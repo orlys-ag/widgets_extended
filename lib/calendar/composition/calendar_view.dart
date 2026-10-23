@@ -125,14 +125,18 @@ class CalendarEntryTapDetails<T> {
 ///   leaves no slot of [hours] that day, [onCreateRefused].
 ///
 /// An entry runs from its start to its end ([CalendarEntry]): Week and Day
-/// draw it as one block per shown day it covers, at its exact minutes, and
-/// Agenda lists it under each day it covers with that day's part of it.
-/// In Week and Day a tap on a block, and in Month on a chip, reports the
-/// stored entry through [onEntryTap]. In edit mode, which [editable] turns
-/// on, Week's and Day's blocks move, keeping the entry's length, and
-/// resize, and a drag over empty slots reports one continuous range
-/// through [onCreateRange], across days too, which stays marked until its
-/// future completes. Out of edit mode the calendar is read-only. In
+/// draw a timed entry as one block per shown day it covers, at its exact
+/// minutes, and an all-day entry as a bar across those days in a strip
+/// above the hours, and Agenda lists it under each day it covers with that
+/// day's part of it. In Week and Day a tap on a block or a bar, and in
+/// Month on a chip, reports the stored entry through [onEntryTap]. In edit
+/// mode, which [editable] turns on, Week's and Day's blocks move, keeping
+/// the entry's length, and resize, a bar dropped on a slot makes its entry
+/// an hour long there, and a block dropped on a day of the strip makes its
+/// entry all-day on that day; in Week bars move and resize by days. A drag
+/// over empty slots reports one continuous range through [onCreateRange],
+/// across days too, and one over the strip's empty days an all-day range
+/// of them, which stays marked until its future completes. Out of edit mode the calendar is read-only. In
 /// edit mode the history lock, which [lockPast] and [lockEarlierToday]
 /// choose ([HistoryLock.of]), keeps the past as it is. A pinch of two
 /// fingers on Week's, Day's or Month's grid sets the controller's zoom
@@ -271,10 +275,11 @@ class CalendarView<T> extends StatefulWidget {
   final MonthLayout monthLayout;
 
   /// The most days, counting each day it has any part of, that a create
-  /// drag across days in Week may give a range: one dragged past them is
-  /// held at the latest range they admit. A move keeps the days an entry
-  /// covers, except where it crosses a midnight, and no limit applies to
-  /// it. Null for no limit.
+  /// drag across days in Week, over the slots or across the all-day strip,
+  /// and a strip bar's day-edge resize may give a range: one dragged past
+  /// them is held at the latest range they admit, which a release writes
+  /// or reports. A move keeps the days an entry covers, except where it
+  /// crosses a midnight, and no limit applies to it. Null for no limit.
   final int? maxDayCount;
 
   /// Reads the current time, which the calendar reads when first built and
@@ -288,7 +293,8 @@ class CalendarView<T> extends StatefulWidget {
   /// Draws Week's and Day's blocks; null for the module's default.
   final CalendarBlockBuilder<T>? blockBuilder;
 
-  /// Draws Month's chips and cards; null for the module's default.
+  /// Draws Month's chips and cards, and the bars of Week's and Day's
+  /// all-day strip; null for the module's default.
   final CalendarChipBuilder<T>? chipBuilder;
 
   /// Draws Agenda's cards; null for the module's default.
@@ -311,8 +317,9 @@ class CalendarView<T> extends StatefulWidget {
   /// chip in Month; null leaves it out.
   final String? Function(CalendarEntry<T> entry)? entryKindOf;
 
-  /// A tap on a block in Week or Day, or on a chip in Month, of an entry
-  /// that is not pending and that the store holds; null reports nothing.
+  /// A tap on a block or a bar in Week or Day, or on a chip in Month, of an
+  /// entry that is not pending and that the store holds; null reports
+  /// nothing.
   final ValueChanged<CalendarEntryTapDetails<T>>? onEntryTap;
 
   /// A create the calendar's gestures picked, in edit mode: the range a
@@ -1389,6 +1396,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                   // The week strip names Day's one day.
                   showsDayHeader: week,
                   blockBuilder: widget.blockBuilder,
+                  chipBuilder: widget.chipBuilder,
                   loadingBuilder: widget.loadingBuilder,
                   failureBuilder: widget.failureBuilder,
                 );

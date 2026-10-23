@@ -68,10 +68,26 @@ class Shown {
   final DayHours hours;
   final int slotMinutes;
 
-  /// The row of the first slot: under the day header and the room above
-  /// the slots in Week, under the room alone in Day.
+  /// The row of the first slot of the grid shown now, under the day header
+  /// in Week, the all-day strip's rows and the room above the slots: its
+  /// board's row count less its slot rows and the room below them.
   int get firstSlotRow {
-    return week ? 2 : 1;
+    final grid =
+        find.byType(TimedGrid<String>).evaluate().single.widget
+            as TimedGrid<String>;
+    final board =
+        find.byType(Board<GridKey, GridShape<String>>).evaluate().single.widget
+            as Board<GridKey, GridShape<String>>;
+    return board.controller.rows.axis.trackCount -
+        grid.hours.slotCountOf(grid.slotMinutes) -
+        1;
+  }
+
+  /// The rows above the first slot of an editable grid with no bar: the
+  /// day header in Week, the all-day strip's one empty row and the room
+  /// above the slots.
+  int get editLeadingRows {
+    return (week ? 1 : 0) + 1 + 1;
   }
 
   /// The row of the slot starting at [minute].
@@ -1036,7 +1052,11 @@ void main() {
       final harness = Harness(storeOf(const <CalendarEntry<String>>[]), shown);
       await harness.pump(tester);
       // The slots, and the room below them.
-      expect(rowCount(tester), shown.firstSlotRow + 48 + 1, reason: shown.name);
+      expect(
+        rowCount(tester),
+        shown.editLeadingRows + 48 + 1,
+        reason: shown.name,
+      );
       await tester.tapAt(slotRect(tester, shown, tuesday, 10 * 60).center);
       await tester.pumpAndSettle();
       expect(harness.creates, <CreateRange>[
@@ -1250,7 +1270,7 @@ void main() {
               .rows
               .axis
               .trackCount,
-          shown.firstSlotRow + 96 + 1,
+          shown.editLeadingRows + 96 + 1,
         );
         if (shown.week) {
           for (final minute in const <int>[60, 2 * 60, 3 * 60]) {
@@ -1369,7 +1389,7 @@ void main() {
               .rows
               .axis
               .trackCount,
-          shown.firstSlotRow + 96 + 1,
+          shown.editLeadingRows + 96 + 1,
         );
         if (shown.week) {
           final here = cellRect(tester, shown.rowOf(90), col);

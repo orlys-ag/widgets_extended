@@ -27,10 +27,10 @@ Matcher near(double value) {
   return moreOrLessEquals(value, epsilon: 0.5);
 }
 
-/// Week's grid row of [minute] under hours that start at 08:00: row 0 is
-/// the day header and row 1 the room above the first slot.
+/// Week's grid row of [minute] under hours that start at 08:00
+/// ([gridRowOf]).
 int officeRow(int minute) {
-  return 2 + (minute - 8 * 60) ~/ 15;
+  return gridRowOf(minute);
 }
 
 /// Stores [item] through [api] before the calendar is pumped and returns

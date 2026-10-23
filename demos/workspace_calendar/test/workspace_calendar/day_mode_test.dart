@@ -514,11 +514,14 @@ void main() {
       },
     );
     await pickMode(tester, "Day");
-    // Row 0 is the room above the slots, row 1 is 08:00, and row 11 is
-    // 10:30.
+    // Above the slots lie the edit mode's all-day row and the room.
     await setHours(tester, 8, 14);
     final grid = gridViewport(tester);
-    expect(nowLine(tester).from!.dy, near(grid.rectOfCell(11, dayColumn)!.top));
+    final first = dayRowOf(8 * 60);
+    expect(
+      nowLine(tester).from!.dy,
+      near(grid.rectOfCell(dayRowOf(10 * 60 + 30), dayColumn)!.top),
+    );
     // Clipped out of the frozen hour gutter.
     expect(
       (Canvas canvas) {
@@ -532,7 +535,7 @@ void main() {
         ..line(),
     );
 
-    await tester.tapAt(cellRect(tester, 1, dayColumn).center);
+    await tester.tapAt(cellRect(tester, first, dayColumn).center);
     await tester.pumpAndSettle();
     await expectCreateForm(
       tester,
@@ -546,12 +549,13 @@ void main() {
     final gesture = await tester.startGesture(block.center);
     await tester.pump(kLongPressTimeout + kPressTimeout);
     await gesture.moveBy(
-      cellRect(tester, 1, dayColumn).topLeft - block.topLeft,
+      cellRect(tester, first, dayColumn).topLeft - block.topLeft,
     );
     await tester.pump();
+    // At the top of the grid's scrolled part, under the all-day row.
     expect(
       tester.getRect(find.byKey(landingLabelKey)).top,
-      near(grid.localToGlobal(Offset.zero).dy + 8.0),
+      near(tester.getRect(find.byKey(allDayCellKey(today))).bottom + 8.0),
     );
     await gesture.up();
     await tester.pump();

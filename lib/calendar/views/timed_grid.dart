@@ -1,8 +1,8 @@
 /// The calendar's timed grid: consecutive days on the board, with a frozen
-/// hour gutter and, where it shows one, a frozen day header, one row per
-/// slot, and the days' entries as blocks, one per piece, the part
-/// of an entry on one day, that in edit mode move, and once selected
-/// resize.
+/// hour gutter and, where it shows one, a frozen day header, a frozen strip
+/// of the days' all-day entries as bars, one row per slot, and the days'
+/// timed entries as blocks, one per piece, the part of an entry on one
+/// day, that in edit mode move, and once selected resize.
 library;
 
 import 'dart:async';
@@ -31,6 +31,12 @@ const double _gutterWidth = 56.0;
 /// The height of the rows above and below the slots that count the items
 /// outside the hours.
 const double _noticeHeight = 24.0;
+
+/// The height of one row of the all-day strip.
+const double _allDayRowHeight = 22.0;
+
+/// The all-day strip's rows shown collapsed before its count row.
+const int _collapsedStripRows = 3;
 
 /// The time the grid opens scrolled to when it does not show the clock's
 /// day, where its hours hold it.
@@ -108,6 +114,11 @@ class _GridStyles {
         color: theme.onNotice,
       ),
       _noticeCells = _noticeCellsOf(theme),
+      _stripCells = _stripCellsOf(theme),
+      stripMarked = BoxDecoration(
+        color: theme.primaryTint,
+        border: Border.all(color: theme.primary, width: 2.0),
+      ),
       landing = BoxDecoration(
         color: theme.primary,
         borderRadius: BorderRadius.circular(16.0),
@@ -194,6 +205,24 @@ class _GridStyles {
     ];
   }
 
+  /// A strip cell's fill and rules, in the first day column or another,
+  /// and in the strip's last row or another: one rule parts each day from
+  /// the one before, and one parts the last row from the hours.
+  static List<BoxDecoration> _stripCellsOf(CalendarThemeData theme) {
+    final edge = BorderSide(color: theme.outline);
+    return <BoxDecoration>[
+      for (final first in const <bool>[true, false])
+        for (final last in const <bool>[true, false])
+          BoxDecoration(
+            color: theme.surface,
+            border: Border(
+              left: first ? BorderSide.none : edge,
+              bottom: last ? edge : BorderSide.none,
+            ),
+          ),
+    ];
+  }
+
   final CalendarThemeData theme;
 
   /// [timedGridAnimationStyleOf] [theme].
@@ -231,6 +260,10 @@ class _GridStyles {
   final Widget noticeBelow;
   final List<BoxDecoration> _noticeCells;
 
+  /// A strip cell, and one marked as a drop's or a create's days.
+  final List<BoxDecoration> _stripCells;
+  final BoxDecoration stripMarked;
+
   /// The pill naming where a drag lands.
   final BoxDecoration landing;
   final TextStyle landingLabel;
@@ -247,6 +280,12 @@ class _GridStyles {
   BoxDecoration noticeCell({required bool above, required bool first}) {
     return _noticeCells[(above ? 0 : 2) + (first ? 0 : 1)];
   }
+
+  /// The fill and rules of a strip cell in the [first] day column or
+  /// another, in the strip's [last] row or another.
+  BoxDecoration stripCell({required bool first, required bool last}) {
+    return _stripCells[(first ? 0 : 2) + (last ? 0 : 1)];
+  }
 }
 
 /// The key of the day header cell showing [day].
@@ -259,18 +298,38 @@ ValueKey<String> blockKey(String id, DateTime day) {
   return ValueKey<String>("block-$id@${isoDate(day)}");
 }
 
-/// The key of the outline and the resize handles over the block of the
-/// item [id] while it is selected.
+/// The key of the outline and the resize handles over the block, or the
+/// bar of the all-day strip, of the entry [id] while it is selected.
 ValueKey<String> blockHandlesKey(String id) {
   return ValueKey<String>("block-handles-$id");
 }
 
-/// The key of the grip of the selected block of the item [id] that lies
-/// across its edge on [side]: [AxisDirection.up], [AxisDirection.down] or
-/// [AxisDirection.right].
+/// The key of the grip of the selected block or bar of the entry [id] that
+/// lies across its edge on [side]: [AxisDirection.up] or
+/// [AxisDirection.down] for a block, [AxisDirection.left] or
+/// [AxisDirection.right] for a bar of the all-day strip.
 ValueKey<String> blockGripKey(String id, AxisDirection side) {
   return ValueKey<String>("block-grip-$id-${side.name}");
 }
+
+/// The key of the all-day strip's bar of the entry [id].
+ValueKey<String> allDayBarKey(String id) {
+  return ValueKey<String>("grid-all-day-bar-$id");
+}
+
+/// The key of [day]'s cell in the all-day strip's first row.
+ValueKey<String> allDayCellKey(DateTime day) {
+  return ValueKey<String>("grid-all-day-${isoDate(day)}");
+}
+
+/// The key of the pill counting the bars the collapsed all-day strip hides
+/// on [day], a tap on which expands the strip.
+ValueKey<String> allDayMoreKey(DateTime day) {
+  return ValueKey<String>("grid-all-day-more-${isoDate(day)}");
+}
+
+/// The key of the pill that collapses the expanded all-day strip.
+const ValueKey<String> allDayLessKey = ValueKey<String>("grid-all-day-less");
 
 /// The key of the pill counting the shown items on no day the grid has a
 /// column for.
@@ -530,13 +589,68 @@ final class GridPiece<T> extends GridShape<T> {
   }
 }
 
+/// The bar of [shown]'s all-day entry in the all-day strip: across the
+/// columns from the [dayNumber] [firstDay], the first shown day it covers,
+/// to [lastDay], the last, in the strip's [row] from 0, and whether the
+/// entry covers days before [firstDay], [continuesBefore], or after
+/// [lastDay], [continuesAfter].
+final class GridBar<T> extends GridShape<T> {
+  const GridBar({
+    required this.shown,
+    required this.firstDay,
+    required this.lastDay,
+    required this.row,
+    required this.continuesBefore,
+    required this.continuesAfter,
+  });
+
+  @override
+  final CalendarShownEntry<T> shown;
+
+  final int firstDay;
+  final int lastDay;
+  final int row;
+  final bool continuesBefore;
+  final bool continuesAfter;
+
+  @override
+  bool operator ==(Object other) {
+    return other is GridBar<T> &&
+        other.shown == shown &&
+        other.firstDay == firstDay &&
+        other.lastDay == lastDay &&
+        other.row == row &&
+        other.continuesBefore == continuesBefore &&
+        other.continuesAfter == continuesAfter;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(
+      shown,
+      firstDay,
+      lastDay,
+      row,
+      continuesBefore,
+      continuesAfter,
+    );
+  }
+
+  @override
+  String toString() {
+    return "GridBar(${shown.id}, ${isoDate(dateOfDayNumber(firstDay))} to "
+        "${isoDate(dateOfDayNumber(lastDay))}, row $row)";
+  }
+}
+
 /// Which day each column of a timed grid shows and which minute each of
 /// its rows starts at.
 ///
 /// Column 0 is the hour gutter, and the rows from [firstSlotRow] are the
 /// slots of [hours], one per [slotMinutes]; the rows before it are
-/// whatever the grid lays out above its slots, such as a day header or a
-/// row counting the entries before the hours. The
+/// whatever the grid lays out above its slots, such as a day header, the
+/// all-day strip's rows or a row counting the entries before the hours.
+/// The
 /// columns right of the gutter are the days of the [dayCount] days from
 /// [firstDay] whose weekday [weekdays] holds, in order, so a day it does
 /// not hold has no column and the days either side of it are adjacent.
@@ -762,6 +876,19 @@ CreateRange? _createRangeOf(int startWall, int endWall) {
 /// is detailed, and which of its ends the hours cut or continue on
 /// another day.
 ///
+/// All-day entries ([CalendarEntry.isAllDay]) show as bars in a strip
+/// frozen under the day header, or at the grid's top where it shows none,
+/// above the hours: each bar across the columns of the shown days it
+/// covers, and the bars sharing a day in rows of their own. Past three
+/// rows the strip shows three and, in a fourth, a "+N" pill on each day
+/// counting its bars below the third, a tap on which shows every row; a
+/// "Less" pill in the strip's first row over the gutter then collapses it
+/// again, and new days collapse it. With no all-day entry on a shown day
+/// the strip has no rows, and one empty row in edit mode. Each bar's
+/// content is what [chipBuilder] draws, told which of its ends continue
+/// past the shown days. A tap on a bar that is not pending reports
+/// [onOpenEntry] with its entry's id, in edit mode and out of it.
+///
 /// In edit mode, which [editable] turns on, a long press on any block of
 /// an entry lifts the entry to move and selects its blocks; a tap anywhere
 /// but on a selected block, its entry leaving the grid, or edit mode
@@ -787,7 +914,19 @@ CreateRange? _createRangeOf(int startWall, int endWall) {
 /// where there is none; a resize dragged onto one stops at its edge, and
 /// so does a create's range. While a drag runs, a label over the grid
 /// names the days and times a release would give, or that a move has
-/// nowhere to land, and a move outlines the times it would land on. A line
+/// nowhere to land, and a move outlines the times it would land on.
+///
+/// In edit mode a bar takes a long press as a block does. On a grid of more
+/// than one day column it moves by days, and once selected its left grip
+/// drags its first day and its right grip its last, where it does not
+/// continue past them; on one column it takes neither. Dropped with the
+/// pointer over a slot, or over the row above the first slot, a bar's
+/// entry becomes a timed one an hour long from that slot's start, marked
+/// by the landing outline while the pointer is there; and a block dropped
+/// with the pointer over a day's strip cell makes its entry all-day on
+/// that day, the strip marking that day while the pointer is there. A drag
+/// across empty strip cells creates an all-day range of their days, as a
+/// tap on one creates its day. A line
 /// over the blocks marks the time [now] holds in its day's column, and the
 /// grid opens scrolled to the hour before it when it shows that day, at
 /// 08:00 otherwise, with that hour's label whole below the top edge. Each
@@ -869,6 +1008,7 @@ class TimedGrid<T> extends StatefulWidget {
     this.storeRange,
     this.showsDayHeader = true,
     this.blockBuilder,
+    this.chipBuilder,
     this.loadingBuilder,
     this.failureBuilder,
   }) : assert(dayCount >= 1),
@@ -970,10 +1110,11 @@ class TimedGrid<T> extends StatefulWidget {
   final void Function(double minSlotHeight, double minDayWidth)? onZoom;
 
   /// The most days, counting each day it has any part of, that a create
-  /// drag across days may give a range: one dragged past them is held at
-  /// the latest range they admit. A move keeps the days an entry covers,
-  /// except where it crosses a midnight, and no limit applies to it. Null
-  /// for no limit.
+  /// drag across days, over the slots or across the all-day strip, and a
+  /// bar's day-edge resize may give a range: one dragged past them is held
+  /// at the latest range they admit, which a release writes or reports. A
+  /// move keeps the days an entry covers, except where it crosses a
+  /// midnight, and no limit applies to it. Null for no limit.
   final int? maxDayCount;
 
   /// The range, both days inclusive, that the grid's owner asks [store] to
@@ -987,6 +1128,12 @@ class TimedGrid<T> extends StatefulWidget {
   /// for [defaultCalendarBlockBuilder]. A new one, not `==` to the last,
   /// draws every block again.
   final CalendarBlockBuilder<T>? blockBuilder;
+
+  /// Draws each all-day bar's content inside the lane the strip gives it,
+  /// in the chip form ([CalendarChipDetails.card] false); null for
+  /// [defaultCalendarChipBuilder]. A new one, not `==` to the last, draws
+  /// every bar again.
+  final CalendarChipBuilder<T>? chipBuilder;
 
   /// Draws the cover's content while the grid's days are read; null for
   /// [defaultCalendarLoadingBuilder].
@@ -1018,10 +1165,34 @@ typedef _GridDrag = ({
   BoardSpan? target,
 });
 
-/// The pieces of the shown entries a sync split, in the store's order,
-/// and the shown entries with no block, counted: the split [_TimedGridState]
-/// keeps and places.
-typedef _GridLayout<T> = ({List<GridPiece<T>> pieces, _Hidden hidden});
+/// The pieces of the shown timed entries a sync split, in the store's
+/// order; the bars of the shown all-day entries, stacked in [barRows] rows,
+/// and on each day column, `below[c - 1]` for column `c`, the bars below
+/// the strip's third row; and the shown entries with no block or bar,
+/// counted: the split [_TimedGridState] keeps and places.
+typedef _GridLayout<T> = ({
+  List<GridPiece<T>> pieces,
+  List<GridBar<T>> bars,
+  int barRows,
+  List<int> below,
+  _Hidden hidden,
+});
+
+/// What the all-day strip's cells show: the days of [tracks]; whether the
+/// strip is collapsed with a count row, [counted]; the bars each day column
+/// hides below the third row, `below[c - 1]` for column `c`; and whether
+/// the strip is expanded past three rows, so its first row's gutter cell
+/// holds the pill collapsing it, [collapsible].
+typedef _StripState = ({
+  GridTracks tracks,
+  bool counted,
+  List<int> below,
+  bool collapsible,
+});
+
+/// The shown day columns, from [first] to [last], whose all-day strip
+/// cells are marked.
+typedef _StripMark = ({int first, int last});
 
 /// Where the line marking the current time sits: the column of its day
 /// and its minute after midnight.
@@ -1052,8 +1223,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// out above and below its slots.
   _Notices _notices = (above: false, below: false);
 
+  /// The all-day strip's rows the grid lays out: the kept split's bar rows,
+  /// three and a count row where those are more than three and the strip
+  /// is not expanded, and with no bar none, or one empty row in edit mode.
+  /// Kept while the days are not ready ([_sync]).
+  late int _stripRows = widget.editable ? 1 : 0;
+
+  /// Whether a "+N" pill expanded the all-day strip to every bar row. New
+  /// days collapse it.
+  bool _stripExpanded = false;
+
   /// Where the widget's days and minutes sit on the board.
-  late GridTracks _tracks = _tracksOf(widget);
+  late GridTracks _tracks = _tracksOf(widget, _stripRows);
 
   /// Held in fields because `Board` replaces its delegate, and so rebuilds
   /// every cell and item, whenever a builder it gets is not identical to
@@ -1070,15 +1251,24 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return widget.blockBuilder ?? defaultCalendarBlockBuilder<T>;
   }
 
+  /// [TimedGrid.chipBuilder], or the module's default where it is null.
+  late CalendarChipBuilder<T> _chipBuilder = _chipBuilderOf(widget);
+
+  static CalendarChipBuilder<T> _chipBuilderOf<T>(TimedGrid<T> widget) {
+    return widget.chipBuilder ?? defaultCalendarChipBuilder<T>;
+  }
+
   /// One instance in edit mode and one out of it, so a rebuild of this
   /// state hands the board the config it already has. Out of edit mode the
   /// config is disabled, so no handle starts a drag, and turning it off
   /// cancels a drag that runs. The board builds no handles of its own:
   /// each block carries the handle that moves it after a long press, and
   /// the selected block the resize handles the config's edges admit
-  /// ([_Block]). No block resizes its column edges: a piece's days are its
-  /// entry's. Whether the grid has more than one column is fixed for its
-  /// life, which [didUpdateWidget] asserts.
+  /// ([_Block], [_Bar]). No block resizes its column edges: a piece's days
+  /// are its entry's. On more than one column a selected bar's grips resize
+  /// its column edges, its days; on one it has none. Whether the grid has
+  /// more than one column is fixed for its life, which [didUpdateWidget]
+  /// asserts.
   ///
   /// A move [_canDropAt] refuses for meeting another entry slides to the
   /// placement nearest on screen that holds it clear, at any time that
@@ -1087,25 +1277,38 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// another entry stops its dragged edge at that entry. The drag reports
   /// keep [_drag], which the landing label and outline show. A drag's
   /// start plays a haptic, and the block a move carries casts a shadow.
-  /// [_applyTheme] makes both again for a theme with another dragged-block
-  /// opacity, which the board hands its live drag.
+  /// [_applyTheme] makes the three again for a theme with another
+  /// dragged-block opacity, which the board hands its live drag.
+  ///
+  /// [_fitlessConfig] is [_editConfig] with no drop fit, which the board
+  /// holds while a bar drags, from [_handleDragStart] to [_handleDragEnd],
+  /// so a target [_canDropAt] refuses, as every bar target over the slots
+  /// is, costs one gate call and tries no candidate.
   late BoardDragConfig<GridKey> _editConfig;
+  late BoardDragConfig<GridKey> _fitlessConfig;
   late BoardDragConfig<GridKey> _viewConfig;
 
-  BoardDragConfig<GridKey> _dragConfigOf({required bool enabled}) {
+  BoardDragConfig<GridKey> _dragConfigOf({
+    required bool enabled,
+    bool fits = true,
+  }) {
     return BoardDragConfig<GridKey>(
       enabled: enabled,
       canDrag: _canDrag,
       canDropAt: _canDropAt,
-      dropFit: const BoardDropFit(
-        minFreeFraction: 0.0,
-        rowRadius: double.infinity,
-        colRadius: 1.0,
-        clampResizes: true,
-      ),
+      dropFit: fits
+          ? const BoardDropFit(
+              minFreeFraction: 0.0,
+              rowRadius: double.infinity,
+              colRadius: 1.0,
+              clampResizes: true,
+            )
+          : null,
       onItemMoved: _commitMove,
       onItemResized: _commitResize,
-      resizeEdges: BoardResizeEdges.none,
+      resizeEdges: _tracks.columnCount > 1
+          ? BoardResizeEdges.both
+          : BoardResizeEdges.none,
       primaryResizeEdges: BoardResizeEdges.both,
       buildDefaultDragHandles: false,
       draggedItemOpacity: _styles.theme.draggedBlockOpacity,
@@ -1117,10 +1320,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// The id of the entry whose block a long press last lifted, whose
-  /// blocks all show selected and whose first and last blocks show its
-  /// resize handles, or null. The blocks listen to it, as the item builder
-  /// runs only when the board rebuilds an item.
+  /// The id of the entry whose block or bar a long press last lifted, whose
+  /// blocks all show selected and whose first and last blocks, or whose
+  /// bar, show its resize handles, or null. The blocks and bars listen to
+  /// it, as the item builder runs only when the board rebuilds an item.
   final ValueNotifier<String?> _selectedBlock = ValueNotifier<String?>(null);
 
   /// The selected entry's handles, while they are built.
@@ -1136,8 +1339,30 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// The last split [_layOutEntries] made, which [_placeLayout] places.
   late _GridLayout<T> _layout = (
     pieces: <GridPiece<T>>[],
+    bars: <GridBar<T>>[],
+    barRows: 0,
+    below: List<int>.filled(_tracks.columnCount, 0),
     hidden: _Hidden.none(_tracks),
   );
+
+  /// What the all-day strip's cells show. The cell builder runs only when
+  /// the board rebuilds a cell, so the strip cells listen to this.
+  late final ValueNotifier<_StripState> _strip = ValueNotifier<_StripState>(
+    _stripStateOf(),
+  );
+
+  /// The day columns whose strip cells are marked ([_updateStripMark]), or
+  /// null. The strip cells and the landing label listen to it.
+  final ValueNotifier<_StripMark?> _stripMark = ValueNotifier<_StripMark?>(
+    null,
+  );
+
+  /// The board's two scroll controllers, which relay the scroll of
+  /// whichever position the board's scrollables attach, so a listener
+  /// added to them hears the scroll across a position the scrollables
+  /// replace.
+  final ScrollController _verticalScroll = ScrollController();
+  final ScrollController _horizontalScroll = ScrollController();
 
   /// The history lock in edit mode, at the minute [TimedGrid.now] holds
   /// when the grid last built, and none out of it, where nothing changes.
@@ -1175,6 +1400,56 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// The drag the board runs, or null.
   _GridDrag? _drag;
 
+  /// The block or bar each pointer down on the grid pressed, or whose
+  /// handles a press beside a selected block started a resize of, until
+  /// that pointer's up or cancel.
+  final Map<int, GridKey> _pressKeys = <int, GridKey>{};
+
+  /// The pointer of the press that started [_drag], the first in
+  /// [_pressKeys] naming its key; null for a drag no press of the grid
+  /// started, such as a semantics action's, and with no drag.
+  int? _dragPointer;
+
+  /// Where [_dragPointer] last moved during a crossing drag
+  /// ([_isCrossingDrag]), in the board viewport's paint space; null from
+  /// the lift to its first move.
+  Offset? _dragAt;
+
+  /// The cell a crossing drag's pointer is over, as the crossing reads it
+  /// ([_crossTo]): a block's strip column, a bar's day column and slot
+  /// row; -1 for none.
+  int _crossColumn = -1;
+  int _crossRow = -1;
+
+  /// What a release over [_crossColumn] gives the entry: a block's all-day
+  /// day ([_stripLandingOf]), a bar's hour ([_barLandingOf]); null where the
+  /// pointer is over no such cell or the landing is refused.
+  ({DateTime start, DateTime end})? _stripLanding;
+  ({DateTime start, DateTime end})? _barLanding;
+
+  /// The range a bar's day-edge resize past [TimedGrid.maxDayCount] is held
+  /// at ([_heldToLimit]), which its release writes; set by [_canDropAt].
+  ({DateTime start, DateTime end})? _heldBar;
+
+  /// Set once a crossing's release wrote or refused its landing, so
+  /// [_canDropAt] refuses the board's own report of that release; cleared
+  /// by [_handleDragEnd].
+  bool _crossSpent = false;
+
+  /// Whether a post-frame read of the crossing's cell is scheduled
+  /// ([_scheduleCrossRead]).
+  bool _crossReadPending = false;
+
+  /// Whether a crossing drag listens to the two scroll controllers.
+  bool _crossListening = false;
+
+  /// Whether a bar drags, so the board holds [_fitlessConfig].
+  bool _barDrags = false;
+
+  /// The day columns of the all-day range whose create flow is open, which
+  /// the strip marks; null while none is.
+  _StripMark? _stripCreating;
+
   /// The first and the last slot of the range whose create flow is open,
   /// which the background marks; null while none is.
   ({({int row, int col}) anchor, ({int row, int col}) focus})? _creating;
@@ -1204,6 +1479,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   late int _rowSlotMinutes = _tracks.slotMinutes;
   double _rowRoom = _initialLabelRoom;
   late _Notices _rowNotices = _notices;
+  late int _rowStripRows = _stripRows;
   late HourLabelFormat _rowFormat = widget.hourLabelFormat;
 
   /// The room above the first slot and below the last: half an hour label
@@ -1346,8 +1622,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         widget.hours != oldWidget.hours) {
       _cancelForNewSlots();
     }
-    if (widget.blockBuilder != oldWidget.blockBuilder) {
+    final blockBuilderChanged = widget.blockBuilder != oldWidget.blockBuilder;
+    final chipBuilderChanged = widget.chipBuilder != oldWidget.chipBuilder;
+    if (blockBuilderChanged) {
       _blockBuilder = _blockBuilderOf(widget);
+    }
+    if (chipBuilderChanged) {
+      _chipBuilder = _chipBuilderOf(widget);
+    }
+    if (blockBuilderChanged || chipBuilderChanged) {
       _placementBuilder = (context, view) {
         return _buildPlacement(context, view);
       };
@@ -1362,7 +1645,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       oldWidget.now.removeListener(_handleNow);
       widget.now.addListener(_handleNow);
     }
-    final tracks = _tracksOf(widget);
+    final tracks = _tracksOf(widget, _stripRows);
     final tracksChanged = tracks != _tracks;
     assert(
       (tracks.columnCount > 1) == (_tracks.columnCount > 1),
@@ -1374,12 +1657,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       "A TimedGrid keeps its day header or its lack of one; give a grid "
       "that changes it its own key.",
     );
+    if (tracks.firstDay != _tracks.firstDay ||
+        tracks.dayCount != _tracks.dayCount ||
+        tracks.weekdays != _tracks.weekdays) {
+      _stripExpanded = false;
+    }
     _tracks = tracks;
     final range = _range;
     if (tracksChanged && range != null) {
       // Its cells are rows and columns of the tracks it began on.
       range.detach();
       _range = null;
+      _updateStripMark();
     }
     if (!widget.editable) {
       _selectedBlock.value = null;
@@ -1420,6 +1709,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       // New days are not ready yet, so they do not animate in either way;
       // new hours move every block at once.
       _sync(animate: !tracksChanged);
+    } else if (widget.editable != oldWidget.editable &&
+        _syncedReady &&
+        _applyStripRows(_stripRowsOf(_layout.barRows))) {
+      // Edit mode gives an empty strip its row, or takes it away: the kept
+      // split, placed again on the moved slot rows.
+      _placeLayout(disable: true);
     }
   }
 
@@ -1427,10 +1722,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// longer have, writing nothing: cancels the board's drag, by a span
   /// write of its key to the span it holds, whose mutation cancel runs
   /// before the write and queues [_handleDragEnd]; forgets [_lifted], so
-  /// the sync on the new tracks puts a lifted entry's pieces back; and
-  /// detaches a create range and clears the range a create flow marks.
-  /// Runs before [_tracks] is replaced and so before any placement on the
-  /// new tracks, which may drop the dragged key.
+  /// the sync on the new tracks puts a lifted entry's pieces back, and the
+  /// drag's crossing state, so its release writes nothing; and detaches a
+  /// create range and clears the range a create flow marks. Runs before
+  /// [_tracks] is replaced and so before any placement on the new tracks,
+  /// which may drop the dragged key.
   void _cancelForNewSlots() {
     final dragged = _drag?.key;
     if (dragged != null && _board.isDragging(dragged)) {
@@ -1440,20 +1736,24 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
     }
     _lifted = null;
+    _clearCross();
     _range?.detach();
     _range = null;
     _creating = null;
+    _stripCreating = null;
+    _updateStripMark();
   }
 
-  static GridTracks _tracksOf<T>(TimedGrid<T> widget) {
+  /// The tracks [widget] lays out under [stripRows] all-day strip rows.
+  static GridTracks _tracksOf<T>(TimedGrid<T> widget, int stripRows) {
     final tracks = GridTracks(
       firstDay: dayNumber(widget.firstDay),
       dayCount: widget.dayCount,
       weekdays: widget.weekdays,
       hours: widget.hours,
-      // The day header, then the room above the first slot or the row
-      // counting the items before the hours.
-      firstSlotRow: (widget.showsDayHeader ? 1 : 0) + 1,
+      // The day header, the all-day strip's rows, then the room above the
+      // first slot or the row counting the entries before the hours.
+      firstSlotRow: (widget.showsDayHeader ? 1 : 0) + stripRows + 1,
       slotMinutes: widget.slotMinutes,
     );
     assert(
@@ -1494,6 +1794,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (old == null ||
         old.theme.draggedBlockOpacity != styles.theme.draggedBlockOpacity) {
       _editConfig = _dragConfigOf(enabled: true);
+      _fitlessConfig = _dragConfigOf(enabled: true, fits: false);
       _viewConfig = _dragConfigOf(enabled: false);
     }
     if (!_restoreScheduled) {
@@ -1510,44 +1811,130 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _immediateRange.dispose();
     _delayedRange.dispose();
     _range?.detach();
+    _unlistenCross();
     widget.store.removeListener(_handleStore);
     _header.dispose();
     _hiddenCount.dispose();
+    _strip.dispose();
+    _stripMark.dispose();
     _selectedBlock.dispose();
     _lock.dispose();
     _besideCursor.dispose();
     _hourLabels.dispose();
     // The board has unmounted by now, so nothing still listens to the
-    // controller.
+    // controllers.
     _board.dispose();
+    _verticalScroll.dispose();
+    _horizontalScroll.dispose();
     super.dispose();
   }
 
   /// The board key of [shape]: a piece's is its entry's id and its day's
-  /// offset from the entry's first day.
+  /// offset from the entry's first day, and a bar's its entry's id.
   static GridKey _keyOf<T>(GridShape<T> shape) {
     switch (shape) {
       case GridPiece<T>(:final shown, :final day):
         return GridKey.piece(shown.id, day - dayNumber(shown.entry.start));
+      case GridBar<T>(:final shown):
+        return GridKey.bar(shown.id);
     }
   }
 
   /// The slots of the hours, [_slotHeight] each, under the frozen day
-  /// header where the grid shows one. Above the slots a row of
-  /// [_labelRoom], or the frozen row counting the entries before the hours
-  /// where [_notices] has one, and below them a row of [_labelRoom] or the
-  /// frozen row counting those after.
+  /// header where the grid shows one and the all-day strip's
+  /// [_stripRows], [_allDayRowHeight] each, frozen with it. Above the slots
+  /// a row of [_labelRoom], or the frozen row counting the entries before
+  /// the hours where [_notices] has one, and below them a row of
+  /// [_labelRoom] or the frozen row counting those after.
   BoardAxisConfig _rowsConfig() {
     return BoardAxisConfig(
       axis: ExplicitAxis(<double>[
         if (widget.showsDayHeader) _headerHeight,
+        ...List<double>.filled(_stripRows, _allDayRowHeight),
         _edgeAbove,
         ...List<double>.filled(_tracks.rowCount, _slotHeight),
         _edgeBelow,
       ]),
-      frozenStart: (widget.showsDayHeader ? 1 : 0) + (_notices.above ? 1 : 0),
+      frozenStart: _stripStart + _stripRows + (_notices.above ? 1 : 0),
       frozenEnd: _notices.below ? 1 : 0,
     );
+  }
+
+  /// The all-day strip's first row: under the day header where the grid
+  /// shows one.
+  int get _stripStart {
+    return widget.showsDayHeader ? 1 : 0;
+  }
+
+  /// Whether [row] is one of the all-day strip's rows.
+  bool _isStripRow(int row) {
+    return row >= _stripStart && row < _stripStart + _stripRows;
+  }
+
+  /// Whether the collapsed strip shows its count row, its fourth.
+  bool get _stripCounted {
+    return !_stripExpanded && _layout.barRows > _collapsedStripRows;
+  }
+
+  /// The strip rows [barRows] bar rows lay out: none with no bar, or one
+  /// empty row in edit mode; three and a count row where they are more
+  /// than three and the strip is not expanded; and otherwise each.
+  int _stripRowsOf(int barRows) {
+    if (barRows == 0) {
+      return widget.editable ? 1 : 0;
+    }
+    if (barRows > _collapsedStripRows && !_stripExpanded) {
+      return _collapsedStripRows + 1;
+    }
+    return barRows;
+  }
+
+  _StripState _stripStateOf() {
+    return (
+      tracks: _tracks,
+      counted: _stripCounted,
+      below: _layout.below,
+      collapsible: _stripExpanded && _layout.barRows > _collapsedStripRows,
+    );
+  }
+
+  /// Lays out [rows] strip rows in place of the ones the grid has, and
+  /// returns whether they differ. A change moves every slot row by it: the
+  /// tracks and the rows follow, a create range in flight, whose cells
+  /// name rows it no longer has, detaches and reports nothing, an open
+  /// create flow's marks move with their slots, and a crossing drag reads
+  /// its cell again once the board has laid the new rows out. The caller
+  /// places the kept split on the new rows.
+  bool _applyStripRows(int rows) {
+    if (rows == _stripRows) {
+      _strip.value = _stripStateOf();
+      return false;
+    }
+    final shift = rows - _stripRows;
+    _stripRows = rows;
+    _tracks = _tracksOf(widget, rows);
+    final range = _range;
+    if (range != null) {
+      range.detach();
+      _range = null;
+      _updateStripMark();
+    }
+    final creating = _creating;
+    if (creating != null) {
+      _creating = (
+        anchor: (row: creating.anchor.row + shift, col: creating.anchor.col),
+        focus: (row: creating.focus.row + shift, col: creating.focus.col),
+      );
+    }
+    final size = _size;
+    if (size != null) {
+      _fitAxes(size);
+    } else {
+      _replaceRows();
+    }
+    _strip.value = _stripStateOf();
+    _scheduleCrossRead();
+    return true;
   }
 
   /// The height of the row above the slots.
@@ -1567,6 +1954,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _rowSlotMinutes = _tracks.slotMinutes;
     _rowRoom = _labelRoom;
     _rowNotices = _notices;
+    _rowStripRows = _stripRows;
     _rowFormat = widget.hourLabelFormat;
     _board.rows = _rowsConfig();
   }
@@ -1576,9 +1964,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return widget.showsDayHeader ? _headerHeight : 0.0;
   }
 
-  /// The height of the frozen rows above the slots.
+  /// The all-day strip's height.
+  double get _stripExtent {
+    return _stripRows * _allDayRowHeight;
+  }
+
+  /// The height of the frozen rows above the slots: the day header, the
+  /// all-day strip and the row counting the entries before the hours,
+  /// each where the grid shows it.
   double get _leadingExtent {
-    return _headerExtent + (_notices.above ? _noticeHeight : 0.0);
+    return _headerExtent +
+        _stripExtent +
+        (_notices.above ? _noticeHeight : 0.0);
   }
 
   /// The row counting the entries before the hours, or null where
@@ -1619,9 +2016,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   ///
   /// An axis is replaced only when its extent or its tracks change. The
   /// rows are replaced for new hours or a new slot length even at the same
-  /// count, for new [_notices], and for a new [_labelRoom] or hour format,
-  /// which also rebuilds the gutter cells and so what they tell a screen
-  /// reader.
+  /// count, for new [_notices] or strip rows, and for a new [_labelRoom] or
+  /// hour format, which also rebuilds the gutter cells and so what they
+  /// tell a screen reader.
   void _fitAxes(Size size) {
     _size = size;
     final oldRows = _board.rows;
@@ -1633,7 +2030,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final slotHeight = math.max(
       widget.minSlotHeight,
       _share(
-        size.height - _headerExtent - _edgeAbove - _edgeBelow,
+        size.height -
+            _headerExtent -
+            _stripExtent -
+            _edgeAbove -
+            _edgeBelow,
         _tracks.rowCount,
       ),
     );
@@ -1647,6 +2048,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _tracks.slotMinutes != _rowSlotMinutes ||
         _labelRoom != _rowRoom ||
         _notices != _rowNotices ||
+        _stripRows != _rowStripRows ||
         widget.hourLabelFormat != _rowFormat) {
       _slotHeight = slotHeight;
       _replaceRows();
@@ -1845,15 +2247,25 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final layout = _layOutEntries(shown);
     _layout = layout;
     final hidden = layout.hidden;
+    // While the days are not ready the strip keeps the rows it showed, so
+    // no slot moves until they are.
+    final restripped = ready
+        ? _applyStripRows(_stripRowsOf(layout.barRows))
+        : _applyStripRows(_stripRows);
     final relaid = _layOutNotices((
       above: hidden.rowAbove,
       below: hidden.rowBelow,
     ));
-    _placeLayout(disable: !(animate && ready && _syncedReady && !relaid));
+    _placeLayout(
+      disable: !(animate && ready && _syncedReady && !relaid && !restripped),
+    );
     final selected = _selectedBlock.value;
     if (selected != null &&
         !layout.pieces.any((piece) {
           return piece.shown.id == selected;
+        }) &&
+        !layout.bars.any((bar) {
+          return bar.shown.id == selected;
         })) {
       _selectedBlock.value = null;
     }
@@ -1861,17 +2273,19 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _hiddenCount.value = hidden;
   }
 
-  /// The split of [shown] on [_tracks]: for each timed entry, and in this
-  /// grid each all-day one too, its piece on each shown day it covers
-  /// ([pieceOn]) that has a minute inside the hours, walking only the
-  /// columns from its first day's to its last day's, so it yields at most
-  /// one piece per shown day; and the entries with no block, counted: on
+  /// The split of [shown] on [_tracks]: for each timed entry its piece on
+  /// each shown day it covers ([pieceOn]) that has a minute inside the
+  /// hours, walking only the columns from its first day's to its last
+  /// day's, so it yields at most one piece per shown day; each all-day
+  /// entry's bar across the shown days it covers, stacked
+  /// ([_stackBars]); and the entries with no block or bar, counted: on
   /// each day column the pieces wholly before its hours and those wholly
   /// after them, and the entries on no day it has a column for.
   _GridLayout<T> _layOutEntries(List<CalendarShownEntry<T>> shown) {
     final tracks = _tracks;
     final hours = tracks.hours;
     final pieces = <GridPiece<T>>[];
+    final allDay = <({CalendarShownEntry<T> shown, int first, int last})>[];
     final above = List<int>.filled(tracks.columnCount, 0);
     final below = List<int>.filled(tracks.columnCount, 0);
     var offDays = 0;
@@ -1884,6 +2298,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       final last = tracks.lastColumnUpTo(lastDay);
       if (last < first) {
         offDays++;
+        continue;
+      }
+      if (entry.entry.isAllDay) {
+        allDay.add((shown: entry, first: first, last: last));
         continue;
       }
       final span = wallSpanOf(start, end);
@@ -1911,13 +2329,91 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         }
       }
     }
-    return (pieces: pieces, hidden: _Hidden(tracks, above, below, offDays));
+    final stacked = _stackBars(allDay);
+    return (
+      pieces: pieces,
+      bars: stacked.bars,
+      barRows: stacked.rows,
+      below: stacked.below,
+      hidden: _Hidden(tracks, above, below, offDays),
+    );
   }
 
-  /// Turns the kept split into the board's items on the current tracks,
-  /// leaving out, while [_lifted] names an entry the split still shows
-  /// with the times it was lifted with, that entry's pieces other than the
-  /// dragged one. Under [BoardAnimationStyle.disabled] where [disable]
+  /// The bars of [allDay], each an all-day entry over the shown columns
+  /// from `first` to `last`, stacked in the strip's rows: taken by first
+  /// column, then more columns first, then start, title and id, each takes
+  /// the lowest row free at its first column, a row freeing once the sweep
+  /// passes the last column of the bar in it. The rows in use are kept in
+  /// a min-heap by last column and the free ones in a min-heap by row, so
+  /// the stack is O(n log n). Also counts, per column, the bars below the
+  /// third row.
+  ({List<GridBar<T>> bars, int rows, List<int> below}) _stackBars(
+    List<({CalendarShownEntry<T> shown, int first, int last})> allDay,
+  ) {
+    final tracks = _tracks;
+    final below = List<int>.filled(tracks.columnCount, 0);
+    if (allDay.isEmpty) {
+      return (bars: <GridBar<T>>[], rows: 0, below: below);
+    }
+    allDay.sort((a, b) {
+      final byFirst = a.first.compareTo(b.first);
+      if (byFirst != 0) {
+        return byFirst;
+      }
+      final byWidth = (b.last - b.first).compareTo(a.last - a.first);
+      if (byWidth != 0) {
+        return byWidth;
+      }
+      final byStart = a.shown.entry.start.compareTo(b.shown.entry.start);
+      if (byStart != 0) {
+        return byStart;
+      }
+      final byTitle = a.shown.entry.title.compareTo(b.shown.entry.title);
+      if (byTitle != 0) {
+        return byTitle;
+      }
+      return a.shown.id.compareTo(b.shown.id);
+    });
+    // A row in use is held as `last * stride + row`, so the heap's least is
+    // the row whose bar ends at the earliest column.
+    final stride = allDay.length;
+    final used = _IntHeap();
+    final free = _IntHeap();
+    var rows = 0;
+    final bars = <GridBar<T>>[];
+    for (final bar in allDay) {
+      while (used.isNotEmpty && used.peek ~/ stride < bar.first) {
+        free.push(used.pop() % stride);
+      }
+      final row = free.isNotEmpty ? free.pop() : rows++;
+      used.push(bar.last * stride + row);
+      final entry = bar.shown.entry;
+      final firstDay = tracks.dayAt(bar.first);
+      final lastDay = tracks.dayAt(bar.last);
+      bars.add(
+        GridBar<T>(
+          shown: bar.shown,
+          firstDay: firstDay,
+          lastDay: lastDay,
+          row: row,
+          continuesBefore: dayNumber(entry.start) < firstDay,
+          continuesAfter: lastDayNumberOf(entry.start, entry.end) > lastDay,
+        ),
+      );
+      if (row >= _collapsedStripRows) {
+        for (var column = bar.first; column <= bar.last; column++) {
+          below[column - 1]++;
+        }
+      }
+    }
+    return (bars: bars, rows: rows, below: below);
+  }
+
+  /// Turns the kept split into the board's items on the current tracks:
+  /// its pieces, leaving out, while [_lifted] names an entry the split
+  /// still shows with the times it was lifted with, that entry's pieces
+  /// other than the dragged one, and its bars in the strip rows it shows.
+  /// Under [BoardAnimationStyle.disabled] where [disable]
   /// holds and where the placements drop the key a drag holds, so that key
   /// leaves with no exit and what replaces it shows at once, until a frame
   /// callback restores the styles' animation; otherwise under the board's
@@ -1949,6 +2445,28 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
       placements.add(BoardPlacement<GridShape<T>>(piece, span));
     }
+    // A collapsed strip places the bars of its first three rows.
+    final shownRows = _stripCounted ? _collapsedStripRows : _stripRows;
+    for (final bar in _layout.bars) {
+      final first = _tracks.columnOf(bar.firstDay);
+      final last = _tracks.columnOf(bar.lastDay);
+      if (bar.row >= shownRows || first == null || last == null) {
+        continue;
+      }
+      if (dragged != null && !keepsDragged && _keyOf(bar) == dragged) {
+        keepsDragged = true;
+      }
+      placements.add(
+        BoardPlacement<GridShape<T>>(
+          bar,
+          BoardSpan(
+            rowStart: _stripStart + bar.row,
+            colStart: first,
+            colSpan: last - first + 1,
+          ),
+        ),
+      );
+    }
     final dropsDragged =
         dragged != null && !keepsDragged && _board.contains(dragged);
     final disabled = disable || dropsDragged;
@@ -1965,7 +2483,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// place of the ones the grid has, and returns whether they differ. Each
   /// takes the place of the room on its side, so no slot changes row, and
   /// the axes are fitted again at the last size, or replaced before the
-  /// first layout.
+  /// first layout. A row of another height moves the slots under a still
+  /// pointer, so a crossing drag reads its cell again.
   bool _layOutNotices(_Notices notices) {
     if (notices == _notices) {
       return false;
@@ -1977,6 +2496,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     } else {
       _replaceRows();
     }
+    _scheduleCrossRead();
     return true;
   }
 
@@ -2018,7 +2538,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return _tracks.hours.holdsTimes(entry.start, entry.end);
   }
 
+  /// Whether the board may land [key] on [span]. No crossing between the
+  /// strip and the slots is a board drop: a piece stays inside its day's
+  /// rows and a bar inside the strip's, and the grid writes a crossing
+  /// itself at its pointer's release ([_handlePointerUp]), after which
+  /// every target is refused ([_crossSpent]).
   bool _canDropAt(GridKey key, BoardSpan span) {
+    if (_crossSpent) {
+      return false;
+    }
+    if (key.isBar) {
+      return _canDropBar(key, span);
+    }
     // A piece stays inside its day's rows.
     if (span.rowStart < _tracks.firstSlotRow ||
         span.endTrackOn(Axis.vertical) >
@@ -2054,6 +2585,145 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return true;
     }
     return drag.kind == BoardDragKind.move;
+  }
+
+  /// Whether the board may land the bar [key] on [span]: inside the
+  /// strip's rows, not at its stored columns in another strip row, so a
+  /// bar moves only by days, and to times the history lock admits. A bar
+  /// shares time with no entry ([rangeSharesTime]), so it lands over
+  /// another bar's cells too. Over them a day-edge resize previews the
+  /// resized bar's new extent across that bar, which keeps its rect: the
+  /// two lie laned in one column by their stored spans and paint in the
+  /// board's own item order, which the grid does not set, until the
+  /// release stacks them in rows ([_stackBars]). A span of a running
+  /// day-edge resize of the
+  /// bar ([_barResizeOf]) past [TimedGrid.maxDayCount]'s days is refused,
+  /// and holds [_heldBar] at the range the limit admits, which the
+  /// release writes; every other span of that resize clears it.
+  bool _canDropBar(GridKey key, BoardSpan span) {
+    if (span.rowStart < _stripStart ||
+        span.endTrackOn(Axis.vertical) >
+            _stripStart + _stripRows + precisionErrorTolerance ||
+        span.colStart < 1) {
+      return false;
+    }
+    final from = _board.spanOf(key);
+    final shape = _board.itemOf(key);
+    if (from == null || shape is! GridBar<T>) {
+      return false;
+    }
+    final edge = _barResizeOf(key, from, span);
+    if (from == span) {
+      if (edge != null) {
+        _holdBar(null);
+      }
+      return true;
+    }
+    final entry = shape.shown.entry;
+    final lock = _lock.value;
+    final times = _barTimesOf(entry, from, span, move: edge == null);
+    if (edge != null) {
+      if (times != null && !_coversAtMost(times.start, times.end)) {
+        final held = _heldToLimit(
+          times.start,
+          times.end,
+          atEnd: edge == BoardResizeEdges.trailing,
+        );
+        _holdBar(
+          held != null &&
+                  (held.start != entry.start || held.end != entry.end) &&
+                  lock.admits(entry.start, entry.end, held.start, held.end)
+              ? held
+              : null,
+        );
+        return false;
+      }
+      _holdBar(null);
+    } else if (span.colStart == from.colStart &&
+        span.colSpan == from.colSpan) {
+      // Another strip row at the stored columns moves no day.
+      return false;
+    }
+    return times != null &&
+        lock.admits(entry.start, entry.end, times.start, times.end);
+  }
+
+  /// The edge a running day-edge resize of the bar [key] drags, where
+  /// [span] is one it resolves: the stored span [from]'s rows, and the
+  /// edge it does not drag where [from] has it; null for any other span,
+  /// which is a move's.
+  BoardResizeEdges? _barResizeOf(GridKey key, BoardSpan from, BoardSpan span) {
+    final drag = _drag;
+    if (drag == null ||
+        drag.key != key ||
+        span.rowStart != from.rowStart ||
+        span.rowSpan != from.rowSpan) {
+      return null;
+    }
+    switch (drag.kind) {
+      case BoardDragKind.resizeColStart:
+        return _columnEndOf(span) == _columnEndOf(from)
+            ? BoardResizeEdges.leading
+            : null;
+      case BoardDragKind.resizeColEnd:
+        return span.colStart == from.colStart
+            ? BoardResizeEdges.trailing
+            : null;
+      case BoardDragKind.move:
+      case BoardDragKind.resizeRowStart:
+      case BoardDragKind.resizeRowEnd:
+        return null;
+    }
+  }
+
+  /// The last column [span] covers.
+  static int _columnEndOf(BoardSpan span) {
+    return (span.endTrackOn(Axis.horizontal) - precisionErrorTolerance)
+            .ceil() -
+        1;
+  }
+
+  /// Sets [_heldBar] and the strip's marks for it.
+  void _holdBar(({DateTime start, DateTime end})? held) {
+    if (held == _heldBar) {
+      return;
+    }
+    _heldBar = held;
+    _updateStripMark();
+  }
+
+  /// The start and end a drag of the bar of [entry] from [from] to [to]
+  /// gives the entry, or null where the end would not be after the start.
+  /// A [move] moves both by the days between the two spans' first columns'
+  /// days; a resize sets the start to its first column's day start where
+  /// [to] moved that edge, and the end to the start of the day after its
+  /// last column's where it moved that one.
+  ({DateTime start, DateTime end})? _barTimesOf(
+    CalendarEntry<T> entry,
+    BoardSpan from,
+    BoardSpan to, {
+    required bool move,
+  }) {
+    if (move) {
+      final shift = _tracks.dayAt(to.colStart) - _tracks.dayAt(from.colStart);
+      return (
+        start: dateOfDayNumber(dayNumber(entry.start) + shift),
+        end: dateOfDayNumber(dayNumber(entry.end) + shift),
+      );
+    }
+    var start = entry.start;
+    var end = entry.end;
+    if (to.colStart != from.colStart) {
+      start = _tracks.dateAt(to.colStart);
+    }
+    final last = _columnEndOf(to);
+    if (last != _columnEndOf(from)) {
+      end = dateOfDayNumber(_tracks.dayAt(last) + 1);
+    }
+    if (!end.isAfter(start)) {
+      return null;
+    }
+    return (start: start, end: end);
   }
 
   /// Whether a range from [start] to [end] shares time with a board piece
@@ -2193,12 +2863,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final shape = _board.itemOf(key);
     final stored = widget.store.storedEntry(key.id);
     if (from == null ||
-        shape is! GridPiece<T> ||
+        shape == null ||
         stored == null ||
         !_tracks.hours.holdsTimes(stored.start, stored.end)) {
       return;
     }
-    final times = _timesOf(shape, stored, from, to, move: move);
+    final times = switch (shape) {
+      GridPiece<T>() => _timesOf(shape, stored, from, to, move: move),
+      GridBar<T>() => _barTimesOf(stored, from, to, move: move),
+    };
     if (times == null) {
       return;
     }
@@ -2209,6 +2882,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     widget.store.requestMove(requested);
   }
 
+  /// Notes the board's new drag: selects a move's entry, hands the board
+  /// [_fitlessConfig] for a bar's drag, takes as [_dragPointer] the first
+  /// press of the grid on the dragged key, and for a crossing drag
+  /// ([_isCrossingDrag]) listens to the two scroll controllers until the
+  /// drag ends. The lift of a move of an entry with more than one piece
+  /// takes its other pieces off the board.
   void _handleDragStart(GridKey key, BoardDragKind kind) {
     if (!mounted) {
       return;
@@ -2218,7 +2897,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     setState(() {
       _drag = (key: key, kind: kind, resolved: false, target: null);
+      _barDrags = key.isBar;
     });
+    for (final MapEntry(key: pointer, value: pressed) in _pressKeys.entries) {
+      if (pressed == key) {
+        _dragPointer = pointer;
+        break;
+      }
+    }
+    if (_dragPointer != null && _isCrossingDrag(_drag)) {
+      _listenCross();
+    }
     final shape = _board.itemOf(key);
     if (kind != BoardDragKind.move || shape == null) {
       return;
@@ -2257,11 +2946,315 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     setState(() {
       _drag = null;
+      _barDrags = false;
+      _crossSpent = false;
+      _clearCross();
     });
     if (_lifted != null) {
       _lifted = null;
       _placeLayout(disable: false);
     }
+  }
+
+  /// Whether [drag] crosses between the strip and the slots, reading the
+  /// cell under its pointer as it moves: a block's move, into the strip,
+  /// and a bar's, into the slots.
+  bool _isCrossingDrag(_GridDrag? drag) {
+    return drag != null && drag.kind == BoardDragKind.move;
+  }
+
+  /// Listens to the two scroll controllers for a crossing drag, so content
+  /// scrolling under its still pointer moves the cell it reads.
+  void _listenCross() {
+    if (_crossListening) {
+      return;
+    }
+    _crossListening = true;
+    _verticalScroll.addListener(_readCross);
+    _horizontalScroll.addListener(_readCross);
+  }
+
+  void _unlistenCross() {
+    if (!_crossListening) {
+      return;
+    }
+    _crossListening = false;
+    _verticalScroll.removeListener(_readCross);
+    _horizontalScroll.removeListener(_readCross);
+  }
+
+  /// Forgets the drag's crossing state, its pointer and the cell, the
+  /// landings and the marks it read, and stops listening to the scroll.
+  /// [_crossSpent] stays until the drag ends.
+  void _clearCross() {
+    _unlistenCross();
+    _dragPointer = null;
+    _dragAt = null;
+    _crossColumn = -1;
+    _crossRow = -1;
+    _stripLanding = null;
+    _barLanding = null;
+    _heldBar = null;
+    _updateStripMark();
+  }
+
+  /// Reads the crossing's cell under [_dragAt], doing nothing before the
+  /// drag pointer's first move.
+  void _readCross() {
+    final at = _dragAt;
+    final drag = _drag;
+    if (at == null || drag == null || !mounted) {
+      return;
+    }
+    _crossTo(drag, _rowAt(at.dy), _columnAt(at.dx));
+  }
+
+  /// Moves the crossing of [drag] to the cell at [row] and [col], -1 for
+  /// none, writing state only where the cell it reads changes: for a
+  /// block's move the strip column under it, and the all-day day a release
+  /// there gives ([_stripLandingOf]); for a bar's the day column and slot
+  /// row under it, the first slot's over the row above the slots, and the
+  /// hour a release there gives ([_barLandingOf]).
+  void _crossTo(_GridDrag drag, int row, int col) {
+    if (drag.kind != BoardDragKind.move) {
+      return;
+    }
+    if (!drag.key.isBar) {
+      final column = col >= 1 && _isStripRow(row) ? col : -1;
+      if (column == _crossColumn) {
+        return;
+      }
+      setState(() {
+        _crossColumn = column;
+        _stripLanding = column == -1
+            ? null
+            : _stripLandingOf(drag.key, column);
+      });
+      _updateStripMark();
+      return;
+    }
+    var slotRow = -1;
+    if (col >= 1) {
+      if (row >= _tracks.firstSlotRow && row <= _tracks.lastSlotRow) {
+        slotRow = row;
+      } else if (row == _tracks.firstSlotRow - 1) {
+        slotRow = _tracks.firstSlotRow;
+      }
+    }
+    final column = slotRow == -1 ? -1 : col;
+    if (column == _crossColumn && slotRow == _crossRow) {
+      return;
+    }
+    setState(() {
+      _crossColumn = column;
+      _crossRow = slotRow;
+      _barLanding = column == -1
+          ? null
+          : _barLandingOf(drag.key, column, slotRow);
+    });
+  }
+
+  /// The all-day day the block [key]'s entry takes when released over the
+  /// strip cell of [column]: from that day's start to the next day's, or
+  /// null where the history lock does not admit the move to it.
+  ({DateTime start, DateTime end})? _stripLandingOf(GridKey key, int column) {
+    final shape = _board.itemOf(key);
+    if (shape == null) {
+      return null;
+    }
+    final entry = shape.shown.entry;
+    final day = _tracks.dayAt(column);
+    final start = dateOfDayNumber(day);
+    final end = dateOfDayNumber(day + 1);
+    if (!_lock.value.admits(entry.start, entry.end, start, end)) {
+      return null;
+    }
+    return (start: start, end: end);
+  }
+
+  /// The hour the bar [key]'s entry takes when released over the slot
+  /// [row] of [column]: from that slot's start on that column's day, the
+  /// earlier instant of a time the clock repeats, to an hour after it; null
+  /// where the start is a time the clock skips, or where the history lock,
+  /// the hours ([DayHours.holdsTimes]) or [TimedGrid.maxDayCount] refuse
+  /// the range or it shares time with a piece of another entry.
+  ({DateTime start, DateTime end})? _barLandingOf(
+    GridKey key,
+    int column,
+    int row,
+  ) {
+    final shape = _board.itemOf(key);
+    final start = timeAtWallMinute(
+      _tracks.dayAt(column) * minutesPerDay + _tracks.minuteAt(row),
+    );
+    if (shape == null || start == null) {
+      return null;
+    }
+    final entry = shape.shown.entry;
+    final end = start.add(const Duration(hours: 1));
+    if (!_lock.value.admits(entry.start, entry.end, start, end) ||
+        !_tracks.hours.holdsTimes(start, end) ||
+        !_coversAtMost(start, end) ||
+        _meetsOtherEntry(key.id, start, end)) {
+      return null;
+    }
+    return (start: start, end: end);
+  }
+
+  /// Reads the crossing's cell again once the board has laid out the rows
+  /// a strip row change or a notice change gave, which move the slots
+  /// under a still pointer: first as a move off every cell, then at
+  /// [_dragAt]. At most one is pending, and it does nothing once the drag
+  /// has no [_dragPointer].
+  void _scheduleCrossRead() {
+    if (_dragPointer == null ||
+        _crossReadPending ||
+        !_isCrossingDrag(_drag)) {
+      return;
+    }
+    _crossReadPending = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _crossReadPending = false;
+      final drag = _drag;
+      if (!mounted || _dragPointer == null || drag == null) {
+        return;
+      }
+      _crossTo(drag, -1, -1);
+      _readCross();
+    });
+  }
+
+  /// Marks the strip cells of the day columns that a block over the strip
+  /// would land on, that a bar's day-edge resize past the limit is held
+  /// at, or that a create range across the strip, being dragged or with
+  /// its create flow open, covers.
+  void _updateStripMark() {
+    _StripMark? mark;
+    final landing = _stripLanding;
+    final held = _heldBar;
+    final range = _range;
+    if (landing != null && _crossColumn >= 1) {
+      mark = (first: _crossColumn, last: _crossColumn);
+    } else if (held != null) {
+      mark = _columnsOf(held.start, held.end);
+    } else if (range != null && range.strip) {
+      mark = (
+        first: math.min(range.anchor.col, range.focus.col),
+        last: math.max(range.anchor.col, range.focus.col),
+      );
+    } else {
+      mark = _stripCreating;
+    }
+    _stripMark.value = mark;
+  }
+
+  /// The shown day columns the range from [start] to [end] covers, or null
+  /// where it covers none.
+  _StripMark? _columnsOf(DateTime start, DateTime end) {
+    final first = _tracks.firstColumnFrom(dayNumber(start));
+    final last = _tracks.lastColumnUpTo(lastDayNumberOf(start, end));
+    return last < first ? null : (first: first, last: last);
+  }
+
+  /// The row of the board under [y], a coordinate in the viewport's paint
+  /// space, or -1 for none: outside the viewport, and where [y] plus the
+  /// vertical scroll offset lies outside the scrolled rows, as an
+  /// overscroll can leave it. The grid's own arithmetic over the tracks
+  /// [_rowsConfig] builds, allocating nothing: in the leading frozen band
+  /// its rows by their settled offsets, over a frozen after-hours row that
+  /// row, and between them the scrolled row of [y] plus the offset.
+  int _rowAt(double y) {
+    final size = _size;
+    if (size == null || y < 0.0 || y >= size.height) {
+      return -1;
+    }
+    final int row;
+    if (y < _leadingExtent) {
+      var top = y;
+      if (widget.showsDayHeader && top < _headerHeight) {
+        row = 0;
+      } else {
+        top -= _headerExtent;
+        final strip = (top / _allDayRowHeight).floor();
+        row = strip < _stripRows ? _stripStart + strip : _tracks.firstSlotRow - 1;
+      }
+    } else if (_notices.below && y >= size.height - _noticeHeight) {
+      row = _tracks.lastSlotRow + 1;
+    } else if (!_verticalScroll.hasClients) {
+      return -1;
+    } else {
+      var content = y + _verticalScroll.position.pixels - _leadingExtent;
+      if (!_notices.above) {
+        content -= _rowRoom;
+      }
+      if (content < (_notices.above ? 0.0 : -_rowRoom)) {
+        row = -1;
+      } else if (content < 0.0) {
+        row = _tracks.firstSlotRow - 1;
+      } else {
+        final slot = (content / _slotHeight).floor();
+        if (slot < _tracks.rowCount) {
+          row = _tracks.firstSlotRow + slot;
+        } else if (!_notices.below &&
+            content - _tracks.rowCount * _slotHeight < _rowRoom) {
+          row = _tracks.lastSlotRow + 1;
+        } else {
+          row = -1;
+        }
+      }
+    }
+    assert(_debugAgrees(row, y, vertical: true));
+    return row;
+  }
+
+  /// The column of the board under [x], a coordinate in the viewport's
+  /// paint space, or -1 for none: 0 over the gutter, and between it and the
+  /// viewport's edge the day column of [x] plus the horizontal scroll
+  /// offset, as [_columnsConfig] lays them out.
+  int _columnAt(double x) {
+    final size = _size;
+    if (size == null || x < 0.0 || x >= size.width) {
+      return -1;
+    }
+    final int col;
+    if (x < _gutterWidth) {
+      col = 0;
+    } else if (!_horizontalScroll.hasClients) {
+      return -1;
+    } else {
+      final day =
+          1 +
+          ((x - _gutterWidth + _horizontalScroll.position.pixels) / _dayWidth)
+              .floor();
+      col = day >= 1 && day <= _tracks.columnCount ? day : -1;
+    }
+    assert(_debugAgrees(col, x, vertical: false));
+    return col;
+  }
+
+  /// Whether [answer], [_rowAt] or [_columnAt] of [at], agrees with the
+  /// board viewport's own [RenderBoardViewport.cellAt] there, read in the
+  /// gutter for a row and in the first row for a column, or a point a hair
+  /// either side, where the two may round a track edge apart.
+  bool _debugAgrees(int answer, double at, {required bool vertical}) {
+    final viewport = _findViewport();
+    if (viewport == null || !viewport.hasSize) {
+      return true;
+    }
+    int probe(double value) {
+      final cell = viewport.cellAt(
+        vertical ? Offset(0.0, value) : Offset(value, 0.0),
+      );
+      if (cell == null) {
+        return -1;
+      }
+      return vertical ? cell.row : cell.col;
+    }
+
+    const hair = 1e-6;
+    return answer == probe(at) ||
+        answer == probe(at - hair) ||
+        answer == probe(at + hair);
   }
 
   /// The block a move carries, [proxy], over the theme's
@@ -2294,34 +3287,65 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// The times a release of [_drag] would give its entry: null with no
-  /// drag, before its first target, and with no target.
+  /// Whether the crossing of [_drag] names a cell ([_crossTo]), whose
+  /// landing the label and the marks show in place of the board target's.
+  bool get _crosses {
+    return _crossColumn >= 1;
+  }
+
+  /// The times a release of [_drag] would give its entry: a crossing's
+  /// landing while it names a cell, the range a bar's day-edge resize is
+  /// held at, and otherwise the board target's; null with no drag, before
+  /// its first target, and with no target.
   ({DateTime start, DateTime end})? _landingTimes() {
     final drag = _drag;
-    final target = drag?.target;
-    if (drag == null || !drag.resolved || target == null) {
+    if (drag == null) {
+      return null;
+    }
+    if (_crosses) {
+      return drag.key.isBar ? _barLanding : _stripLanding;
+    }
+    final held = _heldBar;
+    if (held != null) {
+      return held;
+    }
+    final target = drag.target;
+    if (!drag.resolved || target == null) {
       return null;
     }
     final from = _board.spanOf(drag.key);
     final shape = _board.itemOf(drag.key);
-    if (from == null || shape is! GridPiece<T>) {
+    if (from == null || shape == null) {
       return null;
     }
-    return _timesOf(
-      shape,
-      shape.shown.entry,
-      from,
-      target,
-      move: drag.kind == BoardDragKind.move,
-    );
+    final move = drag.kind == BoardDragKind.move;
+    return switch (shape) {
+      GridPiece<T>() => _timesOf(
+        shape,
+        shape.shown.entry,
+        from,
+        target,
+        move: move,
+      ),
+      GridBar<T>() => _barTimesOf(shape.shown.entry, from, target, move: move),
+    };
   }
 
   /// What the landing label says for [_drag]: the days and times a release
-  /// would give, or [noLandingLabel] for a move with no target. Null with
-  /// no drag, before its first target, and for a resize with no target.
+  /// would give, or [noLandingLabel] for a crossing whose landing is
+  /// refused and for a move with no target. Null with no drag, before its
+  /// first target, and for a resize with no target.
   String? _landingText(({DateTime start, DateTime end})? times) {
     final drag = _drag;
-    if (drag == null || !drag.resolved) {
+    if (drag == null) {
+      return null;
+    }
+    if (_crosses || _heldBar != null) {
+      return times == null
+          ? noLandingLabel
+          : landingLabel(times.start, times.end, widget.today);
+    }
+    if (!drag.resolved) {
       return null;
     }
     if (drag.target == null) {
@@ -2331,6 +3355,21 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return null;
     }
     return landingLabel(times.start, times.end, widget.today);
+  }
+
+  /// The wall minutes the landing outline paints for [times], what
+  /// [_landingTimes] gives: a block's move while it names no strip cell,
+  /// and a bar's crossing into the slots; none for any other drag, such as
+  /// a bar within the strip, whose days the strip shows.
+  ({int start, int end})? _outlineOf(({DateTime start, DateTime end})? times) {
+    final drag = _drag;
+    if (drag == null || times == null || drag.kind != BoardDragKind.move) {
+      return null;
+    }
+    if (drag.key.isBar != _crosses) {
+      return null;
+    }
+    return wallSpanOf(times.start, times.end);
   }
 
   /// Where the line marking [now] sits: null when no column shows its day
@@ -2412,12 +3451,30 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return _bodyCellAtLocal(viewport, viewport.globalToLocal(global));
   }
 
-  /// Whether a press at [global] may create: no range runs, it lies over a
-  /// body cell whose slot is a time the clock reads and the history lock
-  /// leaves free, no block paints under it, no shown entry shares time
-  /// with its slot, as one from 09:10 does with the 09:00 slot whose free
-  /// part the press lies in, and the grid is neither scrolling nor just
-  /// stopped by this press.
+  /// The all-day strip's cell painting under [local], a point in the
+  /// viewport's paint space, in a row that holds bars, or null elsewhere,
+  /// the collapsed strip's count row included.
+  ({int row, int col})? _stripCellAtLocal(
+    RenderBoardViewport<GridKey> viewport,
+    Offset local,
+  ) {
+    final cell = viewport.cellAt(local);
+    if (cell == null ||
+        !_isStripRow(cell.row) ||
+        (_stripCounted && cell.row >= _stripStart + _collapsedStripRows) ||
+        cell.col < 1) {
+      return null;
+    }
+    return cell;
+  }
+
+  /// Whether a press at [global] may create: no range runs, the grid is
+  /// neither scrolling nor just stopped by this press, and either it lies
+  /// over a body cell whose slot is a time the clock reads and the history
+  /// lock leaves free, no block paints under it, and no shown entry shares
+  /// time with its slot, as one from 09:10 does with the 09:00 slot whose
+  /// free part the press lies in; or over a strip cell no bar paints over,
+  /// of a day whose start the lock leaves free.
   bool _admits(Offset global) {
     final viewport = _findViewport();
     if (viewport == null || _scrollJustStopped || _range != null) {
@@ -2430,6 +3487,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return false;
     }
     final local = viewport.globalToLocal(global);
+    final strip = _stripCellAtLocal(viewport, local);
+    if (strip != null) {
+      return viewport.itemAt(local) == null &&
+          _lock.value.admitsStart(_tracks.dateAt(strip.col));
+    }
     final cell = _bodyCellAtLocal(viewport, local);
     if (cell == null) {
       return false;
@@ -2465,18 +3527,27 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return false;
   }
 
-  /// Starts a resize for a press beside the selected block, keeps any
-  /// other press off it for [_handlePointerUp], and in edit mode arms the
-  /// create gestures for an admitted press. A listener's pointer down runs
-  /// before the arena closes, so they join it beside the scrollable's pan;
-  /// each recognizer ignores the pointer kinds it does not support.
+  /// Notes the block or bar a press lies over in [_pressKeys], starts a
+  /// resize for a press beside the selected block, noting the piece whose
+  /// handles took it, keeps any other press off the selection for
+  /// [_handlePointerUp], and in edit mode arms the create gestures for an
+  /// admitted press. A listener's pointer down runs before the arena
+  /// closes, so they join it beside the scrollable's pan; each recognizer
+  /// ignores the pointer kinds it does not support.
   void _handlePointerDown(PointerDownEvent event) {
     _pinch.handleEvent(event);
+    final under = _keyAt(event.position);
+    if (under != null) {
+      _pressKeys[event.pointer] = under;
+    }
     final selected = _selectedBlock.value;
     if (selected != null) {
-      final under = _keyAt(event.position);
-      if (under == null && _startBeside(event)) {
-        return;
+      if (under == null) {
+        final beside = _startBeside(event);
+        if (beside != null) {
+          _pressKeys[event.pointer] = beside;
+          return;
+        }
       }
       if (under?.id != selected) {
         _pressesOff[event.pointer] = (at: event.position, id: selected);
@@ -2490,10 +3561,29 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _delayedRange.addPointer(event);
   }
 
-  /// Clears the selection for a tap off the selected entry's blocks, which
-  /// a press lifting another block, and so selecting it, is not.
+  /// Feeds the pinch, and for a crossing drag reads the cell under its
+  /// pointer's move. The listener sees the move before the board's drag
+  /// does: a render object handles a pointer event before the gesture
+  /// binding routes it to the recognizers.
+  void _handlePointerMove(PointerMoveEvent event) {
+    _pinch.handleEvent(event);
+    if (event.pointer != _dragPointer || !_isCrossingDrag(_drag)) {
+      return;
+    }
+    _dragAt = event.localPosition;
+    _readCross();
+  }
+
+  /// Writes a crossing or a held bar at its drag pointer's release
+  /// ([_releaseCross]), and clears the selection for a tap off the
+  /// selected entry's blocks, which a press lifting another block, and so
+  /// selecting it, is not.
   void _handlePointerUp(PointerUpEvent event) {
     _pinch.handleEvent(event);
+    _pressKeys.remove(event.pointer);
+    if (event.pointer == _dragPointer) {
+      _releaseCross(event.localPosition);
+    }
     final press = _pressesOff.remove(event.pointer);
     if (press == null ||
         _pinch.pinched.value ||
@@ -2512,16 +3602,78 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   void _handlePointerCancel(PointerCancelEvent event) {
     _pinch.handleEvent(event);
     _pressesOff.remove(event.pointer);
+    _pressKeys.remove(event.pointer);
+    if (event.pointer == _dragPointer) {
+      setState(_clearCross);
+    }
+  }
+
+  /// The release of the drag pointer at [local], in the viewport's paint
+  /// space, before the board's drag hears it. A crossing drag writes from
+  /// the cell under [local], so the pointer, not the proxy's centre,
+  /// decides where the entry lands: a block over a strip cell becomes
+  /// all-day on its day ([_stripLandingOf]), and a bar over a slot or the
+  /// row above the slots an hour from that slot ([_barLandingOf]), each
+  /// through one write, or none where the landing is refused; either way
+  /// [_crossSpent] then refuses the board's own report. A bar's day-edge
+  /// resize held at [TimedGrid.maxDayCount] writes the range it is held
+  /// at. Both stores notify within the write, so the sync that follows
+  /// moves or drops the dragged key, which cancels the board's drag before
+  /// it hears the release.
+  void _releaseCross(Offset local) {
+    final drag = _drag;
+    if (drag == null) {
+      return;
+    }
+    ({DateTime start, DateTime end})? write;
+    if (_isCrossingDrag(drag)) {
+      final row = _rowAt(local.dy);
+      final col = _columnAt(local.dx);
+      if (!drag.key.isBar) {
+        if (col < 1 || !_isStripRow(row)) {
+          return;
+        }
+        write = _stripLandingOf(drag.key, col);
+      } else {
+        if (col < 1 ||
+            row < _tracks.firstSlotRow - 1 ||
+            row > _tracks.lastSlotRow) {
+          return;
+        }
+        write = _barLandingOf(
+          drag.key,
+          col,
+          math.max(row, _tracks.firstSlotRow),
+        );
+      }
+      _crossSpent = true;
+    } else {
+      write = _heldBar;
+    }
+    if (write == null) {
+      return;
+    }
+    final id = drag.key.id;
+    final stored = widget.store.storedEntry(id);
+    if (stored == null || widget.store.isPending(id)) {
+      return;
+    }
+    final requested = stored.copyWith(start: write.start, end: write.end);
+    if (requested != stored) {
+      widget.store.requestMove(requested);
+    }
   }
 
   /// Starts a resize of a selected block for a press over a body cell,
   /// and over no block, on a strip outside a selected block holding a
   /// handle beside one of its edges, which the board, hit-testing a block
-  /// only within its bounds, gives no handle; reports whether it did.
-  bool _startBeside(PointerDownEvent event) {
-    return !_handles.isEmpty &&
-        _bodyCellAt(event.position) != null &&
-        _handles.startOutside(event);
+  /// only within its bounds, gives no handle; returns the key of the piece
+  /// whose handles took it, or null where none did.
+  GridKey? _startBeside(PointerDownEvent event) {
+    if (_handles.isEmpty || _bodyCellAt(event.position) == null) {
+      return null;
+    }
+    return _handles.startOutside(event);
   }
 
   /// Shows the resize cursor over the strips [_startBeside] starts from.
@@ -2546,7 +3698,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   void _handleTapUp(TapUpDetails details) {
-    final cell = _bodyCellAt(details.globalPosition);
+    final viewport = _findViewport();
+    if (viewport == null) {
+      return;
+    }
+    final local = viewport.globalToLocal(details.globalPosition);
+    final strip = _stripCellAtLocal(viewport, local);
+    if (strip != null) {
+      _create(strip, strip, _stripRangeOver(strip.col, strip.col), strip: true);
+      return;
+    }
+    final cell = _bodyCellAtLocal(viewport, local);
     if (cell == null) {
       return;
     }
@@ -2557,25 +3719,49 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _create(cell, cell, range);
   }
 
-  /// Reports [range] through [TimedGrid.onCreate], marking the range from
-  /// the slot of [anchor] to that of [focus] until the create flow
-  /// closes.
+  /// Reports [range] through [TimedGrid.onCreate], marking until the
+  /// create flow closes the range from the slot of [anchor] to that of
+  /// [focus], or for a range across the strip, [strip], the strip cells of
+  /// their columns and those between.
   void _create(
     ({int row, int col}) anchor,
     ({int row, int col}) focus,
-    CreateRange range,
-  ) {
+    CreateRange range, {
+    bool strip = false,
+  }) {
     final create = ++_creates;
     setState(() {
-      _creating = (anchor: anchor, focus: focus);
+      if (strip) {
+        _creating = null;
+        _stripCreating = (
+          first: math.min(anchor.col, focus.col),
+          last: math.max(anchor.col, focus.col),
+        );
+      } else {
+        _creating = (anchor: anchor, focus: focus);
+        _stripCreating = null;
+      }
     });
+    _updateStripMark();
     widget.onCreate(range).whenComplete(() {
       if (mounted && create == _creates) {
         setState(() {
           _creating = null;
+          _stripCreating = null;
         });
+        _updateStripMark();
       }
     });
+  }
+
+  /// The all-day range a create across the strip from the column [anchor]
+  /// to [focus] picks: the earlier column's day start to the start of the
+  /// day after the later one's, over every day between, shown or not.
+  CreateRange _stripRangeOver(int anchor, int focus) {
+    return CreateRange(
+      start: _tracks.dateAt(math.min(anchor, focus)),
+      end: dateOfDayNumber(_tracks.dayAt(math.max(anchor, focus)) + 1),
+    );
   }
 
   Drag? _beginRange(Offset position) {
@@ -2584,29 +3770,78 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return null;
     }
     final point = viewport.globalToLocal(position);
-    final anchor = _bodyCellAtLocal(viewport, point);
+    final strip = _stripCellAtLocal(viewport, point);
+    final anchor = strip ?? _bodyCellAtLocal(viewport, point);
     if (anchor == null) {
       return null;
     }
-    final range = _RangeDrag<T>(this, viewport, anchor, point);
+    final range = _RangeDrag<T>(this, anchor, point, strip: strip != null);
     setState(() {
       _range = range;
     });
+    _updateStripMark();
     return range;
   }
 
-  /// Moves [range]'s focus toward [focus], as far as [_reach] takes it.
+  /// Moves [range]'s focus toward [focus], as far as [_reach] takes it, or
+  /// for a range across the strip [_reachStrip].
   void _moveRange(_RangeDrag<T> range, ({int row, int col}) focus) {
     if (!mounted || !identical(_range, range)) {
       return;
     }
-    final reached = _reach(range, focus);
+    final reached = range.strip
+        ? _reachStrip(range, focus)
+        : _reach(range, focus);
     if (reached == range.focus) {
       return;
     }
     setState(() {
       range.focus = reached;
     });
+    _updateStripMark();
+  }
+
+  /// The focus a range across the strip from [range]'s anchor reaches
+  /// toward [focus]'s column: held, toward earlier days, at the first
+  /// column whose day start the history lock leaves free, and at
+  /// [TimedGrid.maxDayCount]'s days ([_heldToLimit]), however far past
+  /// them [focus] lies. Constant work per call.
+  ({int row, int col}) _reachStrip(
+    _RangeDrag<T> range,
+    ({int row, int col}) focus,
+  ) {
+    final anchor = range.anchor;
+    var col = focus.col;
+    if (col < anchor.col) {
+      final boundary = _lock.value.boundary;
+      if (boundary != null) {
+        // The first column whose day starts at the boundary or after it.
+        final free = _tracks.firstColumnFrom(
+          isDayStart(boundary) ? dayNumber(boundary) : dayNumber(boundary) + 1,
+        );
+        col = math.max(col, math.min(free, anchor.col));
+      }
+    }
+    final picked = _stripRangeOver(anchor.col, col);
+    if (!_coversAtMost(picked.start, picked.end)) {
+      final held = _heldToLimit(
+        picked.start,
+        picked.end,
+        atEnd: col >= anchor.col,
+      );
+      if (held != null) {
+        col = col >= anchor.col
+            ? math.max(
+                anchor.col,
+                _tracks.lastColumnUpTo(lastDayNumberOf(held.start, held.end)),
+              )
+            : math.min(
+                anchor.col,
+                _tracks.firstColumnFrom(dayNumber(held.start)),
+              );
+      }
+    }
+    return (row: anchor.row, col: col);
   }
 
   /// The focus [range] reaches toward [focus], in wall-minute order of the
@@ -2766,20 +4001,25 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Reports the range [range] was let go at: its anchor's slot where its
   /// focus never left it, and otherwise the range to its focus; nothing
-  /// where that range has an end the clock skips.
+  /// where that range has an end the clock skips. A range across the strip
+  /// reports the days of its columns ([_stripRangeOver]).
   void _endRange(_RangeDrag<T> range) {
     if (!mounted || !identical(_range, range)) {
       return;
     }
-    final hold = range.focus == range.anchor;
-    final created = hold
-        ? createRangeAt(_tracks, range.anchor)
-        : createRangeOver(_tracks, range.anchor, range.focus);
+    final CreateRange? created;
+    if (range.strip) {
+      created = _stripRangeOver(range.anchor.col, range.focus.col);
+    } else if (range.focus == range.anchor) {
+      created = createRangeAt(_tracks, range.anchor);
+    } else {
+      created = createRangeOver(_tracks, range.anchor, range.focus);
+    }
     _clearRange(range);
     if (created == null) {
       return;
     }
-    _create(range.anchor, range.focus, created);
+    _create(range.anchor, range.focus, created, strip: range.strip);
   }
 
   void _clearRange(_RangeDrag<T> range) {
@@ -2789,6 +4029,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     setState(() {
       _range = null;
     });
+    _updateStripMark();
   }
 
   Widget? _buildCell(
@@ -2803,6 +4044,23 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         header: _header,
         column: cell.col,
         onSelectDay: _selectDay,
+      );
+    }
+    if (_isStripRow(cell.row)) {
+      final row = cell.row - _stripStart;
+      if (cell.col == 0) {
+        if (row == 0) {
+          return _StripCorner(strip: _strip, onCollapse: _collapseStrip);
+        }
+        return const _GutterCell();
+      }
+      return _StripCell(
+        strip: _strip,
+        mark: _stripMark,
+        column: cell.col,
+        row: row,
+        last: row == _stripRows - 1,
+        onExpand: _expandStrip,
       );
     }
     final above = cell.row == _rowAbove;
@@ -2858,6 +4116,63 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     switch (shape) {
       case GridPiece<T>():
         return _buildPiece(shape, view.span);
+      case GridBar<T>():
+        return _buildBar(shape);
+    }
+  }
+
+  Widget _buildBar(GridBar<T> bar) {
+    final entry = bar.shown;
+    final days = _tracks.columnCount > 1;
+    return _Bar<T>(
+      key: allDayBarKey(entry.id),
+      entry: entry,
+      details: CalendarChipDetails(
+        card: false,
+        continuesBefore: bar.continuesBefore,
+        continuesAfter: bar.continuesAfter,
+      ),
+      builder: _chipBuilder,
+      selection: _selectedBlock,
+      lock: _lock,
+      onSelect: () {
+        _selectedBlock.value = entry.id;
+      },
+      startHandle: days && !bar.continuesBefore,
+      endHandle: days && !bar.continuesAfter,
+      onOpen: entry.pending
+          ? null
+          : () {
+              widget.onOpenEntry(entry.id);
+            },
+    );
+  }
+
+  /// Shows every bar row of the collapsed strip, from a tap on a "+N"
+  /// pill: the kept split, placed again on the moved slot rows.
+  void _expandStrip() {
+    if (_stripExpanded) {
+      return;
+    }
+    setState(() {
+      _stripExpanded = true;
+    });
+    if (_applyStripRows(_stripRowsOf(_layout.barRows))) {
+      _placeLayout(disable: true);
+    }
+  }
+
+  /// Collapses the expanded strip to three rows and its count row, from a
+  /// tap on the "Less" pill.
+  void _collapseStrip() {
+    if (!_stripExpanded) {
+      return;
+    }
+    setState(() {
+      _stripExpanded = false;
+    });
+    if (_applyStripRows(_stripRowsOf(_layout.barRows))) {
+      _placeLayout(disable: true);
     }
   }
 
@@ -2868,6 +4183,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final cutAtEnd = piece.end > hours.end;
     return _Block<T>(
       key: blockKey(entry.id, dateOfDayNumber(piece.day)),
+      pieceKey: _keyOf(piece),
       entry: entry,
       details: CalendarBlockDetails(
         detailed: _tracks.columnCount == 1,
@@ -2995,13 +4311,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       widget.hourLabelFormat,
     );
     _labelRoom = _hourLabels.height / 2 + _HourLabels.gap;
-    final landingTimes = _landingTimes();
-    final landingText = _landingText(landingTimes);
-    final rangeAnchor = range?.anchor ?? _creating?.anchor;
-    final rangeFocus = range?.focus ?? _creating?.focus;
+    final slotRange = range == null || range.strip ? null : range;
+    final rangeAnchor = slotRange?.anchor ?? _creating?.anchor;
+    final rangeFocus = slotRange?.focus ?? _creating?.focus;
     final listener = Listener(
       onPointerDown: _handlePointerDown,
-      onPointerMove: _pinch.handleEvent,
+      onPointerMove: _handlePointerMove,
       onPointerUp: _handlePointerUp,
       onPointerCancel: _handlePointerCancel,
       child: NotificationListener<ScrollNotification>(
@@ -3018,12 +4333,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             range: rangeAnchor == null || rangeFocus == null
                 ? null
                 : _wallSpanOfCells(rangeAnchor, rangeFocus),
-            landing:
-                drag != null &&
-                    drag.kind == BoardDragKind.move &&
-                    landingTimes != null
-                ? wallSpanOf(landingTimes.start, landingTimes.end)
-                : null,
+            landing: _outlineOf(_landingTimes()),
           ),
           foreground: _GridForegroundPainter(
             styles: styles,
@@ -3034,7 +4344,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             reachAbove: _notices.above ? _noticeHeight : 0.0,
             reachBelow: _notices.below ? _noticeHeight : 0.0,
           ),
-          drag: widget.editable ? _editConfig : _viewConfig,
+          drag: widget.editable
+              ? (_barDrags ? _fitlessConfig : _editConfig)
+              : _viewConfig,
+          verticalDetails: ScrollableDetails.vertical(
+            controller: _verticalScroll,
+          ),
+          horizontalDetails: ScrollableDetails.horizontal(
+            controller: _horizontalScroll,
+          ),
           // The grid scrolls on its own, not with the screen's primary
           // scroll controller.
           primary: false,
@@ -3054,12 +4372,23 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         return Stack(
           children: <Widget>[
             Positioned.fill(child: board),
-            if (landingText != null)
+            if (drag != null)
               Positioned(
                 top: _leadingExtent + 8.0,
                 left: _gutterWidth + 8.0,
                 right: 8.0,
-                child: _LandingLabel(text: landingText),
+                // The range a bar's day-edge resize is held at changes
+                // with the strip's marks, which the drop gate writes.
+                child: ValueListenableBuilder<_StripMark?>(
+                  valueListenable: _stripMark,
+                  builder: (context, mark, child) {
+                    final text = _landingText(_landingTimes());
+                    if (text == null) {
+                      return const SizedBox.shrink();
+                    }
+                    return _LandingLabel(text: text);
+                  },
+                ),
               ),
             if (!_daysReady)
               Positioned.fill(
@@ -3079,34 +4408,39 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 }
 
 /// A create range from the press at [anchor] to the body cell under the
-/// pointer.
+/// pointer, or for a range across the all-day strip, [strip], to the strip
+/// cell under it.
 ///
 /// The pointer is tracked in the viewport's paint space, as the press
 /// converted plus the sum of every update's delta: a multi-drag recognizer
 /// reports the move that accepted it as a delta from the press, with the
-/// press's own position. The range listens to both scroll positions for
-/// its length, so the focus stays the cell under the pointer while content
-/// scrolls beneath it. It reads the entries that hold it once, when it
-/// begins, and again on a store notify ([readConflicts]).
+/// press's own position. The range listens to the grid's two scroll
+/// controllers for its length, which relay the scroll of whichever
+/// position the board's scrollables attach, so the focus stays the cell
+/// under the pointer while content scrolls beneath it, across a position
+/// a scrollable replaces too; and it reads that cell through the viewport
+/// the grid finds then, so a board built anew under it is read. A range
+/// over the slots reads the entries that hold it once, when it begins, and
+/// again on a store notify ([readConflicts]).
 class _RangeDrag<T> extends Drag {
-  _RangeDrag(this._grid, this._viewport, this.anchor, this._point)
-    : focus = anchor,
-      _vertical = _viewport.verticalPosition,
-      _horizontal = _viewport.horizontalPosition {
-    _vertical?.addListener(_refocus);
-    _horizontal?.addListener(_refocus);
+  _RangeDrag(this._grid, this.anchor, this._point, {required this.strip})
+    : focus = anchor {
+    _grid._verticalScroll.addListener(_refocus);
+    _grid._horizontalScroll.addListener(_refocus);
     readConflicts();
   }
 
   final _TimedGridState<T> _grid;
-  final RenderBoardViewport<GridKey> _viewport;
-  final ScrollPosition? _vertical;
-  final ScrollPosition? _horizontal;
   final ({int row, int col}) anchor;
 
-  /// The body cell last under the pointer, as far as the range reaches:
-  /// unchanged while the pointer is over the header, the gutter or past
-  /// the lattice.
+  /// Whether the range runs over the all-day strip's cells, picking whole
+  /// days, rather than over the slots.
+  final bool strip;
+
+  /// The cell last under the pointer, as far as the range reaches: for a
+  /// range over the slots a body cell, unchanged while the pointer is over
+  /// the header, the gutter or past the lattice; for one across the strip
+  /// the anchor's row in the column of the strip cell last under it.
   ({int row, int col}) focus;
 
   /// The wall minute of the earliest start after [anchor]'s slot, which a
@@ -3119,8 +4453,12 @@ class _RangeDrag<T> extends Drag {
 
   Offset _point;
 
-  /// Reads the entries next to [anchor]'s slot that hold the range.
+  /// Reads the entries next to [anchor]'s slot that hold the range; a
+  /// range across the strip, of all-day days, is held by none.
   void readConflicts() {
+    if (strip) {
+      return;
+    }
     final conflicts = _grid._conflictsAround(anchor);
     nextStart = conflicts.next;
     previousEnd = conflicts.previous;
@@ -3133,7 +4471,17 @@ class _RangeDrag<T> extends Drag {
   }
 
   void _refocus() {
-    final cell = _grid._bodyCellAtLocal(_viewport, _point);
+    final viewport = _grid._findViewport();
+    if (viewport == null) {
+      return;
+    }
+    final ({int row, int col})? cell;
+    if (strip) {
+      final over = _grid._stripCellAtLocal(viewport, _point);
+      cell = over == null ? null : (row: anchor.row, col: over.col);
+    } else {
+      cell = _grid._bodyCellAtLocal(viewport, _point);
+    }
     if (cell == null || cell == focus) {
       return;
     }
@@ -3152,10 +4500,10 @@ class _RangeDrag<T> extends Drag {
     _grid._clearRange(this);
   }
 
-  /// Stops listening to the scroll positions.
+  /// Stops listening to the scroll controllers.
   void detach() {
-    _vertical?.removeListener(_refocus);
-    _horizontal?.removeListener(_refocus);
+    _grid._verticalScroll.removeListener(_refocus);
+    _grid._horizontalScroll.removeListener(_refocus);
   }
 }
 
@@ -3223,7 +4571,7 @@ class _DayHeaderCell extends StatelessWidget {
 }
 
 /// One piece on the grid: the box the board places it in, inset 1 px,
-/// which [_BlockContent] fills with what [builder] draws for [entry] and
+/// which [_EntryContent] fills with what [builder] draws for [entry] and
 /// [details]; the block draws nothing of the entry itself. A long press on
 /// it moves its entry while the history [lock] holds the entry
 /// [EntryHold.free], and reports [onSelect] while it holds it
@@ -3235,6 +4583,7 @@ class _DayHeaderCell extends StatelessWidget {
 class _Block<T> extends StatelessWidget {
   const _Block({
     super.key,
+    required this.pieceKey,
     required this.entry,
     required this.details,
     required this.builder,
@@ -3246,6 +4595,10 @@ class _Block<T> extends StatelessWidget {
     required this.endHandle,
     required this.onOpen,
   });
+
+  /// The board key of the block's piece, which its handles report for a
+  /// press outside it.
+  final GridKey pieceKey;
 
   final CalendarShownEntry<T> entry;
 
@@ -3280,7 +4633,7 @@ class _Block<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final content = _BlockContent<T>(
+    final content = _EntryContent<T, CalendarBlockDetails>(
       entry: entry,
       details: details,
       builder: builder,
@@ -3315,6 +4668,7 @@ class _Block<T> extends StatelessWidget {
                 child: _BlockHandles(
                   key: blockHandlesKey(entry.id),
                   id: entry.id,
+                  pieceKey: pieceKey,
                   slot: handles,
                   resizesStart: startHandle && hold == EntryHold.free,
                   resizesEnd: endHandle,
@@ -3327,37 +4681,225 @@ class _Block<T> extends StatelessWidget {
   }
 }
 
-/// A block's content: what [builder] last returned for [entry] and
-/// [details], called again only once one of the three is not `==` to the
-/// last, an inherited widget the builder read through this widget's
+/// One bar of the all-day strip: the lane the board places it in, inset
+/// 1 px, which what [builder] draws for [entry] and [details] fills. It
+/// takes presses as a [_Block] does: a tap reports [onOpen], which is null
+/// while the entry is pending; a long press moves its entry while the
+/// history [lock] holds the entry [EntryHold.free], and reports [onSelect]
+/// while it holds it [EntryHold.started]; and while [selection] names its
+/// entry an outline lies over it, with the left grip where [startHandle]
+/// holds and the entry is free, and the right one where [endHandle] holds
+/// ([_BarHandles]).
+class _Bar<T> extends StatelessWidget {
+  const _Bar({
+    super.key,
+    required this.entry,
+    required this.details,
+    required this.builder,
+    required this.selection,
+    required this.lock,
+    required this.onSelect,
+    required this.startHandle,
+    required this.endHandle,
+    required this.onOpen,
+  });
+
+  final CalendarShownEntry<T> entry;
+
+  /// The bar's chip form and its continued ends, which [builder] draws
+  /// from.
+  final CalendarChipDetails details;
+
+  final CalendarChipBuilder<T> builder;
+
+  /// The id of the entry whose blocks or bar are selected, or null.
+  final ValueListenable<String?> selection;
+
+  final ValueListenable<HistoryLock> lock;
+
+  /// A long press on the bar of a started entry asks to select it.
+  final VoidCallback onSelect;
+
+  /// Whether the bar, selected, has a grip on its left edge while its
+  /// entry is free, which drags its first day: on a grid of more than one
+  /// day column, where the entry does not continue before the bar.
+  final bool startHandle;
+
+  /// Whether the bar, selected, has a grip on its right edge, which drags
+  /// its last day: on a grid of more than one day column, where the entry
+  /// does not continue after the bar.
+  final bool endHandle;
+
+  /// Null while the entry is pending, so a tap opens nothing.
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = _EntryContent<T, CalendarChipDetails>(
+      entry: entry,
+      details: details,
+      builder: builder,
+    );
+    // One shape selected or not, and held or not, so neither change drops
+    // the bar's State.
+    return ListenableBuilder(
+      listenable: Listenable.merge(<Listenable>[selection, lock]),
+      child: content,
+      builder: (context, child) {
+        final hold = lock.value.holdOf(entry.entry.start, entry.entry.end);
+        return Stack(
+          fit: StackFit.passthrough,
+          children: <Widget>[
+            BoardDelayedDragHandle(
+              enabled: hold == EntryHold.free,
+              child: Padding(
+                padding: const EdgeInsets.all(1.0),
+                child: GestureDetector(
+                  // Opaque, so the lane takes a press wherever the builder
+                  // paints nothing, and the drag handle deferring to it
+                  // does too.
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onOpen,
+                  onLongPress: hold == EntryHold.started ? onSelect : null,
+                  child: child,
+                ),
+              ),
+            ),
+            if (selection.value == entry.id)
+              Positioned.fill(
+                child: _BarHandles(
+                  key: blockHandlesKey(entry.id),
+                  id: entry.id,
+                  resizesStart: startHandle && hold == EntryHold.free,
+                  resizesEnd: endHandle,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// A selected bar's outline and day-edge handles, over the bar: each edge
+/// that resizes, the left where [resizesStart] and the right where
+/// [resizesEnd], has a pill-shaped grip lying across its middle on the
+/// outline, and a strip inside the bar, [_BlockHandles.depth] wide and
+/// never more than a third of the bar, that starts a resize of that edge
+/// at once.
+class _BarHandles extends StatelessWidget {
+  const _BarHandles({
+    super.key,
+    required this.id,
+    required this.resizesStart,
+    required this.resizesEnd,
+  });
+
+  /// The bar's entry, which names the grips' keys.
+  final String id;
+
+  final bool resizesStart;
+  final bool resizesEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    final styles = _GridStyles.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final height = constraints.maxHeight;
+        final columns = math.min(_BlockHandles.depth, width / 3);
+        final across = math.min(_BlockHandles.gripLength, height * 0.6);
+        // From the bar's edge to a grip's near side, which centres the grip
+        // on the outline's middle.
+        const lead =
+            _BlockHandles.outlineWidth / 2 - _BlockHandles.gripThickness / 2;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: <Widget>[
+            styles.selectionOutline,
+            if (resizesStart)
+              Positioned(
+                top: 0.0,
+                bottom: 0.0,
+                left: 0.0,
+                width: columns,
+                child: const _ResizeHandle(
+                  edge: BoardResizeEdges.leading,
+                  axis: Axis.horizontal,
+                ),
+              ),
+            if (resizesEnd)
+              Positioned(
+                top: 0.0,
+                bottom: 0.0,
+                right: 0.0,
+                width: columns,
+                child: const _ResizeHandle(
+                  edge: BoardResizeEdges.trailing,
+                  axis: Axis.horizontal,
+                ),
+              ),
+            if (resizesStart)
+              Positioned(
+                left: lead,
+                top: (height - across) / 2,
+                width: _BlockHandles.gripThickness,
+                height: across,
+                child: _Grip(key: blockGripKey(id, AxisDirection.left)),
+              ),
+            if (resizesEnd)
+              Positioned(
+                right: lead,
+                top: (height - across) / 2,
+                width: _BlockHandles.gripThickness,
+                height: across,
+                child: _Grip(key: blockGripKey(id, AxisDirection.right)),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// A block's or a bar's content: what [builder] last returned for [entry]
+/// and [details], called again only once one of the three is not `==` to
+/// the last, an inherited widget the builder read through this widget's
 /// context notifies, or a hot reload reassembles it. The board rebuilds
-/// every block it has built on each pinch move and each write, with the
-/// identical entry and an equal details value for a block neither
+/// every block and bar it has built on each pinch move and each write,
+/// with the identical entry and an equal details value for one neither
 /// changes, so such a rebuild calls no builder.
-class _BlockContent<T> extends StatefulWidget {
-  const _BlockContent({
+class _EntryContent<T, D extends Object> extends StatefulWidget {
+  const _EntryContent({
     required this.entry,
     required this.details,
     required this.builder,
   });
 
   final CalendarShownEntry<T> entry;
-  final CalendarBlockDetails details;
-  final CalendarBlockBuilder<T> builder;
+  final D details;
+  final Widget Function(
+    BuildContext context,
+    CalendarShownEntry<T> entry,
+    D details,
+  )
+  builder;
 
   @override
-  State<_BlockContent<T>> createState() {
-    return _BlockContentState<T>();
+  State<_EntryContent<T, D>> createState() {
+    return _EntryContentState<T, D>();
   }
 }
 
-class _BlockContentState<T> extends State<_BlockContent<T>> {
+class _EntryContentState<T, D extends Object>
+    extends State<_EntryContent<T, D>> {
   /// What the builder last returned, which the element under this one then
   /// neither updates nor rebuilds; null until the next build calls it.
   Widget? _built;
 
   @override
-  void didUpdateWidget(_BlockContent<T> oldWidget) {
+  void didUpdateWidget(_EntryContent<T, D> oldWidget) {
     super.didUpdateWidget(oldWidget);
     // Identity first: an unchanged block's entry is the board's stored
     // instance, and its builder the grid's one field, so the deep
@@ -3555,6 +5097,199 @@ class _NoticeCell extends StatelessWidget {
         },
       ),
     );
+  }
+}
+
+/// A day column's cell in a row of the all-day strip: the surface, with a
+/// rule between days and one under the strip's last row, [last], tinted and
+/// edged in the primary colour while [mark] covers its column. The first
+/// row's cell carries [allDayCellKey]. In the collapsed strip's count row,
+/// while the day hides bars, a "+N" pill counting them ([allDayMoreKey]),
+/// which a screen reader hears as [allDayMoreLabel] and a tap on which
+/// reports [onExpand].
+class _StripCell extends StatelessWidget {
+  const _StripCell({
+    required this.strip,
+    required this.mark,
+    required this.column,
+    required this.row,
+    required this.last,
+    required this.onExpand,
+  });
+
+  final ValueListenable<_StripState> strip;
+  final ValueListenable<_StripMark?> mark;
+
+  /// The board column of the cell, which [GridTracks.dateAt] reads.
+  final int column;
+
+  /// The cell's strip row, from 0.
+  final int row;
+
+  final bool last;
+  final VoidCallback onExpand;
+
+  @override
+  Widget build(BuildContext context) {
+    final styles = _GridStyles.of(context);
+    return ListenableBuilder(
+      listenable: Listenable.merge(<Listenable>[strip, mark]),
+      builder: (context, child) {
+        final state = strip.value;
+        // New tracks reach the strip in the sync that places items on
+        // them, so the cell of a column they no longer have rebuilds once
+        // before the board's next layout drops it.
+        final tracks = state.tracks;
+        if (column > tracks.columnCount) {
+          return const SizedBox.shrink();
+        }
+        final day = tracks.dateAt(column);
+        final marked = mark.value;
+        final decoration =
+            marked != null && column >= marked.first && column <= marked.last
+            ? styles.stripMarked
+            : styles.stripCell(first: column == 1, last: last);
+        final count = state.counted && row == _collapsedStripRows
+            ? state.below[column - 1]
+            : 0;
+        return DecoratedBox(
+          key: row == 0 ? allDayCellKey(day) : null,
+          decoration: decoration,
+          child: count == 0
+              ? const SizedBox.expand()
+              : Semantics(
+                  container: true,
+                  button: true,
+                  label: allDayMoreLabel(count),
+                  onTap: onExpand,
+                  excludeSemantics: true,
+                  child: GestureDetector(
+                    key: allDayMoreKey(day),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: onExpand,
+                    child: Center(
+                      child: _StripPill(text: "+$count", styles: styles),
+                    ),
+                  ),
+                ),
+        );
+      },
+    );
+  }
+}
+
+/// The all-day strip's first row over the gutter: the surface, holding
+/// while the strip is expanded past three rows a "Less" pill
+/// ([allDayLessKey]), which a screen reader hears as [allDayLessLabel] and
+/// a tap on which reports [onCollapse].
+class _StripCorner extends StatelessWidget {
+  const _StripCorner({required this.strip, required this.onCollapse});
+
+  final ValueListenable<_StripState> strip;
+  final VoidCallback onCollapse;
+
+  @override
+  Widget build(BuildContext context) {
+    final styles = _GridStyles.of(context);
+    return ColoredBox(
+      color: styles.theme.surface,
+      child: ValueListenableBuilder<_StripState>(
+        valueListenable: strip,
+        builder: (context, state, child) {
+          if (!state.collapsible) {
+            return const SizedBox.expand();
+          }
+          return Semantics(
+            container: true,
+            button: true,
+            label: allDayLessLabel,
+            onTap: onCollapse,
+            excludeSemantics: true,
+            child: GestureDetector(
+              key: allDayLessKey,
+              behavior: HitTestBehavior.opaque,
+              onTap: onCollapse,
+              child: Center(child: _StripPill(text: "Less", styles: styles)),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// A pill of the all-day strip, in the look of the one counting the
+/// entries on no shown day.
+class _StripPill extends StatelessWidget {
+  const _StripPill({required this.text, required this.styles});
+
+  final String text;
+  final _GridStyles styles;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: styles.hiddenPill,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 1.0),
+        child: Text(text, maxLines: 1, style: styles.hiddenLabel),
+      ),
+    );
+  }
+}
+
+/// A binary min-heap of integers.
+class _IntHeap {
+  final List<int> _values = <int>[];
+
+  bool get isNotEmpty {
+    return _values.isNotEmpty;
+  }
+
+  /// The least value; the heap is not empty.
+  int get peek {
+    return _values.first;
+  }
+
+  void push(int value) {
+    _values.add(value);
+    var at = _values.length - 1;
+    while (at > 0) {
+      final parent = (at - 1) >> 1;
+      if (_values[parent] <= value) {
+        break;
+      }
+      _values[at] = _values[parent];
+      at = parent;
+    }
+    _values[at] = value;
+  }
+
+  /// Removes and returns the least value; the heap is not empty.
+  int pop() {
+    final least = _values.first;
+    final last = _values.removeLast();
+    if (_values.isNotEmpty) {
+      var at = 0;
+      final count = _values.length;
+      while (true) {
+        final left = 2 * at + 1;
+        if (left >= count) {
+          break;
+        }
+        final right = left + 1;
+        final child = right < count && _values[right] < _values[left]
+            ? right
+            : left;
+        if (_values[child] >= last) {
+          break;
+        }
+        _values[at] = _values[child];
+        at = child;
+      }
+      _values[at] = last;
+    }
+    return least;
   }
 }
 
@@ -4009,14 +5744,15 @@ class _HandlesSlot {
   }
 
   /// Starts a resize for [event] on the first registered handles whose
-  /// strip outside its block holds it, and reports whether one did.
-  bool startOutside(PointerDownEvent event) {
+  /// strip outside its block holds it, and returns the key of that block's
+  /// piece, or null where none did.
+  GridKey? startOutside(PointerDownEvent event) {
     for (final state in _states) {
       if (state.startOutside(event)) {
-        return true;
+        return state.widget.pieceKey;
       }
     }
-    return false;
+    return null;
   }
 
   /// The resize cursor of the strip outside a registered block that holds
@@ -4054,6 +5790,7 @@ class _BlockHandles extends StatefulWidget {
   const _BlockHandles({
     super.key,
     required this.id,
+    required this.pieceKey,
     required this.slot,
     required this.resizesStart,
     required this.resizesEnd,
@@ -4073,6 +5810,9 @@ class _BlockHandles extends StatefulWidget {
 
   /// The block's entry, which names the grips' keys.
   final String id;
+
+  /// The board key of the block's piece.
+  final GridKey pieceKey;
 
   final _HandlesSlot slot;
   final bool resizesStart;

@@ -2118,7 +2118,11 @@ void main() {
     probe("a selected block");
 
     // A lift and its landing label, the block left behind at A's opacity
-    // and the lift's shadow coming in on A's motion.
+    // and the lift's shadow coming in on A's motion. The block lies on the
+    // first slot, which the grid scrolls to show whole under the frozen
+    // header, all-day row and before-hours notice.
+    gridViewport(tester).verticalPosition!.jumpTo(0.0);
+    await tester.pump();
     final block = blockFinder("item-6");
     final slot = tester.getRect(block);
     final gesture = await tester.startGesture(slot.center);

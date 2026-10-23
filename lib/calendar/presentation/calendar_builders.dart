@@ -31,17 +31,18 @@ typedef CalendarBlockBuilder<T> =
       CalendarBlockDetails details,
     );
 
-/// Builds the content of a bar of Month's board, in its chip or card form:
-/// everything inside the lane the board gives [entry], its pending state
-/// included.
+/// Builds the content of a bar of Month's board or of Week's and Day's
+/// all-day strip, in its chip or card form: everything inside the lane the
+/// board or the strip gives [entry], its pending state included. The strip
+/// draws its bars in the chip form alone.
 ///
-/// The board calls it only in a widget's build, which the board may run
+/// The view calls it only in a widget's build, which its board may run
 /// inside its layout, so the builder marks no ancestor dirty. It calls it
 /// when the bar's box is first built, and again only when [entry],
-/// [details] or the board's builder parameter changes, an inherited widget
-/// the builder read notifies, or a hot reload reassembles the board; not
-/// when anything else the builder reads changes. The board keeps the bar's
-/// semantics node and its tap around the output.
+/// [details] or the view's builder parameter changes, an inherited widget
+/// the builder read notifies, or a hot reload reassembles the view; not
+/// when anything else the builder reads changes. The view keeps the bar's
+/// semantics node or gestures and its tap around the output.
 typedef CalendarChipBuilder<T> =
     Widget Function(
       BuildContext context,
@@ -172,8 +173,8 @@ final class CalendarBlockDetails {
   }
 }
 
-/// What the month board decides about one bar's appearance, which a
-/// [CalendarChipBuilder] draws from.
+/// What the month board or the timed grid's all-day strip decides about
+/// one bar's appearance, which a [CalendarChipBuilder] draws from.
 @immutable
 final class CalendarChipDetails {
   /// The bar's form and its continued ends.
@@ -185,13 +186,16 @@ final class CalendarChipDetails {
 
   /// Whether the days are large enough for the card form: a bar one card
   /// lane tall, with room for the times under the title. Otherwise the
-  /// bar is a chip, one lane tall.
+  /// bar is a chip, one lane tall. Always false in the all-day strip.
   final bool card;
 
-  /// Whether the entry covers days before the bar's week.
+  /// Whether the entry covers days before the bar's first shown day: in
+  /// Month the first day of the bar's week it covers, and in the all-day
+  /// strip the first shown day it covers.
   final bool continuesBefore;
 
-  /// Whether the entry covers days after the bar's week.
+  /// Whether the entry covers days after the bar's last shown day, as
+  /// [continuesBefore] reads the first.
   final bool continuesAfter;
 
   @override

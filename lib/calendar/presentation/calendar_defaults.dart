@@ -157,10 +157,11 @@ Widget defaultCalendarBlockBuilder<T>(
   );
 }
 
-/// The default bar of Month's board: the entry's tint holding a 4 px band
-/// of its colour and its title, and in the [CalendarChipDetails.card] form
-/// its times under the title; rounded at an end the entry does not continue
-/// past and square where it does, and dimmed while the entry is pending.
+/// The default bar of Month's board and of Week's and Day's all-day strip:
+/// the entry's tint holding a 4 px band of its colour and its title, and in
+/// the [CalendarChipDetails.card] form its times under the title; rounded at
+/// an end the entry does not continue past and square where it does, and
+/// dimmed while the entry is pending.
 Widget defaultCalendarChipBuilder<T>(
   BuildContext context,
   CalendarShownEntry<T> entry,

@@ -1,13 +1,14 @@
-/// Widget tests for a resize strip drag on the timed grids: the block takes
-/// the size the drop would give it on the frame after the pointer moves,
-/// and keeps that size through the release, the write and the mock's
-/// answer.
+/// Widget tests for a resize strip drag on the timed grids: the block, or
+/// the all-day strip's bar, takes the size the drop would give it on the
+/// frame after the pointer moves, and keeps that size through the release,
+/// the write and the mock's answer.
 library;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 
 import 'calendar_harness.dart';
@@ -95,6 +96,62 @@ void main() {
     // Setup sanity: the drop was written, two slots later.
     final item = await storedJson(tester, api, brainstormId);
     expect(minuteOfDay(endOfJson(item)), 15 * 60 + 30);
+  });
+
+  testWidgets("L2 a strip bar's trailing day edge sets the days as it "
+      "drags", (tester) async {
+    final api = MockCalendarApi.seeded(today, latency: harnessLatency);
+    final wednesday = DateTime(2026, 4, 22);
+    await createBeforePump(
+      tester,
+      api,
+      taskJson("Focus", wednesday, 0, minutesPerDay),
+    );
+    final focus =
+        (await listAll(
+              tester,
+              api,
+              wednesday,
+              wednesday,
+            )).singleWhere((item) => item["title"] == "Focus")["id"]!
+            as String;
+    await pumpCalendar(tester, editing: true, api: api, size: tall);
+    await pickMode(tester, "Week");
+    final bar = find.byKey(allDayBarKey(focus));
+    final dayWidth = cellRect(tester, rowOf(9 * 60), colOf(0)).width;
+    final before = tester.getRect(bar);
+    // Setup sanity: the bar fills its one day.
+    expect(before.width, moreOrLessEquals(dayWidth, epsilon: 0.5));
+    final press = await tester.startGesture(tester.getCenter(bar));
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    await press.up();
+    await tester.pumpAndSettle();
+    final expected = Rect.fromLTRB(
+      before.left,
+      before.top,
+      before.right + dayWidth,
+      before.bottom,
+    );
+    final gesture = await tester.startGesture(
+      Offset(before.right - 3.0, before.center.dy),
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveBy(Offset(dayWidth, 0.0));
+    await tester.pump();
+    expect(tester.getRect(bar), nearRect(expected));
+    await gesture.up();
+    await tester.pump();
+    expect(tester.getRect(bar), nearRect(expected));
+    for (var frame = 0; frame < framesAfterRelease; frame++) {
+      await tester.pump(oneFrame);
+      expect(tester.getRect(bar), nearRect(expected));
+    }
+    await tester.pumpAndSettle();
+    expect(tester.getRect(bar), nearRect(expected));
+    // Setup sanity: the drop was written, a day later.
+    final item = await storedJson(tester, api, focus);
+    expect(startOfJson(item), wednesday);
+    expect(endOfJson(item), DateTime(2026, 4, 24));
   });
 
   testWidgets("L3 the day grid's bottom strip sets the end as it drags", (

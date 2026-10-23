@@ -217,3 +217,16 @@ String entryCountLabel(int count) {
   }
   return "$count items";
 }
+
+/// What a screen reader hears for the pill counting [count] all-day
+/// entries the collapsed all-day strip hides on a day: "1 more all-day
+/// entry" or "N more all-day entries".
+String allDayMoreLabel(int count) {
+  return count == 1
+      ? "1 more all-day entry"
+      : "$count more all-day entries";
+}
+
+/// What a screen reader hears for the pill that collapses the expanded
+/// all-day strip.
+const String allDayLessLabel = "Show fewer all-day entries";

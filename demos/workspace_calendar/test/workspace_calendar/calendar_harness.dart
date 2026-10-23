@@ -47,16 +47,38 @@ const String dayOffId = "item-28";
 /// The Monday of [today]'s week.
 final DateTime monday = DateTime(2026, 4, 20);
 
-/// Week's timed grid row of [minute], over the whole day's hours: row 0 is
-/// the day header and row 1 the room above the first slot.
-int rowOf(int minute) {
-  return 2 + minute ~/ 15;
+/// The row of the slot holding [minute], a minute after midnight, in the
+/// timed grid shown now: its first slot row, under the day header in Week,
+/// the all-day strip's rows and the room above the slots, which is its
+/// board's row count less its slot rows and the room below them, plus the
+/// slots from its hours' start.
+int gridRowOf(int minute) {
+  final grid =
+      find.byType(TimedGrid<ItemPayload>).evaluate().single.widget
+          as TimedGrid<ItemPayload>;
+  final board =
+      find
+              .byType(Board<GridKey, GridShape<ItemPayload>>)
+              .evaluate()
+              .single
+              .widget
+          as Board<GridKey, GridShape<ItemPayload>>;
+  final hours = grid.hours;
+  final firstSlotRow =
+      board.controller.rows.axis.trackCount -
+      hours.slotCountOf(grid.slotMinutes) -
+      1;
+  return firstSlotRow + (minute - hours.start) ~/ grid.slotMinutes;
 }
 
-/// Day's timed grid row of [minute], over the whole day's hours: the grid
-/// has no day header, so row 0 is the room above the first slot.
+/// Week's timed grid row of [minute] ([gridRowOf]).
+int rowOf(int minute) {
+  return gridRowOf(minute);
+}
+
+/// Day's timed grid row of [minute] ([gridRowOf]).
 int dayRowOf(int minute) {
-  return 1 + minute ~/ 15;
+  return gridRowOf(minute);
 }
 
 /// The timed grid's gutter cell that a screen reader hears as [label],

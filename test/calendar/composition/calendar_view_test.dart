@@ -226,16 +226,46 @@ RenderBoardViewport<GridKey> gridViewport(WidgetTester tester) {
       .single;
 }
 
-/// Week's grid row of [minute] over the whole day: row 0 is the day
-/// header and row 1 the room above the first slot.
-int weekRowOf(int minute) {
-  return 2 + minute ~/ defaultSlotMinutes;
+/// The grid row of the slot holding [minute], a minute after midnight, in
+/// the one timed grid shown now: its first slot row, under the day header
+/// in Week, the all-day strip's rows and the room above the slots, which is
+/// its board's row count less its slot rows and the room below them, plus
+/// the slots from its hours' start.
+int gridRowOf(int minute) {
+  final grid =
+      find
+              .byWidgetPredicate((widget) {
+                return widget is TimedGrid;
+              })
+              .evaluate()
+              .single
+              .widget
+          as TimedGrid;
+  final board =
+      find
+              .byWidgetPredicate((widget) {
+                return widget is Board<GridKey, Object?>;
+              })
+              .evaluate()
+              .single
+              .widget
+          as Board<GridKey, Object?>;
+  final hours = grid.hours;
+  final firstSlotRow =
+      board.controller.rows.axis.trackCount -
+      hours.slotCountOf(grid.slotMinutes) -
+      1;
+  return firstSlotRow + (minute - hours.start) ~/ grid.slotMinutes;
 }
 
-/// Day's grid row of [minute] over the whole day: the grid has no day
-/// header, so row 0 is the room above the first slot.
+/// Week's grid row of [minute] ([gridRowOf]).
+int weekRowOf(int minute) {
+  return gridRowOf(minute);
+}
+
+/// Day's grid row of [minute] ([gridRowOf]).
 int dayRowOf(int minute) {
-  return 1 + minute ~/ defaultSlotMinutes;
+  return gridRowOf(minute);
 }
 
 /// Week's grid column of [day], Monday's being 1.

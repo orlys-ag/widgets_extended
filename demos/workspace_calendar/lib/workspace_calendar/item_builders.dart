@@ -29,7 +29,8 @@ class ItemBuilders {
   /// Week's and Day's blocks.
   final CalendarBlockBuilder<ItemPayload>? block;
 
-  /// Month's bars, in their chip and card forms.
+  /// Month's bars, in their chip and card forms, and the bars of the
+  /// all-day strip of Week and Day.
   final CalendarChipBuilder<ItemPayload>? chip;
 
   /// Agenda's cards.
@@ -469,9 +470,10 @@ class _BlockLinesDelegate extends FlowDelegate {
   }
 }
 
-/// One item's bar in one week of Month: the type's tint with a 4 px edge
-/// in the type's colour, as [HarborTypeStyle] draws an item, rounded at an
-/// end where the item starts or ends and square where it continues. A chip
+/// One item's bar in one week of Month, or across its shown days in the
+/// all-day strip of Week and Day: the type's tint with a 4 px edge in the
+/// type's colour, as [HarborTypeStyle] draws an item, rounded at an end
+/// where the item starts or ends and square where it continues. A chip
 /// holds the title on one line; a [CalendarChipDetails.card] holds the
 /// title over the type's icon and the item's times. Dimmed while pending.
 class HarborChip extends StatelessWidget {

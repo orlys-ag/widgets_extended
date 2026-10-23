@@ -450,7 +450,8 @@ class CalendarThemeData with Diagnosticable {
   /// Month's "+N more". Its colour is not used: it draws in [onNotice].
   final TextStyle monthMoreStyle;
 
-  /// A Month chip's title. Its colour is not used: it draws in [text].
+  /// A chip's title, in Month and in Week's and Day's all-day strip. Its
+  /// colour is not used: it draws in [text].
   final TextStyle chipTitleStyle;
 
   /// A Month card's title. Its colour is not used: it draws in [text].
