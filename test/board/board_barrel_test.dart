@@ -46,6 +46,7 @@ void main() {
         BoardCellView,
         BoardItemView,
         BoardDragConfig,
+        BoardDragBounds,
         BoardDropFit,
         BoardSelectionConfig,
         BoardDragHandle,
@@ -62,7 +63,7 @@ void main() {
       // BoardDragController and BoardAnimationReader are not on the list:
       // no app can reach the board's drag controller, and the reader is
       // the type of an internal getter.
-      expect(types, hasLength(35));
+      expect(types, hasLength(36));
       // The three typedefs are not type literals; a nullable declaration
       // per name is the compile-level reference.
       BoardCellBuilder<String, Object?>? cellBuilder;
@@ -113,7 +114,7 @@ void main() {
         shown.add(name.trim());
       }
     }
-    expect(shown, hasLength(38));
+    expect(shown, hasLength(39));
     const internals = <String>{
       "BoardStore",
       "SpanIndex",

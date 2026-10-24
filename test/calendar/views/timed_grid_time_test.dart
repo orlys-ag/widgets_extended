@@ -364,6 +364,19 @@ Future<void> resizeEnd(WidgetTester tester, Finder block, Offset by) async {
   await tester.pumpAndSettle();
 }
 
+/// Drags the top edge of the selected [block], pressed 3 px below its
+/// top, by [by], and lets go.
+Future<void> resizeStart(WidgetTester tester, Finder block, Offset by) async {
+  final rect = tester.getRect(block);
+  final gesture = await tester.startGesture(
+    Offset(rect.center.dx, rect.top + 3.0),
+  );
+  await gesture.moveBy(by);
+  await tester.pump();
+  await gesture.up();
+  await tester.pumpAndSettle();
+}
+
 /// A mouse drag from [from] to [to], let go there: a create drag.
 Future<void> createDrag(WidgetTester tester, Offset from, Offset to) async {
   final gesture = await tester.startGesture(
@@ -1564,6 +1577,132 @@ void main() {
         expect(
           tester.getRect(blockFinder("folds", day)).bottom,
           moreOrLessEquals(cellRect(tester, shown.rowOf(120), col).bottom),
+          reason: shown.name,
+        );
+      }
+    });
+  });
+
+  group("the hours' edges", () {
+    final edgeViews = <Shown>[
+      Shown.week(monday),
+      Shown.day(monday),
+      Shown.day(monday, hours: const DayHours(8 * 60, 18 * 60)),
+    ];
+
+    /// Monday at [minute] past its midnight, the next midnight for 1440.
+    DateTime mondayAt(int minute) {
+      return DateTime(2026, 4, 20, 0, minute);
+    }
+
+    /// The height of one slot of [shown].
+    double slotHeightOf(WidgetTester tester, Shown shown) {
+      final start = shown.hours.start;
+      return slotRect(tester, shown, monday, start + shown.slotMinutes).top -
+          slotRect(tester, shown, monday, start).top;
+    }
+
+    testWidgets("TP28 in Week and in Day, over the whole day and over part "
+        "of it, a block dragged past the last slot lands ending at the "
+        "hours' end, and one dragged above the first slot starting at their "
+        "start", (tester) async {
+      for (final shown in edgeViews) {
+        final start = shown.hours.start;
+        final end = shown.hours.end;
+        final late = entryOf("late", mondayAt(end - 120), mondayAt(end - 60));
+        final early = entryOf(
+          "early",
+          mondayAt(start + 60),
+          mondayAt(start + 120),
+        );
+        final store = storeOf(<CalendarEntry<String>>[late, early]);
+        await Harness(store, shown).pump(tester);
+        final slot = slotHeightOf(tester, shown);
+        // Six slots: the block's top half an hour past the last hour's.
+        await moveBlock(
+          tester,
+          blockFinder("late", monday),
+          Offset(0.0, slot * 6),
+        );
+        expect(
+          store.storedEntry("late"),
+          late.copyWith(start: mondayAt(end - 60), end: mondayAt(end)),
+          reason: shown.name,
+        );
+        // The pointer onto the first slot's top, the block's half an hour
+        // above it.
+        await moveBlock(
+          tester,
+          blockFinder("early", monday),
+          Offset(0.0, -slot * 6),
+        );
+        expect(
+          store.storedEntry("early"),
+          early.copyWith(start: mondayAt(start), end: mondayAt(start + 60)),
+          reason: shown.name,
+        );
+      }
+    });
+
+    testWidgets("TP29 in Week and in Day, over the whole day and over part "
+        "of it, a bottom handle dragged past the last slot ends its entry at "
+        "the hours' end, and a top handle dragged above the first slot "
+        "starts it at their start", (tester) async {
+      for (final shown in edgeViews) {
+        final start = shown.hours.start;
+        final end = shown.hours.end;
+        final late = entryOf("late", mondayAt(end - 120), mondayAt(end - 60));
+        final early = entryOf(
+          "early",
+          mondayAt(start + 60),
+          mondayAt(start + 120),
+        );
+        final store = storeOf(<CalendarEntry<String>>[late, early]);
+        await Harness(store, shown).pump(tester);
+        final slot = slotHeightOf(tester, shown);
+        await selectBlock(tester, blockFinder("late", monday));
+        await resizeEnd(
+          tester,
+          blockFinder("late", monday),
+          Offset(0.0, slot * 6),
+        );
+        expect(
+          store.storedEntry("late"),
+          late.copyWith(end: mondayAt(end)),
+          reason: shown.name,
+        );
+        await selectBlock(tester, blockFinder("early", monday));
+        await resizeStart(
+          tester,
+          blockFinder("early", monday),
+          Offset(0.0, -slot * 6),
+        );
+        expect(
+          store.storedEntry("early"),
+          early.copyWith(start: mondayAt(start)),
+          reason: shown.name,
+        );
+      }
+    });
+
+    testWidgets("TP30 in Day, over the whole day and over part of it, a "
+        "block dragged past the last slot while another entry holds it "
+        "lands at the free time just before that entry", (tester) async {
+      for (final shown in edgeViews.skip(1)) {
+        final end = shown.hours.end;
+        final move = entryOf("move", mondayAt(end - 180), mondayAt(end - 120));
+        final last = entryOf("last", mondayAt(end - 30), mondayAt(end));
+        final store = storeOf(<CalendarEntry<String>>[move, last]);
+        await Harness(store, shown).pump(tester);
+        final slot = slotHeightOf(tester, shown);
+        await moveBlock(
+          tester,
+          blockFinder("move", monday),
+          Offset(0.0, slot * 10),
+        );
+        expect(
+          store.storedEntry("move"),
+          move.copyWith(start: mondayAt(end - 90), end: mondayAt(end - 30)),
           reason: shown.name,
         );
       }

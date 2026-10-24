@@ -920,7 +920,9 @@ CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
 /// lock's boundary takes no drag, one in progress neither moves nor has a
 /// top handle, a long press selecting it, no move or resize lands an
 /// entry, and no create gesture starts or reaches, before the boundary.
-/// A move dropped onto another entry's time lands at the nearest free time
+/// A block dragged above the first slot or below the last stops there, and
+/// so does a handle dragged past either. A move dropped onto
+/// another entry's time lands at the nearest free time
 /// that shows, on that day or the day before or after it, and goes back
 /// where there is none; a resize dragged onto one stops at its edge, and
 /// so does a create's range. While a drag runs, a label over the grid
@@ -1283,7 +1285,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// more than one column is fixed for its life, which [didUpdateWidget]
   /// asserts.
   ///
-  /// A move [_canDropAt] refuses for meeting another entry slides to the
+  /// A block's move and resize stay inside the slot rows ([_boundsOf]), so
+  /// one dragged past the first or the last slot stops there. A move
+  /// [_canDropAt] refuses for meeting another entry slides to the
   /// placement nearest on screen that holds it clear, at any time that
   /// shows of the day it was dropped on or of the day before or after it,
   /// however busy the time around it is. A resize it refuses for meeting
@@ -1309,6 +1313,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       enabled: enabled,
       canDrag: _canDrag,
       canDropAt: _canDropAt,
+      boundsOf: _boundsOf,
       dropFit: fits
           ? const BoardDropFit(
               minFreeFraction: 0.0,
@@ -2664,6 +2669,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     final entry = shape.shown.entry;
     return _tracks.hours.holdsTimes(entry.start, entry.end);
+  }
+
+  /// The rows a drag stays inside: the slot rows of [_tracks]. They bind a
+  /// block's drag; a bar lies in
+  /// the strip's rows, which they do not hold, so they bind nothing for it
+  /// ([BoardDragConfig.boundsOf]).
+  BoardDragBounds _boundsOf(GridKey key) {
+    return BoardDragBounds(
+      rows: (start: _tracks.firstSlotRow, end: _tracks.lastSlotRow + 1),
+    );
   }
 
   /// Whether the board may land [key] on [span]. No crossing between the

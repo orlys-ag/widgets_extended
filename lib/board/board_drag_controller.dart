@@ -152,6 +152,26 @@ bool? askCanDropAt<TKey>(
   }
 }
 
+/// The tracks [config] keeps a drag of [key] inside: null with no
+/// callback, for a null answer, and for a throw, which is reported
+/// through [FlutterError.reportError] and so binds nothing.
+///
+/// Every `boundsOf` question the board asks goes through here. Not shown
+/// by the module barrel.
+@pragma("vm:notify-debugger-on-exception")
+BoardDragBounds? askBoundsOf<TKey>(BoardDragConfig<TKey> config, TKey key) {
+  final boundsOf = config.boundsOf;
+  if (boundsOf == null) {
+    return null;
+  }
+  try {
+    return boundsOf(key);
+  } catch (exception, stack) {
+    _reportPolicyThrow("boundsOf", exception, stack);
+    return null;
+  }
+}
+
 void _reportPolicyThrow(String predicate, Object exception, StackTrace stack) {
   FlutterError.reportError(
     FlutterErrorDetails(
@@ -1058,6 +1078,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       return;
     }
     final draggedSpan = boardController.spanOf(session.key)!;
+    final bounds = askBoundsOf(config, session.key);
     final BoardDropTarget resolved;
     ({BoardStartWindow rows, BoardStartWindow cols})? windows;
     ({double row, double col})? lean;
@@ -1102,6 +1123,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
         liftCorner: session.liftCorner,
         liftPointer: session.liftPointer,
         pinned: _pinsAt(session.key, pointer),
+        bounds: bounds,
       );
       resolved = answer.target;
       windows = (rows: answer.rows, cols: answer.cols);
@@ -1130,6 +1152,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
         snap: config.snap,
         liftPointer: session.liftPointer!,
         pinned: _pinsAt(session.key, pointer),
+        bounds: bounds,
       );
     }
     // Over the same placement, only a new lean after a refusal resolves

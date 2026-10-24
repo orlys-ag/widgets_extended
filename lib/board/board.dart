@@ -30,6 +30,7 @@ export 'board_background.dart'
         BoardGridPainter;
 export 'board_config.dart'
     show
+        BoardDragBounds,
         BoardDragConfig,
         BoardDropFit,
         BoardResizeEdges,

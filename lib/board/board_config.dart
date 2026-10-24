@@ -216,6 +216,37 @@ class BoardDropFit {
   final bool clampResizes;
 }
 
+/// The tracks a drag keeps an item inside: on each axis a half-open range
+/// of whole tracks, `[start, end)`, or null for none. See
+/// [BoardDragConfig.boundsOf].
+@immutable
+class BoardDragBounds {
+  /// Bounds on [rows], on [cols], or on both. A range that does not hold
+  /// the dragged item's span, such as an empty one, binds nothing.
+  const BoardDragBounds({this.rows, this.cols});
+
+  /// The rows a drag keeps the item inside, or null for none.
+  final ({int start, int end})? rows;
+
+  /// The columns a drag keeps the item inside, or null for none.
+  final ({int start, int end})? cols;
+
+  @override
+  bool operator ==(Object other) {
+    return other is BoardDragBounds && other.rows == rows && other.cols == cols;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(rows, cols);
+  }
+
+  @override
+  String toString() {
+    return "BoardDragBounds(rows: $rows, cols: $cols)";
+  }
+}
+
 /// Policy for the drag layer.
 ///
 /// A board applies each new instance IN PLACE, so it can be built inline
@@ -262,6 +293,7 @@ class BoardDragConfig<TKey> {
     this.canDrag,
     this.canDropAt,
     this.dropFit,
+    this.boundsOf,
     this.snap = const BoardSnap.track(),
     this.resizeEdges = BoardResizeEdges.none,
     this.primaryResizeEdges = BoardResizeEdges.none,
@@ -328,6 +360,25 @@ class BoardDragConfig<TKey> {
   /// in its way. Null, the default, refuses as before; see
   /// [BoardDropFit], which still fires only on a [canDropAt] refusal.
   final BoardDropFit? dropFit;
+
+  /// The tracks a drag keeps the item [key] inside, or null, the default,
+  /// for the lattice alone. A move's start and a resize's dragged edge are
+  /// clamped into them as they are into the lattice, so an item dragged
+  /// past a bound stops at it while the pointer goes on, and its target is
+  /// the placement at the bound. That target is still asked of
+  /// [canDropAt], and a [dropFit] nudge searches only inside the bounds,
+  /// measuring from where the item shows held inside them, so dragging
+  /// further past a bound does not change where it nudges to. A resize's
+  /// edge stays inside them even where that leaves the span out of view.
+  ///
+  /// On each axis a range binds only where it holds the item's span when
+  /// the drag starts; elsewhere, and on an axis left null, the drag takes
+  /// the lattice as it would with no bounds. Asked on every resolve of the
+  /// drag of [key], so the bounds may follow state the board cannot see.
+  /// Drags only: a semantics action's move is [canDropAt]'s to refuse. A
+  /// question, which must not mutate; one that throws binds nothing, and
+  /// the throw is reported through `FlutterError.reportError`.
+  final BoardDragBounds? Function(TKey key)? boundsOf;
 
   /// How a drag's target quantizes: a move's start and a resize's dragged
   /// edge, on both axes. A drag leaves an axis where it was until it has

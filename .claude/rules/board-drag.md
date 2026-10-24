@@ -131,7 +131,21 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   else, where no such start shows, the whole lattice. The centre and
   not the corner, because across a band's edge the aligned placements
   lie on two lattices and rounding one coordinate cannot say which the
-  proxy covers more of.
+  proxy covers more of. BOUNDS narrow every window: `_resolve` asks
+  `BoardDragConfig.boundsOf` once per resolve through `askBoundsOf`,
+  which reports a throw and answers it as none, and on each axis whose
+  range holds the stored span a move's window, the kept axis's and the
+  lane axis's too, keeps only the starts the range holds
+  (`_boundedPath`), a path holding none falling through as a refused band
+  placement does, to the scrolled lattice and then the whole lattice; so
+  an item dragged past a bound stops at it, and the drop fit, clamping
+  its candidates into these windows, nudges only inside it, its lean
+  measured from where the item shows HELD inside the range, or an item
+  dragged far past a bound would lean the nudge after it onto the other
+  axis. A resize clamps its dragged edge into the range of its axis
+  where that range holds the stored span, and the edges where the span
+  shows (below) are clamped into it too, so a range scrolled under a band
+  wins over showing.
   Whether an axis has moved is measured in the ITEM FIELD, the
   coordinate of the lattice the item paints in (the band's where
   `pinOfId` pins it at this resolve, the scrolled one otherwise): an
@@ -177,7 +191,7 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   laned item's painted edge on its lane axis is its band's, not its
   span's. `resolveMove` returns the window and the LEAN of each axis
   beside its target, a kept axis's window being the lattice its stored
-  span lies in. The lean is how far the dragged item shows past the
+  span lies in, narrowed by the bounds. The lean is how far the dragged item shows past the
   target's start, which the snap discarded: on the lane axis of a laned
   item the finger's place across its cell less its place across the cell
   it grabbed, elsewhere the corner's coordinate less the start, and on a

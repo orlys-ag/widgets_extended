@@ -309,6 +309,13 @@ finger across a refused cell.
 - Added `BoardDropFit.clampResizes`, off by default: a resize `canDropAt`
 refuses for running into another item stops its dragged edge at that item,
 nearest the pointer, instead of going back.
+- Added `BoardDragConfig.boundsOf` and `BoardDragBounds`: the rows and columns
+a drag keeps an item inside. A move or a resize dragged past them stops at their
+edge, as it does at the lattice's, so its target stays the placement at the
+edge and a drop there lands rather than going back; a `BoardDropFit` nudge
+searches only inside them, measuring from where the item shows held inside
+them. On each axis a range binds only where it holds the item's span when the
+drag starts.
 - Added `BoardRenderPort.trackSampleAt`, which maps a point on each axis in both
 lattices the axis can paint, the frozen band's and the scrolled tracks', with the
 band geometry a drop reads; `trackSpaceAt` is its painted coordinate.
