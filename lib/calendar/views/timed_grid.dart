@@ -963,7 +963,8 @@ CreateRange? _createRangeOf(int startWall, int endWall) {
 /// and a finger that pinched clears no selection when it lifts off the
 /// selected block. No pinch starts while a block moves or resizes or a
 /// create range runs. New days, which a new [firstDay], [dayCount] or
-/// [weekdays] gives, end a create range in flight, which then creates
+/// [weekdays] gives, cancel a move or a resize in flight, which then
+/// writes nothing, and end a create range in flight, which then creates
 /// nothing. A new [slotMinutes] or [hours] cancels a move or a resize in
 /// flight, which then writes nothing, and ends a create range in flight
 /// and clears the range a create flow marks.
@@ -1686,6 +1687,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         tracks.dayCount != _tracks.dayCount ||
         tracks.weekdays != _tracks.weekdays) {
       _stripExpanded = false;
+      // The dragged key and its span can be the same on the new days, as a
+      // bar's over both are, where no placement cancels its drag.
+      _cancelDrag();
     }
     _tracks = tracks;
     final range = _range;
@@ -1744,15 +1748,26 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Ends the gestures that new slots or hours leave on rows they no
-  /// longer have, writing nothing: cancels the board's drag, by a span
-  /// write of its key to the span it holds, whose mutation cancel runs
-  /// before the write and queues [_handleDragEnd]; forgets [_lifted], so
-  /// the sync on the new tracks puts a lifted entry's pieces back, and the
-  /// drag's crossing state, so its release writes nothing; and detaches a
-  /// create range and clears the range a create flow marks. Runs before
-  /// [_tracks] is replaced and so before any placement on the new tracks,
-  /// which may drop the dragged key.
+  /// longer have, writing nothing: cancels the board's drag
+  /// ([_cancelDrag]), and detaches a create range and clears the range a
+  /// create flow marks. Runs before [_tracks] is replaced.
   void _cancelForNewSlots() {
+    _cancelDrag();
+    _range?.detach();
+    _range = null;
+    _creating = null;
+    _stripCreating = null;
+    _updateStripMark();
+  }
+
+  /// Cancels the board's drag on tracks about to be replaced, writing
+  /// nothing: a span write of its key to the span it holds, whose mutation
+  /// cancel runs before the write and queues [_handleDragEnd]; forgets
+  /// [_lifted], so the sync on the new tracks puts a lifted entry's pieces
+  /// back, and the drag's crossing state, so its release writes nothing.
+  /// Runs before [_tracks] is replaced and so before any placement on the
+  /// new tracks, which may drop the dragged key.
+  void _cancelDrag() {
     final dragged = _drag?.key;
     if (dragged != null && _board.isDragging(dragged)) {
       final span = _board.spanOf(dragged);
@@ -1762,11 +1777,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     _lifted = null;
     _clearCross();
-    _range?.detach();
-    _range = null;
-    _creating = null;
-    _stripCreating = null;
-    _updateStripMark();
   }
 
   /// The tracks [widget] lays out under [stripRows] all-day strip rows.

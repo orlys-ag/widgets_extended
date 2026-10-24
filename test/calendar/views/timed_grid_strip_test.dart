@@ -2499,6 +2499,64 @@ void main() {
     }
   });
 
+  testWidgets("new days during a bar's drag over a slot, which leave the bar "
+      "its key and its span, cancel the drag: the proxy and the landing go, "
+      "a move over another slot shows none, and the release writes nothing", (
+    tester,
+  ) async {
+    for (final shown in bothGrids()) {
+      // Two weeks from Monday: in Week a bar over every column of this week
+      // and of the next, and in Day over Tuesday and over Wednesday.
+      final long = allDayOf("long", monday, days: 14);
+      final store = storeOf(<CalendarEntry<String>>[long]);
+      final harness = Harness(store, shown);
+      await harness.pump(tester);
+      final gesture = await liftTo(
+        tester,
+        tester.getCenter(barFinder("long")),
+        slotRect(tester, shown, tuesday, 10 * 60).center,
+      );
+      // Setup sanity: the bar lifted, and its landing shows on the slot.
+      expect(find.byKey(liftedBlockKey), findsOneWidget, reason: shown.name);
+      expect(
+        landingText(tester),
+        landingLabel(at(tuesday, 10), at(tuesday, 11), harness.today),
+        reason: shown.name,
+      );
+      const key = GridKey.bar("long");
+      final span = boardOf(tester).controller.spanOf(key);
+
+      final next = addDays(shown.first, shown.week ? 7 : 1);
+      harness.first = next;
+      await harness.rebuild(tester);
+      await tester.pump();
+      // Setup sanity: the grid shows the new days, and its board holds the
+      // bar's key at the span it had, so no placement moved the dragged key.
+      expect(
+        find.byKey(allDayCellKey(next)),
+        findsOneWidget,
+        reason: shown.name,
+      );
+      expect(span, isNotNull, reason: shown.name);
+      expect(boardOf(tester).controller.spanOf(key), span, reason: shown.name);
+      expect(find.byKey(liftedBlockKey), findsNothing, reason: shown.name);
+      expect(landingText(tester), isNull, reason: shown.name);
+
+      // The 14:00 slot of the column under the pointer, a day of the new
+      // days.
+      await gesture.moveTo(
+        cellRect(tester, shown.rowOf(14 * 60), shown.colOf(tuesday)).center,
+      );
+      await tester.pump();
+      expect(landingText(tester), isNull, reason: shown.name);
+      expect(strokedRects(tester), isEmpty, reason: shown.name);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(store.moves, isEmpty, reason: shown.name);
+      expect(storedOf(store, "long"), long, reason: shown.name);
+    }
+  });
+
   group("TX22", () {
     testWidgets("Monday's one-day bar over Tuesday's, in the strip's one "
         "row, halves Tuesday's bar while it hovers, and its release writes "
