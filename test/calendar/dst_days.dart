@@ -25,12 +25,12 @@ final DstDay? shortDay = _firstDayOf(23);
 final DstDay? longDay = _firstDayOf(25);
 
 DstDay? _firstDayOf(int hours) {
-  for (
-    var day = DateTime(2026);
-    day.year == 2026;
-    day = addDays(day, 1)
-  ) {
-    if (addDays(day, 1).difference(day).inHours != hours) {
+  // Days are built from their fields here rather than stepped with
+  // [addDays], the step under test: an [addDays] that lasts 24 hours would
+  // otherwise find no DST day and skip the tests that would catch it.
+  for (var index = 0; DateTime(2026, 1, 1 + index).year == 2026; index++) {
+    final day = DateTime(2026, 1, 1 + index);
+    if (DateTime(2026, 1, 2 + index).difference(day).inHours != hours) {
       continue;
     }
     for (var hour = 0; hour < 24; hour++) {

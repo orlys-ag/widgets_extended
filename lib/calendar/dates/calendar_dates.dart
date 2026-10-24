@@ -303,8 +303,8 @@ DateTime? timeAtWallMinute(int wall, {DateTime? from}) {
   if (!reads(time)) {
     return null;
   }
-  final change = date.timeZoneOffset - addDays(date, 1).timeZoneOffset;
-  if (change <= Duration.zero) {
+  final change = repeatedStretchOf(date);
+  if (change == Duration.zero) {
     return time;
   }
   // The clock repeats a stretch of [change] on this day, so the time may
@@ -328,10 +328,86 @@ DateTime? timeAtWallMinute(int wall, {DateTime? from}) {
   return earliest;
 }
 
+/// How long the stretch of wall time is that [day]'s clock reads twice,
+/// as a clock turned back does: how far its offset falls by the next day's
+/// start, and zero where it does not fall.
+Duration repeatedStretchOf(DateTime day) {
+  final date = dateOnly(day);
+  final change = date.timeZoneOffset - addDays(date, 1).timeZoneOffset;
+  return change > Duration.zero ? change : Duration.zero;
+}
+
 /// Whether [time] is the later instant of a wall time its day's clock
 /// reads twice.
 bool isLaterOccurrence(DateTime time) {
   return time != timeAtWallMinute(wallMinuteOf(time));
+}
+
+/// The first wall minute the clock reads whose instant in [from]'s
+/// occurrence ([timeAtWallMinute]) is not before [time], so a range from it
+/// starts at [time] or later: [time]'s own ([wallMinuteOf]) or, for a time
+/// with seconds past its minute, the next, except where its day's clock
+/// reads [time] twice and [from] picks the other instant, where it is the
+/// repeated stretch's start or the first minute after it.
+///
+/// Those instants rise with the wall minute, whichever occurrence [from]
+/// picks, so each walk from [time]'s own minute ends at the first minute
+/// that fails its test, at most a minute past a stretch the clock repeats
+/// or skips.
+int firstWallMinuteNotBefore(DateTime time, {DateTime? from}) {
+  var wall = wallMinuteOf(time);
+  while (!(timeAtWallMinute(wall - 1, from: from)?.isBefore(time) ?? true)) {
+    wall--;
+  }
+  while (timeAtWallMinute(wall, from: from)?.isBefore(time) ?? true) {
+    wall++;
+  }
+  return wall;
+}
+
+/// The last wall minute the clock reads whose instant in [from]'s
+/// occurrence ([timeAtWallMinute]) is not after [time], so a range to it
+/// ends at [time] or earlier: [time]'s own ([wallMinuteOf]), except where
+/// its day's clock reads [time] twice and [from] picks the other instant,
+/// where it is the last minute of the repeated stretch or the last before
+/// it, as [firstWallMinuteNotBefore] walks.
+int lastWallMinuteNotAfter(DateTime time, {DateTime? from}) {
+  var wall = wallMinuteOf(time);
+  while (!(timeAtWallMinute(wall + 1, from: from)?.isAfter(time) ?? true)) {
+    wall++;
+  }
+  while (timeAtWallMinute(wall, from: from)?.isAfter(time) ?? true) {
+    wall--;
+  }
+  return wall;
+}
+
+/// The first slot of [slotMinutes] on [day] whose start and end its clock
+/// reads ([timeAtWallMinute]), that [isFree] takes where it is given, and
+/// that ends by its minute [until]: the one from its minute [from], or
+/// where that one is not, the first from a later minute on the grid of
+/// [slotMinutes] from midnight; null where none is. Each time is in
+/// [occurrence]'s occurrence where [day]'s clock repeats it, as
+/// [timeAtWallMinute]'s `from` picks.
+({DateTime start, DateTime end})? firstReadableSlot(
+  DateTime day,
+  int from,
+  int until,
+  int slotMinutes, {
+  DateTime? occurrence,
+  bool Function(DateTime start, DateTime end)? isFree,
+}) {
+  final base = dayNumber(day) * minutesPerDay;
+  var minute = from;
+  while (minute + slotMinutes <= until) {
+    final start = timeAtWallMinute(base + minute, from: occurrence);
+    final end = timeAtWallMinute(base + minute + slotMinutes, from: occurrence);
+    if (start != null && end != null && (isFree?.call(start, end) ?? true)) {
+      return (start: start, end: end);
+    }
+    minute = (minute ~/ slotMinutes + 1) * slotMinutes;
+  }
+  return null;
 }
 
 /// The [dayNumber] of the last day a range from [start] to [end], end

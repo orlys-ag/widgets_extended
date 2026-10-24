@@ -78,6 +78,12 @@ Map<String, Object?> envelope({
   };
 }
 
+/// The local time [local], written with no offset, in UTC with a Z, as
+/// `DateTime.toIso8601String` writes it.
+String utcText(String local) {
+  return DateTime.parse(local).toUtc().toIso8601String();
+}
+
 /// An envelope of [type] whose `start` and `end` are the texts given.
 Map<String, Object?> timed(
   Object? start,
@@ -282,8 +288,8 @@ void main() {
     expect(updated.error, isNull);
     final got = await fetched(tester, api, id);
     expect(got["title"], "Renamed");
-    expect(got["start"], "2026-04-22T11:00");
-    expect(got["end"], "2026-04-22T12:30");
+    expect(got["start"], utcText("2026-04-22T11:00"));
+    expect(got["end"], utcText("2026-04-22T12:30"));
     expect(got["fields"], <String, Object?>{
       "status": "done",
       "priority": "medium",
@@ -448,11 +454,11 @@ void main() {
     );
   });
 
-  testWidgets("A4 the validator requires start and end as "
-      "YYYY-MM-DDTHH:MM, refuses seconds, offsets, a day that does not "
-      "exist, an end not after the start and 367 days, and accepts 09:10", (
-    tester,
-  ) async {
+  testWidgets("A4 the validator requires start and end as a local "
+      "YYYY-MM-DDTHH:MM or in UTC with seconds and a Z, refuses a local time "
+      "with seconds, another offset, a UTC time with no seconds, a day that "
+      "does not exist, an end not after the start and 367 days, and accepts "
+      "and keeps 09:10", (tester) async {
     final api = MockCalendarApi(latency: latency);
     await stored(tester, api, envelope());
     final before = await listed(
@@ -529,8 +535,9 @@ void main() {
     expect(offGrid.error, isNull);
     final offGridId = (offGrid.value! as Map<String, Object?>)["id"]! as String;
     final kept = await fetched(tester, api, offGridId);
-    expect(kept["start"], "2026-04-23T09:10");
-    expect(kept["end"], "2026-04-23T09:50");
+    // Kept off the slot grid, and written in UTC as the API writes times.
+    expect(kept["start"], utcText("2026-04-23T09:10"));
+    expect(kept["end"], utcText("2026-04-23T09:50"));
 
     // From 23:00 on Friday to 01:00 a year on: 366 days.
     final longest = await answer(
@@ -693,7 +700,10 @@ void main() {
       ),
     );
     expect(shortened.error, isNull);
-    expect((await fetched(tester, api, away))["end"], "2026-04-22T09:45");
+    expect(
+      (await fetched(tester, api, away))["end"],
+      utcText("2026-04-22T09:45"),
+    );
 
     final early = await stored(
       tester,
@@ -900,8 +910,8 @@ void main() {
     );
     final dayOff = week.singleWhere((item) => item["title"] == "Day off");
     expect(dayOff["type"], CalendarItemType.outOfOffice.id);
-    expect(dayOff["start"], "2026-04-20T09:00");
-    expect(dayOff["end"], "2026-04-20T17:00");
+    expect(dayOff["start"], utcText("2026-04-20T09:00"));
+    expect(dayOff["end"], utcText("2026-04-20T17:00"));
   });
 
   testWidgets("A11 the seed's Conference trip is one all-day entry over "
@@ -915,8 +925,8 @@ void main() {
     );
     final trip = may.singleWhere((item) => item["title"] == "Conference trip");
     expect(trip["type"], CalendarItemType.outOfOffice.id);
-    expect(trip["start"], "2026-05-11T00:00");
-    expect(trip["end"], "2026-05-16T00:00");
+    expect(trip["start"], utcText("2026-05-11T00:00"));
+    expect(trip["end"], utcText("2026-05-16T00:00"));
     final id = trip["id"]! as String;
     for (var day = 11; day <= 15; day++) {
       final listing = await listed(

@@ -242,8 +242,16 @@ class MockCalendarApi implements CalendarApi {
     return conflicts;
   }
 
+  /// Stores the valid [body] as [id], its start and end written as
+  /// [isoDateTime] writes them, whichever form they came in, so the stored
+  /// texts sort as their instants do ([_compareStored]).
   Map<String, Object?> _store(String id, Map<String, Object?> body) {
-    final stored = <String, Object?>{...body, "id": id};
+    final stored = <String, Object?>{
+      ...body,
+      "id": id,
+      "start": isoDateTime(parseIsoDateTime(body["start"]! as String)!),
+      "end": isoDateTime(parseIsoDateTime(body["end"]! as String)!),
+    };
     _items[id] = stored;
     for (final day in _coveredDaysOf(stored)) {
       _idsByDay
@@ -283,8 +291,10 @@ Iterable<int> _coveredDaysOf(Map<String, Object?> stored) sync* {
   }
 }
 
-/// By start, then creation order. The envelope's start text sorts as its
-/// time does: its fields are written in order, each zero-padded.
+/// By start, then creation order. A stored start text sorts as its
+/// instant does: [MockCalendarApi._store] keeps it in UTC as
+/// [isoDateTime] writes it, its fields in order, each zero-padded, on a
+/// whole minute.
 int _compareStored(Map<String, Object?> a, Map<String, Object?> b) {
   final byStart = (a["start"] as String).compareTo(b["start"] as String);
   if (byStart != 0) {

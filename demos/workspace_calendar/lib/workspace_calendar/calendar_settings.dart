@@ -17,8 +17,8 @@ import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 /// hold ([DayHours.holdsTimes]), keyed as `validateItemJson` keys them: the
 /// start when the hours do not hold its time of day as a start, the end
 /// when they do not hold its minute on its last day as an end, each naming
-/// the first and the last time of the hours on the grid of
-/// [defaultSlotMinutes]. An all-day item has none.
+/// the bounds [DayHours.holdsStart] and [DayHours.holdsEnd] take any minute
+/// between. An all-day item has none.
 Map<String, String> hoursErrorsOf(
   DateTime start,
   DateTime end,
@@ -30,12 +30,11 @@ Map<String, String> hoursErrorsOf(
   return <String, String>{
     if (!hours.holdsStart(minuteOfDay(start)))
       "start":
-          "The start is ${clockLabel(hours.start)} to "
-          "${clockLabel(hours.end - defaultSlotMinutes)}, inside the "
-          "calendar's hours.",
+          "The start is from ${clockLabel(hours.start)} to before "
+          "${clockLabel(hours.end)}, inside the calendar's hours.",
     if (!hours.holdsEnd(endMinuteOfDay(end)))
       "end":
-          "The end is ${clockLabel(hours.start + defaultSlotMinutes)} to "
+          "The end is from after ${clockLabel(hours.start)} to "
           "${clockLabel(hours.end)}, inside the calendar's hours.",
   };
 }

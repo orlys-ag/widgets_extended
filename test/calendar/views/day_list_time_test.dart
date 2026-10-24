@@ -15,6 +15,8 @@ import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
+import 'package:widgets_extended/calendar/views/timed_grid.dart'
+    show CreateRange;
 
 import '../dst_days.dart';
 
@@ -92,7 +94,7 @@ Future<void> pumpList(
   bool editable = true,
   int slotMinutes = 15,
   Map<String, List<CalendarCardDetails>>? cards,
-  List<(DateTime, int, int)>? creates,
+  List<CreateRange>? creates,
 }) async {
   final now = ValueNotifier<DateTime>(at(day, 9));
   addTearDown(now.dispose);
@@ -114,8 +116,8 @@ Future<void> pumpList(
         today: day,
         now: now,
         onTopDay: (day) {},
-        onCreateIn: (day, startMinute, endMinute) {
-          creates?.add((day, startMinute, endMinute));
+        onCreateRange: (range) {
+          creates?.add(range);
         },
         onEdit: (id) {},
         onDelete: (id) {},
@@ -240,14 +242,16 @@ void main() {
       entryOf("first", at(tuesday, 9), at(tuesday, 9, 40)),
       entryOf("second", at(tuesday, 10), at(tuesday, 11)),
     ]);
-    final creates = <(DateTime, int, int)>[];
+    final creates = <CreateRange>[];
     await pumpList(tester, store, tuesday, slotMinutes: 30, creates: creates);
     // The 20 minutes from 09:40 hold no 30-minute slot.
     expect(find.byKey(dayListGapKey(tuesday, 580)), findsOneWidget);
     expect(find.text("add 580"), findsNothing);
     await tester.tap(find.text("add 660"));
     await tester.pumpAndSettle();
-    expect(creates, <(DateTime, int, int)>[(tuesday, 660, 690)]);
+    expect(creates, <CreateRange>[
+      CreateRange(start: at(tuesday, 11), end: at(tuesday, 11, 30)),
+    ]);
   });
 
   group("on the 23-hour day", skip: shortDaySkip, () {
@@ -288,6 +292,30 @@ void main() {
       expect(find.byKey(dayListHeaderKey(day)), findsOneWidget);
       expect(find.text("card repeated"), findsOneWidget);
       expect(find.text("card all-day"), findsOneWidget);
+    });
+
+    testWidgets("AG7 00:30 to the second 02:30 is listed to 02:30, and the "
+        "first 01:30 to the second 01:15 from 01:30 to 02:15", (tester) async {
+      final day = longDayStart;
+      final store = storeOf(<CalendarEntry<String>>[
+        // 180 minutes, over the repeated hour.
+        entryOf("spans", at(day, 0, 30), at(day, 2, 30)),
+        // 45 minutes, whose end's wall time is before its start's.
+        entryOf(
+          "folds",
+          day.add(const Duration(minutes: 90)),
+          secondHalfPastOne.subtract(const Duration(minutes: 15)),
+        ),
+      ]);
+      expect(rowsOf(store, day, editable: true), <Object>[
+        (0, 30),
+        ("spans", 30, 150, false),
+        ("folds", 90, 135, false),
+        (150, 1440),
+      ]);
+      await pumpList(tester, store, day);
+      expect(find.byKey(dayListGapKey(day, 150)), findsOneWidget);
+      expect(find.text("card folds"), findsOneWidget);
     });
   });
 }

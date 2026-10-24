@@ -351,23 +351,23 @@ void main() {
       ],
       hours: const DayHours(480, 1200),
     );
-    expect(store.firstFreeRange(day, slotMinutes: 15, from: 840), (
+    expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 840)), (
       start: at(day, 840),
       end: at(day, 855),
     ));
-    expect(store.firstFreeRange(day, slotMinutes: 15, from: 850), (
+    expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 850)), (
       start: at(day, 855),
       end: at(day, 870),
     ));
-    expect(store.firstFreeRange(day, slotMinutes: 15, from: 900), (
+    expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 900)), (
       start: at(day, 960),
       end: at(day, 975),
     ));
-    expect(store.firstFreeRange(day, slotMinutes: 15, from: 300), (
+    expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 300)), (
       start: at(day, 540),
       end: at(day, 555),
     ));
-    expect(store.firstFreeRange(day, slotMinutes: 15, from: 1200), (
+    expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 1200)), (
       start: at(day, 540),
       end: at(day, 555),
     ));

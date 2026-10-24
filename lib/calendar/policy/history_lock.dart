@@ -111,7 +111,10 @@ class HistoryLock {
   /// The first minute of [day] on the grid of [slotMinutes]-minute slots
   /// from midnight a new entry may start at: 0 on a day after the
   /// boundary's, [minutesPerDay] on one before it, where none may, and on
-  /// the boundary's day its [minuteOfDay] rounded up to the grid.
+  /// the boundary's day its [minuteOfDay] rounded up to the grid. On a day
+  /// whose clock repeats a stretch, a minute in it is a time in
+  /// [boundary]'s occurrence, which `timeAtWallMinute` given [boundary] as
+  /// its `from` picks: in the stretch's second pass, the later instant.
   int earliestStartOn(DateTime day, {required int slotMinutes}) {
     final boundary = this.boundary;
     if (boundary == null) {

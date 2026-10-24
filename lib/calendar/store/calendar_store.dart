@@ -252,24 +252,35 @@ abstract class CalendarStore<T> extends ChangeNotifier {
   /// slot from it, the first one whose start and end are times [day]'s
   /// clock reads ([timeAtWallMinute]) and that shares no time
   /// ([rangeSharesTime]) with an entry [entriesOn] lists for [day], pending
-  /// ones where they show. With [from], minutes after midnight, the starts
-  /// begin at the later of it, rounded up to the grid of [slotMinutes] from
-  /// midnight, and the hours' start, and only with none free from there at
-  /// the hours' start. With none free, the hours' first slot.
+  /// ones where they show. With [from], a time on [day], the starts begin
+  /// at the later of its minute, rounded up to the grid of [slotMinutes]
+  /// from midnight, and the hours' start, each start and end in [from]'s
+  /// occurrence where [day]'s clock repeats its time ([timeAtWallMinute]),
+  /// so none is before [from]; and only with none free from there at the
+  /// hours' start. With none free, the hours' first slot.
   ({DateTime start, DateTime end}) firstFreeRange(
     DateTime day, {
     required int slotMinutes,
-    int? from,
+    DateTime? from,
   }) {
+    assert(
+      from == null || dayNumber(from) == dayNumber(day),
+      "A first-free search on $day starts from a time on it, not $from.",
+    );
     final shown = entriesOn(day);
     final base = dayNumber(day) * minutesPerDay;
     if (from != null) {
-      final slot = (from + slotMinutes - 1) ~/ slotMinutes;
+      // A minute any part of which is before [from] does not start a slot.
+      final passed =
+          from.second > 0 || from.millisecond > 0 || from.microsecond > 0;
+      final minute = wallMinuteOf(from) - base + (passed ? 1 : 0);
+      final slot = (minute + slotMinutes - 1) ~/ slotMinutes;
       final later = _firstSlotFrom(
         base,
         math.max(hours.start, slot * slotMinutes),
         slotMinutes,
         shown,
+        occurrence: from,
       );
       if (later != null) {
         return later;
@@ -297,20 +308,25 @@ abstract class CalendarStore<T> extends ChangeNotifier {
   /// The first slot of [slotMinutes] from the minute [first] of the day
   /// whose minute 0 is the wall minute [base] whose start and end its clock
   /// reads and that shares no time with any of [shown], or null where none
-  /// does.
+  /// does; its times in [occurrence]'s occurrence where the day's clock
+  /// repeats them ([timeAtWallMinute]).
   ({DateTime start, DateTime end})? _firstSlotFrom(
     int base,
     int first,
     int slotMinutes,
-    List<CalendarShownEntry<T>> shown,
-  ) {
+    List<CalendarShownEntry<T>> shown, {
+    DateTime? occurrence,
+  }) {
     for (
       var minute = first;
       minute <= hours.end - slotMinutes;
       minute += slotMinutes
     ) {
-      final start = timeAtWallMinute(base + minute);
-      final end = timeAtWallMinute(base + minute + slotMinutes);
+      final start = timeAtWallMinute(base + minute, from: occurrence);
+      final end = timeAtWallMinute(
+        base + minute + slotMinutes,
+        from: occurrence,
+      );
       if (start == null || end == null) {
         continue;
       }

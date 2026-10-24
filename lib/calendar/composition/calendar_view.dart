@@ -1146,18 +1146,6 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     return onCreateRange(range);
   }
 
-  /// Reports a create on [day] from [startMinute] to [endMinute] after its
-  /// midnight, or nothing where either is a time the clock skips.
-  void _createIn(DateTime day, int startMinute, int endMinute) {
-    final base = dayNumber(day) * minutesPerDay;
-    final start = timeAtWallMinute(base + startMinute);
-    final end = timeAtWallMinute(base + endMinute);
-    if (start == null || end == null) {
-      return;
-    }
-    _createRange(CreateRange(start: start, end: end));
-  }
-
   void _requestEdit(String id) {
     final onEditRequest = widget.onEditRequest;
     final entry = widget.store.storedEntry(id);
@@ -1184,10 +1172,13 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     _openCreateFlow(day);
   }
 
-  /// Reports a create on [day] at its first free slot from the first time
-  /// the history lock leaves free on [day], or the slot at that time where
-  /// none after it is free; where the lock leaves no slot in the hours,
-  /// reports [CalendarView.onCreateRefused] instead.
+  /// Reports a create on [day] at its first free slot from the history
+  /// lock's boundary, or where none after it is free, at the first slot
+  /// from the first time the lock leaves free whose times the clock reads
+  /// ([firstReadableSlot]); each in the boundary's occurrence where [day]'s
+  /// clock repeats its time, so none starts before the boundary. Where the
+  /// lock leaves no such slot in the hours, reports
+  /// [CalendarView.onCreateRefused] instead.
   void _openCreateFlow(DateTime day) {
     final hours = _hours;
     final slot = widget.slotMinutes;
@@ -1196,16 +1187,29 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       widget.onCreateRefused?.call(day);
       return;
     }
+    // A boundary on [day] after its start leaves earliest past 0.
+    final from = earliest > 0 ? _lock.boundary : null;
     final free = widget.store.firstFreeRange(
       day,
       slotMinutes: slot,
-      from: earliest == 0 ? null : earliest,
+      from: from,
     );
-    if (wallMinuteOf(free.start) - dayNumber(day) * minutesPerDay >= earliest) {
+    if (from == null || !free.start.isBefore(from)) {
       _createRange(CreateRange(start: free.start, end: free.end));
       return;
     }
-    _createIn(day, earliest, earliest + slot);
+    final held = firstReadableSlot(
+      day,
+      earliest,
+      hours.end,
+      slot,
+      occurrence: from,
+    );
+    if (held == null) {
+      widget.onCreateRefused?.call(day);
+      return;
+    }
+    _createRange(CreateRange(start: held.start, end: held.end));
   }
 
   CalendarHeaderDetails _headerDetails() {
@@ -1316,7 +1320,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
               today: _today.value,
               now: _now,
               onTopDay: _select,
-              onCreateIn: _createIn,
+              onCreateRange: _createRange,
               onEdit: _requestEdit,
               onDelete: _requestDelete,
               cardBuilder: widget.cardBuilder,

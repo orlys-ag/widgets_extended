@@ -1043,6 +1043,34 @@ void main() {
     expect(store.betweenCalls - calls, 1);
   });
 
+  testWidgets("TR9 a create drag from Tuesday 10:00 reaches up to the end of "
+      "an entry ending at 09:00 and down to the start of one starting at "
+      "11:00, and no further", (tester) async {
+    final shown = Shown.week(monday);
+    final harness = Harness(
+      storeOf(<CalendarEntry<String>>[
+        entryOf("before", at(tuesday, 8), at(tuesday, 9)),
+        entryOf("after", at(tuesday, 11), at(tuesday, 12)),
+      ]),
+      shown,
+    );
+    await harness.pump(tester);
+    await createDrag(
+      tester,
+      slotRect(tester, shown, tuesday, 10 * 60).center,
+      slotRect(tester, shown, tuesday, 7 * 60).center,
+    );
+    await createDrag(
+      tester,
+      slotRect(tester, shown, tuesday, 10 * 60).center,
+      slotRect(tester, shown, tuesday, 13 * 60).center,
+    );
+    expect(harness.creates, <CreateRange>[
+      CreateRange(start: at(tuesday, 9), end: at(tuesday, 10, 15)),
+      CreateRange(start: at(tuesday, 10), end: at(tuesday, 11)),
+    ]);
+  });
+
   testWidgets("TC1 at slot 30 over 00:00-24:00 the grid has 48 slot rows and "
       "a tap reports 30 minutes", (tester) async {
     for (final shown in <Shown>[
@@ -1504,6 +1532,41 @@ void main() {
       expect(find.byKey(blockHandlesKey("second")), findsOneWidget);
       expect(store.changes, changes);
       expect(store.storedEntry("second"), second);
+    });
+
+    testWidgets("TP27 in Week and in Day, 00:30 to the second 02:30 draws to "
+        "the 02:30 row, and the first 01:30 to the second 01:15 from the "
+        "01:30 row to the 02:15 row", (tester) async {
+      final day = longDayStart;
+      // 180 minutes, over the repeated hour.
+      final spans = entryOf("spans", at(day, 0, 30), at(day, 2, 30));
+      // 45 minutes, whose end's wall time is before its start's.
+      final folds = entryOf(
+        "folds",
+        day.add(const Duration(minutes: 90)),
+        secondHalfPastOne.subtract(const Duration(minutes: 15)),
+      );
+      for (final shown in <Shown>[
+        Shown.week(addDays(day, -6)),
+        Shown.day(day),
+      ]) {
+        await Harness(
+          storeOf(<CalendarEntry<String>>[spans, folds]),
+          shown,
+        ).pump(tester);
+        final col = shown.colOf(day);
+        expect(
+          tester.getRect(blockFinder("spans", day)).bottom,
+          moreOrLessEquals(cellRect(tester, shown.rowOf(135), col).bottom),
+          reason: shown.name,
+        );
+        expect(blockFinder("folds", day), findsOneWidget, reason: shown.name);
+        expect(
+          tester.getRect(blockFinder("folds", day)).bottom,
+          moreOrLessEquals(cellRect(tester, shown.rowOf(120), col).bottom),
+          reason: shown.name,
+        );
+      }
     });
   });
 }

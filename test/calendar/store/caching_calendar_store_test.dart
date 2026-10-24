@@ -807,7 +807,7 @@ void main() {
       ));
     });
 
-    test("FF5 a search from a minute starts there, rounded up to the slots "
+    test("FF5 a search from a time starts there, rounded up to the slots "
         "and no earlier than the hours, and with nothing free after it "
         "starts again at the hours' start", () async {
       final store = await readDay(Harness(), <CalendarEntry<String>>[
@@ -815,25 +815,25 @@ void main() {
         task("item-2", day, 900, 960),
       ]);
       store.hours = const DayHours(480, 1200);
-      expect(store.firstFreeRange(day, slotMinutes: 15, from: 840), (
+      expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 840)), (
         start: at(day, 840),
         end: at(day, 855),
       ));
       // 14:10 rounds up to 14:15.
-      expect(store.firstFreeRange(day, slotMinutes: 15, from: 850), (
+      expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 850)), (
         start: at(day, 855),
         end: at(day, 870),
       ));
       // Each slot from 15:00 meets item-2 until it ends.
-      expect(store.firstFreeRange(day, slotMinutes: 15, from: 900), (
+      expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 900)), (
         start: at(day, 960),
         end: at(day, 975),
       ));
-      expect(store.firstFreeRange(day, slotMinutes: 15, from: 300), (
+      expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 300)), (
         start: at(day, 540),
         end: at(day, 555),
       ));
-      expect(store.firstFreeRange(day, slotMinutes: 15, from: 1200), (
+      expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 1200)), (
         start: at(day, 540),
         end: at(day, 555),
       ));

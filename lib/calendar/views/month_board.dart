@@ -353,6 +353,11 @@ splitMonthHours<T>(
       for (var col = 0; col < columns; col++)
         dayNumber(grid.dateAt(row, col)): row * columns + col,
   };
+  // A day outside the grid's first and last has no cell, so each entry's
+  // days are walked only inside them; a grid of no weekdays has none.
+  final days = cells.keys;
+  final gridFirst = days.isEmpty ? 0 : days.reduce(math.min);
+  final gridLast = days.isEmpty ? -1 : days.reduce(math.max);
   for (final entry in shown) {
     final calendarEntry = entry.entry;
     if (calendarEntry.isAllDay) {
@@ -360,8 +365,11 @@ splitMonthHours<T>(
       continue;
     }
     final span = wallSpanOf(calendarEntry.start, calendarEntry.end);
-    final first = dayNumber(calendarEntry.start);
-    final last = lastDayNumberOf(calendarEntry.start, calendarEntry.end);
+    final first = math.max(dayNumber(calendarEntry.start), gridFirst);
+    final last = math.min(
+      lastDayNumberOf(calendarEntry.start, calendarEntry.end),
+      gridLast,
+    );
     var holds = false;
     for (var day = first; day <= last && !holds; day++) {
       final piece = pieceOn(span, day);

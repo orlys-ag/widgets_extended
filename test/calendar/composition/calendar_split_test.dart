@@ -3,8 +3,9 @@
 /// notifies as the calendar asks it for a new range, splits once per store
 /// write and per step and nothing for a create on a day it does not show,
 /// and a scroll, a pinch, a drag's moves, a pill and an edit-mode change
-/// split nothing. Week places once per sync, one that changes the all-day
-/// strip's rows too, and once per pill or edit-mode change of those rows.
+/// split nothing. Week places once per sync that splits, one that changes
+/// the all-day strip's rows too, nothing for a sync that keeps its split,
+/// and once per pill or edit-mode change of those rows.
 library;
 
 import 'package:flutter/gestures.dart';
@@ -96,6 +97,15 @@ void resetCounts() {
 }
 
 /// The rows of the timed grid's board.
+/// The vertical scroll offset of the timed grid's board.
+double gridScrollPixels(WidgetTester tester) {
+  return tester.allRenderObjects
+      .whereType<RenderBoardViewport<GridKey>>()
+      .single
+      .verticalOffset
+      .pixels;
+}
+
 int rowCount() {
   final board =
       find.byType(Board<GridKey, GridShape<String>>).evaluate().single.widget
@@ -172,14 +182,18 @@ void main() {
   }
 
   testWidgets("SP1 in Week a store write splits and places once, a create "
-      "on a day Week does not show splits nothing and places once, a "
-      "next-week step splits once and places twice, ten frames of a scroll, "
+      "on a day Week does not show splits and places nothing, a "
+      "next-week step splits and places once, ten frames of a scroll, "
       "a pinch and a block's drag split and place nothing, and a \"+N\" "
       "pill and an edit-mode change place once and split nothing; a write "
       "and a step that change the strip's rows place no more", (tester) async {
     final editable = ValueNotifier<bool>(true);
     addTearDown(editable.dispose);
-    await pumpCalendar(tester, CalendarViewKind.week, editable);
+    final controller = await pumpCalendar(
+      tester,
+      CalendarViewKind.week,
+      editable,
+    );
     // Setup sanity: Week shows the week of April 20, its entries split.
     expect(find.byKey(blockKey("solo", thursday)), findsOneWidget);
     expect(find.byKey(allDayMoreKey(wednesday)), findsOneWidget);
@@ -195,9 +209,10 @@ void main() {
 
     resetCounts();
     await createOnJanuary(tester, store);
-    expect(counts(), (0, 1), reason: "a create on a day Week does not show");
+    expect(counts(), (0, 0), reason: "a create on a day Week does not show");
 
     final grid = tester.getRect(find.byType(TimedGrid<String>));
+    final scrolled = gridScrollPixels(tester);
     resetCounts();
     await dragTenFrames(
       tester,
@@ -206,7 +221,10 @@ void main() {
     );
     expect(counts(), (0, 0), reason: "a scroll");
     await tester.pumpAndSettle();
+    // Setup sanity: the drag scrolled the grid.
+    expect(gridScrollPixels(tester), greaterThan(scrolled));
 
+    final slotHeight = controller.minSlotHeight;
     resetCounts();
     final first = await tester.startGesture(grid.center - const Offset(0, 30));
     final second = await tester.startGesture(grid.center + const Offset(0, 30));
@@ -219,6 +237,8 @@ void main() {
     await second.up();
     expect(counts(), (0, 0), reason: "a pinch");
     await tester.pumpAndSettle();
+    // Setup sanity: the pinch zoomed the slots.
+    expect(controller.minSlotHeight, greaterThan(slotHeight));
 
     final solo = find.byKey(blockKey("solo", thursday));
     await tester.ensureVisible(solo);
@@ -262,8 +282,9 @@ void main() {
     expect(find.byKey(allDayCellKey(DateTime(2026, 4, 27))), findsOneWidget);
     expect(rowCount(), rows - 3);
     // The store's notify inside the step syncs on the week shown before,
-    // whose split it keeps, and the new week's sync splits.
-    expect(counts(), (1, 2), reason: "a next-week step");
+    // whose split and placement it keeps, and the new week's sync splits
+    // and places.
+    expect(counts(), (1, 1), reason: "a next-week step");
 
     resetCounts();
     editable.value = false;

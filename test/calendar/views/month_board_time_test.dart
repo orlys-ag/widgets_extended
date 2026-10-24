@@ -74,6 +74,53 @@ Map<DateTime, int> countsByDay(Int32List counts, MonthGrid grid) {
   };
 }
 
+/// The month board over [grid] with [entries] in [hours].
+Future<void> pumpMonth(
+  WidgetTester tester,
+  MonthGrid grid,
+  DateTime selectedDay,
+  List<CalendarEntry<String>> entries, {
+  DayHours hours = DayHours.allDay,
+}) async {
+  final store = MemoryCalendarStore<String>(entries: entries);
+  addTearDown(store.dispose);
+  final today = ValueNotifier<DateTime>(selectedDay);
+  addTearDown(today.dispose);
+  tester.view.devicePixelRatio = 1.0;
+  tester.view.physicalSize = const Size(700.0, 900.0);
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(
+    MaterialApp(
+      home: MonthBoard<String>(
+        store: store,
+        grid: grid,
+        hours: hours,
+        selectedDay: selectedDay,
+        today: today,
+        onSelectDay: (day) {},
+        onOpenDay: (day) {},
+        onCreateOnDay: null,
+        onOpenEntry: (id) {},
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+/// Whether the board draws [id]'s chip in its week of [day] inside the
+/// cell of [day].
+bool chipInCell(WidgetTester tester, MonthGrid grid, String id, DateTime day) {
+  final weekStart = grid.dateAt(grid.cellOf(day).row, 0);
+  final chip = find.byKey(monthChipKey(monthSegmentKey(id, weekStart)));
+  if (chip.evaluate().length != 1) {
+    return false;
+  }
+  final rect = tester.getRect(chip);
+  final cell = tester.getRect(find.byKey(monthDayKey(day)));
+  return cell.contains(rect.centerLeft.translate(1.0, 0.0)) &&
+      cell.contains(rect.centerRight.translate(-1.0, 0.0));
+}
+
 void main() {
   test("MT1 a timed and an all-day entry over three days are bars across "
       "them, an overnight entry one across its two days, and a one-day "
@@ -168,6 +215,24 @@ void main() {
     expect(countsByDay(split.earlier, april), <DateTime, int>{tuesday: 1});
   });
 
+  test("MT6 under 08:00-18:00, an entry from a year before the grid to its "
+      "first day at 07:00 counts earlier on that day, and one from its last "
+      "day at 19:00 to a year after counts later on that day", () {
+    const office = DayHours(8 * 60, 18 * 60);
+    final gridFirst = april.dateAt(0, 0);
+    final gridLast = april.dateAt(april.weekCount - 1, april.columnCount - 1);
+    final split = splitMonthHours(
+      <Shown>[
+        shownOf("into", DateTime(2025, 3, 1, 20), at(gridFirst, 7)),
+        shownOf("out of", at(gridLast, 19), DateTime(2027, 6, 1, 7)),
+      ],
+      april,
+      office,
+    );
+    expect(countsByDay(split.earlier, april), <DateTime, int>{gridFirst: 1});
+    expect(countsByDay(split.later, april), <DateTime, int>{gridLast: 1});
+  });
+
   group("on the 23-hour day", skip: shortDaySkip, () {
     test("MT2 the day shows once with its entries", () {
       final day = shortDayStart;
@@ -192,6 +257,26 @@ void main() {
       }
       expect(cells, 1);
     });
+
+    testWidgets("MT4 the board draws the day's entries in its cell, and an "
+        "entry at 00:30 the next day in that day's cell", (tester) async {
+      final day = shortDayStart;
+      final next = DateTime(day.year, day.month, day.day + 1);
+      final grid = MonthGrid.of(day);
+      await pumpMonth(tester, grid, day, <CalendarEntry<String>>[
+        entryOf("all-day", day, next),
+        entryOf("early", at(day, 1, 30), at(day, 3, 30)),
+        entryOf("next", at(next, 0, 30), at(next, 1)),
+      ]);
+      expect(
+        <String, bool>{
+          "all-day": chipInCell(tester, grid, "all-day", day),
+          "early": chipInCell(tester, grid, "early", day),
+          "next": chipInCell(tester, grid, "next", next),
+        },
+        <String, bool>{"all-day": true, "early": true, "next": true},
+      );
+    });
   });
 
   group("on the 25-hour day", skip: longDaySkip, () {
@@ -211,6 +296,52 @@ void main() {
         "all-day": <(int, int, int)>[(cell.row, cell.col, 1)],
         "repeated": <(int, int, int)>[(cell.row, cell.col, 1)],
       });
+    });
+
+    testWidgets("MT4 the board draws the day's entries in its cell, before "
+        "and after the repeated hour", (tester) async {
+      final day = longDayStart;
+      final grid = MonthGrid.of(day);
+      await pumpMonth(tester, grid, day, <CalendarEntry<String>>[
+        entryOf("all-day", day, DateTime(day.year, day.month, day.day + 1)),
+        entryOf("early", at(day, 0, 30), at(day, 1)),
+        entryOf(
+          "repeated",
+          secondHalfPastOne,
+          secondHalfPastOne.add(const Duration(minutes: 30)),
+        ),
+      ]);
+      expect(
+        <String, bool>{
+          "all-day": chipInCell(tester, grid, "all-day", day),
+          "early": chipInCell(tester, grid, "early", day),
+          "repeated": chipInCell(tester, grid, "repeated", day),
+        },
+        <String, bool>{"all-day": true, "early": true, "repeated": true},
+      );
+    });
+
+    testWidgets("MT5 under hours from 02:30, 00:30 to the second 02:30 and "
+        "the first 01:30 to the second 01:15 count as earlier", (tester) async {
+      final day = longDayStart;
+      final grid = MonthGrid.of(day);
+      await pumpMonth(tester, grid, day, <CalendarEntry<String>>[
+        // 180 minutes, over the repeated hour.
+        entryOf("spans", at(day, 0, 30), at(day, 2, 30)),
+        // 45 minutes, whose end's wall time is before its start's.
+        entryOf(
+          "folds",
+          day.add(const Duration(minutes: 90)),
+          secondHalfPastOne.subtract(const Duration(minutes: 15)),
+        ),
+      ], hours: const DayHours(150, minutesPerDay));
+      expect(
+        find.descendant(
+          of: find.byKey(monthEarlierKey(day)),
+          matching: find.text("+2 earlier"),
+        ),
+        findsOneWidget,
+      );
     });
   });
 }
