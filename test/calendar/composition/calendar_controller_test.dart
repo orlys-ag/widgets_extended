@@ -18,7 +18,7 @@ import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 
-typedef DayRange = ({DateTime first, DateTime last});
+import 'recording_store.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -43,18 +43,6 @@ Widget app(Widget home) {
 DayRange gridRange(DateTime day, {WeekdaySet weekdays = WeekdaySet.all}) {
   final grid = MonthGrid.of(day, weekdays: weekdays);
   return (first: grid.firstDay, last: grid.lastDay);
-}
-
-/// An in-memory store that records each range it is asked to show, and
-/// notifies within the call, as a caching store does.
-class RecordingStore extends MemoryCalendarStore<String> {
-  final List<DayRange> shows = <DayRange>[];
-
-  @override
-  void show(DateTime first, DateTime last) {
-    shows.add((first: first, last: last));
-    notifyListeners();
-  }
 }
 
 /// Counts a controller's notifies, and records what [visibleRange] reads

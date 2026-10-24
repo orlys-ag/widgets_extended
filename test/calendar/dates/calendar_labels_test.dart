@@ -21,12 +21,12 @@ void main() {
       expect(clockLabel(1440), "24:00");
     });
 
-    test("moreItemsLabel and itemCountLabel count in words", () {
-      expect(moreItemsLabel(1), "1 more item");
-      expect(moreItemsLabel(3), "3 more items");
-      expect(itemCountLabel(0), "No items");
-      expect(itemCountLabel(1), "1 item");
-      expect(itemCountLabel(2), "2 items");
+    test("LB2 moreEntriesLabel and entryCountLabel count in words", () {
+      expect(moreEntriesLabel(1), "1 more item");
+      expect(moreEntriesLabel(3), "3 more items");
+      expect(entryCountLabel(0), "No items");
+      expect(entryCountLabel(1), "1 item");
+      expect(entryCountLabel(2), "2 items");
     });
 
     test("dayTitle names today, tomorrow, yesterday and other weekdays, "
@@ -52,6 +52,31 @@ void main() {
     expect(startsAtLabel("07:30"), "Starts at 07:30");
     expect(endsAtLabel("19:30"), "Ends at 19:30");
     expect(clockRangeLabel(540, 600), "09:00-10:00");
+  });
+
+  test("LB1 entryTimesLabel writes a range's clock times, 24:00 for an end "
+      "at the next day's start, and All day from a day start to one", () {
+    expect(
+      entryTimesLabel(DateTime(2026, 4, 21, 9, 10), DateTime(2026, 4, 21, 9, 50)),
+      "09:10-09:50",
+    );
+    expect(
+      entryTimesLabel(DateTime(2026, 4, 20, 22), DateTime(2026, 4, 21, 2)),
+      "22:00-02:00",
+    );
+    expect(
+      entryTimesLabel(DateTime(2026, 4, 20, 22), DateTime(2026, 4, 21)),
+      "22:00-24:00",
+    );
+    expect(
+      entryTimesLabel(DateTime(2026, 4, 20), DateTime(2026, 4, 21)),
+      "All day",
+    );
+    expect(
+      entryTimesLabel(DateTime(2026, 4, 20), DateTime(2026, 4, 23)),
+      "All day",
+    );
+    expect(allDayLabel, "All day");
   });
 
   group("C7 hourLabel", () {

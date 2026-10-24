@@ -4,9 +4,8 @@
 /// The form is generated from the item type's schema and checks its input
 /// with the same validator the API runs, and against the history lock,
 /// whose refusals [lockErrorsOf] keys as the form's fields, before it sends
-/// anything; the
-/// store holds its days and minutes to the calendar's hours, and the time
-/// fields offer the minutes inside them.
+/// anything; the store holds its times to the calendar's hours, and the
+/// time fields offer the slot boundaries inside them.
 library;
 
 import 'package:flutter/material.dart';
@@ -22,14 +21,16 @@ import 'calendar_schema.dart';
 import 'harbor_theme.dart';
 
 /// Asks for a type, then opens the form for a new item of it over the
-/// slots [range] picked, whose Save the history [lock] that holds then
-/// checks. Completes when the flow closes, whether or not an item was
-/// created.
+/// range [range] picked, with All day on for an all-day range, whose Save
+/// the history [lock] that holds then checks; its times step by
+/// [slotMinutes]. Completes when the flow closes, whether or not an item
+/// was created.
 Future<void> showCreateFlow(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
   required CreateRange range,
   required ValueGetter<HistoryLock> lock,
+  int slotMinutes = defaultSlotMinutes,
 }) async {
   final type = await showDialog<CalendarItemType>(
     context: context,
@@ -63,30 +64,42 @@ Future<void> showCreateFlow(
   final draft = calendarItem(
     type: type,
     title: "",
-    day: range.day,
-    startMinute: range.startMinute,
-    endMinute: range.endMinute,
-    dayCount: range.dayCount,
+    start: range.start,
+    end: range.end,
     fields: withFieldDefaults(type, const <String, Object?>{}),
   );
-  await _showForm(context, store: store, item: draft, lock: lock);
+  await _showForm(
+    context,
+    store: store,
+    item: draft,
+    lock: lock,
+    slotMinutes: slotMinutes,
+  );
 }
 
 /// Opens the form for the stored item [id], whose Save the history [lock]
-/// that holds then checks; of an item the lock has [ItemHold.started] the
-/// day and the start take no input, and it has no Delete. Does nothing
-/// when the store does not hold it.
+/// that holds then checks, and whose times step by [slotMinutes]; of an
+/// item the lock has [EntryHold.started] the start date, the start time
+/// and All day take no input, and it has no Delete. Does nothing when the
+/// store does not hold it.
 Future<void> showEditForm(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
   required String id,
   required ValueGetter<HistoryLock> lock,
+  int slotMinutes = defaultSlotMinutes,
 }) async {
   final item = store.storedEntry(id);
   if (item == null) {
     return;
   }
-  await _showForm(context, store: store, item: item, lock: lock);
+  await _showForm(
+    context,
+    store: store,
+    item: item,
+    lock: lock,
+    slotMinutes: slotMinutes,
+  );
 }
 
 /// Opens the form for the stored item [id] read-only: it shows the item's
@@ -136,32 +149,29 @@ Future<bool> confirmDelete(BuildContext context) async {
 /// `validateItemJson` keys them; empty where [lock] admits it.
 Map<String, String> lockErrorsOf(
   HistoryLock lock,
-  CalendarEntryTime? from,
-  CalendarEntryTime to,
+  ({DateTime start, DateTime end})? from,
+  ({DateTime start, DateTime end}) to,
 ) {
   final boundary = lock.boundary;
-  if (boundary == null || (from != null && lock.admits(from, to))) {
+  if (boundary == null ||
+      (from != null && lock.admits(from.start, from.end, to.start, to.end))) {
     return const <String, String>{};
   }
-  if (from == null || lock.holdOf(from) == ItemHold.free) {
-    if (HistoryLock.startOf(to) >= boundary) {
+  if (from == null || lock.holdOf(from.start, from.end) == EntryHold.free) {
+    if (!to.start.isBefore(boundary)) {
       return const <String, String>{};
     }
-    if (to.firstDay < boundary ~/ minutesPerDay) {
-      return const <String, String>{"day": "Past days are locked."};
+    if (dayNumber(to.start) < dayNumber(boundary)) {
+      return const <String, String>{"start": "Past days are locked."};
     }
-    return const <String, String>{
-      "startMinute": "The start can't be in the past.",
-    };
+    return const <String, String>{"start": "The start can't be in the past."};
   }
-  if (lock.holdOf(from) == ItemHold.locked) {
-    return const <String, String>{"day": "Past items are locked."};
+  if (lock.holdOf(from.start, from.end) == EntryHold.locked) {
+    return const <String, String>{"start": "Past items are locked."};
   }
   return <String, String>{
-    if (HistoryLock.startOf(to) != HistoryLock.startOf(from))
-      "startMinute": "An item in progress keeps its start.",
-    if (HistoryLock.endOf(to) <= boundary)
-      "endMinute": "The end can't be in the past.",
+    if (to.start != from.start) "start": "An item in progress keeps its start.",
+    if (!to.end.isAfter(boundary)) "end": "The end can't be in the past.",
   };
 }
 
@@ -171,6 +181,7 @@ Future<void> _showForm(
   required CalendarItem item,
   bool readOnly = false,
   ValueGetter<HistoryLock>? lock,
+  int slotMinutes = defaultSlotMinutes,
 }) {
   return showDialog<void>(
     context: context,
@@ -181,6 +192,7 @@ Future<void> _showForm(
         item: item,
         readOnly: readOnly,
         lock: lock ?? _noLock,
+        slotMinutes: slotMinutes,
       );
     },
   );
@@ -199,10 +211,14 @@ class _ItemForm extends StatefulWidget {
     required this.item,
     required this.readOnly,
     required this.lock,
+    required this.slotMinutes,
   });
 
   final CalendarStore<ItemPayload> store;
   final CalendarItem item;
+
+  /// The step of the time fields' slot boundaries.
+  final int slotMinutes;
 
   /// Whether every control is disabled and Close is the one action.
   final bool readOnly;
@@ -221,18 +237,32 @@ class _ItemFormState extends State<_ItemForm> {
   late final TextEditingController _title = TextEditingController(
     text: widget.item.title,
   );
-  late final TextEditingController _days = TextEditingController(
-    text: "${widget.item.dayCount}",
+
+  /// The day of the item's start.
+  late DateTime _startDate = dateOfDayNumber(dayNumber(widget.item.start));
+
+  /// The start's minute of [_startDate].
+  late int _startMinute = minuteOfDay(widget.item.start);
+
+  /// The last day the item has a part in.
+  late DateTime _endDate = dateOfDayNumber(
+    lastDayNumberOf(widget.item.start, widget.item.end),
   );
-  late DateTime _day = widget.item.day;
-  late int _start = widget.item.startMinute;
-  late int _end = widget.item.endMinute;
+
+  /// The end's minute of [_endDate], 1440 for an end at the start of the
+  /// day after it.
+  late int _endMinute = endMinuteOfDay(widget.item.end);
+
+  /// Whether the item covers whole days, from [_startDate]'s start to the
+  /// start of the day after [_endDate], and the time fields hide.
+  late bool _allDay = widget.item.isAllDay;
 
   /// How the history lock held the stored item when the form opened, free
-  /// for a draft. Of a started one the day and the start take no input.
-  late final ItemHold _hold = widget.item.id == null
-      ? ItemHold.free
-      : widget.lock().holdOf(widget.item.time);
+  /// for a draft. Of a started one the start date, the start time and All
+  /// day take no input.
+  late final EntryHold _hold = widget.item.id == null
+      ? EntryHold.free
+      : widget.lock().holdOf(widget.item.start, widget.item.end);
 
   /// The text controllers of the schema's text, URL, long-text and text
   /// list fields, by key.
@@ -291,18 +321,17 @@ class _ItemFormState extends State<_ItemForm> {
   @override
   void dispose() {
     _title.dispose();
-    _days.dispose();
     for (final controller in _texts.values) {
       controller.dispose();
     }
     super.dispose();
   }
 
-  /// The item the form holds, as an envelope. The Days text goes in as an
-  /// int when it reads as one and as the text otherwise, so the validator
-  /// reports it.
+  /// The item the form holds, as an envelope: with All day on, from the
+  /// start of [_startDate] to the start of the day after [_endDate], and
+  /// otherwise from [_startMinute] of [_startDate] to [_endMinute] of
+  /// [_endDate].
   Map<String, Object?> _envelope() {
-    final daysText = _days.text.trim();
     final fields = <String, Object?>{};
     for (final field in _schema.fields) {
       switch (field.kind) {
@@ -333,12 +362,26 @@ class _ItemFormState extends State<_ItemForm> {
       if (widget.item.id != null) "id": widget.item.id,
       "type": widget.item.type.id,
       "title": _title.text,
-      "day": isoDate(_day),
-      "startMinute": _start,
-      "endMinute": _end,
-      "dayCount": int.tryParse(daysText) ?? daysText,
+      "start": _allDay
+          ? isoDateTime(_startDate)
+          : _timeText(_startDate, _startMinute),
+      "end": _allDay
+          ? isoDateTime(addDays(_endDate, 1))
+          : _timeText(_endDate, _endMinute),
       "fields": fields,
     };
+  }
+
+  /// [minute] of [day] as the envelope writes it: the time
+  /// [timeAtWallMinute] gives, the earlier of a time the clock repeats, so
+  /// 24:00 is the next day's start; and a time the clock skips as its own
+  /// text, which the validator then reports.
+  static String _timeText(DateTime day, int minute) {
+    final time = timeAtWallMinute(dayNumber(day) * minutesPerDay + minute);
+    if (time == null) {
+      return "${isoDate(day)}T${clockLabel(minute)}";
+    }
+    return isoDateTime(time);
   }
 
   /// Validates and sends. Nothing is sent while a field breaks a rule, or
@@ -351,10 +394,11 @@ class _ItemFormState extends State<_ItemForm> {
     final json = _envelope();
     var errors = validateItemJson(json);
     if (errors.isEmpty) {
+      final to = itemFromJson(json);
       errors = lockErrorsOf(
         widget.lock(),
-        _isDraft ? null : widget.item.time,
-        itemFromJson(json).time,
+        _isDraft ? null : (start: widget.item.start, end: widget.item.end),
+        (start: to.start, end: to.end),
       );
     }
     if (errors.isNotEmpty) {
@@ -410,18 +454,49 @@ class _ItemFormState extends State<_ItemForm> {
     widget.store.requestDelete(widget.item.id!);
   }
 
-  Future<void> _pickDay() async {
+  /// Picks a day from [initial], and hands it to [onPicked].
+  Future<void> _pickDate(
+    DateTime initial,
+    ValueChanged<DateTime> onPicked,
+  ) async {
     final picked = await showDatePicker(
       context: context,
-      initialDate: _day,
-      firstDate: DateTime(_day.year - 5),
-      lastDate: DateTime(_day.year + 5, 12, 31),
+      initialDate: initial,
+      firstDate: DateTime(initial.year - 5),
+      lastDate: DateTime(initial.year + 5, 12, 31),
     );
     if (picked != null && mounted) {
       setState(() {
-        _day = dateOnly(picked);
+        onPicked(dateOnly(picked));
       });
     }
+  }
+
+  /// A field naming [date] that opens a date picker, showing the error
+  /// [validateItemJson] keys [errorKey] where it is not null; a [fixed]
+  /// one takes no input.
+  Widget _dateField({
+    required String label,
+    required String? errorKey,
+    required DateTime date,
+    required ValueChanged<DateTime> onPicked,
+    bool fixed = false,
+  }) {
+    return InkWell(
+      onTap: _locked || fixed
+          ? null
+          : () {
+              _pickDate(date, onPicked);
+            },
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          errorText: errorKey == null ? null : _errors[errorKey],
+          suffixIcon: const Icon(Icons.calendar_today),
+        ),
+        child: Text(isoDate(date)),
+      ),
+    );
   }
 
   /// A dropdown of every slot boundary from [first] to [last] minutes, and
@@ -438,7 +513,8 @@ class _ItemFormState extends State<_ItemForm> {
     bool fixed = false,
   }) {
     final minutes = <int>{
-      for (var minute = first; minute <= last; minute += minutesPerSlot) minute,
+      for (var minute = first; minute <= last; minute += widget.slotMinutes)
+        minute,
       value,
     }.toList()..sort();
     return DropdownButtonFormField<int>(
@@ -537,7 +613,7 @@ class _ItemFormState extends State<_ItemForm> {
     final style = harborTypeStyleOf(type);
     final message = _message;
     final hours = widget.store.hours;
-    final started = _hold == ItemHold.started;
+    final started = _hold == EntryHold.started;
     final fields = <Widget>[
       Row(
         children: <Widget>[
@@ -557,56 +633,79 @@ class _ItemFormState extends State<_ItemForm> {
           errorText: _errors["title"],
         ),
       ),
-      InkWell(
-        onTap: _locked || started ? null : _pickDay,
-        child: InputDecorator(
-          decoration: InputDecoration(
-            labelText: "Day",
-            errorText: _errors["day"],
-            suffixIcon: const Icon(Icons.calendar_today),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Expanded(
+            child: _dateField(
+              label: "Start date",
+              errorKey: _allDay ? "start" : null,
+              date: _startDate,
+              onPicked: (date) {
+                _startDate = date;
+              },
+              fixed: started,
+            ),
           ),
-          child: Text(isoDate(_day)),
-        ),
+          if (!_allDay) ...<Widget>[
+            const SizedBox(width: 12.0),
+            Expanded(
+              child: _minuteField(
+                label: "Start time",
+                errorKey: "start",
+                value: _startMinute,
+                first: hours.start,
+                last: hours.end - widget.slotMinutes,
+                onChanged: (minute) {
+                  _startMinute = minute;
+                },
+                fixed: started,
+              ),
+            ),
+          ],
+        ],
       ),
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Expanded(
-            child: _minuteField(
-              label: "Start",
-              errorKey: "startMinute",
-              value: _start,
-              first: hours.start,
-              last: hours.end - minutesPerSlot,
-              onChanged: (minute) {
-                _start = minute;
-              },
-              fixed: started,
-            ),
-          ),
-          const SizedBox(width: 12.0),
-          Expanded(
-            child: _minuteField(
-              label: "End",
-              errorKey: "endMinute",
-              value: _end,
-              first: hours.start + minutesPerSlot,
-              last: hours.end,
-              onChanged: (minute) {
-                _end = minute;
+            child: _dateField(
+              label: "End date",
+              errorKey: _allDay ? "end" : null,
+              date: _endDate,
+              onPicked: (date) {
+                _endDate = date;
               },
             ),
           ),
+          if (!_allDay) ...<Widget>[
+            const SizedBox(width: 12.0),
+            Expanded(
+              child: _minuteField(
+                label: "End time",
+                errorKey: "end",
+                value: _endMinute,
+                first: hours.start + widget.slotMinutes,
+                last: hours.end,
+                onChanged: (minute) {
+                  _endMinute = minute;
+                },
+              ),
+            ),
+          ],
         ],
       ),
-      TextField(
-        controller: _days,
-        enabled: !_locked,
-        keyboardType: TextInputType.number,
-        decoration: InputDecoration(
-          labelText: "Days",
-          errorText: _errors["dayCount"],
-        ),
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text("All day"),
+        value: _allDay,
+        onChanged: _locked || started
+            ? null
+            : (on) {
+                setState(() {
+                  _allDay = on;
+                });
+              },
       ),
       for (final field in _schema.fields) _fieldFor(field),
     ];
@@ -668,7 +767,9 @@ class _ItemFormState extends State<_ItemForm> {
                         },
                         child: const Text("Close"),
                       ),
-                    if (!_isDraft && !widget.readOnly && _hold == ItemHold.free)
+                    if (!_isDraft &&
+                        !widget.readOnly &&
+                        _hold == EntryHold.free)
                       TextButton(
                         onPressed: _saving ? null : _delete,
                         child: const Text("Delete"),

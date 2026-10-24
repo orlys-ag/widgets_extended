@@ -33,7 +33,7 @@ import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 
-typedef DayRange = ({DateTime first, DateTime last});
+import 'recording_store.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -76,39 +76,27 @@ void useTallView(WidgetTester tester) {
   addTearDown(tester.view.reset);
 }
 
+/// An entry from [start] to [end] minutes after [day]'s midnight.
 CalendarEntry<String> entryOf(String id, DateTime day, int start, int end) {
   return CalendarEntry<String>(
     id: id,
-    day: day,
-    startMinute: start,
-    endMinute: end,
+    start: DateTime(day.year, day.month, day.day, 0, start),
+    end: DateTime(day.year, day.month, day.day, 0, end),
     title: id,
     color: const Color(0xFF336699),
     payload: id,
   );
 }
 
+/// [hour]:[minute] on [day].
+DateTime at(DateTime day, int hour, [int minute = 0]) {
+  return DateTime(day.year, day.month, day.day, hour, minute);
+}
+
 /// The month grid's days of [day]'s month under [weekdays].
 DayRange gridRange(DateTime day, {WeekdaySet weekdays = WeekdaySet.all}) {
   final grid = MonthGrid.of(day, weekdays: weekdays);
   return (first: grid.firstDay, last: grid.lastDay);
-}
-
-/// An in-memory store that records each range it is asked to show and
-/// the scheduler's phase at the ask, and notifies within the call, as a
-/// caching store does.
-class RecordingStore extends MemoryCalendarStore<String> {
-  RecordingStore({super.entries, super.hours});
-
-  final List<DayRange> shows = <DayRange>[];
-  final List<SchedulerPhase> phases = <SchedulerPhase>[];
-
-  @override
-  void show(DateTime first, DateTime last) {
-    shows.add((first: first, last: last));
-    phases.add(SchedulerBinding.instance.schedulerPhase);
-    notifyListeners();
-  }
 }
 
 /// A data source that answers each read within the call, through a
@@ -129,8 +117,8 @@ class HeldSource implements CalendarDataSource<String> {
     final to = dayNumber(last);
     final answer = <CalendarEntry<String>>[
       for (final entry in entries)
-        if (entry.time.firstDay <= to &&
-            entry.time.firstDay + entry.time.dayCount - 1 >= from)
+        if (dayNumber(entry.start) <= to &&
+            lastDayNumberOf(entry.start, entry.end) >= from)
           entry,
     ];
     if (!holds) {
@@ -202,27 +190,65 @@ class RecordingCanvas implements Canvas {
   }
 }
 
-Finder blockFinder(String id) {
-  return find.byKey(blockKey(id));
+/// The block of [id]'s piece on [day], or with no [day] the one block of
+/// [id].
+Finder blockFinder(String id, [DateTime? day]) {
+  if (day != null) {
+    return find.byKey(blockKey(id, day));
+  }
+  return find.byWidgetPredicate((widget) {
+    final key = widget.key;
+    return key is ValueKey<String> && key.value.startsWith("block-$id@");
+  });
 }
 
 /// The one timed grid's viewport.
-RenderBoardViewport<String> gridViewport(WidgetTester tester) {
+RenderBoardViewport<GridKey> gridViewport(WidgetTester tester) {
   return tester.allRenderObjects
-      .whereType<RenderBoardViewport<String>>()
+      .whereType<RenderBoardViewport<GridKey>>()
       .single;
 }
 
-/// Week's grid row of [minute] over the whole day: row 0 is the day
-/// header and row 1 the room above the first slot.
-int weekRowOf(int minute) {
-  return 2 + minute ~/ minutesPerSlot;
+/// The grid row of the slot holding [minute], a minute after midnight, in
+/// the one timed grid shown now: its first slot row, under the day header
+/// in Week, the all-day strip's rows and the room above the slots, which is
+/// its board's row count less its slot rows and the room below them, plus
+/// the slots from its hours' start.
+int gridRowOf(int minute) {
+  final grid =
+      find
+              .byWidgetPredicate((widget) {
+                return widget is TimedGrid;
+              })
+              .evaluate()
+              .single
+              .widget
+          as TimedGrid;
+  final board =
+      find
+              .byWidgetPredicate((widget) {
+                return widget is Board<GridKey, Object?>;
+              })
+              .evaluate()
+              .single
+              .widget
+          as Board<GridKey, Object?>;
+  final hours = grid.hours;
+  final firstSlotRow =
+      board.controller.rows.axis.trackCount -
+      hours.slotCountOf(grid.slotMinutes) -
+      1;
+  return firstSlotRow + (minute - hours.start) ~/ grid.slotMinutes;
 }
 
-/// Day's grid row of [minute] over the whole day: the grid has no day
-/// header, so row 0 is the room above the first slot.
+/// Week's grid row of [minute] ([gridRowOf]).
+int weekRowOf(int minute) {
+  return gridRowOf(minute);
+}
+
+/// Day's grid row of [minute] ([gridRowOf]).
 int dayRowOf(int minute) {
-  return 1 + minute ~/ minutesPerSlot;
+  return gridRowOf(minute);
 }
 
 /// Week's grid column of [day], Monday's being 1.
@@ -1012,12 +1038,7 @@ void main() {
     await tester.pump();
     expect(
       creates.last,
-      CreateRange(
-        day: thursday,
-        startMinute: 14 * 60,
-        endMinute: 14 * 60 + 15,
-        dayCount: 1,
-      ),
+      CreateRange(start: at(thursday, 14), end: at(thursday, 14, 15)),
     );
     // The slot stays marked while the host's future runs.
     expect(marksRange(tester), isTrue);
@@ -1036,12 +1057,7 @@ void main() {
     await tester.pump();
     expect(
       creates.last,
-      CreateRange(
-        day: wednesday,
-        startMinute: 14 * 60,
-        endMinute: 14 * 60 + 15,
-        dayCount: 1,
-      ),
+      CreateRange(start: at(wednesday, 14), end: at(wednesday, 14, 15)),
     );
     pending.last.complete();
     await tester.pumpAndSettle();
@@ -1066,7 +1082,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       creates.last,
-      CreateRange(day: thursday, startMinute: 0, endMinute: 15, dayCount: 1),
+      CreateRange(start: at(thursday, 0), end: at(thursday, 0, 15)),
     );
     pending.last.complete();
 
@@ -1078,7 +1094,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       creates.last,
-      CreateRange(day: wednesday, startMinute: 0, endMinute: 15, dayCount: 1),
+      CreateRange(start: at(wednesday, 0), end: at(wednesday, 0, 15)),
     );
     pending.last.complete();
     await tester.tap(find.text("edit later"));
@@ -1150,7 +1166,7 @@ void main() {
     await tester.longPress(find.byKey(monthStripKey(tuesday)));
     await tester.pumpAndSettle();
     expect(creates, <CreateRange>[
-      CreateRange(day: tuesday, startMinute: 705, endMinute: 720, dayCount: 1),
+      CreateRange(start: at(tuesday, 11, 45), end: at(tuesday, 12)),
     ]);
     expect(refused, isEmpty);
     await tester.longPress(find.byKey(monthStripKey(monday)));
@@ -1674,14 +1690,15 @@ void main() {
     );
   });
 
-  test("CV22 no assertion holds the views' throw or the fallback to a "
-      "listed view, which run in a release build", () {
+  test("CV22 no assertion holds the views' throw, the slot length's throw "
+      "or the fallback to a listed view, which run in a release build", () {
     const files = <String>[
       "lib/calendar/composition/calendar_view.dart",
       "lib/calendar/composition/calendar_controller.dart",
     ];
     final named = RegExp(
-      r"\b(_viewsError|calendarViewsError|calendarOpeningView)\b",
+      r"\b(_viewsError|_slotMinutesError|calendarViewsError|"
+      r"calendarOpeningView)\b",
     );
     var asserts = 0;
     for (final path in files) {
@@ -1707,6 +1724,7 @@ void main() {
     );
     final build = methodBody(view, "Widget build(BuildContext context)");
     expect(RegExp(r"\b_viewsError\b").hasMatch(build), isTrue);
+    expect(RegExp(r"\b_slotMinutesError\b").hasMatch(build), isTrue);
   });
 
   testWidgets("CV23 Week's and Day's grid takes as its store range the "
@@ -1865,5 +1883,134 @@ void main() {
     await tester.pumpAndSettle();
     expect(creates, isEmpty);
     expect(marksRange(tester), isFalse);
+  });
+  testWidgets("CV26 a slotMinutes of 0, -15, 7, 45 or 120 throws an "
+      "ArgumentError from the build", (tester) async {
+    for (final slotMinutes in const <int>[0, -15, 7, 45, 120]) {
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            store: store,
+            clock: fixedClock,
+            slotMinutes: slotMinutes,
+          ),
+        ),
+      );
+      final error = tester.takeException();
+      expect(error, isA<ArgumentError>(), reason: "$slotMinutes");
+      expect((error as ArgumentError).name, "slotMinutes");
+      expect(error.invalidValue, slotMinutes);
+      expect(find.byType(DayList<String>), findsNothing);
+    }
+  });
+
+  testWidgets("CV27 the slot length is 15 minutes by default, and each of "
+      "slotMinuteChoices builds Week's grid with its slots", (tester) async {
+    useTallView(tester);
+    expect(defaultSlotMinutes, 15);
+    expect(CalendarView<String>(store: store).slotMinutes, defaultSlotMinutes);
+    final controller = CalendarController(view: CalendarViewKind.week);
+    addTearDown(controller.dispose);
+    for (final slotMinutes in slotMinuteChoices) {
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            store: store,
+            controller: controller,
+            clock: fixedClock,
+            slotMinutes: slotMinutes,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: "$slotMinutes");
+      final grid = tester.widget<TimedGrid<String>>(
+        find.byType(TimedGrid<String>),
+      );
+      expect(grid.slotMinutes, slotMinutes);
+      // The day header, the room above the slots, the slots and the room
+      // below them.
+      expect(
+        tester
+            .widget<Board<GridKey, GridShape<String>>>(
+              find.byType(Board<GridKey, GridShape<String>>),
+            )
+            .controller
+            .rows
+            .axis
+            .trackCount,
+        2 + minutesPerDay ~/ slotMinutes + 1,
+        reason: "$slotMinutes",
+      );
+    }
+  });
+
+  testWidgets("CV28 hours off the grid of the slot length fail an "
+      "assertion, and on it build", (tester) async {
+    const hours = DayHours(8 * 60 + 10, 17 * 60 + 50);
+    final office = MemoryCalendarStore<String>(hours: hours);
+    addTearDown(office.dispose);
+    await tester.pumpWidget(
+      app(CalendarView<String>(store: office, clock: fixedClock, hours: hours)),
+    );
+    final error = tester.takeException();
+    expect(error, isA<AssertionError>());
+    expect("$error", contains("15-minute slots"));
+    await tester.pumpWidget(
+      app(
+        CalendarView<String>(
+          store: office,
+          clock: fixedClock,
+          hours: hours,
+          slotMinutes: 10,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byType(DayList<String>), findsOneWidget);
+  });
+
+  testWidgets("CV29 Month's long press at slot 30 reports a 30-minute range "
+      "at the first free 30-minute slot", (tester) async {
+    final memory = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        entryOf("standup", tuesday, 11 * 60 + 15, 11 * 60 + 45),
+      ],
+    );
+    addTearDown(memory.dispose);
+    final controller = CalendarController(view: CalendarViewKind.month);
+    addTearDown(controller.dispose);
+    final creates = <CreateRange>[];
+    await tester.pumpWidget(
+      app(
+        CalendarView<String>(
+          store: memory,
+          controller: controller,
+          clock: fixedClock,
+          editable: true,
+          lockPast: true,
+          lockEarlierToday: true,
+          slotMinutes: 30,
+          onCreateRange: (range) async {
+            creates.add(range);
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.longPress(find.byKey(monthStripKey(tuesday)));
+    await tester.pumpAndSettle();
+    // The lock's earliest 30-minute start is 11:30, which the standup's
+    // 11:15 to 11:45 overlaps, so the first free slot starts at 12:00.
+    expect(creates, <CreateRange>[
+      CreateRange(start: at(tuesday, 12), end: at(tuesday, 12, 30)),
+    ]);
+    await tester.longPress(find.byKey(monthStripKey(wednesday)));
+    await tester.pumpAndSettle();
+    expect(
+      creates.last,
+      CreateRange(start: wednesday, end: at(wednesday, 0, 30)),
+    );
   });
 }

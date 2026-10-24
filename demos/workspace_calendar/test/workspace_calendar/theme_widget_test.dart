@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
+import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_harness.dart';
@@ -130,7 +131,7 @@ void main() {
       ),
       HarborColors.primary,
     );
-    final card = find.byKey(itemCardKey(designCritiqueId));
+    final card = find.byKey(entryCardKey(designCritiqueId));
     final cardFill = decorationIn(tester, card);
     expect(cardFill.color, const Color(0xFFE0ECEB));
     expect(cardFill.borderRadius, BorderRadius.circular(16.0));
@@ -173,8 +174,8 @@ void main() {
     expect(blockFill.color, const Color(0xFFE0ECEB));
     expect((blockFill.border! as Border).left.width, 4.0);
     expect((blockFill.border! as Border).left.color, const Color(0xFF1F7A72));
-    final board = tester.widget<Board<String, ShownItem>>(
-      find.byType(Board<String, ShownItem>),
+    final board = tester.widget<Board<GridKey, GridShape<ItemPayload>>>(
+      find.byType(Board<GridKey, GridShape<ItemPayload>>),
     );
     expect(board.drag!.draggedItemOpacity, harborDraggedItemOpacity);
 
@@ -208,7 +209,7 @@ void main() {
     await pumpUnderHostTheme(tester);
     await tester.tap(dayFinder(DateTime(2026, 4, 23)));
     await tester.pumpAndSettle();
-    final card = find.byKey(itemCardKey(designCritiqueId));
+    final card = find.byKey(entryCardKey(designCritiqueId));
     await tester.tap(
       find.descendant(
         of: card,
@@ -228,7 +229,7 @@ void main() {
     expect(decorationIn(tester, dayFinder(today)).color, HarborColors.primary);
     await tester.tap(dayFinder(DateTime(2026, 4, 23)));
     await tester.pumpAndSettle();
-    final card = find.byKey(itemCardKey(designCritiqueId));
+    final card = find.byKey(entryCardKey(designCritiqueId));
     expect(
       textColorOf(
         tester,

@@ -61,7 +61,7 @@ CalendarViewKind calendarOpeningView(
 
 /// A tap on an entry: the [entry] as the store holds it, and whether it is
 /// [editable], in edit mode with the history lock not holding it
-/// [ItemHold.locked].
+/// [EntryHold.locked].
 @immutable
 class CalendarEntryTapDetails<T> {
   const CalendarEntryTapDetails({required this.entry, required this.editable});
@@ -71,7 +71,7 @@ class CalendarEntryTapDetails<T> {
 
   /// Whether a host's form may change the entry: the calendar is
   /// [CalendarView.editable] and the history lock does not hold the entry
-  /// [ItemHold.locked].
+  /// [EntryHold.locked].
   final bool editable;
 }
 
@@ -115,7 +115,8 @@ class CalendarEntryTapDetails<T> {
 /// - Week: a timed grid of the selected day's week under the header's
 ///   card, its days in columns under a day header whose tap selects a day.
 /// - Month: the month's weeks under the header's card, each entry a chip
-///   on the days it covers, the weeks laid out as [monthLayout] says. A
+///   on the days it covers, from its start's day to the last day it has a
+///   part in, the weeks laid out as [monthLayout] says. A
 ///   tap on a chip reports the entry, and a tap anywhere else on a day
 ///   opens that day in Day where [views] lists Day, and otherwise selects
 ///   it. In edit mode a long press on a day reports a create through
@@ -123,11 +124,19 @@ class CalendarEntryTapDetails<T> {
 ///   free, selecting the day when it is in the month, or, where the lock
 ///   leaves no slot of [hours] that day, [onCreateRefused].
 ///
-/// In Week and Day a tap on a block, and in Month on a chip, reports the
-/// stored entry through [onEntryTap]. In edit mode, which [editable] turns
-/// on, Week's and Day's blocks move and resize, and a drag over empty slots
-/// reports a create through [onCreateRange], whose slots stay marked until
-/// its future completes. Out of edit mode the calendar is read-only. In
+/// An entry runs from its start to its end ([CalendarEntry]): Week and Day
+/// draw a timed entry as one block per shown day it covers, at its exact
+/// minutes, and an all-day entry as a bar across those days in a strip
+/// above the hours, and Agenda lists it under each day it covers with that
+/// day's part of it. In Week and Day a tap on a block or a bar, and in
+/// Month on a chip, reports the stored entry through [onEntryTap]. In edit
+/// mode, which [editable] turns on, Week's and Day's blocks move, keeping
+/// the entry's length, and resize, a bar dropped on a slot makes its entry
+/// an hour long there, and a block dropped on a day of the strip makes its
+/// entry all-day on that day; in Week bars move and resize by days. A drag
+/// over empty slots reports one continuous range through [onCreateRange],
+/// across days too, and one over the strip's empty days an all-day range
+/// of them, which stays marked until its future completes. Out of edit mode the calendar is read-only. In
 /// edit mode the history lock, which [lockPast] and [lockEarlierToday]
 /// choose ([HistoryLock.of]), keeps the past as it is. A pinch of two
 /// fingers on Week's, Day's or Month's grid sets the controller's zoom
@@ -170,6 +179,16 @@ class CalendarEntryTapDetails<T> {
 /// [views] lists the views the header's menu offers, in its order; a list
 /// that is empty or names a view twice throws an [ArgumentError] from the
 /// build, in a release build as in a debug one.
+///
+/// [slotMinutes] is the slot of Week's and Day's grids, one row each, the
+/// step their gestures snap to, the length of the slot Agenda's add button
+/// and Month's long press create, and the grid those round the history
+/// lock's first free time up to. A value [slotMinuteChoices] does not hold
+/// throws an [ArgumentError] from the build, in a release build as in a
+/// debug one, and [hours] off its grid ([DayHours.isOnSlotsOf]) fail an
+/// assertion in a debug build; the views show and schedule in [hours]
+/// rounded out to it ([DayHours.roundedOutTo]), which are [hours]
+/// themselves on the grid.
 class CalendarView<T> extends StatefulWidget {
   const CalendarView({
     super.key,
@@ -181,6 +200,7 @@ class CalendarView<T> extends StatefulWidget {
     this.lockEarlierToday = false,
     this.weekdays = WeekdaySet.all,
     this.hours = DayHours.allDay,
+    this.slotMinutes = defaultSlotMinutes,
     this.hourLabelFormat = HourLabelFormat.twentyFourHour,
     this.monthLayout = MonthLayout.fitScreen,
     this.maxDayCount,
@@ -238,8 +258,13 @@ class CalendarView<T> extends StatefulWidget {
   final WeekdaySet weekdays;
 
   /// The hours the calendar shows and schedules in; the store's hours must
-  /// be these.
+  /// be these, and they start and end on the grid of [slotMinutes], both of
+  /// which a debug build asserts.
   final DayHours hours;
+
+  /// The length of one slot, in minutes: one of [slotMinuteChoices], or the
+  /// build throws an [ArgumentError].
+  final int slotMinutes;
 
   /// The format Week's and Day's grids and Agenda's times label the hours
   /// in.
@@ -249,9 +274,13 @@ class CalendarView<T> extends StatefulWidget {
   /// not hold.
   final MonthLayout monthLayout;
 
-  /// The most days a resize of an entry's trailing edge in Week may give
-  /// it, past which the grid refuses the drop; null for no limit. A move
-  /// keeps the entry's day count.
+  /// The most days, counting each day it has any part of, that a create
+  /// drag across days in Week, over the slots or across the all-day strip,
+  /// a strip bar's day-edge resize, and Week's end handle dragged into a
+  /// later day may give a range: one dragged past them is held at the
+  /// latest range they admit, which a release writes or reports. A move
+  /// keeps the days an entry covers, except where it crosses a midnight,
+  /// and no limit applies to it. Null for no limit.
   final int? maxDayCount;
 
   /// Reads the current time, which the calendar reads when first built and
@@ -265,7 +294,8 @@ class CalendarView<T> extends StatefulWidget {
   /// Draws Week's and Day's blocks; null for the module's default.
   final CalendarBlockBuilder<T>? blockBuilder;
 
-  /// Draws Month's chips and cards; null for the module's default.
+  /// Draws Month's chips and cards, and the bars of Week's and Day's
+  /// all-day strip; null for the module's default.
   final CalendarChipBuilder<T>? chipBuilder;
 
   /// Draws Agenda's cards; null for the module's default.
@@ -288,15 +318,16 @@ class CalendarView<T> extends StatefulWidget {
   /// chip in Month; null leaves it out.
   final String? Function(CalendarEntry<T> entry)? entryKindOf;
 
-  /// A tap on a block in Week or Day, or on a chip in Month, of an entry
-  /// that is not pending and that the store holds; null reports nothing.
+  /// A tap on a block or a bar in Week or Day, or on a chip in Month, of an
+  /// entry that is not pending and that the store holds; null reports
+  /// nothing.
   final ValueChanged<CalendarEntryTapDetails<T>>? onEntryTap;
 
-  /// A create the calendar's gestures picked, in edit mode: the slots a
-  /// gesture picked in Week or Day, which stay marked until the future
+  /// A create the calendar's gestures picked, in edit mode: the range a
+  /// gesture picked in Week or Day, which stays marked until the future
   /// completes; a gap's first free slot in Agenda, the add button's; and a
   /// day's first free slot in Month, a long press's. Null reports nothing,
-  /// and the marked slots clear at once.
+  /// and the marked range clears at once.
   final Future<void> Function(CreateRange range)? onCreateRange;
 
   /// An edit request from an Agenda card, with the stored entry: a
@@ -342,6 +373,26 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// What [calendarViewsError] answers for [CalendarView.views], which the
   /// build throws.
   ArgumentError? _viewsError;
+
+  /// The error the build throws for a [CalendarView.slotMinutes] that
+  /// [slotMinuteChoices] does not hold, or null.
+  ArgumentError? get _slotMinutesError {
+    final slotMinutes = widget.slotMinutes;
+    if (slotMinuteChoices.contains(slotMinutes)) {
+      return null;
+    }
+    return ArgumentError.value(
+      slotMinutes,
+      "slotMinutes",
+      "is not one of $slotMinuteChoices",
+    );
+  }
+
+  /// The hours the views show and schedule in: [CalendarView.hours]
+  /// rounded out to the grid of [CalendarView.slotMinutes].
+  DayHours get _hours {
+    return widget.hours.roundedOutTo(widget.slotMinutes);
+  }
 
   /// The clock's time, read again at the start of each minute.
   late final ValueNotifier<DateTime> _now;
@@ -1081,7 +1132,8 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       CalendarEntryTapDetails<T>(
         entry: entry,
         editable:
-            widget.editable && _lock.holdOf(entry.time) != ItemHold.locked,
+            widget.editable &&
+            _lock.holdOf(entry.start, entry.end) != EntryHold.locked,
       ),
     );
   }
@@ -1094,15 +1146,16 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     return onCreateRange(range);
   }
 
+  /// Reports a create on [day] from [startMinute] to [endMinute] after its
+  /// midnight, or nothing where either is a time the clock skips.
   void _createIn(DateTime day, int startMinute, int endMinute) {
-    _createRange(
-      CreateRange(
-        day: day,
-        startMinute: startMinute,
-        endMinute: endMinute,
-        dayCount: 1,
-      ),
-    );
+    final base = dayNumber(day) * minutesPerDay;
+    final start = timeAtWallMinute(base + startMinute);
+    final end = timeAtWallMinute(base + endMinute);
+    if (start == null || end == null) {
+      return;
+    }
+    _createRange(CreateRange(start: start, end: end));
   }
 
   void _requestEdit(String id) {
@@ -1136,25 +1189,23 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// none after it is free; where the lock leaves no slot in the hours,
   /// reports [CalendarView.onCreateRefused] instead.
   void _openCreateFlow(DateTime day) {
-    final hours = widget.hours;
-    final earliest = _lock.earliestStartOn(day);
-    if (earliest > hours.end - minutesPerSlot) {
+    final hours = _hours;
+    final slot = widget.slotMinutes;
+    final earliest = _lock.earliestStartOn(day, slotMinutes: slot);
+    if (earliest > hours.end - slot) {
       widget.onCreateRefused?.call(day);
       return;
     }
     final free = widget.store.firstFreeRange(
       day,
+      slotMinutes: slot,
       from: earliest == 0 ? null : earliest,
     );
-    final start = math.max(free.start, earliest);
-    _createRange(
-      CreateRange(
-        day: day,
-        startMinute: start,
-        endMinute: start + minutesPerSlot,
-        dayCount: 1,
-      ),
-    );
+    if (wallMinuteOf(free.start) - dayNumber(day) * minutesPerDay >= earliest) {
+      _createRange(CreateRange(start: free.start, end: free.end));
+      return;
+    }
+    _createIn(day, earliest, earliest + slot);
   }
 
   CalendarHeaderDetails _headerDetails() {
@@ -1257,7 +1308,8 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
               store: widget.store,
               weekdays: widget.weekdays,
               format: widget.hourLabelFormat,
-              hours: widget.hours,
+              hours: _hours,
+              slotMinutes: widget.slotMinutes,
               editable: widget.editable,
               lock: _lock,
               selectedDay: _day,
@@ -1323,7 +1375,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                   today: _today.value,
                   now: _now,
                   onSelectDay: _select,
-                  onOpenItem: _openEntry,
+                  onOpenEntry: _openEntry,
                   onCreate: _createRange,
                   onZoom: (minSlotHeight, minDayWidth) {
                     controller.setZoom(
@@ -1335,7 +1387,8 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                   lockPast: widget.lockPast,
                   lockEarlierToday: widget.lockEarlierToday,
                   weekdays: widget.weekdays,
-                  hours: widget.hours,
+                  hours: _hours,
+                  slotMinutes: widget.slotMinutes,
                   hourLabelFormat: widget.hourLabelFormat,
                   minDayWidth: controller.minDayWidth,
                   minSlotHeight: controller.minSlotHeight,
@@ -1344,6 +1397,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                   // The week strip names Day's one day.
                   showsDayHeader: week,
                   blockBuilder: widget.blockBuilder,
+                  chipBuilder: widget.chipBuilder,
                   loadingBuilder: widget.loadingBuilder,
                   failureBuilder: widget.failureBuilder,
                 );
@@ -1378,14 +1432,14 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                   layout: widget.monthLayout,
                   minDayWidth: controller.minDayWidth,
                   weekScale: controller.monthWeekScale,
-                  hours: widget.hours,
+                  hours: _hours,
                   hourLabelFormat: widget.hourLabelFormat,
                   selectedDay: _day,
                   today: _today,
                   onSelectDay: _select,
                   onOpenDay: _openDay,
                   onCreateOnDay: widget.editable ? _createOn : null,
-                  onOpenItem: _openEntry,
+                  onOpenEntry: _openEntry,
                   onZoom: (weekScale, minDayWidth) {
                     controller.setZoom(
                       monthWeekScale: weekScale,
@@ -1411,10 +1465,19 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     if (error != null) {
       throw error;
     }
+    final slotError = _slotMinutesError;
+    if (slotError != null) {
+      throw slotError;
+    }
     assert(
       widget.store.hours == widget.hours,
       "A CalendarView's hours, ${widget.hours}, must be its store's, "
       "${widget.store.hours}: set the store's hours with them.",
+    );
+    assert(
+      widget.hours.isOnSlotsOf(widget.slotMinutes),
+      "A CalendarView's hours, ${widget.hours}, must start and end on the "
+      "grid of its ${widget.slotMinutes}-minute slots.",
     );
     final header = _buildHeader();
     final Widget view;

@@ -1,11 +1,11 @@
 /// What the calendar's settings choose: whether it is in edit mode, how far
 /// the history lock keeps the past as it is, the weekdays it shows and the
 /// one its weeks start on, the hours it shows
-/// and schedules in, how the timed grid labels its hours, and how Month
-/// fits its weeks. Beside them: the field errors, keyed as
-/// `validateItemJson` keys them, of an item outside the calendar's hours,
-/// [hoursErrorsOf]; and the names of Month's layouts in the settings sheet,
-/// [MonthLayoutLabel].
+/// and schedules in and the length of its slots, how the timed grid labels
+/// its hours, and how Month fits its weeks. Beside them: the field errors,
+/// keyed as `validateItemJson` keys them, of an item outside the calendar's
+/// hours, [hoursErrorsOf]; and the names of Month's layouts in the
+/// settings sheet, [MonthLayoutLabel].
 library;
 
 import 'package:flutter/foundation.dart';
@@ -13,19 +13,29 @@ import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 
-/// The field errors of an item from [start] to [end] minutes that does not
-/// lie in [hours], keyed as `validateItemJson` keys them: the start when it
-/// does not begin a slot inside them, the end when it does not end one.
-Map<String, String> hoursErrorsOf(int start, int end, DayHours hours) {
+/// The field errors of an item from [start] to [end] that [hours] do not
+/// hold ([DayHours.holdsTimes]), keyed as `validateItemJson` keys them: the
+/// start when the hours do not hold its time of day as a start, the end
+/// when they do not hold its minute on its last day as an end, each naming
+/// the first and the last time of the hours on the grid of
+/// [defaultSlotMinutes]. An all-day item has none.
+Map<String, String> hoursErrorsOf(
+  DateTime start,
+  DateTime end,
+  DayHours hours,
+) {
+  if (hours.holdsTimes(start, end)) {
+    return const <String, String>{};
+  }
   return <String, String>{
-    if (!hours.holdsStart(start))
-      "startMinute":
+    if (!hours.holdsStart(minuteOfDay(start)))
+      "start":
           "The start is ${clockLabel(hours.start)} to "
-          "${clockLabel(hours.end - minutesPerSlot)}, inside the calendar's "
-          "hours.",
-    if (!hours.holdsEnd(end))
-      "endMinute":
-          "The end is ${clockLabel(hours.start + minutesPerSlot)} to "
+          "${clockLabel(hours.end - defaultSlotMinutes)}, inside the "
+          "calendar's hours.",
+    if (!hours.holdsEnd(endMinuteOfDay(end)))
+      "end":
+          "The end is ${clockLabel(hours.start + defaultSlotMinutes)} to "
           "${clockLabel(hours.end)}, inside the calendar's hours.",
   };
 }
@@ -47,8 +57,9 @@ extension MonthLayoutLabel on MonthLayout {
 /// calendar is in [editing] mode, whether the history lock holds past days, [lockPast], and earlier
 /// today too, [lockEarlierToday], the [weekdays] it shows and the one its
 /// weeks start on, the
-/// [hours] it shows and schedules in, the [hourLabelFormat] the timed grid
-/// labels them in, and Month's [monthLayout].
+/// [hours] it shows and schedules in, the [slotMinutes] of its slots, the
+/// [hourLabelFormat] the timed grid labels them in, and Month's
+/// [monthLayout].
 @immutable
 class CalendarSettings {
   const CalendarSettings({
@@ -57,6 +68,7 @@ class CalendarSettings {
     this.lockEarlierToday = false,
     this.weekdays = WeekdaySet.all,
     this.hours = DayHours.allDay,
+    this.slotMinutes = defaultSlotMinutes,
     this.hourLabelFormat = HourLabelFormat.twentyFourHour,
     this.monthLayout = MonthLayout.fitScreen,
   });
@@ -83,7 +95,15 @@ class CalendarSettings {
   /// orders them in every view.
   final WeekdaySet weekdays;
 
+  /// The hours, which start and end on the grid of [slotMinutes] where
+  /// [withSlotMinutes] set it.
   final DayHours hours;
+
+  /// The length of the calendar's slots, in minutes, one of
+  /// [slotMinuteChoices]: Week's and Day's rows, the step of their
+  /// gestures and of the item form's times, and the slot a create from
+  /// Agenda or Month takes.
+  final int slotMinutes;
 
   final HourLabelFormat hourLabelFormat;
 
@@ -95,6 +115,7 @@ class CalendarSettings {
     bool? lockEarlierToday,
     WeekdaySet? weekdays,
     DayHours? hours,
+    int? slotMinutes,
     HourLabelFormat? hourLabelFormat,
     MonthLayout? monthLayout,
   }) {
@@ -104,8 +125,19 @@ class CalendarSettings {
       lockEarlierToday: lockEarlierToday ?? this.lockEarlierToday,
       weekdays: weekdays ?? this.weekdays,
       hours: hours ?? this.hours,
+      slotMinutes: slotMinutes ?? this.slotMinutes,
       hourLabelFormat: hourLabelFormat ?? this.hourLabelFormat,
       monthLayout: monthLayout ?? this.monthLayout,
+    );
+  }
+
+  /// These settings with slots of [slotMinutes], and the [hours] rounded out
+  /// to their grid ([DayHours.roundedOutTo]), so the calendar never shows
+  /// hours off it.
+  CalendarSettings withSlotMinutes(int slotMinutes) {
+    return copyWith(
+      slotMinutes: slotMinutes,
+      hours: hours.roundedOutTo(slotMinutes),
     );
   }
 
@@ -117,6 +149,7 @@ class CalendarSettings {
         other.lockEarlierToday == lockEarlierToday &&
         other.weekdays == weekdays &&
         other.hours == hours &&
+        other.slotMinutes == slotMinutes &&
         other.hourLabelFormat == hourLabelFormat &&
         other.monthLayout == monthLayout;
   }
@@ -129,6 +162,7 @@ class CalendarSettings {
       lockEarlierToday,
       weekdays,
       hours,
+      slotMinutes,
       hourLabelFormat,
       monthLayout,
     );
@@ -138,7 +172,8 @@ class CalendarSettings {
   String toString() {
     return "CalendarSettings(${editing ? "editing" : "viewing"}, "
         "${lockPast ? "past locked${lockEarlierToday ? " to now" : ""}, " : ""}"
-        "$weekdays, $hours, ${hourLabelFormat.name}, "
+        "$weekdays, $hours, $slotMinutes-minute slots, "
+        "${hourLabelFormat.name}, "
         "${monthLayout.name})";
   }
 }

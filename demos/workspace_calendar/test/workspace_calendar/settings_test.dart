@@ -1,17 +1,19 @@
 /// The calendar's settings, in the calendar bar and the settings sheet,
 /// and what they change: the hours the timed grids show and the store
-/// schedules in, the weekdays, and the least size of the grids' cells.
+/// schedules in, the weekdays, the slot length, and the least size of the
+/// grids' cells.
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
-import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 
@@ -25,10 +27,10 @@ Matcher near(double value) {
   return moreOrLessEquals(value, epsilon: 0.5);
 }
 
-/// Week's grid row of [minute] under hours that start at 08:00: row 0 is
-/// the day header and row 1 the room above the first slot.
+/// Week's grid row of [minute] under hours that start at 08:00
+/// ([gridRowOf]).
 int officeRow(int minute) {
-  return 2 + (minute - 8 * 60) ~/ 15;
+  return gridRowOf(minute);
 }
 
 /// Stores [item] through [api] before the calendar is pumped and returns
@@ -74,6 +76,23 @@ Future<void> setSlider(WidgetTester tester, Key key, double value) async {
   await tester.pumpAndSettle();
 }
 
+/// The open sheet's slot length buttons.
+SegmentedButton<int> slotLengthButtons(WidgetTester tester) {
+  return tester.widget<SegmentedButton<int>>(find.byKey(slotLengthKey));
+}
+
+/// Taps the open sheet's slot length button of [minutes].
+Future<void> chooseSlotLength(WidgetTester tester, int minutes) async {
+  final button = find.descendant(
+    of: find.byKey(slotLengthKey),
+    matching: find.text("$minutes"),
+  );
+  await tester.ensureVisible(button);
+  await tester.pumpAndSettle();
+  await tester.tap(button);
+  await tester.pumpAndSettle();
+}
+
 /// Opens the calendar bar, sets the hours to [start] to [end] o'clock and
 /// closes it.
 Future<void> pickHours(WidgetTester tester, int start, int end) async {
@@ -100,6 +119,19 @@ List<int?> offeredMinutes(WidgetTester tester, String label) {
     ),
   );
   return <int?>[for (final item in button.items!) item.value];
+}
+
+/// Picks [minute] in the form's [label] time field through the field's own
+/// callback, as a pick in its menu does.
+Future<void> chooseMinute(WidgetTester tester, String label, int minute) async {
+  final button = tester.widget<DropdownButton<int>>(
+    find.descendant(
+      of: dropdownFinder(label),
+      matching: find.byType(DropdownButton<int>),
+    ),
+  );
+  button.onChanged!(minute);
+  await tester.pumpAndSettle();
 }
 
 Finder arrowIn(String id, IconData icon) {
@@ -276,12 +308,9 @@ void main() {
       taskJson("Late", today, 19 * 60, 20 * 60),
     );
     await store(tester, api, taskJson("Run", thursday, 6 * 60, 7 * 60));
-    // 05:00 to 06:00 on Wednesday and Thursday.
-    await store(
-      tester,
-      api,
-      taskJson("Trip", wednesday, 5 * 60, 6 * 60, dayCount: 2),
-    );
+    // 05:00 to 06:00 on Wednesday and on Thursday.
+    await store(tester, api, taskJson("Trip", wednesday, 5 * 60, 6 * 60));
+    await store(tester, api, taskJson("Trip", thursday, 5 * 60, 6 * 60));
     await pumpCalendar(tester, api: api);
     await pickMode(tester, "Week");
     expect(blockFinder(lateId), findsOneWidget);
@@ -359,19 +388,22 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       find.descendant(
-        of: dropdownFinder("Start"),
+        of: dropdownFinder("Start time"),
         matching: find.text("17:45"),
       ),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: dropdownFinder("End"), matching: find.text("18:00")),
+      find.descendant(
+        of: dropdownFinder("End time"),
+        matching: find.text("18:00"),
+      ),
       findsOneWidget,
     );
   });
 
   testWidgets("H6 the form offers the hours' times and holds a change of "
-      "days or times to them", (tester) async {
+      "its times to them", (tester) async {
     final api = MockCalendarApi.seeded(today, latency: harnessLatency);
     final early = await store(
       tester,
@@ -385,16 +417,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text("Edit Task"), findsOneWidget);
 
-    expect(offeredMinutes(tester, "Start"), <int>[
+    expect(offeredMinutes(tester, "Start time"), <int>[
       7 * 60,
       for (var minute = 8 * 60; minute < 18 * 60; minute += 15) minute,
     ]);
-    expect(offeredMinutes(tester, "End"), <int>[
+    expect(offeredMinutes(tester, "End time"), <int>[
       for (var minute = 8 * 60 + 15; minute <= 18 * 60; minute += 15) minute,
     ]);
 
     final updates = updateCount(api);
-    await tester.enterText(find.widgetWithText(TextField, "Days"), "2");
+    await chooseMinute(tester, "End time", 10 * 60);
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pumpAndSettle();
     expect(
@@ -403,8 +435,8 @@ void main() {
     );
     expect(updateCount(api), updates);
 
-    // Keeping the stored days and times, a new title saves.
-    await tester.enterText(find.widgetWithText(TextField, "Days"), "1");
+    // Keeping the stored times, a new title saves.
+    await chooseMinute(tester, "End time", 9 * 60);
     await tester.enterText(find.widgetWithText(TextField, "Title"), "Earlier");
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pump(api.latency);
@@ -826,5 +858,73 @@ void main() {
     expect(find.text("Days shown"), findsNothing);
     expect(find.text("Hours"), findsNothing);
     expect(find.text("AM/PM hour labels"), findsNothing);
+  });
+  testWidgets("SL1 the sheet offers the six slot lengths and opens on the "
+      "one in force", (tester) async {
+    await pumpCalendar(tester);
+    await openSettings(tester);
+    expect(find.text("Slot length"), findsOneWidget);
+    expect(<int>[
+      for (final segment in slotLengthButtons(tester).segments) segment.value,
+    ], slotMinuteChoices);
+    expect(slotMinuteChoices, <int>[5, 10, 15, 20, 30, 60]);
+    expect(slotLengthButtons(tester).selected, <int>{15});
+  });
+
+  testWidgets("SL2 choosing 30 minutes gives the grid 48 slot rows, and the "
+      "slot height names them", (tester) async {
+    await pumpCalendar(tester, size: tall);
+    await pickMode(tester, "Week");
+    final grid = gridViewport(tester);
+    expect(grid.rectOfCell(2 + 96, 1), isNotNull);
+    await openSettings(tester);
+    await chooseSlotLength(tester, 30);
+    expect(slotLengthButtons(tester).selected, <int>{30});
+    expect(find.text("At least 16 px per 30 minutes"), findsOneWidget);
+    await closeSettings(tester);
+    // The day header, the room above the slots, 48 slots and the room
+    // below them.
+    expect(grid.rectOfCell(2 + 47, 1), isNotNull);
+    expect(grid.rectOfCell(2 + 48, 1), isNotNull);
+    expect(grid.rectOfCell(2 + 49, 1), isNull);
+    expect(
+      tester
+          .widget<TimedGrid<ItemPayload>>(find.byType(TimedGrid<ItemPayload>))
+          .slotMinutes,
+      30,
+    );
+  });
+
+  testWidgets("SL3 from 08:10-17:50 at slot 10, choosing 30 minutes gives "
+      "08:00-18:00", (tester) async {
+    const off = DayHours(8 * 60 + 10, 17 * 60 + 50);
+    const office = DayHours(8 * 60, 18 * 60);
+    final start = const CalendarSettings(hours: off, slotMinutes: 10);
+    expect(
+      start.withSlotMinutes(30),
+      start.copyWith(hours: office, slotMinutes: 30),
+    );
+    expect(start.withSlotMinutes(5), start.copyWith(slotMinutes: 5));
+
+    final controller = CalendarController();
+    addTearDown(controller.dispose);
+    final chosen = <CalendarSettings>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(splashFactory: NoSplash.splashFactory),
+        home: Scaffold(
+          body: CalendarSettingsSheet(
+            settings: start,
+            controller: controller,
+            onChanged: chosen.add,
+          ),
+        ),
+      ),
+    );
+    expect(slotLengthButtons(tester).selected, <int>{10});
+    await chooseSlotLength(tester, 30);
+    expect(chosen, hasLength(1));
+    expect(chosen.single.slotMinutes, 30);
+    expect(chosen.single.hours, office);
   });
 }

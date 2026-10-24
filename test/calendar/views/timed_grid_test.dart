@@ -1,6 +1,6 @@
-/// The timed grid: where an entry's days and minutes sit on its tracks
-/// and back from the span a drop reports, over some of the weekdays and
-/// part of the day, the create ranges its gestures pick, the weekdays,
+/// The timed grid: where an entry's pieces sit on its tracks, over some
+/// of the weekdays and part of the day, the create ranges its gestures
+/// pick, the weekdays,
 /// hours, hour format and least sizes it lays out from, the edit mode and
 /// lock choices its drags follow, what each of those defaults to, a
 /// block drawn again for a new payload, the theme's shadows, when its days
@@ -31,13 +31,9 @@ final int weekStartDay = dayNumber(DateTime(2026, 4, 20));
 /// The week from [weekStartDay], every day and every minute shown.
 final GridTracks week = GridTracks(firstDay: weekStartDay, dayCount: 7);
 
-CalendarEntryTime shapeOf(DateTime firstDay, int dayCount, int start, int end) {
-  return (
-    firstDay: dayNumber(firstDay),
-    dayCount: dayCount,
-    start: start,
-    end: end,
-  );
+/// [minute] minutes after [day]'s midnight.
+DateTime at(DateTime day, int minute) {
+  return DateTime(day.year, day.month, day.day, 0, minute);
 }
 
 final DateTime monday = DateTime(2026, 4, 20);
@@ -65,10 +61,10 @@ Future<void> pumpBoxed(
   await tester.pumpWidget(boxed(size, grid));
 }
 
-/// The grid's viewport: the one board keyed by entry id strings.
-RenderBoardViewport<String> viewportOf(WidgetTester tester) {
+/// The grid's viewport: the one board keyed by [GridKey]s.
+RenderBoardViewport<GridKey> viewportOf(WidgetTester tester) {
   return tester.allRenderObjects
-      .whereType<RenderBoardViewport<String>>()
+      .whereType<RenderBoardViewport<GridKey>>()
       .single;
 }
 
@@ -77,8 +73,16 @@ DateTime nineOClock() {
   return DateTime(2026, 4, 21, 9);
 }
 
-Finder blockFinder(String id) {
-  return find.byKey(blockKey(id));
+/// The block of [id]'s piece on [day], or with no [day] every block of
+/// [id], which for an entry on one shown day is its one block.
+Finder blockFinder(String id, [DateTime? day]) {
+  if (day != null) {
+    return find.byKey(blockKey(id, day));
+  }
+  return find.byWidgetPredicate((widget) {
+    final key = widget.key;
+    return key is ValueKey<String> && key.value.startsWith("block-$id@");
+  });
 }
 
 /// A data source that answers each read within the call, through a
@@ -103,8 +107,8 @@ class ReadSource implements CalendarDataSource<String> {
     return SynchronousFuture<List<CalendarEntry<String>>>(
       <CalendarEntry<String>>[
         for (final entry in entries)
-          if (entry.time.firstDay <= to &&
-              entry.time.firstDay + entry.time.dayCount - 1 >= from)
+          if (dayNumber(entry.start) <= to &&
+              lastDayNumberOf(entry.start, entry.end) >= from)
             entry,
       ],
     );
@@ -141,8 +145,8 @@ class CountingStore extends CachingCalendarStore<String> {
   }
 }
 
-/// An entry with the id and title [id] on [day] from [start] to [end]
-/// minutes, over [dayCount] days.
+/// An entry with the id and title [id] from [start] minutes after [day]'s
+/// midnight to [end] minutes after the midnight of its [dayCount]th day.
 CalendarEntry<String> entryOf(
   String id,
   DateTime day,
@@ -152,10 +156,8 @@ CalendarEntry<String> entryOf(
 }) {
   return CalendarEntry<String>(
     id: id,
-    day: day,
-    startMinute: start,
-    endMinute: end,
-    dayCount: dayCount,
+    start: at(day, start),
+    end: at(DateTime(day.year, day.month, day.day + dayCount - 1), end),
     title: id,
     color: const Color(0xFF336699),
     payload: id,
@@ -173,118 +175,76 @@ Widget failureText(BuildContext context, CalendarFailureState state) {
 }
 
 void main() {
-  group("S1 gridSpanOf", () {
-    test("places a day's slots in its column, below the header", () {
-      final tuesday = shapeOf(DateTime(2026, 4, 21), 1, 600, 780);
+  group("S1 pieceSpanOf", () {
+    test("places a piece's minutes in its column, below the header", () {
       expect(
-        gridSpanOf(tuesday, week),
+        pieceSpanOf(week, 2, 600, 780),
         const BoardSpan(rowStart: 41, colStart: 2, rowSpan: 12, colSpan: 1),
       );
     });
 
-    test("clips the days outside the week", () {
-      final fromFriday = shapeOf(DateTime(2026, 4, 17), 4, 1080, 1140);
-      expect(
-        gridSpanOf(fromFriday, week),
-        const BoardSpan(rowStart: 73, colStart: 1, rowSpan: 4, colSpan: 1),
+    test("places each piece of an entry from before the week in its own "
+        "day's column", () {
+      // Friday 18:00 to Tuesday 19:00: all of Monday, and Tuesday to 19:00.
+      final span = wallSpanOf(
+        DateTime(2026, 4, 17, 18),
+        DateTime(2026, 4, 21, 19),
       );
-      final fromSaturday = shapeOf(DateTime(2026, 4, 25), 4, 1080, 1140);
+      final onMonday = pieceOn(span, weekStartDay)!;
+      final onTuesday = pieceOn(span, weekStartDay + 1)!;
       expect(
-        gridSpanOf(fromSaturday, week),
-        const BoardSpan(rowStart: 73, colStart: 6, rowSpan: 4, colSpan: 2),
+        pieceSpanOf(week, 1, onMonday.start, onMonday.end),
+        const BoardSpan(rowStart: 1, colStart: 1, rowSpan: 96, colSpan: 1),
+      );
+      expect(
+        pieceSpanOf(week, 2, onTuesday.start, onTuesday.end),
+        const BoardSpan(rowStart: 1, colStart: 2, rowSpan: 76, colSpan: 1),
       );
     });
 
-    test("is null for an item with no day in the week", () {
-      final later = shapeOf(DateTime(2026, 5, 4), 1, 600, 660);
-      expect(gridSpanOf(later, week), isNull);
+    test("is null for a piece with no minute", () {
+      expect(pieceSpanOf(week, 2, 600, 600), isNull);
     });
 
-    test("clips to a one-day grid on both sides", () {
-      final wednesday = GridTracks(
-        firstDay: dayNumber(DateTime(2026, 4, 22)),
-        dayCount: 1,
-      );
-      final threeDays = shapeOf(DateTime(2026, 4, 21), 3, 1080, 1140);
+    test("lays a piece off the slot grid a fraction into its rows", () {
       expect(
-        gridSpanOf(threeDays, wednesday),
-        const BoardSpan(rowStart: 73, colStart: 1, rowSpan: 4, colSpan: 1),
+        pieceSpanOf(week, 2, 550, 590),
+        const BoardSpan(
+          rowStart: 37,
+          colStart: 2,
+          rowFraction: 10 / 15,
+          rowSpan: 2,
+          rowSpanFraction: 10 / 15,
+        ),
       );
-      final thursday = shapeOf(DateTime(2026, 4, 23), 1, 1080, 1140);
-      expect(gridSpanOf(thursday, wednesday), isNull);
     });
   });
 
-  group("S2 shapeFromSpan", () {
-    test("a move shifts the first day by the column change and the minutes "
-        "by the row change", () {
-      final tuesday = shapeOf(DateTime(2026, 4, 21), 1, 600, 780);
-      final from = gridSpanOf(tuesday, week)!;
-      final moved = shapeFromSpan(
-        tuesday,
-        from,
-        const BoardSpan(rowStart: 45, colStart: 3, rowSpan: 12, colSpan: 1),
-        week,
+  group("S2 createRangeOver", () {
+    test("a drag over days is one range from the earlier slot's start to "
+        "the later slot's end", () {
+      final range = CreateRange(
+        start: DateTime(2026, 4, 20, 10),
+        end: DateTime(2026, 4, 22, 12, 15),
       );
-      expect(moved, shapeOf(DateTime(2026, 4, 22), 1, 660, 840));
+      expect(
+        createRangeOver(week, (row: 41, col: 1), (row: 49, col: 3)),
+        range,
+      );
+      expect(
+        createRangeOver(week, (row: 49, col: 3), (row: 41, col: 1)),
+        range,
+      );
     });
 
-    test("a right-edge resize of one column adds a day", () {
-      final tuesday = shapeOf(DateTime(2026, 4, 21), 1, 600, 780);
-      final from = gridSpanOf(tuesday, week)!;
-      final resized = shapeFromSpan(
-        tuesday,
-        from,
-        const BoardSpan(rowStart: 41, colStart: 2, rowSpan: 12, colSpan: 2),
-        week,
+    test("a drag within a day picks the slots between its ends", () {
+      expect(
+        createRangeOver(week, (row: 44, col: 2), (row: 41, col: 2)),
+        CreateRange(
+          start: DateTime(2026, 4, 21, 10),
+          end: DateTime(2026, 4, 21, 11),
+        ),
       );
-      expect(resized, shapeOf(DateTime(2026, 4, 21), 2, 600, 780));
-    });
-
-    test("an item clipped at the week's start keeps its hidden days", () {
-      final fromFriday = shapeOf(DateTime(2026, 4, 17), 4, 1080, 1140);
-      final from = gridSpanOf(fromFriday, week)!;
-      final moved = shapeFromSpan(
-        fromFriday,
-        from,
-        const BoardSpan(rowStart: 73, colStart: 2, rowSpan: 4, colSpan: 1),
-        week,
-      );
-      expect(moved, shapeOf(DateTime(2026, 4, 18), 4, 1080, 1140));
-      final toSunday = shapeFromSpan(
-        fromFriday,
-        from,
-        const BoardSpan(rowStart: 73, colStart: 1, rowSpan: 4, colSpan: 7),
-        week,
-      );
-      expect(toSunday, shapeOf(DateTime(2026, 4, 17), 10, 1080, 1140));
-    });
-
-    test("an item clipped at the week's end ends on the column its right "
-        "edge is dropped on", () {
-      final fromSaturday = shapeOf(DateTime(2026, 4, 25), 4, 1080, 1140);
-      final from = gridSpanOf(fromSaturday, week)!;
-      final shortened = shapeFromSpan(
-        fromSaturday,
-        from,
-        const BoardSpan(rowStart: 73, colStart: 6, rowSpan: 4, colSpan: 1),
-        week,
-      );
-      expect(shortened, shapeOf(DateTime(2026, 4, 25), 1, 1080, 1140));
-      final movedLeft = shapeFromSpan(
-        fromSaturday,
-        from,
-        const BoardSpan(rowStart: 73, colStart: 5, rowSpan: 4, colSpan: 2),
-        week,
-      );
-      expect(movedLeft, shapeOf(DateTime(2026, 4, 24), 4, 1080, 1140));
-      final longer = shapeFromSpan(
-        fromSaturday,
-        from,
-        const BoardSpan(rowStart: 73, colStart: 6, rowSpan: 6, colSpan: 2),
-        week,
-      );
-      expect(longer, shapeOf(DateTime(2026, 4, 25), 4, 1080, 1170));
     });
   });
 
@@ -314,16 +274,16 @@ void main() {
       expect(noWednesday.lastColumnUpTo(weekStartDay - 1), 0);
     });
 
-    test("gridSpanOf joins the columns either side of a hidden day", () {
+    test("a piece lies in its own day's column, after the hidden day", () {
       expect(
-        gridSpanOf(shapeOf(tuesday, 3, 600, 660), noWednesday),
-        const BoardSpan(rowStart: 41, colStart: 2, rowSpan: 4, colSpan: 2),
-      );
-      expect(
-        gridSpanOf(shapeOf(wednesday, 2, 600, 660), noWednesday),
+        pieceSpanOf(
+          noWednesday,
+          noWednesday.columnOf(dayNumber(thursday))!,
+          600,
+          660,
+        ),
         const BoardSpan(rowStart: 41, colStart: 3, rowSpan: 4, colSpan: 1),
       );
-      expect(gridSpanOf(shapeOf(wednesday, 1, 600, 660), noWednesday), isNull);
     });
 
     test("the weekend leaves a workweek grid", () {
@@ -335,69 +295,25 @@ void main() {
       expect(workweek.columnCount, 5);
       expect(workweek.dateAt(5), DateTime(2026, 4, 24));
       expect(
-        gridSpanOf(shapeOf(DateTime(2026, 4, 24), 3, 600, 660), workweek),
+        pieceSpanOf(
+          workweek,
+          workweek.columnOf(dayNumber(DateTime(2026, 4, 24)))!,
+          600,
+          660,
+        ),
         const BoardSpan(rowStart: 41, colStart: 5, rowSpan: 4, colSpan: 1),
       );
-      expect(
-        gridSpanOf(shapeOf(DateTime(2026, 4, 25), 2, 600, 660), workweek),
-        isNull,
-      );
-    });
-
-    test("a move shifts the days by the days between the columns", () {
-      final one = shapeOf(tuesday, 1, 600, 660);
-      expect(
-        shapeFromSpan(
-          one,
-          gridSpanOf(one, noWednesday)!,
-          const BoardSpan(rowStart: 41, colStart: 3, rowSpan: 4, colSpan: 1),
-          noWednesday,
-        ),
-        shapeOf(thursday, 1, 600, 660),
-      );
-      final three = shapeOf(tuesday, 3, 600, 660);
-      expect(
-        shapeFromSpan(
-          three,
-          gridSpanOf(three, noWednesday)!,
-          const BoardSpan(rowStart: 41, colStart: 3, rowSpan: 4, colSpan: 2),
-          noWednesday,
-        ),
-        shapeOf(thursday, 3, 600, 660),
-      );
-    });
-
-    test("a right-edge resize ends on its last column's day", () {
-      final one = shapeOf(tuesday, 1, 600, 660);
-      expect(
-        shapeFromSpan(
-          one,
-          gridSpanOf(one, noWednesday)!,
-          const BoardSpan(rowStart: 41, colStart: 2, rowSpan: 4, colSpan: 2),
-          noWednesday,
-        ),
-        shapeOf(tuesday, 3, 600, 660),
-      );
+      expect(workweek.columnOf(dayNumber(DateTime(2026, 4, 25))), isNull);
     });
 
     test("a create range over the hidden day covers it", () {
       expect(
         createRangeOver(noWednesday, (row: 44, col: 3), (row: 41, col: 2)),
-        CreateRange(
-          day: tuesday,
-          startMinute: 600,
-          endMinute: 660,
-          dayCount: 3,
-        ),
+        CreateRange(start: at(tuesday, 600), end: at(thursday, 660)),
       );
       expect(
         createRangeAt(noWednesday, (row: 41, col: 3)),
-        CreateRange(
-          day: thursday,
-          startMinute: 600,
-          endMinute: 615,
-          dayCount: 1,
-        ),
+        CreateRange(start: at(thursday, 600), end: at(thursday, 615)),
       );
     });
   });
@@ -419,63 +335,38 @@ void main() {
       expect(office.rowOf(9 * 60), 5);
     });
 
-    test("gridSpanOf clips the minutes outside the hours", () {
+    test("pieceSpanOf clips the minutes outside the hours", () {
       expect(
-        gridSpanOf(shapeOf(tuesday, 1, 9 * 60, 10 * 60), office),
+        pieceSpanOf(office, 2, 9 * 60, 10 * 60),
         const BoardSpan(rowStart: 5, colStart: 2, rowSpan: 4, colSpan: 1),
       );
       expect(
-        gridSpanOf(shapeOf(tuesday, 1, 7 * 60, 9 * 60), office),
+        pieceSpanOf(office, 2, 7 * 60, 9 * 60),
         const BoardSpan(rowStart: 1, colStart: 2, rowSpan: 4, colSpan: 1),
       );
       expect(
-        gridSpanOf(shapeOf(tuesday, 1, 17 * 60, 19 * 60), office),
+        pieceSpanOf(office, 2, 17 * 60, 19 * 60),
         const BoardSpan(rowStart: 37, colStart: 2, rowSpan: 4, colSpan: 1),
       );
-      expect(gridSpanOf(shapeOf(tuesday, 1, 6 * 60, 8 * 60), office), isNull);
-      expect(gridSpanOf(shapeOf(tuesday, 1, 18 * 60, 19 * 60), office), isNull);
-    });
-
-    test("a move reads the minutes from the rows below the first hour", () {
-      final shape = shapeOf(tuesday, 1, 9 * 60, 10 * 60);
-      expect(
-        shapeFromSpan(
-          shape,
-          gridSpanOf(shape, office)!,
-          const BoardSpan(rowStart: 9, colStart: 2, rowSpan: 4, colSpan: 1),
-          office,
-        ),
-        shapeOf(tuesday, 1, 10 * 60, 11 * 60),
-      );
+      expect(pieceSpanOf(office, 2, 6 * 60, 8 * 60), isNull);
+      expect(pieceSpanOf(office, 2, 18 * 60, 19 * 60), isNull);
     });
 
     test("create ranges start at the hours and stop at their end", () {
       expect(
         createRangeAt(office, (row: 1, col: 2)),
-        CreateRange(
-          day: tuesday,
-          startMinute: 8 * 60,
-          endMinute: 8 * 60 + 15,
-          dayCount: 1,
-        ),
+        CreateRange(start: at(tuesday, 8 * 60), end: at(tuesday, 8 * 60 + 15)),
       );
       expect(
         createRangeAt(office, (row: 40, col: 2)),
         CreateRange(
-          day: tuesday,
-          startMinute: 17 * 60 + 45,
-          endMinute: 18 * 60,
-          dayCount: 1,
+          start: at(tuesday, 17 * 60 + 45),
+          end: at(tuesday, 18 * 60),
         ),
       );
       expect(
         createRangeOver(office, (row: 1, col: 2), (row: 4, col: 2)),
-        CreateRange(
-          day: tuesday,
-          startMinute: 8 * 60,
-          endMinute: 9 * 60,
-          dayCount: 1,
-        ),
+        CreateRange(start: at(tuesday, 8 * 60), end: at(tuesday, 9 * 60)),
       );
     });
   });
@@ -485,9 +376,8 @@ void main() {
     final day = DateTime(2026, 4, 21);
     final note = CalendarEntry<String>(
       id: "note-1",
-      day: day,
-      startMinute: 10 * 60,
-      endMinute: 11 * 60,
+      start: at(day, 10 * 60),
+      end: at(day, 11 * 60),
       title: "Note",
       color: const Color(0xFF336699),
       payload: "first",
@@ -511,7 +401,7 @@ void main() {
           today: day,
           now: now,
           onSelectDay: (day) {},
-          onOpenItem: (id) {},
+          onOpenEntry: (id) {},
           onCreate: (range) async {},
           blockBuilder: (context, entry, details) {
             calls.add(entry);
@@ -560,7 +450,7 @@ void main() {
         today: tuesday,
         now: now,
         onSelectDay: (day) {},
-        onOpenItem: (id) {},
+        onOpenEntry: (id) {},
         onCreate: (range) async {},
         weekdays: WeekdaySet.workweek,
         hours: const DayHours(8 * 60, 18 * 60),
@@ -615,9 +505,8 @@ void main() {
     CalendarEntry<String> entry(String id, DateTime day, int start, int end) {
       return CalendarEntry<String>(
         id: id,
-        day: day,
-        startMinute: start,
-        endMinute: end,
+        start: at(day, start),
+        end: at(day, end),
         title: id,
         color: const Color(0xFF336699),
         payload: id,
@@ -649,7 +538,7 @@ void main() {
         today: tuesday,
         now: now,
         onSelectDay: (day) {},
-        onOpenItem: (id) {},
+        onOpenEntry: (id) {},
         onCreate: (range) async {},
         editable: editable,
         lockPast: lockPast,
@@ -660,8 +549,8 @@ void main() {
 
     bool dragEnabled() {
       return tester
-          .widget<Board<String, CalendarShownEntry<String>>>(
-            find.byType(Board<String, CalendarShownEntry<String>>),
+          .widget<Board<GridKey, GridShape<String>>>(
+            find.byType(Board<GridKey, GridShape<String>>),
           )
           .drag!
           .enabled;
@@ -669,7 +558,7 @@ void main() {
 
     Finder handleOf(String id) {
       return find.descendant(
-        of: find.byKey(blockKey(id)),
+        of: blockFinder(id),
         matching: find.byType(BoardDelayedDragHandle),
       );
     }
@@ -753,9 +642,8 @@ void main() {
     CalendarEntry<String> entry(String id, DateTime day, int start, int end) {
       return CalendarEntry<String>(
         id: id,
-        day: day,
-        startMinute: start,
-        endMinute: end,
+        start: at(day, start),
+        end: at(day, end),
         title: id,
         color: const Color(0xFF336699),
         payload: id,
@@ -776,8 +664,8 @@ void main() {
 
     bool dragEnabled() {
       return tester
-          .widget<Board<String, CalendarShownEntry<String>>>(
-            find.byType(Board<String, CalendarShownEntry<String>>),
+          .widget<Board<GridKey, GridShape<String>>>(
+            find.byType(Board<GridKey, GridShape<String>>),
           )
           .drag!
           .enabled;
@@ -785,7 +673,7 @@ void main() {
 
     Finder handleOf(String id) {
       return find.descendant(
-        of: find.byKey(blockKey(id)),
+        of: blockFinder(id),
         matching: find.byType(BoardDelayedDragHandle),
       );
     }
@@ -809,7 +697,7 @@ void main() {
         today: tuesday,
         now: now,
         onSelectDay: (day) {},
-        onOpenItem: (id) {},
+        onOpenEntry: (id) {},
         onCreate: (range) async {},
       ),
     );
@@ -842,7 +730,7 @@ void main() {
           today: tuesday,
           now: now,
           onSelectDay: (day) {},
-          onOpenItem: (id) {},
+          onOpenEntry: (id) {},
           onCreate: (range) async {},
           editable: true,
         ),
@@ -862,7 +750,7 @@ void main() {
           today: tuesday,
           now: now,
           onSelectDay: (day) {},
-          onOpenItem: (id) {},
+          onOpenEntry: (id) {},
           onCreate: (range) async {},
           editable: true,
           lockPast: true,
@@ -890,7 +778,7 @@ void main() {
         today: tuesday,
         now: now,
         onSelectDay: (day) {},
-        onOpenItem: (id) {},
+        onOpenEntry: (id) {},
         onCreate: (range) async {},
         minDayWidth: minDayWidth,
         minSlotHeight: minSlotHeight,
@@ -956,7 +844,7 @@ void main() {
             today: tuesday,
             now: now,
             onSelectDay: (day) {},
-            onOpenItem: (id) {},
+            onOpenEntry: (id) {},
             onCreate: (range) async {},
             editable: true,
           ),
@@ -1013,7 +901,7 @@ void main() {
         today: tuesday,
         now: now,
         onSelectDay: (day) {},
-        onOpenItem: (id) {},
+        onOpenEntry: (id) {},
         onCreate: (range) async {},
         minSlotHeight: minSlotHeight,
         storeRange: range,
@@ -1100,7 +988,7 @@ void main() {
         today: tuesday,
         now: now,
         onSelectDay: (day) {},
-        onOpenItem: (id) {},
+        onOpenEntry: (id) {},
         onCreate: (range) async {},
         editable: true,
         storeRange: (first: first, last: addDays(first, 6)),
@@ -1109,20 +997,22 @@ void main() {
 
     await pumpBoxed(tester, size, grid(monday));
     await tester.pumpAndSettle();
+    // Saturday 10:00 to Tuesday 11:00, in two blocks of each week.
+    expect(blockFinder("trip"), findsNWidgets(2));
     final gesture = await tester.startGesture(
-      tester.getCenter(blockFinder("trip")),
+      tester.getCenter(blockFinder("trip", saturday)),
     );
     await tester.pump(kLongPressTimeout + kPressTimeout);
     await gesture.up();
     await tester.pumpAndSettle();
-    expect(find.byKey(blockHandlesKey("trip")), findsOneWidget);
+    expect(find.byKey(blockHandlesKey("trip")), findsNWidgets(2));
 
     // A chevron's step: the owner asks the store for the next week, which
     // notifies within the call, and builds the grid on it.
     store.show(nextMonday, nextSunday);
     await tester.pumpWidget(boxed(size, grid(nextMonday)));
     await tester.pumpAndSettle();
-    expect(blockFinder("trip"), findsOneWidget);
+    expect(blockFinder("trip"), findsNWidgets(2));
     expect(find.byKey(blockHandlesKey("trip")), findsNothing);
   });
 }

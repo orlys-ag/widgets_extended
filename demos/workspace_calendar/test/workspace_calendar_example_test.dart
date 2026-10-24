@@ -84,7 +84,7 @@ List<String> topRowShortNames(WidgetTester tester) {
 }
 
 bool hasMarker(WidgetTester tester, int month, int day) {
-  return tester.widget<DayCell>(dayFinder(2026, month, day)).hasItems;
+  return tester.widget<DayCell>(dayFinder(2026, month, day)).hasEntries;
 }
 
 void main() {

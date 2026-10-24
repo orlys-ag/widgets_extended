@@ -6,6 +6,11 @@ import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
 import 'calendar_schema.dart';
 
+/// [minute] minutes after [day]'s midnight.
+DateTime _at(DateTime day, int minute) {
+  return DateTime(day.year, day.month, day.day, 0, minute);
+}
+
 /// A task kept from the original demo: [day] counts whole days from today,
 /// [start] and [end] are minutes after midnight, and [status] is a Task
 /// status value.
@@ -242,8 +247,9 @@ const List<_WeekEntry> _weekEntries = <_WeekEntry>[
 /// [today]; the meetings and deadlines of the Monday-to-Sunday week
 /// holding [today]; "Day off", an Out of office from 09:00 to 17:00 on the
 /// first day of that week, Monday first, that holds no kept task; and
-/// "Conference trip", an Out of office from 09:00 to 17:00 on five days
-/// from the first Monday at least 19 days after [today].
+/// "Conference trip", an all-day Out of office over the five days from
+/// the first Monday at least 19 days after [today], from that Monday's
+/// start to the start of the day five days on.
 List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
   final day = dateOnly(today);
   final weekStart = weekStartOf(day);
@@ -256,9 +262,8 @@ List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
       _envelope(
         type: CalendarItemType.task,
         title: task.title,
-        day: taskDay,
-        start: task.start,
-        end: task.end,
+        start: _at(taskDay, task.start),
+        end: _at(taskDay, task.end),
         fields: <String, Object?>{"status": task.status},
       ),
     );
@@ -268,9 +273,8 @@ List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
       _envelope(
         type: entry.type,
         title: entry.title,
-        day: addDays(weekStart, entry.weekday),
-        start: entry.start,
-        end: entry.end,
+        start: _at(addDays(weekStart, entry.weekday), entry.start),
+        end: _at(addDays(weekStart, entry.weekday), entry.end),
         fields: entry.fields,
       ),
     );
@@ -289,9 +293,8 @@ List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
     _envelope(
       type: CalendarItemType.outOfOffice,
       title: "Day off",
-      day: dayOff,
-      start: 9 * 60,
-      end: 17 * 60,
+      start: _at(dayOff, 9 * 60),
+      end: _at(dayOff, 17 * 60),
       fields: const <String, Object?>{"reason": "vacation"},
     ),
   );
@@ -301,10 +304,8 @@ List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
     _envelope(
       type: CalendarItemType.outOfOffice,
       title: "Conference trip",
-      day: tripStart,
-      start: 9 * 60,
-      end: 17 * 60,
-      dayCount: 5,
+      start: tripStart,
+      end: addDays(tripStart, 5),
       fields: const <String, Object?>{"reason": "travel"},
     ),
   );
@@ -314,19 +315,15 @@ List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
 Map<String, Object?> _envelope({
   required CalendarItemType type,
   required String title,
-  required DateTime day,
-  required int start,
-  required int end,
-  int dayCount = 1,
+  required DateTime start,
+  required DateTime end,
   required Map<String, Object?> fields,
 }) {
   return <String, Object?>{
     "type": type.id,
     "title": title,
-    "day": isoDate(day),
-    "startMinute": start,
-    "endMinute": end,
-    "dayCount": dayCount,
+    "start": isoDateTime(start),
+    "end": isoDateTime(end),
     "fields": <String, Object?>{
       for (final entry in fields.entries)
         entry.key: entry.value is List

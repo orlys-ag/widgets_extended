@@ -18,6 +18,7 @@ import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 import 'day_cell.dart';
+import 'entry_split.dart';
 import 'pinch_zoom.dart';
 
 /// The height of a day's number strip, which the weeks' lanes start
@@ -266,11 +267,14 @@ class MonthChip<T> {
 }
 
 /// Where each of [shown] sits on the month board of [grid]: one placement
-/// per week of the grid whose shown days the item covers, on that week's
-/// row and on the columns from the first shown day on or after the item's
-/// first day to the last shown day on or before its last. A week whose
-/// shown days the item misses has none, which is the clipping
-/// `gridSpanOf` applies to the timed grid's columns.
+/// per week of the grid whose shown days the entry covers, from the day of
+/// its start to the last day it has a part in ([lastDayNumberOf]), on that
+/// week's row and on the columns from the first shown day on or after its
+/// first day to the last shown day on or before its last. So an entry
+/// covering more than one day, timed or all-day, is a bar across them, and
+/// a one-day timed entry a chip. A week whose shown days the entry misses
+/// has none, as the timed grid shows no piece on a day it has no column
+/// for.
 List<BoardPlacement<MonthChip<T>>> monthPlacementsOf<T>(
   Iterable<CalendarShownEntry<T>> shown,
   MonthGrid grid,
@@ -286,9 +290,9 @@ List<BoardPlacement<MonthChip<T>>> monthPlacementsOf<T>(
   }
   final placements = <BoardPlacement<MonthChip<T>>>[];
   for (final entry in shown) {
-    final item = entry.entry;
-    final first = dayNumber(item.day);
-    final last = first + item.dayCount - 1;
+    final calendarEntry = entry.entry;
+    final first = dayNumber(calendarEntry.start);
+    final last = lastDayNumberOf(calendarEntry.start, calendarEntry.end);
     for (var row = 0; row < weeks; row++) {
       final weekFirst = grid.weekdays.weekStartOfDay(days[row * columns]);
       final weekLast = weekFirst + DateTime.daysPerWeek - 1;
@@ -327,68 +331,88 @@ List<BoardPlacement<MonthChip<T>>> monthPlacementsOf<T>(
 
 /// Which of [shown] a month board of [grid] shows as chips under [hours],
 /// and how many of the others each cell counts, at
-/// `row * columnCount + col`. An item with no minute inside the hours has
-/// no chip, and counts on each shown day of the grid it covers, in
-/// `earlier` when it starts before the hours and in `later` otherwise,
-/// as Agenda's `dayListRowsOf` counts it; every other item is `inside`.
+/// `row * columnCount + col`. An all-day entry is inside the hours, and so
+/// is a timed one any piece of which ([pieceOn]) on a day of the grid has a
+/// minute inside them; every other entry has no chip, and each of its
+/// pieces counts on its own day where the grid shows that day, in
+/// `earlier` where it ends at or before the hours' start and in `later`
+/// otherwise, as Agenda's `dayListRowsOf` counts it.
 ({List<CalendarShownEntry<T>> inside, Int32List earlier, Int32List later})
 splitMonthHours<T>(
   Iterable<CalendarShownEntry<T>> shown,
   MonthGrid grid,
   DayHours hours,
 ) {
-  final inside = <CalendarShownEntry<T>>[];
-  final before = <CalendarShownEntry<T>>[];
-  final after = <CalendarShownEntry<T>>[];
-  for (final entry in shown) {
-    final item = entry.entry;
-    if (math.min(item.endMinute, hours.end) >
-        math.max(item.startMinute, hours.start)) {
-      inside.add(entry);
-    } else if (item.startMinute < hours.start) {
-      before.add(entry);
-    } else {
-      after.add(entry);
-    }
-  }
   final columns = grid.columnCount;
-  Int32List countsOf(List<CalendarShownEntry<T>> outside) {
-    final counts = Int32List(grid.weekCount * columns);
-    // A placement covers the shown days of its week the item covers.
-    for (final placement in monthPlacementsOf(outside, grid)) {
-      final span = placement.span;
-      final first = span.rowStart * columns + span.colStart;
-      for (var cell = first; cell < first + span.colSpan; cell++) {
-        counts[cell]++;
-      }
+  final inside = <CalendarShownEntry<T>>[];
+  final earlier = Int32List(grid.weekCount * columns);
+  final later = Int32List(grid.weekCount * columns);
+  // The cell of each day the grid shows, by dayNumber, made once per call.
+  final cells = <int, int>{
+    for (var row = 0; row < grid.weekCount; row++)
+      for (var col = 0; col < columns; col++)
+        dayNumber(grid.dateAt(row, col)): row * columns + col,
+  };
+  for (final entry in shown) {
+    final calendarEntry = entry.entry;
+    if (calendarEntry.isAllDay) {
+      inside.add(entry);
+      continue;
     }
-    return counts;
+    final span = wallSpanOf(calendarEntry.start, calendarEntry.end);
+    final first = dayNumber(calendarEntry.start);
+    final last = lastDayNumberOf(calendarEntry.start, calendarEntry.end);
+    var holds = false;
+    for (var day = first; day <= last && !holds; day++) {
+      final piece = pieceOn(span, day);
+      holds =
+          cells.containsKey(day) &&
+          piece != null &&
+          math.min(piece.end, hours.end) > math.max(piece.start, hours.start);
+    }
+    if (holds) {
+      inside.add(entry);
+      continue;
+    }
+    for (var day = first; day <= last; day++) {
+      final cell = cells[day];
+      final piece = pieceOn(span, day);
+      if (cell == null || piece == null) {
+        continue;
+      }
+      (piece.end <= hours.start ? earlier : later)[cell]++;
+    }
   }
-
-  return (inside: inside, earlier: countsOf(before), later: countsOf(after));
+  return (inside: inside, earlier: earlier, later: later);
 }
 
 /// The month board's lane order among bars whose columns in a week are
-/// the same: the item that starts on an earlier day first, then the one
-/// covering more days, then the earlier start time, the title and the id.
-/// The board orders bars by their first and their last column before it,
-/// so a week's chips stack by the day each starts in the week, the longer
-/// first, and a bar continuing from the week before stacks above a chip
-/// starting on its first shown day.
+/// the same: the entry that starts on an earlier day first, then the one
+/// covering more days, then an all-day entry before a timed one, then the
+/// earlier start, the title and the id. The board orders bars by their
+/// first and their last column before it, so a week's chips stack by the
+/// day each starts in the week, the longer first, and a bar continuing
+/// from the week before stacks above a chip starting on its first shown
+/// day.
 int compareMonthChips<T>(MonthChip<T> a, MonthChip<T> b) {
   final x = a.entry.entry;
   final y = b.entry.entry;
-  // `day` is the first day at local midnight, so this compares days and
-  // allocates nothing.
-  final byDay = x.day.compareTo(y.day);
+  final xFirst = dayNumber(x.start);
+  final yFirst = dayNumber(y.start);
+  final byDay = xFirst.compareTo(yFirst);
   if (byDay != 0) {
     return byDay;
   }
-  final byLength = y.dayCount.compareTo(x.dayCount);
+  final xDays = lastDayNumberOf(x.start, x.end) - xFirst;
+  final yDays = lastDayNumberOf(y.start, y.end) - yFirst;
+  final byLength = yDays.compareTo(xDays);
   if (byLength != 0) {
     return byLength;
   }
-  final byStart = x.startMinute.compareTo(y.startMinute);
+  if (x.isAllDay != y.isAllDay) {
+    return x.isAllDay ? -1 : 1;
+  }
+  final byStart = x.start.compareTo(y.start);
   if (byStart != 0) {
     return byStart;
   }
@@ -594,7 +618,7 @@ enum MonthLayout {
 /// weeks and the days, and each day of another month lies on the
 /// background colour.
 ///
-/// A tap on a chip reports [onOpenItem], a tap anywhere else on a day
+/// A tap on a chip reports [onOpenEntry], a tap anywhere else on a day
 /// [onOpenDay], and a long press on a day outside its chips
 /// [onCreateOnDay], or where there is none [onOpenDay] as a tap does; the
 /// last two give the board the keyboard, whose arrow
@@ -641,7 +665,7 @@ class MonthBoard<T> extends StatefulWidget {
     required this.onSelectDay,
     required this.onOpenDay,
     required this.onCreateOnDay,
-    required this.onOpenItem,
+    required this.onOpenEntry,
     this.onZoom,
     this.chipBuilder,
     this.loadingBuilder,
@@ -690,7 +714,7 @@ class MonthBoard<T> extends StatefulWidget {
   final ValueChanged<DateTime>? onCreateOnDay;
 
   /// The chip of this item, which is not pending, was tapped.
-  final ValueChanged<String> onOpenItem;
+  final ValueChanged<String> onOpenEntry;
 
   /// Reports the week scale and the least day width a pinch zooms to,
   /// which the board shows once [weekScale] and [minDayWidth] bring them;
@@ -758,6 +782,20 @@ const _Hidden _noneHidden = (
 
 /// The hours the days' banners name to a screen reader, and their format.
 typedef _BannerHours = ({DayHours hours, HourLabelFormat format});
+
+/// A split of the entries the store shows on a month's days: the entries
+/// it [read], for [grid] and [hours]; those [inside] the hours, and on each
+/// day the counts wholly before them, [earlier], and after them, [later]
+/// ([splitMonthHours]); and the bars of those inside ([monthPlacementsOf]).
+typedef _MonthSplit<T> = ({
+  List<CalendarShownEntry<T>> read,
+  MonthGrid grid,
+  DayHours hours,
+  List<CalendarShownEntry<T>> inside,
+  Int32List earlier,
+  Int32List later,
+  List<BoardPlacement<MonthChip<T>>> placements,
+});
 
 class _MonthBoardState<T> extends State<MonthBoard<T>>
     with TickerProviderStateMixin {
@@ -925,6 +963,14 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// The board's background for [MonthBoard.grid], made once per grid and
   /// styles, so a build that keeps both hands the board the same painter.
   late _MonthGridPainter _background;
+
+  /// The last split of the entries the store shows on the grid's days
+  /// ([_splitOf]), with the bars [monthPlacementsOf] made of it, the entry
+  /// list it read, and the grid and hours it split for; null before the
+  /// first layout. A new grid, new hours and the store's notify set
+  /// [_syncPending], so while none is pending it is the split of what the
+  /// board shows, which a change of the lanes or of the cards fits again.
+  _MonthSplit<T>? _split;
 
   /// The latest sync's placements, by chip key.
   Map<String, BoardPlacement<MonthChip<T>>> _placed =
@@ -1183,9 +1229,9 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     create(day);
   }
 
-  void _openItem(String id) {
+  void _openEntry(String id) {
     if (!_pinch.pinched.value) {
-      widget.onOpenItem(id);
+      widget.onOpenEntry(id);
     }
   }
 
@@ -1279,14 +1325,16 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// and so one structural notification; the sync also tells each day what
   /// it hides ([_writeHidden]). A sync the store, the grid or the hours owe
   /// reads the store before the axes, since the banners it counts decide
-  /// the room above and below the lanes. Called from the layout callback,
-  /// so the first frame lays the board out at its size.
+  /// the room above and below the lanes, and splits only what the store
+  /// answers anew ([_splitOf]); one the lanes or the cards alone owe fits
+  /// the kept split's bars again ([_split]). Called from the layout
+  /// callback, so the first frame lays the board out at its size.
   ///
   /// A sync animates only when it follows the store alone, its days are
   /// ready and the last sync's were. Any other sync runs under
   /// [BoardAnimationStyle.disabled], which [_scheduleStyleRestore] lifts,
   /// and settles in its batch every enter and exit in flight
-  /// ([_setItemsSettled]). A refit alone leaves the style as it is, so the
+  /// ([_placeSettled]). A refit alone leaves the style as it is, so the
   /// motion in flight runs on: the replaced axis lands its own track
   /// resizes, and a new row axis takes each week's first measurement
   /// without animating it.
@@ -1309,11 +1357,13 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     final cards = monthShowsCards(width, fitted);
     final laneExtent = cards ? monthCardExtent : monthLaneExtent;
     final ready = _daysReady;
-    var split = _syncPending ? _splitShown(grid, hours, ready) : null;
-    if (split != null) {
+    if (_syncPending) {
+      final split = _splitOf(grid, hours, ready);
+      _split = split;
       _earlierBand = split.earlier.any(_isCounted);
       _laterBand = split.later.any(_isCounted);
     }
+    final split = _split!;
     final padding =
         monthStripHeight + (_earlierBand ? monthHoursBannerExtent : 0.0);
     final lanes = layout == MonthLayout.fitScreen
@@ -1342,13 +1392,10 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     }
     List<BoardPlacement<MonthChip<T>>>? placements;
     Int32List? hidden;
-    if (sync) {
-      split ??= _splitShown(grid, hours, ready);
-    }
     if (sync && !ready) {
       placements = <BoardPlacement<MonthChip<T>>>[];
     } else if (sync) {
-      final all = monthPlacementsOf(split!.inside, grid);
+      final all = split.placements;
       if (lanes == null) {
         placements = all;
       } else {
@@ -1381,7 +1428,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
         return;
       }
       if (settles) {
-        _setItemsSettled(placements, next);
+        _placeSettled(placements, next);
       } else {
         _board.setItems(placements);
       }
@@ -1432,7 +1479,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       lanes,
       laneExtent,
       padding,
-      split!,
+      split,
       _laterBand ? monthDayLanesOf(placements, grid) : null,
     );
     if (remeasure) {
@@ -1449,23 +1496,62 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   }
 
   /// The items the store shows on [grid]'s days split by [hours]
-  /// ([splitMonthHours]); none, and no day counting any, while they are not
-  /// [ready].
-  ({List<CalendarShownEntry<T>> inside, Int32List earlier, Int32List later})
-  _splitShown(MonthGrid grid, DayHours hours, bool ready) {
+  /// ([splitMonthHours]), with their bars ([monthPlacementsOf]); none, and
+  /// no day counting any, while they are not [ready]. Where the store
+  /// answers the entries the last split read, the identical instances with
+  /// the same pending flags in the same order, for the same grid and hours,
+  /// the split is that one, [_split], and runs nothing.
+  _MonthSplit<T> _splitOf(MonthGrid grid, DayHours hours, bool ready) {
+    final read = ready
+        ? widget.store.entriesBetween(grid.firstDay, grid.lastDay)
+        : <CalendarShownEntry<T>>[];
+    final kept = _split;
+    if (kept != null &&
+        _sameGrid(kept.grid, grid) &&
+        kept.hours == hours &&
+        _sameShown(kept.read, read)) {
+      return kept;
+    }
+    noteEntrySplit();
     if (!ready) {
       final cells = grid.weekCount * grid.columnCount;
       return (
+        read: read,
+        grid: grid,
+        hours: hours,
         inside: <CalendarShownEntry<T>>[],
         earlier: Int32List(cells),
         later: Int32List(cells),
+        placements: <BoardPlacement<MonthChip<T>>>[],
       );
     }
-    return splitMonthHours(
-      widget.store.entriesBetween(grid.firstDay, grid.lastDay),
-      grid,
-      hours,
+    final split = splitMonthHours(read, grid, hours);
+    return (
+      read: read,
+      grid: grid,
+      hours: hours,
+      inside: split.inside,
+      earlier: split.earlier,
+      later: split.later,
+      placements: monthPlacementsOf(split.inside, grid),
     );
+  }
+
+  /// Whether [a] and [b] hold the identical entries with the same pending
+  /// flags, in the same order.
+  static bool _sameShown<T>(
+    List<CalendarShownEntry<T>> a,
+    List<CalendarShownEntry<T>> b,
+  ) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (var i = 0; i < a.length; i++) {
+      if (!identical(a[i].entry, b[i].entry) || a[i].pending != b[i].pending) {
+        return false;
+      }
+    }
+    return true;
   }
 
   static bool _isCounted(int count) {
@@ -1486,8 +1572,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     int? lanes,
     double laneExtent,
     double padding,
-    ({List<CalendarShownEntry<T>> inside, Int32List earlier, Int32List later})
-    split,
+    _MonthSplit<T> split,
     Int32List? dayLanes,
   ) {
     final cells = grid.weekCount * grid.columnCount;
@@ -1551,7 +1636,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// retiring an entering one; the second retires the carried keys and
   /// adds the left-out ones whole, under new ids. Inside the sync's batch
   /// the two calls make one notification.
-  void _setItemsSettled(
+  void _placeSettled(
     List<BoardPlacement<MonthChip<T>>> placements,
     Map<String, BoardPlacement<MonthChip<T>>> next,
   ) {
@@ -1581,7 +1666,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// after the batch of the sync that disabled it, so it runs at the next
   /// frame's start, before that frame's layout and after the sync's own
   /// layout has measured the weeks under the disabled style. That sync
-  /// left nothing in flight ([_setItemsSettled]), so a sync the next frame
+  /// left nothing in flight ([_placeSettled]), so a sync the next frame
   /// lays out animates.
   void _scheduleStyleRestore() {
     if (_restoreScheduled) {
@@ -1680,7 +1765,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
         card: card,
         builder: _barBuilder,
         kindOf: widget.entryKindOf,
-        onOpen: _openItem,
+        onOpen: _openEntry,
       ),
     );
     _chips[chip.key] = (chip: chip, widget: built);
@@ -1852,21 +1937,31 @@ String _dayLabel(DateTime day) {
 
 /// What a screen reader says for [entry]'s chip: its title, the [kind]
 /// where there is one, its days and times, and that it is pending while it
-/// is.
+/// is: "Title, Monday, April 20, all day", "Title, Monday, April 20 to
+/// Wednesday, April 22, all day", "Title, Monday, April 20, 09:10 to
+/// 09:50", and for a timed entry over days "Title, Monday, April 20, 22:00
+/// to Tuesday, April 21, 02:00".
 String _chipLabel<T>(CalendarShownEntry<T> entry, String? kind) {
-  final item = entry.entry;
-  final times =
-      "${clockLabel(item.startMinute)} to ${clockLabel(item.endMinute)}";
+  final calendarEntry = entry.entry;
+  final first = dateOfDayNumber(dayNumber(calendarEntry.start));
+  final last = dateOfDayNumber(
+    lastDayNumberOf(calendarEntry.start, calendarEntry.end),
+  );
+  final start = clockLabel(minuteOfDay(calendarEntry.start));
+  final end = clockLabel(endMinuteOfDay(calendarEntry.end));
   final String when;
-  if (item.dayCount == 1) {
-    when = "${_dayLabel(item.day)}, $times";
+  if (calendarEntry.isAllDay) {
+    when = first == last
+        ? "${_dayLabel(first)}, all day"
+        : "${_dayLabel(first)} to ${_dayLabel(last)}, all day";
+  } else if (first == last) {
+    when = "${_dayLabel(first)}, $start to $end";
   } else {
-    final last = addDays(item.day, item.dayCount - 1);
-    when = "${_dayLabel(item.day)} to ${_dayLabel(last)}, $times each day";
+    when = "${_dayLabel(first)}, $start to ${_dayLabel(last)}, $end";
   }
   final label = kind == null
-      ? "${item.title}, $when"
-      : "${item.title}, $kind, $when";
+      ? "${calendarEntry.title}, $when"
+      : "${calendarEntry.title}, $kind, $when";
   return entry.pending ? "$label, pending" : label;
 }
 
@@ -1942,11 +2037,11 @@ class _MonthDayCell extends StatelessWidget {
             label,
             if (isToday) "today",
             if (hides.earlier > 0)
-              "${moreItemsLabel(hides.earlier)} before "
+              "${moreEntriesLabel(hides.earlier)} before "
                   "${hourLabel(hours.hours.start, hours.format)}",
             if (hides.count > 0) _hiddenLabel(hides.count),
             if (hides.later > 0)
-              "${moreItemsLabel(hides.later)} after "
+              "${moreEntriesLabel(hides.later)} after "
                   "${hourLabel(hours.hours.end, hours.format)}",
           ].join(", "),
           hint: "Opens the day",

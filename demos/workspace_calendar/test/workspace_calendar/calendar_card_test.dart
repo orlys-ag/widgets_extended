@@ -390,7 +390,7 @@ void main() {
     await tester.pump(harnessLatency);
     await tester.pumpAndSettle();
     expect(find.text("Today, April 21"), findsOneWidget);
-    expect(tester.widget<DayCell>(dayFinder(2026, 6, 10)).hasItems, isTrue);
-    expect(tester.widget<DayCell>(dayFinder(2026, 6, 11)).hasItems, isFalse);
+    expect(tester.widget<DayCell>(dayFinder(2026, 6, 10)).hasEntries, isTrue);
+    expect(tester.widget<DayCell>(dayFinder(2026, 6, 11)).hasEntries, isFalse);
   });
 }

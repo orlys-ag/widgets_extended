@@ -6,7 +6,6 @@ library;
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:flutter/gestures.dart';
@@ -186,10 +185,8 @@ void main() {
     await createBeforePump(tester, api, <String, Object?>{
       "type": "meeting",
       "title": "Pairing",
-      "day": "2026-04-22",
-      "startMinute": 8 * 60 + 15,
-      "endMinute": 9 * 60,
-      "dayCount": 1,
+      "start": "2026-04-22T08:15",
+      "end": "2026-04-22T09:00",
       "fields": <String, Object?>{"location": "Lab"},
     });
     final week = await listAll(tester, api, monday, addDays(monday, 6));
@@ -208,10 +205,8 @@ void main() {
     final viewport = gridViewport(tester);
     var checked = 0;
     for (final item in week) {
-      final start = item["startMinute"]! as int;
-      final end = item["endMinute"]! as int;
-      final first = rowOf(start);
-      final last = rowOf(end) - 1;
+      final first = rowOf(minuteOfDay(startOfJson(item)));
+      final last = rowOf(endMinuteOfDay(endOfJson(item))) - 1;
       if (last < viewport.firstVisibleRow || first > viewport.lastVisibleRow) {
         continue;
       }
@@ -273,10 +268,14 @@ void main() {
         continue;
       }
       placed++;
-      final day = parseIsoDate(item["day"]! as String)!;
-      final col = colOf(daysBetween(monday, day));
-      final first = cellRect(tester, rowOf(item["startMinute"]! as int), col);
-      final last = cellRect(tester, rowOf(item["endMinute"]! as int) - 1, col);
+      final start = startOfJson(item);
+      final col = colOf(daysBetween(monday, dateOnly(start)));
+      final first = cellRect(tester, rowOf(minuteOfDay(start)), col);
+      final last = cellRect(
+        tester,
+        rowOf(endMinuteOfDay(endOfJson(item))) - 1,
+        col,
+      );
       final rect = tester.getRect(blockFinder(id));
       expect(rect.topLeft, nearOffset(first.topLeft), reason: id);
       expect(rect.bottomRight, nearOffset(last.bottomRight), reason: id);
@@ -364,19 +363,21 @@ void main() {
 
     await createAt(tester, rowOf(14 * 60), colOf(2), "Meeting");
     expect(find.text("New Meeting"), findsOneWidget);
-    expect(find.text("2026-04-22"), findsOneWidget);
+    expectFormDays("2026-04-22", 1);
     expect(
       find.descendant(
-        of: dropdownFinder("Start"),
+        of: dropdownFinder("Start time"),
         matching: find.text("14:00"),
       ),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: dropdownFinder("End"), matching: find.text("14:15")),
+      find.descendant(
+        of: dropdownFinder("End time"),
+        matching: find.text("14:15"),
+      ),
       findsOneWidget,
     );
-    expect(fieldText(tester, "Days"), "1");
     expect(formButton("Delete"), findsNothing);
 
     await tester.enterText(fieldFinder("Title"), "Design sync");
@@ -410,10 +411,10 @@ void main() {
       tester.getSize(blockTitled("Design sync")).width,
       lessThan(dayWidth - 1.0),
     );
-    final created =
+    final key =
         (tester.widget(blockTitled("Design sync")).key! as ValueKey<String>)
-            .value
-            .substring("block-".length);
+            .value;
+    final created = key.substring("block-".length, key.indexOf("@"));
     await tester.pumpAndSettle();
     expect(find.text("New Meeting"), findsNothing);
     final slot = cellRect(tester, rowOf(14 * 60), colOf(2));
@@ -440,20 +441,23 @@ void main() {
     await createAt(tester, rowOf(23 * 60 + 45), colOf(2), "Task");
     expect(
       find.descendant(
-        of: dropdownFinder("Start"),
+        of: dropdownFinder("Start time"),
         matching: find.text("23:45"),
       ),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: dropdownFinder("End"), matching: find.text("24:00")),
+      find.descendant(
+        of: dropdownFinder("End time"),
+        matching: find.text("24:00"),
+      ),
       findsOneWidget,
     );
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
   });
 
-  testWidgets("W3 a range across empty cells creates its rectangle", (
+  testWidgets("W3 a range across empty cells creates its continuous range", (
     tester,
   ) async {
     final api = await pumpCalendar(tester, editing: true);
@@ -472,19 +476,21 @@ void main() {
       expect(find.text("New item"), findsOneWidget);
       await tester.tap(find.text("Task").last);
       await tester.pumpAndSettle();
-      expect(find.text(day), findsOneWidget);
+      expectFormDays(day, int.parse(days));
       expect(
         find.descendant(
-          of: dropdownFinder("Start"),
+          of: dropdownFinder("Start time"),
           matching: find.text(start),
         ),
         findsOneWidget,
       );
       expect(
-        find.descendant(of: dropdownFinder("End"), matching: find.text(end)),
+        find.descendant(
+          of: dropdownFinder("End time"),
+          matching: find.text(end),
+        ),
         findsOneWidget,
       );
-      expect(fieldText(tester, "Days"), days);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     }
@@ -581,7 +587,9 @@ void main() {
     vertical.jumpTo(before);
     await tester.pumpAndSettle();
 
-    // A held range fills its rectangle; a cancel clears it.
+    // A held range fills its time in each day it covers, Saturday from the
+    // pressed slot on and Sunday up to the focus's slot; a cancel clears
+    // it.
     gesture = await tester.startGesture(
       centerOf(tester, from, saturday),
       kind: PointerDeviceKind.mouse,
@@ -589,17 +597,21 @@ void main() {
     await gesture.moveTo(centerOf(tester, to, sunday));
     await tester.pump();
     final viewport = gridViewport(tester);
-    final covered = viewport
-        .rectOfCell(from, saturday)!
-        .expandToInclude(viewport.rectOfCell(to, sunday)!);
     var canvas = paintGridBackground(tester);
-    expect(
-      canvas.fillsOf(HarborColors.primaryTint).where((rect) {
-        return rect.contains(covered.topLeft + const Offset(1.0, 1.0)) &&
-            rect.contains(covered.bottomRight - const Offset(1.0, 1.0));
-      }),
-      isNotEmpty,
-    );
+    bool marks(int row, int col) {
+      final cell = viewport.rectOfCell(row, col)!;
+      return canvas.fillsOf(HarborColors.primaryTint).any((rect) {
+        return rect.contains(cell.topLeft + const Offset(1.0, 1.0)) &&
+            rect.contains(cell.bottomRight - const Offset(1.0, 1.0));
+      });
+    }
+
+    expect(marks(from, saturday), isTrue);
+    expect(marks(to + 1, saturday), isTrue);
+    expect(marks(from, sunday), isTrue);
+    expect(marks(to, sunday), isTrue);
+    expect(marks(from - 1, saturday), isFalse);
+    expect(marks(to + 1, sunday), isFalse);
     await gesture.cancel();
     await tester.pump();
     await tester.pump(oneFrame);
@@ -701,8 +713,7 @@ void main() {
     expect(find.text("New item"), findsOneWidget);
     await tester.tap(find.text("Task").last);
     await tester.pumpAndSettle();
-    expect(find.text("2026-04-25"), findsOneWidget);
-    expect(fieldText(tester, "Days"), "2");
+    expectFormDays("2026-04-25", 2);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
@@ -753,13 +764,13 @@ void main() {
 
     await createAt(tester, rowOf(14 * 60), colOf(5), "Meeting");
     await tester.enterText(fieldFinder("Title"), "Review");
-    await tester.enterText(fieldFinder("Days"), "x");
+    await chooseOption(tester, "End time", "13:00");
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
     expect(
       find.descendant(
-        of: fieldFinder("Days"),
-        matching: find.text("The item covers 1 to 366 days."),
+        of: dropdownFinder("End time"),
+        matching: find.text("The end must be after the start."),
       ),
       findsOneWidget,
     );
@@ -846,7 +857,7 @@ void main() {
     await tester.pump(latency);
     await tester.pumpAndSettle();
     expect(
-      (await stored(tester, api, brainstormId)).day,
+      firstDayOf(await stored(tester, api, brainstormId)),
       DateTime(2026, 4, 25),
     );
 
@@ -874,32 +885,11 @@ void main() {
       api,
       taskJson("Quick check", DateTime(2026, 4, 23), 12 * 60, 12 * 60 + 15),
     );
+    // Saturday 15:00 to Sunday 16:00.
     await createBeforePump(
       tester,
       api,
-      taskJson(
-        "Handover",
-        DateTime(2026, 4, 17),
-        18 * 60,
-        19 * 60,
-        dayCount: 4,
-      ),
-    );
-    await createBeforePump(
-      tester,
-      api,
-      taskJson("Retreat", DateTime(2026, 4, 25), 19 * 60, 20 * 60, dayCount: 3),
-    );
-    await createBeforePump(
-      tester,
-      api,
-      taskJson(
-        "Late shift",
-        DateTime(2026, 4, 26),
-        21 * 60,
-        22 * 60,
-        dayCount: 3,
-      ),
+      taskJson("Weekend", DateTime(2026, 4, 25), 15 * 60, 16 * 60, dayCount: 2),
     );
     final quickCheck = await idOn(
       tester,
@@ -907,51 +897,53 @@ void main() {
       DateTime(2026, 4, 23),
       "Quick check",
     );
-    final handover = await idOn(tester, api, DateTime(2026, 4, 20), "Handover");
-    final retreat = await idOn(tester, api, DateTime(2026, 4, 25), "Retreat");
-    final lateShift = await idOn(
-      tester,
-      api,
-      DateTime(2026, 4, 26),
-      "Late shift",
-    );
+    final weekend = await idOn(tester, api, DateTime(2026, 4, 25), "Weekend");
     await pumpCalendar(tester, editing: true, api: api, size: tall);
     await pickMode(tester, "Week");
     final requests = api.requests.length;
+    final saturday = blockFinder(weekend, DateTime(2026, 4, 25));
+    final sunday = blockFinder(weekend, DateTime(2026, 4, 26));
 
-    /// Drops [id] at [target] and expects it back in its slot with nothing
-    /// sent. The grid's own refusals show no snackbar, where a refusal the
-    /// store makes at the drop reports one.
-    Future<void> refused(String id, Offset target, {bool byGrid = true}) async {
-      final before = tester.getRect(blockFinder(id));
-      await moveBlock(tester, blockFinder(id), target);
+    /// Drops [block] at [target] and expects it back in its slot with
+    /// nothing sent. The grid's own refusals show no snackbar, where a
+    /// refusal the store makes at the drop reports one.
+    Future<void> refused(
+      Finder block,
+      Offset target, {
+      bool byGrid = true,
+    }) async {
+      final before = tester.getRect(block);
+      await moveBlock(tester, block, target);
       if (byGrid) {
-        expect(find.byType(SnackBar), findsNothing, reason: id);
+        expect(find.byType(SnackBar), findsNothing);
       }
       await tester.pumpAndSettle();
-      expect(tester.getRect(blockFinder(id)), before, reason: id);
-      expect(api.requests, hasLength(requests), reason: id);
+      expect(tester.getRect(block), before);
+      expect(api.requests, hasLength(requests));
     }
 
-    // Onto the hour gutter, from Sunday: one column there would move the
-    // Sunday-to-Tuesday Task a week earlier, onto Monday and Tuesday, so
-    // the gutter test alone refuses it. Then onto the header row.
-    await refused(lateShift, cellRect(tester, rowOf(21 * 60), 0).topLeft);
-    await refused(quickCheck, cellRect(tester, 0, colOf(3)).topLeft);
-    // One column right puts the clipped Friday-to-Monday Task on Monday
-    // 16:00, inside "Day off".
-    await refused(handover, cellRect(tester, rowOf(16 * 60), colOf(1)).topLeft);
-
-    // Saturday 17:00 puts the Saturday-to-Monday Task on Monday
-    // 2026-04-27 over "Retro prep", which the grid does not show but the
-    // store has read with April.
+    // Onto the hour gutter, from Sunday, which the gutter test alone
+    // refuses. Then onto the header row.
+    await refused(sunday, cellRect(tester, rowOf(10 * 60), 0).topLeft);
     await refused(
-      retreat,
-      cellRect(tester, rowOf(17 * 60), colOf(5)).topLeft,
+      blockFinder(quickCheck),
+      cellRect(tester, 0, colOf(3)).topLeft,
+    );
+    // Monday 16:00 puts the item's 25 hours over "Day off", and from any
+    // time of Monday or Tuesday they meet an item of that day or the next,
+    // so the drop finds no free time.
+    await refused(saturday, cellRect(tester, rowOf(16 * 60), colOf(0)).topLeft);
+
+    // Sunday 08:00 puts the item from Sunday 08:00 to 09:00 on Monday
+    // 2026-04-27, over "Plan the sprint goals", 08:30 to 09:00, which the
+    // grid does not show but the store has read with April.
+    await refused(
+      saturday,
+      cellRect(tester, rowOf(8 * 60), colOf(6)).topLeft,
       byGrid: false,
     );
     expect(
-      find.text(const CalendarOverlapException(<String>[retroPrepId]).message),
+      find.text(const CalendarOverlapException(<String>["item-10"]).message),
       findsOneWidget,
     );
   });
@@ -1019,7 +1011,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       find.descendant(
-        of: find.byKey(itemCardKey(designCritiqueId)),
+        of: find.byKey(entryCardKey(designCritiqueId)),
         matching: find.text("Design review"),
       ),
       findsOneWidget,
@@ -1086,7 +1078,7 @@ void main() {
     for (var i = 0; i < 25; i++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
-    final card = find.byKey(itemCardKey(uxFlowId));
+    final card = find.byKey(entryCardKey(uxFlowId));
     // Whether the card lies in [day]'s block: below its header and above
     // the next day's.
     bool cardIn(DateTime day) {
@@ -1347,8 +1339,8 @@ void main() {
 
     await createAt(tester, rowOf(18 * 60), colOf(0), "Task");
     await tester.enterText(fieldFinder("Title"), "Dentist");
-    await chooseOption(tester, "Start", "10:00");
-    await chooseOption(tester, "End", "11:00");
+    await chooseOption(tester, "Start time", "10:00");
+    await chooseOption(tester, "End time", "11:00");
     await tester.tap(saveFinder());
     await tester.pump();
     await tester.pump(api.latency);
@@ -1360,8 +1352,8 @@ void main() {
     expect(find.text("New Task"), findsOneWidget);
     expect(fieldText(tester, "Title"), "Dentist");
 
-    await chooseOption(tester, "Start", "18:00", delta: 100.0);
-    await chooseOption(tester, "End", "19:00", delta: 100.0);
+    await chooseOption(tester, "Start time", "18:00", delta: 100.0);
+    await chooseOption(tester, "End time", "19:00", delta: 100.0);
     api.failurePolicy = (request) {
       return "The server is down.";
     };
@@ -1383,48 +1375,12 @@ void main() {
 
   testWidgets("W14 the resize strips, and no shared time", (tester) async {
     final api = MockCalendarApi.seeded(today, latency: harnessLatency);
-    await createBeforePump(
-      tester,
-      api,
-      taskJson("Retreat", DateTime(2026, 4, 25), 19 * 60, 20 * 60, dayCount: 3),
-    );
-    await createBeforePump(
-      tester,
-      api,
-      taskJson(
-        "Handover",
-        DateTime(2026, 4, 17),
-        18 * 60,
-        19 * 60,
-        dayCount: 4,
-      ),
-    );
-    await createBeforePump(
-      tester,
-      api,
-      taskJson(
-        "Year plan",
-        DateTime(2025, 4, 20),
-        20 * 60,
-        21 * 60,
-        dayCount: maxDayCount,
-      ),
-    );
-    final retreat = await idOn(tester, api, DateTime(2026, 4, 25), "Retreat");
-    final handover = await idOn(tester, api, DateTime(2026, 4, 20), "Handover");
-    final yearPlan = await idOn(
-      tester,
-      api,
-      DateTime(2026, 4, 20),
-      "Year plan",
-    );
     await pumpCalendar(tester, editing: true, api: api, size: tall);
     await pickMode(tester, "Week");
 
-    final board = tester.widget<Board<String, ShownItem>>(
-      find.byType(Board<String, ShownItem>),
+    final board = tester.widget<Board<GridKey, GridShape<ItemPayload>>>(
+      find.byType(Board<GridKey, GridShape<ItemPayload>>),
     );
-    expect(board.drag!.resizeEdges, BoardResizeEdges.trailing);
     expect(board.drag!.primaryResizeEdges, BoardResizeEdges.both);
     final dayWidth = cellRect(tester, rowOf(9 * 60), colOf(0)).width;
     final slot = cellRect(tester, rowOf(9 * 60), colOf(0)).height;
@@ -1450,25 +1406,15 @@ void main() {
       return Offset(rect.center.dx, rect.bottom - 3.0);
     }
 
-    Offset rightStrip(String id) {
-      final rect = tester.getRect(blockFinder(id));
-      return Offset(rect.right - 3.0, rect.center.dy);
-    }
-
     await dragStrip(
       brainstormId,
       bottomStrip(brainstormId),
       Offset(0.0, 2 * slot),
     );
-    expect((await stored(tester, api, brainstormId)).endMinute, 15 * 60 + 30);
-
-    // The right strip onto Wednesday, where a single-day item holds
-    // 11:00 to 12:00, would make a two-day item share it.
-    var requests = api.requests.length;
-    final uxFlow = tester.getRect(blockFinder(uxFlowId));
-    await dragStrip(uxFlowId, rightStrip(uxFlowId), Offset(dayWidth, 0.0));
-    expect(api.requests, hasLength(requests));
-    expect(tester.getRect(blockFinder(uxFlowId)), uxFlow);
+    expect(
+      (await stored(tester, api, brainstormId)).end,
+      atMinute(today, 15 * 60 + 30),
+    );
 
     // A single-day item cannot share another single-day item's time: the
     // drop onto Wednesday 11:00, where "Review onboarding copy" sits until
@@ -1483,37 +1429,13 @@ void main() {
     await tester.pumpAndSettle();
     final landed = await stored(tester, api, brainstormId);
     expect(
-      (landed.day, landed.startMinute, landed.endMinute),
-      (DateTime(2026, 4, 23), 11 * 60, 12 * 60 + 30),
+      (landed.start, landed.end),
+      (
+        atMinute(DateTime(2026, 4, 23), 11 * 60),
+        atMinute(DateTime(2026, 4, 23), 12 * 60 + 30),
+      ),
     );
     expect(tester.getSize(blockFinder(reviewId)).width, near(dayWidth));
-
-    // The right strip of an item that ends after the week ends it on the
-    // column it is dropped on.
-    await dragStrip(retreat, rightStrip(retreat), Offset(-dayWidth, 0.0));
-    final shortened = await stored(tester, api, retreat);
-    expect(shortened.day, DateTime(2026, 4, 25));
-    expect(shortened.dayCount, 1);
-
-    // The right strip of an item that starts before the week keeps its
-    // first day.
-    await dragStrip(handover, rightStrip(handover), Offset(6 * dayWidth, 0.0));
-    final lengthened = await stored(tester, api, handover);
-    expect(lengthened.day, DateTime(2026, 4, 17));
-    expect(lengthened.dayCount, 10);
-    await tester.tap(blockFinder(handover));
-    await tester.pumpAndSettle();
-    expect(fieldText(tester, "Days"), "10");
-    await tester.tap(formButton("Cancel"));
-    await tester.pumpAndSettle();
-
-    // A drop that would make an item longer than the longest allowed is
-    // refused.
-    requests = api.requests.length;
-    final year = tester.getRect(blockFinder(yearPlan));
-    await dragStrip(yearPlan, rightStrip(yearPlan), Offset(dayWidth, 0.0));
-    expect(api.requests, hasLength(requests));
-    expect(tester.getRect(blockFinder(yearPlan)), year);
   });
 
   testWidgets("W15 a range drag lays nothing out", (tester) async {
@@ -1600,7 +1522,9 @@ void main() {
     await pumpCalendar(tester);
     await pickMode(tester, "Week");
     final mondayHeader = headerFinder(monday);
-    final boardTop = tester.getRect(find.byType(Board<String, ShownItem>)).top;
+    final boardTop = tester
+        .getRect(find.byType(Board<GridKey, GridShape<ItemPayload>>))
+        .top;
     expect(tester.getRect(mondayHeader).top, boardTop);
     final noonLabel = gutterLabelFinder("12:00");
     final noonTop = tester.getRect(noonLabel).top;
@@ -1632,16 +1556,19 @@ void main() {
     expect(tester.getRect(eightLabel).left, eightLeft);
     expect(tester.getRect(mondayHeader).left, lessThan(headerLeft - 1.0));
 
-    final board = find.byType(Board<String, ShownItem>);
+    final board = find.byType(Board<GridKey, GridShape<ItemPayload>>);
     final columns = tester
-        .widget<Board<String, ShownItem>>(board)
+        .widget<Board<GridKey, GridShape<ItemPayload>>>(board)
         .controller
         .columns;
     tester.view.physicalSize = const Size(330.0, 640.0);
     await tester.pump();
     expect(
       identical(
-        tester.widget<Board<String, ShownItem>>(board).controller.columns,
+        tester
+            .widget<Board<GridKey, GridShape<ItemPayload>>>(board)
+            .controller
+            .columns,
         columns,
       ),
       isTrue,
@@ -1866,8 +1793,11 @@ void main() {
     await tester.pumpAndSettle();
     final landed = await stored(tester, api, standupId);
     expect(
-      (landed.day, landed.startMinute, landed.endMinute),
-      (DateTime(2026, 4, 22), 10 * 60 + 30, 11 * 60),
+      (landed.start, landed.end),
+      (
+        atMinute(DateTime(2026, 4, 22), 10 * 60 + 30),
+        atMinute(DateTime(2026, 4, 22), 11 * 60),
+      ),
     );
 
     // Monday holds "Weekly planning", 08:00 to 09:00, and "Day off",
@@ -1886,26 +1816,20 @@ void main() {
     expect(tester.getRect(blockFinder(longHaul)), before);
     expect(api.requests, hasLength(requests));
 
-    // Monday and Tuesday 16:00 meet "Day off": the nearest free hour on
-    // both days is 17:00, an hour later, where Tuesday and Wednesday
-    // 16:00 are free a day later.
+    // Saturday 19:00 to Sunday 20:00 dropped from Saturday onto Monday
+    // 16:00 meets "Day off", and its 25 hours from any time of Monday or
+    // Tuesday meet an item of that day or the next: it goes back with
+    // nothing sent.
+    final summitBlock = blockFinder(summit, DateTime(2026, 4, 25));
+    final summitBefore = tester.getRect(summitBlock);
     await moveBlock(
       tester,
-      blockFinder(summit),
+      summitBlock,
       cellRect(tester, rowOf(16 * 60), colOf(0)).topLeft,
     );
-    await tester.pump(api.latency);
     await tester.pumpAndSettle();
-    final spanning = await stored(tester, api, summit);
-    expect(
-      (
-        spanning.day,
-        spanning.dayCount,
-        spanning.startMinute,
-        spanning.endMinute,
-      ),
-      (DateTime(2026, 4, 21), 2, 16 * 60, 17 * 60),
-    );
+    expect(tester.getRect(summitBlock), summitBefore);
+    expect(api.requests, hasLength(requests));
 
     // Monday 13:00 lies inside "Day off": the nearest free hour that day
     // is 17:00, four hours later, where Tuesday 13:00, between "Design new
@@ -1919,8 +1843,11 @@ void main() {
     await tester.pumpAndSettle();
     final moved = await stored(tester, api, planning);
     expect(
-      (moved.day, moved.startMinute, moved.endMinute),
-      (DateTime(2026, 4, 21), 13 * 60, 14 * 60),
+      (moved.start, moved.end),
+      (
+        atMinute(DateTime(2026, 4, 21), 13 * 60),
+        atMinute(DateTime(2026, 4, 21), 14 * 60),
+      ),
     );
   });
 
@@ -1929,7 +1856,6 @@ void main() {
   ) async {
     final api = await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
-    final dayWidth = cellRect(tester, rowOf(9 * 60), colOf(0)).width;
     final slot = cellRect(tester, rowOf(9 * 60), colOf(0)).height;
 
     /// Drags a strip of a block with a mouse, which the grid's scrollable
@@ -1959,23 +1885,11 @@ void main() {
     );
     final resized = await stored(tester, api, uxFlowId);
     expect(
-      (resized.day, resized.startMinute, resized.endMinute),
-      (DateTime(2026, 4, 21), 10 * 60, 14 * 60),
-    );
-
-    // The brainstorm's right edge dragged three days on, to Friday, where
-    // "Interview: product designer" holds 13:00 to 14:30: it stops at
-    // Thursday, three days in all.
-    final brainstorm = tester.getRect(blockFinder(brainstormId));
-    await dragStrip(
-      brainstormId,
-      Offset(brainstorm.right - 3.0, brainstorm.center.dy),
-      Offset(3 * dayWidth, 0.0),
-    );
-    final widened = await stored(tester, api, brainstormId);
-    expect(
-      (widened.day, widened.dayCount, widened.startMinute, widened.endMinute),
-      (DateTime(2026, 4, 21), 3, 14 * 60, 15 * 60),
+      (resized.start, resized.end),
+      (
+        atMinute(DateTime(2026, 4, 21), 10 * 60),
+        atMinute(DateTime(2026, 4, 21), 14 * 60),
+      ),
     );
   });
 
@@ -2078,8 +1992,11 @@ void main() {
     await tester.pumpAndSettle();
     final landed = await stored(tester, api, brainstormId);
     expect(
-      (landed.day, landed.startMinute, landed.endMinute),
-      (DateTime(2026, 4, 22), 10 * 60, 11 * 60),
+      (landed.start, landed.end),
+      (
+        atMinute(DateTime(2026, 4, 22), 10 * 60),
+        atMinute(DateTime(2026, 4, 22), 11 * 60),
+      ),
     );
 
     // A resize names the times it would give, and outlines nothing: the
@@ -2174,8 +2091,11 @@ void main() {
     );
     final earlier = await stored(tester, api, standupId);
     expect(
-      (earlier.day, earlier.startMinute, earlier.endMinute),
-      (DateTime(2026, 4, 22), 9 * 60, 10 * 60),
+      (earlier.start, earlier.end),
+      (
+        atMinute(DateTime(2026, 4, 22), 9 * 60),
+        atMinute(DateTime(2026, 4, 22), 10 * 60),
+      ),
     );
 
     // The start of "Brainstorm with the team", 14:00 on Tuesday, dragged
@@ -2189,8 +2109,11 @@ void main() {
     );
     final stopped = await stored(tester, api, brainstormId);
     expect(
-      (stopped.day, stopped.startMinute, stopped.endMinute),
-      (DateTime(2026, 4, 21), 13 * 60, 15 * 60),
+      (stopped.start, stopped.end),
+      (
+        atMinute(DateTime(2026, 4, 21), 13 * 60),
+        atMinute(DateTime(2026, 4, 21), 15 * 60),
+      ),
     );
   });
 
@@ -2224,13 +2147,19 @@ void main() {
     // Friday.
     final right = await dropLeaning(0.3);
     expect(
-      (right.day, right.startMinute, right.endMinute),
-      (DateTime(2026, 4, 25), 13 * 60, 14 * 60),
+      (right.start, right.end),
+      (
+        atMinute(DateTime(2026, 4, 25), 13 * 60),
+        atMinute(DateTime(2026, 4, 25), 14 * 60),
+      ),
     );
     final left = await dropLeaning(-0.3);
     expect(
-      (left.day, left.startMinute, left.endMinute),
-      (DateTime(2026, 4, 23), 13 * 60, 14 * 60),
+      (left.start, left.end),
+      (
+        atMinute(DateTime(2026, 4, 23), 13 * 60),
+        atMinute(DateTime(2026, 4, 23), 14 * 60),
+      ),
     );
   });
 
@@ -2239,8 +2168,8 @@ void main() {
     await pumpCalendar(tester, size: tall);
     await pickMode(tester, "Week");
 
-    final board = tester.widget<Board<String, ShownItem>>(
-      find.byType(Board<String, ShownItem>),
+    final board = tester.widget<Board<GridKey, GridShape<ItemPayload>>>(
+      find.byType(Board<GridKey, GridShape<ItemPayload>>),
     );
     for (final family in BoardAnimationFamily.values) {
       final spec = board.controller.animationStyle.specFor(family);
@@ -2390,18 +2319,6 @@ void main() {
     final before = tester.getRect(blockFinder(brainstormId));
     await dragBottomStrip(tester, brainstormId);
     expect(tester.getRect(blockFinder(brainstormId)), before);
-
-    // The right strip, a day to the right, with a mouse.
-    final dayWidth = cellRect(tester, rowOf(9 * 60), colOf(0)).width;
-    final gesture = await tester.startGesture(
-      Offset(before.right - 3.0, before.center.dy),
-      kind: PointerDeviceKind.mouse,
-    );
-    await gesture.moveBy(Offset(dayWidth, 0.0));
-    await tester.pump();
-    await gesture.up();
-    await tester.pumpAndSettle();
-    expect(tester.getRect(blockFinder(brainstormId)), before);
   });
 
   testWidgets("W31 a touch drag from the edge of a block that is not "
@@ -2484,15 +2401,6 @@ void main() {
       tester.getRect(block).top,
       moreOrLessEquals(before.top - 2 * cell.height, epsilon: 0.5),
     );
-    before = tester.getRect(block);
-    await drag(
-      Offset(before.right - 3.0, before.center.dy),
-      Offset(cell.width, 0.0),
-    );
-    expect(
-      tester.getRect(block).width,
-      moreOrLessEquals(before.width + cell.width, epsilon: 0.5),
-    );
 
     await tester.tap(block);
     await tester.pumpAndSettle();
@@ -2535,16 +2443,16 @@ void main() {
     expect(find.text("Edit Task"), findsNothing);
     // The title, and the type beside its icon.
     expect(inDialog(find.text("Task")), findsNWidgets(2));
-    // Title, Days, Assignee and Notes.
+    // Title, Assignee and Notes.
     expect(
       tester.widgetList<TextField>(inDialog(find.byType(TextField))).map((
         field,
       ) {
         return field.enabled;
       }),
-      <bool>[false, false, false, false],
+      <bool>[false, false, false],
     );
-    // Start, End, Status and Priority.
+    // Start time, End time, Status and Priority.
     expect(
       tester
           .widgetList<DropdownButtonFormField<Object>>(
@@ -2559,9 +2467,17 @@ void main() {
           }),
       <bool>[true, true, true, true],
     );
-    await tester.tap(inDialog(find.widgetWithText(InputDecorator, "Day")));
-    await tester.pumpAndSettle();
-    expect(find.byType(DatePickerDialog), findsNothing);
+    for (final label in <String>["Start date", "End date"]) {
+      await tester.tap(inDialog(find.widgetWithText(InputDecorator, label)));
+      await tester.pumpAndSettle();
+      expect(find.byType(DatePickerDialog), findsNothing, reason: label);
+    }
+    expect(
+      tester
+          .widget<SwitchListTile>(inDialog(find.byType(SwitchListTile)))
+          .onChanged,
+      isNull,
+    );
     expect(saveFinder(), findsNothing);
     expect(formButton("Cancel"), findsNothing);
     expect(formButton("Delete"), findsNothing);
@@ -2618,9 +2534,7 @@ void main() {
   });
 
   testWidgets("W38 a selected block's grips are pills filled with the "
-      "primary colour, each centred on its top, bottom or right edge", (
-    tester,
-  ) async {
+      "primary colour, each centred on its top or bottom edge", (tester) async {
     await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     await selectBlock(tester, brainstormId);
@@ -2640,22 +2554,18 @@ void main() {
 
     final top = grip(AxisDirection.up);
     final bottom = grip(AxisDirection.down);
-    final right = grip(AxisDirection.right);
     // The grips lie on the outline's middle, a pixel inside the block.
     expect(top.rect.center.dy, moreOrLessEquals(block.top, epsilon: 1.5));
     expect(top.rect.center.dx, near(block.center.dx));
     expect(bottom.rect.center.dy, moreOrLessEquals(block.bottom, epsilon: 1.5));
     expect(bottom.rect.center.dx, near(block.center.dx));
-    expect(right.rect.center.dx, moreOrLessEquals(block.right, epsilon: 1.5));
-    expect(right.rect.center.dy, near(block.center.dy));
+    expect(
+      find.byKey(blockGripKey(brainstormId, AxisDirection.right)),
+      findsNothing,
+    );
 
     expect(top.rect.width, greaterThan(2 * top.rect.height));
-    expect(right.rect.height, greaterThan(2 * right.rect.width));
-    for (final each in <({Rect rect, BoxDecoration decoration})>[
-      top,
-      bottom,
-      right,
-    ]) {
+    for (final each in <({Rect rect, BoxDecoration decoration})>[top, bottom]) {
       expect(each.decoration.color, HarborColors.primary);
       expect(
         each.decoration.borderRadius,
@@ -2695,9 +2605,10 @@ void main() {
     await hover.moveTo(Offset(before.center.dx, before.top - 4.0));
     await tester.pump();
     expect(cursor(), SystemMouseCursors.resizeUpDown);
+    // No edge beside the block resizes its days.
     await hover.moveTo(Offset(before.right + 4.0, before.center.dy));
     await tester.pump();
-    expect(cursor(), SystemMouseCursors.resizeLeftRight);
+    expect(cursor(), SystemMouseCursors.basic);
     await hover.moveTo(Offset(before.center.dx, before.bottom + 20.0));
     await tester.pump();
     expect(cursor(), SystemMouseCursors.basic);
@@ -2721,14 +2632,6 @@ void main() {
     await settle();
     expect(tester.getRect(block).bottom, near(before.bottom + 2 * cell.height));
     expect(tester.getRect(block).top, near(before.top));
-
-    before = tester.getRect(block);
-    await tester.dragFrom(
-      Offset(before.right + 4.0, before.center.dy),
-      Offset(cell.width, 0.0),
-    );
-    await settle();
-    expect(tester.getRect(block).width, near(before.width + cell.width));
 
     before = tester.getRect(block);
     await tester.tapAt(Offset(before.center.dx, before.bottom + 4.0));
@@ -2813,8 +2716,9 @@ void main() {
   });
 
   testWidgets("W42 a range dragged onto an item stops at its edge, however "
-      "far past it the finger jumps: first its times in the pressed day, "
-      "then its days, while each is free over those times", (tester) async {
+      "far past it the finger jumps, in time order across the days", (
+    tester,
+  ) async {
     await pumpCalendar(tester, editing: true);
     await pickMode(tester, "Week");
 
@@ -2842,19 +2746,21 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text("Task").last);
       await tester.pumpAndSettle();
-      expect(find.text(day), findsOneWidget);
+      expectFormDays(day, int.parse(days));
       expect(
         find.descendant(
-          of: dropdownFinder("Start"),
+          of: dropdownFinder("Start time"),
           matching: find.text(start),
         ),
         findsOneWidget,
       );
       expect(
-        find.descendant(of: dropdownFinder("End"), matching: find.text(end)),
+        find.descendant(
+          of: dropdownFinder("End time"),
+          matching: find.text(end),
+        ),
         findsOneWidget,
       );
-      expect(fieldText(tester, "Days"), days);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     }
@@ -2885,31 +2791,32 @@ void main() {
       end: "13:45",
       days: "1",
     );
-    // Friday holds 13:00 to 14:30, and Monday 09:00 to 17:00.
+    // Toward Friday the range meets Wednesday's 17:00 first, and back
+    // toward Monday the end of Wednesday's 11:00 to 12:00.
     await expectRange(
       (13 * 60, 2),
       <(int, int)>[(13 * 60 + 30, 4)],
       day: "2026-04-22",
       start: "13:00",
-      end: "13:45",
-      days: "2",
+      end: "17:00",
+      days: "1",
     );
     await expectRange(
       (13 * 60, 2),
       <(int, int)>[(13 * 60 + 30, 0)],
-      day: "2026-04-21",
-      start: "13:00",
-      end: "13:45",
-      days: "2",
+      day: "2026-04-22",
+      start: "12:00",
+      end: "13:15",
+      days: "1",
     );
-    // Thursday is free from 11:00 to 14:00, so the times reach 13:45
-    // there, and Friday, which is not free over them, adds no day.
+    // Thursday is free from 11:00 to 16:00, so the range from 11:00 toward
+    // Friday stops at 16:00.
     await expectRange(
       (11 * 60, 3),
       <(int, int)>[(13 * 60 + 30, 4)],
       day: "2026-04-23",
       start: "11:00",
-      end: "13:45",
+      end: "16:00",
       days: "1",
     );
   });

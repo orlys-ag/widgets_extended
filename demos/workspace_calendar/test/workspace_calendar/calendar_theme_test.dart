@@ -372,10 +372,8 @@ Map<String, Object?> itemJson(
   return <String, Object?>{
     "type": type.id,
     "title": title,
-    "day": isoDate(day),
-    "startMinute": start,
-    "endMinute": end,
-    "dayCount": 1,
+    "start": isoDateTime(atMinute(day, start)),
+    "end": isoDateTime(atMinute(day, end)),
     "fields": fields,
   };
 }
@@ -823,10 +821,7 @@ Future<Set<String>> labelsOf(
 /// Fails every read [api] answers from here on, and selects in Agenda the
 /// day a month on ([selectNextMonth]) until a read fails, at most three
 /// times.
-Future<void> failNextMonthRead(
-  WidgetTester tester,
-  MockCalendarApi api,
-) async {
+Future<void> failNextMonthRead(WidgetTester tester, MockCalendarApi api) async {
   api.failurePolicy = (request) {
     return request.method == CalendarMethod.list ? "Reading failed." : null;
   };
@@ -1045,7 +1040,7 @@ Future<void> revealDay(WidgetTester tester, DateTime day) async {
 /// Expects every family of [board]'s animation style to run [duration]
 /// on [curve].
 void expectBoardMotion(
-  BoardController<String, Object?> board,
+  BoardController<Object, Object?> board,
   Duration duration,
   Curve curve,
 ) {
@@ -1069,9 +1064,9 @@ BoardController<String, MonthChip<ItemPayload>> monthController(
 }
 
 /// The timed grid's board.
-Board<String, ShownItem> gridBoard(WidgetTester tester) {
-  return tester.widget<Board<String, ShownItem>>(
-    find.byType(Board<String, ShownItem>),
+Board<GridKey, GridShape<ItemPayload>> gridBoard(WidgetTester tester) {
+  return tester.widget<Board<GridKey, GridShape<ItemPayload>>>(
+    find.byType(Board<GridKey, GridShape<ItemPayload>>),
   );
 }
 
@@ -1922,7 +1917,7 @@ void main() {
       return tester
           .widget<Text>(
             find.descendant(
-              of: find.byKey(itemCardKey("item-1")),
+              of: find.byKey(entryCardKey("item-1")),
               matching: find.text("Planning"),
             ),
           )
@@ -2123,7 +2118,11 @@ void main() {
     probe("a selected block");
 
     // A lift and its landing label, the block left behind at A's opacity
-    // and the lift's shadow coming in on A's motion.
+    // and the lift's shadow coming in on A's motion. The block lies on the
+    // first slot, which the grid scrolls to show whole under the frozen
+    // header, all-day row and before-hours notice.
+    gridViewport(tester).verticalPosition!.jumpTo(0.0);
+    await tester.pump();
     final block = blockFinder("item-6");
     final slot = tester.getRect(block);
     final gesture = await tester.startGesture(slot.center);
@@ -2184,7 +2183,7 @@ void main() {
       april(24),
       april(24),
     )).firstWhere((item) => item["title"] == "Slot 1");
-    expect(stored["startMinute"], 12 * 60);
+    expect(startOfJson(stored), atMinute(april(24), 12 * 60));
     expect(
       tester.getRect(block).top,
       moreOrLessEquals(target.top, epsilon: 1.0),
@@ -2478,7 +2477,7 @@ void main() {
       return tester
           .widget<Text>(
             find.descendant(
-              of: find.byKey(itemCardKey(id)),
+              of: find.byKey(entryCardKey(id)),
               matching: find.text(title),
             ),
           )
@@ -2528,17 +2527,17 @@ void main() {
       }).toSet(),
       <Type>{CustomPaint, SizedBox},
     );
-    final card = tester.element(find.byKey(itemCardKey("item-2")));
+    final card = tester.element(find.byKey(entryCardKey("item-2")));
     final cardWidget = card.widget;
     storeOf(tester).requestDelete("item-13");
     await tester.pump();
     expect(
-      identical(tester.element(find.byKey(itemCardKey("item-2"))), card),
+      identical(tester.element(find.byKey(entryCardKey("item-2"))), card),
       isTrue,
     );
     expect(
       identical(
-        tester.element(find.byKey(itemCardKey("item-2"))).widget,
+        tester.element(find.byKey(entryCardKey("item-2"))).widget,
         cardWidget,
       ),
       isFalse,
@@ -2723,14 +2722,14 @@ void main() {
     );
     expectText(
       tester,
-      textIn(find.byKey(itemCardKey("item-1")), "Planning"),
+      textIn(find.byKey(entryCardKey("item-1")), "Planning"),
       theme,
       "entryCardTitleStyle",
       theme.text,
     );
     expectText(
       tester,
-      textIn(find.byKey(itemCardKey("item-1")), "Room 2"),
+      textIn(find.byKey(entryCardKey("item-1")), "Room 2"),
       theme,
       "entryCardSummaryStyle",
       theme.textSecondary,
@@ -3065,7 +3064,7 @@ void main() {
     final now = find.byKey(dayListNowKey);
     expectColour(decorationOf(tester, now).color!, theme.error, "time pill");
     expectColour(lineColourOf(tester, now), theme.error, "time line");
-    final card = find.byKey(itemCardKey("item-1"));
+    final card = find.byKey(entryCardKey("item-1"));
     expectColour(
       iconColourOf(tester, card, theme.entryMenuIcon),
       theme.textMuted,
@@ -3576,7 +3575,7 @@ void main() {
       if (mode == "Agenda") {
         expectText(
           tester,
-          textIn(find.byKey(itemCardKey("item-1")), "Planning"),
+          textIn(find.byKey(entryCardKey("item-1")), "Planning"),
           b,
           "entryCardTitleStyle",
           b.text,
@@ -3774,7 +3773,7 @@ void main() {
       april(24),
       april(24),
     )).firstWhere((item) => item["title"] == "Slot 1");
-    expect(stored["startMinute"], 12 * 60);
+    expect(startOfJson(stored), atMinute(april(24), 12 * 60));
 
     // An exit runs on through the frames of a theme moving back to A.
     storeOf(tester).requestDelete("item-7");

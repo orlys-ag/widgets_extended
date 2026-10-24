@@ -20,7 +20,8 @@
 /// given it, and with the bar closed. Out of edit mode the calendar is
 /// read-only, so nothing is moved, resized or created, and a tap on an
 /// item opens its form read-only. The settings sheet, which opens from the
-/// app bar's More menu, chooses how Month fits its weeks, and on the
+/// app bar's More menu, chooses how Month fits its weeks, the length of the
+/// calendar's slots, which the item form's times step by too, and on the
 /// calendar's [CalendarController] the least width of a day in Week, Day
 /// and Month and the least height of the timed grids' slots, which a pinch
 /// on a grid sets too.
@@ -36,7 +37,7 @@
 ///
 /// A tap on an item opens its form, which edits it in edit mode unless the
 /// history lock holds it locked, and otherwise shows it read-only; a create
-/// the calendar's gestures pick opens the create flow over the slots
+/// the calendar's gestures pick opens the create flow over the range
 /// picked; Agenda's Edit opens the form, and its Delete asks before it
 /// deletes. A write that fails says why.
 library;
@@ -268,11 +269,17 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   /// The form of the tapped item: editable where the calendar reports it
   /// so, in edit mode with the history lock not holding the item
-  /// [ItemHold.locked], and read-only otherwise.
-  void _openItem(CalendarEntryTapDetails<ItemPayload> details) {
+  /// [EntryHold.locked], and read-only otherwise.
+  void _openEntry(CalendarEntryTapDetails<ItemPayload> details) {
     final id = details.entry.id!;
     if (details.editable) {
-      showEditForm(context, store: _store, id: id, lock: _currentLock);
+      showEditForm(
+        context,
+        store: _store,
+        id: id,
+        lock: _currentLock,
+        slotMinutes: _settings.slotMinutes,
+      );
     } else {
       showItemDetails(context, store: _store, id: id);
     }
@@ -284,11 +291,18 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       store: _store,
       range: range,
       lock: _currentLock,
+      slotMinutes: _settings.slotMinutes,
     );
   }
 
   void _openEditForm(CalendarItem item) {
-    showEditForm(context, store: _store, id: item.id!, lock: _currentLock);
+    showEditForm(
+      context,
+      store: _store,
+      id: item.id!,
+      lock: _currentLock,
+      slotMinutes: _settings.slotMinutes,
+    );
   }
 
   Future<void> _deleteFromCard(CalendarItem item) async {
@@ -369,6 +383,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               lockEarlierToday: _settings.lockEarlierToday,
               weekdays: _settings.weekdays,
               hours: _settings.hours,
+              slotMinutes: _settings.slotMinutes,
               hourLabelFormat: _settings.hourLabelFormat,
               monthLayout: _settings.monthLayout,
               maxDayCount: maxDayCount,
@@ -383,7 +398,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               failureBuilder: widget.builders.failure,
               // Whatever the builders, a chip names its item's type.
               entryKindOf: harborEntryKind,
-              onEntryTap: _openItem,
+              onEntryTap: _openEntry,
               onCreateRange: _openCreateFlow,
               onEditRequest: _openEditForm,
               onDeleteRequest: _deleteFromCard,

@@ -30,7 +30,7 @@ class DayMarkerListener<T> extends StatefulWidget {
 
   final CalendarStore<T> store;
   final DateTime day;
-  final Widget Function(BuildContext context, bool hasItems) builder;
+  final Widget Function(BuildContext context, bool hasEntries) builder;
 
   @override
   State<DayMarkerListener<T>> createState() {
@@ -39,7 +39,7 @@ class DayMarkerListener<T> extends StatefulWidget {
 }
 
 class _DayMarkerListenerState<T> extends State<DayMarkerListener<T>> {
-  late bool _hasItems = widget.store.dayHasShownEntries(widget.day);
+  late bool _hasEntries = widget.store.dayHasShownEntries(widget.day);
 
   @override
   void initState() {
@@ -55,7 +55,7 @@ class _DayMarkerListenerState<T> extends State<DayMarkerListener<T>> {
       widget.store.addListener(_handleStore);
     }
     if (widget.store != oldWidget.store || widget.day != oldWidget.day) {
-      _hasItems = widget.store.dayHasShownEntries(widget.day);
+      _hasEntries = widget.store.dayHasShownEntries(widget.day);
     }
   }
 
@@ -66,18 +66,18 @@ class _DayMarkerListenerState<T> extends State<DayMarkerListener<T>> {
   }
 
   void _handleStore() {
-    final hasItems = widget.store.dayHasShownEntries(widget.day);
-    if (hasItems == _hasItems) {
+    final hasEntries = widget.store.dayHasShownEntries(widget.day);
+    if (hasEntries == _hasEntries) {
       return;
     }
     setState(() {
-      _hasItems = hasItems;
+      _hasEntries = hasEntries;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return widget.builder(context, _hasItems);
+    return widget.builder(context, _hasEntries);
   }
 }
 
@@ -267,7 +267,7 @@ class DayCell extends StatelessWidget {
     required this.inMonth,
     required this.isSelected,
     required this.isToday,
-    required this.hasItems,
+    required this.hasEntries,
     required this.collapse,
   });
 
@@ -275,7 +275,7 @@ class DayCell extends StatelessWidget {
   final bool inMonth;
   final bool isSelected;
   final bool isToday;
-  final bool hasItems;
+  final bool hasEntries;
   final Animation<double> collapse;
 
   @override
@@ -291,7 +291,7 @@ class DayCell extends StatelessWidget {
     return Semantics(
       button: true,
       selected: isSelected,
-      label: hasItems ? "$name, $date, has items" : "$name, $date",
+      label: hasEntries ? "$name, $date, has items" : "$name, $date",
       excludeSemantics: true,
       child: AnimatedBuilder(
         animation: collapse,
@@ -330,7 +330,7 @@ class DayCell extends StatelessWidget {
       foregroundDecoration: isToday ? styles.ring : null,
       child: Text("${day.day}", style: numberStyle),
     );
-    if (hasItems) {
+    if (hasEntries) {
       circle = Stack(
         clipBehavior: Clip.none,
         children: <Widget>[

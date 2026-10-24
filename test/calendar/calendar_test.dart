@@ -115,8 +115,9 @@ void main() {
       WeekdaySet,
       dayNumber,
       dateOfDayNumber,
+      defaultSlotMinutes,
+      slotMinuteChoices,
       CalendarEntry,
-      CalendarEntryTime,
       CalendarDataSource,
       CalendarStore,
       CachingCalendarStore,
@@ -228,6 +229,25 @@ void main() {
       expect(
         export.shown!.toSet().intersection(viewWidgets),
         isEmpty,
+        reason: export.path,
+      );
+    }
+  });
+
+  test("B3 the barrel's show clauses name no CalendarEntryTime", () {
+    final exports = exportsOf(File(barrelPath).readAsStringSync());
+    final entries = <List<String>?>[
+      for (final export in exports)
+        if (export.path == "lib/calendar/entries/calendar_entry.dart")
+          export.shown,
+    ];
+    // The barrel shows the entry's file, by name.
+    expect(entries, hasLength(1));
+    expect(entries.single, contains("CalendarEntry"));
+    for (final export in exports) {
+      expect(
+        export.shown,
+        isNot(contains("CalendarEntryTime")),
         reason: export.path,
       );
     }

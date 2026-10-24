@@ -9,10 +9,16 @@ export 'composition/calendar_theme_extension.dart' show CalendarThemeExtension;
 export 'composition/calendar_view.dart'
     show CalendarController, CalendarEntryTapDetails, CalendarView;
 export 'dates/calendar_dates.dart'
-    show DayHours, WeekdaySet, dateOfDayNumber, dayNumber;
+    show
+        DayHours,
+        WeekdaySet,
+        dateOfDayNumber,
+        dayNumber,
+        defaultSlotMinutes,
+        slotMinuteChoices;
 export 'dates/calendar_labels.dart' show HourLabelFormat;
 export 'entries/calendar_data_source.dart' show CalendarDataSource;
-export 'entries/calendar_entry.dart' show CalendarEntry, CalendarEntryTime;
+export 'entries/calendar_entry.dart' show CalendarEntry;
 export 'presentation/calendar_activity_indicator.dart'
     show CalendarActivityIndicator;
 export 'presentation/calendar_builders.dart'

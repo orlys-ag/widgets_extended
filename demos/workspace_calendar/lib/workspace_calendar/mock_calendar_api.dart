@@ -221,18 +221,19 @@ class MockCalendarApi implements CalendarApi {
   }
 
   /// The stored ids, other than [ownId], that the valid [body] may not
-  /// share time with, read from the index of the days it covers.
+  /// share time with ([entriesShareTime]), read from the index of the days
+  /// it covers.
   List<String> _conflictsOf(Map<String, Object?> body, String? ownId) {
-    final time = itemFromJson(body).time;
+    final item = itemFromJson(body);
     final seen = <String>{};
     final conflicts = <String>[];
-    for (var day = time.firstDay; day < time.firstDay + time.dayCount; day++) {
+    final last = lastDayNumberOf(item.start, item.end);
+    for (var day = dayNumber(item.start); day <= last; day++) {
       for (final id in _idsByDay[day] ?? const <String>{}) {
         if (id == ownId || !seen.add(id)) {
           continue;
         }
-        final other = itemFromJson(_items[id]!).time;
-        if (timesOverlap(time, other)) {
+        if (entriesShareTime(item, itemFromJson(_items[id]!))) {
           conflicts.add(id);
         }
       }
@@ -244,7 +245,7 @@ class MockCalendarApi implements CalendarApi {
   Map<String, Object?> _store(String id, Map<String, Object?> body) {
     final stored = <String, Object?>{...body, "id": id};
     _items[id] = stored;
-    for (final day in itemFromJson(stored).dayNumbers) {
+    for (final day in _coveredDaysOf(stored)) {
       _idsByDay
           .putIfAbsent(day, () {
             return <String>{};
@@ -259,7 +260,7 @@ class MockCalendarApi implements CalendarApi {
     if (stored == null) {
       return;
     }
-    for (final day in itemFromJson(stored).dayNumbers) {
+    for (final day in _coveredDaysOf(stored)) {
       final ids = _idsByDay[day];
       if (ids == null) {
         continue;
@@ -272,13 +273,20 @@ class MockCalendarApi implements CalendarApi {
   }
 }
 
-/// By day, then start minute, then creation order.
-int _compareStored(Map<String, Object?> a, Map<String, Object?> b) {
-  final byDay = (a["day"] as String).compareTo(b["day"] as String);
-  if (byDay != 0) {
-    return byDay;
+/// The [dayNumber]s of the days the stored envelope [stored] has a part
+/// in, from its start's day to [lastDayNumberOf].
+Iterable<int> _coveredDaysOf(Map<String, Object?> stored) sync* {
+  final item = itemFromJson(stored);
+  final last = lastDayNumberOf(item.start, item.end);
+  for (var day = dayNumber(item.start); day <= last; day++) {
+    yield day;
   }
-  final byStart = (a["startMinute"] as int).compareTo(b["startMinute"] as int);
+}
+
+/// By start, then creation order. The envelope's start text sorts as its
+/// time does: its fields are written in order, each zero-padded.
+int _compareStored(Map<String, Object?> a, Map<String, Object?> b) {
+  final byStart = (a["start"] as String).compareTo(b["start"] as String);
   if (byStart != 0) {
     return byStart;
   }

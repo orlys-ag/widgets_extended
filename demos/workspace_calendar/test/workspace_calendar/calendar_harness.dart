@@ -9,6 +9,7 @@ import 'dart:ui' as ui;
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
@@ -46,16 +47,38 @@ const String dayOffId = "item-28";
 /// The Monday of [today]'s week.
 final DateTime monday = DateTime(2026, 4, 20);
 
-/// Week's timed grid row of [minute], over the whole day's hours: row 0 is
-/// the day header and row 1 the room above the first slot.
-int rowOf(int minute) {
-  return 2 + minute ~/ 15;
+/// The row of the slot holding [minute], a minute after midnight, in the
+/// timed grid shown now: its first slot row, under the day header in Week,
+/// the all-day strip's rows and the room above the slots, which is its
+/// board's row count less its slot rows and the room below them, plus the
+/// slots from its hours' start.
+int gridRowOf(int minute) {
+  final grid =
+      find.byType(TimedGrid<ItemPayload>).evaluate().single.widget
+          as TimedGrid<ItemPayload>;
+  final board =
+      find
+              .byType(Board<GridKey, GridShape<ItemPayload>>)
+              .evaluate()
+              .single
+              .widget
+          as Board<GridKey, GridShape<ItemPayload>>;
+  final hours = grid.hours;
+  final firstSlotRow =
+      board.controller.rows.axis.trackCount -
+      hours.slotCountOf(grid.slotMinutes) -
+      1;
+  return firstSlotRow + (minute - hours.start) ~/ grid.slotMinutes;
 }
 
-/// Day's timed grid row of [minute], over the whole day's hours: the grid
-/// has no day header, so row 0 is the room above the first slot.
+/// Week's timed grid row of [minute] ([gridRowOf]).
+int rowOf(int minute) {
+  return gridRowOf(minute);
+}
+
+/// Day's timed grid row of [minute] ([gridRowOf]).
 int dayRowOf(int minute) {
-  return 1 + minute ~/ 15;
+  return gridRowOf(minute);
 }
 
 /// The timed grid's gutter cell that a screen reader hears as [label],
@@ -78,14 +101,43 @@ DateTime gridDay(WidgetTester tester) {
       .firstDay;
 }
 
+/// [minute] minutes after [day]'s midnight.
+DateTime atMinute(DateTime day, int minute) {
+  return DateTime(day.year, day.month, day.day, 0, minute);
+}
+
+/// The minutes after midnight of [item]'s start, and of its end on the
+/// last day it has a part in, 1440 for an end at a day's start.
+(int, int) minutesOf(CalendarItem item) {
+  return (minuteOfDay(item.start), endMinuteOfDay(item.end));
+}
+
+/// The day of [item]'s start.
+DateTime firstDayOf(CalendarItem item) {
+  return dateOfDayNumber(dayNumber(item.start));
+}
+
+/// The days [item] has a part in, from its start's day to its last.
+int daysOf(CalendarItem item) {
+  return lastDayNumberOf(item.start, item.end) - dayNumber(item.start) + 1;
+}
+
 /// The week grid's column of the day [weekday] days after [monday]:
 /// column 0 is the hour gutter.
 int colOf(int weekday) {
   return 1 + weekday;
 }
 
-Finder blockFinder(String id) {
-  return find.byKey(blockKey(id));
+/// The block of the item [id]'s piece on [day], or with no [day] the one
+/// block of [id].
+Finder blockFinder(String id, [DateTime? day]) {
+  if (day != null) {
+    return find.byKey(blockKey(id, day));
+  }
+  return find.byWidgetPredicate((widget) {
+    final key = widget.key;
+    return key is ValueKey<String> && key.value.startsWith("block-$id@");
+  });
 }
 
 /// The global rect of the timed grid's cell at [row] and [col].
@@ -93,6 +145,31 @@ Rect cellRect(WidgetTester tester, int row, int col) {
   final viewport = gridViewport(tester);
   final rect = viewport.rectOfCell(row, col)!;
   return viewport.localToGlobal(rect.topLeft) & rect.size;
+}
+
+/// The item form's date field labelled [label], "Start date" or "End
+/// date".
+Finder formDateFinder(String label) {
+  return find.ancestor(
+    of: find.text(label),
+    matching: find.byType(InputDecorator),
+  );
+}
+
+/// The item form's date field labelled [label] showing [date], as
+/// [isoDate] writes it.
+Finder formDateShows(String label, String date) {
+  return find.descendant(of: formDateFinder(label), matching: find.text(date));
+}
+
+/// Expects the item form's Start date to name [day] and its End date the
+/// day [days] - 1 days after it, both as [isoDate] writes them.
+void expectFormDays(String day, int days) {
+  expect(formDateShows("Start date", day), findsOneWidget);
+  expect(
+    formDateShows("End date", isoDate(addDays(parseIsoDate(day)!, days - 1))),
+    findsOneWidget,
+  );
 }
 
 /// Opens the calendar's mode menu and picks [mode], "Agenda", "Day", "Week"
@@ -115,7 +192,9 @@ Future<void> createBeforePump(
   await tester.pump(api.latency);
 }
 
-/// A Task envelope with status to do.
+/// A Task envelope with status to do, from [start] minutes after [day]'s
+/// midnight to [end] minutes after the midnight of the day [dayCount] - 1
+/// days on.
 Map<String, Object?> taskJson(
   String title,
   DateTime day,
@@ -126,12 +205,21 @@ Map<String, Object?> taskJson(
   return <String, Object?>{
     "type": "task",
     "title": title,
-    "day": isoDate(day),
-    "startMinute": start,
-    "endMinute": end,
-    "dayCount": dayCount,
+    "start": isoDateTime(atMinute(day, start)),
+    "end": isoDateTime(atMinute(addDays(day, dayCount - 1), end)),
     "fields": <String, Object?>{"status": "toDo"},
   };
+}
+
+/// The start of the stored envelope [item], read as the envelope writes
+/// it.
+DateTime startOfJson(Map<String, Object?> item) {
+  return parseIsoDateTime(item["start"]! as String)!;
+}
+
+/// The end of the stored envelope [item], read as the envelope writes it.
+DateTime endOfJson(Map<String, Object?> item) {
+  return parseIsoDateTime(item["end"]! as String)!;
 }
 
 /// The app [pumpCalendar] pumps: the calendar over [api], given [today]
@@ -253,12 +341,11 @@ Future<void> selectNextMonth(WidgetTester tester) async {
   final motion = CalendarTheme.of(
     tester.element(find.byType(MonthStrip<ItemPayload>)),
   ).motionDuration;
-  final selected = tester
-      .widgetList<DayCell>(find.byType(DayCell))
-      .singleWhere((cell) {
-        return cell.isSelected;
-      })
-      .day;
+  final selected = tester.widgetList<DayCell>(find.byType(DayCell)).singleWhere(
+    (cell) {
+      return cell.isSelected;
+    },
+  ).day;
   await tester.tap(find.byTooltip("Next month"));
   // The frame that starts the slide after the build, the frame its
   // motion's clock starts on, its motion, and a frame past it: the slide
@@ -271,10 +358,11 @@ Future<void> selectNextMonth(WidgetTester tester) async {
   await tester.tap(find.byKey(dayCellKey(addMonths(selected, 1))));
 }
 
-/// The timed grid's viewport: the one board keyed by item id strings.
-RenderBoardViewport<String> gridViewport(WidgetTester tester) {
+/// The one board's viewport: in Week and Day the timed grid's, keyed by
+/// [GridKey]s, and in Month the month board's, keyed by strings.
+RenderBoardViewport<Object> gridViewport(WidgetTester tester) {
   return tester.allRenderObjects
-      .whereType<RenderBoardViewport<String>>()
+      .whereType<RenderBoardViewport<Object>>()
       .single;
 }
 

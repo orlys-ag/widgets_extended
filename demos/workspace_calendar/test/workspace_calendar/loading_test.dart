@@ -35,7 +35,7 @@ double rowHeight(WidgetTester tester) {
 }
 
 bool hasMarker(WidgetTester tester, DateTime day) {
-  return tester.widget<DayCell>(dayFinder(day)).hasItems;
+  return tester.widget<DayCell>(dayFinder(day)).hasEntries;
 }
 
 /// The week grid's overlay: what covers the grid while its week is not
@@ -79,7 +79,7 @@ void main() {
     expect(loading, findsNothing);
     expect(
       find.descendant(
-        of: find.byKey(itemCardKey(releasePlanningId)),
+        of: find.byKey(entryCardKey(releasePlanningId)),
         matching: find.text("Release planning"),
       ),
       findsOneWidget,
@@ -137,7 +137,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       find.descendant(
-        of: find.byKey(itemCardKey(designSystemSyncId)),
+        of: find.byKey(entryCardKey(designSystemSyncId)),
         matching: find.text("Design system sync"),
       ),
       findsOneWidget,
@@ -217,7 +217,12 @@ void main() {
       final key = element.widget.key! as ValueKey<String>;
       widths[key.value] = tester.getSize(find.byKey(key)).width;
     }
-    expect(widths, contains("block-$teamOffsiteId"));
+    expect(
+      widths.keys.where((key) {
+        return key.startsWith("block-$teamOffsiteId@");
+      }),
+      hasLength(1),
+    );
     await tester.pump(
       gridAnimationStyle(tester).effectiveItemEnterExit.duration,
     );

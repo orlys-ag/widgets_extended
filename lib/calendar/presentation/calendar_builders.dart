@@ -31,17 +31,18 @@ typedef CalendarBlockBuilder<T> =
       CalendarBlockDetails details,
     );
 
-/// Builds the content of a bar of Month's board, in its chip or card form:
-/// everything inside the lane the board gives [entry], its pending state
-/// included.
+/// Builds the content of a bar of Month's board or of Week's and Day's
+/// all-day strip, in its chip or card form: everything inside the lane the
+/// board or the strip gives [entry], its pending state included. The strip
+/// draws its bars in the chip form alone.
 ///
-/// The board calls it only in a widget's build, which the board may run
+/// The view calls it only in a widget's build, which its board may run
 /// inside its layout, so the builder marks no ancestor dirty. It calls it
 /// when the bar's box is first built, and again only when [entry],
-/// [details] or the board's builder parameter changes, an inherited widget
-/// the builder read notifies, or a hot reload reassembles the board; not
-/// when anything else the builder reads changes. The board keeps the bar's
-/// semantics node and its tap around the output.
+/// [details] or the view's builder parameter changes, an inherited widget
+/// the builder read notifies, or a hot reload reassembles the view; not
+/// when anything else the builder reads changes. The view keeps the bar's
+/// semantics node or gestures and its tap around the output.
 typedef CalendarChipBuilder<T> =
     Widget Function(
       BuildContext context,
@@ -99,15 +100,18 @@ typedef CalendarFailureBuilder =
     Widget Function(BuildContext context, CalendarFailureState state);
 
 /// What the timed grid decides about one block's appearance, which a
-/// [CalendarBlockBuilder] draws from.
+/// [CalendarBlockBuilder] draws from. A block shows one piece of its
+/// entry: the part of it on the block's day.
 @immutable
 final class CalendarBlockDetails {
-  /// The block's form, its room and its cut ends.
+  /// The block's form, its room, its cut ends and its continued ends.
   const CalendarBlockDetails({
     required this.detailed,
     required this.tall,
     required this.cutAtStart,
     required this.cutAtEnd,
+    this.continuesBefore = false,
+    this.continuesAfter = false,
   });
 
   /// Whether the grid shows one day column, with room for the times and
@@ -120,11 +124,23 @@ final class CalendarBlockDetails {
   /// does not rebuild for it.
   final bool tall;
 
-  /// Whether the entry starts before the grid's hours.
+  /// Whether the block's piece starts before the grid's hours on its day,
+  /// which the grid then cuts off. A piece that starts at its day's start
+  /// because its entry began on an earlier day is cut only where the hours
+  /// start after midnight; [continuesBefore] tells that it continues.
   final bool cutAtStart;
 
-  /// Whether the entry ends after the grid's hours.
+  /// Whether the block's piece ends after the grid's hours on its day,
+  /// which the grid then cuts off, as [cutAtStart] does at its start.
   final bool cutAtEnd;
+
+  /// Whether the block's entry has a part on an earlier day than the
+  /// block's.
+  final bool continuesBefore;
+
+  /// Whether the block's entry has a part on a later day than the
+  /// block's.
+  final bool continuesAfter;
 
   @override
   bool operator ==(Object other) {
@@ -132,23 +148,33 @@ final class CalendarBlockDetails {
         other.detailed == detailed &&
         other.tall == tall &&
         other.cutAtStart == cutAtStart &&
-        other.cutAtEnd == cutAtEnd;
+        other.cutAtEnd == cutAtEnd &&
+        other.continuesBefore == continuesBefore &&
+        other.continuesAfter == continuesAfter;
   }
 
   @override
   int get hashCode {
-    return Object.hash(detailed, tall, cutAtStart, cutAtEnd);
+    return Object.hash(
+      detailed,
+      tall,
+      cutAtStart,
+      cutAtEnd,
+      continuesBefore,
+      continuesAfter,
+    );
   }
 
   @override
   String toString() {
     return "CalendarBlockDetails(detailed: $detailed, tall: $tall, "
-        "cutAtStart: $cutAtStart, cutAtEnd: $cutAtEnd)";
+        "cutAtStart: $cutAtStart, cutAtEnd: $cutAtEnd, continuesBefore: "
+        "$continuesBefore, continuesAfter: $continuesAfter)";
   }
 }
 
-/// What the month board decides about one bar's appearance, which a
-/// [CalendarChipBuilder] draws from.
+/// What the month board or the timed grid's all-day strip decides about
+/// one bar's appearance, which a [CalendarChipBuilder] draws from.
 @immutable
 final class CalendarChipDetails {
   /// The bar's form and its continued ends.
@@ -160,13 +186,16 @@ final class CalendarChipDetails {
 
   /// Whether the days are large enough for the card form: a bar one card
   /// lane tall, with room for the times under the title. Otherwise the
-  /// bar is a chip, one lane tall.
+  /// bar is a chip, one lane tall. Always false in the all-day strip.
   final bool card;
 
-  /// Whether the entry covers days before the bar's week.
+  /// Whether the entry covers days before the bar's first shown day: in
+  /// Month the first day of the bar's week it covers, and in the all-day
+  /// strip the first shown day it covers.
   final bool continuesBefore;
 
-  /// Whether the entry covers days after the bar's week.
+  /// Whether the entry covers days after the bar's last shown day, as
+  /// [continuesBefore] reads the first.
   final bool continuesAfter;
 
   @override
@@ -202,12 +231,14 @@ final class CalendarCardDetails {
     this.onDelete,
   });
 
-  /// The time the entry starts at as the list writes it, for one that
-  /// starts before the list's hours; null for one that starts inside them.
+  /// The time the row's piece of the entry, its part on the row's day,
+  /// starts at as the list writes it, for a piece that starts before the
+  /// list's hours on that day; null for one that starts inside them.
   final String? startsAt;
 
-  /// The time the entry ends at as the list writes it, for one that ends
-  /// after the list's hours; null for one that ends inside them.
+  /// The time the row's piece of the entry ends at as the list writes it,
+  /// for a piece that ends after the list's hours on the row's day; null
+  /// for one that ends inside them.
   final String? endsAt;
 
   /// Requests an edit of the entry; null where the list offers none.

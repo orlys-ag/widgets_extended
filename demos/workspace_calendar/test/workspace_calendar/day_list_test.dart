@@ -22,7 +22,7 @@ import 'calendar_harness.dart';
 const Duration oneFrame = Duration(milliseconds: 16);
 
 Finder cardFinder(String id) {
-  return find.byKey(itemCardKey(id));
+  return find.byKey(entryCardKey(id));
 }
 
 /// Opens the calendar bar, sets the hours to [start] to [end] o'clock and
@@ -158,7 +158,7 @@ void main() {
     await tester.tap(dayFinder(DateTime(2026, 4, 23)));
     await tester.pumpAndSettle();
     expect(
-      tester.widget<DayCell>(dayFinder(DateTime(2026, 4, 23))).hasItems,
+      tester.widget<DayCell>(dayFinder(DateTime(2026, 4, 23))).hasEntries,
       isTrue,
     );
     await cardAction(tester, designCritiqueId, "Delete");
@@ -169,7 +169,7 @@ void main() {
     await tester.pump(latency);
     await tester.pumpAndSettle();
     expect(
-      tester.widget<DayCell>(dayFinder(DateTime(2026, 4, 23))).hasItems,
+      tester.widget<DayCell>(dayFinder(DateTime(2026, 4, 23))).hasEntries,
       isFalse,
     );
     expect(
@@ -215,8 +215,8 @@ void main() {
           // card out where it was and in where it goes, and the card it
           // passes moves up as the old place shrinks.
           await cardAction(tester, standupId, "Edit");
-          await chooseOption(tester, "Start", "12:00");
-          await chooseOption(tester, "End", "12:30");
+          await chooseOption(tester, "Start time", "12:00");
+          await chooseOption(tester, "End time", "12:30");
           await tester.tap(find.byType(FilledButton));
           await tester.pump();
           await tester.pump(api.latency);
@@ -415,7 +415,7 @@ void main() {
     }
     final yesterday = DateTime(2026, 4, 20);
     bool yesterdayRead() {
-      return tester.widget<DayCell>(dayFinder(yesterday)).hasItems;
+      return tester.widget<DayCell>(dayFinder(yesterday)).hasEntries;
     }
 
     expect(headerTop(tester, today), 0.0);
@@ -519,24 +519,24 @@ void main() {
     }
 
     await addFrom(find.byKey(dayListGapKey(day, 10 * 60)));
-    expect(find.text("2026-04-22"), findsOneWidget);
-    expect(shows("Start", "10:00"), findsOneWidget);
-    expect(shows("End", "10:15"), findsOneWidget);
+    expectFormDays("2026-04-22", 1);
+    expect(shows("Start time", "10:00"), findsOneWidget);
+    expect(shows("End time", "10:15"), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, "Cancel"));
     await tester.pumpAndSettle();
 
     // The gap after the last item, to the end of the day.
     await addFrom(find.byKey(dayListGapKey(day, 11 * 60 + 15)));
-    expect(shows("Start", "11:15"), findsOneWidget);
-    expect(shows("End", "11:30"), findsOneWidget);
+    expect(shows("Start time", "11:15"), findsOneWidget);
+    expect(shows("End time", "11:30"), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, "Cancel"));
     await tester.pumpAndSettle();
 
     // A day without items: one gap across the hours.
     await addFrom(find.byKey(dayListGapKey(DateTime(2026, 4, 23), 0)));
-    expect(find.text("2026-04-23"), findsOneWidget);
-    expect(shows("Start", "00:00"), findsOneWidget);
-    expect(shows("End", "00:15"), findsOneWidget);
+    expectFormDays("2026-04-23", 1);
+    expect(shows("Start time", "00:00"), findsOneWidget);
+    expect(shows("End time", "00:15"), findsOneWidget);
   });
 
   testWidgets("L14 the gap rows follow the calendar's hours as the "

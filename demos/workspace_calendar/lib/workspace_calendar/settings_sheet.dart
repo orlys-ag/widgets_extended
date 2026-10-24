@@ -1,11 +1,11 @@
 /// The calendar's settings sheet: the history lock, how Month fits its
-/// weeks, and on the calendar's controller the least width of a day in
-/// Week, Day and Month and the least height of the timed grid's slots.
+/// weeks, the length of the calendar's slots, and on the calendar's
+/// controller the least width of a day in Week, Day and Month and the
+/// least height of the timed grid's slots.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
@@ -23,6 +23,9 @@ const ValueKey<String> lockEarlierTodayKey = ValueKey<String>(
 const ValueKey<String> monthLayoutKey = ValueKey<String>(
   "settings-month-layout",
 );
+
+/// The key of the sheet's slot length buttons.
+const ValueKey<String> slotLengthKey = ValueKey<String>("settings-slot-length");
 
 /// The key of the sheet's day width slider.
 const ValueKey<String> dayWidthSliderKey = ValueKey<String>(
@@ -67,7 +70,10 @@ Future<void> showCalendarSettings(
 /// The sheet [showCalendarSettings] opens: a switch for the history lock of
 /// past days and, under it, one that extends the lock to earlier today,
 /// which takes input only while the first is on, a segmented button for
-/// Month's layout, and a slider for each least size of [controller].
+/// Month's layout, one for the slot length, offering each of
+/// [slotMinuteChoices] and choosing through
+/// [CalendarSettings.withSlotMinutes], and a slider for each least size of
+/// [controller].
 class CalendarSettingsSheet extends StatefulWidget {
   const CalendarSettingsSheet({
     super.key,
@@ -175,6 +181,27 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
               "shows +N more.",
             ),
             const SizedBox(height: 16.0),
+            const _Heading(label: "Slot length"),
+            const SizedBox(height: 8.0),
+            SegmentedButton<int>(
+              key: slotLengthKey,
+              expandedInsets: EdgeInsets.zero,
+              showSelectedIcon: false,
+              segments: <ButtonSegment<int>>[
+                for (final minutes in slotMinuteChoices)
+                  ButtonSegment<int>(value: minutes, label: Text("$minutes")),
+              ],
+              selected: <int>{_settings.slotMinutes},
+              onSelectionChanged: (selected) {
+                _set(_settings.withSlotMinutes(selected.single));
+              },
+            ),
+            const SizedBox(height: 4.0),
+            const _Note(
+              "Minutes per row in Week and Day, and the step of moves, "
+              "resizes and new items; the hours widen to whole slots.",
+            ),
+            const SizedBox(height: 16.0),
             ListenableBuilder(
               listenable: widget.controller,
               builder: (context, child) {
@@ -202,7 +229,7 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
                       label: "Slot height",
                       value:
                           "At least ${controller.minSlotHeight.round()} px "
-                          "per $minutesPerSlot minutes",
+                          "per ${_settings.slotMinutes} minutes",
                     ),
                     Slider(
                       key: slotHeightSliderKey,

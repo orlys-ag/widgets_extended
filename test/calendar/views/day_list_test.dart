@@ -26,9 +26,8 @@ ShownItem entryAt(String id, int start, int end) {
   return ShownItem(
     CalendarEntry<String>(
       id: id,
-      day: DateTime(2026, 4, 22),
-      startMinute: start,
-      endMinute: end,
+      start: DateTime(2026, 4, 22, 0, start),
+      end: DateTime(2026, 4, 22, 0, end),
       title: id,
       color: const Color(0xFF336699),
       payload: id,
@@ -53,7 +52,7 @@ List<Object> rowsOf(
       editable: editable,
     ))
       switch (row) {
-        DayListItem(:final entry) => entry.id,
+        DayListEntry(:final entry) => entry.id,
         DayListGap(:final start, :final end) => (start, end),
         DayListHidden(:final count, :final above) => (
           above ? "before" : "after",
@@ -174,9 +173,8 @@ void main() {
     final day = DateTime(2026, 4, 21);
     final note = CalendarEntry<String>(
       id: "note-1",
-      day: day,
-      startMinute: 10 * 60,
-      endMinute: 11 * 60,
+      start: DateTime(2026, 4, 21, 10),
+      end: DateTime(2026, 4, 21, 11),
       title: "Note",
       color: const Color(0xFF336699),
       payload: "first",
@@ -212,7 +210,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final card = find.byKey(itemCardKey("note-1"));
+    final card = find.byKey(entryCardKey("note-1"));
     expect(
       find.descendant(of: card, matching: find.text("first")),
       findsOneWidget,

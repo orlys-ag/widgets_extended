@@ -179,7 +179,7 @@ const double dayListTimeGap = 8.0;
 const double dayListAddButtonSize = 24.0;
 
 /// The key of the slot that holds the card of the item [id].
-ValueKey<String> itemCardKey(String id) {
+ValueKey<String> entryCardKey(String id) {
   return ValueKey<String>("card-$id");
 }
 
@@ -312,11 +312,33 @@ final class DayListBody extends DayListRow {
   }
 }
 
-/// The row of the item [entry] on [day].
-final class DayListItem<T> extends DayListRow {
-  const DayListItem(super.day, this.entry);
+/// The row of the entry [entry] on [day]: its piece there, from [start]
+/// to [end] minutes after the day's midnight ([pieceOn]), and whether the
+/// entry is all-day, [allDay].
+final class DayListEntry<T> extends DayListRow {
+  const DayListEntry(super.day, this.entry, this.start, this.end, this.allDay);
 
   final CalendarShownEntry<T> entry;
+
+  /// Minutes after [day]'s midnight, on the wall clock.
+  final int start;
+
+  /// Minutes after [day]'s midnight, on the wall clock, after [start].
+  final int end;
+
+  /// Whether the entry is all-day ([CalendarEntry.isAllDay]).
+  final bool allDay;
+
+  /// Whether the piece holds the entry's start.
+  bool get first {
+    return dayNumber(entry.entry.start) == dayNumber(day);
+  }
+
+  /// Whether the piece holds the entry's end.
+  bool get last {
+    return lastDayNumberOf(entry.entry.start, entry.entry.end) ==
+        dayNumber(day);
+  }
 
   @override
   String get key {
@@ -325,22 +347,27 @@ final class DayListItem<T> extends DayListRow {
 
   @override
   bool operator ==(Object other) {
-    return other is DayListItem<T> && other.day == day && other.entry == entry;
+    return other is DayListEntry<T> &&
+        other.day == day &&
+        other.entry == entry &&
+        other.start == start &&
+        other.end == end &&
+        other.allDay == allDay;
   }
 
   @override
   int get hashCode {
-    return Object.hash(day, entry);
+    return Object.hash(day, entry, start, end, allDay);
   }
 
   @override
   String toString() {
-    return "DayListItem(${isoDate(day)}, $entry)";
+    return "DayListEntry(${isoDate(day)}, $entry)";
   }
 }
 
 /// [day]'s dashed row of a gap: the minutes from [start] to [end], inside
-/// the calendar's hours, that no item covers.
+/// the calendar's hours, that no timed entry's piece covers.
 final class DayListGap extends DayListRow {
   const DayListGap(super.day, this.start, this.end);
 
@@ -374,7 +401,7 @@ final class DayListGap extends DayListRow {
   }
 }
 
-/// [day]'s banner counting the [count] items that lie wholly before the
+/// [day]'s banner counting the [count] pieces that lie wholly before the
 /// calendar's hours, or wholly after them when [above] is false.
 final class DayListHidden extends DayListRow {
   const DayListHidden(super.day, this.count, {required this.above});
@@ -446,48 +473,64 @@ final class DayListFailed extends DayListRow {
   }
 }
 
-/// The rows of [day]'s block for [entries], the day's items sorted by
-/// start as [CalendarStore.entriesOn] sorts them. An item with no minute
-/// inside [hours] has no row: a [DayListHidden] first counts those before
-/// the hours, and one last those after them, as the timed grid counts the
-/// items it has no block for. Each other item has its row, and where
-/// [editable], one gap row for each run of minutes in [hours] that none of
-/// them covers, an item covering the minutes from its start to before its
-/// end, before the item that ends the run or after the last item. So items
-/// that touch have no gap between them, and a day with no item inside the
-/// hours has one gap row across them.
+/// The rows of [day]'s block for [entries], the entries the store answers
+/// on [day], sorted as [CalendarStore.entriesOn] sorts them, each row
+/// holding the entry's piece on [day] ([pieceOn]). The all-day entries come
+/// first, in that order. A timed entry whose piece has no minute inside
+/// [hours] has no row: a [DayListHidden] after the all-day rows counts
+/// those before the hours, and one last those after them, as the timed
+/// grid counts the pieces it has no block for. Each other timed entry has
+/// its row, and where [editable], one gap row for each run of minutes in
+/// [hours] that none of their pieces covers, a piece covering the minutes
+/// from its start to before its end, before the row that ends the run or
+/// after the last one. So pieces that touch have no gap between them, and
+/// a day with no timed piece inside the hours has one gap row across
+/// them.
 List<DayListRow> dayListRowsOf<T>(
   DateTime day,
   List<CalendarShownEntry<T>> entries,
   DayHours hours, {
   required bool editable,
 }) {
+  final allDay = <DayListRow>[];
   final rows = <DayListRow>[];
+  final number = dayNumber(day);
   var before = 0;
   var after = 0;
-  // The latest end among the items so far, or the hours' start.
+  // The latest end among the pieces so far, or the hours' start.
   var covered = hours.start;
   for (final entry in entries) {
-    final item = entry.entry;
-    if (math.min(item.endMinute, hours.end) <=
-        math.max(item.startMinute, hours.start)) {
-      if (item.startMinute < hours.start) {
+    final calendarEntry = entry.entry;
+    final piece = pieceOn(
+      wallSpanOf(calendarEntry.start, calendarEntry.end),
+      number,
+    );
+    if (piece == null) {
+      continue;
+    }
+    if (calendarEntry.isAllDay) {
+      allDay.add(DayListEntry<T>(day, entry, piece.start, piece.end, true));
+      continue;
+    }
+    if (math.min(piece.end, hours.end) <= math.max(piece.start, hours.start)) {
+      if (piece.start < hours.start) {
         before++;
       } else {
         after++;
       }
       continue;
     }
-    if (editable && item.startMinute > covered) {
-      rows.add(DayListGap(day, covered, item.startMinute));
+    if (editable && piece.start > covered) {
+      rows.add(DayListGap(day, covered, piece.start));
     }
-    rows.add(DayListItem<T>(day, entry));
-    covered = math.max(covered, item.endMinute);
+    rows.add(DayListEntry<T>(day, entry, piece.start, piece.end, false));
+    covered = math.max(covered, piece.end);
   }
   if (editable && hours.end > covered) {
     rows.add(DayListGap(day, covered, hours.end));
   }
   return <DayListRow>[
+    ...allDay,
     if (before > 0) DayListHidden(day, before, above: true),
     ...rows,
     if (after > 0) DayListHidden(day, after, above: false),
@@ -511,10 +554,10 @@ List<DayListRow> dayListRowsOf<T>(
 /// Unless [editable], the list has no dashed rows and hands the card
 /// builder no Edit or Delete, so a day without items shows its header
 /// alone. Under the history [lock] a card is handed Edit only while its
-/// item is not [ItemHold.locked], and Delete only while it is
-/// [ItemHold.free], and a dashed row's button adds from the first time the
-/// lock leaves free in its gap, and is gone where the lock leaves none. A
-/// row that comes or
+/// item is not [EntryHold.locked], and Delete only while it is
+/// [EntryHold.free], and a dashed row's button adds one slot of
+/// [slotMinutes] from the first time the lock leaves free in its gap, and
+/// is gone where that slot does not fit in the gap. A row that comes or
 /// goes in a block grows in and fades in, or fades out and shrinks away,
 /// so the block grows or shrinks smoothly; a block above the list's top
 /// that changes height moves nothing the list shows.
@@ -557,6 +600,7 @@ class DayList<T> extends StatefulWidget {
     required this.weekdays,
     required this.format,
     required this.hours,
+    this.slotMinutes = defaultSlotMinutes,
     required this.editable,
     required this.lock,
     required this.selectedDay,
@@ -586,6 +630,11 @@ class DayList<T> extends StatefulWidget {
   /// outside them shows only in a banner's count.
   final DayHours hours;
 
+  /// The length of the slot a gap row's add button creates, in minutes,
+  /// one of [slotMinuteChoices], which the list's state asserts; the lock
+  /// rounds its first free time up to the grid of it from midnight.
+  final int slotMinutes;
+
   /// Whether the calendar is in edit mode, where the list has its dashed
   /// rows and hands each card its Edit and Delete.
   final bool editable;
@@ -605,15 +654,15 @@ class DayList<T> extends StatefulWidget {
   /// A drag or a fling brought a new day under the list's top.
   final ValueChanged<DateTime> onTopDay;
 
-  /// The add button of a gap was pressed: an item in the gap's first slot
-  /// the history lock leaves free.
+  /// The add button of a gap was pressed: an item of one slot of
+  /// [slotMinutes] from the gap's first time the history lock leaves free.
   final void Function(DateTime day, int startMinute, int endMinute) onCreateIn;
 
   final void Function(String id) onEdit;
   final void Function(String id) onDelete;
 
   /// Draws each card inside the slot the list gives it, keyed
-  /// [itemCardKey]; null for [defaultCalendarCardBuilder].
+  /// [entryCardKey]; null for [defaultCalendarCardBuilder].
   final CalendarCardBuilder<T>? cardBuilder;
 
   /// The height of [cardBuilder]'s card of an entry, its strips left out,
@@ -698,6 +747,11 @@ class _DayListState<T> extends State<DayList<T>> {
   @override
   void initState() {
     super.initState();
+    assert(
+      slotMinuteChoices.contains(widget.slotMinutes),
+      "A DayList's slotMinutes, ${widget.slotMinutes}, is not one of "
+      "$slotMinuteChoices.",
+    );
     _centreOn(widget.selectedDay);
     _scroll = ScrollController(initialScrollOffset: _offsetOf(_topDay));
     widget.store.addListener(_handleStore);
@@ -721,6 +775,11 @@ class _DayListState<T> extends State<DayList<T>> {
   @override
   void didUpdateWidget(DayList<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
+    assert(
+      slotMinuteChoices.contains(widget.slotMinutes),
+      "A DayList's slotMinutes, ${widget.slotMinutes}, is not one of "
+      "$slotMinuteChoices.",
+    );
     if (widget.store != oldWidget.store) {
       oldWidget.store.removeListener(_handleStore);
       widget.store.addListener(_handleStore);
@@ -1001,12 +1060,17 @@ class _DayListState<T> extends State<DayList<T>> {
     const padding = _rowGap;
     final hours = widget.hours;
     switch (row) {
-      case DayListItem<T>(:final entry):
-        final item = entry.entry;
+      case DayListEntry<T>(
+        :final entry,
+        :final start,
+        :final end,
+        :final allDay,
+      ):
         final cardExtentOf = widget.cardExtentOf;
-        final strips =
-            (item.startMinute < hours.start ? calendarCardStripExtent : 0.0) +
-            (item.endMinute > hours.end ? calendarCardStripExtent : 0.0);
+        final strips = allDay
+            ? 0.0
+            : (start < hours.start ? calendarCardStripExtent : 0.0) +
+                  (end > hours.end ? calendarCardStripExtent : 0.0);
         final card =
             (cardExtentOf == null
                 ? defaultCalendarCardExtent(_styles.theme)
@@ -1241,12 +1305,19 @@ class _DayListState<T> extends State<DayList<T>> {
       case DayListHeader():
       case DayListBody():
         throw ArgumentError.value(row, "row", "not a row of a block");
-      case DayListItem<T>(:final entry):
-        return _padded(_buildItem(entry));
-      case DayListItem():
+      case DayListEntry<T>():
+        return _padded(_buildEntryRow(row));
+      case DayListEntry():
         throw ArgumentError.value(row, "row", "an item of another payload");
       case DayListGap(:final day, :final start, :final end):
-        final from = math.max(start, widget.lock.earliestStartOn(day));
+        final slot = widget.slotMinutes;
+        final from = math.max(
+          start,
+          widget.lock.earliestStartOn(day, slotMinutes: slot),
+        );
+        // One slot from the gap's first free minute must fit it, so a gap
+        // shorter than a slot, as entries off the slot grid can leave,
+        // offers no add.
         return _padded(
           _buildDashed(
             key: dayListGapKey(day, start),
@@ -1254,9 +1325,9 @@ class _DayListState<T> extends State<DayList<T>> {
             day: day,
             addMinute: from,
             addLabel: "Add an item at ${hourLabel(from, widget.format)}",
-            onAdd: from < end
+            onAdd: from + slot <= end
                 ? () {
-                    widget.onCreateIn(day, from, from + minutesPerSlot);
+                    widget.onCreateIn(day, from, from + slot);
                   }
                 : null,
           ),
@@ -1358,7 +1429,7 @@ class _DayListState<T> extends State<DayList<T>> {
             ),
             if (count != null)
               Text(
-                itemCountLabel(count),
+                entryCountLabel(count),
                 style: empty ? styles.emptyCount : styles.count,
               ),
           ],
@@ -1367,23 +1438,42 @@ class _DayListState<T> extends State<DayList<T>> {
     );
   }
 
-  /// The later of the item's start and the hours', its whole length on a
-  /// chip under that behind an hourglass, scaled down where the chip would
-  /// not fit the time column, and its card's slot. The card of an item that
-  /// starts before the hours is handed its own start, for a strip across
-  /// its top, and that of one that ends after them its own end, for a strip
-  /// across its bottom. A row leaving for a banner, whose item has no
-  /// minute inside the hours, shows the item's own start and is handed
-  /// neither.
-  Widget _buildItem(CalendarShownEntry<T> entry) {
-    final item = entry.entry;
+  /// The time column and the card's slot of [row]'s piece of its entry.
+  /// For an entry wholly on the row's day the column shows the later of
+  /// its start and the hours', and for a piece of an entry over more than
+  /// one day the piece's range, its two ends joined by "-" and scaled down
+  /// to fit the column, so a middle day reads 00:00-24:00; under either,
+  /// the piece's length, from the entry's start or the day's to its end or
+  /// the next day's start, on a chip behind an hourglass, scaled down where
+  /// the chip would not fit. An all-day row shows [allDayLabel] and no
+  /// chip. The card of a piece that starts before the hours is handed the
+  /// piece's start, for a strip across its top, and that of one that ends
+  /// after them its end, for a strip across its bottom. A row leaving for a
+  /// banner, whose piece has no minute inside the hours, shows the piece's
+  /// own start and is handed neither.
+  Widget _buildEntryRow(DayListEntry<T> row) {
+    final entry = row.entry;
+    final calendarEntry = entry.entry;
     final hours = widget.hours;
-    var start = math.max(item.startMinute, hours.start);
-    final inside = math.min(item.endMinute, hours.end) > start;
+    final allDay = row.allDay;
+    var start = math.max(row.start, hours.start);
+    final inside = !allDay && math.min(row.end, hours.end) > start;
     if (!inside) {
-      start = item.startMinute;
+      start = row.start;
     }
-    final hold = widget.lock.holdOf(item.time);
+    final String time;
+    if (allDay) {
+      time = allDayLabel;
+    } else if (row.first && row.last) {
+      time = hourLabel(start, widget.format);
+    } else {
+      time =
+          "${hourLabel(row.start, widget.format)}-"
+          "${hourLabel(row.end, widget.format)}";
+    }
+    final pieceStart = row.first ? calendarEntry.start : row.day;
+    final pieceEnd = row.last ? calendarEntry.end : addDays(row.day, 1);
+    final hold = widget.lock.holdOf(calendarEntry.start, calendarEntry.end);
     final styles = _styles;
     return Row(
       children: <Widget>[
@@ -1394,57 +1484,67 @@ class _DayListState<T> extends State<DayList<T>> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: <Widget>[
-              Text(
-                hourLabel(start, widget.format),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: styles.time,
-              ),
-              const SizedBox(height: 6.0),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: DecoratedBox(
-                  key: dayListDurationKey(entry.id),
-                  decoration: styles.durationChip,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 7.0,
-                      vertical: 2.0,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        styles.durationIcon,
-                        const SizedBox(width: 2.0),
-                        Text(
-                          durationLabel(item.endMinute - item.startMinute),
-                          style: styles.durationLabel,
-                        ),
-                      ],
+              if (row.first && row.last || allDay)
+                Text(
+                  time,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: styles.time,
+                )
+              else
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(time, maxLines: 1, style: styles.time),
+                ),
+              if (!allDay) ...<Widget>[
+                const SizedBox(height: 6.0),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: DecoratedBox(
+                    key: dayListDurationKey(entry.id),
+                    decoration: styles.durationChip,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7.0,
+                        vertical: 2.0,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          styles.durationIcon,
+                          const SizedBox(width: 2.0),
+                          Text(
+                            durationLabel(
+                              pieceEnd.difference(pieceStart).inMinutes,
+                            ),
+                            style: styles.durationLabel,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
         ),
         Expanded(
           child: _CardSlot<T>(
-            key: itemCardKey(entry.id),
+            key: entryCardKey(entry.id),
             entry: entry,
             builder: widget.cardBuilder ?? defaultCalendarCardBuilder<T>,
-            startsAt: inside && item.startMinute < hours.start
-                ? hourLabel(item.startMinute, widget.format)
+            startsAt: inside && row.start < hours.start
+                ? hourLabel(row.start, widget.format)
                 : null,
-            endsAt: inside && item.endMinute > hours.end
-                ? hourLabel(item.endMinute, widget.format)
+            endsAt: inside && row.end > hours.end
+                ? hourLabel(row.end, widget.format)
                 : null,
-            onEdit: widget.editable && hold != ItemHold.locked
+            onEdit: widget.editable && hold != EntryHold.locked
                 ? () {
                     widget.onEdit(entry.id);
                   }
                 : null,
-            onDelete: widget.editable && hold == ItemHold.free
+            onDelete: widget.editable && hold == EntryHold.free
                 ? () {
                     widget.onDelete(entry.id);
                   }
@@ -1490,7 +1590,7 @@ class _DayListState<T> extends State<DayList<T>> {
                     const SizedBox(width: 4.0),
                     Expanded(
                       child: Text(
-                        "${moreItemsLabel(count)} $side "
+                        "${moreEntriesLabel(count)} $side "
                         "${hourLabel(minute, widget.format)}",
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -1832,7 +1932,7 @@ enum _NowSide {
 }
 
 /// The minutes, from [from] up to [until], for which a row of a day's
-/// block holds the marker of the current time, the [item]'s minutes inside
+/// block holds the marker of the current time, the [piece]'s minutes inside
 /// the hours where the row is one, with whether it runs on [before] or
 /// [after] them, and whether the row is the block's [first], which also
 /// holds the marker for the minutes before [from].
@@ -1842,26 +1942,27 @@ class _NowSpan {
     required this.from,
     required this.until,
     required this.first,
-    required this.item,
+    required this.piece,
   });
 
   final int from;
   final int until;
   final bool first;
-  final ({int start, int end, bool before, bool after})? item;
+  final ({int start, int end, bool before, bool after})? piece;
 
   /// The span of each of a day's [rows] in [hours] by key: each row holds
   /// the marker from its start to the next row's, the last one on past the
-  /// end of the day. A banner of the items before the hours starts before
+  /// end of the day. A banner of the pieces before the hours starts before
   /// any minute, and one of those after them after every minute. Only rows
-  /// with a start take part.
+  /// with a start take part, which an all-day row has not.
   static Map<String, _NowSpan> spansOf(List<DayListRow> rows, DayHours hours) {
     final starts = <(DayListRow, int)>[];
     for (final row in rows) {
       final start = switch (row) {
         DayListHidden(above: true) => -1,
         DayListHidden(above: false) => minutesPerDay + 1,
-        DayListItem(:final entry) => entry.entry.startMinute,
+        DayListEntry(allDay: true) => null,
+        DayListEntry(:final start) => start,
         DayListGap(:final start) => start,
         _ => null,
       };
@@ -1875,12 +1976,12 @@ class _NowSpan {
           from: starts[i].$2,
           until: i + 1 < starts.length ? starts[i + 1].$2 : minutesPerDay + 1,
           first: i == 0,
-          item: switch (starts[i].$1) {
-            DayListItem(:final entry) => (
-              start: math.max(entry.entry.startMinute, hours.start),
-              end: math.min(entry.entry.endMinute, hours.end),
-              before: entry.entry.startMinute < hours.start,
-              after: entry.entry.endMinute > hours.end,
+          piece: switch (starts[i].$1) {
+            DayListEntry(:final start, :final end) => (
+              start: math.max(start, hours.start),
+              end: math.min(end, hours.end),
+              before: start < hours.start,
+              after: end > hours.end,
             ),
             _ => null,
           },
@@ -1899,12 +2000,12 @@ class _NowSpan {
     if (minute >= until) {
       return null;
     }
-    final item = this.item;
-    if (item != null &&
-        (minute < item.end || (item.after && minute == item.end))) {
+    final piece = this.piece;
+    if (piece != null &&
+        (minute < piece.end || (piece.after && minute == piece.end))) {
       return (
         side: _NowSide.across,
-        fraction: (minute - item.start) / (item.end - item.start),
+        fraction: (minute - piece.start) / (piece.end - piece.start),
       );
     }
     return (side: _NowSide.below, fraction: 0.0);
@@ -1916,12 +2017,12 @@ class _NowSpan {
         other.from == from &&
         other.until == until &&
         other.first == first &&
-        other.item == item;
+        other.piece == piece;
   }
 
   @override
   int get hashCode {
-    return Object.hash(from, until, first, item);
+    return Object.hash(from, until, first, piece);
   }
 }
 
@@ -1955,17 +2056,17 @@ class _NowMarker extends StatelessWidget {
         if (place == null) {
           return const SizedBox.shrink();
         }
-        final item = span.item;
+        final piece = span.piece;
         return IgnorePointer(
           child: ExcludeSemantics(
             child: CustomSingleChildLayout(
               delegate: _NowLayout(
                 place.side,
                 place.fraction,
-                top: item != null && item.before
+                top: piece != null && piece.before
                     ? calendarCardStripExtent
                     : 0.0,
-                bottom: item != null && item.after
+                bottom: piece != null && piece.after
                     ? calendarCardStripExtent
                     : 0.0,
               ),
@@ -2085,7 +2186,7 @@ class _NowLinePainter extends CustomPainter {
   }
 }
 
-/// The slot of an entry's card in its row, keyed [itemCardKey]: what
+/// The slot of an entry's card in its row, keyed [entryCardKey]: what
 /// [builder] draws for [entry] and the details this slot makes of
 /// [startsAt], [endsAt], [onEdit] and [onDelete] on each of its builds,
 /// called below the row, so a builder that throws loses its own output

@@ -211,8 +211,8 @@ void main() {
   group("C2 DayHours", () {
     test("counts its slots and holds the minutes inside it", () {
       const office = DayHours(8 * 60, 18 * 60);
-      expect(DayHours.allDay.slotCount, 96);
-      expect(office.slotCount, 40);
+      expect(DayHours.allDay.slotCountOf(15), 96);
+      expect(office.slotCountOf(15), 40);
       expect(office.contains(8 * 60, 18 * 60), isTrue);
       expect(office.contains(7 * 60 + 45, 9 * 60), isFalse);
       expect(office.contains(17 * 60, 18 * 60 + 15), isFalse);
@@ -233,8 +233,8 @@ void main() {
   });
 
   group("DH1 DayHours' starts and ends", () {
-    test("holds a start from its start to its last slot's start, and an end "
-        "from its first slot's end to its end", () {
+    test("holds a start from its start to before its end, and an end from "
+        "after its start to its end", () {
       const office = DayHours(480, 1080);
       expect(office.holdsStart(480), isTrue);
       expect(office.holdsStart(1065), isTrue);

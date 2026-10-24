@@ -5,7 +5,6 @@ library;
 
 import 'package:flutter/foundation.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
 import 'calendar_schema.dart';
 import 'harbor_theme.dart';
@@ -64,39 +63,35 @@ extension CalendarItemFields on CalendarEntry<ItemPayload> {
     return payload.fields;
   }
 
-  /// The envelope, a new map each call. A draft carries no `id` key.
+  /// The envelope, a new map each call. A draft carries no `id` key. Its
+  /// `start` and `end` are the item's times as [isoDateTime] writes them.
   Map<String, Object?> toJson() {
     return <String, Object?>{
       if (id != null) "id": id,
       "type": type.id,
       "title": title,
-      "day": isoDate(day),
-      "startMinute": startMinute,
-      "endMinute": endMinute,
-      "dayCount": dayCount,
+      "start": isoDateTime(start),
+      "end": isoDateTime(end),
       "fields": _modifiableCopy(fields),
     };
   }
 }
 
 /// An item of [type] with [fields], coloured by its type's Harbor edge;
-/// [id] null for a draft the API has not stored.
+/// [id] null for a draft the API has not stored. It runs from [start] to
+/// [end], an exclusive end.
 CalendarItem calendarItem({
   String? id,
   required CalendarItemType type,
   required String title,
-  required DateTime day,
-  required int startMinute,
-  required int endMinute,
-  int dayCount = 1,
+  required DateTime start,
+  required DateTime end,
   Map<String, Object?> fields = const <String, Object?>{},
 }) {
   return CalendarItem(
     id: id,
-    day: day,
-    startMinute: startMinute,
-    endMinute: endMinute,
-    dayCount: dayCount,
+    start: start,
+    end: end,
     title: title,
     color: harborTypeStyleOf(type).edge,
     payload: ItemPayload(type, fields),
@@ -104,24 +99,22 @@ CalendarItem calendarItem({
 }
 
 /// Reads a valid envelope. Throws a [FormatException] when a key is
-/// missing or of the wrong kind.
+/// missing or of the wrong kind, or the end is not after the start.
 CalendarItem itemFromJson(Map<String, Object?> json) {
   final typeId = json["type"];
   final type = typeId is String ? CalendarItemType.fromId(typeId) : null;
-  final dayText = json["day"];
-  final day = dayText is String ? parseIsoDate(dayText) : null;
   final title = json["title"];
-  final start = json["startMinute"];
-  final end = json["endMinute"];
-  final dayCount = json["dayCount"];
+  final startText = json["start"];
+  final start = startText is String ? parseIsoDateTime(startText) : null;
+  final endText = json["end"];
+  final end = endText is String ? parseIsoDateTime(endText) : null;
   final fields = json["fields"];
   final id = json["id"];
   if (type == null ||
-      day == null ||
       title is! String ||
-      start is! int ||
-      end is! int ||
-      dayCount is! int ||
+      start == null ||
+      end == null ||
+      !end.isAfter(start) ||
       fields is! Map<String, Object?> ||
       (id != null && id is! String)) {
     throw FormatException("Not a calendar item envelope: $json");
@@ -130,10 +123,8 @@ CalendarItem itemFromJson(Map<String, Object?> json) {
     id: id as String?,
     type: type,
     title: title,
-    day: day,
-    startMinute: start,
-    endMinute: end,
-    dayCount: dayCount,
+    start: start,
+    end: end,
     fields: fields,
   );
 }

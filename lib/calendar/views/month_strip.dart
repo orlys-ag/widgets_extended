@@ -501,14 +501,14 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
       child: DayMarkerListener<T>(
         store: widget.store,
         day: day,
-        builder: (context, hasItems) {
+        builder: (context, hasEntries) {
           return DayCell(
             key: dayCellKey(day),
             day: day,
             inMonth: true,
             isSelected: day == widget.selectedDay,
             isToday: day == widget.today,
-            hasItems: hasItems,
+            hasEntries: hasEntries,
             collapse: widget.collapse,
           );
         },
@@ -543,13 +543,13 @@ class _NeighbourDay<T> extends StatelessWidget {
         child: DayMarkerListener<T>(
           store: store,
           day: day,
-          builder: (context, hasItems) {
+          builder: (context, hasEntries) {
             return DayCell(
               day: day,
               inMonth: false,
               isSelected: isSelected,
               isToday: isToday,
-              hasItems: hasItems,
+              hasEntries: hasEntries,
               collapse: collapse,
             );
           },

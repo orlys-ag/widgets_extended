@@ -85,6 +85,22 @@ String clockRangeLabel(int start, int end) {
   return "${clockLabel(start)}-${clockLabel(end)}";
 }
 
+/// What an all-day entry's times read: "All day".
+const String allDayLabel = "All day";
+
+/// "09:10-09:50": the [clockLabel]s of the times of day of [start] and
+/// [end], the end reading "24:00" where it is the start of the day after
+/// [start]'s; [allDayLabel] for a range from a day start to a day start.
+String entryTimesLabel(DateTime start, DateTime end) {
+  if (isDayStart(start) && isDayStart(end)) {
+    return allDayLabel;
+  }
+  final last = isDayStart(end) && dayNumber(end) == dayNumber(start) + 1
+      ? minutesPerDay
+      : minuteOfDay(end);
+  return clockRangeLabel(minuteOfDay(start), last);
+}
+
 /// How the timed grid's hour gutter names the times it labels.
 enum HourLabelFormat {
   /// "13:00", as [clockLabel] writes it.
@@ -128,7 +144,7 @@ String hiddenRowLabel(
       "${weekdayNames[weekdayColumn(day)]}, "
       "${monthNames[day.month - 1]} ${day.day}";
   final side = above ? "before" : "after";
-  return "$date, ${moreItemsLabel(count)} $side ${hourLabel(minute, format)}";
+  return "$date, ${moreEntriesLabel(count)} $side ${hourLabel(minute, format)}";
 }
 
 /// The sentence the default failure builder shows for a read that failed.
@@ -187,12 +203,12 @@ String dayTitle(DateTime day, DateTime today) {
 }
 
 /// "1 more item" or "N more items".
-String moreItemsLabel(int count) {
+String moreEntriesLabel(int count) {
   return count == 1 ? "1 more item" : "$count more items";
 }
 
 /// "No items", "1 item" or "N items".
-String itemCountLabel(int count) {
+String entryCountLabel(int count) {
   if (count == 0) {
     return "No items";
   }
@@ -201,3 +217,16 @@ String itemCountLabel(int count) {
   }
   return "$count items";
 }
+
+/// What a screen reader hears for the pill counting [count] all-day
+/// entries the collapsed all-day strip hides on a day: "1 more all-day
+/// entry" or "N more all-day entries".
+String allDayMoreLabel(int count) {
+  return count == 1
+      ? "1 more all-day entry"
+      : "$count more all-day entries";
+}
+
+/// What a screen reader hears for the pill that collapses the expanded
+/// all-day strip.
+const String allDayLessLabel = "Show fewer all-day entries";

@@ -53,6 +53,9 @@ Map<String, Object?> validFields(CalendarItemType type) {
   }
 }
 
+/// An envelope of [type] from [start] minutes after [day]'s midnight to
+/// [end] minutes after the midnight of the day [dayCount] - 1 days on,
+/// [day] Wednesday unless given.
 Map<String, Object?> envelope({
   CalendarItemType type = CalendarItemType.task,
   String title = "Item",
@@ -62,15 +65,49 @@ Map<String, Object?> envelope({
   int dayCount = 1,
   Map<String, Object?>? fields,
 }) {
+  final first = day ?? wednesday;
+  final last = addDays(first, dayCount - 1);
   return <String, Object?>{
     "type": type.id,
     "title": title,
-    "day": isoDate(day ?? wednesday),
-    "startMinute": start,
-    "endMinute": end,
-    "dayCount": dayCount,
+    "start": isoDateTime(
+      DateTime(first.year, first.month, first.day, 0, start),
+    ),
+    "end": isoDateTime(DateTime(last.year, last.month, last.day, 0, end)),
     "fields": fields ?? validFields(type),
   };
+}
+
+/// An envelope of [type] whose `start` and `end` are the texts given.
+Map<String, Object?> timed(
+  Object? start,
+  Object? end, {
+  CalendarItemType type = CalendarItemType.task,
+  String title = "Item",
+}) {
+  return <String, Object?>{
+    ...envelope(type: type, title: title),
+    "start": start,
+    "end": end,
+  };
+}
+
+/// The first hour of 2026 that the local clock skips, on its first day of
+/// 23 hours, as [isoDateTime] would write its half hour; null where the
+/// zone has no such day.
+String? _skippedHalfHour() {
+  for (var day = DateTime(2026); day.year == 2026; day = addDays(day, 1)) {
+    if (addDays(day, 1).difference(day).inHours != 23) {
+      continue;
+    }
+    for (var hour = 0; hour < 24; hour++) {
+      if (DateTime(day.year, day.month, day.day, hour, 30).hour != hour) {
+        final text = hour.toString().padLeft(2, "0");
+        return "${isoDate(day)}T$text:30";
+      }
+    }
+  }
+  return null;
 }
 
 /// The error [call] completed with by the end of a pump of the latency.
@@ -245,8 +282,8 @@ void main() {
     expect(updated.error, isNull);
     final got = await fetched(tester, api, id);
     expect(got["title"], "Renamed");
-    expect(got["startMinute"], 11 * 60);
-    expect(got["endMinute"], 12 * 60 + 30);
+    expect(got["start"], "2026-04-22T11:00");
+    expect(got["end"], "2026-04-22T12:30");
     expect(got["fields"], <String, Object?>{
       "status": "done",
       "priority": "medium",
@@ -399,8 +436,8 @@ void main() {
       tester,
       api.create(<String, Object?>{
         ...meeting(const <String, Object?>{"videoLink": ""}),
-        "startMinute": 10 * 60,
-        "endMinute": 11 * 60,
+        "start": "2026-04-22T10:00",
+        "end": "2026-04-22T11:00",
       }),
     );
     expect(linkless.error, isNull);
@@ -411,7 +448,11 @@ void main() {
     );
   });
 
-  testWidgets("A4 time and day-count rules", (tester) async {
+  testWidgets("A4 the validator requires start and end as "
+      "YYYY-MM-DDTHH:MM, refuses seconds, offsets, a day that does not "
+      "exist, an end not after the start and 367 days, and accepts 09:10", (
+    tester,
+  ) async {
     final api = MockCalendarApi(latency: latency);
     await stored(tester, api, envelope());
     final before = await listed(
@@ -425,73 +466,105 @@ void main() {
       return errorOf(tester, api.create(item));
     }
 
-    Map<String, Object?> withKey(String key, Object? value) {
-      return <String, Object?>{...envelope(start: 0, end: 60), key: value};
-    }
-
+    const end = "2026-04-23T10:00";
     expect(
-      await created(envelope(start: 540, end: 540)),
-      validationOf(<String>{"endMinute"}),
+      await created(timed("2026-04-23T09:00:00", end)),
+      validationOf(<String>{"start"}),
     );
     expect(
-      await created(envelope(start: 550, end: 600)),
-      validationOf(<String>{"startMinute"}),
+      await created(timed("2026-04-23T09:00", "2026-04-23T10:00-04:00")),
+      validationOf(<String>{"end"}),
     );
     expect(
-      await created(envelope(start: 540, end: 610)),
-      validationOf(<String>{"endMinute"}),
+      await created(timed("2026-04-23T09:00Z", end)),
+      validationOf(<String>{"start"}),
     );
     expect(
-      await created(envelope(start: -15, end: 600)),
-      validationOf(<String>{"startMinute"}),
+      await created(timed("2026-04-23 09:00", end)),
+      validationOf(<String>{"start"}),
     );
     expect(
-      await created(envelope(start: 1380, end: 1455)),
-      validationOf(<String>{"endMinute"}),
+      await created(timed("2026-02-30T09:00", end)),
+      validationOf(<String>{"start"}),
     );
     expect(
-      await created(envelope(dayCount: 0)),
-      validationOf(<String>{"dayCount"}),
+      await created(timed("2026-04-23T24:00", "2026-04-24T01:00")),
+      validationOf(<String>{"start"}),
+    );
+    expect(await created(timed(540, end)), validationOf(<String>{"start"}));
+    expect(
+      await created(timed("2026-04-23T09:00", null)),
+      validationOf(<String>{"end"}),
     );
     expect(
-      await created(envelope(dayCount: 367)),
-      validationOf(<String>{"dayCount"}),
+      await created(timed("2026-04-23T10:00", end)),
+      validationOf(<String>{"end"}),
     );
     expect(
-      await created(withKey("day", "21/04/2026")),
-      validationOf(<String>{"day"}),
+      await created(timed("2026-04-23T11:00", end)),
+      validationOf(<String>{"end"}),
+    );
+    // From 23:00 on Thursday to 01:00 a year and a day on: 367 days.
+    expect(
+      await created(timed("2026-04-23T23:00", "2027-04-24T01:00")),
+      validationOf(<String>{"end"}),
     );
     expect(
-      await created(withKey("startMinute", "540")),
-      validationOf(<String>{"startMinute"}),
-    );
-    expect(
-      await created(withKey("endMinute", 600.0)),
-      validationOf(<String>{"endMinute"}),
-    );
-    expect(
-      await created(withKey("dayCount", "2")),
-      validationOf(<String>{"dayCount"}),
-    );
-    expect(
-      await created(envelope(start: 1440, end: 1455)),
-      validationOf(<String>{"startMinute", "endMinute"}),
+      await created(<String, Object?>{
+        ...envelope(),
+        "day": "2026-04-23",
+        "startMinute": 540,
+      }),
+      validationOf(<String>{"day", "startMinute"}),
     );
     expect(
       await listed(tester, api, DateTime(2025, 1, 1), DateTime(2027, 12, 31)),
       before,
     );
 
+    final offGrid = await answer(
+      tester,
+      api.create(timed("2026-04-23T09:10", "2026-04-23T09:50")),
+    );
+    expect(offGrid.error, isNull);
+    final offGridId = (offGrid.value! as Map<String, Object?>)["id"]! as String;
+    final kept = await fetched(tester, api, offGridId);
+    expect(kept["start"], "2026-04-23T09:10");
+    expect(kept["end"], "2026-04-23T09:50");
+
+    // From 23:00 on Friday to 01:00 a year on: 366 days.
     final longest = await answer(
       tester,
-      api.create(envelope(start: 1380, end: 1440, dayCount: 366)),
+      api.create(timed("2026-04-24T23:00", "2027-04-24T01:00")),
     );
     expect(longest.error, isNull);
-    final id = (longest.value! as Map<String, Object?>)["id"]! as String;
-    expect((await fetched(tester, api, id))["dayCount"], 366);
   });
 
-  testWidgets("A5 overlap rules", (tester) async {
+  final skipped = _skippedHalfHour();
+  testWidgets(
+    "A4 the validator refuses a start or an end the clock skips",
+    (tester) async {
+      final api = MockCalendarApi(latency: latency);
+      final day = skipped!.substring(0, 10);
+      expect(
+        await errorOf(tester, api.create(timed(skipped, "${day}T23:00"))),
+        validationOf(<String>{"start"}),
+      );
+      expect(
+        await errorOf(tester, api.create(timed("${day}T00:30", skipped))),
+        validationOf(<String>{"end"}),
+      );
+      expect(
+        await listed(tester, api, DateTime(2026), DateTime(2026, 12, 31)),
+        isEmpty,
+      );
+    },
+    skip: skipped == null,
+  );
+
+  testWidgets("A5 overlap rules: instants that intersect conflict, an "
+      "overnight entry with each day it covers, and an all-day entry with "
+      "none", (tester) async {
     final api = MockCalendarApi(latency: latency);
     final thursday = DateTime(2026, 4, 23);
     final away = await stored(
@@ -499,15 +572,14 @@ void main() {
       api,
       envelope(type: CalendarItemType.outOfOffice, start: 540, end: 600),
     );
-    final meeting = await stored(
+    // Monday 22:00 to Tuesday 02:00.
+    final overnight = await stored(
       tester,
       api,
-      envelope(
+      timed(
+        "2026-04-27T22:00",
+        "2026-04-28T02:00",
         type: CalendarItemType.meeting,
-        day: DateTime(2026, 4, 27),
-        start: 13 * 60,
-        end: 14 * 60,
-        dayCount: 3,
       ),
     );
     final single = await stored(
@@ -531,31 +603,19 @@ void main() {
       overlapWith(<String>[away]),
     );
     expect(
-      await created(
-        envelope(day: DateTime(2026, 4, 28), start: 13 * 60 + 30, end: 14 * 60),
-      ),
-      overlapWith(<String>[meeting]),
+      await created(timed("2026-04-28T01:00", "2026-04-28T03:00")),
+      overlapWith(<String>[overnight]),
+    );
+    expect(
+      await created(timed("2026-04-27T21:00", "2026-04-27T23:00")),
+      overlapWith(<String>[overnight]),
     );
     expect(
       await created(
-        envelope(
+        timed(
+          "2026-04-22T15:00",
+          "2026-04-23T15:30",
           type: CalendarItemType.meeting,
-          day: wednesday,
-          start: 15 * 60,
-          end: 15 * 60 + 30,
-          dayCount: 2,
-        ),
-      ),
-      overlapWith(<String>[single]),
-    );
-    expect(
-      await created(
-        envelope(
-          type: CalendarItemType.outOfOffice,
-          day: wednesday,
-          start: 15 * 60 + 30,
-          end: 17 * 60,
-          dayCount: 2,
         ),
       ),
       overlapWith(<String>[single]),
@@ -565,11 +625,48 @@ void main() {
       before,
     );
 
-    final after = await answer(
+    // Touching ends share no time.
+    final evening = await answer(
       tester,
-      api.create(envelope(start: 600, end: 660)),
+      api.create(timed("2026-04-27T21:00", "2026-04-27T22:00")),
     );
-    expect(after.error, isNull);
+    expect(evening.error, isNull);
+    final morning = await answer(
+      tester,
+      api.create(timed("2026-04-28T02:00", "2026-04-28T03:00")),
+    );
+    expect(morning.error, isNull);
+
+    // An all-day entry over the busy Thursday, and over Monday to Tuesday,
+    // shares no time with any.
+    final allDay = await answer(
+      tester,
+      api.create(
+        timed(
+          "2026-04-23T00:00",
+          "2026-04-24T00:00",
+          type: CalendarItemType.outOfOffice,
+        ),
+      ),
+    );
+    expect(allDay.error, isNull);
+    final trip = await answer(
+      tester,
+      api.create(
+        timed(
+          "2026-04-27T00:00",
+          "2026-04-29T00:00",
+          type: CalendarItemType.outOfOffice,
+        ),
+      ),
+    );
+    expect(trip.error, isNull);
+    final over = await answer(
+      tester,
+      api.create(timed("2026-04-23T15:30", "2026-04-23T15:45")),
+    );
+    expect(over.error, overlapWith(<String>[single]));
+
     final renamed = await answer(
       tester,
       api.update(
@@ -596,32 +693,14 @@ void main() {
       ),
     );
     expect(shortened.error, isNull);
-    expect((await fetched(tester, api, away))["endMinute"], 585);
+    expect((await fetched(tester, api, away))["end"], "2026-04-22T09:45");
 
-    // Two single-day items of any types are kept apart too.
     final early = await stored(
       tester,
       api,
       envelope(day: thursday, start: 9 * 60, end: 10 * 60),
     );
     final thursdayBefore = await listed(tester, api, thursday, thursday);
-    expect(
-      await created(
-        envelope(day: thursday, start: 9 * 60 + 30, end: 10 * 60 + 30),
-      ),
-      overlapWith(<String>[early]),
-    );
-    expect(
-      await created(
-        envelope(
-          type: CalendarItemType.deadline,
-          day: thursday,
-          start: 15 * 60 + 45,
-          end: 16 * 60,
-        ),
-      ),
-      overlapWith(<String>[single]),
-    );
     final moved = await answer(
       tester,
       api.update(
@@ -631,6 +710,63 @@ void main() {
     );
     expect(moved.error, overlapWith(<String>[early]));
     expect(await listed(tester, api, thursday, thursday), thursdayBefore);
+  });
+
+  testWidgets("A10 a list of a day answers an overnight entry on both days "
+      "it covers, and not an entry ending at that day's start", (tester) async {
+    final api = MockCalendarApi(latency: latency);
+    final overnight = await stored(
+      tester,
+      api,
+      timed("2026-04-20T22:00", "2026-04-21T02:00"),
+    );
+    // An all-day Monday, which shares no time with the overnight entry.
+    final allMonday = await stored(
+      tester,
+      api,
+      timed("2026-04-20T00:00", "2026-04-21T00:00"),
+    );
+    final tuesday = await listed(
+      tester,
+      api,
+      DateTime(2026, 4, 21),
+      DateTime(2026, 4, 21),
+    );
+    expect(idsOf(tuesday), <String>[overnight]);
+    final monday = await listed(
+      tester,
+      api,
+      DateTime(2026, 4, 20),
+      DateTime(2026, 4, 20),
+    );
+    expect(idsOf(monday), <String>[allMonday, overnight]);
+
+    final evening = MockCalendarApi(latency: latency);
+    final toMidnight = await stored(
+      tester,
+      evening,
+      timed("2026-04-20T18:00", "2026-04-21T00:00"),
+    );
+    expect(
+      idsOf(
+        await listed(
+          tester,
+          evening,
+          DateTime(2026, 4, 20),
+          DateTime(2026, 4, 20),
+        ),
+      ),
+      <String>[toMidnight],
+    );
+    expect(
+      await listed(
+        tester,
+        evening,
+        DateTime(2026, 4, 21),
+        DateTime(2026, 4, 21),
+      ),
+      isEmpty,
+    );
   });
 
   testWidgets("A6 failure policy, latency and the request log", (tester) async {
@@ -764,10 +900,13 @@ void main() {
     );
     final dayOff = week.singleWhere((item) => item["title"] == "Day off");
     expect(dayOff["type"], CalendarItemType.outOfOffice.id);
-    expect(dayOff["day"], "2026-04-20");
-    expect(dayOff["startMinute"], 9 * 60);
-    expect(dayOff["endMinute"], 17 * 60);
+    expect(dayOff["start"], "2026-04-20T09:00");
+    expect(dayOff["end"], "2026-04-20T17:00");
+  });
 
+  testWidgets("A11 the seed's Conference trip is one all-day entry over "
+      "five days", (tester) async {
+    final api = MockCalendarApi.seeded(DateTime(2026, 4, 21), latency: latency);
     final may = await listed(
       tester,
       api,
@@ -776,10 +915,25 @@ void main() {
     );
     final trip = may.singleWhere((item) => item["title"] == "Conference trip");
     expect(trip["type"], CalendarItemType.outOfOffice.id);
-    expect(trip["day"], "2026-05-11");
-    expect(trip["dayCount"], 5);
-    expect(trip["startMinute"], 9 * 60);
-    expect(trip["endMinute"], 17 * 60);
+    expect(trip["start"], "2026-05-11T00:00");
+    expect(trip["end"], "2026-05-16T00:00");
+    final id = trip["id"]! as String;
+    for (var day = 11; day <= 15; day++) {
+      final listing = await listed(
+        tester,
+        api,
+        DateTime(2026, 5, day),
+        DateTime(2026, 5, day),
+      );
+      expect(idsOf(listing), contains(id), reason: "May $day");
+    }
+    final after = await listed(
+      tester,
+      api,
+      DateTime(2026, 5, 16),
+      DateTime(2026, 5, 16),
+    );
+    expect(idsOf(after), isNot(contains(id)));
   });
 
   test("A9 the schemas' summary keys", () {

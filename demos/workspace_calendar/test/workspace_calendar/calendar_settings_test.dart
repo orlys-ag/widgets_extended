@@ -8,6 +8,11 @@ import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+/// [minute] minutes after the midnight of Tuesday, April 21 2026.
+DateTime onTuesday(int minute) {
+  return DateTime(2026, 4, 21, 0, minute);
+}
+
 void main() {
   group("C3 hoursErrorsOf", () {
     const office = DayHours(8 * 60, 18 * 60);
@@ -17,29 +22,40 @@ void main() {
     const endError = "The end is 08:15 to 18:00, inside the calendar's hours.";
 
     test("is empty for minutes inside the hours, to their edges", () {
-      expect(hoursErrorsOf(8 * 60, 18 * 60, office), isEmpty);
-      expect(hoursErrorsOf(17 * 60 + 45, 18 * 60, office), isEmpty);
-      expect(hoursErrorsOf(8 * 60, 8 * 60 + 15, office), isEmpty);
+      expect(
+        hoursErrorsOf(onTuesday(8 * 60), onTuesday(18 * 60), office),
+        isEmpty,
+      );
+      expect(
+        hoursErrorsOf(onTuesday(17 * 60 + 45), onTuesday(18 * 60), office),
+        isEmpty,
+      );
+      expect(
+        hoursErrorsOf(onTuesday(8 * 60), onTuesday(8 * 60 + 15), office),
+        isEmpty,
+      );
     });
 
     test("names a start or an end outside the hours", () {
-      expect(hoursErrorsOf(7 * 60 + 45, 9 * 60, office), <String, String>{
-        "startMinute": startError,
-      });
-      expect(hoursErrorsOf(17 * 60, 18 * 60 + 15, office), <String, String>{
-        "endMinute": endError,
-      });
+      expect(
+        hoursErrorsOf(onTuesday(7 * 60 + 45), onTuesday(9 * 60), office),
+        <String, String>{"start": startError},
+      );
+      expect(
+        hoursErrorsOf(onTuesday(17 * 60), onTuesday(18 * 60 + 15), office),
+        <String, String>{"end": endError},
+      );
     });
 
     test("names both for minutes wholly past either end", () {
-      expect(hoursErrorsOf(18 * 60, 18 * 60 + 15, office), <String, String>{
-        "startMinute": startError,
-        "endMinute": endError,
-      });
-      expect(hoursErrorsOf(7 * 60, 8 * 60, office), <String, String>{
-        "startMinute": startError,
-        "endMinute": endError,
-      });
+      expect(
+        hoursErrorsOf(onTuesday(18 * 60), onTuesday(18 * 60 + 15), office),
+        <String, String>{"start": startError, "end": endError},
+      );
+      expect(
+        hoursErrorsOf(onTuesday(7 * 60), onTuesday(8 * 60), office),
+        <String, String>{"start": startError, "end": endError},
+      );
     });
   });
 

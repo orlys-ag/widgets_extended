@@ -60,9 +60,8 @@ CalendarShownEntry<String> shown({
   return CalendarShownEntry<String>(
     CalendarEntry<String>(
       id: "entry-1",
-      day: DateTime(2026, 4, 21),
-      startMinute: 540,
-      endMinute: 600,
+      start: DateTime(2026, 4, 21, 9),
+      end: DateTime(2026, 4, 21, 10),
       title: title,
       color: colour,
       payload: "note",
