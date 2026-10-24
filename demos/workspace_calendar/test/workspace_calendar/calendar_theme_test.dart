@@ -3018,8 +3018,14 @@ void main() {
       "today's ring",
     );
     expect((ring.border! as Border).top.width, theme.todayRingWidth);
+    // A day's badge takes its items' type's Harbor colour, its ring the
+    // theme's surface.
     final badge = decorationOf(tester, find.byKey(dayBadgeKey(april(22))));
-    expectColour(badge.color!, theme.primary, "badge");
+    expectColour(
+      badge.color!,
+      harborTypeStyleOf(CalendarItemType.meeting).edge,
+      "badge",
+    );
     expectColour(
       (badge.border! as Border).top.color,
       theme.surface,

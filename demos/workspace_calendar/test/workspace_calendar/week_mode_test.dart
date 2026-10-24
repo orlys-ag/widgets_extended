@@ -880,22 +880,11 @@ void main() {
 
   testWidgets("W6 refused drops", (tester) async {
     final api = MockCalendarApi.seeded(today, latency: harnessLatency);
-    await createBeforePump(
-      tester,
-      api,
-      taskJson("Quick check", DateTime(2026, 4, 23), 12 * 60, 12 * 60 + 15),
-    );
     // Saturday 15:00 to Sunday 16:00.
     await createBeforePump(
       tester,
       api,
       taskJson("Weekend", DateTime(2026, 4, 25), 15 * 60, 16 * 60, dayCount: 2),
-    );
-    final quickCheck = await idOn(
-      tester,
-      api,
-      DateTime(2026, 4, 23),
-      "Quick check",
     );
     final weekend = await idOn(tester, api, DateTime(2026, 4, 25), "Weekend");
     await pumpCalendar(tester, editing: true, api: api, size: tall);
@@ -923,12 +912,8 @@ void main() {
     }
 
     // Onto the hour gutter, from Sunday, which the gutter test alone
-    // refuses. Then onto the header row.
+    // refuses.
     await refused(sunday, cellRect(tester, rowOf(10 * 60), 0).topLeft);
-    await refused(
-      blockFinder(quickCheck),
-      cellRect(tester, 0, colOf(3)).topLeft,
-    );
     // Monday 16:00 puts the item's 25 hours over "Day off", and from any
     // time of Monday or Tuesday they meet an item of that day or the next,
     // so the drop finds no free time.

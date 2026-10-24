@@ -17,9 +17,10 @@ void main() {
   group("C3 hoursErrorsOf", () {
     const office = DayHours(8 * 60, 18 * 60);
     const startError =
-        "The start is 08:00 to 17:45, inside the calendar's "
+        "The start is from 08:00 to before 18:00, inside the calendar's "
         "hours.";
-    const endError = "The end is 08:15 to 18:00, inside the calendar's hours.";
+    const endError =
+        "The end is from after 08:00 to 18:00, inside the calendar's hours.";
 
     test("is empty for minutes inside the hours, to their edges", () {
       expect(

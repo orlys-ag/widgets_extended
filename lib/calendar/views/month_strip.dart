@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../dates/calendar_dates.dart';
+import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 import 'day_cell.dart';
@@ -53,8 +54,9 @@ DateTime monthFoldDay(
 /// The months side by side, opening on [month], one at a time across the
 /// strip, each a grid of [weekdays]' columns and a row [rowHeight] tall for
 /// each of its weeks ([MonthGrid]), its days as [DayCell]s: the selected
-/// day's in the primary colour, today's ringed, and a badge on a day with
-/// items once the store has read it. The cells before a month's first day
+/// day's in the primary colour, today's ringed, and badges on a day with
+/// items once the store has read it, one for each kind [dayBadges] gives
+/// its entries. The cells before a month's first day
 /// and after its last are blank. A tap on a day reports [onSelectDay].
 ///
 /// A horizontal drag slides the strip with the finger, the next month
@@ -96,6 +98,7 @@ class MonthStrip<T> extends StatefulWidget {
     required this.onSelectDay,
     required this.onBrowse,
     this.snap = MonthStripSnap.nearest,
+    this.dayBadges,
   });
 
   final CalendarStore<T> store;
@@ -124,6 +127,10 @@ class MonthStrip<T> extends StatefulWidget {
   final ValueChanged<DateTime> onBrowse;
 
   final MonthStripSnap snap;
+
+  /// The kinds of entry the days' badges mark; null for one primary dot
+  /// on a day with entries.
+  final CalendarDayBadges<T>? dayBadges;
 
   /// The most weeks a month's grid takes.
   static const int maxWeeks = 6;
@@ -490,6 +497,7 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
         isSelected: day == widget.selectedDay,
         isToday: day == widget.today,
         collapse: widget.collapse,
+        dayBadges: widget.dayBadges,
       );
     }
     return GestureDetector(
@@ -501,14 +509,15 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
       child: DayMarkerListener<T>(
         store: widget.store,
         day: day,
-        builder: (context, hasEntries) {
+        badges: widget.dayBadges,
+        builder: (context, badges) {
           return DayCell(
             key: dayCellKey(day),
             day: day,
             inMonth: true,
             isSelected: day == widget.selectedDay,
             isToday: day == widget.today,
-            hasEntries: hasEntries,
+            badges: badges,
             collapse: widget.collapse,
           );
         },
@@ -527,6 +536,7 @@ class _NeighbourDay<T> extends StatelessWidget {
     required this.isSelected,
     required this.isToday,
     required this.collapse,
+    required this.dayBadges,
   });
 
   final CalendarStore<T> store;
@@ -534,6 +544,7 @@ class _NeighbourDay<T> extends StatelessWidget {
   final bool isSelected;
   final bool isToday;
   final Animation<double> collapse;
+  final CalendarDayBadges<T>? dayBadges;
 
   @override
   Widget build(BuildContext context) {
@@ -543,13 +554,14 @@ class _NeighbourDay<T> extends StatelessWidget {
         child: DayMarkerListener<T>(
           store: store,
           day: day,
-          builder: (context, hasEntries) {
+          badges: dayBadges,
+          builder: (context, badges) {
             return DayCell(
               day: day,
               inMonth: false,
               isSelected: isSelected,
               isToday: isToday,
-              hasEntries: hasEntries,
+              badges: badges,
               collapse: collapse,
             );
           },

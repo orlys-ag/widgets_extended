@@ -6,6 +6,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
 import '../dates/calendar_dates.dart';
+import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 import 'day_cell.dart';
@@ -20,8 +21,8 @@ ValueKey<String> weekStripDayKey(DateTime day) {
 /// which starts on [weekdays]' first weekday. Each is a [DayCell]
 /// as Agenda's folded month shows it: its weekday's three-letter name
 /// over its number on a circle, the selected day's in the primary colour,
-/// today's ringed, and a badge on a day with items once the store has read
-/// it. The strip is as tall as a day ([stripCellHeight]), at any text
+/// today's ringed, and badges on a day with items once the store has read
+/// it, one for each kind [dayBadges] gives its entries. The strip is as tall as a day ([stripCellHeight]), at any text
 /// size. A tap on a day reports [onSelectDay].
 ///
 /// A horizontal drag slides the strip through the shown days, one after
@@ -51,6 +52,7 @@ class WeekStrip<T> extends StatefulWidget {
     required this.onBrowse,
     this.recalls = 0,
     this.initialDay,
+    this.dayBadges,
   });
 
   final CalendarStore<T> store;
@@ -75,6 +77,10 @@ class WeekStrip<T> extends StatefulWidget {
   /// A day of the week the strip opens on; null opens it on
   /// [selectedDay]'s.
   final DateTime? initialDay;
+
+  /// The kinds of entry the days' badges mark; null for one primary dot
+  /// on a day with entries.
+  final CalendarDayBadges<T>? dayBadges;
 
   @override
   State<WeekStrip<T>> createState() {
@@ -321,13 +327,14 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
       child: DayMarkerListener<T>(
         store: widget.store,
         day: day,
-        builder: (context, hasEntries) {
+        badges: widget.dayBadges,
+        builder: (context, badges) {
           return DayCell(
             day: day,
             inMonth: true,
             isSelected: day == widget.selectedDay,
             isToday: day == widget.today,
-            hasEntries: hasEntries,
+            badges: badges,
             collapse: kAlwaysCompleteAnimation,
           );
         },

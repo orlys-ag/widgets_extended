@@ -430,7 +430,10 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pumpAndSettle();
     expect(
-      find.text("The start is 08:00 to 17:45, inside the calendar's hours."),
+      find.text(
+        "The start is from 08:00 to before 18:00, inside the calendar's "
+        "hours.",
+      ),
       findsOneWidget,
     );
     expect(updateCount(api), updates);

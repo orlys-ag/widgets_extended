@@ -199,7 +199,7 @@ void main() {
           today: day,
           now: now,
           onTopDay: (day) {},
-          onCreateIn: (day, startMinute, endMinute) {},
+          onCreateRange: (range) {},
           onEdit: (id) {},
           onDelete: (id) {},
           cardBuilder: (context, entry, details) {

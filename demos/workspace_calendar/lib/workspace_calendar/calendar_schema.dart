@@ -3,9 +3,10 @@
 /// and the form both read these.
 ///
 /// An item is a JSON envelope: `id`, `type`, `title`, `start` and `end`,
-/// local date-times with no offset in the form [isoDateTime] writes
-/// (`YYYY-MM-DDTHH:MM`), the end exclusive, and `fields`, the type's
-/// payload.
+/// instants in UTC as [isoDateTime] writes them
+/// (`YYYY-MM-DDTHH:MM:SS.sssZ`), or local date-times with no offset
+/// (`YYYY-MM-DDTHH:MM`), which [parseIsoDateTime] reads too, the end
+/// exclusive, and `fields`, the type's payload.
 library;
 
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
@@ -241,26 +242,39 @@ String fieldErrorKey(String key) {
   return "fields.$key";
 }
 
-/// [time]'s wall clock as the envelope writes it, "2026-04-21T09:10": its
-/// year, month, day, hour and minute, with no seconds and no offset. Both
-/// instants of a time a day's clock repeats write the same text.
+/// [time] as the envelope writes it, "2026-04-21T13:10:00.000Z": its
+/// instant in UTC, as `DateTime.toIso8601String` writes it, so the two
+/// instants of a time a day's clock repeats write different texts, and
+/// the texts of whole minutes sort as their instants do.
 String isoDateTime(DateTime time) {
-  final hour = time.hour.toString().padLeft(2, "0");
-  final minute = time.minute.toString().padLeft(2, "0");
-  return "${isoDate(time)}T$hour:$minute";
+  return time.toUtc().toIso8601String();
 }
 
-final RegExp _isoDateTimePattern = RegExp(
+final RegExp _utcDateTimePattern = RegExp(
+  r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?Z$",
+);
+
+final RegExp _localDateTimePattern = RegExp(
   r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$",
 );
 
-/// The local time [text] names in the form [isoDateTime] writes, or null
-/// when it is not in that form or names no time the clock reads: a day
-/// that does not exist, or a time in an hour the clock skips, whose fields
-/// a `DateTime` reads back moved. A time the clock repeats reads as its
-/// earlier instant, the one `DateTime` gives.
+/// The local time [text] names, or null where it names none an item may
+/// take. Text in the form [isoDateTime] writes, a UTC time with seconds,
+/// an optional fraction and a Z, reads as the local time of its instant,
+/// where its fields name a time UTC has and that local time is a whole
+/// minute, as is every time [isoDateTime] writes of one; in a zone whose
+/// offset has seconds, its UTC text has them too. Text with no
+/// offset, `YYYY-MM-DDTHH:MM`, reads as that local time where the clock
+/// reads it: not on a day that does not exist, nor in an hour the clock
+/// skips, whose fields a `DateTime` reads back moved; a time the clock
+/// repeats reads as its earlier instant, the one `DateTime` gives, and
+/// only the UTC form names the later.
 DateTime? parseIsoDateTime(String text) {
-  final match = _isoDateTimePattern.firstMatch(text);
+  final utc = _utcDateTimePattern.firstMatch(text);
+  if (utc != null) {
+    return _utcTimeOf(utc);
+  }
+  final match = _localDateTimePattern.firstMatch(text);
   if (match == null) {
     return null;
   }
@@ -276,6 +290,39 @@ DateTime? parseIsoDateTime(String text) {
     return null;
   }
   return time;
+}
+
+/// The local time of the UTC time [match] of [_utcDateTimePattern] names,
+/// or null where its fields roll over into another time, as month 13 or
+/// second 60 does, which moves the minute, or that local time is off a
+/// whole minute.
+DateTime? _utcTimeOf(RegExpMatch match) {
+  final fields = <int>[
+    for (var group = 1; group <= 6; group++) int.parse(match.group(group)!),
+  ];
+  final microseconds = int.parse((match.group(7) ?? "").padRight(6, "0"));
+  final time = DateTime.utc(
+    fields[0],
+    fields[1],
+    fields[2],
+    fields[3],
+    fields[4],
+    fields[5],
+    microseconds ~/ 1000,
+    microseconds % 1000,
+  );
+  if (time.year != fields[0] ||
+      time.month != fields[1] ||
+      time.day != fields[2] ||
+      time.hour != fields[3] ||
+      time.minute != fields[4]) {
+    return null;
+  }
+  final local = time.toLocal();
+  if (local.second != 0 || local.millisecond != 0 || local.microsecond != 0) {
+    return null;
+  }
+  return local;
 }
 
 const Set<String> _envelopeKeys = <String>{
@@ -336,7 +383,9 @@ Map<String, String> validateItemJson(Map<String, Object?> json) {
 /// What [validateItemJson] reports for a start or an end that
 /// [parseIsoDateTime] does not read.
 const String _timeError =
-    "Enter a date and time as YYYY-MM-DDTHH:MM, at a time the clock reads.";
+    "Enter a date and time in UTC as YYYY-MM-DDTHH:MM:SSZ on a whole "
+    "minute of local time, or as a local YYYY-MM-DDTHH:MM at a time the "
+    "clock reads.";
 
 void _validateFields(
   TypeSchema schema,

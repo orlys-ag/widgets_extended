@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import '../dates/calendar_dates.dart';
+import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 import '../views/day_cell.dart';
@@ -119,6 +120,7 @@ class CalendarCard<T> extends StatefulWidget {
     required this.onBrowseStrip,
     required this.onSettle,
     required this.onUnfold,
+    this.dayBadges,
   });
 
   final CalendarStore<T> store;
@@ -162,6 +164,10 @@ class CalendarCard<T> extends StatefulWidget {
 
   /// A drag down the folded strip asks to unfold the month.
   final VoidCallback onUnfold;
+
+  /// The kinds of entry the days' badges mark, in the month and in the
+  /// week strip; null for one primary dot on a day with entries.
+  final CalendarDayBadges<T>? dayBadges;
 
   @override
   State<CalendarCard<T>> createState() {
@@ -233,6 +239,7 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
       ),
       onSelectDay: widget.onSelectDay,
       onBrowse: widget.onBrowseStrip,
+      dayBadges: widget.dayBadges,
     );
   }
 
@@ -297,6 +304,7 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
       collapse: widget.collapse,
       onSelectDay: widget.onSelectDay,
       onBrowse: widget.onBrowseMonth,
+      dayBadges: widget.dayBadges,
     );
     final header = widget.header;
     return DecoratedBox(

@@ -4,6 +4,7 @@
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar_example.dart';
@@ -115,12 +116,15 @@ void main() {
       ),
       HarborColors.onPrimary,
     );
-    // Another day's marker is a primary badge.
+    // Another day's marker is its meeting's Harbor badge.
     final thursday = dayFinder(DateTime(2026, 4, 23));
     final badge = tester.widget<DecoratedBox>(
       find.byKey(dayBadgeKey(DateTime(2026, 4, 23))),
     );
-    expect((badge.decoration as BoxDecoration).color, HarborColors.primary);
+    expect(
+      (badge.decoration as BoxDecoration).color,
+      harborTypeStyleOf(CalendarItemType.meeting).edge,
+    );
 
     await tester.tap(thursday);
     await tester.pumpAndSettle();

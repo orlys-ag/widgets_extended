@@ -828,10 +828,17 @@ int slotWallMinuteOf(GridTracks tracks, ({int row, int col}) cell) {
 
 /// What a tap on the body [cell] creates: its one slot, or null where its
 /// start or its end is a time the clock skips. On a day whose clock
-/// repeats a stretch, each end is the earlier instant of its time.
-CreateRange? createRangeAt(GridTracks tracks, ({int row, int col}) cell) {
+/// repeats a stretch, each end is the earlier instant of its time, or the
+/// later where [occurrence] is a later instant on that day
+/// ([timeAtWallMinute]), as the history lock's boundary in the stretch's
+/// second pass is.
+CreateRange? createRangeAt(
+  GridTracks tracks,
+  ({int row, int col}) cell, {
+  DateTime? occurrence,
+}) {
   final start = slotWallMinuteOf(tracks, cell);
-  return _createRangeOf(start, start + tracks.slotMinutes);
+  return _createRangeOf(start, start + tracks.slotMinutes, occurrence);
 }
 
 /// What a drag from the body cell [anchor] to [focus] creates: one
@@ -840,23 +847,26 @@ CreateRange? createRangeAt(GridTracks tracks, ({int row, int col}) cell) {
 /// Wednesday 12:00 gives Monday 10:00 to Wednesday 12:15, over every day
 /// between, shown or not. Null where an end is a time the clock skips; on
 /// a day whose clock repeats a stretch, each end is the earlier instant of
-/// its time.
+/// its time, or the later where [occurrence] is a later instant on that
+/// day, as [createRangeAt] takes it.
 CreateRange? createRangeOver(
   GridTracks tracks,
   ({int row, int col}) anchor,
-  ({int row, int col}) focus,
-) {
+  ({int row, int col}) focus, {
+  DateTime? occurrence,
+}) {
   final from = slotWallMinuteOf(tracks, anchor);
   final to = slotWallMinuteOf(tracks, focus);
   return _createRangeOf(
     math.min(from, to),
     math.max(from, to) + tracks.slotMinutes,
+    occurrence,
   );
 }
 
-CreateRange? _createRangeOf(int startWall, int endWall) {
-  final start = timeAtWallMinute(startWall);
-  final end = timeAtWallMinute(endWall);
+CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
+  final start = timeAtWallMinute(startWall, from: occurrence);
+  final end = timeAtWallMinute(endWall, from: occurrence);
   if (start == null || end == null || !end.isAfter(start)) {
     return null;
   }
@@ -910,7 +920,9 @@ CreateRange? _createRangeOf(int startWall, int endWall) {
 /// lock's boundary takes no drag, one in progress neither moves nor has a
 /// top handle, a long press selecting it, no move or resize lands an
 /// entry, and no create gesture starts or reaches, before the boundary.
-/// A move dropped onto another entry's time lands at the nearest free time
+/// A block dragged above the first slot or below the last stops there, and
+/// so does a handle dragged past either. A move dropped onto
+/// another entry's time lands at the nearest free time
 /// that shows, on that day or the day before or after it, and goes back
 /// where there is none; a resize dragged onto one stops at its edge, and
 /// so does a create's range. While a drag runs, a label over the grid
@@ -1273,7 +1285,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// more than one column is fixed for its life, which [didUpdateWidget]
   /// asserts.
   ///
-  /// A move [_canDropAt] refuses for meeting another entry slides to the
+  /// A block's move and resize stay inside the slot rows ([_boundsOf]), so
+  /// one dragged past the first or the last slot stops there. A move
+  /// [_canDropAt] refuses for meeting another entry slides to the
   /// placement nearest on screen that holds it clear, at any time that
   /// shows of the day it was dropped on or of the day before or after it,
   /// however busy the time around it is. A resize it refuses for meeting
@@ -1299,6 +1313,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       enabled: enabled,
       canDrag: _canDrag,
       canDropAt: _canDropAt,
+      boundsOf: _boundsOf,
       dropFit: fits
           ? const BoardDropFit(
               minFreeFraction: 0.0,
@@ -1338,6 +1353,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// entry keeps those times. Set by [_handleDragStart], cleared by
   /// [_handleDragEnd].
   ({String id, DateTime start, DateTime end})? _lifted;
+
+  /// What the last placement ([_placeLayout]) read: the split, the tracks,
+  /// [_lifted] and the strip rows it placed bars in; null before the first.
+  /// While they are the same the board holds that placement's items, so a
+  /// sync places nothing ([_placementCurrent]).
+  ({
+    _GridLayout<T> layout,
+    GridTracks tracks,
+    ({String id, DateTime start, DateTime end})? lifted,
+    int shownRows,
+  })?
+  _placed;
 
   /// The entry list the last split read, with the days, weekdays and
   /// hours it split them for, never the strip rows, which the split does
@@ -1911,6 +1938,24 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return !_stripExpanded && _layout.barRows > _collapsedStripRows;
   }
 
+  /// The strip rows the placement puts bars in: a collapsed strip's first
+  /// three, and otherwise every one.
+  int get _shownStripRows {
+    return _stripCounted ? _collapsedStripRows : _stripRows;
+  }
+
+  /// Whether the board holds the placement of the kept split as it stands
+  /// ([_placed]): the same split on the same tracks, with the same lift
+  /// and the same strip rows.
+  bool get _placementCurrent {
+    final placed = _placed;
+    return placed != null &&
+        identical(placed.layout, _layout) &&
+        placed.tracks == _tracks &&
+        placed.lifted == _lifted &&
+        placed.shownRows == _shownStripRows;
+  }
+
   /// The strip rows [barRows] bar rows lay out: none with no bar, or one
   /// empty row in edit mode; three and a count row where they are more
   /// than three and the strip is not expanded; and otherwise each.
@@ -2267,7 +2312,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// otherwise ([_layOutEntries]), lays out the all-day strip's rows and
   /// the rows counting those outside the hours before the pieces, so they
   /// fit the lattice they land on, and places the split once
-  /// ([_placeLayout]), whatever rows it changed. A sync animates only when
+  /// ([_placeLayout]), whatever rows it changed, unless the board holds
+  /// its placement already ([_placementCurrent]): a store notify that
+  /// keeps the split on the same tracks places nothing. A sync animates only when
   /// [animate] holds, its days are ready, the last sync found its own days
   /// ready and the rows stay as they were; any other runs under
   /// [BoardAnimationStyle.disabled], and so does every sync until a frame
@@ -2292,9 +2339,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       above: hidden.rowAbove,
       below: hidden.rowBelow,
     ));
-    _placeLayout(
-      disable: !(animate && ready && _syncedReady && !relaid && !restripped),
-    );
+    if (!_placementCurrent) {
+      _placeLayout(
+        disable: !(animate && ready && _syncedReady && !relaid && !restripped),
+      );
+    }
     final selected = _selectedBlock.value;
     if (selected != null &&
         !layout.pieces.any((piece) {
@@ -2499,6 +2548,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   void _placeLayout({required bool disable}) {
     noteEntryPlace();
     final lifted = _lifted;
+    _placed = (
+      layout: _layout,
+      tracks: _tracks,
+      lifted: lifted,
+      shownRows: _shownStripRows,
+    );
     final dragged = _drag?.key;
     final placements = <BoardPlacement<GridShape<T>>>[];
     var keepsDragged = false;
@@ -2524,8 +2579,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
       placements.add(BoardPlacement<GridShape<T>>(piece, span));
     }
-    // A collapsed strip places the bars of its first three rows.
-    final shownRows = _stripCounted ? _collapsedStripRows : _stripRows;
+    final shownRows = _shownStripRows;
     for (final bar in _layout.bars) {
       final first = _tracks.columnOf(bar.firstDay);
       final last = _tracks.columnOf(bar.lastDay);
@@ -2615,6 +2669,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     final entry = shape.shown.entry;
     return _tracks.hours.holdsTimes(entry.start, entry.end);
+  }
+
+  /// The rows a drag stays inside: the slot rows of [_tracks]. They bind a
+  /// block's drag; a bar lies in
+  /// the strip's rows, which they do not hold, so they bind nothing for it
+  /// ([BoardDragConfig.boundsOf]).
+  BoardDragBounds _boundsOf(GridKey key) {
+    return BoardDragBounds(
+      rows: (start: _tracks.firstSlotRow, end: _tracks.lastSlotRow + 1),
+    );
   }
 
   /// Whether the board may land [key] on [span]. No crossing between the
@@ -3260,9 +3324,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Whether the range from [start] to [end] shares time with a timed
-  /// entry other than [id] that the store shows on the days the range
-  /// covers, shown columns or not ([rangeSharesTime]).
-  bool _sharesShownTime(String id, DateTime start, DateTime end) {
+  /// entry other than [id], or with any where [id] is null, that the store
+  /// shows on the days the range covers, shown columns or not
+  /// ([rangeSharesTime]).
+  bool _sharesShownTime(String? id, DateTime start, DateTime end) {
     final shown = widget.store.entriesBetween(
       dateOfDayNumber(dayNumber(start)),
       dateOfDayNumber(lastDayNumberOf(start, end)),
@@ -3672,8 +3737,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// over a body cell whose slot is a time the clock reads and the history
   /// lock leaves free, no block paints under it, and no shown entry shares
   /// time with its slot, as one from 09:10 does with the 09:00 slot whose
-  /// free part the press lies in; or over a strip cell no bar paints over,
-  /// of a day whose start the lock leaves free.
+  /// free part the press lies in, or on a day whose clock reads a stretch
+  /// twice, one whose block lies on other rows ([_sharesShownTime]); or
+  /// over a strip cell no bar paints over, of a day whose start the lock
+  /// leaves free.
   bool _admits(Offset global) {
     final viewport = _findViewport();
     if (viewport == null || _scrollJustStopped || _range != null) {
@@ -3695,11 +3762,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (cell == null) {
       return false;
     }
-    final slot = createRangeAt(_tracks, cell);
+    final slot = createRangeAt(_tracks, cell, occurrence: _lock.value.boundary);
     return slot != null &&
         _lock.value.admitsStart(slot.start) &&
         viewport.itemAt(local) == null &&
-        !_slotMeetsEntry(cell, slot);
+        !_slotMeetsEntry(cell, slot) &&
+        // A block lies on the rows of its wall minutes ([wallSpanOf]),
+        // which order as its instants do except where the clock reads a
+        // stretch twice; only there can it hold the slot from other rows.
+        (repeatedStretchOf(slot.start) == Duration.zero ||
+            !_sharesShownTime(null, slot.start, slot.end));
   }
 
   /// Whether a board piece in [cell]'s row and column shares time with
@@ -3924,7 +3996,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (cell == null) {
       return;
     }
-    final range = createRangeAt(_tracks, cell);
+    final range = createRangeAt(
+      _tracks,
+      cell,
+      occurrence: _lock.value.boundary,
+    );
     if (range == null) {
       return;
     }
@@ -4063,6 +4139,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ([_heldToLimit]), however far past them [focus] lies. Constant work
   /// per call: the entries were read when the range began.
   ({int row, int col}) _reach(_RangeDrag<T> range, ({int row, int col}) focus) {
+    // A create's times keep the lock boundary's occurrence, as
+    // [createRangeOver] reads them.
+    final boundary = _lock.value.boundary;
     final anchor = range.anchor;
     final anchorWall = slotWallMinuteOf(_tracks, anchor);
     final focusWall = slotWallMinuteOf(_tracks, focus);
@@ -4073,8 +4152,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
       final end = timeAtWallMinute(
         slotWallMinuteOf(_tracks, focus) + _tracks.slotMinutes,
+        from: boundary,
       );
-      final start = timeAtWallMinute(anchorWall);
+      final start = timeAtWallMinute(anchorWall, from: boundary);
       if (start != null && end != null && !_coversAtMost(start, end)) {
         final held = _heldToLimit(start, end, atEnd: true);
         if (held != null) {
@@ -4084,7 +4164,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return focus;
     }
     var earliest = range.previousEnd;
-    final boundary = _lock.value.boundary;
     if (boundary != null) {
       final wall = wallMinuteOf(boundary);
       earliest = earliest == null ? wall : math.max(earliest, wall);
@@ -4092,8 +4171,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (earliest != null && focusWall < earliest) {
       focus = _firstCellStartingFrom(earliest, anchor);
     }
-    final start = timeAtWallMinute(slotWallMinuteOf(_tracks, focus));
-    final end = timeAtWallMinute(anchorWall + _tracks.slotMinutes);
+    final start = timeAtWallMinute(
+      slotWallMinuteOf(_tracks, focus),
+      from: boundary,
+    );
+    final end = timeAtWallMinute(
+      anchorWall + _tracks.slotMinutes,
+      from: boundary,
+    );
     if (start != null && end != null && !_coversAtMost(start, end)) {
       final held = _heldToLimit(start, end, atEnd: false);
       if (held != null) {
@@ -4223,9 +4308,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (range.strip) {
       created = _stripRangeOver(range.anchor.col, range.focus.col);
     } else if (range.focus == range.anchor) {
-      created = createRangeAt(_tracks, range.anchor);
+      created = createRangeAt(
+        _tracks,
+        range.anchor,
+        occurrence: _lock.value.boundary,
+      );
     } else {
-      created = createRangeOver(_tracks, range.anchor, range.focus);
+      created = createRangeOver(
+        _tracks,
+        range.anchor,
+        range.focus,
+        occurrence: _lock.value.boundary,
+      );
     }
     _clearRange(range);
     if (created == null) {
@@ -4438,15 +4532,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// The wall minutes ([wallMinuteOf]) next to [anchor]'s slot that a
-  /// create range from it may not pass: the earliest start after the
-  /// slot's start, and the latest end before its end, among the timed
-  /// entries the store shows on the grid's days; each null where there is
-  /// none.
+  /// The wall minutes next to [anchor]'s slot that a create range from it
+  /// may not pass, in the occurrence its times take ([_reach]): the last
+  /// not after the earliest start after the slot's start
+  /// ([lastWallMinuteNotAfter]), and the first not before the latest end
+  /// before its end ([firstWallMinuteNotBefore]), among the timed entries
+  /// the store shows on the grid's days; each null where there is none.
   ({int? next, int? previous}) _conflictsAround(({int row, int col}) anchor) {
     final wall = slotWallMinuteOf(_tracks, anchor);
-    final start = timeAtWallMinute(wall);
-    final end = timeAtWallMinute(wall + _tracks.slotMinutes);
+    final boundary = _lock.value.boundary;
+    final start = timeAtWallMinute(wall, from: boundary);
+    final end = timeAtWallMinute(wall + _tracks.slotMinutes, from: boundary);
     int? next;
     int? previous;
     if (start == null || end == null) {
@@ -4461,11 +4557,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         continue;
       }
       if (entry.start.isAfter(start)) {
-        final at = wallMinuteOf(entry.start);
+        final at = lastWallMinuteNotAfter(entry.start, from: boundary);
         next = next == null ? at : math.min(next, at);
       }
       if (entry.end.isBefore(end)) {
-        final at = wallMinuteOf(entry.end);
+        final at = firstWallMinuteNotBefore(entry.end, from: boundary);
         previous = previous == null ? at : math.max(previous, at);
       }
     }

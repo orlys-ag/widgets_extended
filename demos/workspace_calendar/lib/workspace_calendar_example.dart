@@ -8,7 +8,9 @@
 /// around today where no API is given. It draws its items with
 /// [harborItemBuilders], unless given others, in the Harbor theme,
 /// [harborCalendarTheme], and a screen reader hears each of Month's chips
-/// name its item's type.
+/// name its item's type. The days of Agenda's and Day's calendar card
+/// carry a dot for each type of item they have, in the type's Harbor
+/// colour ([harborDayBadges]).
 ///
 /// The app bar's chevron opens a bar under it, and closes it again, the
 /// bar sliding down from under the app bar, or back up, over
@@ -396,8 +398,10 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               addButtonBuilder: widget.builders.addButton,
               loadingBuilder: widget.builders.loading,
               failureBuilder: widget.builders.failure,
-              // Whatever the builders, a chip names its item's type.
+              // Whatever the builders, a chip names its item's type, and a
+              // day of the calendar card marks each type it has.
               entryKindOf: harborEntryKind,
+              dayBadges: harborDayBadges,
               onEntryTap: _openEntry,
               onCreateRange: _openCreateFlow,
               onEditRequest: _openEditForm,

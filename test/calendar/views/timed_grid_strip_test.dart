@@ -2640,12 +2640,10 @@ void main() {
   });
 
   testWidgets("TX21 in edit mode with no all-day entry, a block of as many "
-      "slots as the leading band's tracks whose proxy's centre is over the "
-      "band shows no landing and drops nothing, one whose centre is just "
-      "below the band shows the first slots that show, and a block of one "
-      "slot more shows a landing over the band and drops on its last one", (
-    tester,
-  ) async {
+      "slots as the leading band's tracks shows the first slots that show "
+      "whether its proxy's centre is over the band or just below it, and "
+      "one whose centre is over the band, and one of a slot more, drop on "
+      "the landing's last one", (tester) async {
     for (final shown in bothGrids()) {
       // The day header in Week, and the strip's one empty row.
       final band = shown.week ? 2 : 1;
@@ -2702,17 +2700,13 @@ void main() {
         for (var frame = 0; frame < 30; frame++) {
           await tester.pump(const Duration(milliseconds: 16));
           final strokes = strokedRects(tester);
-          if (slots == band && centreOver) {
-            expect(strokes, isEmpty, reason: "$reason, frame $frame");
-          } else {
-            expect(strokes, hasLength(1), reason: "$reason, frame $frame");
-            last = strokes.single;
-            lastLabel = landingText(tester);
-          }
+          expect(strokes, hasLength(1), reason: "$reason, frame $frame");
+          last = strokes.single;
+          lastLabel = landingText(tester);
         }
         viewport = viewportOf(tester);
         final region = viewport.scrolledRegion;
-        if (slots == band && !centreOver) {
+        if (slots == band) {
           // The first slot rows that show, the first of them in part
           // under the band; the outline's stroke lies 1 px inside them.
           final slot = viewport.rectOfCell(shown.firstSlotRow, col)!.height;
@@ -2739,9 +2733,7 @@ void main() {
         }
         await gesture.up();
         await tester.pumpAndSettle();
-        if (slots == band && centreOver) {
-          expect(store.moves, isEmpty, reason: reason);
-        } else if (slots == band + 1) {
+        if (centreOver) {
           final end = (lastRow! - shown.firstSlotRow + 1) * 15;
           expectTimes(
             store,

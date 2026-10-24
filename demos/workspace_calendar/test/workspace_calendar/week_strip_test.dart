@@ -144,11 +144,11 @@ void main() {
     expect(stripCell(tester, april(22)).hasEntries, isFalse);
 
     final node = tester.getSemantics(stripDay(april(23)));
-    expect(node.label, "Thursday, April 23, has items");
+    expect(node.label, "Thursday, April 23, has Task");
     expect(node.flagsCollection.isButton, isTrue);
     expect(node.flagsCollection.isSelected, Tristate.isFalse);
     tester.semantics.tap(
-      find.semantics.byLabel("Thursday, April 23, has items"),
+      find.semantics.byLabel("Thursday, April 23, has Task"),
     );
     await tester.pumpAndSettle();
     expect(gridDay(tester), april(23));

@@ -57,8 +57,10 @@ void main() {
   test("AS2 an hours refusal reads as the API's validation words it", () {
     const hours = DayHours(480, 1080);
     const startError =
-        "The start is 08:00 to 17:45, inside the calendar's hours.";
-    const endError = "The end is 08:15 to 18:00, inside the calendar's hours.";
+        "The start is from 08:00 to before 18:00, inside the calendar's "
+        "hours.";
+    const endError =
+        "The end is from after 08:00 to 18:00, inside the calendar's hours.";
     final early = CalendarHoursException(
       hours: hours,
       start: DateTime(2026, 4, 21, 7, 30),

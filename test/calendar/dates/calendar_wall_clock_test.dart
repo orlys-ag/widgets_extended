@@ -1,8 +1,8 @@
 /// The wall-clock coordinate of the dates layer: a time's wall minute and
-/// back, the last day a range has a part in, a range's piece on a day, the
-/// hours rule on starts, ends and ranges, the hours on the grid of a slot
-/// length, and the skipped and repeated times of the local zone's DST
-/// days.
+/// back, the wall minutes nearest a time in an occurrence, the last day a
+/// range has a part in, a range's piece on a day, the hours rule on starts,
+/// ends and ranges, the hours on the grid of a slot length, and the skipped
+/// and repeated times of the local zone's DST days.
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -33,6 +33,18 @@ void main() {
     // A day's 24:00 is the next day's minute 0.
     expect(timeAtWallMinute(day + minutesPerDay), wednesday);
     expect(wallMinuteOf(wednesday), day + minutesPerDay);
+  });
+
+  test("DT9 firstWallMinuteNotBefore and lastWallMinuteNotAfter of a whole "
+      "minute are its own wall minute, and of a time with seconds the next "
+      "and its own", () {
+    final nine = at(tuesday, 9);
+    final wall = wallMinuteOf(nine);
+    expect(firstWallMinuteNotBefore(nine), wall);
+    expect(lastWallMinuteNotAfter(nine), wall);
+    final past = nine.add(const Duration(seconds: 30));
+    expect(firstWallMinuteNotBefore(past), wall + 1);
+    expect(lastWallMinuteNotAfter(past), wall);
   });
 
   test("DT3 lastDayNumberOf is the day before an end at a day start, and "
@@ -78,8 +90,8 @@ void main() {
     expect(office.holdsEnd(18 * 60), isTrue);
     expect(office.holdsEnd(18 * 60 + 1), isFalse);
 
-    // AC13's shapes: an overnight entry starting and ending inside the
-    // hours, and one ending after them on its own day.
+    // An overnight entry starting and ending inside the hours, and one
+    // ending after them on its own day.
     expect(office.holdsTimes(at(monday, 17), at(tuesday, 9)), isTrue);
     expect(office.holdsTimes(at(monday, 17), at(monday, 19)), isFalse);
     expect(office.holdsTimes(at(monday, 7), at(monday, 9)), isFalse);
@@ -148,6 +160,13 @@ void main() {
       expect(timeAtWallMinute(day + 3 * 60), isNotNull);
       expect(timeAtWallMinute(day + 60 + 30)!.hour, 1);
     });
+
+    test("DT11 firstWallMinuteNotBefore of 01:59:30 is 03:00, past the "
+        "minutes the clock skips", () {
+      final day = dayNumber(shortDayStart) * minutesPerDay;
+      final time = at(shortDayStart, 1, 59).add(const Duration(seconds: 30));
+      expect(firstWallMinuteNotBefore(time), day + 3 * 60);
+    });
   });
 
   group("on the 25-hour day", skip: longDaySkip, () {
@@ -193,6 +212,42 @@ void main() {
       expect(isLaterOccurrence(second), isTrue);
       expect(isLaterOccurrence(first), isFalse);
       expect(isLaterOccurrence(at(monday, 1, 30)), isFalse);
+    });
+
+    test("DT10 firstWallMinuteNotBefore and lastWallMinuteNotAfter of a time "
+        "in the repeated hour are its own wall minute in the occurrence from: "
+        "picks, and in the other the edge of the repeated hour", () {
+      final day = dayNumber(longDayStart) * minutesPerDay;
+      final firstOne = longDayStart.add(const Duration(hours: 1));
+      final secondOne = firstOne.add(const Duration(hours: 1));
+      final firstQuarter = firstOne.add(const Duration(minutes: 15));
+      final secondQuarter = secondOne.add(const Duration(minutes: 15));
+      // The first 01:00 to 02:00, which timeAtWallMinute picks without from:.
+      expect(firstWallMinuteNotBefore(firstQuarter), day + 75);
+      expect(lastWallMinuteNotAfter(firstQuarter), day + 75);
+      expect(firstWallMinuteNotBefore(secondQuarter), day + 120);
+      expect(lastWallMinuteNotAfter(secondQuarter), day + 119);
+      // The second, which from: at the second 01:00 picks.
+      expect(
+        firstWallMinuteNotBefore(secondQuarter, from: secondOne),
+        day + 75,
+      );
+      expect(lastWallMinuteNotAfter(secondQuarter, from: secondOne), day + 75);
+      expect(firstWallMinuteNotBefore(firstQuarter, from: secondOne), day + 60);
+      expect(lastWallMinuteNotAfter(firstQuarter, from: secondOne), day + 59);
+    });
+
+    test("DT12 timeAtWallMinute's instants rise with the wall minute through "
+        "the 25-hour day in either occurrence", () {
+      final day = dayNumber(longDayStart) * minutesPerDay;
+      final secondOne = longDayStart.add(const Duration(hours: 2));
+      for (final from in <DateTime?>[null, secondOne]) {
+        for (var wall = day; wall < day + minutesPerDay; wall++) {
+          final time = timeAtWallMinute(wall, from: from)!;
+          final next = timeAtWallMinute(wall + 1, from: from)!;
+          expect(next.isAfter(time), isTrue, reason: "$wall from $from");
+        }
+      }
     });
   });
 }

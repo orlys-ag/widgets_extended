@@ -6,6 +6,8 @@
 /// unnameable by app code otherwise; the resolver itself is not.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
@@ -157,6 +159,10 @@ class BoardDropResolver {
   /// by the caller's check. See [BoardDropResolver] for the lift rule it
   /// applies.
   ///
+  /// [bounds] narrows each axis's window to the starts its range holds,
+  /// where that range holds [draggedSpan] there ([_boundedPath]), and holds
+  /// inside them the place the axis's lean is measured from.
+  ///
   /// [pointerAnchoredAxis] is the axis whose start a whole-track move
   /// takes from the POINTER rather than from the corner, or null when
   /// neither axis does. The caller passes the lane axis of a LANED item
@@ -191,6 +197,7 @@ class BoardDropResolver {
     required BoardLiftSamples? liftCorner,
     required BoardLiftSamples? liftPointer,
     required BoardPins pinned,
+    required BoardDragBounds? bounds,
   }) {
     // The ITEM'S CORNER decides, quantized by the snap: a track snap
     // ROUNDS it to the nearest track, because a straddling item covers
@@ -222,6 +229,7 @@ class BoardDropResolver {
       liftCorner: liftCorner?.row,
       liftPointer: liftPointer?.row,
       pinned: pinned.row,
+      bound: bounds?.rows,
     );
     final col = _moveAxis(
       axis: Axis.horizontal,
@@ -235,6 +243,7 @@ class BoardDropResolver {
       liftCorner: liftCorner?.col,
       liftPointer: liftPointer?.col,
       pinned: pinned.col,
+      bound: bounds?.cols,
     );
     final rowStart = row.start;
     final colStart = col.start;
@@ -284,6 +293,7 @@ class BoardDropResolver {
     required BoardAxisSample? liftCorner,
     required BoardAxisSample? liftPointer,
     required ({int start, int end})? pinned,
+    required ({int start, int end})? bound,
   }) {
     final stored = draggedSpan.startTrackOn(axis);
     final laneAxis = pointerAnchoredAxis == axis;
@@ -296,20 +306,39 @@ class BoardDropResolver {
     final quantum = laneAxis
         ? 1.0
         : quantumOn(axis, snap, pointerAnchoredAxis);
+    final within = _boundWindowOf(bound, draggedSpan, axis, extent);
+    BoardAxisPath bounded(BoardAxisPath path, BoardAxisSample sample) {
+      return _boundedPath(
+        path,
+        within,
+        sample,
+        extent: extent,
+        quantum: quantum,
+      );
+    }
+
+    // Where the item shows, held inside the bound: an item dragged past
+    // it shows past it, and a lean measured from there would carry the
+    // nudge after it, toward a placement on the other axis.
+    double held(double at) {
+      return within == null ? at : clampToWindow(at, within);
+    }
+
     // The window of a kept axis: the lattice the stored span lies in,
-    // which the nudge may still step.
-    final keptWindow = pinnedPathOf(
-      pinned,
+    // narrowed to the bound, which the nudge may still step.
+    final keptWindow = bounded(
+      pinnedPathOf(pinned, pointer, extent: extent, quantum: quantum),
       pointer,
-      extent: extent,
-      quantum: quantum,
     ).window;
     ({double? start, BoardStartWindow window, double lean}) kept(double lean) {
       return (start: null, window: keptWindow, lean: _leanOf(lean, quantum));
     }
 
     if (laneAxis) {
-      final path = regionPathOf(pointer, extent: 1.0, quantum: 1.0);
+      final path = bounded(
+        regionPathOf(pointer, extent: 1.0, quantum: 1.0),
+        pointer,
+      );
       final at = coordinateIn(path, pointer);
       // The finger's place across its cell less its place across the
       // cell it grabbed: zero without a lift sample to read that from.
@@ -326,13 +355,14 @@ class BoardDropResolver {
       }
       final cellStart = (at.floor() - grabCell).toDouble();
       final start = clampToWindow(cellStart, path.window).floorToDouble();
+      final shows = held(cellStart + across);
       if (_landsBack(start, stored)) {
-        return kept(cellStart + across - stored);
+        return kept(shows - stored);
       }
       return (
         start: start,
         window: path.window,
-        lean: _leanOf(cellStart + across - start, quantum),
+        lean: _leanOf(shows - start, quantum),
       );
     }
     // THE ITEM FIELD: the corner read in the lattice the item paints in.
@@ -382,11 +412,14 @@ class BoardDropResolver {
       return false;
     }
 
-    var path = placementPathOf(
-      corner: corner,
-      centre: centre,
-      extent: extent,
-      quantum: quantum,
+    var path = bounded(
+      placementPathOf(
+        corner: corner,
+        centre: centre,
+        extent: extent,
+        quantum: quantum,
+      ),
+      corner,
     );
     // A guard refusal implies a displacement: an axis with none refuses
     // nothing.
@@ -398,17 +431,90 @@ class BoardDropResolver {
       // FALL THROUGH: a refused band placement is placed and guarded
       // again on the scrolled path, the whole lattice where no scrolled
       // start shows.
-      path = pinnedPathOf(null, corner, extent: extent, quantum: quantum);
+      path = bounded(
+        pinnedPathOf(null, corner, extent: extent, quantum: quantum),
+        corner,
+      );
       start = place(path);
       if (refused(start, path)) {
         return kept(displacement!);
       }
     }
-    final lean = coordinateIn(path, corner) - start;
+    final lean = held(coordinateIn(path, corner)) - start;
     if (_landsBack(start, stored)) {
       return kept(lean);
     }
     return (start: start, window: path.window, lean: _leanOf(lean, quantum));
+  }
+
+  /// The starts of an [extent] that [bound] holds, `[start, end -
+  /// extent]`, where it holds [span] on [axis] within
+  /// `precisionErrorTolerance`; null where [bound] is null or does not.
+  static BoardStartWindow? _boundWindowOf(
+    ({int start, int end})? bound,
+    BoardSpan span,
+    Axis axis,
+    double extent,
+  ) {
+    if (bound == null ||
+        span.startTrackOn(axis) < bound.start - precisionErrorTolerance ||
+        span.endTrackOn(axis) > bound.end + precisionErrorTolerance) {
+      return null;
+    }
+    return (min: bound.start.toDouble(), max: bound.end - extent);
+  }
+
+  /// [path] with its window narrowed to the starts [within] holds. Where
+  /// its window holds none of them, the path the placement falls through
+  /// to is narrowed instead: from a band the scrolled lattice, or the
+  /// whole lattice where no scrolled start shows, and from the scrolled
+  /// lattice the whole lattice. [path] as it is where [within] is null or
+  /// the whole lattice holds none of its starts.
+  static BoardAxisPath _boundedPath(
+    BoardAxisPath path,
+    BoardStartWindow? within,
+    BoardAxisSample sample, {
+    required double extent,
+    required double quantum,
+  }) {
+    if (within == null) {
+      return path;
+    }
+    var next = path;
+    if (next.band != null) {
+      final narrowed = _narrowed(next, within);
+      if (narrowed != null) {
+        return narrowed;
+      }
+      next = pinnedPathOf(null, sample, extent: extent, quantum: quantum);
+    }
+    if (next.scrolled) {
+      final narrowed = _narrowed(next, within);
+      if (narrowed != null) {
+        return narrowed;
+      }
+      next = (
+        band: null,
+        scrolled: false,
+        window: latticeWindowOf(sample.trackCount, extent),
+      );
+    }
+    return _narrowed(next, within) ?? path;
+  }
+
+  /// [path] with its window intersected with [within], or null where the
+  /// two share no start within `precisionErrorTolerance`.
+  static BoardAxisPath? _narrowed(BoardAxisPath path, BoardStartWindow within) {
+    final min = math.max(path.window.min, within.min);
+    final max = math.min(path.window.max, within.max);
+    if (min > max + precisionErrorTolerance) {
+      return null;
+    }
+    return (
+      band: path.band,
+      scrolled: path.scrolled,
+      window: (min: min, max: max < min ? min : max),
+    );
   }
 
   /// The grain of a lean, in steps per grid quantum.
@@ -439,7 +545,9 @@ class BoardDropResolver {
   /// endpoint is the stored one plus the pointer's coordinate in that
   /// path's lattice less the lift's item field, quantized by the snap, the
   /// extent floored at one quantum or at the item's own extent when that
-  /// is less, and the endpoint clamped into the lattice; an endpoint back
+  /// is less, and the endpoint clamped into the lattice, and into the range
+  /// [bounds] gives the axis where that range holds [draggedSpan] there,
+  /// which the shows bound below never takes it out of; an endpoint back
   /// where it began keeps the stored span. A span placed on the band path
   /// that does not pin in that band is placed again on the other path. A
   /// span that pins in a band is taken as it is; one that scrolls keeps a
@@ -461,6 +569,7 @@ class BoardDropResolver {
     required BoardSnap snap,
     required BoardLiftSamples liftPointer,
     required BoardPins pinned,
+    required BoardDragBounds? bounds,
   }) {
     final vertical =
         kind == BoardDragKind.resizeRowStart ||
@@ -489,22 +598,39 @@ class BoardDropResolver {
     final liftExtent = trail - lead;
     final floor = quantum < liftExtent ? quantum : liftExtent;
     final held = leadingKind ? trail : lead;
+    // The edges the dragged one may reach: the lattice's, narrowed to
+    // the bound on this axis where it holds the span the drag started
+    // from, which keeps the floored extent and the shows bound inside it
+    // too.
+    final bound = vertical ? bounds?.rows : bounds?.cols;
+    var low = 0.0;
+    var high = trackCount.toDouble();
+    if (bound != null &&
+        lead >= bound.start - precisionErrorTolerance &&
+        trail <= bound.end + precisionErrorTolerance) {
+      final boundLow = math.max(low, bound.start.toDouble());
+      final boundHigh = math.min(high, bound.end.toDouble());
+      if (boundLow <= boundHigh) {
+        low = boundLow;
+        high = boundHigh;
+      }
+    }
 
     // The dragged endpoint placed on [path]. The extent is floored by
     // moving the DRAGGED edge, never the held one.
     double endpointOn(BoardAxisPath path) {
       final moved = from + (coordinateIn(path, now) - liftItem);
-      var edge = snap.quantize(moved).clamp(0.0, trackCount.toDouble());
+      var edge = snap.quantize(moved).clamp(low, high);
       if (leadingKind) {
         if (held - edge < floor) {
           edge = held - floor;
         }
-        return edge < 0.0 ? 0.0 : edge;
+        return edge < low ? low : edge;
       }
       if (edge - held < floor) {
         edge = held + floor;
       }
-      return edge > trackCount ? trackCount.toDouble() : edge;
+      return edge > high ? high : edge;
     }
 
     ({int start, int end})? pinOf(double edge) {
@@ -570,10 +696,7 @@ class BoardDropResolver {
           visibleFrom != null && visibleTo != null && visibleFrom >= visibleTo;
       var bounded = edge;
       if (!empty && leadingKind && visibleTo != null) {
-        final bound = lastGridStartBelow(
-          visibleTo,
-          quantum,
-        ).clamp(0.0, trackCount.toDouble());
+        final bound = lastGridStartBelow(visibleTo, quantum).clamp(low, high);
         if (bounded > bound) {
           bounded = bound;
         }
@@ -582,7 +705,7 @@ class BoardDropResolver {
         final bound = firstGridStartAbove(
           visibleFrom,
           quantum,
-        ).clamp(0.0, trackCount.toDouble());
+        ).clamp(low, high);
         if (bounded < bound) {
           bounded = bound;
         }

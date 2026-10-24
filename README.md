@@ -336,7 +336,10 @@ The board
 REPORTS a drop through `onItemMoved` and `onItemResized` and changes
 nothing itself: apply it, as above, or ignore it to refuse. `canDropAt:
 (key, span) => ...` refuses a placement before the drop, so it shows no
-gap, and `dropFit` slides a refused move onto nearby free space. `snap:
+gap, and `dropFit` slides a refused move onto nearby free space. `boundsOf:
+(key) => const BoardDragBounds(rows: (start: 1, end: 25))` keeps a drag inside
+those rows where they hold the item when the drag starts: an item dragged past
+them stops at their edge. `snap:
 BoardSnap.fraction(0.25)` lands on quarter tracks. For an immediate grip,
 set `buildDefaultDragHandles: false` and put a `BoardDragHandle` inside the
 item.

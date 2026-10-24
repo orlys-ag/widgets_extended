@@ -2,10 +2,14 @@
 /// three-letter names of the weekdays over the grid.
 library;
 
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import '../dates/calendar_dates.dart';
 import '../dates/calendar_labels.dart';
+import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 
@@ -14,8 +18,48 @@ ValueKey<String> dayCellKey(DateTime day) {
   return ValueKey<String>("day-${day.year}-${day.month}-${day.day}");
 }
 
-/// Builds [builder] with whether [store] shows a marker for [day], and
-/// builds it again only when that answer changes.
+/// The badges of [day]'s circle: none where [store] shows no marker for
+/// it ([CalendarStore.dayHasShownEntries]); otherwise, where [badges] is
+/// null, the primary dot alone, a null; and otherwise each kind of
+/// [badges] that [CalendarDayBadges.kindOf] answers for one of the day's
+/// shown entries, in [CalendarDayBadges.kinds]' order, then a null for the
+/// entries it answers null for.
+List<CalendarBadgeKind?> dayBadgesOf<T>(
+  CalendarStore<T> store,
+  DateTime day,
+  CalendarDayBadges<T>? badges,
+) {
+  if (!store.dayHasShownEntries(day)) {
+    return const <CalendarBadgeKind?>[];
+  }
+  if (badges == null) {
+    return const <CalendarBadgeKind?>[null];
+  }
+  final kinds = badges.kinds;
+  final has = List<bool>.filled(kinds.length, false);
+  var other = false;
+  for (final shown in store.entriesOn(day)) {
+    final kind = badges.kindOf(shown.entry);
+    final index = kind == null ? -1 : kinds.indexOf(kind);
+    assert(
+      kind == null || index >= 0,
+      "The kind of ${shown.id}, $kind, is not one of the badges' kinds.",
+    );
+    if (index < 0) {
+      other = true;
+    } else {
+      has[index] = true;
+    }
+  }
+  return <CalendarBadgeKind?>[
+    for (var index = 0; index < kinds.length; index++)
+      if (has[index]) kinds[index],
+    if (other) null,
+  ];
+}
+
+/// Builds [builder] with the badges [store] gives [day] under [badges]
+/// ([dayBadgesOf]), and builds it again only when they change.
 ///
 /// A store change reaches no cell of the month board, whose cell builder
 /// re-runs only when an axis or a cell's selection changes; this listener
@@ -26,11 +70,17 @@ class DayMarkerListener<T> extends StatefulWidget {
     required this.store,
     required this.day,
     required this.builder,
+    this.badges,
   });
 
   final CalendarStore<T> store;
   final DateTime day;
-  final Widget Function(BuildContext context, bool hasEntries) builder;
+
+  /// The kinds the badges mark; null for the primary dot alone.
+  final CalendarDayBadges<T>? badges;
+
+  final Widget Function(BuildContext context, List<CalendarBadgeKind?> badges)
+  builder;
 
   @override
   State<DayMarkerListener<T>> createState() {
@@ -39,7 +89,11 @@ class DayMarkerListener<T> extends StatefulWidget {
 }
 
 class _DayMarkerListenerState<T> extends State<DayMarkerListener<T>> {
-  late bool _hasEntries = widget.store.dayHasShownEntries(widget.day);
+  late List<CalendarBadgeKind?> _badges = _read();
+
+  List<CalendarBadgeKind?> _read() {
+    return dayBadgesOf(widget.store, widget.day, widget.badges);
+  }
 
   @override
   void initState() {
@@ -54,8 +108,10 @@ class _DayMarkerListenerState<T> extends State<DayMarkerListener<T>> {
       oldWidget.store.removeListener(_handleStore);
       widget.store.addListener(_handleStore);
     }
-    if (widget.store != oldWidget.store || widget.day != oldWidget.day) {
-      _hasEntries = widget.store.dayHasShownEntries(widget.day);
+    if (widget.store != oldWidget.store ||
+        widget.day != oldWidget.day ||
+        !identical(widget.badges, oldWidget.badges)) {
+      _badges = _read();
     }
   }
 
@@ -66,18 +122,18 @@ class _DayMarkerListenerState<T> extends State<DayMarkerListener<T>> {
   }
 
   void _handleStore() {
-    final hasEntries = widget.store.dayHasShownEntries(widget.day);
-    if (hasEntries == _hasEntries) {
+    final badges = _read();
+    if (listEquals(badges, _badges)) {
       return;
     }
     setState(() {
-      _hasEntries = hasEntries;
+      _badges = badges;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return widget.builder(context, _hasEntries);
+    return widget.builder(context, _badges);
   }
 }
 
@@ -113,10 +169,49 @@ double stripCellHeight(BuildContext context) {
   return line + stripLabelGap + dayCircleSize;
 }
 
-/// The key of the badge on the circle of a [DayCell] for [day] that has
-/// items.
-ValueKey<String> dayBadgeKey(DateTime day) {
-  return ValueKey<String>("day-badge-${day.year}-${day.month}-${day.day}");
+/// The diameter of a badge on a [DayCell]'s circle that carries one or
+/// two.
+const double _badgeSize = 9.0;
+
+/// The diameter of a badge on a [DayCell]'s circle that carries three or
+/// more, whose first lies near the circle's top, under the weekday name
+/// in the week strip, which a [_badgeSize] one there reaches.
+const double _smallBadgeSize = 7.0;
+
+/// The width of the ring around a [_badgeSize] badge, and around a
+/// [_smallBadgeSize] one.
+const double _badgeRim = 1.5;
+const double _smallBadgeRim = 1.0;
+
+/// The most badges a [DayCell]'s circle draws.
+const int _maxDrawnBadges = 4;
+
+/// The angle about a [DayCell]'s circle's centre from one badge's centre
+/// to the next: 30 degrees.
+const double _badgeStep = math.pi / 6.0;
+
+/// Where the centre of the badge at [index] of [count] lies in the box of
+/// a [DayCell]'s circle. A lone badge lies in the box's top right corner,
+/// its centre near the rim at 45 degrees; the others turn about the
+/// circle's centre from there by [_badgeStep] each, clockwise for the
+/// later ones, as many before it as after, whatever their size.
+Offset _badgeCentre(int index, int count) {
+  const half = dayCircleSize / 2.0;
+  // From the circle's centre to a lone badge's.
+  const dx = half - _badgeSize / 2.0;
+  const dy = _badgeSize / 2.0 - half;
+  final turn = (index - (count - 1) / 2.0) * _badgeStep;
+  final cos = math.cos(turn);
+  final sin = math.sin(turn);
+  return Offset(half + dx * cos - dy * sin, half + dx * sin + dy * cos);
+}
+
+/// The key of the badge at [index] of those on the circle of a [DayCell]
+/// for [day], counted along the rim from the first.
+ValueKey<String> dayBadgeKey(DateTime day, [int index = 0]) {
+  return ValueKey<String>(
+    "day-badge-${day.year}-${day.month}-${day.day}-$index",
+  );
 }
 
 /// What a [DayCell] and a [WeekdayHeader] draw with, made from one
@@ -142,11 +237,6 @@ class _DayCellStyles {
       ring = BoxDecoration(
         border: Border.all(color: theme.todayRing, width: theme.todayRingWidth),
         borderRadius: BorderRadius.circular(dayCircleSize / 2.0),
-      ),
-      badge = BoxDecoration(
-        color: theme.primary,
-        shape: BoxShape.circle,
-        border: Border.all(color: theme.surface, width: 1.5),
       ),
       weightOnly =
           theme.dayNumberStyle.copyWith(
@@ -208,7 +298,16 @@ class _DayCellStyles {
   final BoxDecoration selectedCircle;
   final BoxDecoration circle;
   final BoxDecoration ring;
-  final BoxDecoration badge;
+
+  /// The dot of [kind], or the primary dot for null, ringed [rim] wide in
+  /// the surface colour.
+  BoxDecoration badgeOf(CalendarBadgeKind? kind, double rim) {
+    return BoxDecoration(
+      color: kind?.color ?? theme.primary,
+      shape: BoxShape.circle,
+      border: Border.all(color: theme.surface, width: rim),
+    );
+  }
 
   /// The style of an unmarked number [t] of the way through the fold, for a
   /// day of the shown month when [inMonth]: the prepared style itself at
@@ -250,8 +349,11 @@ class _DayCellElement extends StatelessElement {
 }
 
 /// A day number on a circle: the background grey, the primary colour when
-/// selected, ringed when today, and with a small badge on its top right
-/// corner when the day has items, in the [CalendarTheme] above it.
+/// selected, ringed when today, and with its [badges] when the day has
+/// items, in the [CalendarTheme] above it: up to four dots along the
+/// circle's rim, 30 degrees apart, about a lone dot's place at its top
+/// right corner, smaller where there are three or more. A screen reader
+/// hears every badge's kind.
 ///
 /// [collapse] runs from 0, the month grid, to 1, the week strip. At 0 a
 /// day outside the shown month is muted on no circle and the weekday name
@@ -267,7 +369,7 @@ class DayCell extends StatelessWidget {
     required this.inMonth,
     required this.isSelected,
     required this.isToday,
-    required this.hasEntries,
+    required this.badges,
     required this.collapse,
   });
 
@@ -275,8 +377,17 @@ class DayCell extends StatelessWidget {
   final bool inMonth;
   final bool isSelected;
   final bool isToday;
-  final bool hasEntries;
+
+  /// The badges the circle carries ([dayBadgesOf]), a null for the
+  /// primary dot.
+  final List<CalendarBadgeKind?> badges;
+
   final Animation<double> collapse;
+
+  /// Whether the day has items, so its circle carries a badge.
+  bool get hasEntries {
+    return badges.isNotEmpty;
+  }
 
   @override
   StatelessElement createElement() {
@@ -291,13 +402,43 @@ class DayCell extends StatelessWidget {
     return Semantics(
       button: true,
       selected: isSelected,
-      label: hasEntries ? "$name, $date, has items" : "$name, $date",
+      label: badges.isEmpty
+          ? "$name, $date"
+          : "$name, $date, has ${_badgeLabels()}",
       excludeSemantics: true,
       child: AnimatedBuilder(
         animation: collapse,
         builder: (context, child) {
           return _buildAt(collapse.value, styles);
         },
+      ),
+    );
+  }
+
+  /// The badges' kinds as a screen reader hears them: each kind's label,
+  /// and the primary dot's "items" where it is the only badge and "other
+  /// items" beside kinds.
+  String _badgeLabels() {
+    return <String>[
+      for (final kind in badges)
+        kind?.label ?? (badges.length == 1 ? "items" : "other items"),
+    ].join(", ");
+  }
+
+  Widget _buildBadge(int index, int count, _DayCellStyles styles) {
+    final centre = _badgeCentre(index, count);
+    final small = count >= 3;
+    final size = small ? _smallBadgeSize : _badgeSize;
+    return Positioned(
+      left: centre.dx - size / 2.0,
+      top: centre.dy - size / 2.0,
+      child: DecoratedBox(
+        key: dayBadgeKey(day, index),
+        decoration: styles.badgeOf(
+          badges[index],
+          small ? _smallBadgeRim : _badgeRim,
+        ),
+        child: SizedBox(width: size, height: size),
       ),
     );
   }
@@ -330,22 +471,14 @@ class DayCell extends StatelessWidget {
       foregroundDecoration: isToday ? styles.ring : null,
       child: Text("${day.day}", style: numberStyle),
     );
-    if (hasEntries) {
+    if (badges.isNotEmpty) {
+      final count = math.min(badges.length, _maxDrawnBadges);
       circle = Stack(
         clipBehavior: Clip.none,
         children: <Widget>[
           circle,
-          // Centred near the circle's edge at 45 degrees, which lies
-          // 0.29 of the radius in from the box's corner on each axis.
-          Positioned(
-            top: 0.0,
-            right: 0.0,
-            child: DecoratedBox(
-              key: dayBadgeKey(day),
-              decoration: styles.badge,
-              child: const SizedBox(width: 9.0, height: 9.0),
-            ),
-          ),
+          for (var index = 0; index < count; index++)
+            _buildBadge(index, count, styles),
         ],
       );
     }

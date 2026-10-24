@@ -16,7 +16,7 @@ Normative for `lib/calendar/`, the calendar module: `CalendarView`, a calendar o
 | Entries | `lib/calendar/entries/` | `calendar-entries.md` | `CalendarEntry<T>` and the data-source contract |
 | Policy | `lib/calendar/policy/` | `calendar-policy.md` | The rules that limit edits: the overlap rule, the history lock, `CalendarEditPolicy` |
 | Store | `lib/calendar/store/` | `calendar-store.md` | `CalendarStore`, the in-memory store, and the caching store over a data source |
-| Presentation | `lib/calendar/presentation/` | `calendar-presentation.md` | `CalendarThemeData`, `CalendarTheme`, and the builder signatures |
+| Presentation | `lib/calendar/presentation/` | `calendar-presentation.md` | `CalendarThemeData`, `CalendarTheme`, the builder signatures, and the day badges' kinds |
 | Views | `lib/calendar/views/` | `calendar-views.md` | Week's and Day's timed grid, the month board, Agenda's day list, the week strip, the month picker, day cells, entry cards, the pinch |
 | Composition | `lib/calendar/composition/` | `calendar-composition.md` | `CalendarView`, `CalendarController`, the header, view switching, the folding calendar card, the default chrome |
 

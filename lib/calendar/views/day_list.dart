@@ -19,10 +19,12 @@ import '../../sliver_tree/sliver_tree.dart';
 import '../dates/calendar_dates.dart';
 import '../dates/calendar_labels.dart';
 import '../policy/history_lock.dart';
+import '../policy/overlap.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
+import 'timed_grid.dart' show CreateRange;
 
 /// The style the day list animates its rows with under [theme]: every
 /// family over its [CalendarThemeData.motionDuration] on its
@@ -607,7 +609,7 @@ class DayList<T> extends StatefulWidget {
     required this.today,
     required this.now,
     required this.onTopDay,
-    required this.onCreateIn,
+    required this.onCreateRange,
     required this.onEdit,
     required this.onDelete,
     this.cardBuilder,
@@ -655,8 +657,13 @@ class DayList<T> extends StatefulWidget {
   final ValueChanged<DateTime> onTopDay;
 
   /// The add button of a gap was pressed: an item of one slot of
-  /// [slotMinutes] from the gap's first time the history lock leaves free.
-  final void Function(DateTime day, int startMinute, int endMinute) onCreateIn;
+  /// [slotMinutes] from the gap's first time the history lock leaves free,
+  /// or the first slot after it whose times the clock reads and that no
+  /// shown entry shares time with ([firstReadableSlot]), in the lock
+  /// boundary's occurrence where the day's clock repeats its time, so it
+  /// starts at the boundary or after. On a day whose clock repeats a
+  /// stretch, an entry can hold time in a gap it is not listed beside.
+  final void Function(CreateRange range) onCreateRange;
 
   final void Function(String id) onEdit;
   final void Function(String id) onDelete;
@@ -1311,25 +1318,40 @@ class _DayListState<T> extends State<DayList<T>> {
         throw ArgumentError.value(row, "row", "an item of another payload");
       case DayListGap(:final day, :final start, :final end):
         final slot = widget.slotMinutes;
-        final from = math.max(
-          start,
-          widget.lock.earliestStartOn(day, slotMinutes: slot),
+        final lock = widget.lock;
+        // A free slot whose times the clock reads must fit the gap, so a
+        // gap shorter than a slot, as entries off the slot grid can leave,
+        // or one the clock skips, offers no add.
+        final shown = widget.store.entriesOn(day);
+        final add = firstReadableSlot(
+          day,
+          math.max(start, lock.earliestStartOn(day, slotMinutes: slot)),
+          end,
+          slot,
+          occurrence: lock.boundary,
+          isFree: (start, end) {
+            return !shown.any((other) {
+              return rangeSharesTime(start, end, other.entry);
+            });
+          },
         );
-        // One slot from the gap's first free minute must fit it, so a gap
-        // shorter than a slot, as entries off the slot grid can leave,
-        // offers no add.
+        final addMinute = add == null
+            ? start
+            : wallMinuteOf(add.start) - dayNumber(day) * minutesPerDay;
         return _padded(
           _buildDashed(
             key: dayListGapKey(day, start),
             label: hourLabel(start, widget.format),
             day: day,
-            addMinute: from,
-            addLabel: "Add an item at ${hourLabel(from, widget.format)}",
-            onAdd: from + slot <= end
-                ? () {
-                    widget.onCreateIn(day, from, from + slot);
-                  }
-                : null,
+            addMinute: addMinute,
+            addLabel: "Add an item at ${hourLabel(addMinute, widget.format)}",
+            onAdd: add == null
+                ? null
+                : () {
+                    widget.onCreateRange(
+                      CreateRange(start: add.start, end: add.end),
+                    );
+                  },
           ),
         );
       case DayListHidden(:final day, :final count, :final above):

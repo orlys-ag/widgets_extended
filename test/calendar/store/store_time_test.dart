@@ -277,10 +277,25 @@ void main() {
         end: at(tuesday, 1),
       ), reason: name);
       // A start from 10:05 rounds up to 10:30.
-      expect(store.firstFreeRange(tuesday, slotMinutes: 30, from: 605), (
-        start: at(tuesday, 10, 30),
-        end: at(tuesday, 11),
-      ), reason: name);
+      expect(
+        store.firstFreeRange(
+          tuesday,
+          slotMinutes: 30,
+          from: at(tuesday, 10, 5),
+        ),
+        (start: at(tuesday, 10, 30), end: at(tuesday, 11)),
+        reason: name,
+      );
+      // So does one from 10:00:30, part of whose minute has passed.
+      expect(
+        store.firstFreeRange(
+          tuesday,
+          slotMinutes: 30,
+          from: at(tuesday, 10).add(const Duration(seconds: 30)),
+        ),
+        (start: at(tuesday, 10, 30), end: at(tuesday, 11)),
+        reason: name,
+      );
     }
   });
 
@@ -333,6 +348,25 @@ void main() {
           "all-day",
           "repeated",
         ], reason: name);
+      }
+    });
+
+    test("SM7 a first-free search from the second 01:30 finds the slot "
+        "from the second 01:30", () {
+      final day = longDayStart;
+      for (final (name, store) in storesOf(
+        const <CalendarEntry<String>>[],
+        first: day,
+        last: day,
+      )) {
+        expect(
+          store.firstFreeRange(day, slotMinutes: 15, from: secondHalfPastOne),
+          (
+            start: secondHalfPastOne,
+            end: secondHalfPastOne.add(const Duration(minutes: 15)),
+          ),
+          reason: name,
+        );
       }
     });
   });

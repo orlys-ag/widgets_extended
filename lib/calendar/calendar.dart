@@ -37,6 +37,8 @@ export 'presentation/calendar_builders.dart'
         CalendarLoadingState,
         CalendarStateSite,
         calendarCardStripExtent;
+export 'presentation/calendar_day_badges.dart'
+    show CalendarBadgeKind, CalendarDayBadges;
 export 'presentation/calendar_defaults.dart'
     show
         defaultCalendarAddButtonBuilder,
