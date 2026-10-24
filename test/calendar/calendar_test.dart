@@ -154,6 +154,8 @@ void main() {
       defaultCalendarLoadingBuilder,
       defaultCalendarFailureBuilder,
       CalendarActivityIndicator,
+      CalendarBadgeKind,
+      CalendarDayBadges,
       CalendarView,
       CalendarController,
       CalendarViewKind,

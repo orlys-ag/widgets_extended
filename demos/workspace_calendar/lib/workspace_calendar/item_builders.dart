@@ -109,6 +109,26 @@ String? harborEntryKind(CalendarEntry<ItemPayload> entry) {
   return entry.type.label;
 }
 
+/// The badge of each item type: its Harbor edge colour and its label.
+final Map<CalendarItemType, CalendarBadgeKind> harborBadgeKinds =
+    <CalendarItemType, CalendarBadgeKind>{
+      for (final type in CalendarItemType.values)
+        type: CalendarBadgeKind(
+          color: harborTypeStyleOf(type).edge,
+          label: type.label,
+        ),
+    };
+
+/// The badges on the days of the calendar card: a dot for each type of
+/// item a day has, in [CalendarItemType]'s order, in [harborBadgeKinds].
+final CalendarDayBadges<ItemPayload> harborDayBadges =
+    CalendarDayBadges<ItemPayload>(
+      kinds: harborBadgeKinds.values.toList(),
+      kindOf: (entry) {
+        return harborBadgeKinds[entry.type];
+      },
+    );
+
 /// A progress indicator: centred on the cover, and 16 square at the start
 /// of a day row.
 Widget harborLoadingBuilder(BuildContext context, CalendarLoadingState state) {

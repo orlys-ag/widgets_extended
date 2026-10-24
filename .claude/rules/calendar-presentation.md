@@ -17,3 +17,6 @@ The contract of the calendar's theme and builder signatures. The conventions eve
 - **Builder signatures** for Week's and Day's blocks, Month's chips,
   Agenda's cards, and the loading and failure states: each takes the
   context and the entry or the state it builds.
+- **Day badges**: `CalendarDayBadges` holds the host's kinds of entry, each
+  a `CalendarBadgeKind` of a colour and a label, and the kind of each
+  entry, which the calendar card's days mark with a dot each.

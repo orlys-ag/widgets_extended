@@ -15,6 +15,7 @@ import '../dates/calendar_labels.dart';
 import '../entries/calendar_entry.dart';
 import '../policy/history_lock.dart';
 import '../presentation/calendar_builders.dart';
+import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 import '../views/day_list.dart';
@@ -83,8 +84,8 @@ class CalendarEntryTapDetails<T> {
 /// - Agenda: the calendar card's month over a list of the days, one after
 ///   another, each day's entries beside their times and lengths. The month
 ///   is a `MonthStrip` under the weekdays' three-letter names, one month at
-///   a time, each day a cell with its number on a circle and a badge when
-///   it has entries. A tap selects a day, and the arrow keys move the
+///   a time, each day a cell with its number on a circle and badges when
+///   it has entries, one for each kind [dayBadges] gives them. A tap selects a day, and the arrow keys move the
 ///   selection once a tap has given the month focus. A horizontal drag
 ///   slides the next or the previous month in, the card's height
 ///   following, a fling carrying it past several months; the chevrons
@@ -214,6 +215,7 @@ class CalendarView<T> extends StatefulWidget {
     this.loadingBuilder,
     this.failureBuilder,
     this.entryKindOf,
+    this.dayBadges,
     this.onEntryTap,
     this.onCreateRange,
     this.onEditRequest,
@@ -317,6 +319,11 @@ class CalendarView<T> extends StatefulWidget {
   /// The word naming an entry's kind in what a screen reader hears for its
   /// chip in Month; null leaves it out.
   final String? Function(CalendarEntry<T> entry)? entryKindOf;
+
+  /// The kinds of entry the badges on the days of Agenda's and Day's
+  /// calendar card mark, a dot for each kind a day has; null for one dot
+  /// in the theme's primary colour on a day with entries.
+  final CalendarDayBadges<T>? dayBadges;
 
   /// A tap on a block or a bar in Week or Day, or on a chip in Month, of an
   /// entry that is not pending and that the store holds; null reports
@@ -1280,6 +1287,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       onBrowseStrip: _browseStrip,
       onSettle: _settleCollapse,
       onUnfold: _unfold,
+      dayBadges: widget.dayBadges,
     );
   }
 

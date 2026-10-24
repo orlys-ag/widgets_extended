@@ -24,6 +24,7 @@ import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_day_badges.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
@@ -31,7 +32,9 @@ import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
+import 'package:widgets_extended/calendar/views/month_strip.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
+import 'package:widgets_extended/calendar/views/week_strip.dart';
 
 import 'recording_store.dart';
 
@@ -2012,5 +2015,76 @@ void main() {
       creates.last,
       CreateRange(start: wednesday, end: at(wednesday, 0, 30)),
     );
+  });
+
+  testWidgets("CV41 the calendar card's month and its week strip mark the "
+      "kinds dayBadges gives, and the primary dot alone once it gives none", (
+    tester,
+  ) async {
+    const task = CalendarBadgeKind(color: Color(0xFF1F4E8C), label: "Task");
+    const meeting = CalendarBadgeKind(
+      color: Color(0xFF1F7A72),
+      label: "Meeting",
+    );
+    final dayBadges = CalendarDayBadges<String>(
+      kinds: const <CalendarBadgeKind>[task, meeting],
+      kindOf: (entry) {
+        return entry.id == "standup" ? meeting : task;
+      },
+    );
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        entryOf("standup", thursday, 9 * 60, 10 * 60),
+        entryOf("review", thursday, 11 * 60, 12 * 60),
+      ],
+    );
+    addTearDown(store.dispose);
+    Future<void> pumpUnder(CalendarDayBadges<String>? badges) {
+      return tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            store: store,
+            clock: fixedClock,
+            dayBadges: badges,
+          ),
+        ),
+      );
+    }
+
+    List<List<CalendarBadgeKind?>> thursdayIn(Finder strip) {
+      return <List<CalendarBadgeKind?>>[
+        for (final cell in tester.widgetList<DayCell>(
+          find.descendant(
+            of: strip,
+            matching: find.byWidgetPredicate((widget) {
+              return widget is DayCell && widget.day == thursday;
+            }),
+          ),
+        ))
+          cell.badges,
+      ];
+    }
+
+    await pumpUnder(dayBadges);
+    await tester.pumpAndSettle();
+    expect(
+      thursdayIn(find.byType(MonthStrip<String>)),
+      <List<CalendarBadgeKind?>>[
+        <CalendarBadgeKind?>[task, meeting],
+      ],
+    );
+
+    await tester.tap(find.byKey(calendarPullTabKey));
+    await tester.pumpAndSettle();
+    final week = find.byType(WeekStrip<String>);
+    expect(thursdayIn(week), <List<CalendarBadgeKind?>>[
+      <CalendarBadgeKind?>[task, meeting],
+    ]);
+
+    await pumpUnder(null);
+    await tester.pump();
+    expect(thursdayIn(week), <List<CalendarBadgeKind?>>[
+      <CalendarBadgeKind?>[null],
+    ]);
   });
 }
