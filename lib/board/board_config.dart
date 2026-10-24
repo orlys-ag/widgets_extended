@@ -419,8 +419,9 @@ class BoardDragConfig<TKey> {
   /// the item's own builder output at the item's size, faded by
   /// [dragProxyOpacity] and ignoring pointers; what it returns is placed
   /// at the proxy's top-left corner, in a `Stack` above the board, so the
-  /// proxy shares the board's ancestors but not the lattice's clip. A
-  /// resize shows no proxy.
+  /// proxy shares the board's ancestors. All it paints is clipped to the
+  /// board's bounds under `Board.clipBehavior`, a shadow it adds past the
+  /// proxy's rect included. A resize shows no proxy.
   final Widget Function(BuildContext, TKey, Widget)? dragProxyBuilder;
 
   /// The moved visual's opacity while a move session is live. The

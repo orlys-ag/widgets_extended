@@ -8,9 +8,12 @@
 /// moves off that range.
 library;
 
+import 'dart:ui' as ui;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
@@ -1014,5 +1017,117 @@ void main() {
     await tester.pumpAndSettle();
     expect(blockFinder("trip"), findsNWidgets(2));
     expect(find.byKey(blockHandlesKey("trip")), findsNothing);
+  });
+
+  testWidgets("TG8 a block dragged up past the grid's top paints nothing "
+      "above the grid, in one day's grid and in seven days'", (tester) async {
+    const size = Size(400.0, 600.0);
+    const white = Color(0xFFFFFFFF);
+    const screenKey = ValueKey<String>("screen");
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = size;
+    addTearDown(tester.view.reset);
+    final now = ValueNotifier<DateTime>(nineOClock());
+    addTearDown(now.dispose);
+
+    /// The colours the last frame shows at [points].
+    Future<List<Color>> pixelsAt(List<Offset> points) async {
+      final boundary = tester.renderObject<RenderRepaintBoundary>(
+        find.byKey(screenKey),
+      );
+      final colors = <Color>[];
+      await tester.runAsync(() async {
+        final image = await boundary.toImage();
+        final bytes = (await image.toByteData(
+          format: ui.ImageByteFormat.rawRgba,
+        ))!;
+        for (final point in points) {
+          final at = (point.dy.floor() * image.width + point.dx.floor()) * 4;
+          colors.add(
+            Color.fromARGB(
+              bytes.getUint8(at + 3),
+              bytes.getUint8(at),
+              bytes.getUint8(at + 1),
+              bytes.getUint8(at + 2),
+            ),
+          );
+        }
+        image.dispose();
+      });
+      return colors;
+    }
+
+    for (final dayCount in <int>[1, 7]) {
+      final store = MemoryCalendarStore<String>(
+        entries: <CalendarEntry<String>>[
+          entryOf("talk", tuesday, 9 * 60, 12 * 60),
+        ],
+      );
+      addTearDown(store.dispose);
+      // The grid under a white box 150 px tall, as a view's is under its
+      // header.
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: screenKey,
+          child: MaterialApp(
+            home: ColoredBox(
+              color: white,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  const SizedBox(height: 150.0),
+                  Expanded(
+                    child: TimedGrid<String>(
+                      key: ValueKey<int>(dayCount),
+                      store: store,
+                      firstDay: dayCount == 1 ? tuesday : monday,
+                      dayCount: dayCount,
+                      selectedDay: tuesday,
+                      today: tuesday,
+                      now: now,
+                      onSelectDay: (day) {},
+                      onOpenEntry: (id) {},
+                      onCreate: (range) async {},
+                      editable: true,
+                      showsDayHeader: dayCount > 1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final grid = tester.getRect(find.byType(TimedGrid<String>));
+      final block = tester.getRect(blockFinder("talk"));
+      final x = block.center.dx;
+      final inside = Offset(x, grid.top + 5.0);
+      final before = await pixelsAt(<Offset>[inside]);
+
+      // Held 10 px above its bottom and moved up until its top is 60 px
+      // above the grid's, which leaves the pointer over the hours.
+      final gesture = await tester.startGesture(
+        block.bottomCenter - const Offset(0.0, 10.0),
+      );
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await gesture.moveBy(Offset(0.0, grid.top - 60.0 - block.top));
+      await tester.pump();
+      final lifted = tester.getRect(find.byKey(liftedBlockKey));
+      // Setup sanity: the lifted block lies across the grid's top, and
+      // paints where it lies inside the grid.
+      expect(lifted.top, lessThan(grid.top - 50.0), reason: "$dayCount");
+      expect(lifted.contains(inside), isTrue, reason: "$dayCount");
+      final pixels = await pixelsAt(<Offset>[
+        inside,
+        Offset(x, grid.top - 1.0),
+      ]);
+      expect(pixels[0], isNot(before[0]), reason: "$dayCount");
+      // TARGET. Above the grid the box stays white.
+      expect(pixels[1], white, reason: "$dayCount");
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+    }
   });
 }

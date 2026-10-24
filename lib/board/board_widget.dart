@@ -146,7 +146,11 @@ class Board<TKey, TItem> extends StatefulWidget {
   /// Whether a drag gesture may move both axes at once.
   final DiagonalDragBehavior diagonalDragBehavior;
 
-  /// How the viewport clips its children.
+  /// How the board clips what it paints to its bounds: the viewport's
+  /// children, and a move's drag proxy, all of whose paint stays inside
+  /// them, a shadow or a transform its [BoardDragConfig.dragProxyBuilder]
+  /// adds included. Under [Clip.none] the proxy follows the pointer past
+  /// them.
   final Clip clipBehavior;
 
   /// Whether the main axis attaches to the surrounding
@@ -656,7 +660,8 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
   }
 
   /// The drag proxy: a separate overlay above the board, following the
-  /// pointer, sized to the dragged item's rect. The item's in-place
+  /// pointer, sized to the dragged item's rect, and clipped to the
+  /// board's bounds under [Board.clipBehavior]. The item's in-place
   /// widget stays live with `isDragging` true; the proxy is the moved
   /// visual.
   ///
@@ -673,7 +678,7 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
       _proxyKey = key;
       _proxyHost = _buildProxyContent(key);
     }
-    return ValueListenableBuilder<Offset?>(
+    final proxy = ValueListenableBuilder<Offset?>(
       valueListenable: drag.pointerPosition,
       child: _proxyHost,
       builder: (context, pointer, proxyHost) {
@@ -702,6 +707,16 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
           child: content,
         );
       },
+    );
+    // A ClipRect over the board rather than the Stack's own clip, which
+    // `RenderStack` takes only for a child laid out past the Stack, so a
+    // shadow or a transform the proxy builder adds past the proxy's rect
+    // is clipped too.
+    return Positioned.fill(
+      child: ClipRect(
+        clipBehavior: widget.clipBehavior,
+        child: Stack(clipBehavior: Clip.none, children: <Widget>[proxy]),
+      ),
     );
   }
 

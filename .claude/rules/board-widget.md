@@ -54,7 +54,11 @@ The contract of `Board`. The conventions every layer follows are in `board.md`.
   forwarding listener, the drag-proxy overlay (gated on the SESSION's
   kind through `draggedKind`, never on the target's, so the moved visual
   keeps following the pointer across a `canDropAt`-refused cell, where
-  the target is null by design), the SESSION CURSOR (one unconditional
+  the target is null by design, and clipped to the board's bounds under
+  `clipBehavior` by a `ClipRect` over the board around its slot, not by
+  the `Stack`'s own clip, which `RenderStack` takes only for a child
+  LAID OUT past it, so a shadow or a transform the proxy builder paints
+  past the proxy's rect is clipped too), the SESSION CURSOR (one unconditional
   `MouseRegion` over the board and the proxy, `grabbing` for a move and
   the resized axis's cursor for a resize, `defer` with no session, so the
   cursor holds wherever the pointer goes), the config's OPACITY PAIR
