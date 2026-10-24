@@ -2264,9 +2264,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Splits the days' shown entries when the days are ready, and none
-  /// otherwise ([_layOutEntries]), lays out the rows counting those
-  /// outside the hours before the pieces, so they fit the lattice they land
-  /// on, and places the split ([_placeLayout]). A sync animates only when
+  /// otherwise ([_layOutEntries]), lays out the all-day strip's rows and
+  /// the rows counting those outside the hours before the pieces, so they
+  /// fit the lattice they land on, and places the split once
+  /// ([_placeLayout]), whatever rows it changed. A sync animates only when
   /// [animate] holds, its days are ready, the last sync found its own days
   /// ready and the rows stay as they were; any other runs under
   /// [BoardAnimationStyle.disabled], and so does every sync until a frame
@@ -2321,8 +2322,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// instances with the same pending flags in the same order, on the same
   /// days, weekdays and hours ([_layoutRead]), the split is that one, kept
   /// in [_layout], and runs nothing: a store notify that changes nothing
-  /// the grid shows splits nothing, and a sync on new tracks followed by a
-  /// store notify that answers the same entries splits once.
+  /// the grid shows splits nothing; and a store that notifies as it is
+  /// asked for new days, before the grid has them, syncs on the days
+  /// shown before, whose split it keeps, so the step splits once.
   _GridLayout<T> _layOutEntries(List<CalendarShownEntry<T>> shown) {
     final tracks = _tracks;
     final read = _layoutRead;

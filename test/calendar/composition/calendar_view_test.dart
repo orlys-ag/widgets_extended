@@ -33,7 +33,7 @@ import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 
-typedef DayRange = ({DateTime first, DateTime last});
+import 'recording_store.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -97,23 +97,6 @@ DateTime at(DateTime day, int hour, [int minute = 0]) {
 DayRange gridRange(DateTime day, {WeekdaySet weekdays = WeekdaySet.all}) {
   final grid = MonthGrid.of(day, weekdays: weekdays);
   return (first: grid.firstDay, last: grid.lastDay);
-}
-
-/// An in-memory store that records each range it is asked to show and
-/// the scheduler's phase at the ask, and notifies within the call, as a
-/// caching store does.
-class RecordingStore extends MemoryCalendarStore<String> {
-  RecordingStore({super.entries, super.hours});
-
-  final List<DayRange> shows = <DayRange>[];
-  final List<SchedulerPhase> phases = <SchedulerPhase>[];
-
-  @override
-  void show(DateTime first, DateTime last) {
-    shows.add((first: first, last: last));
-    phases.add(SchedulerBinding.instance.schedulerPhase);
-    notifyListeners();
-  }
 }
 
 /// A data source that answers each read within the call, through a

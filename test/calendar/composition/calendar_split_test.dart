@@ -1,20 +1,25 @@
 /// When the views split the shown entries and place them: a calendar over
-/// a month of 5,000 entries, 200 of them on one day, splits once per store
-/// write and per step, and a scroll, a pinch, a drag's moves, a pill and an
-/// edit-mode change split nothing.
+/// a month of 5,000 entries, 200 of them on one day, in a store that
+/// notifies as the calendar asks it for a new range, splits once per store
+/// write and per step and nothing for a create on a day it does not show,
+/// and a scroll, a pinch, a drag's moves, a pill and an edit-mode change
+/// split nothing. Week places once per sync, one that changes the all-day
+/// strip's rows too, and once per pill or edit-mode change of those rows.
 library;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
-import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/entry_split.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
+
+import 'recording_store.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -90,11 +95,27 @@ void resetCounts() {
   debugEntryPlaceCount = 0;
 }
 
+/// The rows of the timed grid's board.
+int rowCount() {
+  final board =
+      find.byType(Board<GridKey, GridShape<String>>).evaluate().single.widget
+          as Board<GridKey, GridShape<String>>;
+  return board.controller.rows.axis.trackCount;
+}
+
+/// Creates an entry from 09:00 to 10:00 on January 4 2027, a day neither
+/// view of April 2026 shows, and lets the calendar settle.
+Future<void> createOnJanuary(WidgetTester tester, RecordingStore store) async {
+  final day = DateTime(2027, 1, 4);
+  await store.create(entryOf("far", at(day, 9), at(day, 10)));
+  await tester.pumpAndSettle();
+}
+
 void main() {
-  late MemoryCalendarStore<String> store;
+  late RecordingStore store;
 
   setUp(() {
-    store = MemoryCalendarStore<String>(entries: monthOfEntries());
+    store = RecordingStore(entries: monthOfEntries());
     resetCounts();
   });
 
@@ -150,10 +171,12 @@ void main() {
     await gesture.up();
   }
 
-  testWidgets("SP1 in Week a store write and a next-week step each split and "
-      "place once, ten frames of a scroll, a pinch and a block's drag split "
-      "and place nothing, and a \"+N\" pill and an edit-mode change place "
-      "once and split nothing", (tester) async {
+  testWidgets("SP1 in Week a store write splits and places once, a create "
+      "on a day Week does not show splits nothing and places once, a "
+      "next-week step splits once and places twice, ten frames of a scroll, "
+      "a pinch and a block's drag split and place nothing, and a \"+N\" "
+      "pill and an edit-mode change place once and split nothing; a write "
+      "and a step that change the strip's rows place no more", (tester) async {
     final editable = ValueNotifier<bool>(true);
     addTearDown(editable.dispose);
     await pumpCalendar(tester, CalendarViewKind.week, editable);
@@ -169,6 +192,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(counts(), (1, 1), reason: "a store write");
+
+    resetCounts();
+    await createOnJanuary(tester, store);
+    expect(counts(), (0, 1), reason: "a create on a day Week does not show");
 
     final grid = tester.getRect(find.byType(TimedGrid<String>));
     resetCounts();
@@ -216,13 +243,27 @@ void main() {
     expect(find.byKey(allDayLessKey), findsOneWidget);
     expect(counts(), (0, 1), reason: "a pill");
 
+    var rows = rowCount();
+    resetCounts();
+    final last = store.storedEntry("w4")!;
+    store.requestMove(last.copyWith(start: thursday, end: friday));
+    await tester.pumpAndSettle();
+    // Setup sanity: Wednesday's bars, each in a row of the expanded strip,
+    // need one row less.
+    expect(rowCount(), rows - 1);
+    expect(counts(), (1, 1), reason: "a store write that drops a strip row");
+
+    rows = rowCount();
     resetCounts();
     await tester.tap(find.byTooltip("Next week"));
     await tester.pumpAndSettle();
     // Setup sanity: Week shows the week of April 27, which holds no
-    // all-day entry.
+    // all-day entry, so the strip's four rows give way to one empty row.
     expect(find.byKey(allDayCellKey(DateTime(2026, 4, 27))), findsOneWidget);
-    expect(counts(), (1, 1), reason: "a next-week step");
+    expect(rowCount(), rows - 3);
+    // The store's notify inside the step syncs on the week shown before,
+    // whose split it keeps, and the new week's sync splits.
+    expect(counts(), (1, 2), reason: "a next-week step");
 
     resetCounts();
     editable.value = false;
@@ -232,8 +273,9 @@ void main() {
     expect(counts(), (0, 1), reason: "an edit-mode change");
   });
 
-  testWidgets("SP2 in Month ten frames of a scroll split nothing, and a store "
-      "write and a next-month step each split once", (tester) async {
+  testWidgets("SP2 in Month ten frames of a scroll split nothing, a store "
+      "write and a next-month step each split once, and a create on a day "
+      "Month does not show splits nothing", (tester) async {
     final editable = ValueNotifier<bool>(true);
     addTearDown(editable.dispose);
     await pumpCalendar(
@@ -258,6 +300,14 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(debugEntrySplitCount, 1, reason: "a store write");
+
+    resetCounts();
+    await createOnJanuary(tester, store);
+    expect(
+      debugEntrySplitCount,
+      0,
+      reason: "a create on a day Month does not show",
+    );
 
     resetCounts();
     await tester.tap(find.byTooltip("Next month"));
