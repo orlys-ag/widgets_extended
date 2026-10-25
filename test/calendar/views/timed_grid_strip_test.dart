@@ -18,6 +18,7 @@ import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/policy/overlap.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
@@ -3004,6 +3005,161 @@ void main() {
       entryOf("night", at(monday, 22), at(wednesday, 12, 15)),
     ]);
   });
+
+  testWidgets("PG3 in Week, the Saturday piece of Saturday 23:30 to Sunday "
+      "00:30 and a Saturday bar, each released on Sunday's 23:30 slot, "
+      "record no move sharing time with an entry on the unshown next "
+      "Monday", (tester) async {
+    final shown = Shown.week(monday);
+    final next = entryOf("N", nextMonday, at(nextMonday, 1));
+    final crossing = entryOf("X", at(saturday, 23, 30), at(sunday, 0, 30));
+    final bar = allDayOf("A", saturday);
+    final shared = <String, List<CalendarEntry<String>>>{};
+    for (final withNext in const <bool>[false, true]) {
+      final pieceStore = storeOf(<CalendarEntry<String>>[
+        crossing,
+        if (withNext) next,
+      ]);
+      await Harness(pieceStore, shown).pump(tester);
+      await moveBlockOnto(
+        tester,
+        blockFinder("X", saturday),
+        slotRect(tester, shown, sunday, 23 * 60 + 30),
+      );
+      final barStore = storeOf(<CalendarEntry<String>>[
+        bar,
+        if (withNext) next,
+      ]);
+      await Harness(barStore, shown).pump(tester);
+      await dragTo(
+        tester,
+        tester.getCenter(barFinder("A")),
+        slotRect(tester, shown, sunday, 23 * 60 + 30).center,
+      );
+      if (!withNext) {
+        // Setup sanity: each gesture asks for Sunday 23:30 to Monday 00:30.
+        expect(pieceStore.moves, <CalendarEntry<String>>[
+          crossing.copyWith(
+            start: at(sunday, 23, 30),
+            end: at(nextMonday, 0, 30),
+          ),
+        ]);
+        expect(barStore.moves, <CalendarEntry<String>>[
+          bar.copyWith(start: at(sunday, 23, 30), end: at(nextMonday, 0, 30)),
+        ]);
+        continue;
+      }
+      shared["piece"] = movesSharingTime(pieceStore, next);
+      shared["bar"] = movesSharingTime(barStore, next);
+    }
+    expect(shared, <String, List<CalendarEntry<String>>>{
+      "piece": <CalendarEntry<String>>[],
+      "bar": <CalendarEntry<String>>[],
+    });
+  });
+
+  testWidgets("PG6 in Week under hours from 06:00 to 22:00, Tuesday 21:00 to "
+      "Wednesday 07:00 released on Monday's 21:00 slot records no move "
+      "sharing time with Monday 23:00 to 23:30, which the hours hide", (
+    tester,
+  ) async {
+    final shown = Shown.week(monday, hours: const DayHours(6 * 60, 22 * 60));
+    final hidden = entryOf("H", at(monday, 23), at(monday, 23, 30));
+    final overnight = entryOf("O", at(tuesday, 21), at(wednesday, 7));
+    for (final withHidden in const <bool>[false, true]) {
+      final store = storeOf(<CalendarEntry<String>>[
+        overnight,
+        if (withHidden) hidden,
+      ]);
+      await Harness(store, shown).pump(tester);
+      if (withHidden) {
+        // Setup sanity: the hours leave the hidden entry no block.
+        expect(blocksOf("H"), findsNothing);
+      }
+      await moveBlockOnto(
+        tester,
+        blockFinder("O", tuesday),
+        slotRect(tester, shown, monday, 21 * 60),
+      );
+      if (!withHidden) {
+        // Setup sanity: the drop asks for Monday 21:00 to Tuesday 07:00.
+        expect(store.moves, <CalendarEntry<String>>[
+          overnight.copyWith(start: at(monday, 21), end: at(tuesday, 7)),
+        ]);
+        continue;
+      }
+      expect(movesSharingTime(store, hidden), isEmpty);
+    }
+  });
+
+  group("on the 25-hour day", skip: longDaySkip, () {
+    testWidgets("PG7 in Day, the second 01:40 to 02:10 released on the 01:00 "
+        "row records no move sharing time with the first 01:30 to the "
+        "second 01:30, whose block lies on the rows from 01:30", (
+      tester,
+    ) async {
+      final day = longDayStart;
+      final shown = Shown.day(day);
+      final repeated = entryOf(
+        "E1",
+        day.add(const Duration(minutes: 90)),
+        secondHalfPastOne,
+      );
+      final moved = entryOf(
+        "M",
+        secondHalfPastOne.add(const Duration(minutes: 10)),
+        at(day, 2, 10),
+      );
+      for (final withRepeated in const <bool>[false, true]) {
+        final store = storeOf(<CalendarEntry<String>>[
+          moved,
+          if (withRepeated) repeated,
+        ]);
+        await Harness(store, shown).pump(tester);
+        final block = tester.getRect(blockFinder("M", day));
+        final row = slotRect(tester, shown, day, 60);
+        final gesture = await lift(tester, block.center);
+        await gesture.moveBy(Offset(0.0, row.top - block.top + 2.0));
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+        if (!withRepeated) {
+          // Setup sanity: the drop asks for the second 01:00 to the second
+          // 01:30.
+          expect(store.moves, <CalendarEntry<String>>[
+            moved.copyWith(
+              start: secondHalfPastOne.subtract(const Duration(minutes: 30)),
+              end: secondHalfPastOne,
+            ),
+          ]);
+          continue;
+        }
+        expect(movesSharingTime(store, repeated), isEmpty);
+      }
+    });
+  });
+}
+
+/// Lifts [block] at its centre, moves it so its top lies 2 px below
+/// [slot]'s, which the drop snaps to, lets go and lets the drop settle.
+Future<void> moveBlockOnto(WidgetTester tester, Finder block, Rect slot) async {
+  final from = tester.getRect(block);
+  final gesture = await lift(tester, from.center);
+  await gesture.moveBy(slot.topLeft - from.topLeft + const Offset(0.0, 2.0));
+  await tester.pump();
+  await gesture.up();
+  await tester.pumpAndSettle();
+}
+
+/// The moves [store] was asked for that share time with [other].
+List<CalendarEntry<String>> movesSharingTime(
+  RecordingStore store,
+  CalendarEntry<String> other,
+) {
+  return <CalendarEntry<String>>[
+    for (final move in store.moves)
+      if (rangeSharesTime(move.start, move.end, other)) move,
+  ];
 }
 
 /// A text scaler whose every scale throws, so a build that lays text out
