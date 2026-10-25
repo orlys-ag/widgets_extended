@@ -240,14 +240,6 @@ Matcher pendingRefusal(String id) {
   );
 }
 
-Matcher overlapRefusal(List<String> ids) {
-  return isA<CalendarEntryOverlapException>().having(
-    (error) => error.conflictingIds,
-    "conflictingIds",
-    ids,
-  );
-}
-
 /// A refusal under the hours 08:00 to 18:00 with only the start, or only
 /// the end, outside them.
 Matcher hoursRefusal({required bool startOutside}) {
@@ -469,7 +461,8 @@ void main() {
     expect(idsOn(store, DateTime(2026, 4, 24)), isEmpty);
   });
 
-  test("M4 a move that meets an entry on a read day sends nothing", () async {
+  test("M4 a move that meets an entry on a read day is sent to the source "
+      "and stored once it answers", () async {
     final harness = Harness();
     final store = harness.store;
     // From Saturday 19:00 to Sunday 01:00.
@@ -482,41 +475,30 @@ void main() {
     final calls = harness.source.calls.length;
 
     // Monday 13:00 to 19:00 meets Monday's entry from 17:00.
-    store.requestMove(
-      multi.copyWith(
-        start: DateTime(2026, 4, 27, 13),
-        end: DateTime(2026, 4, 27, 19),
-      ),
+    final meeting = multi.copyWith(
+      start: DateTime(2026, 4, 27, 13),
+      end: DateTime(2026, 4, 27, 19),
     );
-    expect(harness.source.calls, hasLength(calls));
-    expect(store.isPending("item-1"), isFalse);
-    expect(harness.failures, <Matcher>[
-      failureOf("item-1", overlapRefusal(<String>["item-2"])),
-    ]);
-
-    // Sunday 19:00 to Monday 01:00 meets neither.
-    final clear = multi.copyWith(
-      start: DateTime(2026, 4, 26, 19),
-      end: DateTime(2026, 4, 27, 1),
-    );
-    store.requestMove(clear);
+    store.requestMove(meeting);
     expect(harness.source.calls, hasLength(calls + 1));
-    harness.lastCall.succeed(clear);
+    expect(harness.lastCall.method, SourceMethod.replace);
+    expect(store.isPending("item-1"), isTrue);
+    harness.lastCall.succeed(meeting);
     await settle();
+    expect(store.isPending("item-1"), isFalse);
+    expect(store.storedEntry("item-1"), meeting);
 
-    // Two single-day entries are kept apart as well.
-    final reported = harness.failures.length;
-    store.requestMove(
-      single.copyWith(
-        start: DateTime(2026, 4, 26, 10, 30),
-        end: DateTime(2026, 4, 26, 11, 30),
-      ),
+    // Two single-day entries share time as well.
+    final sharing = single.copyWith(
+      start: DateTime(2026, 4, 26, 10, 30),
+      end: DateTime(2026, 4, 26, 11, 30),
     );
-    expect(harness.source.calls, hasLength(calls + 1));
-    expect(store.isPending("item-2"), isFalse);
-    expect(harness.failures.sublist(reported), <Matcher>[
-      failureOf("item-2", overlapRefusal(<String>["item-3"])),
-    ]);
+    store.requestMove(sharing);
+    expect(harness.source.calls, hasLength(calls + 2));
+    harness.lastCall.succeed(sharing);
+    await settle();
+    expect(store.storedEntry("item-2"), sharing);
+    expect(harness.failures, isEmpty);
   });
 
   test("M5 a multi-day entry shows on each day it covers", () async {

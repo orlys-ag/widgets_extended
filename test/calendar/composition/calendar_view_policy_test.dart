@@ -332,6 +332,72 @@ bool near(Rect a, Rect b) {
       (a.bottom - b.bottom).abs() <= 1.0;
 }
 
+/// The global rect of the grid's slot holding [minute] in [day]'s column.
+Rect slotRect(
+  WidgetTester tester,
+  DateTime day,
+  int minute, {
+  bool week = true,
+}) {
+  final viewport = gridViewport(tester);
+  final cell = viewport.rectOfCell(rowOf(minute), colOf(day, week: week))!;
+  return Rect.fromPoints(
+    viewport.localToGlobal(cell.topLeft),
+    viewport.localToGlobal(cell.bottomRight),
+  );
+}
+
+/// Whether [rect] lies within [column]'s horizontal extent, to half a
+/// pixel.
+bool inColumn(Rect rect, Rect column) {
+  return rect.left >= column.left - 0.5 && rect.right <= column.right + 0.5;
+}
+
+/// Whether the horizontal extents of [a] and [b] share no more than half a
+/// pixel.
+bool apart(Rect a, Rect b) {
+  return a.right <= b.left + 0.5 || b.right <= a.left + 0.5;
+}
+
+/// Lifts the block [finder] finds and moves the pointer, in two steps a
+/// frame apart, by as much as puts the block's top 2 px inside [slot];
+/// returns the gesture still held.
+Future<TestGesture> liftOnto(WidgetTester tester, Finder finder, Rect slot) {
+  final from = tester.getRect(finder);
+  return liftTo(
+    tester,
+    from.center,
+    from.center + (slot.topLeft - from.topLeft) + const Offset(0.0, 2.0),
+  );
+}
+
+/// PV2's entries: P on Monday from 10:00 to 11:00, to move onto Q's time
+/// on Tuesday from 10:00 to 12:00; R on Wednesday from 08:00 to 09:00, to
+/// resize across S from 09:30 to 10:30; T on Thursday from 10:00 to 11:00,
+/// for a create range to cross; and U on Friday from 09:10 to 10:00.
+List<CalendarEntry<String>> pv2Entries() {
+  return <CalendarEntry<String>>[
+    entryOf("P", at(monday, 10), at(monday, 11)),
+    entryOf("Q", at(tuesday, 10), at(tuesday, 12)),
+    entryOf("R", at(wednesday, 8), at(wednesday, 9)),
+    entryOf("S", at(wednesday, 9, 30), at(wednesday, 10, 30)),
+    entryOf("T", at(thursday, 10), at(thursday, 11)),
+    entryOf("U", at(friday, 9, 10), at(friday, 10)),
+  ];
+}
+
+/// An editable Week of Tuesday over [pv2Entries], given no policy.
+Future<Host> pumpPv2Week(WidgetTester tester) async {
+  final host = Host(
+    storeOf(pv2Entries()),
+    view: CalendarViewKind.week,
+    day: tuesday,
+    time: at(monday, 8),
+  );
+  await host.pump(tester);
+  return host;
+}
+
 /// PV1's policy: no move of A and the all-day A2, the end's edge alone of
 /// B, no edit of C, no delete of D, and on Thursday an earliest start of
 /// 10:00.
@@ -506,6 +572,105 @@ void main() {
     expect(store.moves, hasLength(1));
   });
 
+  group("PV2 with no policy entries share time", () {
+    testWidgets("a move onto another entry's time is stored there, the two "
+        "blocks side by side in its day's column", (tester) async {
+      final host = await pumpPv2Week(tester);
+      final gesture = await liftOnto(
+        tester,
+        blockFinder("P"),
+        slotRect(tester, tuesday, 10 * 60 + 30),
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(
+        host.store.storedEntry("P"),
+        entryOf("P", at(tuesday, 10, 30), at(tuesday, 11, 30)),
+      );
+      final column = slotRect(tester, tuesday, 10 * 60);
+      final moved = tester.getRect(blockFinder("P"));
+      final occupant = tester.getRect(blockFinder("Q"));
+      expect(inColumn(moved, column), isTrue);
+      expect(inColumn(occupant, column), isTrue);
+      expect(apart(moved, occupant), isTrue);
+    });
+
+    testWidgets("an end handle dragged across a neighbour stores the end it "
+        "is let go at", (tester) async {
+      final host = await pumpPv2Week(tester);
+      await select(tester, blockFinder("R"));
+      final block = tester.getRect(blockFinder("R"));
+      final from = Offset(block.center.dx, block.bottom - 2.0);
+      final to = Offset(
+        from.dx,
+        slotRect(tester, wednesday, 10 * 60 + 45).bottom - 2.0,
+      );
+      final gesture = await tester.startGesture(from);
+      await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+      await tester.pump();
+      await gesture.moveTo(to);
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(
+        host.store.storedEntry("R"),
+        entryOf("R", at(wednesday, 8), at(wednesday, 11)),
+      );
+    });
+
+    testWidgets("a create range dragged across an entry reports the range "
+        "it is dragged over", (tester) async {
+      final host = await pumpPv2Week(tester);
+      final gesture = await holdRange(
+        tester,
+        slotCenter(tester, thursday, 9 * 60),
+        slotCenter(tester, thursday, 11 * 60 + 45),
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(host.creates, <CreateRange>[
+        CreateRange(start: at(thursday, 9), end: at(thursday, 12)),
+      ]);
+    });
+
+    testWidgets("a press on the free part of a slot an entry shares creates "
+        "that slot", (tester) async {
+      final host = await pumpPv2Week(tester);
+      final nine = slotRect(tester, friday, 9 * 60);
+      final free = Offset(nine.center.dx, nine.top + 2.0);
+      // Setup sanity: the press lies above U's block, over no item.
+      expect(free.dy, lessThan(tester.getRect(blockFinder("U")).top));
+      await tester.tapAt(free);
+      await tester.pumpAndSettle();
+      expect(host.creates, <CreateRange>[
+        CreateRange(start: at(friday, 9), end: at(friday, 9, 15)),
+      ]);
+    });
+  });
+
+  testWidgets("PV6 with no policy a block held over another entry's time "
+      "narrows it to the lane the release leaves it in, and the release "
+      "lands the block beside it", (tester) async {
+    await pumpPv2Week(tester);
+    final before = tester.getRect(blockFinder("Q"));
+    final gesture = await liftOnto(
+      tester,
+      blockFinder("P"),
+      slotRect(tester, tuesday, 10 * 60 + 30),
+    );
+    await tester.pumpAndSettle();
+    final held = tester.getRect(blockFinder("Q"));
+    // Setup sanity: the make-room preview moved the occupant.
+    expect(near(held, before), isFalse);
+    await gesture.up();
+    await tester.pumpAndSettle();
+    final occupant = tester.getRect(blockFinder("Q"));
+    expect(near(occupant, held), isTrue);
+    final moved = tester.getRect(blockFinder("P"));
+    expect(inColumn(moved, slotRect(tester, tuesday, 10 * 60)), isTrue);
+    expect(apart(moved, occupant), isTrue);
+  });
+
   group("PV3", () {
     final changed = UnrestrictedEditPolicy<String>(allowsOverlaps: false);
 
@@ -608,6 +773,29 @@ void main() {
       expect(host.store.moves, isEmpty);
       expect(near(tester.getRect(blockFinder("N", tuesday)), first), isTrue);
       expect(near(tester.getRect(blockFinder("N", wednesday)), second), isTrue);
+    });
+
+    testWidgets("a new policy cancels a move whose make-room preview holds "
+        "an occupant, both blocks settling at their rects before the "
+        "lift", (tester) async {
+      final host = await pumpPv2Week(tester);
+      final moved = tester.getRect(blockFinder("P"));
+      final occupant = tester.getRect(blockFinder("Q"));
+      final gesture = await liftOnto(
+        tester,
+        blockFinder("P"),
+        slotRect(tester, tuesday, 10 * 60 + 30),
+      );
+      await tester.pumpAndSettle();
+      // Setup sanity: the make-room preview moved the occupant.
+      expect(near(tester.getRect(blockFinder("Q")), occupant), isFalse);
+      host.policy.value = changed;
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(host.store.moves, isEmpty);
+      expect(near(tester.getRect(blockFinder("P")), moved), isTrue);
+      expect(near(tester.getRect(blockFinder("Q")), occupant), isTrue);
     });
 
     testWidgets("an equal policy, a second history lock equal to the first, "

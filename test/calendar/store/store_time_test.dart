@@ -212,8 +212,8 @@ void main() {
     }
   });
 
-  test("SM3 a move onto a timed entry's time is refused, and an all-day "
-      "entry over a busy day is accepted", () {
+  test("SM3 a move onto a timed entry's time is stored with no failure, and "
+      "an all-day entry over a busy day is accepted", () {
     final busy = entryOf("busy", at(tuesday, 0, 30), at(tuesday, 1, 30));
     final task = entryOf("task", at(monday, 9), at(monday, 10));
     final failures = <CalendarWriteFailure>[];
@@ -224,18 +224,10 @@ void main() {
       failures: failures,
     )) {
       failures.clear();
-      store.requestMove(
-        task.copyWith(start: at(monday, 23), end: at(tuesday, 1)),
-      );
-      expect(failures, hasLength(1), reason: name);
-      final refusal = failures.single.error;
-      expect(refusal, isA<CalendarEntryOverlapException>(), reason: name);
-      expect(
-        (refusal as CalendarEntryOverlapException).conflictingIds,
-        <String>["busy"],
-        reason: name,
-      );
-      expect(store.storedEntry("task")!.start, at(monday, 9), reason: name);
+      final onto = task.copyWith(start: at(monday, 23), end: at(tuesday, 1));
+      store.requestMove(onto);
+      expect(failures, isEmpty, reason: name);
+      expect(store.storedEntry("task"), onto, reason: name);
 
       failures.clear();
       store.requestMove(task.copyWith(start: tuesday, end: wednesday));

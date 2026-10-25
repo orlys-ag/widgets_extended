@@ -208,23 +208,13 @@ void main() {
     );
 
     store.requestMove(item.copyWith(start: at(day, 450), end: at(day, 510)));
-    store.requestMove(item.copyWith(start: at(day, 750), end: at(day, 810)));
-    expect(recorder.failures, hasLength(2));
+    expect(recorder.failures, hasLength(1));
     expect(recorder.failures[0].id, "item-1");
     expect(
       recorder.failures[0].error,
       isA<CalendarHoursException>()
           .having((error) => error.startOutside, "startOutside", isTrue)
           .having((error) => error.endOutside, "endOutside", isFalse),
-    );
-    expect(recorder.failures[1].id, "item-1");
-    expect(
-      recorder.failures[1].error,
-      isA<CalendarEntryOverlapException>().having(
-        (error) => error.conflictingIds,
-        "conflictingIds",
-        <String>["item-2"],
-      ),
     );
     expect(store.storedEntry("item-1"), item);
     expect(recorder.events, isEmpty);
