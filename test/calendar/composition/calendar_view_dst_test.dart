@@ -14,6 +14,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
@@ -362,6 +363,74 @@ void main() {
           end: day.add(const Duration(minutes: 165)),
         ),
       ]);
+    });
+
+    testWidgets("CV42 in Week under the lock of earlier today at the second "
+        "01:30, an all-day entry on the next day dragged from the strip lands "
+        "at the second 01:30 when released on the 01:30 row, and at the "
+        "second 01:45 on the 01:45 row", (tester) async {
+      final day = longDayStart;
+      final next = dateOfDayNumber(dayNumber(day) + 1);
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(800.0, 1200.0);
+      addTearDown(tester.view.reset);
+      for (final (locked, minute) in const <(bool, int)>[
+        (false, 90),
+        (false, 105),
+        (true, 90),
+        (true, 105),
+      ]) {
+        final bar = entryOf("bar", next, dateOfDayNumber(dayNumber(next) + 1));
+        final store = MemoryCalendarStore<String>(
+          entries: <CalendarEntry<String>>[bar],
+        );
+        addTearDown(store.dispose);
+        final controller = CalendarController(
+          view: CalendarViewKind.week,
+          selectedDay: day,
+        );
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: CalendarView<String>(
+              key: ValueKey<(bool, int)>((locked, minute)),
+              store: store,
+              controller: controller,
+              // The 25-hour day is the week's first column, which
+              // [slotRect] reads, and the next day its second.
+              weekdays: WeekdaySet.all.startingOn(weekdayColumn(day)),
+              clock: () {
+                return secondHalfPastOne;
+              },
+              editable: true,
+              editPolicy: locked
+                  ? const HistoryLockPolicy<String>(lockEarlierToday: true)
+                  : null,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final from = tester.getCenter(find.byKey(allDayBarKey("bar")));
+        final to = slotRect(tester, minute).center;
+        final gesture = await tester.startGesture(from);
+        await tester.pump(kLongPressTimeout + kPressTimeout);
+        await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+        await tester.pump();
+        await gesture.moveTo(to);
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+        // Setup sanity, with no lock: the release lands on the row's first
+        // occurrence, so the gesture reaches the row.
+        final start = locked
+            ? secondHalfPastOne.add(Duration(minutes: minute - 90))
+            : day.add(Duration(minutes: minute));
+        expect(
+          store.storedEntry("bar"),
+          bar.copyWith(start: start, end: start.add(const Duration(hours: 1))),
+          reason: "locked: $locked, row $minute",
+        );
+      }
     });
   });
 

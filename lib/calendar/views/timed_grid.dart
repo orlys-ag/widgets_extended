@@ -964,8 +964,10 @@ CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
 /// drags its first day and its right grip its last, where it does not
 /// continue past them; on one column it takes neither. Dropped with the
 /// pointer over a slot, or over the row above the first slot, a bar's
-/// entry becomes a timed one an hour long from that slot's start, marked
-/// by the landing outline while the pointer is there; and a block dropped
+/// entry becomes a timed one an hour long from that slot's start, in the
+/// occurrence of the earliest start [editPolicy] gives the day where its
+/// clock repeats that time, marked by the landing outline while the
+/// pointer is there; and a block dropped
 /// with the pointer over a day's strip cell makes its entry all-day on
 /// that day, the strip marking that day while the pointer is there. A drag
 /// across empty strip cells creates an all-day range of their days, as a
@@ -3675,14 +3677,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// The hour the bar [key]'s entry takes when released over the slot
-  /// [row] of [column]: from that slot's start on that column's day, the
-  /// earlier instant of a time the clock repeats, to an hour after it; null
-  /// where the start is a time the clock skips, where [_policy] does not
-  /// let the entry move or refuses the range, or its answer throws
-  /// ([_reportPolicyThrow]), where the hours ([DayHours.holdsTimes]) or
-  /// [_dayLimit] refuse the range, or where the policy forbids overlaps
-  /// and it shares time with another timed entry the store shows
-  /// ([_meetsOtherEntry]).
+  /// [row] of [column]: from that slot's start on that column's day to an
+  /// hour after it. A start the day's clock repeats takes the occurrence of
+  /// the earliest start [_policy] gives the day
+  /// ([CalendarEditPolicy.earliestStartOn]), as a create's times do
+  /// ([timeAtWallMinute]). Null where the start is a time the clock skips,
+  /// where [_policy] does not let the entry move or refuses the range, or
+  /// its answer throws ([_reportPolicyThrow]), where the hours
+  /// ([DayHours.holdsTimes]) or [_dayLimit] refuse the range, or where the
+  /// policy forbids overlaps and it shares time with another timed entry
+  /// the store shows ([_meetsOtherEntry]). Three asks of the policy at
+  /// most, the day's date read from [_tracks], which holds it.
   ({DateTime start, DateTime end})? _barLandingOf(
     GridKey key,
     int column,
@@ -3690,21 +3695,33 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   ) {
     noteDropGate();
     final shape = _board.itemOf(key);
-    final start = timeAtWallMinute(
-      _tracks.dayAt(column) * minutesPerDay + _tracks.minuteAt(row),
-    );
-    if (shape == null || start == null) {
+    if (shape == null) {
       return null;
     }
     final entry = shape.shown.entry;
+    final now = _calendarNow;
+    final DateTime? start;
+    try {
+      if (!_policy.mayMove(entry, now)) {
+        return null;
+      }
+      start = timeAtWallMinute(
+        _tracks.dayAt(column) * minutesPerDay + _tracks.minuteAt(row),
+        from: _policy.earliestStartOn(_tracks.dateAt(column), now),
+      );
+    } catch (exception, stack) {
+      _reportPolicyThrow(exception, stack);
+      return null;
+    }
+    if (start == null) {
+      return null;
+    }
     final end = start.add(const Duration(hours: 1));
     if (!_tracks.hours.holdsTimes(start, end) || !_coversAtMost(start, end)) {
       return null;
     }
-    final now = _calendarNow;
     try {
-      if (!_policy.mayMove(entry, now) ||
-          !_policy.admitsChange(entry, start, end, now)) {
+      if (!_policy.admitsChange(entry, start, end, now)) {
         return null;
       }
     } catch (exception, stack) {
