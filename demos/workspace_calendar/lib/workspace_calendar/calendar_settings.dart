@@ -1,6 +1,6 @@
 /// What the calendar's settings choose: whether it is in edit mode, how far
-/// the history lock keeps the past as it is, and so the calendar's edit
-/// policy, the weekdays it shows and the
+/// the history lock keeps the past as it is, whether items may overlap, and
+/// so the calendar's edit policy, the weekdays it shows and the
 /// one its weeks start on, the hours it shows
 /// and schedules in and the length of its slots, how the timed grid labels
 /// its hours, and how Month fits its weeks. Beside them: the field errors,
@@ -83,18 +83,19 @@ extension MonthLayoutLabel on MonthLayout {
 }
 
 /// What the calendar bar and the settings sheet choose: whether the
-/// calendar is in [editing] mode, whether the history lock holds past days, [lockPast], and earlier
-/// today too, [lockEarlierToday], the [weekdays] it shows and the one its
-/// weeks start on, the
-/// [hours] it shows and schedules in, the [slotMinutes] of its slots, the
-/// [hourLabelFormat] the timed grid labels them in, and Month's
-/// [monthLayout].
+/// calendar is in [editing] mode, whether the history lock holds past
+/// days, [lockPast], and earlier today too, [lockEarlierToday], whether
+/// items may share time, [allowsOverlaps], the [weekdays] it shows and the
+/// one its weeks start on, the [hours] it shows and schedules in, the
+/// [slotMinutes] of its slots, the [hourLabelFormat] the timed grid labels
+/// them in, and Month's [monthLayout].
 @immutable
 class CalendarSettings {
   const CalendarSettings({
     this.editing = false,
     this.lockPast = false,
     this.lockEarlierToday = false,
+    this.allowsOverlaps = false,
     this.weekdays = WeekdaySet.all,
     this.hours = DayHours.allDay,
     this.slotMinutes = defaultSlotMinutes,
@@ -119,6 +120,12 @@ class CalendarSettings {
   /// time after now. Without [lockPast] it holds nothing.
   final bool lockEarlierToday;
 
+  /// Whether items may share time: in edit mode Week's and Day's moves,
+  /// resizes and creates go over other items' times, and the API stores
+  /// items that share time. Off, they keep to free time, and the API
+  /// refuses an item whose new times share time with another.
+  final bool allowsOverlaps;
+
   /// The weekdays the calendar shows, at least one, which the month grid
   /// and the timed grid assert, and the weekday its weeks start on, which
   /// orders them in every view.
@@ -140,23 +147,24 @@ class CalendarSettings {
 
   /// The edit policy the calendar and the item form both read: the history
   /// lock, of earlier today too under [lockEarlierToday], under
-  /// [lockPast], and no lock otherwise. Neither allows overlapping items.
-  /// Equal settings give equal policies, so a rebuild with them cancels no
-  /// gesture.
+  /// [lockPast], and no lock otherwise, each allowing overlapping items as
+  /// [allowsOverlaps] says. Equal settings give equal policies, so a
+  /// rebuild with them cancels no gesture.
   CalendarEditPolicy<ItemPayload> get editPolicy {
     if (lockPast) {
       return WorkspaceHistoryLockPolicy(
         lockEarlierToday: lockEarlierToday,
-        allowsOverlaps: false,
+        allowsOverlaps: allowsOverlaps,
       );
     }
-    return const WorkspaceUnrestrictedPolicy(allowsOverlaps: false);
+    return WorkspaceUnrestrictedPolicy(allowsOverlaps: allowsOverlaps);
   }
 
   CalendarSettings copyWith({
     bool? editing,
     bool? lockPast,
     bool? lockEarlierToday,
+    bool? allowsOverlaps,
     WeekdaySet? weekdays,
     DayHours? hours,
     int? slotMinutes,
@@ -167,6 +175,7 @@ class CalendarSettings {
       editing: editing ?? this.editing,
       lockPast: lockPast ?? this.lockPast,
       lockEarlierToday: lockEarlierToday ?? this.lockEarlierToday,
+      allowsOverlaps: allowsOverlaps ?? this.allowsOverlaps,
       weekdays: weekdays ?? this.weekdays,
       hours: hours ?? this.hours,
       slotMinutes: slotMinutes ?? this.slotMinutes,
@@ -191,6 +200,7 @@ class CalendarSettings {
         other.editing == editing &&
         other.lockPast == lockPast &&
         other.lockEarlierToday == lockEarlierToday &&
+        other.allowsOverlaps == allowsOverlaps &&
         other.weekdays == weekdays &&
         other.hours == hours &&
         other.slotMinutes == slotMinutes &&
@@ -204,6 +214,7 @@ class CalendarSettings {
       editing,
       lockPast,
       lockEarlierToday,
+      allowsOverlaps,
       weekdays,
       hours,
       slotMinutes,
@@ -216,6 +227,7 @@ class CalendarSettings {
   String toString() {
     return "CalendarSettings(${editing ? "editing" : "viewing"}, "
         "${lockPast ? "past locked${lockEarlierToday ? " to now" : ""}, " : ""}"
+        "${allowsOverlaps ? "overlaps allowed, " : ""}"
         "$weekdays, $hours, $slotMinutes-minute slots, "
         "${hourLabelFormat.name}, "
         "${monthLayout.name})";

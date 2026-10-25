@@ -8,6 +8,7 @@ import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -2790,5 +2791,64 @@ void main() {
       end: "16:00",
       days: "1",
     );
+  });
+
+  testWidgets("W43 with the sheet's overlap switch on, a block dropped on "
+      "another item's time is stored there, the two side by side, and the "
+      "mock API follows the switch on and off", (tester) async {
+    final api = MockCalendarApi(latency: harnessLatency);
+    final wednesday = DateTime(2026, 4, 22);
+    await createBeforePump(tester, api, taskJson("Moved", today, 600, 660));
+    await createBeforePump(
+      tester,
+      api,
+      taskJson("Occupant", wednesday, 600, 720),
+    );
+    final moved = await idOn(tester, api, today, "Moved");
+    final occupant = await idOn(tester, api, wednesday, "Occupant");
+    await pumpCalendar(tester, editing: true, api: api, size: tall);
+    await pickMode(tester, "Week");
+
+    /// Flips the settings sheet's overlap switch and closes the sheet.
+    Future<void> flipOverlaps() async {
+      await openSettings(tester);
+      await tester.ensureVisible(find.byKey(allowsOverlapsKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(allowsOverlapsKey));
+      await tester.pumpAndSettle();
+      await tester.tapAt(const Offset(195.0, 20.0));
+      await tester.pumpAndSettle();
+    }
+
+    await flipOverlaps();
+    expect(api.allowsOverlaps, isTrue);
+    await moveBlock(
+      tester,
+      blockFinder(moved),
+      cellRect(tester, rowOf(10 * 60 + 30), colOf(2)).topLeft,
+    );
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
+    final item = await stored(tester, api, moved);
+    expect(
+      (item.start, item.end),
+      (DateTime(2026, 4, 22, 10, 30), DateTime(2026, 4, 22, 11, 30)),
+    );
+    expect(find.byType(SnackBar), findsNothing);
+    final column = cellRect(tester, rowOf(10 * 60), colOf(2));
+    final movedRect = tester.getRect(blockFinder(moved));
+    final occupantRect = tester.getRect(blockFinder(occupant));
+    for (final rect in <Rect>[movedRect, occupantRect]) {
+      expect(rect.left, greaterThanOrEqualTo(column.left - 0.5));
+      expect(rect.right, lessThanOrEqualTo(column.right + 0.5));
+    }
+    expect(
+      movedRect.right <= occupantRect.left + 0.5 ||
+          occupantRect.right <= movedRect.left + 0.5,
+      isTrue,
+    );
+
+    await flipOverlaps();
+    expect(api.allowsOverlaps, isFalse);
   });
 }

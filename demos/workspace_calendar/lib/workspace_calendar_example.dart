@@ -34,6 +34,12 @@
 /// resize or get created there, and an item in progress changes only its
 /// end. A create with no time left after the lock on its day says so.
 ///
+/// Its last switch lets items overlap: in edit mode Week's and Day's
+/// moves, resizes and creates then go over other items' times, the items
+/// sharing a time side by side, and a [MockCalendarApi] stores them. Off,
+/// the gestures keep to free time and the mock API refuses an item whose
+/// new times share time with another.
+///
 /// Today, in the calendar bar, selects today, or the shown day nearest it,
 /// in every view, and slides a strip a drag moved away back to it.
 ///
@@ -148,6 +154,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     with SingleTickerProviderStateMixin {
   late final CachingCalendarStore<ItemPayload> _store;
 
+  /// The API [_store] reads and writes through, kept so a
+  /// [MockCalendarApi]'s overlap rule follows [_settings]
+  /// ([_setApiOverlaps]).
+  late final CalendarApi _api = widget.api ?? MockCalendarApi.seeded(_today());
+
   /// The calendar's view, selected day and zoom sizes, which Today and the
   /// settings sheet's sliders set; the calendar opens on Agenda.
   final CalendarController _controller = CalendarController(
@@ -176,13 +187,22 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   @override
   void initState() {
     super.initState();
+    _setApiOverlaps(_settings);
     _store = CachingCalendarStore<ItemPayload>(
-      dataSource: CalendarApiSource(
-        widget.api ?? MockCalendarApi.seeded(_today()),
-      ),
+      dataSource: CalendarApiSource(_api),
       onWriteFailed: _handleWriteFailed,
     );
     _controller.addListener(_handleControllerChange);
+  }
+
+  /// Has a [MockCalendarApi] refuse overlapping items where [settings]
+  /// forbid them, as their edit policy does, so the API and the calendar
+  /// agree.
+  void _setApiOverlaps(CalendarSettings settings) {
+    final api = _api;
+    if (api is MockCalendarApi) {
+      api.allowsOverlaps = settings.allowsOverlaps;
+    }
   }
 
   @override
@@ -247,6 +267,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     setState(() {
       _settings = settings;
     });
+    _setApiOverlaps(settings);
     _store.hours = settings.hours;
   }
 

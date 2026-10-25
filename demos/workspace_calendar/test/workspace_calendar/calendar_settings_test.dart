@@ -5,6 +5,7 @@ library;
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -158,6 +159,82 @@ void main() {
       expect(editing == settings, isFalse);
       expect(editing == settings.copyWith(editing: true), isTrue);
       expect(editing.hashCode == settings.hashCode, isFalse);
+    });
+  });
+
+  group("OS3 CalendarSettings overlaps", () {
+    test("start refused, take part in copyWith, == and hashCode, and leave "
+        "the default's text as it is", () {
+      const settings = CalendarSettings();
+      expect(settings.allowsOverlaps, isFalse);
+      final allowing = settings.copyWith(allowsOverlaps: true);
+      expect(allowing.allowsOverlaps, isTrue);
+      expect(
+        allowing
+            .copyWith(hours: const DayHours(8 * 60, 18 * 60))
+            .allowsOverlaps,
+        isTrue,
+      );
+      expect(allowing == settings, isFalse);
+      expect(allowing == settings.copyWith(allowsOverlaps: true), isTrue);
+      expect(allowing.hashCode == settings.hashCode, isFalse);
+      expect(
+        settings.toString(),
+        "CalendarSettings(viewing, WeekdaySet(Mo, Tu, We, Th, Fr, Sa, Su; "
+        "from Mo), DayHours(00:00-24:00), 15-minute slots, twentyFourHour, "
+        "fitScreen)",
+      );
+      expect(allowing.toString(), contains("overlaps allowed"));
+    });
+
+    test("give the edit policy: the history lock under lockPast and no lock "
+        "otherwise, each with the settings' overlap answer and a day limit "
+        "of maxDayCount, equal settings giving equal policies", () {
+      for (final lockPast in const <bool>[false, true]) {
+        for (final lockEarlierToday in const <bool>[false, true]) {
+          for (final allowsOverlaps in const <bool>[false, true]) {
+            final settings = CalendarSettings(
+              lockPast: lockPast,
+              lockEarlierToday: lockEarlierToday,
+              allowsOverlaps: allowsOverlaps,
+            );
+            final reason =
+                "lockPast $lockPast, lockEarlierToday $lockEarlierToday, "
+                "allowsOverlaps $allowsOverlaps";
+            final policy = settings.editPolicy;
+            if (lockPast) {
+              expect(
+                policy,
+                isA<WorkspaceHistoryLockPolicy>().having(
+                  (policy) => policy.lockEarlierToday,
+                  "lockEarlierToday",
+                  lockEarlierToday,
+                ),
+                reason: reason,
+              );
+            } else {
+              expect(
+                policy,
+                isA<WorkspaceUnrestrictedPolicy>(),
+                reason: reason,
+              );
+            }
+            expect(policy.allowsOverlaps, allowsOverlaps, reason: reason);
+            expect(policy.dayLimit, maxDayCount, reason: reason);
+            expect(
+              policy == settings.copyWith().editPolicy,
+              isTrue,
+              reason: reason,
+            );
+            expect(
+              policy ==
+                  settings.copyWith(allowsOverlaps: !allowsOverlaps).editPolicy,
+              isFalse,
+              reason: reason,
+            );
+          }
+        }
+      }
     });
   });
 }
