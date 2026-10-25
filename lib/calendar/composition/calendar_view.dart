@@ -264,6 +264,17 @@ class CalendarView<T> extends StatefulWidget {
   /// release writes or reports. A move keeps the days an entry covers,
   /// except where it crosses a midnight, and no limit applies to it.
   ///
+  /// Its [CalendarEditPolicy.allowsOverlaps] decides whether Week's and
+  /// Day's moves, resizes and creates may give an entry times another
+  /// entry shares: where it is true they go over other entries' times as
+  /// over free ones, the blocks sharing a day's time side by side; where
+  /// it is false none gives times that another timed entry shares, and a
+  /// move dropped onto another entry's time lands at the nearest free time
+  /// or goes back. Month's long press and Agenda's add buttons create at a
+  /// free slot under either answer. The calendar checks no write of the
+  /// host's, and [store] refuses none for sharing time: a host whose data
+  /// forbids it refuses the write in its data source.
+  ///
   /// A policy not `==` to the last one given cancels a move or a resize in
   /// flight, which then writes nothing, and ends a create range in flight,
   /// which then creates nothing: a host passes a policy whose class defines

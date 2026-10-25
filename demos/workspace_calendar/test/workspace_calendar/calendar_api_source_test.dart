@@ -94,12 +94,6 @@ void main() {
       "This item has a change in progress.",
     );
     expect(
-      writeFailureMessage(
-        const CalendarEntryOverlapException(<String>["item-2"]),
-      ),
-      "The item overlaps another item.",
-    );
-    expect(
       writeFailureMessage(const CalendarFailureException("Offline.")),
       "Offline.",
     );
@@ -111,10 +105,6 @@ void main() {
     expect(writeFieldErrors(invalid), invalid.fieldErrors);
     expect(
       writeFieldErrors(const CalendarWritePendingException("item-1")),
-      isNull,
-    );
-    expect(
-      writeFieldErrors(const CalendarEntryOverlapException(<String>["x"])),
       isNull,
     );
     expect(

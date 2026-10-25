@@ -36,8 +36,8 @@ class _Read {
 /// source answers. A write on a pending entry sends nothing and fails
 /// with a [CalendarWritePendingException], where that write reports a
 /// failure, and so does one [hoursRefusalOf] refuses, with a
-/// [CalendarHoursException], and a move onto a shown entry's time, with a
-/// [CalendarEntryOverlapException].
+/// [CalendarHoursException]. The store refuses no write for sharing time
+/// with another entry; a data source that forbids it fails the write.
 ///
 /// The store holds the source to its contract: a read answering an entry
 /// with no id fails as a read does, a create answering one with no id
@@ -445,10 +445,8 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// data source answers. A failure shows the stored entry again and
   /// reports through [onWriteFailed]. Sends nothing and reports through
   /// [onWriteFailed] instead a [CalendarHoursException] for a move
-  /// [hoursRefusalOf] refuses, a [CalendarWritePendingException] for a
-  /// pending entry, and a [CalendarEntryOverlapException] for one that
-  /// would share time with another entry on a read day it covers; an
-  /// overlap on a day not read yet is left to the source. Throws an
+  /// [hoursRefusalOf] refuses, and a [CalendarWritePendingException] for
+  /// a pending entry; a move onto another entry's time is sent. Throws an
   /// [ArgumentError] for an entry with no id.
   @override
   void requestMove(CalendarEntry<T> requested) {
@@ -460,13 +458,6 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     if (refusal != null) {
       reportWriteFailure(id, refusal);
       return;
-    }
-    if (!isPending(id)) {
-      final overlaps = overlapsOf(requested);
-      if (overlaps.isNotEmpty) {
-        reportWriteFailure(id, CalendarEntryOverlapException(overlaps));
-        return;
-      }
     }
     if (!_lock(id, requested)) {
       reportWriteFailure(id, CalendarWritePendingException(id));

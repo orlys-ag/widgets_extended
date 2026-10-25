@@ -101,14 +101,14 @@ enum CalendarResizeEdges {
 /// alone. An answer that throws is the host's error. A subclass with
 /// fields compares them in `==` and `hashCode`.
 ///
-/// The views ask it in edit mode only, and read [dayLimit] each time they
-/// take a policy. An answer that throws in a drag's gates, which the
-/// views ask during a drag and inside their pointer handlers, is reported
-/// through [FlutterError.reportError] and refuses; one that throws in a
-/// build, a press or a tap goes through. A view given a policy not `==`
-/// to the last cancels a move, a resize or a create range in flight, so a
-/// host's policy defines value equality, or is kept as one instance
-/// across builds.
+/// The views ask it in edit mode only, and read [dayLimit] and
+/// [allowsOverlaps] each time they take a policy. An answer that throws in
+/// a drag's gates, which the views ask during a drag and inside their
+/// pointer handlers, is reported through [FlutterError.reportError] and
+/// refuses; one that throws in a build, a press or a tap goes through. A
+/// view given a policy not `==` to the last cancels a move, a resize or a
+/// create range in flight, so a host's policy defines value equality, or
+/// is kept as one instance across builds.
 @immutable
 abstract class CalendarEditPolicy<T> {
   /// Const, so a subclass can be const.
@@ -162,7 +162,13 @@ abstract class CalendarEditPolicy<T> {
     return null;
   }
 
-  /// Whether two entries may share time. True here.
+  /// Whether two entries may share time, which the views read for Week's
+  /// and Day's moves, resizes and creates. Where it is true they go over
+  /// other entries' times as over free ones; where it is false no move or
+  /// resize gives a timed entry times another timed entry shares, and a
+  /// move dropped onto one lands at the nearest free time or goes back.
+  /// An all-day entry shares time with none, so neither answer limits a
+  /// bar within the all-day strip. True here.
   bool get allowsOverlaps {
     return true;
   }

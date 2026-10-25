@@ -134,7 +134,6 @@ void main() {
       CalendarEntryChanged,
       CalendarStoreException,
       CalendarHoursException,
-      CalendarEntryOverlapException,
       CalendarWritePendingException,
       CalendarTheme,
       CalendarThemeData,

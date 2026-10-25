@@ -43,17 +43,13 @@ const String lockedMessage = "This item has a change in progress.";
 
 /// The sentence the calendar shows for [error], a write's failure: the
 /// field errors of an hours refusal, as the API's validation words them,
-/// the API's overlap sentence for an overlap refusal, [lockedMessage] for
-/// a write in flight, an API error's own message, and the error itself
-/// otherwise.
+/// [lockedMessage] for a write in flight, an API error's own message, such
+/// as an overlap refusal's, and the error itself otherwise.
 String writeFailureMessage(Object error) {
   if (error is CalendarHoursException) {
     return CalendarValidationException(
       hoursErrorsOf(error.start, error.end, error.hours),
     ).message;
-  }
-  if (error is CalendarEntryOverlapException) {
-    return CalendarOverlapException(error.conflictingIds).message;
   }
   if (error is CalendarWritePendingException) {
     return lockedMessage;

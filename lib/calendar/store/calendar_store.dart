@@ -124,20 +124,6 @@ final class CalendarHoursException extends CalendarStoreException {
   }
 }
 
-/// The move would share time with the shown entries [conflictingIds].
-final class CalendarEntryOverlapException extends CalendarStoreException {
-  /// The refusal of a move onto the time of [conflictingIds].
-  const CalendarEntryOverlapException(this.conflictingIds);
-
-  /// The ids of the entries the move would share time with.
-  final List<String> conflictingIds;
-
-  @override
-  String toString() {
-    return "CalendarEntryOverlapException(${conflictingIds.join(", ")})";
-  }
-}
-
 /// The entry [id] has a write in flight, so the store sends no other.
 final class CalendarWritePendingException extends CalendarStoreException {
   /// The refusal of a write on [id], which has one in flight.
@@ -238,8 +224,8 @@ abstract class CalendarStore<T> extends ChangeNotifier {
   Future<CalendarEntry<T>> update(CalendarEntry<T> entry);
 
   /// Writes a grid move or resize to [requested], whose id names a stored
-  /// entry. A failure, or a refusal for the hours, for an overlap with
-  /// another shown entry or for a write in flight, reaches
+  /// entry, whether or not it shares time with another entry. A failure,
+  /// or a refusal for the hours or for a write in flight, reaches
   /// [onWriteFailed]. Throws an [ArgumentError] for an entry with no id.
   void requestMove(CalendarEntry<T> requested);
 
@@ -364,28 +350,6 @@ abstract class CalendarStore<T> extends ChangeNotifier {
       start: entry.start,
       end: entry.end,
     );
-  }
-
-  /// The ids of the shown entries on [requested]'s days, other than
-  /// [requested] itself, that share time with it ([entriesShareTime]);
-  /// none for an all-day [requested], which shares time with nothing.
-  @protected
-  List<String> overlapsOf(CalendarEntry<T> requested) {
-    final overlaps = <String>[];
-    if (requested.isAllDay) {
-      return overlaps;
-    }
-    final first = dateOfDayNumber(dayNumber(requested.start));
-    final last = dateOfDayNumber(
-      lastDayNumberOf(requested.start, requested.end),
-    );
-    for (final other in entriesBetween(first, last)) {
-      if (other.id != requested.id &&
-          entriesShareTime(requested, other.entry)) {
-        overlaps.add(other.id);
-      }
-    }
-    return overlaps;
   }
 
   /// Calls [onWriteFailed], when set, with the failure of the write on

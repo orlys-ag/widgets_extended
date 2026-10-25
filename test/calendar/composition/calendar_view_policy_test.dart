@@ -1105,6 +1105,10 @@ void main() {
         final host = await pumpDay(
           tester,
           time: at(tuesday, 13, 59, 30),
+          policy: const HistoryLockPolicy<String>(
+            lockEarlierToday: true,
+            allowsOverlaps: false,
+          ),
           hours: hours,
           entries: <CalendarEntry<String>>[
             entryOf("X", at(tuesday, 14, 15), at(tuesday, 15)),

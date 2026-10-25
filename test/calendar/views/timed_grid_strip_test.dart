@@ -2281,7 +2281,7 @@ void main() {
     final today = DateTime(2026, 1, 5);
     for (final shown in bothGrids()) {
       final store = storeOf(<CalendarEntry<String>>[allDayOf("off", tuesday)]);
-      await Harness(store, shown).pump(tester);
+      await Harness(store, shown, allowsOverlaps: false).pump(tester);
       final gesture = await liftTo(
         tester,
         tester.getCenter(barFinder("off")),
@@ -2316,7 +2316,7 @@ void main() {
         allDayOf("off", tuesday),
         entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
       ]);
-      await Harness(busy, shown).pump(tester);
+      await Harness(busy, shown, allowsOverlaps: false).pump(tester);
       final over = await liftTo(
         tester,
         tester.getCenter(barFinder("off")),
@@ -3043,7 +3043,7 @@ void main() {
         crossing,
         if (withNext) next,
       ]);
-      await Harness(pieceStore, shown).pump(tester);
+      await Harness(pieceStore, shown, allowsOverlaps: false).pump(tester);
       await moveBlockOnto(
         tester,
         blockFinder("X", saturday),
@@ -3053,7 +3053,7 @@ void main() {
         bar,
         if (withNext) next,
       ]);
-      await Harness(barStore, shown).pump(tester);
+      await Harness(barStore, shown, allowsOverlaps: false).pump(tester);
       await dragTo(
         tester,
         tester.getCenter(barFinder("A")),
@@ -3094,7 +3094,7 @@ void main() {
         overnight,
         if (withHidden) hidden,
       ]);
-      await Harness(store, shown).pump(tester);
+      await Harness(store, shown, allowsOverlaps: false).pump(tester);
       if (withHidden) {
         // Setup sanity: the hours leave the hidden entry no block.
         expect(blocksOf("H"), findsNothing);
@@ -3140,7 +3140,7 @@ void main() {
     // A block held over Sunday's late slots, whose moves reach the next
     // Monday.
     var store = storeOf(<CalendarEntry<String>>[crossing, next]);
-    await Harness(store, shown).pump(tester);
+    await Harness(store, shown, allowsOverlaps: false).pump(tester);
     final block = tester.getRect(blockFinder("X", saturday));
     final gesture = await lift(tester, block.center);
     Future<void> holdOver(int minute) async {
@@ -3178,7 +3178,7 @@ void main() {
     // A block whose moves stay inside the range.
     final meet = entryOf("T", at(tuesday, 10), at(tuesday, 11));
     store = storeOf(<CalendarEntry<String>>[meet]);
-    await Harness(store, shown).pump(tester);
+    await Harness(store, shown, allowsOverlaps: false).pump(tester);
     final from = tester.getRect(blockFinder("T", tuesday));
     final held = await lift(tester, from.center);
     for (final (day, minute) in <(DateTime, int)>[
@@ -3203,7 +3203,7 @@ void main() {
     // Monday.
     final bar = allDayOf("A", saturday);
     store = storeOf(<CalendarEntry<String>>[bar, next]);
-    await Harness(store, shown).pump(tester);
+    await Harness(store, shown, allowsOverlaps: false).pump(tester);
     final crossed = await liftTo(
       tester,
       tester.getCenter(barFinder("A")),
@@ -3252,7 +3252,7 @@ void main() {
           moved,
           if (withRepeated) repeated,
         ]);
-        await Harness(store, shown).pump(tester);
+        await Harness(store, shown, allowsOverlaps: false).pump(tester);
         final settled = store.reads.length;
         final block = tester.getRect(blockFinder("M", day));
         final row = slotRect(tester, shown, day, 60);

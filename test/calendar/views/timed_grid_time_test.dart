@@ -1027,6 +1027,7 @@ void main() {
         entryOf("task", at(tuesday, 9, 10), at(tuesday, 9, 50)),
       ]),
       shown,
+      allowsOverlaps: false,
     );
     await harness.pump(tester);
     final nine = slotRect(tester, shown, tuesday, 9 * 60);
@@ -1051,7 +1052,7 @@ void main() {
     final store = storeOf(<CalendarEntry<String>>[
       entryOf("task", at(tuesday, 15), at(tuesday, 16)),
     ]);
-    final harness = Harness(store, shown);
+    final harness = Harness(store, shown, allowsOverlaps: false);
     await harness.pump(tester);
     final calls = store.betweenCalls;
     final from = slotRect(tester, shown, tuesday, 10 * 60).center;
@@ -1082,6 +1083,7 @@ void main() {
         entryOf("after", at(tuesday, 11), at(tuesday, 12)),
       ]),
       shown,
+      allowsOverlaps: false,
     );
     await harness.pump(tester);
     await createDrag(
@@ -1709,7 +1711,7 @@ void main() {
         final move = entryOf("move", mondayAt(end - 180), mondayAt(end - 120));
         final last = entryOf("last", mondayAt(end - 30), mondayAt(end));
         final store = storeOf(<CalendarEntry<String>>[move, last]);
-        await Harness(store, shown).pump(tester);
+        await Harness(store, shown, allowsOverlaps: false).pump(tester);
         final slot = slotHeightOf(tester, shown);
         await moveBlock(
           tester,

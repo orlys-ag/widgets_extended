@@ -58,7 +58,6 @@ export 'presentation/calendar_theme.dart' show CalendarTheme, CalendarThemeData;
 export 'store/caching_calendar_store.dart' show CachingCalendarStore;
 export 'store/calendar_store.dart'
     show
-        CalendarEntryOverlapException,
         CalendarHoursException,
         CalendarLoadStatus,
         CalendarShownEntry,

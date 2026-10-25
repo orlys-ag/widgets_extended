@@ -13,10 +13,11 @@ typedef CalendarEntryChanged<T> =
 
 /// A [CalendarStore] holding the entries the host gives it, always loaded.
 ///
-/// It runs the checks every store runs: the hours on a create, an update
-/// and a move, and the overlap on a move. A write that passes is applied
-/// within the call, so no write is ever pending: the store notifies its
-/// listeners once, then calls [onChanged] with the old and the new entry.
+/// It runs the check every store runs, the hours on a create, an update
+/// and a move, and refuses no write for sharing time with another entry.
+/// A write that passes is applied within the call, so no write is ever
+/// pending: the store notifies its listeners once, then calls [onChanged]
+/// with the old and the new entry.
 /// A refused move or delete reaches [onWriteFailed], and a refused create
 /// or update fails to its caller; neither changes anything or notifies.
 /// An update, move or delete of an id no entry has fails with an
@@ -206,9 +207,9 @@ class MemoryCalendarStore<T> extends CalendarStore<T> {
 
   /// Moves or resizes the stored entry to [requested]. Reports through
   /// [onWriteFailed], changing nothing, an [ArgumentError] for an id no
-  /// entry has, a [CalendarHoursException] for a move [hoursRefusalOf]
-  /// refuses, and a [CalendarEntryOverlapException] for one onto another
-  /// entry's time. Throws an [ArgumentError] for an entry with no id.
+  /// entry has, and a [CalendarHoursException] for a move [hoursRefusalOf]
+  /// refuses; a move onto another entry's time is applied. Throws an
+  /// [ArgumentError] for an entry with no id.
   @override
   void requestMove(CalendarEntry<T> requested) {
     final id = requested.id;
@@ -223,11 +224,6 @@ class MemoryCalendarStore<T> extends CalendarStore<T> {
     final refusal = hoursRefusalOf(requested);
     if (refusal != null) {
       reportWriteFailure(id, refusal);
-      return;
-    }
-    final overlaps = overlapsOf(requested);
-    if (overlaps.isNotEmpty) {
-      reportWriteFailure(id, CalendarEntryOverlapException(overlaps));
       return;
     }
     _apply(old, requested);

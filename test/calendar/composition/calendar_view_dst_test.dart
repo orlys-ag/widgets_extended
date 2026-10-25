@@ -210,6 +210,7 @@ void main() {
         day: day,
         now: secondHalfPastOne,
         entries: <CalendarEntry<String>>[across()],
+        allowsOverlaps: false,
       );
       await tester.tapAt(slotRect(tester, 90).center);
       await tester.pumpAndSettle();
@@ -255,6 +256,7 @@ void main() {
         now: at(day, 0, 30),
         entries: <CalendarEntry<String>>[folds()],
         lock: false,
+        allowsOverlaps: false,
       );
       await tester.tapAt(slotRect(tester, 90).center);
       await tester.pumpAndSettle();
@@ -297,6 +299,7 @@ void main() {
         now: at(day, 0, 30),
         entries: <CalendarEntry<String>>[folds()],
         lock: false,
+        allowsOverlaps: false,
       );
       await dragSlots(tester, 120, 75);
       expect(creates, <CreateRange>[
@@ -324,6 +327,7 @@ void main() {
           ),
         ],
         lock: false,
+        allowsOverlaps: false,
       );
       await dragSlots(tester, 45, 105);
       expect(creates, <CreateRange>[
