@@ -168,7 +168,8 @@ class ScriptedThrow implements Exception {
 /// delete for [undeletable], the earliest start [earliestStarts] gives a
 /// day's start, and the change [admits] decides. Its earliest start throws
 /// a [ScriptedThrow] for the day [throwsOn], and at a [CalendarNow.time]
-/// of [throwsFrom] or later. Compared by identity.
+/// of [throwsFrom] or later; its move answer throws one at a
+/// [CalendarNow.time] of [movesThrowFrom] or later. Compared by identity.
 class ScriptedEditPolicy<T> extends CalendarEditPolicy<T> {
   const ScriptedEditPolicy({
     this.unmovable = const <String>{},
@@ -178,6 +179,7 @@ class ScriptedEditPolicy<T> extends CalendarEditPolicy<T> {
     this.earliestStarts = const <DateTime, DateTime?>{},
     this.throwsOn,
     this.throwsFrom,
+    this.movesThrowFrom,
     this.admits,
   });
 
@@ -192,6 +194,7 @@ class ScriptedEditPolicy<T> extends CalendarEditPolicy<T> {
 
   final DateTime? throwsOn;
   final DateTime? throwsFrom;
+  final DateTime? movesThrowFrom;
 
   /// Whether an entry may take the times a change gives it; null admits
   /// every change. It may throw.
@@ -200,6 +203,10 @@ class ScriptedEditPolicy<T> extends CalendarEditPolicy<T> {
 
   @override
   bool mayMove(CalendarEntry<T> entry, CalendarNow now) {
+    final from = movesThrowFrom;
+    if (from != null && !now.time.isBefore(from)) {
+      throw const ScriptedThrow("mayMove");
+    }
     return !unmovable.contains(entry.id);
   }
 

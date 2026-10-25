@@ -15,6 +15,8 @@ import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
+import 'package:widgets_extended/calendar/views/day_list.dart'
+    show dayListGapKey;
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 
@@ -58,8 +60,8 @@ MoveRecordingStore storeOf(
 /// reads [time], its policy is [policy]'s and edit mode
 /// [editable]'s, each of which builds it again when set. It records each
 /// create it reports in [creates], each tap in [taps], the last details
-/// each card is built with in [cards], and each add button's details in
-/// [adds].
+/// each card is built with in [cards], the id of each card it builds in
+/// [cardsBuilt], and each add button's details in [adds].
 class Host {
   Host(
     this.store, {
@@ -88,6 +90,7 @@ class Host {
       <CalendarEntryTapDetails<String>>[];
   final Map<String, CalendarCardDetails> cards =
       <String, CalendarCardDetails>{};
+  final List<String> cardsBuilt = <String>[];
   final List<CalendarAddButtonDetails> adds = <CalendarAddButtonDetails>[];
 
   late final CalendarController controller = CalendarController(
@@ -121,6 +124,7 @@ class Host {
               today: today,
               cardBuilder: (context, entry, details) {
                 cards[entry.entry.id!] = details;
+                cardsBuilt.add(entry.entry.id!);
                 return Text("card ${entry.entry.id}");
               },
               cardExtentOf: (entry) {
@@ -424,6 +428,42 @@ Future<void> recordingErrors(
   } finally {
     FlutterError.onError = previous;
   }
+}
+
+/// The key of each block or bar that builds again during [body], once per
+/// build: [debugOnRebuildDirtyWidget] reports each build of the
+/// [BoardDelayedDragHandle] that every block and bar holds, and the key is
+/// that of the nearest widget above it keyed by a string, the block's or
+/// the bar's own.
+Future<List<String>> rebuiltBlocks(Future<void> Function() body) async {
+  final rebuilt = <String>[];
+  debugOnRebuildDirtyWidget = (element, builtOnce) {
+    if (element.widget is! BoardDelayedDragHandle) {
+      return;
+    }
+    element.visitAncestorElements((ancestor) {
+      final key = ancestor.widget.key;
+      if (key is ValueKey<String>) {
+        rebuilt.add(key.value);
+        return false;
+      }
+      return true;
+    });
+  };
+  try {
+    await body();
+  } finally {
+    debugOnRebuildDirtyWidget = null;
+  }
+  return rebuilt;
+}
+
+/// Moves [host]'s clock to [time] and lets the calendar's minute timer
+/// run, and the frame it schedules.
+Future<void> tickTo(WidgetTester tester, Host host, DateTime time) async {
+  host.time = time;
+  await tester.pump(const Duration(minutes: 1));
+  await tester.pump();
 }
 
 void main() {
@@ -1306,5 +1346,198 @@ void main() {
         CreateRange(start: start, end: at(friday, 11, 15)),
       ], reason: "back to $back");
     }
+  });
+
+  group("PV9 a new minute builds again only what its answers change", () {
+    testWidgets("in Week, under answers the time does not change, no block "
+        "or bar, selected or not", (tester) async {
+      final policy = CountingEditPolicy<String>(
+        const UnrestrictedEditPolicy<String>(),
+      );
+      final host = Host(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("A", at(tuesday, 9), at(tuesday, 10)),
+          entryOf("B", at(wednesday, 11), at(wednesday, 12)),
+          entryOf("C", monday, tuesday),
+        ]),
+        view: CalendarViewKind.week,
+        day: tuesday,
+        time: at(tuesday, 13, 59),
+        policy: policy,
+      );
+      await host.pump(tester);
+      // Setup sanity: the record sees a block build again, as a block does
+      // when it is selected.
+      final selected = await rebuiltBlocks(() {
+        return select(tester, blockFinder("A"));
+      });
+      expect(selected, contains(blockKey("A", tuesday).value));
+      // Setup sanity: the bar is shown.
+      expect(barFinder("C"), findsOneWidget);
+      policy.asked.clear();
+      final rebuilt = await rebuiltBlocks(() {
+        return tickTo(tester, host, at(tuesday, 14, 0, 30));
+      });
+      // Setup sanity: the minute reached the blocks, which asked again.
+      expect(
+        policy.asked.where((ask) {
+          return ask.name == "mayMove";
+        }),
+        isNotEmpty,
+      );
+      expect(rebuilt, isEmpty);
+    });
+
+    testWidgets("in Week under the lock of earlier today, the one block "
+        "whose start the minute passes, which then takes no drag", (
+      tester,
+    ) async {
+      final host = Host(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("L", at(tuesday, 14), at(tuesday, 15)),
+          entryOf("M", at(tuesday, 16), at(tuesday, 17)),
+          entryOf("N", at(wednesday, 10), at(wednesday, 11)),
+        ]),
+        view: CalendarViewKind.week,
+        day: tuesday,
+        time: at(tuesday, 13, 59),
+        policy: const HistoryLockPolicy<String>(lockEarlierToday: true),
+      );
+      await host.pump(tester);
+      // Setup sanity: L moves before the minute.
+      expect(handleOf(tester, blockFinder("L")).enabled, isTrue);
+      final rebuilt = await rebuiltBlocks(() {
+        return tickTo(tester, host, at(tuesday, 14, 0, 30));
+      });
+      expect(handleOf(tester, blockFinder("L")).enabled, isFalse);
+      expect(rebuilt, <String>[blockKey("L", tuesday).value]);
+    });
+
+    testWidgets("in Agenda, under answers the time does not change, no card "
+        "and no add button", (tester) async {
+      final policy = CountingEditPolicy<String>(
+        const UnrestrictedEditPolicy<String>(),
+      );
+      final host = Host(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("A", at(tuesday, 9), at(tuesday, 10)),
+          entryOf("B", at(wednesday, 11), at(wednesday, 12)),
+        ]),
+        view: CalendarViewKind.agenda,
+        day: tuesday,
+        time: at(tuesday, 13, 59),
+        policy: policy,
+      );
+      await host.pump(tester);
+      // Setup sanity: the cards and the add buttons are built.
+      expect(host.cardsBuilt, containsAll(<String>["A", "B"]));
+      expect(host.adds, isNotEmpty);
+      final cards = host.cardsBuilt.length;
+      final adds = host.adds.length;
+      policy.asked.clear();
+      await tickTo(tester, host, at(tuesday, 14, 0, 30));
+      // Setup sanity: the minute reached the rows, which asked again.
+      expect(
+        policy.asked.map((ask) {
+          return ask.name;
+        }),
+        containsAll(<String>["mayEdit", "mayDelete", "earliestStartOn"]),
+      );
+      expect(host.cardsBuilt.length, cards);
+      expect(host.adds.length, adds);
+    });
+
+    testWidgets("in Agenda under the lock of earlier today, the one card "
+        "whose end the minute passes, which loses its Edit, and the one add "
+        "button the boundary moves", (tester) async {
+      final host = Host(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("L", at(tuesday, 14), at(tuesday, 15)),
+          entryOf("M", at(tuesday, 17), at(tuesday, 18)),
+          entryOf("N", at(wednesday, 10), at(wednesday, 11)),
+        ]),
+        view: CalendarViewKind.agenda,
+        day: tuesday,
+        time: at(tuesday, 14, 59),
+        policy: const HistoryLockPolicy<String>(lockEarlierToday: true),
+      );
+      await host.pump(tester);
+      // Setup sanity: L is edited before the minute, and the free time
+      // after it offers its add at 15:00.
+      expect(host.cards["L"]!.onEdit, isNotNull);
+      expect(
+        host.adds.where((add) {
+          return add.day == tuesday && add.startMinute == 15 * 60;
+        }),
+        isNotEmpty,
+      );
+      final cards = host.cardsBuilt.length;
+      final adds = host.adds.length;
+      await tickTo(tester, host, at(tuesday, 15, 0, 30));
+      expect(host.cards["L"]!.onEdit, isNull);
+      expect(host.cardsBuilt.sublist(cards), <String>["L"]);
+      expect(
+        host.adds.sublist(adds).map((add) {
+          return (add.day, add.startMinute);
+        }),
+        <(DateTime, int)>[(tuesday, 15 * 60 + 15)],
+      );
+    });
+
+    testWidgets("in Agenda, an earliest start that throws at a new minute is "
+        "reported, and the free time keeps the add it showed", (tester) async {
+      final host = Host(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("A", at(tuesday, 9), at(tuesday, 10)),
+        ]),
+        view: CalendarViewKind.agenda,
+        day: tuesday,
+        time: at(tuesday, 13, 59),
+        policy: ScriptedEditPolicy<String>(throwsFrom: at(tuesday, 14)),
+      );
+      await host.pump(tester);
+      final add = find.descendant(
+        of: find.byKey(dayListGapKey(tuesday, 10 * 60)),
+        matching: find.text("add 600"),
+      );
+      // Setup sanity: the free time after A offers its add at 10:00.
+      expect(add, findsOneWidget);
+      await recordingErrors((errors) async {
+        await tickTo(tester, host, at(tuesday, 14, 0, 30));
+        // Setup sanity: the minute asked again, and the answer threw.
+        expect(errors, isNotEmpty);
+        for (final error in errors) {
+          expect(error.exception, const ScriptedThrow("earliestStartOn"));
+        }
+      });
+      expect(find.byType(ErrorWidget), findsNothing);
+      expect(add, findsOneWidget);
+    });
+
+    testWidgets("in Week, a move answer that throws at a new minute is "
+        "reported, and the block keeps the drag it showed", (tester) async {
+      final host = Host(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("L", at(tuesday, 16), at(tuesday, 17)),
+        ]),
+        view: CalendarViewKind.week,
+        day: tuesday,
+        time: at(tuesday, 13, 59),
+        policy: ScriptedEditPolicy<String>(movesThrowFrom: at(tuesday, 14)),
+      );
+      await host.pump(tester);
+      // Setup sanity: L moves before the minute.
+      expect(handleOf(tester, blockFinder("L")).enabled, isTrue);
+      await recordingErrors((errors) async {
+        await tickTo(tester, host, at(tuesday, 14, 0, 30));
+        // Setup sanity: the minute asked again, and the answer threw.
+        expect(errors, isNotEmpty);
+        for (final error in errors) {
+          expect(error.exception, const ScriptedThrow("mayMove"));
+        }
+      });
+      expect(find.byType(ErrorWidget), findsNothing);
+      expect(handleOf(tester, blockFinder("L")).enabled, isTrue);
+    });
   });
 }

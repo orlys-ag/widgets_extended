@@ -24,6 +24,7 @@ import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
+import 'answer_builder.dart';
 import 'timed_grid.dart' show CreateRange;
 
 /// The style the day list animates its rows with under [theme]: every
@@ -773,11 +774,13 @@ class _DayListState<T> extends State<DayList<T>> {
 
   /// The time the rows ask [_policy] at: [DayList.now] and [DayList.today]
   /// as the list last took them, at a minute of the day it holds
-  /// ([_handleNow]) or in a build that changes either.
-  late CalendarNow _calendarNow = CalendarNow(
-    time: widget.now.value,
-    today: widget.today,
-  );
+  /// ([_handleNow]) or in a build that changes either. The rows that show
+  /// an answer listen to it, each asking again and building again only
+  /// where its own answer changes.
+  late final ValueNotifier<CalendarNow> _calendarNow =
+      ValueNotifier<CalendarNow>(
+        CalendarNow(time: widget.now.value, today: widget.today),
+      );
 
   @override
   void initState() {
@@ -825,9 +828,9 @@ class _DayListState<T> extends State<DayList<T>> {
       _nowDay = dateOnly(widget.now.value);
     }
     final time = widget.now.value;
-    if (time != _calendarNow.time ||
-        dateOnly(widget.today) != _calendarNow.today) {
-      _calendarNow = CalendarNow(time: time, today: widget.today);
+    if (time != _calendarNow.value.time ||
+        dateOnly(widget.today) != _calendarNow.value.today) {
+      _calendarNow.value = CalendarNow(time: time, today: widget.today);
     }
     if (widget.weekdays != oldWidget.weekdays) {
       _rebuildOn(widget.selectedDay);
@@ -854,6 +857,7 @@ class _DayListState<T> extends State<DayList<T>> {
   void dispose() {
     widget.store.removeListener(_handleStore);
     widget.now.removeListener(_handleNow);
+    _calendarNow.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -866,10 +870,10 @@ class _DayListState<T> extends State<DayList<T>> {
 
   /// Moves the marker of the current time to the block of a new day; the
   /// markers follow the minutes themselves. A new minute on the day of the
-  /// minute the list holds becomes [_calendarNow], and in edit mode builds
-  /// the rows again, which ask [_policy] at it; one on another day waits
-  /// for the build that comes with it, so it is never paired with the
-  /// last day's [DayList.today].
+  /// minute the list holds becomes [_calendarNow], at which the rows that
+  /// show an answer ask [_policy] again; one on another day waits for the
+  /// build that comes with it, so it is never paired with the last day's
+  /// [DayList.today].
   void _handleNow() {
     final time = widget.now.value;
     final day = dateOnly(time);
@@ -878,13 +882,11 @@ class _DayListState<T> extends State<DayList<T>> {
         _nowDay = day;
       });
     }
-    if (time == _calendarNow.time || day != dateOnly(_calendarNow.time)) {
+    final held = _calendarNow.value.time;
+    if (time == held || day != dateOnly(held)) {
       return;
     }
-    _calendarNow = CalendarNow(time: time, today: widget.today);
-    if (widget.editable) {
-      setState(() {});
-    }
+    _calendarNow.value = CalendarNow(time: time, today: widget.today);
   }
 
   /// Holds the days around [day] and builds their rows.
@@ -1351,6 +1353,56 @@ class _DayListState<T> extends State<DayList<T>> {
     }
   }
 
+  /// The slot the add of [day]'s gap from [start] to [end] takes: the
+  /// first free one in it from the policy's earliest start on [day], or
+  /// null where none is. A free slot whose times the clock reads must fit
+  /// the gap, so a gap shorter than a slot, as entries off the slot grid
+  /// can leave, or one the clock skips, offers no add.
+  ({DateTime start, DateTime end})? _gapAddOf(
+    DateTime day,
+    int start,
+    int end,
+  ) {
+    final slot = widget.slotMinutes;
+    final earliest = _policy.earliestStartOn(day, _calendarNow.value);
+    final shown = widget.store.entriesOn(day);
+    return firstReadableSlot(
+      day,
+      math.max(start, earliestSlotMinuteOf(day, earliest, slotMinutes: slot)),
+      end,
+      slot,
+      occurrence: earliest != null && earliest.isAfter(day) ? earliest : null,
+      isFree: (start, end) {
+        return !shown.any((other) {
+          return rangeSharesTime(start, end, other.entry);
+        });
+      },
+    );
+  }
+
+  /// The dashed row of [day]'s gap from [start], whose add takes [add].
+  Widget _buildGap(
+    DateTime day,
+    int start,
+    ({DateTime start, DateTime end})? add,
+  ) {
+    final addMinute = add == null
+        ? start
+        : wallMinuteOf(add.start) - dayNumber(day) * minutesPerDay;
+    return _buildDashed(
+      key: dayListGapKey(day, start),
+      label: hourLabel(start, widget.format),
+      day: day,
+      addMinute: addMinute,
+      addLabel: "Add an item at ${hourLabel(addMinute, widget.format)}",
+      onAdd: add == null
+          ? null
+          : () {
+              widget.onCreateRange(CreateRange(start: add.start, end: add.end));
+            },
+    );
+  }
+
   /// One row of a day's block.
   Widget _buildDayRow(DayListRow row) {
     switch (row) {
@@ -1362,46 +1414,17 @@ class _DayListState<T> extends State<DayList<T>> {
       case DayListEntry():
         throw ArgumentError.value(row, "row", "an item of another payload");
       case DayListGap(:final day, :final start, :final end):
-        final slot = widget.slotMinutes;
-        final earliest = _policy.earliestStartOn(day, _calendarNow);
-        // A free slot whose times the clock reads must fit the gap, so a
-        // gap shorter than a slot, as entries off the slot grid can leave,
-        // or one the clock skips, offers no add.
-        final shown = widget.store.entriesOn(day);
-        final add = firstReadableSlot(
-          day,
-          math.max(
-            start,
-            earliestSlotMinuteOf(day, earliest, slotMinutes: slot),
-          ),
-          end,
-          slot,
-          occurrence: earliest != null && earliest.isAfter(day)
-              ? earliest
-              : null,
-          isFree: (start, end) {
-            return !shown.any((other) {
-              return rangeSharesTime(start, end, other.entry);
-            });
-          },
-        );
-        final addMinute = add == null
-            ? start
-            : wallMinuteOf(add.start) - dayNumber(day) * minutesPerDay;
+        // Built again at a new minute only where the slot its add takes
+        // moves.
         return _padded(
-          _buildDashed(
-            key: dayListGapKey(day, start),
-            label: hourLabel(start, widget.format),
-            day: day,
-            addMinute: addMinute,
-            addLabel: "Add an item at ${hourLabel(addMinute, widget.format)}",
-            onAdd: add == null
-                ? null
-                : () {
-                    widget.onCreateRange(
-                      CreateRange(start: add.start, end: add.end),
-                    );
-                  },
+          AnswerBuilder<({DateTime start, DateTime end})?>(
+            listenables: <Listenable>[_calendarNow],
+            answer: () {
+              return _gapAddOf(day, start, end);
+            },
+            builder: (context, add, child) {
+              return _buildGap(day, start, add);
+            },
           ),
         );
       case DayListHidden(:final day, :final count, :final above):
@@ -1546,7 +1569,6 @@ class _DayListState<T> extends State<DayList<T>> {
     final pieceStart = row.first ? calendarEntry.start : row.day;
     final pieceEnd = row.last ? calendarEntry.end : addDays(row.day, 1);
     final editable = widget.editable;
-    final now = _calendarNow;
     final styles = _styles;
     return Row(
       children: <Widget>[
@@ -1602,26 +1624,45 @@ class _DayListState<T> extends State<DayList<T>> {
           ),
         ),
         Expanded(
-          child: _CardSlot<T>(
-            key: entryCardKey(entry.id),
-            entry: entry,
-            builder: widget.cardBuilder ?? defaultCalendarCardBuilder<T>,
-            startsAt: inside && row.start < hours.start
-                ? hourLabel(row.start, widget.format)
-                : null,
-            endsAt: inside && row.end > hours.end
-                ? hourLabel(row.end, widget.format)
-                : null,
-            onEdit: editable && _policy.mayEdit(calendarEntry, now)
-                ? () {
-                    widget.onEdit(entry.id);
-                  }
-                : null,
-            onDelete: editable && _policy.mayDelete(calendarEntry, now)
-                ? () {
-                    widget.onDelete(entry.id);
-                  }
-                : null,
+          // Built again at a new minute only where the card gains or loses
+          // its Edit or its Delete; out of edit mode it asks nothing.
+          child: AnswerBuilder<({bool edits, bool deletes})>(
+            listenables: editable
+                ? <Listenable>[_calendarNow]
+                : const <Listenable>[],
+            answer: () {
+              if (!editable) {
+                return (edits: false, deletes: false);
+              }
+              final now = _calendarNow.value;
+              return (
+                edits: _policy.mayEdit(calendarEntry, now),
+                deletes: _policy.mayDelete(calendarEntry, now),
+              );
+            },
+            builder: (context, answers, child) {
+              return _CardSlot<T>(
+                key: entryCardKey(entry.id),
+                entry: entry,
+                builder: widget.cardBuilder ?? defaultCalendarCardBuilder<T>,
+                startsAt: inside && row.start < hours.start
+                    ? hourLabel(row.start, widget.format)
+                    : null,
+                endsAt: inside && row.end > hours.end
+                    ? hourLabel(row.end, widget.format)
+                    : null,
+                onEdit: answers.edits
+                    ? () {
+                        widget.onEdit(entry.id);
+                      }
+                    : null,
+                onDelete: answers.deletes
+                    ? () {
+                        widget.onDelete(entry.id);
+                      }
+                    : null,
+              );
+            },
           ),
         ),
       ],

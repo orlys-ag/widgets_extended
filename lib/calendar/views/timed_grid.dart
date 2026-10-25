@@ -23,6 +23,7 @@ import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
+import 'answer_builder.dart';
 import 'entry_split.dart';
 import 'pinch_zoom.dart';
 
@@ -1588,7 +1589,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// [_policy] at [_calendarNow] in edit mode, and null out of it, where
   /// every answer reads as permissive and none is asked. Written only
-  /// where one of the three changes. The blocks and bars listen to it.
+  /// where one of the three changes. The blocks and bars listen to it, each
+  /// asking again and building again only where its own answers change.
   late final ValueNotifier<_EditLimits<T>?> _limits;
 
   /// The cursor over the strips outside the selected block that resize it,
@@ -5675,16 +5677,13 @@ class _Block<T> extends StatelessWidget {
     );
     // One shape selected or not, and limited or not, so neither change
     // drops the block's State.
-    return ListenableBuilder(
-      listenable: Listenable.merge(<Listenable>[selection, limits]),
+    return _buildEditAnswers<T>(
+      selection: selection,
+      limits: limits,
+      entry: entry,
       child: content,
-      builder: (context, child) {
-        final selected = selection.value == entry.id;
-        final limited = limits.value;
-        final moves = _movesOf(limited, entry.entry);
-        final edges = moves && !selected
-            ? CalendarResizeEdges.both
-            : _edgesOf(limited, entry.entry);
+      builder: (context, answers, child) {
+        final (:selected, :moves, :edges) = answers;
         return Stack(
           fit: StackFit.passthrough,
           children: <Widget>[
@@ -5721,6 +5720,63 @@ class _Block<T> extends StatelessWidget {
       },
     );
   }
+}
+
+/// What a block or a bar shows of the selection and the policy: whether
+/// the selection names its entry, whether the entry moves, and the edges
+/// that resize it.
+typedef _EditAnswers = ({bool selected, bool moves, CalendarResizeEdges edges});
+
+/// Builds [builder] from [entry]'s [_EditAnswers] under [selection] and
+/// [limits], with [child], and builds it again only where they change.
+/// The selection is compared first, so a new selection asks the policy
+/// again only of the entries it selects or deselects, while a new value of
+/// [limits], as at a new minute, asks it of every entry.
+Widget _buildEditAnswers<T>({
+  required ValueListenable<String?> selection,
+  required ValueListenable<_EditLimits<T>?> limits,
+  required CalendarShownEntry<T> entry,
+  required Widget child,
+  required Widget Function(
+    BuildContext context,
+    _EditAnswers answers,
+    Widget? child,
+  )
+  builder,
+}) {
+  return AnswerBuilder<bool>(
+    listenables: <Listenable>[selection],
+    answer: () {
+      return selection.value == entry.id;
+    },
+    child: child,
+    builder: (context, selected, child) {
+      return AnswerBuilder<_EditAnswers>(
+        listenables: <Listenable>[limits],
+        answer: () {
+          return _editAnswersOf(limits, entry, selected: selected);
+        },
+        builder: builder,
+        child: child,
+      );
+    },
+  );
+}
+
+/// [entry]'s [_EditAnswers] under [limits], [selected] or not. The edges
+/// are asked only of an entry that is selected or does not move, the only
+/// ones whose block or bar shows them; any other shows both.
+_EditAnswers _editAnswersOf<T>(
+  ValueListenable<_EditLimits<T>?> limits,
+  CalendarShownEntry<T> entry, {
+  required bool selected,
+}) {
+  final limited = limits.value;
+  final moves = _movesOf(limited, entry.entry);
+  final edges = moves && !selected
+      ? CalendarResizeEdges.both
+      : _edgesOf(limited, entry.entry);
+  return (selected: selected, moves: moves, edges: edges);
 }
 
 /// Whether [limits] let [entry] move ([CalendarEditPolicy.mayMove]); out
@@ -5807,16 +5863,13 @@ class _Bar<T> extends StatelessWidget {
     );
     // One shape selected or not, and limited or not, so neither change
     // drops the bar's State.
-    return ListenableBuilder(
-      listenable: Listenable.merge(<Listenable>[selection, limits]),
+    return _buildEditAnswers<T>(
+      selection: selection,
+      limits: limits,
+      entry: entry,
       child: content,
-      builder: (context, child) {
-        final selected = selection.value == entry.id;
-        final limited = limits.value;
-        final moves = _movesOf(limited, entry.entry);
-        final edges = moves && !selected
-            ? CalendarResizeEdges.both
-            : _edgesOf(limited, entry.entry);
+      builder: (context, answers, child) {
+        final (:selected, :moves, :edges) = answers;
         return Stack(
           fit: StackFit.passthrough,
           children: <Widget>[
