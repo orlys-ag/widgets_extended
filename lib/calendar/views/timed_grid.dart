@@ -712,15 +712,37 @@ class GridTracks {
     return firstSlotRow + rowCount - 1;
   }
 
+  /// The local midnights of the shown days, by column as [_days]: built at
+  /// the first [dateAt] of this instance, so a later one builds no date.
+  late final List<DateTime> _dates = List<DateTime>.unmodifiable(<DateTime>[
+    for (final day in _days) dateOfDayNumber(day),
+  ]);
+
+  /// Whether each shown day's clock repeats a stretch, by column as
+  /// [_days]: built at the first [repeatsStretchAt] of this instance.
+  late final List<bool> _repeats = List<bool>.unmodifiable(<bool>[
+    for (final date in _dates) repeatedStretchOf(date) > Duration.zero,
+  ]);
+
   /// The [dayNumber] of the day [column] shows, 1 to [columnCount].
   int dayAt(int column) {
     assert(column >= 1 && column <= columnCount);
     return _days[column - 1];
   }
 
-  /// The local midnight of the day [column] shows.
+  /// The local midnight of the day [column] shows, 1 to [columnCount].
   DateTime dateAt(int column) {
-    return dateOfDayNumber(dayAt(column));
+    assert(column >= 1 && column <= columnCount);
+    return _dates[column - 1];
+  }
+
+  /// Whether the clock of the day [column] shows, 1 to [columnCount],
+  /// reads a stretch twice ([repeatedStretchOf]), where a piece's rows,
+  /// which follow its wall minutes ([wallSpanOf]), do not order as its
+  /// instants do.
+  bool repeatsStretchAt(int column) {
+    assert(column >= 1 && column <= columnCount);
+    return _repeats[column - 1];
   }
 
   /// The column showing the [dayNumber] [day], or null when none does.
@@ -1183,15 +1205,95 @@ typedef _GridDrag = ({
 /// The pieces of the shown timed entries a sync split, in the store's
 /// order; the bars of the shown all-day entries, stacked in [barRows] rows,
 /// and on each day column, `below[c - 1]` for column `c`, the bars below
-/// the strip's third row; and the shown entries with no block or bar,
-/// counted: the split [_TimedGridState] keeps and places.
+/// the strip's third row; the shown entries with no block or bar,
+/// counted; and [loose], the shown timed entries whose time the board's
+/// pieces in the rows a change covers can miss, or null where there are
+/// none: the split [_TimedGridState] keeps and places.
 typedef _GridLayout<T> = ({
   List<GridPiece<T>> pieces,
   List<GridBar<T>> bars,
   int barRows,
   List<int> below,
   _Hidden hidden,
+  _OverlapIndex? loose,
 });
+
+/// Timed entries by their instants, which [sharesTime] searches in
+/// O(log n) with no allocation: their ids, and their starts and their ends
+/// as [DateTime.microsecondsSinceEpoch], each list sorted ascending on its
+/// own. For the index of the days outside a grid's range, [readFrom] and
+/// [readTo] are the [dayNumber]s of the days it has read: from [readFrom]
+/// to the day before the range, and from the day after the range to
+/// [readTo], each run empty while its end is the range's own day.
+class _OverlapIndex {
+  _OverlapIndex({this.readFrom = 0, this.readTo = 0});
+
+  final Set<String> ids = <String>{};
+  final List<int> starts = <int>[];
+  final List<int> ends = <int>[];
+  int readFrom;
+  int readTo;
+
+  /// Adds the timed entries of [shown] whose ids it does not hold, and
+  /// sorts each list again: O(n log n).
+  void addAll<T>(Iterable<CalendarShownEntry<T>> shown) {
+    var added = false;
+    for (final item in shown) {
+      final entry = item.entry;
+      if (entry.isAllDay || !ids.add(item.id)) {
+        continue;
+      }
+      starts.add(entry.start.microsecondsSinceEpoch);
+      ends.add(entry.end.microsecondsSinceEpoch);
+      added = true;
+    }
+    if (added) {
+      starts.sort();
+      ends.sort();
+    }
+  }
+
+  /// Whether an entry it holds other than [id], whose stored entry is
+  /// [own], shares time with the range from [start] to [end]. The entries
+  /// sharing time with it are those starting before [end] less those
+  /// ending at [start] or before, every entry ending after it starts:
+  /// none answers false and two or more true, and one is [id]'s only
+  /// where it holds [id] and [own] shares time with the range, so [ids]
+  /// is hashed only there.
+  bool sharesTime<T>(
+    String id,
+    CalendarEntry<T> own,
+    DateTime start,
+    DateTime end,
+  ) {
+    final count =
+        _countBelow(starts, end.microsecondsSinceEpoch) -
+        _countBelow(ends, start.microsecondsSinceEpoch + 1);
+    if (count <= 0) {
+      return false;
+    }
+    if (count >= 2) {
+      return true;
+    }
+    return !ids.contains(id) || !timesOverlap(own.start, own.end, start, end);
+  }
+
+  /// How many of the ascending [values] are less than [bound], by binary
+  /// search.
+  static int _countBelow(List<int> values, int bound) {
+    var low = 0;
+    var high = values.length;
+    while (low < high) {
+      final middle = (low + high) >> 1;
+      if (values[middle] < bound) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    return low;
+  }
+}
 
 /// What the all-day strip's cells show: the days of [tracks]; whether the
 /// strip is collapsed with a count row, [counted]; the bars each day column
@@ -1386,7 +1488,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     barRows: 0,
     below: List<int>.filled(_tracks.columnCount, 0),
     hidden: _Hidden.none(_tracks),
+    loose: null,
   );
+
+  /// The timed entries the store shows on the days outside the tracks'
+  /// range, which the split does not read, as far as the overlap checks
+  /// since it was last cleared have needed them ([_offRangeOver]); null
+  /// before the first. Cleared by a store notify, a new store and new
+  /// tracks' first day or day count, and kept across builds, layouts and
+  /// drags.
+  _OverlapIndex? _offRange;
 
   /// What the all-day strip's cells show. The cell builder runs only when
   /// the board rebuilds a cell, so the strip cells listen to this.
@@ -1692,6 +1803,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (storeChanged) {
       oldWidget.store.removeListener(_handleStore);
       widget.store.addListener(_handleStore);
+      _offRange = null;
     }
     final nowChanged = widget.now != oldWidget.now;
     if (nowChanged) {
@@ -1718,7 +1830,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       // bar's over both are, where no placement cancels its drag.
       _cancelDrag();
     }
-    _tracks = tracks;
+    if (tracks.firstDay != _tracks.firstDay ||
+        tracks.dayCount != _tracks.dayCount) {
+      // Its runs of read days border the old range.
+      _offRange = null;
+    }
+    // Equal tracks are kept, so the lists they build at their first read
+    // are not built again.
+    if (tracksChanged) {
+      _tracks = tracks;
+    }
     final range = _range;
     if (tracksChanged && range != null) {
       // Its cells are rows and columns of the tracks it began on.
@@ -1737,7 +1858,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         widget.selectedDay != oldWidget.selectedDay ||
         widget.today != oldWidget.today) {
       _header.value = (
-        tracks: tracks,
+        tracks: _tracks,
         selectedDay: widget.selectedDay,
         today: widget.today,
       );
@@ -1765,6 +1886,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       // New days are not ready yet, so they do not animate in either way;
       // new hours move every block at once.
       _sync(animate: !tracksChanged);
+      if (storeChanged) {
+        _askDragAgain();
+      }
     } else if (widget.editable != oldWidget.editable &&
         _syncedReady &&
         _applyStripRows(_stripRowsOf(_layout.barRows))) {
@@ -2241,17 +2365,41 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Follows the store. A notify that moves it off the range it showed
   /// for this grid clears the selection: the grid's owner, which moved it,
-  /// builds the grid on the days of its new range next. A create range in
-  /// flight reads the entries it is held by again.
+  /// builds the grid on the days of its new range next. The entries of
+  /// the days outside the range are read again when a check next needs
+  /// them ([_offRange]), a create range in flight reads the entries it is
+  /// held by again, and a drag the board runs asks its gates again
+  /// ([_askDragAgain]).
   void _handleStore() {
     final showedRange = _showsRange;
     _noteRange();
     if (showedRange && !_showsRange) {
       _selectedBlock.value = null;
     }
+    _offRange = null;
     _sync();
     _range?.readConflicts();
+    _askDragAgain();
     setState(() {});
+  }
+
+  /// Where the board's drag session runs, makes [_editConfig] and
+  /// [_fitlessConfig] again, which the next build hands the board, and
+  /// reads a crossing's cell again after the frame ([_scheduleCrossRead]):
+  /// the gates read entries a store change may have changed, and a change
+  /// only on days the grid does not show places nothing, so the board's
+  /// structural channel does not ask the drop gate again. A new config on
+  /// a live session asks it again for the placement the pointer rests on
+  /// ([BoardDragConfig.canDropAt]). The board tears its session down
+  /// before it reports the drop, so a drop's own write makes no config.
+  void _askDragAgain() {
+    final drag = _drag;
+    if (drag == null || !_board.isDragging(drag.key)) {
+      return;
+    }
+    _editConfig = _dragConfigOf(enabled: true);
+    _fitlessConfig = _dragConfigOf(enabled: true, fits: false);
+    _scheduleCrossRead();
   }
 
   /// Notes whether the store has read every day of [TimedGrid.storeRange]
@@ -2363,9 +2511,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// hours, walking only the columns from its first day's to its last
   /// day's, so it yields at most one piece per shown day; each all-day
   /// entry's bar across the shown days it covers, stacked
-  /// ([_stackBars]); and the entries with no block or bar, counted: on
+  /// ([_stackBars]); the entries with no block or bar, counted: on
   /// each day column the pieces wholly before its hours and those wholly
-  /// after them, and the entries on no day it has a column for.
+  /// after them, and the entries on no day it has a column for; and,
+  /// indexed as `loose`, the timed entries a change's rows on the board
+  /// can miss: those with a piece wholly before or after the hours, those
+  /// covering a day of the range with no column, and those with a piece
+  /// on a day whose clock repeats a stretch, where a piece's rows do not
+  /// order as its instants do ([GridTracks.repeatsStretchAt]).
   ///
   /// Where [shown] holds the entries the last split read, the identical
   /// instances with the same pending flags in the same order, on the same
@@ -2399,6 +2552,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final above = List<int>.filled(tracks.columnCount, 0);
     final below = List<int>.filled(tracks.columnCount, 0);
     var offDays = 0;
+    final loose = <CalendarShownEntry<T>>[];
     for (final entry in shown) {
       final start = entry.entry.start;
       final end = entry.entry.end;
@@ -2408,12 +2562,21 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       final last = tracks.lastColumnUpTo(lastDay);
       if (last < first) {
         offDays++;
+        if (!entry.entry.isAllDay) {
+          loose.add(entry);
+        }
         continue;
       }
       if (entry.entry.isAllDay) {
         allDay.add((shown: entry, first: first, last: last));
         continue;
       }
+      // Fewer columns than days of the range covered: a day with none.
+      var missed =
+          last - first + 1 <
+          math.min(lastDay, tracks.lastDay) -
+              math.max(firstDay, tracks.firstDay) +
+              1;
       final span = wallSpanOf(start, end);
       for (var column = first; column <= last; column++) {
         final day = tracks.dayAt(column);
@@ -2423,8 +2586,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         }
         if (piece.end <= hours.start) {
           above[column - 1]++;
+          missed = true;
         } else if (piece.start >= hours.end) {
           below[column - 1]++;
+          missed = true;
         } else {
           pieces.add(
             GridPiece<T>(
@@ -2436,7 +2601,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
               last: day == lastDay,
             ),
           );
+          if (tracks.repeatsStretchAt(column)) {
+            missed = true;
+          }
         }
+      }
+      if (missed) {
+        loose.add(entry);
       }
     }
     final stacked = _stackBars(allDay);
@@ -2446,6 +2617,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       barRows: stacked.rows,
       below: stacked.below,
       hidden: _Hidden(tracks, above, below, offDays),
+      loose: loose.isEmpty ? null : (_OverlapIndex()..addAll(loose)),
     );
   }
 
@@ -2718,7 +2890,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         !_tracks.hours.holdsTimes(times.start, times.end)) {
       return false;
     }
-    return !_meetsOtherEntry(key.id, times.start, times.end);
+    return !_meetsOtherEntry(key.id, entry, times.start, times.end);
   }
 
   /// Whether the running drag of [key], or with none a semantics action's
@@ -2870,15 +3042,85 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return (start: start, end: end);
   }
 
-  /// Whether a range from [start] to [end] shares time with a board piece
-  /// of an entry other than [id] in the shown columns it covers. An
-  /// all-day range shares time with none ([entriesShareTime]).
-  bool _meetsOtherEntry(String id, DateTime start, DateTime end) {
+  /// Whether a range from [start] to [end] shares time with a timed entry
+  /// other than [id], whose entry is [own], that the store shows on the
+  /// days the range covers, shown or not ([rangeSharesTime]): a board
+  /// piece in the rows the range covers on the shown columns, one of the
+  /// entries those rows can miss that the split indexes ([_GridLayout]'s
+  /// `loose`), and, for a range with a day outside the tracks' range, one
+  /// the store shows there ([_offRangeOver]). An all-day range shares time
+  /// with none ([entriesShareTime]). The walk, as many columns as the
+  /// range covers, and at most two O(log n) searches; a store read only
+  /// for days outside the range no check since the last clearing of
+  /// [_offRange] covered.
+  bool _meetsOtherEntry(
+    String id,
+    CalendarEntry<T> own,
+    DateTime start,
+    DateTime end,
+  ) {
     if (isDayStart(start) && isDayStart(end)) {
       return false;
     }
-    final first = _tracks.firstColumnFrom(dayNumber(start));
-    final last = _tracks.lastColumnUpTo(lastDayNumberOf(start, end));
+    final firstDay = dayNumber(start);
+    final lastDay = lastDayNumberOf(start, end);
+    final tracks = _tracks;
+    if (_meetsPiece(id, start, end, firstDay, lastDay)) {
+      return true;
+    }
+    if (_layout.loose?.sharesTime(id, own, start, end) ?? false) {
+      return true;
+    }
+    if (firstDay >= tracks.firstDay && lastDay <= tracks.lastDay) {
+      return false;
+    }
+    return _offRangeOver(firstDay, lastDay).sharesTime(id, own, start, end);
+  }
+
+  /// The index of the timed entries the store shows on the days outside
+  /// the tracks' range that the [dayNumber]s [firstDay] to [lastDay] cover,
+  /// [_offRange], having read first the days among them it has not: one
+  /// [CalendarStore.entriesBetween] before the range and one after it at
+  /// most, each wholly outside the range.
+  _OverlapIndex _offRangeOver(int firstDay, int lastDay) {
+    final tracks = _tracks;
+    final index = _offRange ??= _OverlapIndex(
+      readFrom: tracks.firstDay,
+      readTo: tracks.lastDay,
+    );
+    if (firstDay < index.readFrom) {
+      index.addAll(
+        widget.store.entriesBetween(
+          dateOfDayNumber(firstDay),
+          dateOfDayNumber(index.readFrom - 1),
+        ),
+      );
+      index.readFrom = firstDay;
+    }
+    if (lastDay > index.readTo) {
+      index.addAll(
+        widget.store.entriesBetween(
+          dateOfDayNumber(index.readTo + 1),
+          dateOfDayNumber(lastDay),
+        ),
+      );
+      index.readTo = lastDay;
+    }
+    return index;
+  }
+
+  /// Whether a board piece of an entry other than [id] in the rows the
+  /// range from [start] to [end] covers on the shown columns of its days,
+  /// the [dayNumber]s [firstDay] to [lastDay], shares time with it.
+  bool _meetsPiece(
+    String id,
+    DateTime start,
+    DateTime end,
+    int firstDay,
+    int lastDay,
+  ) {
+    final first = _tracks.firstColumnFrom(firstDay);
+    final last = _tracks.lastColumnUpTo(lastDay);
     final span = wallSpanOf(start, end);
     for (var column = first; column <= last; column++) {
       final piece = pieceOn(span, _tracks.dayAt(column));
@@ -3264,7 +3506,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// earlier instant of a time the clock repeats, to an hour after it; null
   /// where the start is a time the clock skips, or where the history lock,
   /// the hours ([DayHours.holdsTimes]) or [TimedGrid.maxDayCount] refuse
-  /// the range or it shares time with a piece of another entry.
+  /// the range or it shares time with another timed entry the store shows
+  /// ([_meetsOtherEntry]).
   ({DateTime start, DateTime end})? _barLandingOf(
     GridKey key,
     int column,
@@ -3283,7 +3526,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (!_lock.value.admits(entry.start, entry.end, start, end) ||
         !_tracks.hours.holdsTimes(start, end) ||
         !_coversAtMost(start, end) ||
-        _meetsOtherEntry(key.id, start, end)) {
+        _meetsOtherEntry(key.id, entry, start, end)) {
       return null;
     }
     return (start: start, end: end);
@@ -3296,7 +3539,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ([_heldToLimit]); null where that end is a time the clock skips, or
   /// where the history lock or the hours ([DayHours.holdsTimes]) refuse the
   /// range from the entry's start to it, or that range shares time with
-  /// another timed entry the store shows.
+  /// another timed entry the store shows ([_meetsOtherEntry]).
   DateTime? _laterDayEndOf(GridKey key, int column, int row) {
     noteDropGate();
     final shape = _board.itemOf(key);
@@ -3317,7 +3560,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     if (!_lock.value.admits(entry.start, entry.end, start, end) ||
         !_tracks.hours.holdsTimes(start, end) ||
-        _sharesShownTime(key.id, start, end)) {
+        _meetsOtherEntry(key.id, entry, start, end)) {
       return null;
     }
     return end;
@@ -3342,9 +3585,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Reads the crossing's cell again once the board has laid out the rows
   /// a strip row change or a notice change gave, which move the slots
-  /// under a still pointer: first as a move off every cell, then at
-  /// [_dragAt]. At most one is pending, and it does nothing once the drag
-  /// has no [_dragPointer].
+  /// under a still pointer, or after a store change, which can change
+  /// what a release there gives ([_askDragAgain]): first as a move off
+  /// every cell, then at [_dragAt]. At most one is pending, and it does
+  /// nothing once the drag has no [_dragPointer].
   void _scheduleCrossRead() {
     if (_dragPointer == null ||
         _crossReadPending ||

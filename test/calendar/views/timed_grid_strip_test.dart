@@ -309,17 +309,46 @@ class _NearRect extends Matcher {
   }
 }
 
-/// An in-memory store that records every move it is asked for.
+/// An in-memory store that records every move it is asked for, and the
+/// range of days, as [dayNumber]s, of each [entriesBetween] it is asked
+/// while no move of its own runs: the reads of its own overlap refusal
+/// and of the split its write's notify runs within the call are left out.
 class RecordingStore extends MemoryCalendarStore<String> {
   RecordingStore({super.entries, super.hours}) : super();
 
   final List<CalendarEntry<String>> moves = <CalendarEntry<String>>[];
 
+  final List<({int first, int last})> reads = <({int first, int last})>[];
+
+  bool _moving = false;
+
   @override
   void requestMove(CalendarEntry<String> requested) {
     moves.add(requested);
-    super.requestMove(requested);
+    _moving = true;
+    try {
+      super.requestMove(requested);
+    } finally {
+      _moving = false;
+    }
   }
+
+  @override
+  List<CalendarShownEntry<String>> entriesBetween(
+    DateTime first,
+    DateTime last,
+  ) {
+    if (!_moving) {
+      reads.add((first: dayNumber(first), last: dayNumber(last)));
+    }
+    return super.entriesBetween(first, last);
+  }
+}
+
+/// The range of days, as [RecordingStore.reads] records it, from [first]
+/// to [last].
+({int first, int last}) daysOf(DateTime first, DateTime last) {
+  return (first: dayNumber(first), last: dayNumber(last));
 }
 
 /// A store holding [entries], disposed at the test's end.
@@ -3089,7 +3118,121 @@ void main() {
         continue;
       }
       expect(movesSharingTime(store, hidden), isEmpty);
+      // The store holding the hidden entry, from before the grid's first
+      // frame: every change the gates and the hosts' semantics actions
+      // ask for covers days of the range alone, which the split reads.
+      expect(store.reads.toSet(), <({int first, int last})>{
+        daysOf(monday, sunday),
+      });
     }
+  });
+
+  testWidgets("PG5 in Week the overlap check reads each day outside the "
+      "range once between store notifies, a store notify during a drag asks "
+      "the drop gate and a crossing's landing again, and a drop's own write "
+      "gives the board no new drag config", (tester) async {
+    final shown = Shown.week(monday);
+    final own = daysOf(monday, sunday);
+    bool isAfter(({int first, int last}) range) {
+      return range.first > own.last;
+    }
+
+    final ownOrAfter = predicate<({int first, int last})>((range) {
+      return range == own || isAfter(range);
+    }, "the grid's own range or one wholly after it");
+    final next = entryOf("N", nextMonday, at(nextMonday, 1));
+    final crossing = entryOf("X", at(saturday, 23, 30), at(sunday, 0, 30));
+
+    // A block held over Sunday's late slots, whose moves reach the next
+    // Monday.
+    var store = storeOf(<CalendarEntry<String>>[crossing, next]);
+    await Harness(store, shown).pump(tester);
+    final block = tester.getRect(blockFinder("X", saturday));
+    final gesture = await lift(tester, block.center);
+    Future<void> holdOver(int minute) async {
+      final slot = slotRect(tester, shown, sunday, minute);
+      await gesture.moveTo(
+        block.center + slot.topLeft - block.topLeft + const Offset(0.0, 2.0),
+      );
+      await tester.pump();
+    }
+
+    await holdOver(20 * 60);
+    for (var i = 0; i < 2; i++) {
+      await holdOver(23 * 60 + 15);
+      await holdOver(23 * 60 + 30);
+    }
+    final beforeDelete = store.reads.where(isAfter).length;
+    final config = boardOf(tester).drag;
+    store.requestDelete("N");
+    await tester.pump();
+    await tester.pump();
+    final renewed = boardOf(tester).drag;
+    expect(renewed, isNot(same(config)));
+    expect(
+      (beforeDelete, store.reads.where(isAfter).length - beforeDelete),
+      (1, 1),
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(store.moves, <CalendarEntry<String>>[
+      crossing.copyWith(start: at(sunday, 23, 30), end: at(nextMonday, 0, 30)),
+    ]);
+    expect(boardOf(tester).drag, same(renewed));
+    expect(store.reads, everyElement(ownOrAfter));
+
+    // A block whose moves stay inside the range.
+    final meet = entryOf("T", at(tuesday, 10), at(tuesday, 11));
+    store = storeOf(<CalendarEntry<String>>[meet]);
+    await Harness(store, shown).pump(tester);
+    final from = tester.getRect(blockFinder("T", tuesday));
+    final held = await lift(tester, from.center);
+    for (final (day, minute) in <(DateTime, int)>[
+      (tuesday, 14 * 60),
+      (wednesday, 10 * 60),
+    ]) {
+      final slot = slotRect(tester, shown, day, minute);
+      await held.moveTo(
+        from.center + slot.topLeft - from.topLeft + const Offset(0.0, 2.0),
+      );
+      await tester.pump();
+    }
+    await held.up();
+    await tester.pumpAndSettle();
+    // Setup sanity: the drop landed.
+    expect(store.moves, <CalendarEntry<String>>[
+      meet.copyWith(start: at(wednesday, 10), end: at(wednesday, 11)),
+    ]);
+    expect(store.reads.toSet(), <({int first, int last})>{own});
+
+    // A bar held over Sunday's 23:30 slot, whose hour reaches the next
+    // Monday.
+    final bar = allDayOf("A", saturday);
+    store = storeOf(<CalendarEntry<String>>[bar, next]);
+    await Harness(store, shown).pump(tester);
+    final crossed = await liftTo(
+      tester,
+      tester.getCenter(barFinder("A")),
+      slotRect(tester, shown, sunday, 23 * 60 + 30).center,
+    );
+    expect(landingText(tester), noLandingLabel);
+    store.requestDelete("N");
+    await tester.pump();
+    await tester.pump();
+    expect(
+      landingText(tester),
+      landingLabel(
+        at(sunday, 23, 30),
+        at(nextMonday, 0, 30),
+        DateTime(2026, 1, 5),
+      ),
+    );
+    await crossed.up();
+    await tester.pumpAndSettle();
+    expect(store.moves, <CalendarEntry<String>>[
+      bar.copyWith(start: at(sunday, 23, 30), end: at(nextMonday, 0, 30)),
+    ]);
+    expect(store.reads, everyElement(ownOrAfter));
   });
 
   group("on the 25-hour day", skip: longDaySkip, () {
@@ -3116,11 +3259,13 @@ void main() {
           if (withRepeated) repeated,
         ]);
         await Harness(store, shown).pump(tester);
+        final settled = store.reads.length;
         final block = tester.getRect(blockFinder("M", day));
         final row = slotRect(tester, shown, day, 60);
         final gesture = await lift(tester, block.center);
         await gesture.moveBy(Offset(0.0, row.top - block.top + 2.0));
         await tester.pump();
+        final held = store.reads.length;
         await gesture.up();
         await tester.pumpAndSettle();
         if (!withRepeated) {
@@ -3135,6 +3280,13 @@ void main() {
           continue;
         }
         expect(movesSharingTime(store, repeated), isEmpty);
+        // The store holding the repeated entry: the split's read of the
+        // day alone, and none from the grid's first settled frame to the
+        // release, the gates searching what the split indexed.
+        expect(store.reads.toSet(), <({int first, int last})>{
+          daysOf(day, day),
+        });
+        expect(held - settled, 0);
       }
     });
   });

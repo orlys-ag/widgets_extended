@@ -894,18 +894,11 @@ void main() {
     final sunday = blockFinder(weekend, DateTime(2026, 4, 26));
 
     /// Drops [block] at [target] and expects it back in its slot with
-    /// nothing sent. The grid's own refusals show no snackbar, where a
-    /// refusal the store makes at the drop reports one.
-    Future<void> refused(
-      Finder block,
-      Offset target, {
-      bool byGrid = true,
-    }) async {
+    /// nothing sent, and no snackbar: the grid refuses the drop itself.
+    Future<void> refused(Finder block, Offset target) async {
       final before = tester.getRect(block);
       await moveBlock(tester, block, target);
-      if (byGrid) {
-        expect(find.byType(SnackBar), findsNothing);
-      }
+      expect(find.byType(SnackBar), findsNothing);
       await tester.pumpAndSettle();
       expect(tester.getRect(block), before);
       expect(api.requests, hasLength(requests));
@@ -921,16 +914,9 @@ void main() {
 
     // Sunday 08:00 puts the item from Sunday 08:00 to 09:00 on Monday
     // 2026-04-27, over "Plan the sprint goals", 08:30 to 09:00, which the
-    // grid does not show but the store has read with April.
-    await refused(
-      saturday,
-      cellRect(tester, rowOf(8 * 60), colOf(6)).topLeft,
-      byGrid: false,
-    );
-    expect(
-      find.text(const CalendarOverlapException(<String>["item-10"]).message),
-      findsOneWidget,
-    );
+    // grid does not show but the store has read with April, so the grid
+    // refuses it too.
+    await refused(saturday, cellRect(tester, rowOf(8 * 60), colOf(6)).topLeft);
   });
 
   testWidgets("W7 a block opens its form, saves an edit and deletes", (
