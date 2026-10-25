@@ -54,7 +54,8 @@ MoveRecordingStore storeOf(
 
 /// An editable calendar on [view] over [day] and [store], in a view 800
 /// wide and 2000 tall, where Week's and Day's grids show every slot of the
-/// day. Its clock reads [time], its policy is [policy]'s and edit mode
+/// day, marking [today] as today, or with none the clock's day. Its clock
+/// reads [time], its policy is [policy]'s and edit mode
 /// [editable]'s, each of which builds it again when set. It records each
 /// create it reports in [creates], each tap in [taps], the last details
 /// each card is built with in [cards], and each add button's details in
@@ -67,12 +68,14 @@ class Host {
     required this.time,
     CalendarEditPolicy<String>? policy,
     this.hours = DayHours.allDay,
+    this.today,
   }) : policy = ValueNotifier<CalendarEditPolicy<String>?>(policy);
 
   final MoveRecordingStore store;
   final CalendarViewKind view;
   final DateTime day;
   final DayHours hours;
+  final DateTime? today;
 
   /// What the calendar's clock reads.
   DateTime time;
@@ -115,6 +118,7 @@ class Host {
               editable: editable.value,
               editPolicy: policy.value,
               hours: hours,
+              today: today,
               cardBuilder: (context, entry, details) {
                 cards[entry.entry.id!] = details;
                 return Text("card ${entry.entry.id}");
@@ -836,6 +840,119 @@ void main() {
                 )
               : CreateRange(start: at(tuesday, 14), end: at(tuesday, 14, 15)),
         ], reason: "minute passes: $minutePasses");
+      }
+    });
+
+    testWidgets("a refill that refuses the range shows at once, though the "
+        "minute moves no now mark: with today pinned to Tuesday and the "
+        "clock on Monday, Day's range at 14:45 stops being marked", (
+      tester,
+    ) async {
+      const hours = DayHours(8 * 60, 15 * 60);
+      final host = Host(
+        storeOf(const <CalendarEntry<String>>[], hours: hours),
+        view: CalendarViewKind.day,
+        day: tuesday,
+        time: at(monday, 14, 44, 30),
+        policy: lock,
+        hours: hours,
+        today: tuesday,
+      );
+      await host.pump(tester);
+      final gesture = await holdRange(
+        tester,
+        slot(tester, 14 * 60 + 45),
+        slot(tester, 14 * 60 + 30),
+      );
+      // Setup sanity: the range is admitted and marked, and the grid shows
+      // no line of the current time, whose day it does not show.
+      expect(marksRange(tester), isTrue);
+      host.time = at(monday, 14, 45, 30);
+      await tester.pump(const Duration(minutes: 1));
+      await tester.pump();
+      expect(marksRange(tester), isFalse);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(host.creates, isEmpty);
+    });
+
+    testWidgets("a refill that refuses a range across the strip clears its "
+        "marked days: with today pinned to Tuesday and the clock at Monday "
+        "00:00, Tuesday's day start is locked a minute later", (tester) async {
+      final host = Host(
+        storeOf(const <CalendarEntry<String>>[]),
+        view: CalendarViewKind.week,
+        day: tuesday,
+        time: monday,
+        policy: lock,
+        today: tuesday,
+      );
+      await host.pump(tester);
+      Color? fillOf(DateTime day) {
+        final box = tester.widget<DecoratedBox>(find.byKey(allDayCellKey(day)));
+        return (box.decoration as BoxDecoration).color;
+      }
+
+      final unmarked = fillOf(wednesday);
+      final gesture = await holdRange(
+        tester,
+        tester.getCenter(find.byKey(allDayCellKey(tuesday))),
+        tester.getCenter(find.byKey(allDayCellKey(thursday))),
+      );
+      // Setup sanity: the range marks the days it covers.
+      expect(fillOf(wednesday), isNot(unmarked));
+      host.time = at(monday, 0, 1);
+      await tester.pump(const Duration(minutes: 1));
+      await tester.pump();
+      expect(fillOf(wednesday), unmarked);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(host.creates, isEmpty);
+    });
+
+    testWidgets("a range a refill refused for the entries its column holds "
+        "is admitted again once a store write frees a slot", (tester) async {
+      const hours = DayHours(8 * 60, 15 * 60);
+      for (final frees in const <bool>[false, true]) {
+        final host = await pumpDay(
+          tester,
+          time: at(tuesday, 13, 59, 30),
+          hours: hours,
+          entries: <CalendarEntry<String>>[
+            entryOf("X", at(tuesday, 14, 15), at(tuesday, 15)),
+          ],
+        );
+        final from = slot(tester, 14 * 60);
+        final gesture = await holdRange(
+          tester,
+          from,
+          from + const Offset(2.0, 0.0),
+        );
+        host.time = at(tuesday, 14, 0, 30);
+        await tester.pump(const Duration(minutes: 1));
+        await tester.pump();
+        // Setup sanity: no slot from 14:01 is free, so the range is
+        // refused.
+        expect(marksRange(tester), isFalse);
+        if (frees) {
+          host.store.requestDelete("X");
+          await tester.pump();
+          expect(marksRange(tester), isTrue);
+        }
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(
+          host.creates,
+          frees
+              ? <CreateRange>[
+                  CreateRange(
+                    start: at(tuesday, 14, 15),
+                    end: at(tuesday, 14, 30),
+                  ),
+                ]
+              : isEmpty,
+          reason: "frees: $frees",
+        );
       }
     });
   });
