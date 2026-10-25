@@ -23,6 +23,7 @@ import 'package:widgets_extended/calendar/composition/calendar_view.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_day_badges.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
@@ -991,7 +992,7 @@ void main() {
           controller: controller,
           clock: fixedClock,
           editable: true,
-          lockPast: true,
+          editPolicy: const HistoryLockPolicy<String>(),
           cardBuilder: card,
           cardExtentOf: cardExtent,
           onEntryTap: reports ? taps.add : null,
@@ -1156,8 +1157,7 @@ void main() {
           controller: controller,
           clock: fixedClock,
           editable: true,
-          lockPast: true,
-          lockEarlierToday: true,
+          editPolicy: const HistoryLockPolicy<String>(lockEarlierToday: true),
           onCreateRange: (range) async {
             creates.add(range);
           },
@@ -1992,8 +1992,7 @@ void main() {
           controller: controller,
           clock: fixedClock,
           editable: true,
-          lockPast: true,
-          lockEarlierToday: true,
+          editPolicy: const HistoryLockPolicy<String>(lockEarlierToday: true),
           slotMinutes: 30,
           onCreateRange: (range) async {
             creates.add(range);

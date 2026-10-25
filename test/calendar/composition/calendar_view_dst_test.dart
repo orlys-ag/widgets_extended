@@ -15,6 +15,8 @@ import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/policy/edit_policy.dart';
+import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
@@ -40,8 +42,9 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
 
 /// Pumps an editable calendar on [view] over [day] with [entries], its
 /// clock at [now], under the history lock of earlier today where [lock]
-/// holds, and returns the ranges it reports for a create. Agenda's add
-/// buttons read "add" and their minute.
+/// holds and the unrestricted policy otherwise, each allowing overlaps as
+/// [allowsOverlaps] says, and returns the ranges it reports for a create.
+/// Agenda's add buttons read "add" and their minute.
 Future<List<CreateRange>> pumpCalendar(
   WidgetTester tester, {
   required CalendarViewKind view,
@@ -49,6 +52,7 @@ Future<List<CreateRange>> pumpCalendar(
   required DateTime now,
   List<CalendarEntry<String>> entries = const <CalendarEntry<String>>[],
   bool lock = true,
+  bool allowsOverlaps = true,
 }) async {
   tester.view.devicePixelRatio = 1.0;
   tester.view.physicalSize = const Size(800.0, 1200.0);
@@ -67,8 +71,12 @@ Future<List<CreateRange>> pumpCalendar(
           return now;
         },
         editable: true,
-        lockPast: lock,
-        lockEarlierToday: lock,
+        editPolicy: lock
+            ? HistoryLockPolicy<String>(
+                lockEarlierToday: true,
+                allowsOverlaps: allowsOverlaps,
+              )
+            : UnrestrictedEditPolicy<String>(allowsOverlaps: allowsOverlaps),
         onCreateRange: (range) async {
           creates.add(range);
         },

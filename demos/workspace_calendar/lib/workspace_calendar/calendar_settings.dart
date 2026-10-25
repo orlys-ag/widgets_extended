@@ -1,5 +1,6 @@
 /// What the calendar's settings choose: whether it is in edit mode, how far
-/// the history lock keeps the past as it is, the weekdays it shows and the
+/// the history lock keeps the past as it is, and so the calendar's edit
+/// policy, the weekdays it shows and the
 /// one its weeks start on, the hours it shows
 /// and schedules in and the length of its slots, how the timed grid labels
 /// its hours, and how Month fits its weeks. Beside them: the field errors,
@@ -12,6 +13,35 @@ import 'package:flutter/foundation.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+
+import 'calendar_item.dart';
+import 'calendar_schema.dart';
+
+/// The history lock as the demo's edit policy: an item covers at most
+/// [maxDayCount] days, which the gestures a `CalendarView` limits by its
+/// policy's day limit hold to.
+class WorkspaceHistoryLockPolicy extends HistoryLockPolicy<ItemPayload> {
+  const WorkspaceHistoryLockPolicy({
+    super.lockEarlierToday,
+    super.allowsOverlaps,
+  });
+
+  @override
+  int get dayLimit {
+    return maxDayCount;
+  }
+}
+
+/// The demo's edit policy with no lock: an item covers at most
+/// [maxDayCount] days, as under [WorkspaceHistoryLockPolicy].
+class WorkspaceUnrestrictedPolicy extends UnrestrictedEditPolicy<ItemPayload> {
+  const WorkspaceUnrestrictedPolicy({super.allowsOverlaps});
+
+  @override
+  int get dayLimit {
+    return maxDayCount;
+  }
+}
 
 /// The field errors of an item from [start] to [end] that [hours] do not
 /// hold ([DayHours.holdsTimes]), keyed as `validateItemJson` keys them: the
@@ -107,6 +137,21 @@ class CalendarSettings {
   final HourLabelFormat hourLabelFormat;
 
   final MonthLayout monthLayout;
+
+  /// The edit policy the calendar and the item form both read: the history
+  /// lock, of earlier today too under [lockEarlierToday], under
+  /// [lockPast], and no lock otherwise. Neither allows overlapping items.
+  /// Equal settings give equal policies, so a rebuild with them cancels no
+  /// gesture.
+  CalendarEditPolicy<ItemPayload> get editPolicy {
+    if (lockPast) {
+      return WorkspaceHistoryLockPolicy(
+        lockEarlierToday: lockEarlierToday,
+        allowsOverlaps: false,
+      );
+    }
+    return const WorkspaceUnrestrictedPolicy(allowsOverlaps: false);
+  }
 
   CalendarSettings copyWith({
     bool? editing,

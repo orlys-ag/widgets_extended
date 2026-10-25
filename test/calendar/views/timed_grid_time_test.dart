@@ -18,12 +18,14 @@ import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 
 import '../dst_days.dart';
+import '../edit_policies.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -260,16 +262,30 @@ class HeldSource implements CalendarDataSource<String> {
 /// What a test pumps: the grid of [shown] over [store], in a view 800 wide
 /// and 2000 tall, where every slot of the day shows; [creates] records each
 /// create range it reports. [hours] and [slotMinutes] start as [shown]'s,
-/// and [rebuild] builds the grid again with them.
+/// and [rebuild] builds the grid again with them. The grid's policy is the
+/// unrestricted one, allowing overlaps as [allowsOverlaps] says, inside a
+/// [DayLimitPolicy] where [maxDayCount] is given.
 class Harness {
-  Harness(this.store, this.shown, {this.maxDayCount, this.editable = true})
-    : hours = shown.hours,
-      slotMinutes = shown.slotMinutes;
+  Harness(
+    this.store,
+    this.shown, {
+    this.maxDayCount,
+    this.editable = true,
+    this.allowsOverlaps = true,
+  }) : hours = shown.hours,
+       slotMinutes = shown.slotMinutes;
 
   final CalendarStore<String> store;
   final Shown shown;
   final int? maxDayCount;
   final bool editable;
+  final bool allowsOverlaps;
+
+  CalendarEditPolicy<String> get policy {
+    final base = UnrestrictedEditPolicy<String>(allowsOverlaps: allowsOverlaps);
+    final limit = maxDayCount;
+    return limit == null ? base : DayLimitPolicy<String>(base, limit);
+  }
 
   DayHours hours;
   int slotMinutes;
@@ -294,9 +310,9 @@ class Harness {
         creates.add(range);
       },
       editable: editable,
+      editPolicy: policy,
       hours: hours,
       slotMinutes: slotMinutes,
-      maxDayCount: maxDayCount,
       showsDayHeader: shown.week,
     );
   }

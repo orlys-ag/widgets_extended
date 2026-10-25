@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/policy/history_lock.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
@@ -55,6 +54,18 @@ final List<Map<String, Object?>> seed = <Map<String, Object?>>[
   return (
     start: DateTime(day.year, day.month, day.day, 0, start),
     end: DateTime(day.year, day.month, day.day + dayCount - 1, 0, end),
+  );
+}
+
+/// A stored entry of [shape]'s times, a change's from.
+CalendarEntry<String> stored(({DateTime start, DateTime end}) shape) {
+  return CalendarEntry<String>(
+    id: "stored",
+    start: shape.start,
+    end: shape.end,
+    title: "Stored",
+    color: const Color(0xFF336699),
+    payload: "stored",
   );
 }
 
@@ -183,33 +194,35 @@ void main() {
     test("K5 the form's errors name the day of a new item on a past day, "
         "the start of one before now, a started item's moved start and "
         "past end, and nothing the lock admits", () {
-      final lock = HistoryLock.of(
-        lockPast: true,
-        lockEarlierToday: true,
-        today: today,
-        now: midMorning,
-      );
-      final running = shape(today, 10 * 60, 12 * 60);
+      const lock = HistoryLockPolicy<String>(lockEarlierToday: true);
+      final now = CalendarNow(time: midMorning, today: today);
+      final running = stored(shape(today, 10 * 60, 12 * 60));
       expect(
-        lockErrorsOf(lock, null, shape(monday, 9 * 60, 10 * 60)).keys,
+        lockErrorsOf(lock, now, null, shape(monday, 9 * 60, 10 * 60)).keys,
         <String>["start"],
       );
       expect(
-        lockErrorsOf(lock, null, shape(today, 9 * 60, 10 * 60)).keys,
+        lockErrorsOf(lock, now, null, shape(today, 9 * 60, 10 * 60)).keys,
         <String>["start"],
       );
       expect(
-        lockErrorsOf(lock, running, shape(today, 10 * 60 + 15, 11 * 60)).keys,
+        lockErrorsOf(
+          lock,
+          now,
+          running,
+          shape(today, 10 * 60 + 15, 11 * 60),
+        ).keys,
         <String>["start", "end"],
       );
       expect(
-        lockErrorsOf(lock, running, shape(today, 10 * 60, 13 * 60)),
+        lockErrorsOf(lock, now, running, shape(today, 10 * 60, 13 * 60)),
         isEmpty,
       );
       expect(
         lockErrorsOf(
           lock,
-          shape(today, 8 * 60, 9 * 60),
+          now,
+          stored(shape(today, 8 * 60, 9 * 60)),
           shape(today, 8 * 60, 9 * 60 + 15),
         ).keys,
         <String>["start"],

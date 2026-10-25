@@ -47,13 +47,11 @@ library;
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/policy/history_lock.dart';
 
 import 'workspace_calendar/calendar_api.dart';
 import 'workspace_calendar/calendar_api_source.dart';
 import 'workspace_calendar/calendar_bar.dart';
 import 'workspace_calendar/calendar_item.dart';
-import 'workspace_calendar/calendar_schema.dart';
 import 'workspace_calendar/calendar_settings.dart';
 import 'workspace_calendar/harbor_theme.dart';
 import 'workspace_calendar/item_builders.dart';
@@ -202,16 +200,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     return dateOnly(widget.today ?? widget.clock());
   }
 
-  /// The history lock the settings choose as it holds when called, which a
-  /// form reads when it opens and at Save.
-  HistoryLock _currentLock() {
+  /// The time the calendar's edit policy answers at when called, which a
+  /// form reads when it opens and at Save: the clock's, with the day the
+  /// calendar marks as today.
+  CalendarNow _currentNow() {
     final now = widget.clock();
-    return HistoryLock.of(
-      lockPast: _settings.lockPast,
-      lockEarlierToday: _settings.lockEarlierToday,
-      today: dateOnly(widget.today ?? now),
-      now: now,
-    );
+    return CalendarNow(time: now, today: widget.today ?? now);
   }
 
   void _handleControllerChange() {
@@ -270,8 +264,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   }
 
   /// The form of the tapped item: editable where the calendar reports it
-  /// so, in edit mode with the history lock not holding the item
-  /// [EntryHold.locked], and read-only otherwise.
+  /// so, in edit mode with the settings' edit policy letting the item be
+  /// edited, and read-only otherwise.
   void _openEntry(CalendarEntryTapDetails<ItemPayload> details) {
     final id = details.entry.id!;
     if (details.editable) {
@@ -279,7 +273,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
         context,
         store: _store,
         id: id,
-        lock: _currentLock,
+        policy: _settings.editPolicy,
+        now: _currentNow,
         slotMinutes: _settings.slotMinutes,
       );
     } else {
@@ -292,7 +287,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       context,
       store: _store,
       range: range,
-      lock: _currentLock,
+      policy: _settings.editPolicy,
+      now: _currentNow,
       slotMinutes: _settings.slotMinutes,
     );
   }
@@ -302,7 +298,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       context,
       store: _store,
       id: item.id!,
-      lock: _currentLock,
+      policy: _settings.editPolicy,
+      now: _currentNow,
       slotMinutes: _settings.slotMinutes,
     );
   }
@@ -381,14 +378,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               store: _store,
               controller: _controller,
               editable: _settings.editing,
-              lockPast: _settings.lockPast,
-              lockEarlierToday: _settings.lockEarlierToday,
+              editPolicy: _settings.editPolicy,
               weekdays: _settings.weekdays,
               hours: _settings.hours,
               slotMinutes: _settings.slotMinutes,
               hourLabelFormat: _settings.hourLabelFormat,
               monthLayout: _settings.monthLayout,
-              maxDayCount: maxDayCount,
               clock: widget.clock,
               today: widget.today,
               blockBuilder: widget.builders.block,

@@ -100,6 +100,15 @@ enum CalendarResizeEdges {
 /// answer from what they are given and the policy's own final fields
 /// alone. An answer that throws is the host's error. A subclass with
 /// fields compares them in `==` and `hashCode`.
+///
+/// The views ask it in edit mode only, and read [dayLimit] each time they
+/// take a policy. An answer that throws in a drag's gates, which the
+/// views ask during a drag and inside their pointer handlers, is reported
+/// through [FlutterError.reportError] and refuses; one that throws in a
+/// build, a press or a tap goes through. A view given a policy not `==`
+/// to the last cancels a move, a resize or a create range in flight, so a
+/// host's policy defines value equality, or is kept as one instance
+/// across builds.
 @immutable
 abstract class CalendarEditPolicy<T> {
   /// Const, so a subclass can be const.
@@ -160,7 +169,8 @@ abstract class CalendarEditPolicy<T> {
 }
 
 /// A policy that limits nothing, other than overlaps where
-/// [allowsOverlaps] is false.
+/// [allowsOverlaps] is false: the one a `CalendarView` given no
+/// `editPolicy` takes.
 ///
 /// Two compare equal where their runtime types and [allowsOverlaps] are
 /// the same.

@@ -20,6 +20,7 @@ import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
@@ -544,8 +545,9 @@ void main() {
         onOpenEntry: (id) {},
         onCreate: (range) async {},
         editable: editable,
-        lockPast: lockPast,
-        lockEarlierToday: lockEarlierToday,
+        editPolicy: lockPast
+            ? HistoryLockPolicy<String>(lockEarlierToday: lockEarlierToday)
+            : null,
         hours: const DayHours(8 * 60, 16 * 60),
       );
     }
@@ -756,7 +758,7 @@ void main() {
           onOpenEntry: (id) {},
           onCreate: (range) async {},
           editable: true,
-          lockPast: true,
+          editPolicy: const HistoryLockPolicy<String>(),
         ),
       ),
     );

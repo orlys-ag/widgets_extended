@@ -18,7 +18,7 @@ import 'package:flutter/widgets.dart';
 import '../../sliver_tree/sliver_tree.dart';
 import '../dates/calendar_dates.dart';
 import '../dates/calendar_labels.dart';
-import '../policy/history_lock.dart';
+import '../policy/edit_policy.dart';
 import '../policy/overlap.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
@@ -555,11 +555,14 @@ List<DayListRow> dayListRowsOf<T>(
 /// with a retry that reads the shown days again. Times read in [format].
 /// Unless [editable], the list has no dashed rows and hands the card
 /// builder no Edit or Delete, so a day without items shows its header
-/// alone. Under the history [lock] a card is handed Edit only while its
-/// item is not [EntryHold.locked], and Delete only while it is
-/// [EntryHold.free], and a dashed row's button adds one slot of
-/// [slotMinutes] from the first time the lock leaves free in its gap, and
-/// is gone where that slot does not fit in the gap. A row that comes or
+/// alone, and asks [editPolicy] nothing. In edit mode a card is handed
+/// Edit only where [editPolicy] lets its item be edited
+/// ([CalendarEditPolicy.mayEdit]), and Delete only where it lets it be
+/// deleted ([CalendarEditPolicy.mayDelete]), and a dashed row's button
+/// adds one slot of [slotMinutes] from the first time in its gap the
+/// policy's earliest start on its day leaves free
+/// ([CalendarEditPolicy.earliestStartOn]), and is gone where that slot
+/// does not fit in the gap. A row that comes or
 /// goes in a block grows in and fades in, or fades out and shrinks away,
 /// so the block grows or shrinks smoothly; a block above the list's top
 /// that changes height moves nothing the list shows.
@@ -604,7 +607,7 @@ class DayList<T> extends StatefulWidget {
     required this.hours,
     this.slotMinutes = defaultSlotMinutes,
     required this.editable,
-    required this.lock,
+    this.editPolicy,
     required this.selectedDay,
     required this.today,
     required this.now,
@@ -633,15 +636,19 @@ class DayList<T> extends StatefulWidget {
   final DayHours hours;
 
   /// The length of the slot a gap row's add button creates, in minutes,
-  /// one of [slotMinuteChoices], which the list's state asserts; the lock
-  /// rounds its first free time up to the grid of it from midnight.
+  /// one of [slotMinuteChoices], which the list's state asserts; an
+  /// earliest start of the policy is rounded up to the grid of it from
+  /// midnight ([earliestSlotMinuteOf]).
   final int slotMinutes;
 
   /// Whether the calendar is in edit mode, where the list has its dashed
-  /// rows and hands each card its Edit and Delete.
+  /// rows and hands each card the Edit and Delete [editPolicy] allows.
   final bool editable;
 
-  final HistoryLock lock;
+  /// What the cards and the gap rows may offer in edit mode
+  /// ([CalendarEditPolicy]); null for an [UnrestrictedEditPolicy]. The
+  /// rows read it as they build.
+  final CalendarEditPolicy<T>? editPolicy;
 
   /// The day the list brings to its top; a shown day.
   final DateTime selectedDay;
@@ -650,19 +657,24 @@ class DayList<T> extends StatefulWidget {
   final DateTime today;
 
   /// The current time, which its owner sets again at the start of each
-  /// minute, and whose day's block marks it.
+  /// minute, and whose day's block marks it. The list asks [editPolicy] at
+  /// the [CalendarNow] of it and [today]: it follows a new minute on the
+  /// day of the minute it last took, building again in edit mode, and
+  /// takes a minute on another day at its next build, with that build's
+  /// [today].
   final ValueListenable<DateTime> now;
 
   /// A drag or a fling brought a new day under the list's top.
   final ValueChanged<DateTime> onTopDay;
 
   /// The add button of a gap was pressed: an item of one slot of
-  /// [slotMinutes] from the gap's first time the history lock leaves free,
-  /// or the first slot after it whose times the clock reads and that no
-  /// shown entry shares time with ([firstReadableSlot]), in the lock
-  /// boundary's occurrence where the day's clock repeats its time, so it
-  /// starts at the boundary or after. On a day whose clock repeats a
-  /// stretch, an entry can hold time in a gap it is not listed beside.
+  /// [slotMinutes] from the gap's first time the policy's earliest start
+  /// on its day leaves free, or the first slot after it whose times the
+  /// clock reads and that no shown entry shares time with
+  /// ([firstReadableSlot]), in that earliest start's occurrence where the
+  /// day's clock repeats its time, so it starts at the earliest start or
+  /// after. On a day whose clock repeats a stretch, an entry can hold time
+  /// in a gap it is not listed beside.
   final void Function(CreateRange range) onCreateRange;
 
   final void Function(String id) onEdit;
@@ -751,6 +763,22 @@ class _DayListState<T> extends State<DayList<T>> {
   /// The day [DayList.now] reads, whose block marks the current time.
   late DateTime _nowDay = dateOnly(widget.now.value);
 
+  /// The policy the list reads where [DayList.editPolicy] is null.
+  late final UnrestrictedEditPolicy<T> _unrestricted =
+      UnrestrictedEditPolicy<T>();
+
+  CalendarEditPolicy<T> get _policy {
+    return widget.editPolicy ?? _unrestricted;
+  }
+
+  /// The time the rows ask [_policy] at: [DayList.now] and [DayList.today]
+  /// as the list last took them, at a minute of the day it holds
+  /// ([_handleNow]) or in a build that changes either.
+  late CalendarNow _calendarNow = CalendarNow(
+    time: widget.now.value,
+    today: widget.today,
+  );
+
   @override
   void initState() {
     super.initState();
@@ -796,6 +824,11 @@ class _DayListState<T> extends State<DayList<T>> {
       widget.now.addListener(_handleNow);
       _nowDay = dateOnly(widget.now.value);
     }
+    final time = widget.now.value;
+    if (time != _calendarNow.time ||
+        dateOnly(widget.today) != _calendarNow.today) {
+      _calendarNow = CalendarNow(time: time, today: widget.today);
+    }
     if (widget.weekdays != oldWidget.weekdays) {
       _rebuildOn(widget.selectedDay);
       return;
@@ -832,13 +865,25 @@ class _DayListState<T> extends State<DayList<T>> {
   }
 
   /// Moves the marker of the current time to the block of a new day; the
-  /// markers follow the minutes themselves.
+  /// markers follow the minutes themselves. A new minute on the day of the
+  /// minute the list holds becomes [_calendarNow], and in edit mode builds
+  /// the rows again, which ask [_policy] at it; one on another day waits
+  /// for the build that comes with it, so it is never paired with the
+  /// last day's [DayList.today].
   void _handleNow() {
-    final day = dateOnly(widget.now.value);
+    final time = widget.now.value;
+    final day = dateOnly(time);
     if (day != _nowDay) {
       setState(() {
         _nowDay = day;
       });
+    }
+    if (time == _calendarNow.time || day != dateOnly(_calendarNow.time)) {
+      return;
+    }
+    _calendarNow = CalendarNow(time: time, today: widget.today);
+    if (widget.editable) {
+      setState(() {});
     }
   }
 
@@ -1318,17 +1363,22 @@ class _DayListState<T> extends State<DayList<T>> {
         throw ArgumentError.value(row, "row", "an item of another payload");
       case DayListGap(:final day, :final start, :final end):
         final slot = widget.slotMinutes;
-        final lock = widget.lock;
+        final earliest = _policy.earliestStartOn(day, _calendarNow);
         // A free slot whose times the clock reads must fit the gap, so a
         // gap shorter than a slot, as entries off the slot grid can leave,
         // or one the clock skips, offers no add.
         final shown = widget.store.entriesOn(day);
         final add = firstReadableSlot(
           day,
-          math.max(start, lock.earliestStartOn(day, slotMinutes: slot)),
+          math.max(
+            start,
+            earliestSlotMinuteOf(day, earliest, slotMinutes: slot),
+          ),
           end,
           slot,
-          occurrence: lock.boundary,
+          occurrence: earliest != null && earliest.isAfter(day)
+              ? earliest
+              : null,
           isFree: (start, end) {
             return !shown.any((other) {
               return rangeSharesTime(start, end, other.entry);
@@ -1495,7 +1545,8 @@ class _DayListState<T> extends State<DayList<T>> {
     }
     final pieceStart = row.first ? calendarEntry.start : row.day;
     final pieceEnd = row.last ? calendarEntry.end : addDays(row.day, 1);
-    final hold = widget.lock.holdOf(calendarEntry.start, calendarEntry.end);
+    final editable = widget.editable;
+    final now = _calendarNow;
     final styles = _styles;
     return Row(
       children: <Widget>[
@@ -1561,12 +1612,12 @@ class _DayListState<T> extends State<DayList<T>> {
             endsAt: inside && row.end > hours.end
                 ? hourLabel(row.end, widget.format)
                 : null,
-            onEdit: widget.editable && hold != EntryHold.locked
+            onEdit: editable && _policy.mayEdit(calendarEntry, now)
                 ? () {
                     widget.onEdit(entry.id);
                   }
                 : null,
-            onDelete: widget.editable && hold == EntryHold.free
+            onDelete: editable && _policy.mayDelete(calendarEntry, now)
                 ? () {
                     widget.onDelete(entry.id);
                   }

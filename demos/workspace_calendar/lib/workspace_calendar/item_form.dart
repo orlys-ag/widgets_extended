@@ -2,8 +2,8 @@
 /// read-only, and the delete confirmation.
 ///
 /// The form is generated from the item type's schema and checks its input
-/// with the same validator the API runs, and against the history lock,
-/// whose refusals [lockErrorsOf] keys as the form's fields, before it sends
+/// with the same validator the API runs, and against the calendar's edit
+/// policy, whose refusals [lockErrorsOf] keys as the form's fields, before it sends
 /// anything; the store holds its times to the calendar's hours, and the
 /// time fields offer the slot boundaries inside them.
 library;
@@ -12,7 +12,6 @@ import 'package:flutter/material.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
-import 'package:widgets_extended/calendar/policy/history_lock.dart';
 
 import 'calendar_api.dart';
 import 'calendar_api_source.dart';
@@ -22,14 +21,15 @@ import 'harbor_theme.dart';
 
 /// Asks for a type, then opens the form for a new item of it over the
 /// range [range] picked, with All day on for an all-day range, whose Save
-/// the history [lock] that holds then checks; its times step by
+/// [policy] checks at the time [now] reads then; its times step by
 /// [slotMinutes]. Completes when the flow closes, whether or not an item
 /// was created.
 Future<void> showCreateFlow(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
   required CreateRange range,
-  required ValueGetter<HistoryLock> lock,
+  required CalendarEditPolicy<ItemPayload> policy,
+  required ValueGetter<CalendarNow> now,
   int slotMinutes = defaultSlotMinutes,
 }) async {
   final type = await showDialog<CalendarItemType>(
@@ -72,21 +72,24 @@ Future<void> showCreateFlow(
     context,
     store: store,
     item: draft,
-    lock: lock,
+    policy: policy,
+    now: now,
     slotMinutes: slotMinutes,
   );
 }
 
-/// Opens the form for the stored item [id], whose Save the history [lock]
-/// that holds then checks, and whose times step by [slotMinutes]; of an
-/// item the lock has [EntryHold.started] the start date, the start time
-/// and All day take no input, and it has no Delete. Does nothing when the
-/// store does not hold it.
+/// Opens the form for the stored item [id], whose Save [policy] checks at
+/// the time [now] reads then, and whose times step by [slotMinutes]. Of an
+/// item [policy], when the form opens, lets neither move nor resize its
+/// start, the start date, the start time and All day take no input; and
+/// the form offers Delete only where [policy] then lets the item be
+/// deleted. Does nothing when the store does not hold it.
 Future<void> showEditForm(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
   required String id,
-  required ValueGetter<HistoryLock> lock,
+  required CalendarEditPolicy<ItemPayload> policy,
+  required ValueGetter<CalendarNow> now,
   int slotMinutes = defaultSlotMinutes,
 }) async {
   final item = store.storedEntry(id);
@@ -97,7 +100,8 @@ Future<void> showEditForm(
     context,
     store: store,
     item: item,
-    lock: lock,
+    policy: policy,
+    now: now,
     slotMinutes: slotMinutes,
   );
 }
@@ -145,34 +149,48 @@ Future<bool> confirmDelete(BuildContext context) async {
 }
 
 /// The item form's errors for [to], a change of the stored [from] or,
-/// where [from] is null, a new item, which [lock] refuses, keyed as
-/// `validateItemJson` keys them; empty where [lock] admits it.
-Map<String, String> lockErrorsOf(
-  HistoryLock lock,
-  ({DateTime start, DateTime end})? from,
+/// where [from] is null, a new item, which [policy] refuses at [now],
+/// keyed as `validateItemJson` keys them; empty where it admits it.
+///
+/// A change [CalendarEditPolicy.admitsChange] admits has none. Of a
+/// refused one, an item the policy does not let be edited is locked; of
+/// one it lets neither move nor resize its start, a moved start and an end
+/// it refuses with the start kept are each an error. Any other change, as
+/// a new item, starts on a day the policy gives no earliest start on, or
+/// before the earliest start it gives.
+Map<String, String> lockErrorsOf<T>(
+  CalendarEditPolicy<T> policy,
+  CalendarNow now,
+  CalendarEntry<T>? from,
   ({DateTime start, DateTime end}) to,
 ) {
-  final boundary = lock.boundary;
-  if (boundary == null ||
-      (from != null && lock.admits(from.start, from.end, to.start, to.end))) {
-    return const <String, String>{};
-  }
-  if (from == null || lock.holdOf(from.start, from.end) == EntryHold.free) {
-    if (!to.start.isBefore(boundary)) {
+  if (from != null) {
+    if (policy.admitsChange(from, to.start, to.end, now)) {
       return const <String, String>{};
     }
-    if (dayNumber(to.start) < dayNumber(boundary)) {
-      return const <String, String>{"start": "Past days are locked."};
+    if (!policy.mayEdit(from, now)) {
+      return const <String, String>{"start": "Past items are locked."};
     }
+    if (!policy.mayMove(from, now) &&
+        !policy.resizableEdges(from, now).hasStart) {
+      return <String, String>{
+        if (to.start != from.start)
+          "start": "An item in progress keeps its start.",
+        if (!policy.admitsChange(from, from.start, to.end, now))
+          "end": "The end can't be in the past.",
+      };
+    }
+  }
+  final day = dateOnly(to.start);
+  final earliest = policy.earliestStartOn(day, now);
+  // An earliest start on a later day leaves none on this one.
+  if (earliest == null || dayNumber(earliest) > dayNumber(day)) {
+    return const <String, String>{"start": "Past days are locked."};
+  }
+  if (to.start.isBefore(earliest)) {
     return const <String, String>{"start": "The start can't be in the past."};
   }
-  if (lock.holdOf(from.start, from.end) == EntryHold.locked) {
-    return const <String, String>{"start": "Past items are locked."};
-  }
-  return <String, String>{
-    if (to.start != from.start) "start": "An item in progress keeps its start.",
-    if (!to.end.isAfter(boundary)) "end": "The end can't be in the past.",
-  };
+  return const <String, String>{};
 }
 
 Future<void> _showForm(
@@ -180,7 +198,8 @@ Future<void> _showForm(
   required CalendarStore<ItemPayload> store,
   required CalendarItem item,
   bool readOnly = false,
-  ValueGetter<HistoryLock>? lock,
+  CalendarEditPolicy<ItemPayload>? policy,
+  ValueGetter<CalendarNow>? now,
   int slotMinutes = defaultSlotMinutes,
 }) {
   return showDialog<void>(
@@ -191,15 +210,17 @@ Future<void> _showForm(
         store: store,
         item: item,
         readOnly: readOnly,
-        lock: lock ?? _noLock,
+        policy: policy ?? const UnrestrictedEditPolicy<ItemPayload>(),
+        now: now ?? _clockNow,
         slotMinutes: slotMinutes,
       );
     },
   );
 }
 
-HistoryLock _noLock() {
-  return HistoryLock.none;
+CalendarNow _clockNow() {
+  final time = DateTime.now();
+  return CalendarNow(time: time, today: time);
 }
 
 /// The form for [item]: a draft when its id is null, which Save creates,
@@ -210,7 +231,8 @@ class _ItemForm extends StatefulWidget {
     required this.store,
     required this.item,
     required this.readOnly,
-    required this.lock,
+    required this.policy,
+    required this.now,
     required this.slotMinutes,
   });
 
@@ -223,9 +245,13 @@ class _ItemForm extends StatefulWidget {
   /// Whether every control is disabled and Close is the one action.
   final bool readOnly;
 
-  /// The history lock at the moment it is read: when the form opens, for
-  /// what it takes input in, and at Save, which it refuses to break.
-  final ValueGetter<HistoryLock> lock;
+  /// The edit policy, asked when the form opens, for what it takes input
+  /// in and whether it offers Delete, and at Save, which it refuses to
+  /// break.
+  final CalendarEditPolicy<ItemPayload> policy;
+
+  /// The time [policy] is asked at, read at each ask.
+  final ValueGetter<CalendarNow> now;
 
   @override
   State<_ItemForm> createState() {
@@ -257,12 +283,17 @@ class _ItemFormState extends State<_ItemForm> {
   /// start of the day after [_endDate], and the time fields hide.
   late bool _allDay = widget.item.isAllDay;
 
-  /// How the history lock held the stored item when the form opened, free
-  /// for a draft. Of a started one the start date, the start time and All
-  /// day take no input.
-  late final EntryHold _hold = widget.item.id == null
-      ? EntryHold.free
-      : widget.lock().holdOf(widget.item.start, widget.item.end);
+  /// Whether the policy, when the form opened, let the stored item neither
+  /// move nor resize its start, so its start date, its start time and All
+  /// day take no input; false for a draft and read-only.
+  late final bool _startFixed = _fixesStart();
+
+  /// Whether the form offers Delete: of a stored item the policy, when the
+  /// form opened, let be deleted, where the form is not read-only.
+  late final bool _deletable =
+      !_isDraft &&
+      !widget.readOnly &&
+      widget.policy.mayDelete(widget.item, widget.now());
 
   /// The text controllers of the schema's text, URL, long-text and text
   /// list fields, by key.
@@ -288,6 +319,15 @@ class _ItemFormState extends State<_ItemForm> {
 
   bool get _isDraft {
     return widget.item.id == null;
+  }
+
+  bool _fixesStart() {
+    if (_isDraft || widget.readOnly) {
+      return false;
+    }
+    final now = widget.now();
+    return !widget.policy.mayMove(widget.item, now) &&
+        !widget.policy.resizableEdges(widget.item, now).hasStart;
   }
 
   TypeSchema get _schema {
@@ -385,7 +425,7 @@ class _ItemFormState extends State<_ItemForm> {
   }
 
   /// Validates and sends. Nothing is sent while a field breaks a rule, or
-  /// the item breaks the history lock; the form stays open, with every
+  /// the item breaks the edit policy; the form stays open, with every
   /// control disabled, until the API answers, and closes on success.
   Future<void> _save() async {
     if (_saving) {
@@ -395,9 +435,10 @@ class _ItemFormState extends State<_ItemForm> {
     var errors = validateItemJson(json);
     if (errors.isEmpty) {
       final to = itemFromJson(json);
-      errors = lockErrorsOf(
-        widget.lock(),
-        _isDraft ? null : (start: widget.item.start, end: widget.item.end),
+      errors = lockErrorsOf<ItemPayload>(
+        widget.policy,
+        widget.now(),
+        _isDraft ? null : widget.item,
         (start: to.start, end: to.end),
       );
     }
@@ -613,7 +654,7 @@ class _ItemFormState extends State<_ItemForm> {
     final style = harborTypeStyleOf(type);
     final message = _message;
     final hours = widget.store.hours;
-    final started = _hold == EntryHold.started;
+    final started = _startFixed;
     final fields = <Widget>[
       Row(
         children: <Widget>[
@@ -767,9 +808,7 @@ class _ItemFormState extends State<_ItemForm> {
                         },
                         child: const Text("Close"),
                       ),
-                    if (!_isDraft &&
-                        !widget.readOnly &&
-                        _hold == EntryHold.free)
+                    if (_deletable)
                       TextButton(
                         onPressed: _saving ? null : _delete,
                         child: const Text("Delete"),
