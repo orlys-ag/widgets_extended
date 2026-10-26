@@ -1957,7 +1957,7 @@ void main() {
     expect(find.byType(DayList<String>), findsOneWidget);
   });
 
-  testWidgets("CV42 every view shows the store's hours, and a set of them "
+  testWidgets("CV45 every view shows the store's hours, and a set of them "
       "reaches the view shown", (tester) async {
     const office = DayHours(8 * 60, 18 * 60);
     const late = DayHours(10 * 60, 20 * 60);
@@ -2000,7 +2000,7 @@ void main() {
     );
   });
 
-  testWidgets("CV43 a store notify that keeps the hours builds the calendar "
+  testWidgets("CV46 a store notify that keeps the hours builds the calendar "
       "nothing again, and a set of other hours builds it once", (tester) async {
     final memory = MemoryCalendarStore<String>();
     addTearDown(memory.dispose);
@@ -2029,7 +2029,7 @@ void main() {
     expect(headers, built + 1);
   });
 
-  testWidgets("CV44 a new store's hours show and its sets reach the "
+  testWidgets("CV47 a new store's hours show and its sets reach the "
       "calendar, and once the calendar leaves, a set of either store's "
       "hours reaches it no more", (tester) async {
     const office = DayHours(8 * 60, 18 * 60);
