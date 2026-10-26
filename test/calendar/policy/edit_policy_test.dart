@@ -437,5 +437,18 @@ void main() {
         ]).mayMove(entry, now);
       }, throwsA(isA<StateError>()));
     });
+
+    test("EP11 two of the same policies under other type arguments are "
+        "unequal either way round", () {
+      const member = UnrestrictedEditPolicy<String>();
+      final ofObjects = CalendarEditPolicy<Object>.all(
+        <CalendarEditPolicy<Object>>[member],
+      );
+      final ofStrings = CalendarEditPolicy<String>.all(
+        <CalendarEditPolicy<String>>[member],
+      );
+      expect(ofObjects, isNot(ofStrings));
+      expect(ofStrings, isNot(ofObjects));
+    });
   });
 }

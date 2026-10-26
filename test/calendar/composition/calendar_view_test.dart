@@ -2066,6 +2066,40 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets("CV50 after a store swap, a notify of the new store that keeps "
+      "its hours builds the calendar nothing again", (tester) async {
+    final first = MemoryCalendarStore<String>();
+    addTearDown(first.dispose);
+    final second = MemoryCalendarStore<String>(
+      hours: const DayHours(8 * 60, 18 * 60),
+    );
+    addTearDown(second.dispose);
+    var headers = 0;
+    Widget calendar(CalendarStore<String> store) {
+      return app(
+        CalendarView<String>(
+          store: store,
+          clock: fixedClock,
+          headerBuilder: (context, details) {
+            headers++;
+            return const SizedBox(height: 40.0);
+          },
+        ),
+      );
+    }
+
+    await tester.pumpWidget(calendar(first));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(calendar(second));
+    await tester.pumpAndSettle();
+    final built = headers;
+    await second.create(entryOf("talk", tuesday, 10 * 60, 11 * 60));
+    await tester.pumpAndSettle();
+    // Setup sanity: the create's notify reached Agenda's list.
+    expect(find.text("talk"), findsOneWidget);
+    expect(headers, built);
+  });
+
   testWidgets("CV29 Month's long press at slot 30 reports a 30-minute range "
       "at the first free 30-minute slot", (tester) async {
     final memory = MemoryCalendarStore<String>(

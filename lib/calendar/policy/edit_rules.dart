@@ -17,8 +17,13 @@ import 'overlap.dart';
 /// create on [day] reads from that answer.
 @immutable
 class CalendarEarliestStart {
-  /// The start [earliest] that a policy gave [day], a day's start.
-  const CalendarEarliestStart(this.day, this.earliest);
+  /// The start [earliest] that a policy gave [day], a day's start; a
+  /// [day] that is not one fails an assertion in a debug build.
+  CalendarEarliestStart(this.day, this.earliest)
+    : assert(
+        isDayStart(day),
+        "An earliest start's day, $day, is not a day's start.",
+      );
 
   /// The day the answer is for, a day's start.
   final DateTime day;
@@ -117,7 +122,8 @@ class CalendarEarliestStart {
 /// `slotMinutes`; a host that makes rules of the same three gets the
 /// answers the calendar gives.
 ///
-/// Two compare equal where their policies, hours and slot lengths do.
+/// Two compare equal where their type arguments, policies, hours and slot
+/// lengths do.
 @immutable
 class CalendarEditRules<T> {
   /// The rules of [policy] in [hours] and slots of [slotMinutes], reading
@@ -264,6 +270,10 @@ class CalendarEditRules<T> {
   /// ([CalendarEarliestStart.occurrence]), and that shares no time
   /// ([rangeSharesTime]) with any of [clearOf]; null where none does, as
   /// on a day [start] closes. [from] and [until] are minutes of the day.
+  ///
+  /// A slot is [slotMinutes] of wall-clock time ([timeAtWallMinute]), so
+  /// on a day whose clock repeats a stretch, one from the stretch's first
+  /// pass to a time after it lasts that stretch longer.
   ({DateTime start, DateTime end})? firstSlot(
     CalendarEarliestStart start, {
     Iterable<CalendarEntry<T>> clearOf = const <Never>[],
@@ -289,7 +299,8 @@ class CalendarEditRules<T> {
 
   @override
   bool operator ==(Object other) {
-    return other is CalendarEditRules<T> &&
+    return other.runtimeType == runtimeType &&
+        other is CalendarEditRules<T> &&
         other.policy == policy &&
         other.hours == hours &&
         other.slotMinutes == slotMinutes;

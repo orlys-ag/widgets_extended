@@ -389,6 +389,30 @@ void main() {
     );
   });
 
+  test("ER10 rules of the same policy, hours and slots under other type "
+      "arguments are unequal either way round", () {
+    const policy = UnrestrictedEditPolicy<String>();
+    final ofObjects = CalendarEditRules<Object>(
+      policy: policy,
+      hours: office,
+      slotMinutes: 15,
+    );
+    final ofStrings = CalendarEditRules<String>(
+      policy: policy,
+      hours: office,
+      slotMinutes: 15,
+    );
+    expect(ofObjects, isNot(ofStrings));
+    expect(ofStrings, isNot(ofObjects));
+  });
+
+  test("ER11 an earliest start's day is a day's start", () {
+    expect(() {
+      return CalendarEarliestStart(at(tuesday, 12), at(tuesday, 9));
+    }, throwsAssertionError);
+    expect(CalendarEarliestStart(tuesday, at(tuesday, 9)).day, tuesday);
+  });
+
   group("on the 23-hour day", skip: shortDaySkip, () {
     test("ER8 hours wholly inside the skipped hour hold no slot", () {
       final day = shortDayStart;

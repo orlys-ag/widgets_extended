@@ -128,7 +128,8 @@ abstract class CalendarEditPolicy<T> {
   /// its own: at a refusal, at no edge left that every policy asked gives,
   /// or at a null earliest start; so a later policy is not asked. An
   /// answer that throws throws out of it. It holds a copy of [policies], and
-  /// compares equal to another of equal policies in the same order.
+  /// compares equal to another of the same type argument and of equal
+  /// policies in the same order.
   factory CalendarEditPolicy.all(Iterable<CalendarEditPolicy<T>> policies) {
     return _AllEditPolicies<T>(
       List<CalendarEditPolicy<T>>.unmodifiable(policies),
@@ -335,7 +336,9 @@ class _AllEditPolicies<T> extends CalendarEditPolicy<T> {
 
   @override
   bool operator ==(Object other) {
-    return other is _AllEditPolicies<T> && listEquals(other.policies, policies);
+    return other.runtimeType == runtimeType &&
+        other is _AllEditPolicies<T> &&
+        listEquals(other.policies, policies);
   }
 
   @override

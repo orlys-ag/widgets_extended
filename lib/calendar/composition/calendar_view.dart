@@ -125,9 +125,10 @@ class CalendarEntryTapDetails<T> {
 ///   opens that day in Day where [views] lists Day, and otherwise selects
 ///   it. In edit mode a long press on a day reports a create through
 ///   [onCreateRange] at the day's first free slot from the earliest start
-///   [editPolicy] gives it ([CalendarEditPolicy.earliestStartOn]),
-///   selecting the day when it is in the month, or, where that start
-///   leaves no slot of the store's hours that day, [onCreateRefused].
+///   [editPolicy] gives it ([CalendarEditPolicy.earliestStartOn]), or
+///   where none is free, at its first slot from that start, over an
+///   entry, selecting the day when it is in the month; or, where that
+///   start leaves no slot of the store's hours that day, [onCreateRefused].
 ///
 /// An entry runs from its start to its end ([CalendarEntry]): Week and Day
 /// draw a timed entry as one block per shown day it covers, at its exact
@@ -272,10 +273,11 @@ class CalendarView<T> extends StatefulWidget {
   /// over free ones, the blocks sharing a day's time side by side; where
   /// it is false none gives times that another timed entry shares, and a
   /// move dropped onto another entry's time lands at the nearest free time
-  /// or goes back. Month's long press and Agenda's add buttons create at a
-  /// free slot under either answer. The calendar checks no write of the
-  /// host's, and [store] refuses none for sharing time: a host whose data
-  /// forbids it refuses the write in its data source.
+  /// or goes back. Under either answer Agenda's add buttons create at a
+  /// free slot, and Month's long press does where one is left. The
+  /// calendar checks no write of the host's, and [store] refuses none for
+  /// sharing time: a host whose data forbids it refuses the write in its
+  /// data source.
   ///
   /// A policy not `==` to the last one given cancels a move or a resize in
   /// flight, which then writes nothing, and ends a create range in flight,
