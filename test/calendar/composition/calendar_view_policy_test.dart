@@ -559,6 +559,7 @@ void main() {
     expect(host.creates.last.start.isBefore(at(thursday, 10)), isFalse);
 
     // Agenda.
+    final addsBefore = host.adds.length;
     host.controller.selectedDay = tuesday;
     host.controller.view = CalendarViewKind.agenda;
     await tester.pumpAndSettle();
@@ -566,11 +567,10 @@ void main() {
     expect(host.cards["B"]!.onEdit, isNotNull);
     expect(host.cards["D"]!.onDelete, isNull);
     expect(host.cards["B"]!.onDelete, isNotNull);
-    host.adds.clear();
     host.controller.selectedDay = thursday;
     await tester.pumpAndSettle();
     final thursdayAdds = <int>[
-      for (final add in host.adds)
+      for (final add in host.adds.sublist(addsBefore))
         if (dayNumber(add.day) == dayNumber(thursday)) add.startMinute,
     ];
     // Setup sanity: Thursday's gap rows built their buttons.

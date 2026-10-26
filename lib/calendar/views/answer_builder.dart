@@ -7,7 +7,7 @@ import 'package:flutter/widgets.dart';
 
 /// Builds [builder] from what [answer] gives, and at each notify of any of
 /// [listenables] reads [answer] again and builds again only where the new
-/// answer is not `==` to the last.
+/// answer is not the same as the last, by [equals] or `==`.
 ///
 /// For what a view shows of answers that most notifies leave as they are,
 /// such as an edit policy's at a new minute: unlike a [ListenableBuilder],
@@ -21,6 +21,7 @@ class AnswerBuilder<A> extends StatefulWidget {
     super.key,
     required this.listenables,
     required this.answer,
+    this.equals,
     required this.builder,
     this.child,
   });
@@ -31,6 +32,10 @@ class AnswerBuilder<A> extends StatefulWidget {
   /// The answer [builder] builds from, read when the state starts, at each
   /// new widget and at each notify.
   final A Function() answer;
+
+  /// Whether two answers are the same, as [listEquals] is for a list; `==`
+  /// where null.
+  final bool Function(A a, A b)? equals;
 
   /// Builds from the last answer, with [child].
   final Widget Function(BuildContext context, A answer, Widget? child) builder;
@@ -79,7 +84,8 @@ class _AnswerBuilderState<A> extends State<AnswerBuilder<A>> {
 
   void _handleChange() {
     final answer = widget.answer();
-    if (answer != _answer) {
+    final equals = widget.equals;
+    if (!(equals == null ? answer == _answer : equals(answer, _answer))) {
       setState(() {
         _answer = answer;
       });

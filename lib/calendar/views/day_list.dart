@@ -248,12 +248,11 @@ sealed class DayListRow {
 }
 
 /// The header of [day]: a root of the list, whose one child is the day's
-/// [DayListBody].
+/// [DayListBody]. Neither holds what its row shows, which the row reads
+/// from the store as it builds and again at each change the store
+/// notifies, so a write leaves the tree's items as they are.
 final class DayListHeader extends DayListRow {
-  const DayListHeader(super.day, {required this.count});
-
-  /// How many items [day] shows, or null while it is not read.
-  final int? count;
+  const DayListHeader(super.day);
 
   @override
   String get key {
@@ -267,30 +266,27 @@ final class DayListHeader extends DayListRow {
 
   @override
   bool operator ==(Object other) {
-    return other is DayListHeader && other.day == day && other.count == count;
+    return other is DayListHeader && other.day == day;
   }
 
   @override
   int get hashCode {
-    return Object.hash(day, count);
+    return day.hashCode;
   }
 
   @override
   String toString() {
-    return "DayListHeader(${isoDate(day)}, $count)";
+    return "DayListHeader(${isoDate(day)})";
   }
 }
 
-/// The block under [day]'s header, which holds the day's [rows]. One row
-/// per day, so a change to the day changes this row's height and nothing
-/// of the tree's structure, and the tree keeps a row above its viewport
-/// that changes height from moving the rows it shows.
+/// The block under [day]'s header, which shows the day's rows:
+/// [dayListRowsOf] its items, or one [DayListLoading] or [DayListFailed].
+/// One row per day, so a change to the day changes this row's height and
+/// nothing of the tree's structure, and the tree keeps a row above its
+/// viewport that changes height from moving the rows it shows.
 final class DayListBody extends DayListRow {
-  const DayListBody(super.day, {required this.rows});
-
-  /// The day's rows: [dayListRowsOf] its items, or one [DayListLoading] or
-  /// [DayListFailed].
-  final List<DayListRow> rows;
+  const DayListBody(super.day);
 
   @override
   String get key {
@@ -299,19 +295,17 @@ final class DayListBody extends DayListRow {
 
   @override
   bool operator ==(Object other) {
-    return other is DayListBody &&
-        other.day == day &&
-        listEquals(other.rows, rows);
+    return other is DayListBody && other.day == day;
   }
 
   @override
   int get hashCode {
-    return Object.hash(day, Object.hashAll(rows));
+    return day.hashCode;
   }
 
   @override
   String toString() {
-    return "DayListBody(${isoDate(day)}, $rows)";
+    return "DayListBody(${isoDate(day)})";
   }
 }
 
@@ -708,9 +702,10 @@ class DayList<T> extends StatefulWidget {
   }
 }
 
-/// The time a [DayList]'s rows ask its policy at. A new minute [tick]
-/// takes notifies the rows that listen. A time [take] takes in a build of
-/// the list notifies nothing: that build hands the list's sliver a new
+/// The time a [DayList]'s rows ask its policy at. A time [askAgain] takes,
+/// at a new minute or with a new policy, notifies the rows that listen,
+/// which ask again. A time [take] takes in a build of the list that makes
+/// a new tree notifies nothing: that build hands the list's sliver a new
 /// item builder, which queues every row it holds to build again
 /// (`SliverTreeElement.update`), and each row reads [value] as it builds.
 class _RowsNow extends ChangeNotifier {
@@ -726,7 +721,7 @@ class _RowsNow extends ChangeNotifier {
     _value = value;
   }
 
-  void tick(CalendarNow value) {
+  void askAgain(CalendarNow value) {
     _value = value;
     notifyListeners();
   }
@@ -753,10 +748,30 @@ class _DayListState<T> extends State<DayList<T>> {
   /// The tree's controller, once the tree of [_generation] made it.
   TreeController<String, DayListRow>? _tree;
 
+  /// A header and a body for each day the list holds.
   late List<DayListRow> _rows;
 
   /// [_rows] by key.
   Map<String, DayListRow> _rowsByKey = <String, DayListRow>{};
+
+  /// The tree the last build made, which a build hands on as it is while
+  /// [_treeStands], so the rows build again only where they change.
+  Widget? _treeWidget;
+
+  /// The widget, the rows and the day of [_nowDay] [_treeWidget] was made
+  /// with, or none once a change of the dependencies or a reassemble drops
+  /// it.
+  DayList<T>? _treeMadeFor;
+  List<DayListRow>? _treeRows;
+  DateTime? _treeNowDay;
+
+  /// A time a build of the widget took, which the build hands the rows
+  /// ([_askRowsAgain]).
+  CalendarNow? _pendingNow;
+
+  /// Whether a build of the widget took a policy not `==` to the last,
+  /// which the build has the rows ask again ([_askRowsAgain]).
+  bool _policyChanged = false;
 
   /// Whether a frame will read the weeks of the days the list holds built.
   bool _prefetchScheduled = false;
@@ -798,9 +813,10 @@ class _DayListState<T> extends State<DayList<T>> {
 
   /// The time the rows ask [_policy] at: [DayList.now] and [DayList.today]
   /// as the list last took them, at a minute of the day it holds
-  /// ([_handleNow]) or in a build that changes either. The rows that show
-  /// an answer listen to it, each asking again and building again only
-  /// where its own answer changes.
+  /// ([_handleNow]) or in a build that changes either ([_askRowsAgain]).
+  /// The rows that show an answer listen to it, each asking again, at a
+  /// new time or a new policy, and building again only where its own
+  /// answer changes.
   late final _RowsNow _calendarNow = _RowsNow(
     CalendarNow(time: widget.now.value, today: widget.today),
   );
@@ -815,15 +831,16 @@ class _DayListState<T> extends State<DayList<T>> {
     );
     _centreOn(widget.selectedDay);
     _scroll = ScrollController(initialScrollOffset: _offsetOf(_topDay));
-    widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
     _scheduleLanding();
   }
 
+  /// Drops [_treeWidget], as every row may read what changed.
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _styles = _ListStyles.of(context);
+    _treeMadeFor = null;
   }
 
   @override
@@ -831,6 +848,7 @@ class _DayListState<T> extends State<DayList<T>> {
     _ListStyles._reset();
     super.reassemble();
     _styles = _ListStyles.of(context);
+    _treeMadeFor = null;
   }
 
   @override
@@ -841,10 +859,6 @@ class _DayListState<T> extends State<DayList<T>> {
       "A DayList's slotMinutes, ${widget.slotMinutes}, is not one of "
       "$slotMinuteChoices.",
     );
-    if (widget.store != oldWidget.store) {
-      oldWidget.store.removeListener(_handleStore);
-      widget.store.addListener(_handleStore);
-    }
     if (widget.now != oldWidget.now) {
       oldWidget.now.removeListener(_handleNow);
       widget.now.addListener(_handleNow);
@@ -853,16 +867,14 @@ class _DayListState<T> extends State<DayList<T>> {
     final time = widget.now.value;
     if (time != _calendarNow.value.time ||
         dateOnly(widget.today) != _calendarNow.value.today) {
-      _calendarNow.take(CalendarNow(time: time, today: widget.today));
+      _pendingNow = CalendarNow(time: time, today: widget.today);
+    }
+    if (widget.editPolicy != oldWidget.editPolicy) {
+      _policyChanged = true;
     }
     if (widget.weekdays != oldWidget.weekdays) {
       _rebuildOn(widget.selectedDay);
       return;
-    }
-    if (widget.store != oldWidget.store ||
-        widget.hours != oldWidget.hours ||
-        widget.editable != oldWidget.editable) {
-      _rows = _rowsOf();
     }
     final day = widget.selectedDay;
     if (day != oldWidget.selectedDay && day != _topDay) {
@@ -878,17 +890,10 @@ class _DayListState<T> extends State<DayList<T>> {
 
   @override
   void dispose() {
-    widget.store.removeListener(_handleStore);
     widget.now.removeListener(_handleNow);
     _calendarNow.dispose();
     _scroll.dispose();
     super.dispose();
-  }
-
-  void _handleStore() {
-    setState(() {
-      _rows = _rowsOf();
-    });
   }
 
   /// Moves the marker of the current time to the block of a new day; the
@@ -909,10 +914,10 @@ class _DayListState<T> extends State<DayList<T>> {
     if (time == held || day != dateOnly(held)) {
       return;
     }
-    _calendarNow.tick(CalendarNow(time: time, today: widget.today));
+    _calendarNow.askAgain(CalendarNow(time: time, today: widget.today));
   }
 
-  /// Holds the days around [day] and builds their rows.
+  /// Holds the days around [day] and makes their rows.
   void _centreOn(DateTime day) {
     final number = dayNumber(day);
     _first = number - dayListWindowDays;
@@ -994,47 +999,45 @@ class _DayListState<T> extends State<DayList<T>> {
     return math.max(index, 0) * TreeController.defaultExtent;
   }
 
+  /// A header and a body for each day from [_first] to [_last] that
+  /// [DayList.weekdays] shows; writes [_rowsByKey].
   List<DayListRow> _rowsOf() {
-    final rows = _buildRows();
-    _rowsByKey = <String, DayListRow>{for (final row in rows) row.key: row};
-    return rows;
-  }
-
-  List<DayListRow> _buildRows() {
-    final store = widget.store;
     final rows = <DayListRow>[];
     for (var number = _first; number <= _last; number++) {
       if (!widget.weekdays.containsDay(number)) {
         continue;
       }
       final day = dateOfDayNumber(number);
-      if (!store.isRead(day)) {
-        rows.add(DayListHeader(day, count: null));
-        rows.add(
-          DayListBody(
-            day,
-            rows: <DayListRow>[
-              store.readFailed(day) ? DayListFailed(day) : DayListLoading(day),
-            ],
-          ),
-        );
-        continue;
-      }
-      final entries = store.entriesOn(day);
-      rows.add(DayListHeader(day, count: entries.length));
-      rows.add(
-        DayListBody(
-          day,
-          rows: dayListRowsOf(
-            day,
-            entries,
-            widget.hours,
-            editable: widget.editable,
-          ),
-        ),
-      );
+      rows.add(DayListHeader(day));
+      rows.add(DayListBody(day));
     }
+    _rowsByKey = <String, DayListRow>{for (final row in rows) row.key: row};
     return rows;
+  }
+
+  /// How many items [day]'s header counts as the store holds the day, or
+  /// null while the day is not read.
+  int? _countOf(DateTime day) {
+    final store = widget.store;
+    return store.isRead(day) ? store.entriesOn(day).length : null;
+  }
+
+  /// The rows of [day]'s block as the store holds the day: its items' rows
+  /// ([dayListRowsOf]) once it is read, and until then a loading row, or a
+  /// failed row where its read failed.
+  List<DayListRow> _blockRowsOf(DateTime day) {
+    final store = widget.store;
+    if (!store.isRead(day)) {
+      return <DayListRow>[
+        store.readFailed(day) ? DayListFailed(day) : DayListLoading(day),
+      ];
+    }
+    return dayListRowsOf(
+      day,
+      store.entriesOn(day),
+      widget.hours,
+      editable: widget.editable,
+    );
   }
 
   /// Scrolls [day]'s header to the list's top, animating over the theme's
@@ -1112,9 +1115,9 @@ class _DayListState<T> extends State<DayList<T>> {
     switch (row) {
       case DayListHeader():
         return _headerExtent;
-      case DayListBody(:final rows):
+      case DayListBody(:final day):
         var extent = 0.0;
-        for (final shown in rows) {
+        for (final shown in _blockRowsOf(day)) {
           extent += _blockRowExtent(shown);
         }
         return extent;
@@ -1305,75 +1308,156 @@ class _DayListState<T> extends State<DayList<T>> {
 
   @override
   Widget build(BuildContext context) {
+    var tree = _treeWidget;
+    final fresh = tree == null || !_treeStands();
+    if (fresh) {
+      tree = _treeWidget = _buildTree();
+      _treeMadeFor = widget;
+      _treeRows = _rows;
+      _treeNowDay = _nowDay;
+    }
+    _askRowsAgain(fresh: fresh);
     final Widget list = NotificationListener<ScrollNotification>(
       onNotification: _handleScroll,
       child: CustomScrollView(
         key: ValueKey<int>(_generation),
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        slivers: <Widget>[
-          // Each row takes the list's whole width and keeps its content
-          // [dayListGutter] in from either side, so a header's background
-          // and the marker of the current time reach the list's edges.
-          SyncedSliverTree<String, DayListRow>.flat(
-            items: _rows,
-            keyOf: (row) {
-              return row.key;
-            },
-            parentOf: (row) {
-              return row is DayListHeader
-                  ? null
-                  : DayListHeader.headerKeyOf(row.day);
-            },
-            maxStickyDepth: 1,
-            animationStyle: _styles.treeStyle,
-            onControllerCreated: (controller) {
-              _tree = controller;
-            },
-            itemBuilder: (context, node) {
-              final row = node.item;
-              return _DayMarker(
-                day: row.day,
-                markers: _markers,
-                onMount: _schedulePrefetch,
-                child: _buildRow(row),
-              );
-            },
-          ),
-        ],
+        slivers: <Widget>[tree],
       ),
     );
     return Opacity(opacity: _landing ? 0.0 : 1.0, child: list);
   }
 
+  /// Whether [_treeWidget] still stands: whether nothing its rows read,
+  /// past their day in the store, the policy and the time, which reach
+  /// them through their own listeners, has changed since a build made it.
+  /// The store, the clock and the builders compare by identity, since a
+  /// builder `==` to the last, as a tear-off of the same method is, can
+  /// read what changed; the rest by `==`.
+  bool _treeStands() {
+    final made = _treeMadeFor;
+    if (made == null) {
+      return false;
+    }
+    final current = widget;
+    return identical(_treeRows, _rows) &&
+        _treeNowDay == _nowDay &&
+        identical(made.store, current.store) &&
+        identical(made.now, current.now) &&
+        identical(made.cardBuilder, current.cardBuilder) &&
+        identical(made.addButtonBuilder, current.addButtonBuilder) &&
+        identical(made.loadingBuilder, current.loadingBuilder) &&
+        identical(made.failureBuilder, current.failureBuilder) &&
+        made.format == current.format &&
+        made.hours == current.hours &&
+        made.slotMinutes == current.slotMinutes &&
+        made.editable == current.editable &&
+        dateOnly(made.today) == dateOnly(current.today);
+  }
+
+  /// Hands the rows the time and the policy a build took: silently where
+  /// the build made a new tree, whose rows each read them as they build
+  /// again, and otherwise through [_calendarNow], whose rows ask again.
+  void _askRowsAgain({required bool fresh}) {
+    final pending = _pendingNow;
+    if (pending == null && !_policyChanged) {
+      return;
+    }
+    _pendingNow = null;
+    _policyChanged = false;
+    final now = pending ?? _calendarNow.value;
+    if (fresh) {
+      _calendarNow.take(now);
+    } else {
+      _calendarNow.askAgain(now);
+    }
+  }
+
+  /// The tree of the days' headers and bodies.
+  Widget _buildTree() {
+    // Each row takes the list's whole width and keeps its content
+    // [dayListGutter] in from either side, so a header's background and
+    // the marker of the current time reach the list's edges.
+    return SyncedSliverTree<String, DayListRow>.flat(
+      items: _rows,
+      keyOf: (row) {
+        return row.key;
+      },
+      parentOf: (row) {
+        return row is DayListHeader ? null : DayListHeader.headerKeyOf(row.day);
+      },
+      maxStickyDepth: 1,
+      animationStyle: _styles.treeStyle,
+      onControllerCreated: (controller) {
+        _tree = controller;
+      },
+      itemBuilder: (context, node) {
+        final row = node.item;
+        return _DayMarker(
+          day: row.day,
+          markers: _markers,
+          onMount: _schedulePrefetch,
+          child: _buildRow(row),
+        );
+      },
+    );
+  }
+
+  /// The row of [row], a header or a body, which reads its day from the
+  /// store as it builds and builds again where a change the store notifies
+  /// changes what it shows of the day.
   Widget _buildRow(DayListRow row) {
     switch (row) {
-      case DayListHeader():
-        return _buildHeader(row);
-      case DayListBody(:final day, :final rows):
-        if (day != _nowDay) {
-          return _AnimatedRows(rows: rows, builder: _buildDayRow);
-        }
-        final spans = _NowSpan.spansOf(rows, widget.hours);
-        return _AnimatedRows(
-          rows: rows,
-          builder: _buildDayRow,
-          overlayOf: (row) {
-            final span = spans[row.key];
-            if (span == null) {
-              return null;
-            }
-            return _NowMarker(
-              now: widget.now,
-              span: span,
-              hours: widget.hours,
-              format: widget.format,
-            );
+      case DayListHeader(:final day):
+        return AnswerBuilder<int?>(
+          listenables: <Listenable>[widget.store],
+          answer: () {
+            return _countOf(day);
+          },
+          builder: (context, count, child) {
+            return _buildHeader(day, count);
+          },
+        );
+      case DayListBody(:final day):
+        return AnswerBuilder<List<DayListRow>>(
+          listenables: <Listenable>[widget.store],
+          answer: () {
+            return _blockRowsOf(day);
+          },
+          equals: listEquals,
+          builder: (context, rows, child) {
+            return _buildBody(day, rows);
           },
         );
       default:
-        return _buildDayRow(row);
+        throw ArgumentError.value(row, "row", "not a row of the tree");
     }
+  }
+
+  /// The block of [day]'s [rows], over which, on the day [DayList.now]
+  /// reads, lies the marker of the current time.
+  Widget _buildBody(DateTime day, List<DayListRow> rows) {
+    if (day != _nowDay) {
+      return _AnimatedRows(rows: rows, builder: _buildDayRow);
+    }
+    final spans = _NowSpan.spansOf(rows, widget.hours);
+    return _AnimatedRows(
+      rows: rows,
+      builder: _buildDayRow,
+      overlayOf: (row) {
+        final span = spans[row.key];
+        if (span == null) {
+          return null;
+        }
+        return _NowMarker(
+          now: widget.now,
+          span: span,
+          hours: widget.hours,
+          format: widget.format,
+        );
+      },
+    );
   }
 
   /// The slot the add of [day]'s gap from [start] to [end] takes: the
@@ -1478,8 +1562,14 @@ class _DayListState<T> extends State<DayList<T>> {
           ConstrainedBox(
             key: dayListFailedKey(day),
             constraints: const BoxConstraints(minHeight: _failedRowExtent),
-            child: Builder(
-              builder: (context) {
+            // Built again where the store's load error changes, which the
+            // day's body does not hold.
+            child: AnswerBuilder<Object?>(
+              listenables: <Listenable>[widget.store],
+              answer: () {
+                return widget.store.loadError;
+              },
+              builder: (context, error, child) {
                 // A day a prefetch failed to read, while the shown range is
                 // ready, has no load error.
                 return failure(
@@ -1488,7 +1578,7 @@ class _DayListState<T> extends State<DayList<T>> {
                     site: CalendarStateSite.dayRow,
                     first: day,
                     last: day,
-                    error: widget.store.loadError,
+                    error: error,
                     retry: _retry,
                   ),
                 );
@@ -1511,16 +1601,16 @@ class _DayListState<T> extends State<DayList<T>> {
     );
   }
 
-  /// The day's title and how many items it shows, on the background
-  /// colour, so the rows scrolling under it while it sticks stay hidden. A
-  /// day read to hold no items has both in their own styles, muted, on a
-  /// line as tall as a busy day's title takes, so its header is as tall.
-  Widget _buildHeader(DayListHeader row) {
-    final count = row.count;
+  /// [day]'s title and the [count] of items it shows, none while the day
+  /// is not read, on the background colour, so the rows scrolling under it
+  /// while it sticks stay hidden. A day read to hold no items has both in
+  /// their own styles, muted, on a line as tall as a busy day's title
+  /// takes, so its header is as tall.
+  Widget _buildHeader(DateTime day, int? count) {
     final empty = count == 0;
     final styles = _styles;
     return ColoredBox(
-      key: dayListHeaderKey(row.day),
+      key: dayListHeaderKey(day),
       color: styles.theme.background,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
@@ -1533,7 +1623,7 @@ class _DayListState<T> extends State<DayList<T>> {
           children: <Widget>[
             Expanded(
               child: Text(
-                dayTitle(row.day, widget.today),
+                dayTitle(day, widget.today),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 strutStyle: empty
