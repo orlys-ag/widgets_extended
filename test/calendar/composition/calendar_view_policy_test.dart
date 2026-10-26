@@ -1539,5 +1539,38 @@ void main() {
       expect(find.byType(ErrorWidget), findsNothing);
       expect(handleOf(tester, blockFinder("L")).enabled, isTrue);
     });
+
+    testWidgets("in Agenda, the build that brings a new day asks each card "
+        "once and builds it once", (tester) async {
+      final policy = CountingEditPolicy<String>(
+        const HistoryLockPolicy<String>(),
+      );
+      final host = Host(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("T", at(tuesday, 9), at(tuesday, 10)),
+          entryOf("W", at(wednesday, 9), at(wednesday, 10)),
+        ]),
+        view: CalendarViewKind.agenda,
+        day: tuesday,
+        time: at(tuesday, 23, 59),
+        policy: policy,
+      );
+      await host.pump(tester);
+      // Setup sanity: T is editable on its own day.
+      expect(host.cards["T"]!.onEdit, isNotNull);
+      final cards = host.cardsBuilt.length;
+      policy.asked.clear();
+      await tickTo(tester, host, at(wednesday, 0, 0, 30));
+      // Setup sanity: the new day reached the cards, and T is now past.
+      expect(host.cards["T"]!.onEdit, isNull);
+      final built = host.cardsBuilt.sublist(cards);
+      expect(
+        policy.asked.where((ask) {
+          return ask.name == "mayEdit";
+        }).length,
+        built.length,
+      );
+      expect(built.toSet().length, built.length);
+    });
   });
 }

@@ -708,6 +708,30 @@ class DayList<T> extends StatefulWidget {
   }
 }
 
+/// The time a [DayList]'s rows ask its policy at. A new minute [tick]
+/// takes notifies the rows that listen. A time [take] takes in a build of
+/// the list notifies nothing: that build hands the list's sliver a new
+/// item builder, which queues every row it holds to build again
+/// (`SliverTreeElement.update`), and each row reads [value] as it builds.
+class _RowsNow extends ChangeNotifier {
+  _RowsNow(this._value);
+
+  CalendarNow _value;
+
+  CalendarNow get value {
+    return _value;
+  }
+
+  void take(CalendarNow value) {
+    _value = value;
+  }
+
+  void tick(CalendarNow value) {
+    _value = value;
+    notifyListeners();
+  }
+}
+
 class _DayListState<T> extends State<DayList<T>> {
   /// How far below the list's top a row must reach to make its day the
   /// top day.
@@ -777,10 +801,9 @@ class _DayListState<T> extends State<DayList<T>> {
   /// ([_handleNow]) or in a build that changes either. The rows that show
   /// an answer listen to it, each asking again and building again only
   /// where its own answer changes.
-  late final ValueNotifier<CalendarNow> _calendarNow =
-      ValueNotifier<CalendarNow>(
-        CalendarNow(time: widget.now.value, today: widget.today),
-      );
+  late final _RowsNow _calendarNow = _RowsNow(
+    CalendarNow(time: widget.now.value, today: widget.today),
+  );
 
   @override
   void initState() {
@@ -830,7 +853,7 @@ class _DayListState<T> extends State<DayList<T>> {
     final time = widget.now.value;
     if (time != _calendarNow.value.time ||
         dateOnly(widget.today) != _calendarNow.value.today) {
-      _calendarNow.value = CalendarNow(time: time, today: widget.today);
+      _calendarNow.take(CalendarNow(time: time, today: widget.today));
     }
     if (widget.weekdays != oldWidget.weekdays) {
       _rebuildOn(widget.selectedDay);
@@ -886,7 +909,7 @@ class _DayListState<T> extends State<DayList<T>> {
     if (time == held || day != dateOnly(held)) {
       return;
     }
-    _calendarNow.value = CalendarNow(time: time, today: widget.today);
+    _calendarNow.tick(CalendarNow(time: time, today: widget.today));
   }
 
   /// Holds the days around [day] and builds their rows.
