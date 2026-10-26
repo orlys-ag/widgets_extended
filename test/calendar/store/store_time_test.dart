@@ -1,5 +1,6 @@
 /// Both stores on start and end: an overnight entry answered on each day
-/// it covers, the hours rule on an entry's start and its last day's end,
+/// it covers, a set of the hours notifying where they change, the hours
+/// rule on an entry's start and its last day's end,
 /// the overlap rule on instants with all-day entries exempt, minutes off
 /// the slot grid kept, the first free slot of a slot length, and the
 /// local zone's DST days answered once.
@@ -288,6 +289,27 @@ void main() {
         (start: at(tuesday, 10, 30), end: at(tuesday, 11)),
         reason: name,
       );
+    }
+  });
+
+  test("SM8 a set of other hours notifies once, and a set of equal hours "
+      "notifies nothing", () {
+    const office = DayHours(8 * 60, 18 * 60);
+    for (final (name, store) in storesOf(
+      const <CalendarEntry<String>>[],
+      first: monday,
+      last: wednesday,
+    )) {
+      var notifications = 0;
+      store.addListener(() {
+        notifications++;
+      });
+      store.hours = office;
+      expect(store.hours, office, reason: name);
+      expect(notifications, 1, reason: name);
+      // Equal hours in another instance.
+      store.hours = DayHours(office.start, office.end);
+      expect(notifications, 1, reason: name);
     }
   });
 

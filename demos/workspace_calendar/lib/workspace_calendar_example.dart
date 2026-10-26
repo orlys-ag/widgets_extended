@@ -190,6 +190,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _setApiOverlaps(_settings);
     _store = CachingCalendarStore<ItemPayload>(
       dataSource: CalendarApiSource(_api),
+      hours: _settings.hours,
       onWriteFailed: _handleWriteFailed,
     );
     _controller.addListener(_handleControllerChange);
@@ -401,7 +402,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               editable: _settings.editing,
               editPolicy: _settings.editPolicy,
               weekdays: _settings.weekdays,
-              hours: _settings.hours,
               slotMinutes: _settings.slotMinutes,
               hourLabelFormat: _settings.hourLabelFormat,
               monthLayout: _settings.monthLayout,

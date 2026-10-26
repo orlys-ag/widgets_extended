@@ -95,11 +95,12 @@ class CalendarEntryTapDetails<T> {
 ///   selected day: a selected day scrolls to its top, and a drag or a
 ///   fling of the list selects each day it brings to the top, its header
 ///   sticking while its entries scroll under it. An entry wholly outside
-///   [hours] shows only in a count on a notice banner. A line marks the
-///   current time over the rows of the clock's day. In edit mode the list
-///   marks each gap in [hours] with a dashed row whose button reports a
-///   create through [onCreateRange], and each card's builder receives the
-///   [CalendarCardDetails.onEdit] and [CalendarCardDetails.onDelete]
+///   the store's hours shows only in a count on a notice banner. A line
+///   marks the current time over the rows of the clock's day. In edit mode
+///   the list marks each gap in the hours with a dashed row whose button
+///   reports a create through [onCreateRange], and each card's builder
+///   receives the [CalendarCardDetails.onEdit] and
+///   [CalendarCardDetails.onDelete]
 ///   [editPolicy] allows ([CalendarEditPolicy.mayEdit],
 ///   [CalendarEditPolicy.mayDelete]), which report through [onEditRequest] and
 ///   [onDeleteRequest]; the default card offers neither. A
@@ -125,7 +126,7 @@ class CalendarEntryTapDetails<T> {
 ///   [onCreateRange] at the day's first free slot from the earliest start
 ///   [editPolicy] gives it ([CalendarEditPolicy.earliestStartOn]),
 ///   selecting the day when it is in the month, or, where that start
-///   leaves no slot of [hours] that day, [onCreateRefused].
+///   leaves no slot of the store's hours that day, [onCreateRefused].
 ///
 /// An entry runs from its start to its end ([CalendarEntry]): Week and Day
 /// draw a timed entry as one block per shown day it covers, at its exact
@@ -169,8 +170,9 @@ class CalendarEntryTapDetails<T> {
 ///
 /// The calendar opens no route, dialog or form but the built-in header's
 /// view menu, builds no `Scaffold` or app bar, and never writes [store]'s
-/// settings: the host sets the store's hours to [hours], which a debug
-/// build asserts. It disposes no store. It draws in the [CalendarTheme]
+/// settings. It shows and schedules in the store's hours
+/// ([CalendarStore.hours]), and builds again when a set of them notifies.
+/// It disposes no store. It draws in the [CalendarTheme]
 /// above it; with none, under a Material [Theme], in a
 /// [CalendarThemeExtension] of the [ThemeData], or with none the theme
 /// [CalendarThemeExtension.fromColorScheme] gives the [ColorScheme]; and
@@ -189,10 +191,10 @@ class CalendarEntryTapDetails<T> {
 /// start [editPolicy] gives a day up to
 /// ([CalendarEditPolicy.earliestStartOn]). A value [slotMinuteChoices] does not hold
 /// throws an [ArgumentError] from the build, in a release build as in a
-/// debug one, and [hours] off its grid ([DayHours.isOnSlotsOf]) fail an
-/// assertion in a debug build; the views show and schedule in [hours]
-/// rounded out to it ([DayHours.roundedOutTo]), which are [hours]
-/// themselves on the grid.
+/// debug one, and the store's hours off its grid ([DayHours.isOnSlotsOf])
+/// fail an assertion in a debug build; the views show and schedule in the
+/// store's hours rounded out to it ([DayHours.roundedOutTo]), which are
+/// the hours themselves on the grid.
 class CalendarView<T> extends StatefulWidget {
   const CalendarView({
     super.key,
@@ -202,7 +204,6 @@ class CalendarView<T> extends StatefulWidget {
     this.editable = false,
     this.editPolicy,
     this.weekdays = WeekdaySet.all,
-    this.hours = DayHours.allDay,
     this.slotMinutes = defaultSlotMinutes,
     this.hourLabelFormat = HourLabelFormat.twentyFourHour,
     this.monthLayout = MonthLayout.fitScreen,
@@ -226,9 +227,9 @@ class CalendarView<T> extends StatefulWidget {
     this.headerBuilder,
   });
 
-  /// The entries the calendar shows and its views write; its hours must be
-  /// [hours]. The calendar asks it to show the range of days its view
-  /// shows, and never disposes it.
+  /// The entries the calendar shows and its views write, and the hours it
+  /// shows and schedules in ([CalendarStore.hours]). The calendar asks it
+  /// to show the range of days its view shows, and never disposes it.
   final CalendarStore<T> store;
 
   /// Holds the view, the selected day, the visible range and the zoom
@@ -285,13 +286,9 @@ class CalendarView<T> extends StatefulWidget {
   /// change moves a selected day it hides to the nearest shown one.
   final WeekdaySet weekdays;
 
-  /// The hours the calendar shows and schedules in; the store's hours must
-  /// be these, and they start and end on the grid of [slotMinutes], both of
-  /// which a debug build asserts.
-  final DayHours hours;
-
   /// The length of one slot, in minutes: one of [slotMinuteChoices], or the
-  /// build throws an [ArgumentError].
+  /// build throws an [ArgumentError]. The store's hours start and end on
+  /// its grid, which a debug build asserts.
   final int slotMinutes;
 
   /// The format Week's and Day's grids and Agenda's times label the hours
@@ -366,7 +363,7 @@ class CalendarView<T> extends StatefulWidget {
 
   /// Month's long press, in edit mode, on a day where the earliest start
   /// [editPolicy] gives it ([CalendarEditPolicy.earliestStartOn]) leaves no
-  /// slot of [hours]; null reports nothing.
+  /// slot of the store's hours; null reports nothing.
   final ValueChanged<DateTime>? onCreateRefused;
 
   /// Whether the calendar builds a header; false builds none, whatever
@@ -413,11 +410,16 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     );
   }
 
-  /// The hours the views show and schedule in: [CalendarView.hours]
-  /// rounded out to the grid of [CalendarView.slotMinutes].
+  /// The hours the views show and schedule in: the store's
+  /// ([CalendarStore.hours]) rounded out to the grid of
+  /// [CalendarView.slotMinutes].
   DayHours get _hours {
-    return widget.hours.roundedOutTo(widget.slotMinutes);
+    return widget.store.hours.roundedOutTo(widget.slotMinutes);
   }
+
+  /// The store's hours as this state last took them, which
+  /// [_handleStoreChange] compares a notify's hours with.
+  late DayHours _storeHours;
 
   /// The clock's time, read again at the start of each minute.
   late final ValueNotifier<DateTime> _now;
@@ -521,6 +523,8 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     _ownsController = host == null;
     _bind(host ?? CalendarController(), shown: null);
     _scheduleMinute(_now.value);
+    _storeHours = widget.store.hours;
+    widget.store.addListener(_handleStoreChange);
   }
 
   @override
@@ -572,6 +576,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       _controller._selectedDay = day;
       _grid = MonthGrid.of(day, weekdays: widget.weekdays);
     }
+    if (widget.store != oldWidget.store) {
+      oldWidget.store.removeListener(_handleStoreChange);
+      widget.store.addListener(_handleStoreChange);
+      _storeHours = widget.store.hours;
+    }
     if (viewsChanged || weekdaysChanged || widget.store != oldWidget.store) {
       _scheduleAsk();
     }
@@ -579,6 +588,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
 
   @override
   void dispose() {
+    widget.store.removeListener(_handleStoreChange);
     _minuteTimer?.cancel();
     _noteLifecycle();
     _controller._detach(this);
@@ -746,6 +756,20 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       return true;
     }());
     return calendarOpeningView(_views, view);
+  }
+
+  /// Builds again where a notify of the store brings other hours, which
+  /// the views take from this state's build. The views follow the store's
+  /// entries and load state themselves, so any other notify builds
+  /// nothing here.
+  void _handleStoreChange() {
+    final hours = widget.store.hours;
+    if (hours == _storeHours) {
+      return;
+    }
+    setState(() {
+      _storeHours = hours;
+    });
   }
 
   DateTime _todayAt(DateTime now) {
@@ -1493,14 +1517,9 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       throw slotError;
     }
     assert(
-      widget.store.hours == widget.hours,
-      "A CalendarView's hours, ${widget.hours}, must be its store's, "
-      "${widget.store.hours}: set the store's hours with them.",
-    );
-    assert(
-      widget.hours.isOnSlotsOf(widget.slotMinutes),
-      "A CalendarView's hours, ${widget.hours}, must start and end on the "
-      "grid of its ${widget.slotMinutes}-minute slots.",
+      widget.store.hours.isOnSlotsOf(widget.slotMinutes),
+      "A CalendarView's store's hours, ${widget.store.hours}, must start and "
+      "end on the grid of its ${widget.slotMinutes}-minute slots.",
     );
     final header = _buildHeader();
     final Widget view;

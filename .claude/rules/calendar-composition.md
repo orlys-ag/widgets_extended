@@ -12,7 +12,8 @@ The contract of `CalendarView`, `CalendarController`, the header and the default
   below it; and the board and sliver_tree modules.
 - **`CalendarView`** offers in its view menu the views its parameters list,
   opening on the one they name, and builds no `Scaffold` or app bar. Its
-  configuration is its parameters.
+  configuration is its parameters, and it shows and schedules in its
+  store's hours, keeping none of its own.
 - **`CalendarController`** is listenable and holds the view, the selected
   day, the visible range and the zoom sizes, which the host sets and listens
   to.

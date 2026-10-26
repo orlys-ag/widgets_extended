@@ -69,14 +69,12 @@ class Host {
     required this.day,
     required this.time,
     CalendarEditPolicy<String>? policy,
-    this.hours = DayHours.allDay,
     this.today,
   }) : policy = ValueNotifier<CalendarEditPolicy<String>?>(policy);
 
   final MoveRecordingStore store;
   final CalendarViewKind view;
   final DateTime day;
-  final DayHours hours;
   final DateTime? today;
 
   /// What the calendar's clock reads.
@@ -120,7 +118,6 @@ class Host {
               },
               editable: editable.value,
               editPolicy: policy.value,
-              hours: hours,
               today: today,
               cardBuilder: (context, entry, details) {
                 cards[entry.entry.id!] = details;
@@ -938,7 +935,6 @@ void main() {
         day: tuesday,
         time: time,
         policy: policy,
-        hours: hours,
       );
       await host.pump(tester);
       return host;
@@ -1083,7 +1079,6 @@ void main() {
         day: tuesday,
         time: at(monday, 14, 44, 30),
         policy: lock,
-        hours: hours,
         today: tuesday,
       );
       await host.pump(tester);

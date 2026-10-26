@@ -150,15 +150,31 @@ final class CalendarWritePendingException extends CalendarStoreException {
 abstract class CalendarStore<T> extends ChangeNotifier {
   /// A store holding writes to [hours], reporting a failed move, resize or
   /// delete to [onWriteFailed].
-  CalendarStore({this.hours = DayHours.allDay, this.onWriteFailed});
+  CalendarStore({DayHours hours = DayHours.allDay, this.onWriteFailed})
+    : _hours = hours;
+
+  DayHours _hours;
 
   /// The hours a new entry, and a write that changes an entry's start or
   /// end, must lie in ([DayHours.holdsTimes]), which hold every all-day
   /// entry. A write that keeps the stored start and end is not held to
   /// them, so an entry that lay outside them when they changed can still
-  /// be edited. Setting it notifies nothing: what shows
-  /// does not depend on it.
-  DayHours hours;
+  /// be edited. A calendar shows and schedules in its store's hours.
+  ///
+  /// Setting hours not `==` to these notifies the listeners once, and
+  /// setting equal ones notifies nothing. A calendar listening builds again
+  /// at a notify, so a host sets the hours outside a build.
+  DayHours get hours {
+    return _hours;
+  }
+
+  set hours(DayHours value) {
+    if (value == _hours) {
+      return;
+    }
+    _hours = value;
+    notifyListeners();
+  }
 
   /// Receives each move, resize or delete that fails or that the store
   /// refuses; null drops them.
