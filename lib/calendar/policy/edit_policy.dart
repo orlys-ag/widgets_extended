@@ -206,28 +206,3 @@ class UnrestrictedEditPolicy<T> extends CalendarEditPolicy<T> {
     return "UnrestrictedEditPolicy(allowsOverlaps: $allowsOverlaps)";
   }
 }
-
-/// The minute of [day] from which the slots of [slotMinutes] from
-/// midnight start no earlier than [earliest], an answer of
-/// [CalendarEditPolicy.earliestStartOn] for [day]: [minutesPerDay] where
-/// none may, for null or an instant on a later day; 0 for an instant at
-/// [day]'s start or before it; and otherwise [earliest]'s minute of the
-/// day, one more where it lies inside a minute, rounded up to the grid.
-int earliestSlotMinuteOf(
-  DateTime day,
-  DateTime? earliest, {
-  required int slotMinutes,
-}) {
-  if (earliest == null || dayNumber(earliest) > dayNumber(day)) {
-    return minutesPerDay;
-  }
-  if (!earliest.isAfter(day)) {
-    return 0;
-  }
-  final passed =
-      earliest.second > 0 ||
-      earliest.millisecond > 0 ||
-      earliest.microsecond > 0;
-  final minute = minuteOfDay(earliest) + (passed ? 1 : 0);
-  return (minute + slotMinutes - 1) ~/ slotMinutes * slotMinutes;
-}

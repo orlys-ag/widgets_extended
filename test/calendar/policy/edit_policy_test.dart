@@ -1,12 +1,11 @@
 /// The edit policy: the permissive answers a policy overriding nothing
-/// gives, the unrestricted policy's equality, the time a policy answers at,
-/// and the rounding of an earliest start to the slot grid.
+/// gives, the unrestricted policy's equality, and the time a policy answers
+/// at.
 library;
 
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 
@@ -106,22 +105,5 @@ void main() {
     expect(same.hashCode, now.hashCode);
     expect(nowAt(at(tuesday, 11, 7, 31)), isNot(now));
     expect(nowAt(at(tuesday, 11, 7, 30), wednesday), isNot(now));
-  });
-
-  test("EP4 earliestSlotMinuteOf answers none for no start and for one on a "
-      "later day, 0 from the day's start and before it, and a later start's "
-      "minute, one more inside a minute, rounded up to the slot grid", () {
-    int minuteOf(DateTime? earliest) {
-      return earliestSlotMinuteOf(tuesday, earliest, slotMinutes: 15);
-    }
-
-    expect(minuteOf(null), minutesPerDay);
-    expect(minuteOf(wednesday), minutesPerDay);
-    expect(minuteOf(at(wednesday, 9)), minutesPerDay);
-    expect(minuteOf(tuesday), 0);
-    expect(minuteOf(at(monday, 22)), 0);
-    expect(minuteOf(at(tuesday, 11, 7)), 675);
-    expect(minuteOf(at(tuesday, 11, 15)), 675);
-    expect(minuteOf(at(tuesday, 11, 15, 30)), 690);
   });
 }

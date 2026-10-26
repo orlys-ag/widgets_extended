@@ -12,6 +12,11 @@ The contract of the rules that limit edits. The conventions every layer follows 
 - **Stateless answers.** A policy answers from the entries, the times and
   the boundary it is given, and holds no store and no widget.
 - **The overlap rule** decides whether two entries share time.
+- **The edit rules** (`CalendarEditRules`) join a policy with the hours and
+  the slot length a calendar schedules in, reading the policy's day limit
+  and its answer on overlaps once, when made. They answer whether the hours
+  and the policy admit a change's times, where the day limit holds a range,
+  and which slot a create takes.
 - **The history lock** keeps the past as it is: before its boundary, the
   start of today or the time of day now rounded up to a whole minute, no
   entry moves, resizes or is created. An entry that ends at the boundary or

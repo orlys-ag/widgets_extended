@@ -18,6 +18,7 @@ import '../dates/calendar_dates.dart';
 import '../dates/calendar_labels.dart';
 import '../entries/calendar_entry.dart';
 import '../policy/edit_policy.dart';
+import '../policy/edit_rules.dart';
 import '../policy/overlap.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
@@ -1569,18 +1570,23 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   late final UnrestrictedEditPolicy<T> _unrestricted =
       UnrestrictedEditPolicy<T>();
 
-  /// The policy the grid last took ([_takePolicy]), which the gates ask.
-  late CalendarEditPolicy<T> _policy;
+  /// The rules of the policy the grid last took ([_takePolicy]), in the
+  /// grid's hours and slots ([CalendarEditRules.updated]), which the gates
+  /// ask. They read the policy's day limit and its answer on overlaps when
+  /// the grid took it, so no gesture asks them.
+  late CalendarEditRules<T> _rules;
 
-  /// [_policy]'s [CalendarEditPolicy.dayLimit], read when the grid takes
-  /// it, so no gesture asks it.
-  int? _dayLimit;
+  /// The policy the grid last took, which the gates ask.
+  CalendarEditPolicy<T> get _policy {
+    return _rules.policy;
+  }
 
-  /// [_policy]'s [CalendarEditPolicy.allowsOverlaps], read when the grid
-  /// takes it, so no gesture asks it. Where it is true the grid runs none
-  /// of its overlap tests and the board holds [_fitlessConfig] for every
-  /// drag.
-  bool _allowsOverlaps = true;
+  /// [_policy]'s [CalendarEditPolicy.allowsOverlaps], as the grid read it
+  /// when it took the policy. Where it is true the grid runs none of its
+  /// overlap tests and the board holds [_fitlessConfig] for every drag.
+  bool get _allowsOverlaps {
+    return _rules.allowsOverlaps;
+  }
 
   /// The time the gates and the gestures ask [_policy] at: [TimedGrid.now]
   /// and [TimedGrid.today] as the grid last took them, at a minute of the
@@ -1646,8 +1652,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// later day's slot or the end is refused.
   DateTime? _laterDayEnd;
 
-  /// The range a bar's day-edge resize past [_dayLimit] is held at
-  /// ([_heldToLimit]), which its release writes; set by [_canDropAt].
+  /// The range a bar's day-edge resize past [CalendarEditRules.dayLimit] is
+  /// held at ([CalendarEditRules.heldToLimit]), which its release writes;
+  /// set by [_canDropAt].
   ({DateTime start, DateTime end})? _heldBar;
 
   /// Set once a crossing's release wrote or refused its landing, so
@@ -1840,15 +1847,22 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       "A TimedGrid's slotMinutes, ${widget.slotMinutes}, is not one of "
       "$slotMinuteChoices.",
     );
-    if (widget.slotMinutes != oldWidget.slotMinutes ||
-        widget.hours != oldWidget.hours) {
+    final slotsChanged =
+        widget.slotMinutes != oldWidget.slotMinutes ||
+        widget.hours != oldWidget.hours;
+    if (slotsChanged) {
       _cancelForNewSlots();
     }
-    final policyChanged = (widget.editPolicy ?? _unrestricted) != _policy;
+    final policy = widget.editPolicy ?? _unrestricted;
+    final policyChanged = policy != _policy;
     if (policyChanged) {
       _cancelForNewPolicy();
-      _takePolicy();
     }
+    _rules = _rules.updated(
+      policy: policy,
+      hours: widget.hours,
+      slotMinutes: widget.slotMinutes,
+    );
     final blockBuilderChanged = widget.blockBuilder != oldWidget.blockBuilder;
     final chipBuilderChanged = widget.chipBuilder != oldWidget.chipBuilder;
     if (blockBuilderChanged) {
@@ -1975,19 +1989,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
   }
 
-  /// Takes [TimedGrid.editPolicy], or [_unrestricted] where it is null,
-  /// and reads its day limit and whether it allows overlaps.
+  /// Takes [TimedGrid.editPolicy], or [_unrestricted] where it is null, in
+  /// the grid's hours and slots, reading its day limit and whether it
+  /// allows overlaps ([CalendarEditRules]).
   void _takePolicy() {
-    final policy = widget.editPolicy ?? _unrestricted;
-    final limit = policy.dayLimit;
-    assert(
-      limit == null || limit >= 1,
-      "A CalendarEditPolicy's dayLimit, $limit, is neither null nor at "
-      "least 1.",
+    _rules = CalendarEditRules<T>(
+      policy: widget.editPolicy ?? _unrestricted,
+      hours: widget.hours,
+      slotMinutes: widget.slotMinutes,
     );
-    _policy = policy;
-    _dayLimit = limit;
-    _allowsOverlaps = policy.allowsOverlaps;
   }
 
   /// [_limits]' value as the widget and the fields stand.
@@ -2991,10 +3001,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// itself at its pointer's release ([_handlePointerUp]), after which
   /// every target is refused ([_crossSpent]). A piece's move needs
   /// [_policy]'s [CalendarEditPolicy.mayMove], and its resize the edge it
-  /// changes in [CalendarEditPolicy.resizableEdges]; then the times need
-  /// [CalendarEditPolicy.admitsChange]: two asks of the policy at most,
-  /// and none per neighbouring entry. Where the policy forbids overlaps
-  /// the times must also share none with another entry
+  /// changes in [CalendarEditPolicy.resizableEdges]; then [_rules] must
+  /// admit the times ([CalendarEditRules.admitsTimes]): two asks of the
+  /// policy at most, and none per neighbouring entry. Where it forbids
+  /// overlaps the times must also share none with another entry
   /// ([_meetsOtherEntry]).
   bool _canDropAt(GridKey key, BoardSpan span) {
     noteDropGate();
@@ -3034,8 +3044,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (times == null ||
         (edges != null &&
             !_edgesChange(edges, entry, times.start, times.end)) ||
-        !_tracks.hours.holdsTimes(times.start, times.end) ||
-        !_policy.admitsChange(entry, times.start, times.end, now)) {
+        !_rules.admitsTimes(entry, times.start, times.end, now)) {
       return false;
     }
     return _allowsOverlaps ||
@@ -3075,10 +3084,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// two lie laned in one column by their stored spans and paint in the
   /// board's own item order, which the grid does not set, until the
   /// release stacks them in rows ([_stackBars]). A span of a running
-  /// day-edge resize of the
-  /// bar ([_barResizeOf]) past [_dayLimit]'s days is refused, and holds
-  /// [_heldBar] at the range the limit admits, which the release writes;
-  /// every other span of that resize clears it.
+  /// day-edge resize of the bar ([_barResizeOf]) past
+  /// [CalendarEditRules.dayLimit]'s days is refused, and holds [_heldBar]
+  /// at the range the limit admits, which the release writes; every other
+  /// span of that resize clears it.
   bool _canDropBar(GridKey key, BoardSpan span) {
     if (span.rowStart < _stripStart ||
         span.endTrackOn(Axis.vertical) >
@@ -3107,8 +3116,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _holdBar(null);
         return false;
       }
-      if (times != null && !_coversAtMost(times.start, times.end)) {
-        final held = _heldToLimit(
+      if (times != null && !_rules.coversAtMost(times.start, times.end)) {
+        final held = _rules.heldToLimit(
           times.start,
           times.end,
           atEnd: edge == BoardResizeEdges.trailing,
@@ -3116,7 +3125,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _holdBar(
           held != null &&
                   (held.start != entry.start || held.end != entry.end) &&
-                  _policy.admitsChange(entry, held.start, held.end, now)
+                  _rules.admitsTimes(entry, held.start, held.end, now)
               ? held
               : null,
         );
@@ -3130,7 +3139,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return false;
     }
     return times != null &&
-        _policy.admitsChange(entry, times.start, times.end, now);
+        _rules.admitsTimes(entry, times.start, times.end, now);
   }
 
   /// The edge a running day-edge resize of the bar [key] drags, where
@@ -3668,7 +3677,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final now = _calendarNow;
     try {
       if (!_policy.mayMove(entry, now) ||
-          !_policy.admitsChange(entry, start, end, now)) {
+          !_rules.admitsTimes(entry, start, end, now)) {
         return null;
       }
     } catch (exception, stack) {
@@ -3682,14 +3691,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// [row] of [column]: from that slot's start on that column's day to an
   /// hour after it. A start the day's clock repeats takes the occurrence of
   /// the earliest start [_policy] gives the day
-  /// ([CalendarEditPolicy.earliestStartOn]), as a create's times do
+  /// ([CalendarEarliestStart.occurrence]), as a create's times do
   /// ([timeAtWallMinute]). Null where the start is a time the clock skips,
-  /// where [_policy] does not let the entry move or refuses the range, or
-  /// its answer throws ([_reportPolicyThrow]), where the hours
-  /// ([DayHours.holdsTimes]) or [_dayLimit] refuse the range, or where the
-  /// policy forbids overlaps and it shares time with another timed entry
-  /// the store shows ([_meetsOtherEntry]). Three asks of the policy at
-  /// most, the day's date read from [_tracks], which holds it.
+  /// where [_policy] does not let the entry move or [_rules] refuse the
+  /// range, by the day limit or by the hours and the policy
+  /// ([CalendarEditRules.admitsTimes]), or the policy's answer throws
+  /// ([_reportPolicyThrow]), or where the policy forbids overlaps and the
+  /// range shares time with another timed entry the store shows
+  /// ([_meetsOtherEntry]). Three asks of the policy at most, the day's
+  /// date read from [_tracks], which holds it.
   ({DateTime start, DateTime end})? _barLandingOf(
     GridKey key,
     int column,
@@ -3709,7 +3719,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
       start = timeAtWallMinute(
         _tracks.dayAt(column) * minutesPerDay + _tracks.minuteAt(row),
-        from: _policy.earliestStartOn(_tracks.dateAt(column), now),
+        from: _rules.earliestStartOn(_tracks.dateAt(column), now).occurrence,
       );
     } catch (exception, stack) {
       _reportPolicyThrow(exception, stack);
@@ -3719,11 +3729,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return null;
     }
     final end = start.add(const Duration(hours: 1));
-    if (!_tracks.hours.holdsTimes(start, end) || !_coversAtMost(start, end)) {
+    if (!_rules.coversAtMost(start, end)) {
       return null;
     }
     try {
-      if (!_policy.admitsChange(entry, start, end, now)) {
+      if (!_rules.admitsTimes(entry, start, end, now)) {
         return null;
       }
     } catch (exception, stack) {
@@ -3739,13 +3749,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// The end the piece [key]'s entry takes when its end handle is let go
   /// over the slot [row] of [column], a later day than the piece's: that
   /// slot's end on that column's day, the earlier instant of a time the
-  /// clock repeats, held at [_dayLimit]'s days ([_heldToLimit]); null where
-  /// that end is a time the clock skips, where [_policy] does not let the
-  /// entry's end resize or refuses the range from the entry's start to it,
-  /// or its answer throws ([_reportPolicyThrow]), where the hours
-  /// ([DayHours.holdsTimes]) refuse that range, or where the policy forbids
-  /// overlaps and it shares time with another timed entry the store shows
-  /// ([_meetsOtherEntry]).
+  /// clock repeats, held at [CalendarEditRules.dayLimit]'s days
+  /// ([CalendarEditRules.heldToLimit]); null where that end is a time the
+  /// clock skips, where [_policy] does not let the entry's end resize or
+  /// refuses the range from the entry's start to it, or its answer throws
+  /// ([_reportPolicyThrow]), where the hours ([DayHours.holdsTimes])
+  /// refuse that range, or where the policy forbids overlaps and it shares
+  /// time with another timed entry the store shows ([_meetsOtherEntry]).
   DateTime? _laterDayEndOf(GridKey key, int column, int row) {
     noteDropGate();
     final shape = _board.itemOf(key);
@@ -3757,8 +3767,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     final entry = shape.shown.entry;
     final start = entry.start;
-    if (!_coversAtMost(start, end)) {
-      final held = _heldToLimit(start, end, atEnd: true);
+    if (!_rules.coversAtMost(start, end)) {
+      final held = _rules.heldToLimit(start, end, atEnd: true);
       if (held == null) {
         return null;
       }
@@ -4224,10 +4234,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// neither scrolling nor just stopped by this press, and either it lies
   /// over a body cell whose slot is a time the clock reads, starting no
   /// earlier than the earliest start [_policy] gives its day, in that
-  /// start's occurrence ([_occurrenceOf]), no block paints under it, and
-  /// its slot is free ([_slotIsFree]); or over a strip cell no bar paints
-  /// over, of a day [_policy] lets an entry start at its start. Asks the
-  /// policy once, for the pressed column's day.
+  /// start's occurrence ([CalendarEarliestStart.occurrence]), no block
+  /// paints under it, and its slot is free ([_slotIsFree]); or over a
+  /// strip cell no bar paints over, of a day [_policy] lets an entry start
+  /// at its start. Asks the policy once, for the pressed column's day.
   bool _admits(Offset global) {
     final viewport = _findViewport();
     if (viewport == null || _scrollJustStopped || _range != null) {
@@ -4246,8 +4256,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         return false;
       }
       final day = _tracks.dateAt(strip.col);
-      final earliest = _policy.earliestStartOn(day, _calendarNow);
-      return earliest != null && !earliest.isAfter(day);
+      return _rules.earliestStartOn(day, _calendarNow).admitsDayStart;
     }
     final cell = _bodyCellAtLocal(viewport, local);
     // A press on a block asks the policy nothing.
@@ -4255,26 +4264,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return false;
     }
     final day = _tracks.dateAt(cell.col);
-    final earliest = _policy.earliestStartOn(day, _calendarNow);
+    final start = _rules.earliestStartOn(day, _calendarNow);
+    final earliest = start.earliest;
     if (earliest == null) {
       return false;
     }
-    final slot = createRangeAt(
-      _tracks,
-      cell,
-      occurrence: _occurrenceOf(day, earliest),
-    );
+    final slot = createRangeAt(_tracks, cell, occurrence: start.occurrence);
     return slot != null &&
         !slot.start.isBefore(earliest) &&
         _slotIsFree(cell, slot);
-  }
-
-  /// The occurrence a range starting on [day] takes its times in, where
-  /// [day]'s clock repeats them ([timeAtWallMinute]): [earliest], the
-  /// earliest start the policy gives [day], where it lies after [day]'s
-  /// start, and none otherwise.
-  static DateTime? _occurrenceOf(DateTime day, DateTime? earliest) {
-    return earliest != null && earliest.isAfter(day) ? earliest : null;
   }
 
   /// Whether a create range may start on [cell]'s [slot] by the entries
@@ -4410,8 +4408,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// handle over a later day's slot ends there ([_laterDayEndOf]), each
   /// through one write, or none where the landing is refused; either way
   /// [_crossSpent] then refuses the board's own report. A bar's day-edge
-  /// resize held at [_dayLimit] writes the range it is held at. Both
-  /// stores notify within the write, so the sync that follows
+  /// resize held at [CalendarEditRules.dayLimit] writes the range it is
+  /// held at. Both stores notify within the write, so the sync that follows
   /// moves or drops the dragged key, which cancels the board's drag before
   /// it hears the release, or leaves the dragged piece's span as it was,
   /// as for a piece ending at the day's end, whose drag the board then
@@ -4524,10 +4522,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final range = createRangeAt(
       _tracks,
       cell,
-      occurrence: _occurrenceOf(
-        day,
-        _policy.earliestStartOn(day, _calendarNow),
-      ),
+      occurrence: _rules.earliestStartOn(day, _calendarNow).occurrence,
     );
     if (range == null) {
       return;
@@ -4620,9 +4615,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// The focus a range across the strip from [range]'s anchor reaches
   /// toward [focus]'s column: held, toward earlier days, at the first
   /// column from it whose day [range]'s limits let an entry start at its
-  /// start ([_RangeDrag.stripFrom]), and at [_dayLimit]'s days
-  /// ([_heldToLimit]), however far past them [focus] lies. Constant work
-  /// per call.
+  /// start ([_RangeDrag.stripFrom]), and at [CalendarEditRules.dayLimit]'s
+  /// days ([CalendarEditRules.heldToLimit]), however far past them [focus]
+  /// lies. Constant work per call.
   ({int row, int col}) _reachStrip(
     _RangeDrag<T> range,
     ({int row, int col}) focus,
@@ -4633,8 +4628,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       col = range.stripFrom[col - 1];
     }
     final picked = _stripRangeOver(anchor.col, col);
-    if (!_coversAtMost(picked.start, picked.end)) {
-      final held = _heldToLimit(
+    if (!_rules.coversAtMost(picked.start, picked.end)) {
+      final held = _rules.heldToLimit(
         picked.start,
         picked.end,
         atEnd: col >= anchor.col,
@@ -4658,9 +4653,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// cells' slots: held at the last slot that does not pass the nearest
   /// entry [range] read on either side of its anchor, for its start at the
   /// earliest start its limits give the focus's column
-  /// ([_RangeDrag.firstFrom]), and at [_dayLimit]'s days ([_heldToLimit]),
-  /// however far past them [focus] lies. Constant work per call: the
-  /// entries and the limits were read before.
+  /// ([_RangeDrag.firstFrom]), and at [CalendarEditRules.dayLimit]'s days
+  /// ([CalendarEditRules.heldToLimit]), however far past them [focus] lies.
+  /// Constant work per call: the entries and the limits were read before.
   ({int row, int col}) _reach(_RangeDrag<T> range, ({int row, int col}) focus) {
     final anchor = range.anchor;
     final anchorWall = slotWallMinuteOf(_tracks, anchor);
@@ -4678,8 +4673,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         from: occurrence,
       );
       final start = timeAtWallMinute(anchorWall, from: occurrence);
-      if (start != null && end != null && !_coversAtMost(start, end)) {
-        final held = _heldToLimit(start, end, atEnd: true);
+      if (start != null && end != null && !_rules.coversAtMost(start, end)) {
+        final held = _rules.heldToLimit(start, end, atEnd: true);
         if (held != null) {
           focus = _lastCellEndingBy(wallMinuteOf(held.end), anchor);
         }
@@ -4701,8 +4696,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       anchorWall + _tracks.slotMinutes,
       from: occurrence,
     );
-    if (start != null && end != null && !_coversAtMost(start, end)) {
-      final held = _heldToLimit(start, end, atEnd: false);
+    if (start != null && end != null && !_rules.coversAtMost(start, end)) {
+      final held = _rules.heldToLimit(start, end, atEnd: false);
       if (held != null) {
         focus = _firstCellStartingFrom(wallMinuteOf(held.start), anchor);
       }
@@ -4775,47 +4770,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return anchor;
     }
     return cell;
-  }
-
-  /// Whether the range from [start] to [end] covers at most [_dayLimit]
-  /// days, counting each day it has any part of; every range does with no
-  /// limit.
-  bool _coversAtMost(DateTime start, DateTime end) {
-    final limit = _dayLimit;
-    return limit == null ||
-        lastDayNumberOf(start, end) - dayNumber(start) + 1 <= limit;
-  }
-
-  /// The range from [start] to [end] held at [_dayLimit]'s days: with
-  /// [atEnd] its end moved, and otherwise its start. An all-day
-  /// range ends at the start of the day after the limit's last day, or
-  /// starts at the start of its first; any other ends at the hours' end on
-  /// the limit's last day, or starts at the hours' start on its first, so
-  /// a held slot range ends or starts on a slot the hours hold. Null where
-  /// that is a time the clock skips; the range itself with no limit.
-  ({DateTime start, DateTime end})? _heldToLimit(
-    DateTime start,
-    DateTime end, {
-    required bool atEnd,
-  }) {
-    final limit = _dayLimit;
-    if (limit == null) {
-      return (start: start, end: end);
-    }
-    final hours = _tracks.hours;
-    final allDay = isDayStart(start) && isDayStart(end);
-    if (atEnd) {
-      final lastDay = dayNumber(start) + limit - 1;
-      final held = allDay
-          ? dateOfDayNumber(lastDay + 1)
-          : timeAtWallMinute(lastDay * minutesPerDay + hours.end);
-      return held == null ? null : (start: start, end: held);
-    }
-    final firstDay = lastDayNumberOf(start, end) - limit + 1;
-    final held = allDay
-        ? dateOfDayNumber(firstDay)
-        : timeAtWallMinute(firstDay * minutesPerDay + hours.start);
-    return held == null ? null : (start: held, end: end);
   }
 
   /// Reports the range [range] was let go at: its anchor's slot where its
@@ -5451,31 +5405,19 @@ class _RangeDrag<T> extends Drag {
   void readLimit() {
     final grid = _grid;
     final tracks = grid._tracks;
-    final policy = grid._policy;
+    final rules = grid._rules;
     final now = grid._calendarNow;
     for (var col = anchor.col; col >= 1; col--) {
       final index = col - 1;
       final last = col == anchor.col;
-      final day = tracks.dateAt(col);
-      final number = tracks.dayAt(col);
-      final earliest = policy.earliestStartOn(day, now);
-      occurrences[index] = _TimedGridState._occurrenceOf(day, earliest);
-      if (earliest == null || dayNumber(earliest) > number) {
-        firstFrom[index] = last
-            ? (number + 1) * minutesPerDay
-            : firstFrom[index + 1];
-        stripFrom[index] = last ? col : stripFrom[index + 1];
-      } else if (!earliest.isAfter(day)) {
-        firstFrom[index] = number * minutesPerDay;
-        stripFrom[index] = col;
-      } else {
-        final passed =
-            earliest.second > 0 ||
-            earliest.millisecond > 0 ||
-            earliest.microsecond > 0;
-        firstFrom[index] = wallMinuteOf(earliest) + (passed ? 1 : 0);
-        stripFrom[index] = last ? col : stripFrom[index + 1];
-      }
+      final start = rules.earliestStartOn(tracks.dateAt(col), now);
+      occurrences[index] = start.occurrence;
+      firstFrom[index] = start.closesDay && !last
+          ? firstFrom[index + 1]
+          : start.firstWallMinute;
+      stripFrom[index] = start.admitsDayStart || last
+          ? col
+          : stripFrom[index + 1];
     }
   }
 

@@ -14,6 +14,7 @@ import '../dates/calendar_dates.dart';
 import '../dates/calendar_labels.dart';
 import '../entries/calendar_entry.dart';
 import '../policy/edit_policy.dart';
+import '../policy/edit_rules.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
@@ -438,6 +439,27 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
 
   CalendarEditPolicy<T> get _policy {
     return widget.editPolicy ?? _unrestricted;
+  }
+
+  /// The rules [_rules] last gave, made at its first ask.
+  CalendarEditRules<T>? _madeRules;
+
+  /// The rules a create asks: [_policy] in [_hours] and slots of
+  /// [CalendarView.slotMinutes], made again only for a policy not `==` to
+  /// the last ([CalendarEditRules.updated]).
+  CalendarEditRules<T> get _rules {
+    final made = _madeRules;
+    return _madeRules = made == null
+        ? CalendarEditRules<T>(
+            policy: _policy,
+            hours: _hours,
+            slotMinutes: widget.slotMinutes,
+          )
+        : made.updated(
+            policy: _policy,
+            hours: _hours,
+            slotMinutes: widget.slotMinutes,
+          );
   }
 
   /// A day of the month the calendar card shows and the header names
@@ -1215,45 +1237,27 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     _openCreateFlow(day);
   }
 
-  /// Reports a create on [day] at its first free slot from the earliest
-  /// start [_policy] gives it ([CalendarEditPolicy.earliestStartOn]), or
-  /// where none after it is free, at the first slot from that start's slot
-  /// minute ([earliestSlotMinuteOf]) whose times the clock reads
-  /// ([firstReadableSlot]); each in that start's occurrence where [day]'s
-  /// clock repeats its time, so none starts before it. Where it leaves no
-  /// such slot in the hours, reports [CalendarView.onCreateRefused]
-  /// instead.
+  /// Reports a create on [day] at the first slot of the hours, from the
+  /// earliest start [_policy] gives it ([CalendarEditPolicy.earliestStartOn]),
+  /// that shares no time with an entry the store shows on it, or where
+  /// none is free, at the first slot of the hours from that start
+  /// ([CalendarEditRules.firstSlot]): each one whose times the clock reads,
+  /// in that start's occurrence where [day]'s clock repeats its time, so
+  /// none starts before it. Where it leaves no such slot in the hours,
+  /// reports [CalendarView.onCreateRefused] instead.
   void _openCreateFlow(DateTime day) {
-    final hours = _hours;
-    final slot = widget.slotMinutes;
-    final answer = _policy.earliestStartOn(day, _calendarNow());
-    final earliest = earliestSlotMinuteOf(day, answer, slotMinutes: slot);
-    if (earliest > hours.end - slot) {
+    final rules = _rules;
+    final start = rules.earliestStartOn(day, _calendarNow());
+    final shown = widget.store.entriesOn(day).map((shown) {
+      return shown.entry;
+    });
+    final slot =
+        rules.firstSlot(start, clearOf: shown) ?? rules.firstSlot(start);
+    if (slot == null) {
       widget.onCreateRefused?.call(day);
       return;
     }
-    final from = answer != null && answer.isAfter(day) ? answer : null;
-    final free = widget.store.firstFreeRange(
-      day,
-      slotMinutes: slot,
-      from: from,
-    );
-    if (from == null || !free.start.isBefore(from)) {
-      _createRange(CreateRange(start: free.start, end: free.end));
-      return;
-    }
-    final held = firstReadableSlot(
-      day,
-      earliest,
-      hours.end,
-      slot,
-      occurrence: from,
-    );
-    if (held == null) {
-      widget.onCreateRefused?.call(day);
-      return;
-    }
-    _createRange(CreateRange(start: held.start, end: held.end));
+    _createRange(CreateRange(start: slot.start, end: slot.end));
   }
 
   CalendarHeaderDetails _headerDetails() {

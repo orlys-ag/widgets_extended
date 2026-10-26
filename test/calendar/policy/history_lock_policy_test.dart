@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
+import 'package:widgets_extended/calendar/policy/edit_rules.dart';
 import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 
 /// A Tuesday.
@@ -278,11 +279,10 @@ void main() {
     test("K4 a new entry starts on the slot grid from the boundary on its "
         "day, anywhere on a later day and nowhere on an earlier one", () {
       int slotMinuteOn(HistoryLockPolicy<String> policy, DateTime day) {
-        return earliestSlotMinuteOf(
+        return CalendarEarliestStart(
           day,
           policy.earliestStartOn(day, now),
-          slotMinutes: 15,
-        );
+        ).firstSlotMinute(15);
       }
 
       expect(slotMinuteOn(earlier, today), 11 * 60 + 15);
@@ -340,11 +340,10 @@ void main() {
         "and minutesPerDay before it, and a today other than now's date "
         "takes now's time of day", () {
       int slotMinuteOn(DateTime day, CalendarNow at) {
-        return earliestSlotMinuteOf(
+        return CalendarEarliestStart(
           day,
           earlier.earliestStartOn(day, at),
-          slotMinutes: 15,
-        );
+        ).firstSlotMinute(15);
       }
 
       expect(slotMinuteOn(wednesday, now), 0);

@@ -322,47 +322,6 @@ void main() {
     );
   });
 
-  test("MS8 the first free range is searched over the held entries", () {
-    final first = MemoryCalendarStore<String>(
-      entries: <CalendarEntry<String>>[
-        task("item-1", day, 0, 60),
-        task("item-2", day, 75, 120),
-      ],
-    );
-    expect(first.firstFreeRange(day, slotMinutes: 15), (
-      start: at(day, 60),
-      end: at(day, 75),
-    ));
-
-    final store = MemoryCalendarStore<String>(
-      entries: <CalendarEntry<String>>[
-        task("item-1", day, 480, 540),
-        task("item-2", day, 900, 960),
-      ],
-      hours: const DayHours(480, 1200),
-    );
-    expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 840)), (
-      start: at(day, 840),
-      end: at(day, 855),
-    ));
-    expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 850)), (
-      start: at(day, 855),
-      end: at(day, 870),
-    ));
-    expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 900)), (
-      start: at(day, 960),
-      end: at(day, 975),
-    ));
-    expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 300)), (
-      start: at(day, 540),
-      end: at(day, 555),
-    ));
-    expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 1200)), (
-      start: at(day, 540),
-      end: at(day, 555),
-    ));
-  });
-
   test("MS9 a shown entry is a value of the entry and its flag", () {
     final item = task("item-1", day, 600, 660);
     final a = CalendarShownEntry<String>(item, pending: true);

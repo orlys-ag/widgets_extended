@@ -19,7 +19,7 @@ import '../../sliver_tree/sliver_tree.dart';
 import '../dates/calendar_dates.dart';
 import '../dates/calendar_labels.dart';
 import '../policy/edit_policy.dart';
-import '../policy/overlap.dart';
+import '../policy/edit_rules.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_theme.dart';
@@ -633,7 +633,7 @@ class DayList<T> extends StatefulWidget {
   /// The length of the slot a gap row's add button creates, in minutes,
   /// one of [slotMinuteChoices], which the list's state asserts; an
   /// earliest start of the policy is rounded up to the grid of it from
-  /// midnight ([earliestSlotMinuteOf]).
+  /// midnight ([CalendarEarliestStart.firstSlotMinute]).
   final int slotMinutes;
 
   /// Whether the calendar is in edit mode, where the list has its dashed
@@ -666,10 +666,10 @@ class DayList<T> extends StatefulWidget {
   /// [slotMinutes] from the gap's first time the policy's earliest start
   /// on its day leaves free, or the first slot after it whose times the
   /// clock reads and that no shown entry shares time with
-  /// ([firstReadableSlot]), in that earliest start's occurrence where the
-  /// day's clock repeats its time, so it starts at the earliest start or
-  /// after. On a day whose clock repeats a stretch, an entry can hold time
-  /// in a gap it is not listed beside.
+  /// ([CalendarEditRules.firstSlot]), in that earliest start's occurrence
+  /// where the day's clock repeats its time, so it starts at the earliest
+  /// start or after. On a day whose clock repeats a stretch, an entry can
+  /// hold time in a gap it is not listed beside.
   final void Function(CreateRange range) onCreateRange;
 
   final void Function(String id) onEdit;
@@ -809,6 +809,27 @@ class _DayListState<T> extends State<DayList<T>> {
 
   CalendarEditPolicy<T> get _policy {
     return widget.editPolicy ?? _unrestricted;
+  }
+
+  /// The rules [_rules] last gave, made at its first ask.
+  CalendarEditRules<T>? _madeRules;
+
+  /// The rules the gaps' add buttons ask: [_policy] in [DayList.hours] and
+  /// slots of [DayList.slotMinutes], made again only for a policy not `==`
+  /// to the last ([CalendarEditRules.updated]).
+  CalendarEditRules<T> get _rules {
+    final made = _madeRules;
+    return _madeRules = made == null
+        ? CalendarEditRules<T>(
+            policy: _policy,
+            hours: widget.hours,
+            slotMinutes: widget.slotMinutes,
+          )
+        : made.updated(
+            policy: _policy,
+            hours: widget.hours,
+            slotMinutes: widget.slotMinutes,
+          );
   }
 
   /// The time the rows ask [_policy] at: [DayList.now] and [DayList.today]
@@ -1470,21 +1491,12 @@ class _DayListState<T> extends State<DayList<T>> {
     int start,
     int end,
   ) {
-    final slot = widget.slotMinutes;
-    final earliest = _policy.earliestStartOn(day, _calendarNow.value);
-    final shown = widget.store.entriesOn(day);
-    return firstReadableSlot(
-      day,
-      math.max(start, earliestSlotMinuteOf(day, earliest, slotMinutes: slot)),
-      end,
-      slot,
-      occurrence: earliest != null && earliest.isAfter(day) ? earliest : null,
-      isFree: (start, end) {
-        return !shown.any((other) {
-          return rangeSharesTime(start, end, other.entry);
-        });
-      },
-    );
+    final rules = _rules;
+    final earliest = rules.earliestStartOn(day, _calendarNow.value);
+    final shown = widget.store.entriesOn(day).map((shown) {
+      return shown.entry;
+    });
+    return rules.firstSlot(earliest, clearOf: shown, from: start, until: end);
   }
 
   /// The dashed row of [day]'s gap from [start], whose add takes [add].
