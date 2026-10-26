@@ -12,6 +12,8 @@ The contract of the rules that limit edits. The conventions every layer follows 
 - **Stateless answers.** A policy answers from the entries, the times and
   the boundary it is given, and holds no store and no widget.
 - **The overlap rule** decides whether two entries share time.
+- **Combined policies.** `CalendarEditPolicy.all` allows only what each of
+  its policies allows: each answer is the strictest of theirs.
 - **The edit rules** (`CalendarEditRules`) join a policy with the hours and
   the slot length a calendar schedules in, reading the policy's day limit
   and its answer on overlaps once, when made. They answer whether the hours

@@ -116,6 +116,25 @@ abstract class CalendarEditPolicy<T> {
   /// Const, so a subclass can be const.
   const CalendarEditPolicy();
 
+  /// A policy that allows only what each of [policies] allows, each answer
+  /// the strictest of theirs: [mayMove], [mayEdit], [mayDelete],
+  /// [admitsChange] and [allowsOverlaps] are true where every one's is;
+  /// [resizableEdges] are the edges every one gives; [earliestStartOn] is
+  /// the latest instant they give, and null where any gives null; and
+  /// [dayLimit] is the least limit they give, and null where none gives
+  /// one. With no policies it limits nothing.
+  ///
+  /// It asks [policies] in their order and stops once an answer settles
+  /// its own: at a refusal, at no edge left that every policy asked gives,
+  /// or at a null earliest start; so a later policy is not asked. An
+  /// answer that throws throws out of it. It holds a copy of [policies], and
+  /// compares equal to another of equal policies in the same order.
+  factory CalendarEditPolicy.all(Iterable<CalendarEditPolicy<T>> policies) {
+    return _AllEditPolicies<T>(
+      List<CalendarEditPolicy<T>>.unmodifiable(policies),
+    );
+  }
+
   /// Whether [entry] may move as a whole, to other times or days. True
   /// here.
   bool mayMove(CalendarEntry<T> entry, CalendarNow now) {
@@ -204,5 +223,128 @@ class UnrestrictedEditPolicy<T> extends CalendarEditPolicy<T> {
   @override
   String toString() {
     return "UnrestrictedEditPolicy(allowsOverlaps: $allowsOverlaps)";
+  }
+}
+
+/// The policy [CalendarEditPolicy.all] makes of [policies].
+class _AllEditPolicies<T> extends CalendarEditPolicy<T> {
+  const _AllEditPolicies(this.policies);
+
+  /// The policies each answer asks, in order; unmodifiable.
+  final List<CalendarEditPolicy<T>> policies;
+
+  @override
+  bool mayMove(CalendarEntry<T> entry, CalendarNow now) {
+    for (final policy in policies) {
+      if (!policy.mayMove(entry, now)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  CalendarResizeEdges resizableEdges(CalendarEntry<T> entry, CalendarNow now) {
+    var start = true;
+    var end = true;
+    for (final policy in policies) {
+      final edges = policy.resizableEdges(entry, now);
+      start = start && edges.hasStart;
+      end = end && edges.hasEnd;
+      if (!start && !end) {
+        return CalendarResizeEdges.none;
+      }
+    }
+    if (start) {
+      return end ? CalendarResizeEdges.both : CalendarResizeEdges.start;
+    }
+    return CalendarResizeEdges.end;
+  }
+
+  @override
+  bool mayEdit(CalendarEntry<T> entry, CalendarNow now) {
+    for (final policy in policies) {
+      if (!policy.mayEdit(entry, now)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  bool mayDelete(CalendarEntry<T> entry, CalendarNow now) {
+    for (final policy in policies) {
+      if (!policy.mayDelete(entry, now)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  bool admitsChange(
+    CalendarEntry<T> entry,
+    DateTime start,
+    DateTime end,
+    CalendarNow now,
+  ) {
+    for (final policy in policies) {
+      if (!policy.admitsChange(entry, start, end, now)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  DateTime? earliestStartOn(DateTime day, CalendarNow now) {
+    DateTime? latest;
+    for (final policy in policies) {
+      final earliest = policy.earliestStartOn(day, now);
+      if (earliest == null) {
+        return null;
+      }
+      if (latest == null || earliest.isAfter(latest)) {
+        latest = earliest;
+      }
+    }
+    return latest ?? day;
+  }
+
+  @override
+  int? get dayLimit {
+    int? least;
+    for (final policy in policies) {
+      final limit = policy.dayLimit;
+      if (limit != null && (least == null || limit < least)) {
+        least = limit;
+      }
+    }
+    return least;
+  }
+
+  @override
+  bool get allowsOverlaps {
+    for (final policy in policies) {
+      if (!policy.allowsOverlaps) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is _AllEditPolicies<T> && listEquals(other.policies, policies);
+  }
+
+  @override
+  int get hashCode {
+    return Object.hashAll(policies);
+  }
+
+  @override
+  String toString() {
+    return "CalendarEditPolicy.all($policies)";
   }
 }
