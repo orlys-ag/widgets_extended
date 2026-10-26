@@ -25,6 +25,7 @@ export 'policy/edit_policy.dart'
         CalendarNow,
         CalendarResizeEdges,
         UnrestrictedEditPolicy;
+export 'policy/edit_rules.dart' show CalendarEarliestStart, CalendarEditRules;
 export 'policy/history_lock_policy.dart' show HistoryLockPolicy;
 export 'presentation/calendar_activity_indicator.dart'
     show CalendarActivityIndicator;

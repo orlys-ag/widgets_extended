@@ -123,6 +123,8 @@ void main() {
       CalendarNow,
       CalendarResizeEdges,
       UnrestrictedEditPolicy,
+      CalendarEditRules,
+      CalendarEarliestStart,
       HistoryLockPolicy,
       CalendarStore,
       CachingCalendarStore,
@@ -184,7 +186,8 @@ void main() {
   test("B2 the barrel shows by name; of the views and the labels file only "
       "the types and the range constants the calendar's signatures use, and "
       "no view; and of the policy layer exactly the two edit policy files, "
-      "with the policies and the types their signatures name", () {
+      "with the policies and the types their signatures name, and the edit "
+      "rules", () {
     final source = File(barrelPath).readAsStringSync();
     final exports = exportsOf(source);
     // Every directive the barrel holds was read.
@@ -246,6 +249,10 @@ void main() {
         },
         "lib/calendar/policy/history_lock_policy.dart": <String>{
           "HistoryLockPolicy",
+        },
+        "lib/calendar/policy/edit_rules.dart": <String>{
+          "CalendarEarliestStart",
+          "CalendarEditRules",
         },
       },
     );

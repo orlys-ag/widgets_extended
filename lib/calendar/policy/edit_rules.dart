@@ -111,6 +111,12 @@ class CalendarEarliestStart {
 /// them, and whether a change shares time with another entry is the
 /// view's to test, from what it shows, where [allowsOverlaps] is false.
 ///
+/// A `CalendarView` and its views make their rules of its `editPolicy`,
+/// or an [UnrestrictedEditPolicy] where that is null, its store's hours
+/// rounded out to its slots ([DayHours.roundedOutTo]) and its
+/// `slotMinutes`; a host that makes rules of the same three gets the
+/// answers the calendar gives.
+///
 /// Two compare equal where their policies, hours and slot lengths do.
 @immutable
 class CalendarEditRules<T> {
@@ -141,6 +147,7 @@ class CalendarEditRules<T> {
         "least 1.",
       );
 
+  /// The policy these rules ask.
   final CalendarEditPolicy<T> policy;
 
   /// The hours a timed change must lie in ([DayHours.holdsTimes]).
@@ -190,7 +197,9 @@ class CalendarEditRules<T> {
   /// [hours] hold them ([DayHours.holdsTimes]), as they hold every
   /// all-day range, and [policy] admits the change
   /// ([CalendarEditPolicy.admitsChange]). Asks the policy once at most,
-  /// and not where the hours refuse.
+  /// and not where the hours refuse. It tests neither the day limit
+  /// ([coversAtMost]) nor whether the times share time with another entry
+  /// ([allowsOverlaps]).
   bool admitsTimes(
     CalendarEntry<T> entry,
     DateTime start,
