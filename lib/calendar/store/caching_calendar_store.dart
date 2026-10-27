@@ -34,10 +34,10 @@ class _Read {
 /// answers: a move or a resize shows the requested entry meanwhile, and an
 /// update or a delete the stored one. A create shows nothing until the
 /// source answers. A write on a pending entry sends nothing and fails
-/// with a [CalendarWritePendingException], where that write reports a
-/// failure, and so does one [hoursRefusalOf] refuses, with a
-/// [CalendarHoursException]. The store refuses no write for sharing time
-/// with another entry; a data source that forbids it fails the write.
+/// with a [CalendarWritePendingException], and so does one
+/// [hoursRefusalOf] refuses, with a [CalendarHoursException]. The store
+/// refuses no write for sharing time with another entry; a data source
+/// that forbids it fails the write.
 ///
 /// The store holds the source to its contract: a read answering an entry
 /// with no id fails as a read does, a create answering one with no id
@@ -48,11 +48,8 @@ class _Read {
 class CachingCalendarStore<T> extends CalendarStore<T> {
   /// A store reading and writing through [dataSource], loading until the
   /// first [show].
-  CachingCalendarStore({
-    required CalendarDataSource<T> dataSource,
-    super.hours,
-    super.onWriteFailed,
-  }) : _dataSource = dataSource;
+  CachingCalendarStore({required CalendarDataSource<T> dataSource, super.hours})
+    : _dataSource = dataSource;
 
   final CalendarDataSource<T> _dataSource;
 
@@ -401,8 +398,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
 
   /// Writes [entry], whose id names a stored entry; the entry shows
   /// pending, as stored, until the data source answers. Completes with the
-  /// stored entry, or fails with the source's error, which the caller
-  /// reports: a failure does not reach [onWriteFailed]. It sends nothing
+  /// stored entry, or fails with the source's error. It sends nothing
   /// and fails with an [ArgumentError] for an entry with no id, with a
   /// [CalendarHoursException] when [hoursRefusalOf] refuses it, and with
   /// a [CalendarWritePendingException] on a pending entry. An answer under
@@ -442,76 +438,76 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// Writes a grid move or resize: [requested] shows, pending, until the
-  /// data source answers. A failure shows the stored entry again and
-  /// reports through [onWriteFailed]. Sends nothing and reports through
-  /// [onWriteFailed] instead a [CalendarHoursException] for a move
-  /// [hoursRefusalOf] refuses, and a [CalendarWritePendingException] for
-  /// a pending entry; a move onto another entry's time is sent. Throws an
-  /// [ArgumentError] for an entry with no id.
+  /// data source answers. Completes with the stored entry, or fails with
+  /// the source's error, the stored entry showing again. It sends nothing
+  /// and fails with an [ArgumentError] for an entry with no id, with a
+  /// [CalendarHoursException] when [hoursRefusalOf] refuses it, and with
+  /// a [CalendarWritePendingException] on a pending entry; a move onto
+  /// another entry's time is sent. An answer under another id fails with
+  /// a [StateError]. An answer that arrives within the call, as a
+  /// [SynchronousFuture]'s does, is stored within it.
   @override
-  void requestMove(CalendarEntry<T> requested) {
+  Future<CalendarEntry<T>> requestMove(CalendarEntry<T> requested) {
     final id = requested.id;
     if (id == null) {
-      throw ArgumentError.value(requested, "requested", "A move needs an id.");
+      return Future<CalendarEntry<T>>.error(
+        ArgumentError.value(requested, "requested", "A move needs an id."),
+      );
     }
     final refusal = hoursRefusalOf(requested);
     if (refusal != null) {
-      reportWriteFailure(id, refusal);
-      return;
+      return Future<CalendarEntry<T>>.error(refusal);
     }
     if (!_lock(id, requested)) {
-      reportWriteFailure(id, CalendarWritePendingException(id));
-      return;
+      return Future<CalendarEntry<T>>.error(CalendarWritePendingException(id));
     }
-    Future<CalendarEntry<T>>.sync(() {
+    return Future<CalendarEntry<T>>.sync(() {
       return _dataSource.replace(requested);
-    }).then(
+    }).then<CalendarEntry<T>>(
       (moved) {
-        if (_disposed) {
-          return;
-        }
         if (moved.id != id) {
-          _failWrite(
+          return _failWrite<CalendarEntry<T>>(
             id,
             StateError(
               "The data source replaced $id with an entry under ${moved.id}.",
             ),
             StackTrace.current,
           );
-          return;
         }
-        _applyConfirmed(moved);
-        notifyListeners();
+        if (!_disposed) {
+          _applyConfirmed(moved);
+          notifyListeners();
+        }
+        return moved;
       },
       onError: (Object error, StackTrace stackTrace) {
-        _failWrite(id, error, stackTrace);
+        return _failWrite<CalendarEntry<T>>(id, error, stackTrace);
       },
     );
   }
 
   /// Deletes [id]: the stored entry shows pending until the data source
-  /// answers, and leaves on success. A failure reports through
-  /// [onWriteFailed], and so does a [CalendarWritePendingException] for a
-  /// pending entry, which sends nothing.
+  /// answers, and leaves once it confirms. Completes then, or fails with
+  /// the source's error, the entry showing as stored again. It sends
+  /// nothing and fails with a [CalendarWritePendingException] on a
+  /// pending entry.
   @override
-  void requestDelete(String id) {
+  Future<void> requestDelete(String id) {
     if (!_lock(id, null)) {
-      reportWriteFailure(id, CalendarWritePendingException(id));
-      return;
+      return Future<void>.error(CalendarWritePendingException(id));
     }
-    Future<void>.sync(() {
+    return Future<void>.sync(() {
       return _dataSource.delete(id);
-    }).then(
+    }).then<void>(
       (_) {
-        if (_disposed) {
-          return;
+        if (!_disposed) {
+          _index.release(id);
+          _index.forget(id);
+          notifyListeners();
         }
-        _index.release(id);
-        _index.forget(id);
-        notifyListeners();
       },
       onError: (Object error, StackTrace stackTrace) {
-        _failWrite(id, error, stackTrace);
+        return _failWrite<void>(id, error, stackTrace);
       },
     );
   }
@@ -528,13 +524,14 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     return true;
   }
 
-  void _failWrite(String id, Object error, StackTrace stackTrace) {
-    if (_disposed) {
-      return;
+  /// Ends the pending write on [id], which failed with [error], showing the
+  /// stored entry again; returns a future that fails with [error].
+  Future<R> _failWrite<R>(String id, Object error, StackTrace stackTrace) {
+    if (!_disposed) {
+      _index.release(id);
+      notifyListeners();
     }
-    _index.release(id);
-    notifyListeners();
-    reportWriteFailure(id, error, stackTrace);
+    return Future<R>.error(error, stackTrace);
   }
 
   /// Ends the pending write on [entry]'s id and stores [entry], filed

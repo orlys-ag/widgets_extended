@@ -133,8 +133,6 @@ void main() {
       MemoryCalendarStore,
       CalendarShownEntry,
       CalendarLoadStatus,
-      CalendarWriteFailure,
-      CalendarWriteFailed,
       CalendarEntryChanged,
       CalendarStoreException,
       CalendarHoursException,
@@ -174,6 +172,8 @@ void main() {
       CalendarEntryTapDetails,
       CalendarThemeExtension,
       CreateRange,
+      CalendarMoveRequest,
+      CalendarMoveKind,
       HourLabelFormat,
       MonthLayout,
       minDayWidthLow,
@@ -207,6 +207,10 @@ void main() {
     };
     expect(views, <String, Set<String>>{
       "lib/calendar/views/month_board.dart": <String>{"MonthLayout"},
+      "lib/calendar/views/move_request.dart": <String>{
+        "CalendarMoveKind",
+        "CalendarMoveRequest",
+      },
       "lib/calendar/views/pinch_zoom.dart": <String>{
         "defaultMinSlotHeight",
         "maxMonthWeekScale",

@@ -93,16 +93,10 @@ class FakeDataSource implements CalendarDataSource<String> {
   }
 }
 
-/// A store over a fake data source, recording what reaches
-/// `onWriteFailed` and how often it notifies.
+/// A store over a fake data source, recording how often it notifies.
 class Harness {
   Harness() {
-    store = CachingCalendarStore<String>(
-      dataSource: source,
-      onWriteFailed: (failure) {
-        failures.add(failure);
-      },
-    );
+    store = CachingCalendarStore<String>(dataSource: source);
     store.addListener(() {
       notifications++;
     });
@@ -110,7 +104,6 @@ class Harness {
 
   final FakeDataSource source = FakeDataSource();
   late final CachingCalendarStore<String> store;
-  final List<CalendarWriteFailure> failures = <CalendarWriteFailure>[];
   int notifications = 0;
 
   FakeCall get lastCall {
@@ -206,6 +199,19 @@ Future<void> settle() {
   return pumpEventQueue();
 }
 
+/// Listens to [call] at once, and completes with what it completed with:
+/// its value, or the error it failed with.
+Future<Object?> outcomeOf(Future<Object?> call) {
+  return call.then<Object?>(
+    (value) {
+      return value;
+    },
+    onError: (Object error) {
+      return error;
+    },
+  );
+}
+
 /// Listens to [call] at once and returns what it failed with so far, null
 /// while it has not failed.
 Object? Function() errorOf(Future<Object?> call) {
@@ -223,13 +229,6 @@ Object? Function() errorOf(Future<Object?> call) {
 
 List<String> idsOn(CalendarStore<String> store, DateTime day) {
   return <String>[for (final entry in store.entriesOn(day)) entry.id];
-}
-
-/// A failure of the write on [id] whose error [error] matches.
-Matcher failureOf(String id, Object? error) {
-  return isA<CalendarWriteFailure>()
-      .having((failure) => failure.id, "id", id)
-      .having((failure) => failure.error, "error", error);
 }
 
 Matcher pendingRefusal(String id) {
@@ -396,7 +395,7 @@ void main() {
 
     // A move that fails.
     final requested = onDay(item, DateTime(2026, 4, 23));
-    store.requestMove(requested);
+    final moving = errorOf(store.requestMove(requested));
     final failing = harness.lastCall;
     expect(failing.method, SourceMethod.replace);
     expect(store.entriesOn(DateTime(2026, 4, 23)), <CalendarShownEntry<String>>[
@@ -407,18 +406,15 @@ void main() {
 
     // Every write on the locked id is refused without a call or a throw.
     final calls = harness.source.calls.length;
-    store.requestMove(onDay(item, DateTime(2026, 4, 24)));
-    expect(harness.failures, <Matcher>[
-      failureOf("item-1", pendingRefusal("item-1")),
-    ]);
+    final moved = errorOf(
+      store.requestMove(onDay(item, DateTime(2026, 4, 24))),
+    );
     final refusal = errorOf(store.update(item.copyWith(title: "Renamed")));
-    store.requestDelete("item-1");
+    final deleted = errorOf(store.requestDelete("item-1"));
     await settle();
+    expect(moved(), pendingRefusal("item-1"));
     expect(refusal(), pendingRefusal("item-1"));
-    expect(harness.failures, <Matcher>[
-      failureOf("item-1", pendingRefusal("item-1")),
-      failureOf("item-1", pendingRefusal("item-1")),
-    ]);
+    expect(deleted(), pendingRefusal("item-1"));
     expect(harness.source.calls, hasLength(calls));
 
     final movingFailed = failing.fail("Moving failed.");
@@ -427,18 +423,19 @@ void main() {
       CalendarShownEntry<String>(item, pending: false),
     ]);
     expect(store.isPending("item-1"), isFalse);
-    expect(harness.failures.last, failureOf("item-1", same(movingFailed)));
+    expect(moving(), same(movingFailed));
 
-    // A move that succeeds.
-    store.requestMove(requested);
-    harness.lastCall.succeed(requested);
+    // A move that succeeds completes with the entry the source stored.
+    final succeeding = outcomeOf(store.requestMove(requested));
+    final confirmed = requested.copyWith(title: "Confirmed");
+    harness.lastCall.succeed(confirmed);
     await settle();
-    expect(store.storedEntry("item-1"), requested);
+    expect(store.storedEntry("item-1"), confirmed);
     expect(store.isPending("item-1"), isFalse);
+    expect(await succeeding, same(confirmed));
 
     // A form edit shows the stored entry until the data source answers,
-    // and its failure reaches the caller alone.
-    final failuresBefore = harness.failures.length;
+    // and its failure reaches the caller.
     final edit = errorOf(store.update(other.copyWith(title: "Renamed")));
     expect(store.entriesOn(DateTime(2026, 4, 22)), <CalendarShownEntry<String>>[
       CalendarShownEntry<String>(other, pending: true),
@@ -447,7 +444,6 @@ void main() {
     await settle();
     expect(edit(), same(savingFailed));
     expect(store.isPending("item-2"), isFalse);
-    expect(harness.failures, hasLength(failuresBefore));
 
     // A confirmed create and delete add and remove.
     final created = draft(DateTime(2026, 4, 24), 600, 660);
@@ -455,10 +451,11 @@ void main() {
     harness.lastCall.succeed(created.copyWith(id: "item-3"));
     await creating;
     expect(idsOn(store, DateTime(2026, 4, 24)), <String>["item-3"]);
-    store.requestDelete("item-3");
+    final deleting = outcomeOf(store.requestDelete("item-3"));
     harness.lastCall.succeed();
     await settle();
     expect(idsOn(store, DateTime(2026, 4, 24)), isEmpty);
+    expect(await deleting, isNull);
   });
 
   test("M4 a move that meets an entry on a read day is sent to the source "
@@ -479,7 +476,7 @@ void main() {
       start: DateTime(2026, 4, 27, 13),
       end: DateTime(2026, 4, 27, 19),
     );
-    store.requestMove(meeting);
+    final meetingMove = outcomeOf(store.requestMove(meeting));
     expect(harness.source.calls, hasLength(calls + 1));
     expect(harness.lastCall.method, SourceMethod.replace);
     expect(store.isPending("item-1"), isTrue);
@@ -493,12 +490,13 @@ void main() {
       start: DateTime(2026, 4, 26, 10, 30),
       end: DateTime(2026, 4, 26, 11, 30),
     );
-    store.requestMove(sharing);
+    final sharingMove = outcomeOf(store.requestMove(sharing));
     expect(harness.source.calls, hasLength(calls + 2));
     harness.lastCall.succeed(sharing);
     await settle();
     expect(store.storedEntry("item-2"), sharing);
-    expect(harness.failures, isEmpty);
+    expect(await meetingMove, meeting);
+    expect(await sharingMove, sharing);
   });
 
   test("M5 a multi-day entry shows on each day it covers", () async {
@@ -557,12 +555,12 @@ void main() {
     expect(fresh.notifications, notifications);
   });
 
-  test("M7 a completion after dispose calls neither notifyListeners nor "
-      "onWriteFailed", () async {
+  test("M7 a completion after dispose calls no notifyListeners, and a "
+      "failed move still fails to its caller", () async {
     // A notifyListeners after dispose throws in debug, from the callback
     // that completes the call, so it lands here.
     final errors = <Object>[];
-    final done = Completer<Harness>();
+    final done = Completer<(Object? Function(), Object)>();
     runZonedGuarded(
       () async {
         final harness = Harness();
@@ -573,22 +571,24 @@ void main() {
         await settle();
         store.show(aprilFirst, aprilLast);
         final read = harness.lastCall;
-        store.requestMove(onDay(item, DateTime(2026, 4, 22)));
+        final moving = errorOf(
+          store.requestMove(onDay(item, DateTime(2026, 4, 22))),
+        );
         final write = harness.lastCall;
 
         store.dispose();
         read.succeed(<CalendarEntry<String>>[]);
-        write.fail();
+        final writeFailed = write.fail();
         await settle();
-        done.complete(harness);
+        done.complete((moving, writeFailed));
       },
       (error, stackTrace) {
         errors.add(error);
       },
     );
-    final harness = await done.future;
+    final (moving, writeFailed) = await done.future;
     expect(errors, isEmpty);
-    expect(harness.failures, isEmpty);
+    expect(moving(), same(writeFailed));
   });
 
   test("M8 the hours hold a new entry and a change of an entry's days or "
@@ -615,12 +615,11 @@ void main() {
     expect(moved(), hoursRefusal(startOutside: true));
     expect(store.isPending("item-1"), isFalse);
 
-    store.requestMove(retimed(early, 450, 510));
-    expect(harness.failures, <Matcher>[
-      failureOf("item-1", hoursRefusal(startOutside: true)),
-    ]);
+    final refused = errorOf(store.requestMove(retimed(early, 450, 510)));
     expect(store.isPending("item-1"), isFalse);
     expect(harness.source.calls, hasLength(calls));
+    await settle();
+    expect(refused(), hoursRefusal(startOutside: true));
 
     // A write that keeps the stored days and minutes is not held to them.
     final renamed = store.update(early.copyWith(title: "Renamed"));
@@ -780,12 +779,10 @@ void main() {
       store.show(weekFirst, weekLast);
       harness.lastCall.succeed(<CalendarEntry<String>>[item]);
       await settle();
-      store.requestMove(retimed(item, 720, 780));
+      final moving = errorOf(store.requestMove(retimed(item, 720, 780)));
       harness.lastCall.succeed(retimed(item, 720, 780).copyWith(id: "item-9"));
       await settle();
-      expect(harness.failures, <Matcher>[
-        failureOf("item-1", isA<StateError>()),
-      ]);
+      expect(moving(), isA<StateError>());
       expect(store.isPending("item-1"), isFalse);
       expect(store.entriesOn(day), <CalendarShownEntry<String>>[
         CalendarShownEntry<String>(item, pending: false),
@@ -793,7 +790,8 @@ void main() {
       expect(store.storedEntry("item-9"), isNull);
     });
 
-    test("an update of an entry with no id fails and sends nothing", () async {
+    test("an update or a move of an entry with no id fails and sends "
+        "nothing", () async {
       final harness = Harness();
       final store = harness.store;
       store.show(weekFirst, weekLast);
@@ -801,13 +799,10 @@ void main() {
       await settle();
       final calls = harness.source.calls.length;
       final updating = errorOf(store.update(draft(day, 600, 660)));
+      final moving = errorOf(store.requestMove(draft(day, 600, 660)));
       await settle();
       expect(updating(), isA<ArgumentError>());
-      expect(harness.source.calls, hasLength(calls));
-      expect(
-        () => store.requestMove(draft(day, 600, 660)),
-        throwsArgumentError,
-      );
+      expect(moving(), isA<ArgumentError>());
       expect(harness.source.calls, hasLength(calls));
     });
 
@@ -833,10 +828,9 @@ void main() {
       expect(store.entriesOn(day), <CalendarShownEntry<String>>[
         CalendarShownEntry<String>(requested, pending: true),
       ]);
-      store.requestMove(retimed(stored, 900, 960));
-      expect(harness.failures, <Matcher>[
-        failureOf("item-5", pendingRefusal("item-5")),
-      ]);
+      final again = errorOf(store.requestMove(retimed(stored, 900, 960)));
+      await settle();
+      expect(again(), pendingRefusal("item-5"));
     });
   });
 
@@ -868,16 +862,14 @@ void main() {
       const thrown = SourceFailure("Thrown.");
       harness.source.thrown = thrown;
       expect(() => store.show(aprilFirst, aprilLast), returnsNormally);
-      store.requestMove(retimed(item, 720, 780));
-      store.requestDelete("item-2");
+      final moving = errorOf(store.requestMove(retimed(item, 720, 780)));
+      final deleting = errorOf(store.requestDelete("item-2"));
       await settle();
       expect(store.status, CalendarLoadStatus.failed);
       expect(store.loadError, same(thrown));
       expect(store.isRead(aprilFirst), isFalse);
-      expect(harness.failures, <Matcher>[
-        failureOf("item-1", same(thrown)),
-        failureOf("item-2", same(thrown)),
-      ]);
+      expect(moving(), same(thrown));
+      expect(deleting(), same(thrown));
       expect(store.isPending("item-1"), isFalse);
       expect(store.isPending("item-2"), isFalse);
       expect(idsOn(store, DateTime(2026, 4, 21)), <String>["item-1"]);

@@ -14,10 +14,9 @@ The contract of `CalendarStore` and its two stores. The conventions every layer 
 - **Hours.** The store holds the calendar's one copy of its hours, which
   its writes must lie in; a set of other hours notifies.
 - **Writes.** An entry has one write in flight at most, and a write on an
-  entry that has one sends nothing and fails. A move, resize or delete
-  reports its failure through the store's write-failure callback, the
-  stored entry showing again; an update or a create completes with the
-  stored entry or fails to its caller.
+  entry that has one sends nothing and fails. Every write completes once
+  it is stored, or fails to its caller; a failed move, resize or delete
+  shows the stored entry again.
 - **The caching store** reads through a data source by days. A day once read
   changes only by a confirmed write: a later read fills only the days not
   read yet. A failed read leaves its days unread, so the next read that

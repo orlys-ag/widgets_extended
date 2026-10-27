@@ -2852,4 +2852,51 @@ void main() {
     await flipOverlaps();
     expect(api.allowsOverlaps, isFalse);
   });
+
+  testWidgets("W44 a block moved where the mock API fails the write shows "
+      "a snackbar naming the failure, and a delete from the item's form "
+      "the API fails keeps the item under one naming that failure", (
+    tester,
+  ) async {
+    final api = MockCalendarApi(latency: harnessLatency);
+    await createBeforePump(tester, api, taskJson("Moved", today, 600, 660));
+    final moved = await idOn(tester, api, today, "Moved");
+    await pumpCalendar(tester, editing: true, api: api, size: tall);
+    await pickMode(tester, "Week");
+    api.failurePolicy = (request) {
+      return request.method == CalendarMethod.update ? "Moving failed." : null;
+    };
+    final requests = api.requests.length;
+    await moveBlock(
+      tester,
+      blockFinder(moved),
+      cellRect(tester, rowOf(14 * 60), colOf(2)).topLeft,
+    );
+    // Setup sanity: the drop sent one update.
+    expect(
+      <CalendarMethod>[
+        for (final request in api.requests.skip(requests)) request.method,
+      ],
+      <CalendarMethod>[CalendarMethod.update],
+    );
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(SnackBar, "Moving failed."), findsOneWidget);
+
+    api.failurePolicy = (request) {
+      return request.method == CalendarMethod.delete
+          ? "Deleting failed."
+          : null;
+    };
+    await tester.tap(blockFinder(moved));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, "Delete"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, "Delete").last);
+    await tester.pump();
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(SnackBar, "Deleting failed."), findsOneWidget);
+    expect(blockFinder(moved), findsOneWidget);
+  });
 }

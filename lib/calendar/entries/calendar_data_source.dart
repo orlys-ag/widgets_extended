@@ -8,8 +8,8 @@ import 'calendar_entry.dart';
 /// and writes one entry at a time.
 ///
 /// Each call completes with what the source stored, or fails with the
-/// source's own error, which reaches the store's caller or its
-/// write-failure callback unchanged.
+/// source's own error, which reaches unchanged the caller of the store's
+/// write, or for a read the store's `loadError`.
 abstract interface class CalendarDataSource<T> {
   /// Every entry with any part in the days from [first] to [last], both
   /// inclusive, each once, each with its id: an entry ending at the start

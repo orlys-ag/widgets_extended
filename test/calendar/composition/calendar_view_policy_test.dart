@@ -18,6 +18,7 @@ import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart'
     show dayListGapKey;
 import 'package:widgets_extended/calendar/views/month_board.dart';
+import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
@@ -62,7 +63,8 @@ MoveRecordingStore storeOf(
 /// [editable]'s, each of which builds it again when set. It records each
 /// create it reports in [creates], each tap in [taps], the last details
 /// each card is built with in [cards], the id of each card it builds in
-/// [cardsBuilt], and each add button's details in [adds].
+/// [cardsBuilt], and each add button's details in [adds]; it hands each
+/// move and resize to [onMoveRequest].
 class Host {
   Host(
     this.store, {
@@ -71,12 +73,15 @@ class Host {
     required this.time,
     CalendarEditPolicy<String>? policy,
     this.today,
+    this.onMoveRequest,
   }) : policy = ValueNotifier<CalendarEditPolicy<String>?>(policy);
 
   final MoveRecordingStore store;
   final CalendarViewKind view;
   final DateTime day;
   final DateTime? today;
+  final Future<void> Function(CalendarMoveRequest<String> request)?
+  onMoveRequest;
 
   /// What the calendar's clock reads.
   DateTime time;
@@ -139,6 +144,7 @@ class Host {
               onCreateRange: (range) async {
                 creates.add(range);
               },
+              onMoveRequest: onMoveRequest,
             );
           },
         ),
@@ -1570,6 +1576,48 @@ void main() {
       );
       expect(built.toSet().length, built.length);
     });
+  });
+
+  testWidgets("PV11 a block's move in Week and in Day reaches the host's "
+      "onMoveRequest, and the calendar writes nothing itself", (tester) async {
+    for (final view in <CalendarViewKind>[
+      CalendarViewKind.week,
+      CalendarViewKind.day,
+    ]) {
+      final week = view == CalendarViewKind.week;
+      final meet = entryOf("M", at(tuesday, 10), at(tuesday, 11));
+      final requests = <CalendarMoveRequest<String>>[];
+      final host = Host(
+        storeOf(<CalendarEntry<String>>[meet]),
+        view: view,
+        day: tuesday,
+        time: at(monday, 8),
+        onMoveRequest: (request) async {
+          requests.add(request);
+        },
+      );
+      await host.pump(tester);
+      final from = tester.getCenter(blockFinder("M"));
+      // Four hours of rows down, so the block's top lands on 14:00.
+      final to =
+          from +
+          (slotCenter(tester, tuesday, 14 * 60, week: week) -
+              slotCenter(tester, tuesday, 10 * 60, week: week));
+      final gesture = await liftTo(tester, from, to);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(requests, <CalendarMoveRequest<String>>[
+        CalendarMoveRequest<String>(
+          entry: meet,
+          requested: meet.copyWith(
+            start: at(tuesday, 14),
+            end: at(tuesday, 15),
+          ),
+          kind: CalendarMoveKind.move,
+        ),
+      ], reason: view.name);
+      expect(host.store.moves, isEmpty, reason: view.name);
+    }
   });
 
   testWidgets("PV10 within a minute Week's blocks, Agenda's rows and cards "

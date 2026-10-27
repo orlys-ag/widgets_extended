@@ -196,11 +196,11 @@ class MoveRecordingStore extends MemoryCalendarStore<String> {
   bool _moving = false;
 
   @override
-  void requestMove(CalendarEntry<String> requested) {
+  Future<CalendarEntry<String>> requestMove(CalendarEntry<String> requested) {
     moves.add(requested);
     _moving = true;
     try {
-      super.requestMove(requested);
+      return super.requestMove(requested);
     } finally {
       _moving = false;
     }
