@@ -53,8 +53,9 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
 }
 
 void main() {
-  test("HP1 two default history locks are equal with equal hash codes, each "
-      "setting makes one unequal, none equals the unrestricted policy, and "
+  test("HP1 two default history locks are equal with equal hash codes, "
+      "lockEarlierToday makes one unequal, none equals the unrestricted "
+      "policy, and "
       "the defaults lock no earlier time of today, allow overlaps and limit "
       "no day count", () {
     const constant = HistoryLockPolicy<String>();
@@ -64,10 +65,6 @@ void main() {
     expect(built.hashCode, constant.hashCode);
     expect(
       const HistoryLockPolicy<String>(lockEarlierToday: true),
-      isNot(constant),
-    );
-    expect(
-      const HistoryLockPolicy<String>(allowsOverlaps: false),
       isNot(constant),
     );
     expect(constant, isNot(const UnrestrictedEditPolicy<String>()));

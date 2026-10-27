@@ -46,8 +46,9 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
 /// Pumps an editable calendar on [view] over [day] with [entries] in
 /// [hours] and slots of [slotMinutes], its clock at [now], under the
 /// history lock of earlier today where [lock] holds and the unrestricted
-/// policy otherwise, each allowing overlaps as [allowsOverlaps] says, and
-/// returns the ranges it reports for a create. Each day a create is
+/// policy otherwise, combined with a [NoOverlapsPolicy] where
+/// [allowsOverlaps] is false, and returns the ranges it reports for a
+/// create. Each day a create is
 /// refused on goes to [refusals]. Agenda's add buttons read "add" and
 /// their minute.
 Future<List<CreateRange>> pumpCalendar(
@@ -79,12 +80,13 @@ Future<List<CreateRange>> pumpCalendar(
           return now;
         },
         editable: true,
-        editPolicy: lock
-            ? HistoryLockPolicy<String>(
-                lockEarlierToday: true,
-                allowsOverlaps: allowsOverlaps,
-              )
-            : UnrestrictedEditPolicy<String>(allowsOverlaps: allowsOverlaps),
+        editPolicy: CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+          if (lock)
+            const HistoryLockPolicy<String>(lockEarlierToday: true)
+          else
+            const UnrestrictedEditPolicy<String>(),
+          if (!allowsOverlaps) const NoOverlapsPolicy<String>(),
+        ]),
         slotMinutes: slotMinutes,
         onCreateRange: (range) async {
           creates.add(range);

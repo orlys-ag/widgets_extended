@@ -709,7 +709,7 @@ void main() {
   });
 
   group("PV3", () {
-    final changed = UnrestrictedEditPolicy<String>(allowsOverlaps: false);
+    const changed = NoOverlapsPolicy<String>();
 
     /// Entries after Monday, the clock's day: M and R to move and resize,
     /// and N across Tuesday's midnight.
@@ -1036,10 +1036,11 @@ void main() {
         final host = await pumpDay(
           tester,
           time: at(tuesday, 13, 59, 30),
-          policy: const HistoryLockPolicy<String>(
-            lockEarlierToday: true,
-            allowsOverlaps: false,
-          ),
+          policy:
+              CalendarEditPolicy<String>.all(const <CalendarEditPolicy<String>>[
+                HistoryLockPolicy<String>(lockEarlierToday: true),
+                NoOverlapsPolicy<String>(),
+              ]),
           entries: <CalendarEntry<String>>[
             entryOf("E", at(tuesday, 14, 15), at(tuesday, 14, 30)),
             entryOf("F", at(tuesday, 15, 30), at(tuesday, 16)),
@@ -1140,10 +1141,11 @@ void main() {
         final host = await pumpDay(
           tester,
           time: at(tuesday, 13, 59, 30),
-          policy: const HistoryLockPolicy<String>(
-            lockEarlierToday: true,
-            allowsOverlaps: false,
-          ),
+          policy:
+              CalendarEditPolicy<String>.all(const <CalendarEditPolicy<String>>[
+                HistoryLockPolicy<String>(lockEarlierToday: true),
+                NoOverlapsPolicy<String>(),
+              ]),
           hours: hours,
           entries: <CalendarEntry<String>>[
             entryOf("X", at(tuesday, 14, 15), at(tuesday, 15)),

@@ -262,8 +262,9 @@ class HeldSource implements CalendarDataSource<String> {
 /// and 2000 tall, where every slot of the day shows; [creates] records each
 /// create range it reports. [hours] and [slotMinutes] start as [shown]'s,
 /// and [rebuild] builds the grid again with them. The grid's policy is the
-/// unrestricted one, allowing overlaps as [allowsOverlaps] says, combined
-/// with a [DayLimitPolicy] of [maxDayCount] where it is given.
+/// unrestricted one, combined with a [DayLimitPolicy] of [maxDayCount]
+/// where it is given and with a [NoOverlapsPolicy] where [allowsOverlaps]
+/// is false.
 class Harness {
   Harness(
     this.store,
@@ -281,14 +282,12 @@ class Harness {
   final bool allowsOverlaps;
 
   CalendarEditPolicy<String> get policy {
-    final base = UnrestrictedEditPolicy<String>(allowsOverlaps: allowsOverlaps);
     final limit = maxDayCount;
-    return limit == null
-        ? base
-        : CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
-            base,
-            DayLimitPolicy<String>(limit),
-          ]);
+    return CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+      const UnrestrictedEditPolicy<String>(),
+      if (limit != null) DayLimitPolicy<String>(limit),
+      if (!allowsOverlaps) const NoOverlapsPolicy<String>(),
+    ]);
   }
 
   DayHours hours;

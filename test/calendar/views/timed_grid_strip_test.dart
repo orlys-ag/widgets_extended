@@ -451,26 +451,22 @@ class Harness {
 
   /// [editPolicy], or with none the history lock under [lockPast], with
   /// [lockEarlierToday], and the unrestricted policy otherwise, each
-  /// allowing overlaps as [allowsOverlaps] says, combined with a
-  /// [DayLimitPolicy] of [maxDayCount] where it is given.
+  /// combined with a [DayLimitPolicy] of [maxDayCount] where it is given
+  /// and with a [NoOverlapsPolicy] where [allowsOverlaps] is false.
   CalendarEditPolicy<String> get policy {
     final given = editPolicy;
     if (given != null) {
       return given;
     }
-    final CalendarEditPolicy<String> base = lockPast
-        ? HistoryLockPolicy<String>(
-            lockEarlierToday: lockEarlierToday,
-            allowsOverlaps: allowsOverlaps,
-          )
-        : UnrestrictedEditPolicy<String>(allowsOverlaps: allowsOverlaps);
     final limit = maxDayCount;
-    return limit == null
-        ? base
-        : CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
-            base,
-            DayLimitPolicy<String>(limit),
-          ]);
+    return CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+      if (lockPast)
+        HistoryLockPolicy<String>(lockEarlierToday: lockEarlierToday)
+      else
+        const UnrestrictedEditPolicy<String>(),
+      if (limit != null) DayLimitPolicy<String>(limit),
+      if (!allowsOverlaps) const NoOverlapsPolicy<String>(),
+    ]);
   }
 
   TimedGrid<String> grid() {
@@ -3507,7 +3503,9 @@ void main() {
       for (final allowsOverlaps in const <bool>[false, true]) {
         for (final MapEntry(key: name, value: run) in gestures.entries) {
           final policy = CountingEditPolicy<String>(
-            UnrestrictedEditPolicy<String>(allowsOverlaps: allowsOverlaps),
+            allowsOverlaps
+                ? const UnrestrictedEditPolicy<String>()
+                : const NoOverlapsPolicy<String>(),
           );
           final store = storeOf(<CalendarEntry<String>>[
             for (var i = 0; i < count; i++)

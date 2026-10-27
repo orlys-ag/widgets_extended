@@ -186,9 +186,9 @@ void main() {
       expect(allowing.toString(), contains("overlaps allowed"));
     });
 
-    test("give the edit policy: the history lock under lockPast and no lock "
-        "otherwise, each with the settings' overlap answer and a day limit "
-        "of maxDayCount, equal settings giving equal policies", () {
+    test("give the edit policy: the history lock under lockPast, a day "
+        "limit of maxDayCount, and no overlaps unless allowsOverlaps, "
+        "equal settings giving equal policies", () {
       for (final lockPast in const <bool>[false, true]) {
         for (final lockEarlierToday in const <bool>[false, true]) {
           for (final allowsOverlaps in const <bool>[false, true]) {
@@ -208,13 +208,9 @@ void main() {
                   if (lockPast)
                     HistoryLockPolicy<ItemPayload>(
                       lockEarlierToday: lockEarlierToday,
-                      allowsOverlaps: allowsOverlaps,
-                    )
-                  else
-                    UnrestrictedEditPolicy<ItemPayload>(
-                      allowsOverlaps: allowsOverlaps,
                     ),
                   const DayLimitPolicy<ItemPayload>(maxDayCount),
+                  if (!allowsOverlaps) const NoOverlapsPolicy<ItemPayload>(),
                 ],
               ),
               reason: reason,

@@ -191,40 +191,35 @@ abstract class CalendarEditPolicy<T> {
   /// resize gives a timed entry times another timed entry shares, and a
   /// move dropped onto one lands at the nearest free time or goes back.
   /// An all-day entry shares time with none, so neither answer limits a
-  /// bar within the all-day strip. True here.
+  /// bar within the all-day strip. A [NoOverlapsPolicy] combined with
+  /// other policies ([CalendarEditPolicy.all]) makes it false for them.
+  /// True here.
   bool get allowsOverlaps {
     return true;
   }
 }
 
-/// A policy that limits nothing, other than overlaps where
-/// [allowsOverlaps] is false: the one a `CalendarView` given no
+/// A policy that limits nothing: the one a `CalendarView` given no
 /// `editPolicy` takes.
 ///
-/// Two compare equal where their runtime types and [allowsOverlaps] are
-/// the same.
+/// Two compare equal where their runtime types are the same.
 class UnrestrictedEditPolicy<T> extends CalendarEditPolicy<T> {
-  /// Allows overlaps unless [allowsOverlaps] is false.
-  const UnrestrictedEditPolicy({this.allowsOverlaps = true});
-
-  @override
-  final bool allowsOverlaps;
+  /// Limits nothing.
+  const UnrestrictedEditPolicy();
 
   @override
   bool operator ==(Object other) {
-    return other.runtimeType == runtimeType &&
-        other is UnrestrictedEditPolicy<T> &&
-        other.allowsOverlaps == allowsOverlaps;
+    return other.runtimeType == runtimeType;
   }
 
   @override
   int get hashCode {
-    return Object.hash(runtimeType, allowsOverlaps);
+    return runtimeType.hashCode;
   }
 
   @override
   String toString() {
-    return "UnrestrictedEditPolicy(allowsOverlaps: $allowsOverlaps)";
+    return "UnrestrictedEditPolicy()";
   }
 }
 
@@ -261,6 +256,36 @@ class DayLimitPolicy<T> extends CalendarEditPolicy<T> {
   @override
   String toString() {
     return "DayLimitPolicy($dayLimit)";
+  }
+}
+
+/// A policy that forbids only overlaps, answering false to
+/// [allowsOverlaps], and allows everything else: combined with other
+/// policies ([CalendarEditPolicy.all]), it forbids overlaps under them.
+///
+/// Two compare equal where their runtime types are the same.
+class NoOverlapsPolicy<T> extends CalendarEditPolicy<T> {
+  /// Forbids overlaps.
+  const NoOverlapsPolicy();
+
+  @override
+  bool get allowsOverlaps {
+    return false;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other.runtimeType == runtimeType;
+  }
+
+  @override
+  int get hashCode {
+    return runtimeType.hashCode;
+  }
+
+  @override
+  String toString() {
+    return "NoOverlapsPolicy()";
   }
 }
 

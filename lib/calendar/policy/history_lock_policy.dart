@@ -22,25 +22,19 @@ enum _Hold { free, started, locked }
 /// deleted. One that ends at the boundary or before it neither changes
 /// nor is deleted. A new entry starts on today's day from the boundary,
 /// on a later day anywhere, and on an earlier day nowhere. It limits no
-/// day count, and allows overlaps unless [allowsOverlaps] is false.
+/// day count and allows overlaps; combined with a [DayLimitPolicy] or a
+/// [NoOverlapsPolicy] ([CalendarEditPolicy.all]), it limits those too.
 ///
-/// Two compare equal where their runtime types, [lockEarlierToday] and
-/// [allowsOverlaps] are the same. Each answer compares instants and reads
-/// [CalendarNow]'s fields, so none allocates.
+/// Two compare equal where their runtime types and [lockEarlierToday]
+/// are the same. Each answer compares instants and reads [CalendarNow]'s
+/// fields, so none allocates.
 class HistoryLockPolicy<T> extends CalendarEditPolicy<T> {
   /// The lock at the start of today, or with [lockEarlierToday] at the
-  /// current minute of it; allows overlaps unless [allowsOverlaps] is
-  /// false.
-  const HistoryLockPolicy({
-    this.lockEarlierToday = false,
-    this.allowsOverlaps = true,
-  });
+  /// current minute of it.
+  const HistoryLockPolicy({this.lockEarlierToday = false});
 
   /// Whether the lock holds today up to the current minute too.
   final bool lockEarlierToday;
-
-  @override
-  final bool allowsOverlaps;
 
   /// The instant before which entries are held at [now].
   DateTime _boundaryOf(CalendarNow now) {
@@ -125,18 +119,16 @@ class HistoryLockPolicy<T> extends CalendarEditPolicy<T> {
   bool operator ==(Object other) {
     return other.runtimeType == runtimeType &&
         other is HistoryLockPolicy<T> &&
-        other.lockEarlierToday == lockEarlierToday &&
-        other.allowsOverlaps == allowsOverlaps;
+        other.lockEarlierToday == lockEarlierToday;
   }
 
   @override
   int get hashCode {
-    return Object.hash(runtimeType, lockEarlierToday, allowsOverlaps);
+    return Object.hash(runtimeType, lockEarlierToday);
   }
 
   @override
   String toString() {
-    return "HistoryLockPolicy(lockEarlierToday: $lockEarlierToday, "
-        "allowsOverlaps: $allowsOverlaps)";
+    return "HistoryLockPolicy(lockEarlierToday: $lockEarlierToday)";
   }
 }

@@ -1,6 +1,7 @@
 /// The edit policy: the permissive answers a policy overriding nothing
 /// gives, the unrestricted policy's equality, the time a policy answers
-/// at, the policy of all of several, and the day limit policy.
+/// at, the policy of all of several, the day limit policy, and the
+/// policy forbidding overlaps.
 library;
 
 import 'dart:ui';
@@ -164,19 +165,14 @@ void main() {
     expect(policy.allowsOverlaps, isTrue);
   });
 
-  test("EP2 two unrestricted policies are equal with equal hash codes, one "
-      "forbidding overlaps is not, and the default allows overlaps and "
-      "limits no day count", () {
+  test("EP2 two unrestricted policies are equal with equal hash codes, and "
+      "one allows overlaps and limits no day count", () {
     const constant = UnrestrictedEditPolicy<String>();
     // ignore: prefer_const_constructors
     final built = UnrestrictedEditPolicy<String>();
     expect(built, constant);
     expect(built.hashCode, constant.hashCode);
-    const forbidding = UnrestrictedEditPolicy<String>(allowsOverlaps: false);
-    expect(forbidding, isNot(constant));
-    expect(constant, isNot(forbidding));
     expect(constant.allowsOverlaps, isTrue);
-    expect(forbidding.allowsOverlaps, isFalse);
     expect(constant.dayLimit, isNull);
   });
 
@@ -399,14 +395,14 @@ void main() {
         "equal hash codes; it keeps the policies it was made of; and a "
         "throw of a policy it asks throws out of it", () {
       // ignore: prefer_const_constructors
-      final forbidding = UnrestrictedEditPolicy<String>(allowsOverlaps: false);
+      final forbidding = NoOverlapsPolicy<String>();
       // ignore: prefer_const_constructors
       final allowing = UnrestrictedEditPolicy<String>();
       final policy = CalendarEditPolicy<String>.all(
         <CalendarEditPolicy<String>>[forbidding, allowing],
       );
       final same = CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
-        const UnrestrictedEditPolicy<String>(allowsOverlaps: false),
+        const NoOverlapsPolicy<String>(),
         const UnrestrictedEditPolicy<String>(),
       ]);
       expect(same, policy);
@@ -490,15 +486,53 @@ void main() {
       }, throwsAssertionError);
     });
 
-    test("EP14 combined with another policy, it gives that policy's answers "
-        "and its own day limit", () {
-      final policy =
-          CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
-            const UnrestrictedEditPolicy<String>(allowsOverlaps: false),
-            const DayLimitPolicy<String>(2),
-          ]);
+    test("EP14 combined with the policy forbidding overlaps, it gives that "
+        "policy's answer and its own day limit", () {
+      final policy = CalendarEditPolicy<String>.all(
+        <CalendarEditPolicy<String>>[
+          const NoOverlapsPolicy<String>(),
+          const DayLimitPolicy<String>(2),
+        ],
+      );
       expect(policy.dayLimit, 2);
       expect(policy.allowsOverlaps, isFalse);
+    });
+  });
+
+  group("the policy forbidding overlaps", () {
+    test("EP15 forbids overlaps and nothing else: it moves, resizes both "
+        "edges, edits, deletes and admits every change, lets a new entry "
+        "start from a day's start and limits no day count", () {
+      const policy = NoOverlapsPolicy<String>();
+      final now = CalendarNow(time: at(tuesday, 11, 7), today: tuesday);
+      final past = entryOf("past", at(monday, 9), at(monday, 10));
+      expect(policy.allowsOverlaps, isFalse);
+      expect(policy.mayMove(past, now), isTrue);
+      expect(policy.mayEdit(past, now), isTrue);
+      expect(policy.mayDelete(past, now), isTrue);
+      expect(policy.resizableEdges(past, now), CalendarResizeEdges.both);
+      expect(
+        policy.admitsChange(past, at(monday, 7), at(monday, 8), now),
+        isTrue,
+      );
+      expect(policy.earliestStartOn(monday, now), monday);
+      expect(policy.dayLimit, isNull);
+    });
+
+    test("EP16 two are equal with equal hash codes; one under another type "
+        "argument, or the unrestricted policy, is not, either way "
+        "round", () {
+      const policy = NoOverlapsPolicy<String>();
+      // ignore: prefer_const_constructors
+      final built = NoOverlapsPolicy<String>();
+      expect(built, policy);
+      expect(built.hashCode, policy.hashCode);
+      const ofObjects = NoOverlapsPolicy<Object>();
+      expect(ofObjects, isNot(policy));
+      expect(policy, isNot(ofObjects));
+      const unrestricted = UnrestrictedEditPolicy<String>();
+      expect(unrestricted, isNot(policy));
+      expect(policy, isNot(unrestricted));
     });
   });
 }

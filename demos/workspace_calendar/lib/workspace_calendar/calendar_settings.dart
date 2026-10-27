@@ -121,22 +121,18 @@ class CalendarSettings {
 
   /// The edit policy the calendar and the item form both read: the history
   /// lock, of earlier today too under [lockEarlierToday], under
-  /// [lockPast], and no lock otherwise, each allowing overlapping items as
-  /// [allowsOverlaps] says, combined with a day limit of [maxDayCount]
-  /// ([DayLimitPolicy]), which the gestures a `CalendarView` limits by its
-  /// policy's day limit hold to. Equal settings give equal policies, so a
+  /// [lockPast]; a day limit of [maxDayCount] ([DayLimitPolicy]), which
+  /// the gestures a `CalendarView` limits by its policy's day limit hold
+  /// to; and no overlapping items where [allowsOverlaps] is false
+  /// ([NoOverlapsPolicy]). Equal settings give equal policies, so a
   /// rebuild with them cancels no gesture.
   CalendarEditPolicy<ItemPayload> get editPolicy {
     return CalendarEditPolicy<ItemPayload>.all(
       <CalendarEditPolicy<ItemPayload>>[
         if (lockPast)
-          HistoryLockPolicy<ItemPayload>(
-            lockEarlierToday: lockEarlierToday,
-            allowsOverlaps: allowsOverlaps,
-          )
-        else
-          UnrestrictedEditPolicy<ItemPayload>(allowsOverlaps: allowsOverlaps),
+          HistoryLockPolicy<ItemPayload>(lockEarlierToday: lockEarlierToday),
         const DayLimitPolicy<ItemPayload>(maxDayCount),
+        if (!allowsOverlaps) const NoOverlapsPolicy<ItemPayload>(),
       ],
     );
   }
