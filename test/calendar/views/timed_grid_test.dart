@@ -28,6 +28,7 @@ import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
+import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
 /// The Monday of the week shown.
 final int weekStartDay = dayNumber(DateTime(2026, 4, 20));

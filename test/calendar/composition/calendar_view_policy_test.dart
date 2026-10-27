@@ -19,6 +19,7 @@ import 'package:widgets_extended/calendar/views/day_list.dart'
     show dayListGapKey;
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
+import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
 import '../edit_policies.dart';
 

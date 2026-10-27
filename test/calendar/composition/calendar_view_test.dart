@@ -35,6 +35,7 @@ import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/month_strip.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
+import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 
 import 'recording_store.dart';
