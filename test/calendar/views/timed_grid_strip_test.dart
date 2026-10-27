@@ -28,6 +28,7 @@ import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/views/entry_split.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
+import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
 import '../dst_days.dart';
 import '../edit_policies.dart';

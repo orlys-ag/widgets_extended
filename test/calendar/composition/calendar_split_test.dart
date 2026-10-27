@@ -19,6 +19,7 @@ import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/views/entry_split.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
+import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
 import 'recording_store.dart';
 
