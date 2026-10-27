@@ -2,9 +2,8 @@
 /// the hours it shows and schedules in.
 library;
 
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
-import 'package:widgets_extended/calendar/views/month_board.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -202,23 +201,24 @@ void main() {
                 "lockPast $lockPast, lockEarlierToday $lockEarlierToday, "
                 "allowsOverlaps $allowsOverlaps";
             final policy = settings.editPolicy;
-            if (lockPast) {
-              expect(
-                policy,
-                isA<WorkspaceHistoryLockPolicy>().having(
-                  (policy) => policy.lockEarlierToday,
-                  "lockEarlierToday",
-                  lockEarlierToday,
-                ),
-                reason: reason,
-              );
-            } else {
-              expect(
-                policy,
-                isA<WorkspaceUnrestrictedPolicy>(),
-                reason: reason,
-              );
-            }
+            expect(
+              policy,
+              CalendarEditPolicy<ItemPayload>.all(
+                <CalendarEditPolicy<ItemPayload>>[
+                  if (lockPast)
+                    HistoryLockPolicy<ItemPayload>(
+                      lockEarlierToday: lockEarlierToday,
+                      allowsOverlaps: allowsOverlaps,
+                    )
+                  else
+                    UnrestrictedEditPolicy<ItemPayload>(
+                      allowsOverlaps: allowsOverlaps,
+                    ),
+                  const DayLimitPolicy<ItemPayload>(maxDayCount),
+                ],
+              ),
+              reason: reason,
+            );
             expect(policy.allowsOverlaps, allowsOverlaps, reason: reason);
             expect(policy.dayLimit, maxDayCount, reason: reason);
             expect(

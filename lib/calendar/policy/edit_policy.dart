@@ -179,7 +179,8 @@ abstract class CalendarEditPolicy<T> {
 
   /// The most days, counting each day it has any part of, that a range a
   /// gesture gives may cover; null for no limit, and otherwise at least 1.
-  /// Null here.
+  /// A [DayLimitPolicy] combined with other policies
+  /// ([CalendarEditPolicy.all]) gives them one. Null here.
   int? get dayLimit {
     return null;
   }
@@ -224,6 +225,42 @@ class UnrestrictedEditPolicy<T> extends CalendarEditPolicy<T> {
   @override
   String toString() {
     return "UnrestrictedEditPolicy(allowsOverlaps: $allowsOverlaps)";
+  }
+}
+
+/// A policy that limits only the days a range a gesture gives may cover,
+/// to [dayLimit], and allows everything else: combined with other policies
+/// ([CalendarEditPolicy.all]), it gives them that limit.
+///
+/// Two compare equal where their runtime types and [dayLimit] are the
+/// same.
+class DayLimitPolicy<T> extends CalendarEditPolicy<T> {
+  /// Limits a range to [dayLimit] days; a [dayLimit] under 1 fails an
+  /// assertion in a debug build.
+  const DayLimitPolicy(this.dayLimit)
+    : assert(
+        dayLimit >= 1,
+        "A DayLimitPolicy's dayLimit, $dayLimit, is under 1.",
+      );
+
+  @override
+  final int dayLimit;
+
+  @override
+  bool operator ==(Object other) {
+    return other.runtimeType == runtimeType &&
+        other is DayLimitPolicy<T> &&
+        other.dayLimit == dayLimit;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(runtimeType, dayLimit);
+  }
+
+  @override
+  String toString() {
+    return "DayLimitPolicy($dayLimit)";
   }
 }
 

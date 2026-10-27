@@ -451,8 +451,8 @@ class Harness {
 
   /// [editPolicy], or with none the history lock under [lockPast], with
   /// [lockEarlierToday], and the unrestricted policy otherwise, each
-  /// allowing overlaps as [allowsOverlaps] says, inside a [DayLimitPolicy]
-  /// where [maxDayCount] is given.
+  /// allowing overlaps as [allowsOverlaps] says, combined with a
+  /// [DayLimitPolicy] of [maxDayCount] where it is given.
   CalendarEditPolicy<String> get policy {
     final given = editPolicy;
     if (given != null) {
@@ -465,7 +465,12 @@ class Harness {
           )
         : UnrestrictedEditPolicy<String>(allowsOverlaps: allowsOverlaps);
     final limit = maxDayCount;
-    return limit == null ? base : DayLimitPolicy<String>(base, limit);
+    return limit == null
+        ? base
+        : CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+            base,
+            DayLimitPolicy<String>(limit),
+          ]);
   }
 
   TimedGrid<String> grid() {

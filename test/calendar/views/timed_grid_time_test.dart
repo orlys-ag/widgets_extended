@@ -25,7 +25,6 @@ import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 
 import '../dst_days.dart';
-import '../edit_policies.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -263,8 +262,8 @@ class HeldSource implements CalendarDataSource<String> {
 /// and 2000 tall, where every slot of the day shows; [creates] records each
 /// create range it reports. [hours] and [slotMinutes] start as [shown]'s,
 /// and [rebuild] builds the grid again with them. The grid's policy is the
-/// unrestricted one, allowing overlaps as [allowsOverlaps] says, inside a
-/// [DayLimitPolicy] where [maxDayCount] is given.
+/// unrestricted one, allowing overlaps as [allowsOverlaps] says, combined
+/// with a [DayLimitPolicy] of [maxDayCount] where it is given.
 class Harness {
   Harness(
     this.store,
@@ -284,7 +283,12 @@ class Harness {
   CalendarEditPolicy<String> get policy {
     final base = UnrestrictedEditPolicy<String>(allowsOverlaps: allowsOverlaps);
     final limit = maxDayCount;
-    return limit == null ? base : DayLimitPolicy<String>(base, limit);
+    return limit == null
+        ? base
+        : CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+            base,
+            DayLimitPolicy<String>(limit),
+          ]);
   }
 
   DayHours hours;

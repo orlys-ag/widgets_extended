@@ -1,6 +1,6 @@
 /// The edit policy: the permissive answers a policy overriding nothing
 /// gives, the unrestricted policy's equality, the time a policy answers
-/// at, and the policy of all of several.
+/// at, the policy of all of several, and the day limit policy.
 library;
 
 import 'dart:ui';
@@ -449,6 +449,56 @@ void main() {
       );
       expect(ofObjects, isNot(ofStrings));
       expect(ofStrings, isNot(ofObjects));
+    });
+  });
+
+  group("the day limit policy", () {
+    test("EP12 limits a range to its days and nothing else: it moves, "
+        "resizes both edges, edits, deletes and admits every change, lets a "
+        "new entry start from a day's start and allows overlaps", () {
+      const policy = DayLimitPolicy<String>(3);
+      final now = CalendarNow(time: at(tuesday, 11, 7), today: tuesday);
+      final past = entryOf("past", at(monday, 9), at(monday, 10));
+      expect(policy.dayLimit, 3);
+      expect(policy.mayMove(past, now), isTrue);
+      expect(policy.mayEdit(past, now), isTrue);
+      expect(policy.mayDelete(past, now), isTrue);
+      expect(policy.resizableEdges(past, now), CalendarResizeEdges.both);
+      expect(
+        policy.admitsChange(past, at(monday, 7), at(monday, 8), now),
+        isTrue,
+      );
+      expect(policy.earliestStartOn(monday, now), monday);
+      expect(policy.allowsOverlaps, isTrue);
+    });
+
+    test("EP13 two of the same limit are equal with equal hash codes; one "
+        "of another limit, or under another type argument either way "
+        "round, is not; and a limit under 1 fails an assertion", () {
+      var limit = 2;
+      final policy = DayLimitPolicy<String>(limit);
+      final same = DayLimitPolicy<String>(limit);
+      expect(same, policy);
+      expect(same.hashCode, policy.hashCode);
+      expect(DayLimitPolicy<String>(limit + 1), isNot(policy));
+      final ofObjects = DayLimitPolicy<Object>(limit);
+      expect(ofObjects, isNot(policy));
+      expect(policy, isNot(ofObjects));
+      limit = 0;
+      expect(() {
+        return DayLimitPolicy<String>(limit);
+      }, throwsAssertionError);
+    });
+
+    test("EP14 combined with another policy, it gives that policy's answers "
+        "and its own day limit", () {
+      final policy =
+          CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+            const UnrestrictedEditPolicy<String>(allowsOverlaps: false),
+            const DayLimitPolicy<String>(2),
+          ]);
+      expect(policy.dayLimit, 2);
+      expect(policy.allowsOverlaps, isFalse);
     });
   });
 }

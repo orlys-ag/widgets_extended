@@ -1,7 +1,6 @@
 /// The edit policies and the store the views' policy tests share: a policy
-/// that records each ask, one that gives another its own day limit, one
-/// whose answers a test scripts, and a store that records each move it is
-/// asked for.
+/// that records each ask, one whose answers a test scripts, and a store
+/// that records each move it is asked for.
 library;
 
 import 'package:flutter/scheduler.dart';
@@ -85,69 +84,6 @@ class CountingEditPolicy<T> extends CalendarEditPolicy<T> {
   bool get allowsOverlaps {
     _note("allowsOverlaps");
     return inner.allowsOverlaps;
-  }
-}
-
-/// Forwards each answer to [inner] but [dayLimit], which it answers
-/// itself. Two compare equal where their [inner] and [dayLimit] do.
-class DayLimitPolicy<T> extends CalendarEditPolicy<T> {
-  const DayLimitPolicy(this.inner, this.dayLimit);
-
-  final CalendarEditPolicy<T> inner;
-
-  @override
-  final int? dayLimit;
-
-  @override
-  bool mayMove(CalendarEntry<T> entry, CalendarNow now) {
-    return inner.mayMove(entry, now);
-  }
-
-  @override
-  CalendarResizeEdges resizableEdges(CalendarEntry<T> entry, CalendarNow now) {
-    return inner.resizableEdges(entry, now);
-  }
-
-  @override
-  bool mayEdit(CalendarEntry<T> entry, CalendarNow now) {
-    return inner.mayEdit(entry, now);
-  }
-
-  @override
-  bool mayDelete(CalendarEntry<T> entry, CalendarNow now) {
-    return inner.mayDelete(entry, now);
-  }
-
-  @override
-  bool admitsChange(
-    CalendarEntry<T> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now,
-  ) {
-    return inner.admitsChange(entry, start, end, now);
-  }
-
-  @override
-  DateTime? earliestStartOn(DateTime day, CalendarNow now) {
-    return inner.earliestStartOn(day, now);
-  }
-
-  @override
-  bool get allowsOverlaps {
-    return inner.allowsOverlaps;
-  }
-
-  @override
-  bool operator ==(Object other) {
-    return other is DayLimitPolicy<T> &&
-        other.inner == inner &&
-        other.dayLimit == dayLimit;
-  }
-
-  @override
-  int get hashCode {
-    return Object.hash(inner, dayLimit);
   }
 }
 

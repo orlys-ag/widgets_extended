@@ -17,32 +17,6 @@ import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'calendar_item.dart';
 import 'calendar_schema.dart';
 
-/// The history lock as the demo's edit policy: an item covers at most
-/// [maxDayCount] days, which the gestures a `CalendarView` limits by its
-/// policy's day limit hold to.
-class WorkspaceHistoryLockPolicy extends HistoryLockPolicy<ItemPayload> {
-  const WorkspaceHistoryLockPolicy({
-    super.lockEarlierToday,
-    super.allowsOverlaps,
-  });
-
-  @override
-  int get dayLimit {
-    return maxDayCount;
-  }
-}
-
-/// The demo's edit policy with no lock: an item covers at most
-/// [maxDayCount] days, as under [WorkspaceHistoryLockPolicy].
-class WorkspaceUnrestrictedPolicy extends UnrestrictedEditPolicy<ItemPayload> {
-  const WorkspaceUnrestrictedPolicy({super.allowsOverlaps});
-
-  @override
-  int get dayLimit {
-    return maxDayCount;
-  }
-}
-
 /// The field errors of an item from [start] to [end] that [hours] do not
 /// hold ([DayHours.holdsTimes]), keyed as `validateItemJson` keys them: the
 /// start when the hours do not hold its time of day as a start, the end
@@ -148,16 +122,23 @@ class CalendarSettings {
   /// The edit policy the calendar and the item form both read: the history
   /// lock, of earlier today too under [lockEarlierToday], under
   /// [lockPast], and no lock otherwise, each allowing overlapping items as
-  /// [allowsOverlaps] says. Equal settings give equal policies, so a
+  /// [allowsOverlaps] says, combined with a day limit of [maxDayCount]
+  /// ([DayLimitPolicy]), which the gestures a `CalendarView` limits by its
+  /// policy's day limit hold to. Equal settings give equal policies, so a
   /// rebuild with them cancels no gesture.
   CalendarEditPolicy<ItemPayload> get editPolicy {
-    if (lockPast) {
-      return WorkspaceHistoryLockPolicy(
-        lockEarlierToday: lockEarlierToday,
-        allowsOverlaps: allowsOverlaps,
-      );
-    }
-    return WorkspaceUnrestrictedPolicy(allowsOverlaps: allowsOverlaps);
+    return CalendarEditPolicy<ItemPayload>.all(
+      <CalendarEditPolicy<ItemPayload>>[
+        if (lockPast)
+          HistoryLockPolicy<ItemPayload>(
+            lockEarlierToday: lockEarlierToday,
+            allowsOverlaps: allowsOverlaps,
+          )
+        else
+          UnrestrictedEditPolicy<ItemPayload>(allowsOverlaps: allowsOverlaps),
+        const DayLimitPolicy<ItemPayload>(maxDayCount),
+      ],
+    );
   }
 
   CalendarSettings copyWith({

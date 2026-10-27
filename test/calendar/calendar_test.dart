@@ -123,6 +123,7 @@ void main() {
       CalendarNow,
       CalendarResizeEdges,
       UnrestrictedEditPolicy,
+      DayLimitPolicy,
       CalendarEditRules,
       CalendarEarliestStart,
       HistoryLockPolicy,
@@ -245,6 +246,7 @@ void main() {
           "CalendarEditPolicy",
           "CalendarNow",
           "CalendarResizeEdges",
+          "DayLimitPolicy",
           "UnrestrictedEditPolicy",
         },
         "lib/calendar/policy/history_lock_policy.dart": <String>{
