@@ -1,7 +1,7 @@
 /// The calendar's settings sheet: the history lock, how Month fits its
-/// weeks, the length of the calendar's slots, and on the calendar's
-/// controller the least width of a day in Week, Day and Month and the
-/// least height of the timed grid's slots.
+/// weeks, the length of the calendar's slots, on the calendar's controller
+/// the least width of a day in Week, Day and Month and the least height of
+/// the timed grid's slots, and whether items may overlap.
 library;
 
 import 'package:flutter/material.dart';
@@ -35,6 +35,11 @@ const ValueKey<String> dayWidthSliderKey = ValueKey<String>(
 /// The key of the sheet's slot height slider.
 const ValueKey<String> slotHeightSliderKey = ValueKey<String>(
   "settings-slot-height",
+);
+
+/// The key of the sheet's switch that lets items share time.
+const ValueKey<String> allowsOverlapsKey = ValueKey<String>(
+  "settings-allows-overlaps",
 );
 
 /// Opens the settings sheet on [settings] and the sizes of [controller],
@@ -72,8 +77,8 @@ Future<void> showCalendarSettings(
 /// which takes input only while the first is on, a segmented button for
 /// Month's layout, one for the slot length, offering each of
 /// [slotMinuteChoices] and choosing through
-/// [CalendarSettings.withSlotMinutes], and a slider for each least size of
-/// [controller].
+/// [CalendarSettings.withSlotMinutes], a slider for each least size of
+/// [controller], and last a switch that lets items overlap.
 class CalendarSettingsSheet extends StatefulWidget {
   const CalendarSettingsSheet({
     super.key,
@@ -249,6 +254,21 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
             const _Note(
               "Days and slots stretch to fill the grid; larger sizes make "
               "it scroll. A pinch on a grid sets them too.",
+            ),
+            const SizedBox(height: 16.0),
+            SwitchListTile(
+              key: allowsOverlapsKey,
+              contentPadding: EdgeInsets.zero,
+              title: const Text("Allow overlapping items"),
+              value: _settings.allowsOverlaps,
+              onChanged: (allowsOverlaps) {
+                _set(_settings.copyWith(allowsOverlaps: allowsOverlaps));
+              },
+            ),
+            const _Note(
+              "In edit mode, items can be moved, resized and added over "
+              "other items' times, and show side by side. Off, they keep "
+              "to free time.",
             ),
           ],
         ),

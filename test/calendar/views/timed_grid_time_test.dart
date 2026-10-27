@@ -18,6 +18,7 @@ import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
@@ -260,16 +261,34 @@ class HeldSource implements CalendarDataSource<String> {
 /// What a test pumps: the grid of [shown] over [store], in a view 800 wide
 /// and 2000 tall, where every slot of the day shows; [creates] records each
 /// create range it reports. [hours] and [slotMinutes] start as [shown]'s,
-/// and [rebuild] builds the grid again with them.
+/// and [rebuild] builds the grid again with them. The grid's policy is the
+/// unrestricted one, combined with a [DayLimitPolicy] of [maxDayCount]
+/// where it is given and with a [NoOverlapsPolicy] where [allowsOverlaps]
+/// is false.
 class Harness {
-  Harness(this.store, this.shown, {this.maxDayCount, this.editable = true})
-    : hours = shown.hours,
-      slotMinutes = shown.slotMinutes;
+  Harness(
+    this.store,
+    this.shown, {
+    this.maxDayCount,
+    this.editable = true,
+    this.allowsOverlaps = true,
+  }) : hours = shown.hours,
+       slotMinutes = shown.slotMinutes;
 
   final CalendarStore<String> store;
   final Shown shown;
   final int? maxDayCount;
   final bool editable;
+  final bool allowsOverlaps;
+
+  CalendarEditPolicy<String> get policy {
+    final limit = maxDayCount;
+    return CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+      const UnrestrictedEditPolicy<String>(),
+      if (limit != null) DayLimitPolicy<String>(limit),
+      if (!allowsOverlaps) const NoOverlapsPolicy<String>(),
+    ]);
+  }
 
   DayHours hours;
   int slotMinutes;
@@ -294,9 +313,9 @@ class Harness {
         creates.add(range);
       },
       editable: editable,
+      editPolicy: policy,
       hours: hours,
       slotMinutes: slotMinutes,
-      maxDayCount: maxDayCount,
       showsDayHeader: shown.week,
     );
   }
@@ -1011,6 +1030,7 @@ void main() {
         entryOf("task", at(tuesday, 9, 10), at(tuesday, 9, 50)),
       ]),
       shown,
+      allowsOverlaps: false,
     );
     await harness.pump(tester);
     final nine = slotRect(tester, shown, tuesday, 9 * 60);
@@ -1035,7 +1055,7 @@ void main() {
     final store = storeOf(<CalendarEntry<String>>[
       entryOf("task", at(tuesday, 15), at(tuesday, 16)),
     ]);
-    final harness = Harness(store, shown);
+    final harness = Harness(store, shown, allowsOverlaps: false);
     await harness.pump(tester);
     final calls = store.betweenCalls;
     final from = slotRect(tester, shown, tuesday, 10 * 60).center;
@@ -1066,6 +1086,7 @@ void main() {
         entryOf("after", at(tuesday, 11), at(tuesday, 12)),
       ]),
       shown,
+      allowsOverlaps: false,
     );
     await harness.pump(tester);
     await createDrag(
@@ -1693,7 +1714,7 @@ void main() {
         final move = entryOf("move", mondayAt(end - 180), mondayAt(end - 120));
         final last = entryOf("last", mondayAt(end - 30), mondayAt(end));
         final store = storeOf(<CalendarEntry<String>>[move, last]);
-        await Harness(store, shown).pump(tester);
+        await Harness(store, shown, allowsOverlaps: false).pump(tester);
         final slot = slotHeightOf(tester, shown);
         await moveBlock(
           tester,

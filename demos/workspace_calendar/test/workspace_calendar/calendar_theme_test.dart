@@ -2529,7 +2529,26 @@ void main() {
     );
     final card = tester.element(find.byKey(entryCardKey("item-2")));
     final cardWidget = card.widget;
-    storeOf(tester).requestDelete("item-13");
+    final planningCard = tester.element(find.byKey(entryCardKey("item-1")));
+    final planningWidget = planningCard.widget;
+    // Writes in flight on the card's day and on today, whose block holds
+    // the current-time line, which build both days' rows again and mount
+    // nothing: Planning stays where it is, and Late sync moves an hour
+    // earlier, inside the hours, so each day keeps as many rows.
+    CalendarEntry<ItemPayload> entryOf(DateTime day, String id) {
+      return storeOf(tester).entriesOn(day).firstWhere((shown) {
+        return shown.entry.id == id;
+      }).entry;
+    }
+
+    final lateSync = entryOf(april(22), "item-3");
+    storeOf(tester).requestMove(entryOf(april(21), "item-1"));
+    storeOf(tester).requestMove(
+      lateSync.copyWith(
+        start: lateSync.start.subtract(const Duration(hours: 1)),
+        end: lateSync.end.subtract(const Duration(hours: 1)),
+      ),
+    );
     await tester.pump();
     expect(
       identical(tester.element(find.byKey(entryCardKey("item-2"))), card),
@@ -2539,6 +2558,21 @@ void main() {
       identical(
         tester.element(find.byKey(entryCardKey("item-2"))).widget,
         cardWidget,
+      ),
+      isFalse,
+    );
+    // Setup sanity: today's rows were built again too.
+    expect(
+      identical(
+        tester.element(find.byKey(entryCardKey("item-1"))),
+        planningCard,
+      ),
+      isTrue,
+    );
+    expect(
+      identical(
+        tester.element(find.byKey(entryCardKey("item-1"))).widget,
+        planningWidget,
       ),
       isFalse,
     );

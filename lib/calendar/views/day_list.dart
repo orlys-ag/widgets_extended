@@ -18,12 +18,13 @@ import 'package:flutter/widgets.dart';
 import '../../sliver_tree/sliver_tree.dart';
 import '../dates/calendar_dates.dart';
 import '../dates/calendar_labels.dart';
-import '../policy/history_lock.dart';
-import '../policy/overlap.dart';
+import '../policy/edit_policy.dart';
+import '../policy/edit_rules.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
+import 'answer_builder.dart';
 import 'timed_grid.dart' show CreateRange;
 
 /// The style the day list animates its rows with under [theme]: every
@@ -247,12 +248,11 @@ sealed class DayListRow {
 }
 
 /// The header of [day]: a root of the list, whose one child is the day's
-/// [DayListBody].
+/// [DayListBody]. Neither holds what its row shows, which the row reads
+/// from the store as it builds and again at each change the store
+/// notifies, so a write leaves the tree's items as they are.
 final class DayListHeader extends DayListRow {
-  const DayListHeader(super.day, {required this.count});
-
-  /// How many items [day] shows, or null while it is not read.
-  final int? count;
+  const DayListHeader(super.day);
 
   @override
   String get key {
@@ -266,30 +266,27 @@ final class DayListHeader extends DayListRow {
 
   @override
   bool operator ==(Object other) {
-    return other is DayListHeader && other.day == day && other.count == count;
+    return other is DayListHeader && other.day == day;
   }
 
   @override
   int get hashCode {
-    return Object.hash(day, count);
+    return day.hashCode;
   }
 
   @override
   String toString() {
-    return "DayListHeader(${isoDate(day)}, $count)";
+    return "DayListHeader(${isoDate(day)})";
   }
 }
 
-/// The block under [day]'s header, which holds the day's [rows]. One row
-/// per day, so a change to the day changes this row's height and nothing
-/// of the tree's structure, and the tree keeps a row above its viewport
-/// that changes height from moving the rows it shows.
+/// The block under [day]'s header, which shows the day's rows:
+/// [dayListRowsOf] its items, or one [DayListLoading] or [DayListFailed].
+/// One row per day, so a change to the day changes this row's height and
+/// nothing of the tree's structure, and the tree keeps a row above its
+/// viewport that changes height from moving the rows it shows.
 final class DayListBody extends DayListRow {
-  const DayListBody(super.day, {required this.rows});
-
-  /// The day's rows: [dayListRowsOf] its items, or one [DayListLoading] or
-  /// [DayListFailed].
-  final List<DayListRow> rows;
+  const DayListBody(super.day);
 
   @override
   String get key {
@@ -298,19 +295,17 @@ final class DayListBody extends DayListRow {
 
   @override
   bool operator ==(Object other) {
-    return other is DayListBody &&
-        other.day == day &&
-        listEquals(other.rows, rows);
+    return other is DayListBody && other.day == day;
   }
 
   @override
   int get hashCode {
-    return Object.hash(day, Object.hashAll(rows));
+    return day.hashCode;
   }
 
   @override
   String toString() {
-    return "DayListBody(${isoDate(day)}, $rows)";
+    return "DayListBody(${isoDate(day)})";
   }
 }
 
@@ -555,11 +550,14 @@ List<DayListRow> dayListRowsOf<T>(
 /// with a retry that reads the shown days again. Times read in [format].
 /// Unless [editable], the list has no dashed rows and hands the card
 /// builder no Edit or Delete, so a day without items shows its header
-/// alone. Under the history [lock] a card is handed Edit only while its
-/// item is not [EntryHold.locked], and Delete only while it is
-/// [EntryHold.free], and a dashed row's button adds one slot of
-/// [slotMinutes] from the first time the lock leaves free in its gap, and
-/// is gone where that slot does not fit in the gap. A row that comes or
+/// alone, and asks [editPolicy] nothing. In edit mode a card is handed
+/// Edit only where [editPolicy] lets its item be edited
+/// ([CalendarEditPolicy.mayEdit]), and Delete only where it lets it be
+/// deleted ([CalendarEditPolicy.mayDelete]), and a dashed row's button
+/// adds one slot of [slotMinutes] from the first time in its gap the
+/// policy's earliest start on its day leaves free
+/// ([CalendarEditPolicy.earliestStartOn]), and is gone where that slot
+/// does not fit in the gap. A row that comes or
 /// goes in a block grows in and fades in, or fades out and shrinks away,
 /// so the block grows or shrinks smoothly; a block above the list's top
 /// that changes height moves nothing the list shows.
@@ -604,7 +602,7 @@ class DayList<T> extends StatefulWidget {
     required this.hours,
     this.slotMinutes = defaultSlotMinutes,
     required this.editable,
-    required this.lock,
+    this.editPolicy,
     required this.selectedDay,
     required this.today,
     required this.now,
@@ -633,15 +631,19 @@ class DayList<T> extends StatefulWidget {
   final DayHours hours;
 
   /// The length of the slot a gap row's add button creates, in minutes,
-  /// one of [slotMinuteChoices], which the list's state asserts; the lock
-  /// rounds its first free time up to the grid of it from midnight.
+  /// one of [slotMinuteChoices], which the list's state asserts; an
+  /// earliest start of the policy is rounded up to the grid of it from
+  /// midnight ([CalendarEarliestStart.firstSlotMinute]).
   final int slotMinutes;
 
   /// Whether the calendar is in edit mode, where the list has its dashed
-  /// rows and hands each card its Edit and Delete.
+  /// rows and hands each card the Edit and Delete [editPolicy] allows.
   final bool editable;
 
-  final HistoryLock lock;
+  /// What the cards and the gap rows may offer in edit mode
+  /// ([CalendarEditPolicy]); null for an [UnrestrictedEditPolicy]. The
+  /// rows read it as they build.
+  final CalendarEditPolicy<T>? editPolicy;
 
   /// The day the list brings to its top; a shown day.
   final DateTime selectedDay;
@@ -650,19 +652,24 @@ class DayList<T> extends StatefulWidget {
   final DateTime today;
 
   /// The current time, which its owner sets again at the start of each
-  /// minute, and whose day's block marks it.
+  /// minute, and whose day's block marks it. The list asks [editPolicy] at
+  /// the [CalendarNow] of it and [today]: it follows a new minute on the
+  /// day of the minute it last took, building again in edit mode, and
+  /// takes a minute on another day at its next build, with that build's
+  /// [today].
   final ValueListenable<DateTime> now;
 
   /// A drag or a fling brought a new day under the list's top.
   final ValueChanged<DateTime> onTopDay;
 
   /// The add button of a gap was pressed: an item of one slot of
-  /// [slotMinutes] from the gap's first time the history lock leaves free,
-  /// or the first slot after it whose times the clock reads and that no
-  /// shown entry shares time with ([firstReadableSlot]), in the lock
-  /// boundary's occurrence where the day's clock repeats its time, so it
-  /// starts at the boundary or after. On a day whose clock repeats a
-  /// stretch, an entry can hold time in a gap it is not listed beside.
+  /// [slotMinutes] from the gap's first time the policy's earliest start
+  /// on its day leaves free, or the first slot after it whose times the
+  /// clock reads and that no shown entry shares time with
+  /// ([CalendarEditRules.firstSlot]), in that earliest start's occurrence
+  /// where the day's clock repeats its time, so it starts at the earliest
+  /// start or after. On a day whose clock repeats a stretch, an entry can
+  /// hold time in a gap it is not listed beside.
   final void Function(CreateRange range) onCreateRange;
 
   final void Function(String id) onEdit;
@@ -695,6 +702,31 @@ class DayList<T> extends StatefulWidget {
   }
 }
 
+/// The time a [DayList]'s rows ask its policy at. A time [askAgain] takes,
+/// at a new minute or with a new policy, notifies the rows that listen,
+/// which ask again. A time [take] takes in a build of the list that makes
+/// a new tree notifies nothing: that build hands the list's sliver a new
+/// item builder, which queues every row it holds to build again
+/// (`SliverTreeElement.update`), and each row reads [value] as it builds.
+class _RowsNow extends ChangeNotifier {
+  _RowsNow(this._value);
+
+  CalendarNow _value;
+
+  CalendarNow get value {
+    return _value;
+  }
+
+  void take(CalendarNow value) {
+    _value = value;
+  }
+
+  void askAgain(CalendarNow value) {
+    _value = value;
+    notifyListeners();
+  }
+}
+
 class _DayListState<T> extends State<DayList<T>> {
   /// How far below the list's top a row must reach to make its day the
   /// top day.
@@ -716,10 +748,30 @@ class _DayListState<T> extends State<DayList<T>> {
   /// The tree's controller, once the tree of [_generation] made it.
   TreeController<String, DayListRow>? _tree;
 
+  /// A header and a body for each day the list holds.
   late List<DayListRow> _rows;
 
   /// [_rows] by key.
   Map<String, DayListRow> _rowsByKey = <String, DayListRow>{};
+
+  /// The tree the last build made, which a build hands on as it is while
+  /// [_treeStands], so the rows build again only where they change.
+  Widget? _treeWidget;
+
+  /// The widget, the rows and the day of [_nowDay] [_treeWidget] was made
+  /// with, or none once a change of the dependencies or a reassemble drops
+  /// it.
+  DayList<T>? _treeMadeFor;
+  List<DayListRow>? _treeRows;
+  DateTime? _treeNowDay;
+
+  /// A time a build of the widget took, which the build hands the rows
+  /// ([_askRowsAgain]).
+  CalendarNow? _pendingNow;
+
+  /// Whether a build of the widget took a policy not `==` to the last,
+  /// which the build has the rows ask again ([_askRowsAgain]).
+  bool _policyChanged = false;
 
   /// Whether a frame will read the weeks of the days the list holds built.
   bool _prefetchScheduled = false;
@@ -751,6 +803,45 @@ class _DayListState<T> extends State<DayList<T>> {
   /// The day [DayList.now] reads, whose block marks the current time.
   late DateTime _nowDay = dateOnly(widget.now.value);
 
+  /// The policy the list reads where [DayList.editPolicy] is null.
+  late final UnrestrictedEditPolicy<T> _unrestricted =
+      UnrestrictedEditPolicy<T>();
+
+  CalendarEditPolicy<T> get _policy {
+    return widget.editPolicy ?? _unrestricted;
+  }
+
+  /// The rules [_rules] last gave, made at its first ask.
+  CalendarEditRules<T>? _madeRules;
+
+  /// The rules the gaps' add buttons ask: [_policy] in [DayList.hours] and
+  /// slots of [DayList.slotMinutes], made again only for a policy not `==`
+  /// to the last ([CalendarEditRules.updated]).
+  CalendarEditRules<T> get _rules {
+    final made = _madeRules;
+    return _madeRules = made == null
+        ? CalendarEditRules<T>(
+            policy: _policy,
+            hours: widget.hours,
+            slotMinutes: widget.slotMinutes,
+          )
+        : made.updated(
+            policy: _policy,
+            hours: widget.hours,
+            slotMinutes: widget.slotMinutes,
+          );
+  }
+
+  /// The time the rows ask [_policy] at: [DayList.now] and [DayList.today]
+  /// as the list last took them, at a minute of the day it holds
+  /// ([_handleNow]) or in a build that changes either ([_askRowsAgain]).
+  /// The rows that show an answer listen to it, each asking again, at a
+  /// new time or a new policy, and building again only where its own
+  /// answer changes.
+  late final _RowsNow _calendarNow = _RowsNow(
+    CalendarNow(time: widget.now.value, today: widget.today),
+  );
+
   @override
   void initState() {
     super.initState();
@@ -761,15 +852,16 @@ class _DayListState<T> extends State<DayList<T>> {
     );
     _centreOn(widget.selectedDay);
     _scroll = ScrollController(initialScrollOffset: _offsetOf(_topDay));
-    widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
     _scheduleLanding();
   }
 
+  /// Drops [_treeWidget], as every row may read what changed.
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _styles = _ListStyles.of(context);
+    _treeMadeFor = null;
   }
 
   @override
@@ -777,6 +869,7 @@ class _DayListState<T> extends State<DayList<T>> {
     _ListStyles._reset();
     super.reassemble();
     _styles = _ListStyles.of(context);
+    _treeMadeFor = null;
   }
 
   @override
@@ -787,23 +880,22 @@ class _DayListState<T> extends State<DayList<T>> {
       "A DayList's slotMinutes, ${widget.slotMinutes}, is not one of "
       "$slotMinuteChoices.",
     );
-    if (widget.store != oldWidget.store) {
-      oldWidget.store.removeListener(_handleStore);
-      widget.store.addListener(_handleStore);
-    }
     if (widget.now != oldWidget.now) {
       oldWidget.now.removeListener(_handleNow);
       widget.now.addListener(_handleNow);
       _nowDay = dateOnly(widget.now.value);
     }
+    final time = widget.now.value;
+    if (time != _calendarNow.value.time ||
+        dateOnly(widget.today) != _calendarNow.value.today) {
+      _pendingNow = CalendarNow(time: time, today: widget.today);
+    }
+    if (widget.editPolicy != oldWidget.editPolicy) {
+      _policyChanged = true;
+    }
     if (widget.weekdays != oldWidget.weekdays) {
       _rebuildOn(widget.selectedDay);
       return;
-    }
-    if (widget.store != oldWidget.store ||
-        widget.hours != oldWidget.hours ||
-        widget.editable != oldWidget.editable) {
-      _rows = _rowsOf();
     }
     final day = widget.selectedDay;
     if (day != oldWidget.selectedDay && day != _topDay) {
@@ -819,30 +911,34 @@ class _DayListState<T> extends State<DayList<T>> {
 
   @override
   void dispose() {
-    widget.store.removeListener(_handleStore);
     widget.now.removeListener(_handleNow);
+    _calendarNow.dispose();
     _scroll.dispose();
     super.dispose();
   }
 
-  void _handleStore() {
-    setState(() {
-      _rows = _rowsOf();
-    });
-  }
-
   /// Moves the marker of the current time to the block of a new day; the
-  /// markers follow the minutes themselves.
+  /// markers follow the minutes themselves. A new minute on the day of the
+  /// minute the list holds becomes [_calendarNow], at which the rows that
+  /// show an answer ask [_policy] again; one on another day waits for the
+  /// build that comes with it, so it is never paired with the last day's
+  /// [DayList.today].
   void _handleNow() {
-    final day = dateOnly(widget.now.value);
+    final time = widget.now.value;
+    final day = dateOnly(time);
     if (day != _nowDay) {
       setState(() {
         _nowDay = day;
       });
     }
+    final held = _calendarNow.value.time;
+    if (time == held || day != dateOnly(held)) {
+      return;
+    }
+    _calendarNow.askAgain(CalendarNow(time: time, today: widget.today));
   }
 
-  /// Holds the days around [day] and builds their rows.
+  /// Holds the days around [day] and makes their rows.
   void _centreOn(DateTime day) {
     final number = dayNumber(day);
     _first = number - dayListWindowDays;
@@ -924,47 +1020,45 @@ class _DayListState<T> extends State<DayList<T>> {
     return math.max(index, 0) * TreeController.defaultExtent;
   }
 
+  /// A header and a body for each day from [_first] to [_last] that
+  /// [DayList.weekdays] shows; writes [_rowsByKey].
   List<DayListRow> _rowsOf() {
-    final rows = _buildRows();
-    _rowsByKey = <String, DayListRow>{for (final row in rows) row.key: row};
-    return rows;
-  }
-
-  List<DayListRow> _buildRows() {
-    final store = widget.store;
     final rows = <DayListRow>[];
     for (var number = _first; number <= _last; number++) {
       if (!widget.weekdays.containsDay(number)) {
         continue;
       }
       final day = dateOfDayNumber(number);
-      if (!store.isRead(day)) {
-        rows.add(DayListHeader(day, count: null));
-        rows.add(
-          DayListBody(
-            day,
-            rows: <DayListRow>[
-              store.readFailed(day) ? DayListFailed(day) : DayListLoading(day),
-            ],
-          ),
-        );
-        continue;
-      }
-      final entries = store.entriesOn(day);
-      rows.add(DayListHeader(day, count: entries.length));
-      rows.add(
-        DayListBody(
-          day,
-          rows: dayListRowsOf(
-            day,
-            entries,
-            widget.hours,
-            editable: widget.editable,
-          ),
-        ),
-      );
+      rows.add(DayListHeader(day));
+      rows.add(DayListBody(day));
     }
+    _rowsByKey = <String, DayListRow>{for (final row in rows) row.key: row};
     return rows;
+  }
+
+  /// How many items [day]'s header counts as the store holds the day, or
+  /// null while the day is not read.
+  int? _countOf(DateTime day) {
+    final store = widget.store;
+    return store.isRead(day) ? store.entriesOn(day).length : null;
+  }
+
+  /// The rows of [day]'s block as the store holds the day: its items' rows
+  /// ([dayListRowsOf]) once it is read, and until then a loading row, or a
+  /// failed row where its read failed.
+  List<DayListRow> _blockRowsOf(DateTime day) {
+    final store = widget.store;
+    if (!store.isRead(day)) {
+      return <DayListRow>[
+        store.readFailed(day) ? DayListFailed(day) : DayListLoading(day),
+      ];
+    }
+    return dayListRowsOf(
+      day,
+      store.entriesOn(day),
+      widget.hours,
+      editable: widget.editable,
+    );
   }
 
   /// Scrolls [day]'s header to the list's top, animating over the theme's
@@ -1042,9 +1136,9 @@ class _DayListState<T> extends State<DayList<T>> {
     switch (row) {
       case DayListHeader():
         return _headerExtent;
-      case DayListBody(:final rows):
+      case DayListBody(:final day):
         var extent = 0.0;
-        for (final shown in rows) {
+        for (final shown in _blockRowsOf(day)) {
           extent += _blockRowExtent(shown);
         }
         return extent;
@@ -1235,75 +1329,197 @@ class _DayListState<T> extends State<DayList<T>> {
 
   @override
   Widget build(BuildContext context) {
+    var tree = _treeWidget;
+    final fresh = tree == null || !_treeStands();
+    if (fresh) {
+      tree = _treeWidget = _buildTree();
+      _treeMadeFor = widget;
+      _treeRows = _rows;
+      _treeNowDay = _nowDay;
+    }
+    _askRowsAgain(fresh: fresh);
     final Widget list = NotificationListener<ScrollNotification>(
       onNotification: _handleScroll,
       child: CustomScrollView(
         key: ValueKey<int>(_generation),
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        slivers: <Widget>[
-          // Each row takes the list's whole width and keeps its content
-          // [dayListGutter] in from either side, so a header's background
-          // and the marker of the current time reach the list's edges.
-          SyncedSliverTree<String, DayListRow>.flat(
-            items: _rows,
-            keyOf: (row) {
-              return row.key;
-            },
-            parentOf: (row) {
-              return row is DayListHeader
-                  ? null
-                  : DayListHeader.headerKeyOf(row.day);
-            },
-            maxStickyDepth: 1,
-            animationStyle: _styles.treeStyle,
-            onControllerCreated: (controller) {
-              _tree = controller;
-            },
-            itemBuilder: (context, node) {
-              final row = node.item;
-              return _DayMarker(
-                day: row.day,
-                markers: _markers,
-                onMount: _schedulePrefetch,
-                child: _buildRow(row),
-              );
-            },
-          ),
-        ],
+        slivers: <Widget>[tree],
       ),
     );
     return Opacity(opacity: _landing ? 0.0 : 1.0, child: list);
   }
 
+  /// Whether [_treeWidget] still stands: whether nothing its rows read,
+  /// past their day in the store, the policy and the time, which reach
+  /// them through their own listeners, has changed since a build made it.
+  /// The store, the clock and the builders compare by identity, since a
+  /// builder `==` to the last, as a tear-off of the same method is, can
+  /// read what changed; the rest by `==`.
+  bool _treeStands() {
+    final made = _treeMadeFor;
+    if (made == null) {
+      return false;
+    }
+    final current = widget;
+    return identical(_treeRows, _rows) &&
+        _treeNowDay == _nowDay &&
+        identical(made.store, current.store) &&
+        identical(made.now, current.now) &&
+        identical(made.cardBuilder, current.cardBuilder) &&
+        identical(made.addButtonBuilder, current.addButtonBuilder) &&
+        identical(made.loadingBuilder, current.loadingBuilder) &&
+        identical(made.failureBuilder, current.failureBuilder) &&
+        made.format == current.format &&
+        made.hours == current.hours &&
+        made.slotMinutes == current.slotMinutes &&
+        made.editable == current.editable &&
+        dateOnly(made.today) == dateOnly(current.today);
+  }
+
+  /// Hands the rows the time and the policy a build took: silently where
+  /// the build made a new tree, whose rows each read them as they build
+  /// again, and otherwise through [_calendarNow], whose rows ask again.
+  void _askRowsAgain({required bool fresh}) {
+    final pending = _pendingNow;
+    if (pending == null && !_policyChanged) {
+      return;
+    }
+    _pendingNow = null;
+    _policyChanged = false;
+    final now = pending ?? _calendarNow.value;
+    if (fresh) {
+      _calendarNow.take(now);
+    } else {
+      _calendarNow.askAgain(now);
+    }
+  }
+
+  /// The tree of the days' headers and bodies.
+  Widget _buildTree() {
+    // Each row takes the list's whole width and keeps its content
+    // [dayListGutter] in from either side, so a header's background and
+    // the marker of the current time reach the list's edges.
+    return SyncedSliverTree<String, DayListRow>.flat(
+      items: _rows,
+      keyOf: (row) {
+        return row.key;
+      },
+      parentOf: (row) {
+        return row is DayListHeader ? null : DayListHeader.headerKeyOf(row.day);
+      },
+      maxStickyDepth: 1,
+      animationStyle: _styles.treeStyle,
+      onControllerCreated: (controller) {
+        _tree = controller;
+      },
+      itemBuilder: (context, node) {
+        final row = node.item;
+        return _DayMarker(
+          day: row.day,
+          markers: _markers,
+          onMount: _schedulePrefetch,
+          child: _buildRow(row),
+        );
+      },
+    );
+  }
+
+  /// The row of [row], a header or a body, which reads its day from the
+  /// store as it builds and builds again where a change the store notifies
+  /// changes what it shows of the day.
   Widget _buildRow(DayListRow row) {
     switch (row) {
-      case DayListHeader():
-        return _buildHeader(row);
-      case DayListBody(:final day, :final rows):
-        if (day != _nowDay) {
-          return _AnimatedRows(rows: rows, builder: _buildDayRow);
-        }
-        final spans = _NowSpan.spansOf(rows, widget.hours);
-        return _AnimatedRows(
-          rows: rows,
-          builder: _buildDayRow,
-          overlayOf: (row) {
-            final span = spans[row.key];
-            if (span == null) {
-              return null;
-            }
-            return _NowMarker(
-              now: widget.now,
-              span: span,
-              hours: widget.hours,
-              format: widget.format,
-            );
+      case DayListHeader(:final day):
+        return AnswerBuilder<int?>(
+          listenables: <Listenable>[widget.store],
+          answer: () {
+            return _countOf(day);
+          },
+          builder: (context, count, child) {
+            return _buildHeader(day, count);
+          },
+        );
+      case DayListBody(:final day):
+        return AnswerBuilder<List<DayListRow>>(
+          listenables: <Listenable>[widget.store],
+          answer: () {
+            return _blockRowsOf(day);
+          },
+          equals: listEquals,
+          builder: (context, rows, child) {
+            return _buildBody(day, rows);
           },
         );
       default:
-        return _buildDayRow(row);
+        throw ArgumentError.value(row, "row", "not a row of the tree");
     }
+  }
+
+  /// The block of [day]'s [rows], over which, on the day [DayList.now]
+  /// reads, lies the marker of the current time.
+  Widget _buildBody(DateTime day, List<DayListRow> rows) {
+    if (day != _nowDay) {
+      return _AnimatedRows(rows: rows, builder: _buildDayRow);
+    }
+    final spans = _NowSpan.spansOf(rows, widget.hours);
+    return _AnimatedRows(
+      rows: rows,
+      builder: _buildDayRow,
+      overlayOf: (row) {
+        final span = spans[row.key];
+        if (span == null) {
+          return null;
+        }
+        return _NowMarker(
+          now: widget.now,
+          span: span,
+          hours: widget.hours,
+          format: widget.format,
+        );
+      },
+    );
+  }
+
+  /// The slot the add of [day]'s gap from [start] to [end] takes: the
+  /// first free one in it from the policy's earliest start on [day], or
+  /// null where none is. A free slot whose times the clock reads must fit
+  /// the gap, so a gap shorter than a slot, as entries off the slot grid
+  /// can leave, or one the clock skips, offers no add.
+  ({DateTime start, DateTime end})? _gapAddOf(
+    DateTime day,
+    int start,
+    int end,
+  ) {
+    final rules = _rules;
+    final earliest = rules.earliestStartOn(day, _calendarNow.value);
+    final shown = widget.store.entriesOn(day).map((shown) {
+      return shown.entry;
+    });
+    return rules.firstSlot(earliest, clearOf: shown, from: start, until: end);
+  }
+
+  /// The dashed row of [day]'s gap from [start], whose add takes [add].
+  Widget _buildGap(
+    DateTime day,
+    int start,
+    ({DateTime start, DateTime end})? add,
+  ) {
+    final addMinute = add == null
+        ? start
+        : wallMinuteOf(add.start) - dayNumber(day) * minutesPerDay;
+    return _buildDashed(
+      key: dayListGapKey(day, start),
+      label: hourLabel(start, widget.format),
+      day: day,
+      addMinute: addMinute,
+      addLabel: "Add an item at ${hourLabel(addMinute, widget.format)}",
+      onAdd: add == null
+          ? null
+          : () {
+              widget.onCreateRange(CreateRange(start: add.start, end: add.end));
+            },
+    );
   }
 
   /// One row of a day's block.
@@ -1317,41 +1533,17 @@ class _DayListState<T> extends State<DayList<T>> {
       case DayListEntry():
         throw ArgumentError.value(row, "row", "an item of another payload");
       case DayListGap(:final day, :final start, :final end):
-        final slot = widget.slotMinutes;
-        final lock = widget.lock;
-        // A free slot whose times the clock reads must fit the gap, so a
-        // gap shorter than a slot, as entries off the slot grid can leave,
-        // or one the clock skips, offers no add.
-        final shown = widget.store.entriesOn(day);
-        final add = firstReadableSlot(
-          day,
-          math.max(start, lock.earliestStartOn(day, slotMinutes: slot)),
-          end,
-          slot,
-          occurrence: lock.boundary,
-          isFree: (start, end) {
-            return !shown.any((other) {
-              return rangeSharesTime(start, end, other.entry);
-            });
-          },
-        );
-        final addMinute = add == null
-            ? start
-            : wallMinuteOf(add.start) - dayNumber(day) * minutesPerDay;
+        // Built again at a new minute only where the slot its add takes
+        // moves.
         return _padded(
-          _buildDashed(
-            key: dayListGapKey(day, start),
-            label: hourLabel(start, widget.format),
-            day: day,
-            addMinute: addMinute,
-            addLabel: "Add an item at ${hourLabel(addMinute, widget.format)}",
-            onAdd: add == null
-                ? null
-                : () {
-                    widget.onCreateRange(
-                      CreateRange(start: add.start, end: add.end),
-                    );
-                  },
+          AnswerBuilder<({DateTime start, DateTime end})?>(
+            listenables: <Listenable>[_calendarNow],
+            answer: () {
+              return _gapAddOf(day, start, end);
+            },
+            builder: (context, add, child) {
+              return _buildGap(day, start, add);
+            },
           ),
         );
       case DayListHidden(:final day, :final count, :final above):
@@ -1382,8 +1574,14 @@ class _DayListState<T> extends State<DayList<T>> {
           ConstrainedBox(
             key: dayListFailedKey(day),
             constraints: const BoxConstraints(minHeight: _failedRowExtent),
-            child: Builder(
-              builder: (context) {
+            // Built again where the store's load error changes, which the
+            // day's body does not hold.
+            child: AnswerBuilder<Object?>(
+              listenables: <Listenable>[widget.store],
+              answer: () {
+                return widget.store.loadError;
+              },
+              builder: (context, error, child) {
                 // A day a prefetch failed to read, while the shown range is
                 // ready, has no load error.
                 return failure(
@@ -1392,7 +1590,7 @@ class _DayListState<T> extends State<DayList<T>> {
                     site: CalendarStateSite.dayRow,
                     first: day,
                     last: day,
-                    error: widget.store.loadError,
+                    error: error,
                     retry: _retry,
                   ),
                 );
@@ -1415,16 +1613,16 @@ class _DayListState<T> extends State<DayList<T>> {
     );
   }
 
-  /// The day's title and how many items it shows, on the background
-  /// colour, so the rows scrolling under it while it sticks stay hidden. A
-  /// day read to hold no items has both in their own styles, muted, on a
-  /// line as tall as a busy day's title takes, so its header is as tall.
-  Widget _buildHeader(DayListHeader row) {
-    final count = row.count;
+  /// [day]'s title and the [count] of items it shows, none while the day
+  /// is not read, on the background colour, so the rows scrolling under it
+  /// while it sticks stay hidden. A day read to hold no items has both in
+  /// their own styles, muted, on a line as tall as a busy day's title
+  /// takes, so its header is as tall.
+  Widget _buildHeader(DateTime day, int? count) {
     final empty = count == 0;
     final styles = _styles;
     return ColoredBox(
-      key: dayListHeaderKey(row.day),
+      key: dayListHeaderKey(day),
       color: styles.theme.background,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
@@ -1437,7 +1635,7 @@ class _DayListState<T> extends State<DayList<T>> {
           children: <Widget>[
             Expanded(
               child: Text(
-                dayTitle(row.day, widget.today),
+                dayTitle(day, widget.today),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 strutStyle: empty
@@ -1495,7 +1693,7 @@ class _DayListState<T> extends State<DayList<T>> {
     }
     final pieceStart = row.first ? calendarEntry.start : row.day;
     final pieceEnd = row.last ? calendarEntry.end : addDays(row.day, 1);
-    final hold = widget.lock.holdOf(calendarEntry.start, calendarEntry.end);
+    final editable = widget.editable;
     final styles = _styles;
     return Row(
       children: <Widget>[
@@ -1551,26 +1749,45 @@ class _DayListState<T> extends State<DayList<T>> {
           ),
         ),
         Expanded(
-          child: _CardSlot<T>(
-            key: entryCardKey(entry.id),
-            entry: entry,
-            builder: widget.cardBuilder ?? defaultCalendarCardBuilder<T>,
-            startsAt: inside && row.start < hours.start
-                ? hourLabel(row.start, widget.format)
-                : null,
-            endsAt: inside && row.end > hours.end
-                ? hourLabel(row.end, widget.format)
-                : null,
-            onEdit: widget.editable && hold != EntryHold.locked
-                ? () {
-                    widget.onEdit(entry.id);
-                  }
-                : null,
-            onDelete: widget.editable && hold == EntryHold.free
-                ? () {
-                    widget.onDelete(entry.id);
-                  }
-                : null,
+          // Built again at a new minute only where the card gains or loses
+          // its Edit or its Delete; out of edit mode it asks nothing.
+          child: AnswerBuilder<({bool edits, bool deletes})>(
+            listenables: editable
+                ? <Listenable>[_calendarNow]
+                : const <Listenable>[],
+            answer: () {
+              if (!editable) {
+                return (edits: false, deletes: false);
+              }
+              final now = _calendarNow.value;
+              return (
+                edits: _policy.mayEdit(calendarEntry, now),
+                deletes: _policy.mayDelete(calendarEntry, now),
+              );
+            },
+            builder: (context, answers, child) {
+              return _CardSlot<T>(
+                key: entryCardKey(entry.id),
+                entry: entry,
+                builder: widget.cardBuilder ?? defaultCalendarCardBuilder<T>,
+                startsAt: inside && row.start < hours.start
+                    ? hourLabel(row.start, widget.format)
+                    : null,
+                endsAt: inside && row.end > hours.end
+                    ? hourLabel(row.end, widget.format)
+                    : null,
+                onEdit: answers.edits
+                    ? () {
+                        widget.onEdit(entry.id);
+                      }
+                    : null,
+                onDelete: answers.deletes
+                    ? () {
+                        widget.onDelete(entry.id);
+                      }
+                    : null,
+              );
+            },
           ),
         ),
       ],

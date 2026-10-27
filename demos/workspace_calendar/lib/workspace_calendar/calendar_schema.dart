@@ -230,9 +230,9 @@ const int maxDayCount = 366;
 
 /// Whether an item may cover [dayCount] days, counting each day it has
 /// any part of: 1 to [maxDayCount]. The one test of that range, which
-/// [validateItemJson] reads; the example passes
-/// [maxDayCount] to `CalendarView.maxDayCount`, which holds to it the
-/// gestures its own doc names.
+/// [validateItemJson] reads; the demo's edit policies answer [maxDayCount]
+/// as their day limit (`CalendarEditPolicy.dayLimit`), to which the
+/// calendar holds the gestures `CalendarView.editPolicy`'s doc names.
 bool isAllowedDayCount(int dayCount) {
   return dayCount >= 1 && dayCount <= maxDayCount;
 }

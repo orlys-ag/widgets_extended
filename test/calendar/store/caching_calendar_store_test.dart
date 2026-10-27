@@ -240,14 +240,6 @@ Matcher pendingRefusal(String id) {
   );
 }
 
-Matcher overlapRefusal(List<String> ids) {
-  return isA<CalendarEntryOverlapException>().having(
-    (error) => error.conflictingIds,
-    "conflictingIds",
-    ids,
-  );
-}
-
 /// A refusal under the hours 08:00 to 18:00 with only the start, or only
 /// the end, outside them.
 Matcher hoursRefusal({required bool startOutside}) {
@@ -469,7 +461,8 @@ void main() {
     expect(idsOn(store, DateTime(2026, 4, 24)), isEmpty);
   });
 
-  test("M4 a move that meets an entry on a read day sends nothing", () async {
+  test("M4 a move that meets an entry on a read day is sent to the source "
+      "and stored once it answers", () async {
     final harness = Harness();
     final store = harness.store;
     // From Saturday 19:00 to Sunday 01:00.
@@ -482,41 +475,30 @@ void main() {
     final calls = harness.source.calls.length;
 
     // Monday 13:00 to 19:00 meets Monday's entry from 17:00.
-    store.requestMove(
-      multi.copyWith(
-        start: DateTime(2026, 4, 27, 13),
-        end: DateTime(2026, 4, 27, 19),
-      ),
+    final meeting = multi.copyWith(
+      start: DateTime(2026, 4, 27, 13),
+      end: DateTime(2026, 4, 27, 19),
     );
-    expect(harness.source.calls, hasLength(calls));
-    expect(store.isPending("item-1"), isFalse);
-    expect(harness.failures, <Matcher>[
-      failureOf("item-1", overlapRefusal(<String>["item-2"])),
-    ]);
-
-    // Sunday 19:00 to Monday 01:00 meets neither.
-    final clear = multi.copyWith(
-      start: DateTime(2026, 4, 26, 19),
-      end: DateTime(2026, 4, 27, 1),
-    );
-    store.requestMove(clear);
+    store.requestMove(meeting);
     expect(harness.source.calls, hasLength(calls + 1));
-    harness.lastCall.succeed(clear);
+    expect(harness.lastCall.method, SourceMethod.replace);
+    expect(store.isPending("item-1"), isTrue);
+    harness.lastCall.succeed(meeting);
     await settle();
+    expect(store.isPending("item-1"), isFalse);
+    expect(store.storedEntry("item-1"), meeting);
 
-    // Two single-day entries are kept apart as well.
-    final reported = harness.failures.length;
-    store.requestMove(
-      single.copyWith(
-        start: DateTime(2026, 4, 26, 10, 30),
-        end: DateTime(2026, 4, 26, 11, 30),
-      ),
+    // Two single-day entries share time as well.
+    final sharing = single.copyWith(
+      start: DateTime(2026, 4, 26, 10, 30),
+      end: DateTime(2026, 4, 26, 11, 30),
     );
-    expect(harness.source.calls, hasLength(calls + 1));
-    expect(store.isPending("item-2"), isFalse);
-    expect(harness.failures.sublist(reported), <Matcher>[
-      failureOf("item-2", overlapRefusal(<String>["item-3"])),
-    ]);
+    store.requestMove(sharing);
+    expect(harness.source.calls, hasLength(calls + 2));
+    harness.lastCall.succeed(sharing);
+    await settle();
+    expect(store.storedEntry("item-2"), sharing);
+    expect(harness.failures, isEmpty);
   });
 
   test("M5 a multi-day entry shows on each day it covers", () async {
@@ -733,111 +715,6 @@ void main() {
     await settle();
     expect(store.isRead(weekFirst), isTrue);
     expect(store.readFailed(weekFirst), isFalse);
-  });
-
-  group("first free", () {
-    final day = DateTime(2026, 4, 22);
-
-    /// Shows [day] and completes its read with [entries].
-    Future<CachingCalendarStore<String>> readDay(
-      Harness harness,
-      List<CalendarEntry<String>> entries,
-    ) async {
-      final store = harness.store;
-      store.show(day, day);
-      harness.lastCall.succeed(entries);
-      await settle();
-      expect(store.status, CalendarLoadStatus.ready);
-      return store;
-    }
-
-    test("FF1 the first free range is the earliest slot that meets no shown "
-        "entry", () async {
-      final store = await readDay(Harness(), <CalendarEntry<String>>[
-        task("item-1", day, 0, 60),
-        task("item-2", day, 75, 120),
-      ]);
-      expect(store.firstFreeRange(day, slotMinutes: 15), (
-        start: at(day, 60),
-        end: at(day, 75),
-      ));
-    });
-
-    test(
-      "FF2 a day free only in the hours' last slot gets that slot",
-      () async {
-        final store = await readDay(Harness(), <CalendarEntry<String>>[
-          task("item-1", day, 540, 705),
-        ]);
-        store.hours = const DayHours(540, 720);
-        expect(store.firstFreeRange(day, slotMinutes: 15), (
-          start: at(day, 705),
-          end: at(day, 720),
-        ));
-      },
-    );
-
-    test("FF3 with no free start the range is the hours' first slot", () async {
-      final store = await readDay(Harness(), <CalendarEntry<String>>[
-        task("item-1", day, 0, 1439),
-      ]);
-      expect(store.firstFreeRange(day, slotMinutes: 15), (
-        start: at(day, 0),
-        end: at(day, 15),
-      ));
-    });
-
-    test("FF4 a pending move counts where it shows", () async {
-      final harness = Harness();
-      final item = task("item-1", day, 60, 120);
-      final store = await readDay(harness, <CalendarEntry<String>>[item]);
-      // Sanity: the stored entry leaves the first slot free.
-      expect(store.firstFreeRange(day, slotMinutes: 15), (
-        start: at(day, 0),
-        end: at(day, 15),
-      ));
-
-      final calls = harness.source.calls.length;
-      store.requestMove(retimed(item, 0, 60));
-      expect(harness.source.calls, hasLength(calls + 1));
-      expect(store.isPending("item-1"), isTrue);
-      expect(store.firstFreeRange(day, slotMinutes: 15), (
-        start: at(day, 60),
-        end: at(day, 75),
-      ));
-    });
-
-    test("FF5 a search from a time starts there, rounded up to the slots "
-        "and no earlier than the hours, and with nothing free after it "
-        "starts again at the hours' start", () async {
-      final store = await readDay(Harness(), <CalendarEntry<String>>[
-        task("item-1", day, 480, 540),
-        task("item-2", day, 900, 960),
-      ]);
-      store.hours = const DayHours(480, 1200);
-      expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 840)), (
-        start: at(day, 840),
-        end: at(day, 855),
-      ));
-      // 14:10 rounds up to 14:15.
-      expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 850)), (
-        start: at(day, 855),
-        end: at(day, 870),
-      ));
-      // Each slot from 15:00 meets item-2 until it ends.
-      expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 900)), (
-        start: at(day, 960),
-        end: at(day, 975),
-      ));
-      expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 300)), (
-        start: at(day, 540),
-        end: at(day, 555),
-      ));
-      expect(store.firstFreeRange(day, slotMinutes: 15, from: at(day, 1200)), (
-        start: at(day, 540),
-        end: at(day, 555),
-      ));
-    });
   });
 
   test("CS1 a confirmed write that changes only the payload shows the new "

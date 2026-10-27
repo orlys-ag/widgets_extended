@@ -18,8 +18,9 @@ const Duration defaultCalendarLatency = Duration(milliseconds: 600);
 
 class MockCalendarApi implements CalendarApi {
   /// A store holding [seed], checked entry by entry, in order, as a create
-  /// is: an entry that breaks a rule of its type, or overlaps an earlier
-  /// entry the overlap rule keeps apart, throws an [ArgumentError].
+  /// is: an entry that breaks a rule of its type, or, unless
+  /// [allowsOverlaps], overlaps an earlier entry the overlap rule keeps
+  /// apart, throws an [ArgumentError].
   ///
   /// Every call completes [latency] after it arrives, and only then
   /// changes the store. [failurePolicy] is asked once per call, when it
@@ -29,6 +30,7 @@ class MockCalendarApi implements CalendarApi {
     Iterable<Map<String, Object?>> seed = const <Map<String, Object?>>[],
     this.latency = defaultCalendarLatency,
     this.failurePolicy,
+    this.allowsOverlaps = false,
   }) {
     for (final entry in seed) {
       final body = _prepared(_copyMap(entry));
@@ -36,7 +38,9 @@ class MockCalendarApi implements CalendarApi {
       if (errors.isNotEmpty) {
         throw ArgumentError.value(entry, "seed", "Invalid entry: $errors");
       }
-      final conflicts = _conflictsOf(body, null);
+      final conflicts = allowsOverlaps
+          ? const <String>[]
+          : _conflictsOf(body, null);
       if (conflicts.isNotEmpty) {
         throw ArgumentError.value(entry, "seed", "Overlaps $conflicts");
       }
@@ -61,6 +65,14 @@ class MockCalendarApi implements CalendarApi {
 
   /// Read on every call, so a test may replace it between calls.
   CalendarFailurePolicy? failurePolicy;
+
+  /// Whether items may share time. Where false, a create whose item shares
+  /// time with a stored one fails with a [CalendarOverlapException], and
+  /// so does an update that changes the item's start or end to times
+  /// sharing time with another; an update that keeps them saves, so items
+  /// that already share time stay. Read on every call, as [failurePolicy]
+  /// is, so the app may set it between calls.
+  bool allowsOverlaps;
 
   final List<CalendarRequest> _requests = <CalendarRequest>[];
 
@@ -117,7 +129,9 @@ class MockCalendarApi implements CalendarApi {
         if (errors.isNotEmpty) {
           throw CalendarValidationException(errors);
         }
-        final conflicts = _conflictsOf(prepared, null);
+        final conflicts = allowsOverlaps
+            ? const <String>[]
+            : _conflictsOf(prepared, null);
         if (conflicts.isNotEmpty) {
           throw CalendarOverlapException(conflicts);
         }
@@ -145,7 +159,9 @@ class MockCalendarApi implements CalendarApi {
         if (errors.isNotEmpty) {
           throw CalendarValidationException(errors);
         }
-        final conflicts = _conflictsOf(prepared, id);
+        final conflicts = allowsOverlaps || !_timesChange(stored, prepared)
+            ? const <String>[]
+            : _conflictsOf(prepared, id);
         if (conflicts.isNotEmpty) {
           throw CalendarOverlapException(conflicts);
         }
@@ -218,6 +234,18 @@ class MockCalendarApi implements CalendarApi {
       prepared["fields"] = withFieldDefaults(type, fields);
     }
     return prepared;
+  }
+
+  /// Whether the valid [body] gives the stored envelope [stored] another
+  /// start or end instant.
+  static bool _timesChange(
+    Map<String, Object?> stored,
+    Map<String, Object?> body,
+  ) {
+    final before = itemFromJson(stored);
+    final after = itemFromJson(body);
+    return !before.start.isAtSameMomentAs(after.start) ||
+        !before.end.isAtSameMomentAs(after.end);
   }
 
   /// The stored ids, other than [ownId], that the valid [body] may not

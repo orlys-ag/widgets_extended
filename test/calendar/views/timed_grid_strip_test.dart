@@ -11,6 +11,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
@@ -18,15 +19,18 @@ import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/policy/edit_policy.dart';
+import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
+import 'package:widgets_extended/calendar/policy/overlap.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
-import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/entry_split.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 
 import '../dst_days.dart';
+import '../edit_policies.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -308,25 +312,18 @@ class _NearRect extends Matcher {
   }
 }
 
-/// An in-memory store that records every move it is asked for.
-class RecordingStore extends MemoryCalendarStore<String> {
-  RecordingStore({super.entries, super.hours}) : super();
-
-  final List<CalendarEntry<String>> moves = <CalendarEntry<String>>[];
-
-  @override
-  void requestMove(CalendarEntry<String> requested) {
-    moves.add(requested);
-    super.requestMove(requested);
-  }
+/// The range of days, as [MoveRecordingStore.reads] records it, from [first]
+/// to [last].
+({int first, int last}) daysOf(DateTime first, DateTime last) {
+  return (first: dayNumber(first), last: dayNumber(last));
 }
 
 /// A store holding [entries], disposed at the test's end.
-RecordingStore storeOf(
+MoveRecordingStore storeOf(
   List<CalendarEntry<String>> entries, {
   DayHours hours = DayHours.allDay,
 }) {
-  final store = RecordingStore(entries: entries, hours: hours);
+  final store = MoveRecordingStore(entries: entries, hours: hours);
   addTearDown(store.dispose);
   return store;
 }
@@ -403,7 +400,10 @@ class HeldSource implements CalendarDataSource<String> {
 /// shows at the default [minSlotHeight] and every day column at the
 /// default [minDayWidth]; [creates] records each create range it reports
 /// and [opened] each entry it opens. [editable], [first], [hours] and [slotMinutes]
-/// start as given, and [rebuild] builds the grid again with them.
+/// start as given, and [rebuild] builds the grid again with them. The
+/// grid's policy is [editPolicy] where it is given, and otherwise the one
+/// [lockPast], [lockEarlierToday], [maxDayCount] and [allowsOverlaps]
+/// make ([policy]).
 class Harness {
   Harness(
     this.store,
@@ -412,6 +412,8 @@ class Harness {
     this.editable = true,
     this.lockPast = false,
     this.lockEarlierToday = false,
+    this.allowsOverlaps = true,
+    this.editPolicy,
     this.minSlotHeight = defaultMinSlotHeight,
     this.minDayWidth = minDayWidthLow,
     this.size = const Size(800.0, 2000.0),
@@ -428,6 +430,8 @@ class Harness {
   final int? maxDayCount;
   final bool lockPast;
   final bool lockEarlierToday;
+  final bool allowsOverlaps;
+  final CalendarEditPolicy<String>? editPolicy;
   final double minSlotHeight;
   final double minDayWidth;
   final Size size;
@@ -445,6 +449,26 @@ class Harness {
     at(today, _nowHour),
   );
 
+  /// [editPolicy], or with none the history lock under [lockPast], with
+  /// [lockEarlierToday], and the unrestricted policy otherwise, each
+  /// combined with a [DayLimitPolicy] of [maxDayCount] where it is given
+  /// and with a [NoOverlapsPolicy] where [allowsOverlaps] is false.
+  CalendarEditPolicy<String> get policy {
+    final given = editPolicy;
+    if (given != null) {
+      return given;
+    }
+    final limit = maxDayCount;
+    return CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+      if (lockPast)
+        HistoryLockPolicy<String>(lockEarlierToday: lockEarlierToday)
+      else
+        const UnrestrictedEditPolicy<String>(),
+      if (limit != null) DayLimitPolicy<String>(limit),
+      if (!allowsOverlaps) const NoOverlapsPolicy<String>(),
+    ]);
+  }
+
   TimedGrid<String> grid() {
     return TimedGrid<String>(
       key: ObjectKey(this),
@@ -460,13 +484,11 @@ class Harness {
         creates.add(range);
       },
       editable: editable,
-      lockPast: lockPast,
-      lockEarlierToday: lockEarlierToday,
+      editPolicy: policy,
       hours: hours,
       slotMinutes: slotMinutes,
       minSlotHeight: minSlotHeight,
       minDayWidth: minDayWidth,
-      maxDayCount: maxDayCount,
       showsDayHeader: shown.week,
     );
   }
@@ -588,7 +610,7 @@ void expectTimes(
 }
 
 /// TX1's gesture: in Week, Monday's one-day bar moved two columns.
-Future<RecordingStore> moveBarTwoColumns(
+Future<MoveRecordingStore> moveBarTwoColumns(
   WidgetTester tester, {
   DayHours hours = DayHours.allDay,
 }) async {
@@ -611,7 +633,7 @@ Future<RecordingStore> moveBarTwoColumns(
 
 /// TX2's gesture: in Week, the leading edge of Tuesday and Wednesday's bar
 /// let go over Monday.
-Future<RecordingStore> resizeBarStart(WidgetTester tester) async {
+Future<MoveRecordingStore> resizeBarStart(WidgetTester tester) async {
   final shown = Shown.week(monday);
   final store = storeOf(<CalendarEntry<String>>[
     allDayOf("trip", tuesday, days: 2),
@@ -634,7 +656,7 @@ Future<RecordingStore> resizeBarStart(WidgetTester tester) async {
 
 /// TX3's gesture: in Week, the trailing edge of Tuesday and Wednesday's bar
 /// let go over Thursday.
-Future<RecordingStore> resizeBarEnd(WidgetTester tester) async {
+Future<MoveRecordingStore> resizeBarEnd(WidgetTester tester) async {
   final shown = Shown.week(monday);
   final store = storeOf(<CalendarEntry<String>>[
     allDayOf("trip", tuesday, days: 2),
@@ -656,7 +678,10 @@ Future<RecordingStore> resizeBarEnd(WidgetTester tester) async {
 }
 
 /// TX4's first gesture: Tuesday's bar let go on Tuesday's 10:00 slot.
-Future<RecordingStore> dropBarOnSlot(WidgetTester tester, Shown shown) async {
+Future<MoveRecordingStore> dropBarOnSlot(
+  WidgetTester tester,
+  Shown shown,
+) async {
   final store = storeOf(<CalendarEntry<String>>[allDayOf("off", tuesday)]);
   await Harness(store, shown).pump(tester);
   await dragTo(
@@ -670,7 +695,7 @@ Future<RecordingStore> dropBarOnSlot(WidgetTester tester, Shown shown) async {
 /// TX4's second gesture: Monday to Wednesday's bar, grabbed at its last
 /// day in Week and near its right end in Day, let go with the finger on
 /// Tuesday's 10:00 slot.
-Future<RecordingStore> dropWideBarOnSlot(
+Future<MoveRecordingStore> dropWideBarOnSlot(
   WidgetTester tester,
   Shown shown,
 ) async {
@@ -688,7 +713,7 @@ Future<RecordingStore> dropWideBarOnSlot(
 
 /// TX5's gesture: Tuesday's 10:00 to 11:00 block let go on Tuesday's strip
 /// cell, which a bar of another all-day entry covers.
-Future<RecordingStore> dropBlockOnStrip(
+Future<MoveRecordingStore> dropBlockOnStrip(
   WidgetTester tester,
   Shown shown,
 ) async {
@@ -707,7 +732,7 @@ Future<RecordingStore> dropBlockOnStrip(
 
 /// TX11's gesture: with no all-day entry in range, Tuesday's 10:00 to
 /// 11:00 block let go on the edit mode's empty strip cell of Tuesday.
-Future<RecordingStore> dropBlockOnEmptyRow(
+Future<MoveRecordingStore> dropBlockOnEmptyRow(
   WidgetTester tester,
   Shown shown,
 ) async {
@@ -727,7 +752,7 @@ Future<RecordingStore> dropBlockOnEmptyRow(
 /// on [day] has its edge on [side] dragged so the pointer lies over
 /// [over], with [others] in the strip too; returns the gesture still held
 /// and the store.
-Future<(TestGesture, RecordingStore)> holdBarEdge(
+Future<(TestGesture, MoveRecordingStore)> holdBarEdge(
   WidgetTester tester, {
   required int? limit,
   required String id,
@@ -766,7 +791,7 @@ final List<(int?, String, DateTime, AxisDirection, DateTime)> tx8Releases =
     ];
 
 /// [holdBarEdge], let go.
-Future<RecordingStore> releaseBarEdge(
+Future<MoveRecordingStore> releaseBarEdge(
   WidgetTester tester, {
   required int? limit,
   required String id,
@@ -801,7 +826,7 @@ CalendarEntry<String> nightEntry() {
 /// dragged so the pointer lies over the slot starting at [minute] in
 /// [over]'s column. Returns the gesture still held, the store and the
 /// harness.
-Future<(TestGesture, RecordingStore, Harness)> holdEndOver(
+Future<(TestGesture, MoveRecordingStore, Harness)> holdEndOver(
   WidgetTester tester, {
   required List<CalendarEntry<String>> entries,
   required String id,
@@ -846,7 +871,7 @@ Future<(TestGesture, RecordingStore, Harness)> holdEndOver(
 }
 
 /// [holdEndOver], let go.
-Future<RecordingStore> releaseEndOver(
+Future<MoveRecordingStore> releaseEndOver(
   WidgetTester tester, {
   required List<CalendarEntry<String>> entries,
   required String id,
@@ -1443,7 +1468,7 @@ void main() {
     ) async {
       final shown = Shown.week(monday);
       final days = <DateTime>[for (var i = 0; i < 7; i++) addDays(monday, i)];
-      Future<RecordingStore> pumpLocked(
+      Future<MoveRecordingStore> pumpLocked(
         List<CalendarEntry<String>> entries,
       ) async {
         final store = storeOf(entries);
@@ -2257,7 +2282,7 @@ void main() {
     final today = DateTime(2026, 1, 5);
     for (final shown in bothGrids()) {
       final store = storeOf(<CalendarEntry<String>>[allDayOf("off", tuesday)]);
-      await Harness(store, shown).pump(tester);
+      await Harness(store, shown, allowsOverlaps: false).pump(tester);
       final gesture = await liftTo(
         tester,
         tester.getCenter(barFinder("off")),
@@ -2292,7 +2317,7 @@ void main() {
         allDayOf("off", tuesday),
         entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
       ]);
-      await Harness(busy, shown).pump(tester);
+      await Harness(busy, shown, allowsOverlaps: false).pump(tester);
       final over = await liftTo(
         tester,
         tester.getCenter(barFinder("off")),
@@ -3004,6 +3029,539 @@ void main() {
       entryOf("night", at(monday, 22), at(wednesday, 12, 15)),
     ]);
   });
+
+  testWidgets("PG3 in Week, the Saturday piece of Saturday 23:30 to Sunday "
+      "00:30 and a Saturday bar, each released on Sunday's 23:30 slot, "
+      "record no move sharing time with an entry on the unshown next "
+      "Monday", (tester) async {
+    final shown = Shown.week(monday);
+    final next = entryOf("N", nextMonday, at(nextMonday, 1));
+    final crossing = entryOf("X", at(saturday, 23, 30), at(sunday, 0, 30));
+    final bar = allDayOf("A", saturday);
+    final shared = <String, List<CalendarEntry<String>>>{};
+    for (final withNext in const <bool>[false, true]) {
+      final pieceStore = storeOf(<CalendarEntry<String>>[
+        crossing,
+        if (withNext) next,
+      ]);
+      await Harness(pieceStore, shown, allowsOverlaps: false).pump(tester);
+      await moveBlockOnto(
+        tester,
+        blockFinder("X", saturday),
+        slotRect(tester, shown, sunday, 23 * 60 + 30),
+      );
+      final barStore = storeOf(<CalendarEntry<String>>[
+        bar,
+        if (withNext) next,
+      ]);
+      await Harness(barStore, shown, allowsOverlaps: false).pump(tester);
+      await dragTo(
+        tester,
+        tester.getCenter(barFinder("A")),
+        slotRect(tester, shown, sunday, 23 * 60 + 30).center,
+      );
+      if (!withNext) {
+        // Setup sanity: each gesture asks for Sunday 23:30 to Monday 00:30.
+        expect(pieceStore.moves, <CalendarEntry<String>>[
+          crossing.copyWith(
+            start: at(sunday, 23, 30),
+            end: at(nextMonday, 0, 30),
+          ),
+        ]);
+        expect(barStore.moves, <CalendarEntry<String>>[
+          bar.copyWith(start: at(sunday, 23, 30), end: at(nextMonday, 0, 30)),
+        ]);
+        continue;
+      }
+      shared["piece"] = movesSharingTime(pieceStore, next);
+      shared["bar"] = movesSharingTime(barStore, next);
+    }
+    expect(shared, <String, List<CalendarEntry<String>>>{
+      "piece": <CalendarEntry<String>>[],
+      "bar": <CalendarEntry<String>>[],
+    });
+  });
+
+  testWidgets("PG6 in Week under hours from 06:00 to 22:00, Tuesday 21:00 to "
+      "Wednesday 07:00 released on Monday's 21:00 slot records no move "
+      "sharing time with Monday 23:00 to 23:30, which the hours hide", (
+    tester,
+  ) async {
+    final shown = Shown.week(monday, hours: const DayHours(6 * 60, 22 * 60));
+    final hidden = entryOf("H", at(monday, 23), at(monday, 23, 30));
+    final overnight = entryOf("O", at(tuesday, 21), at(wednesday, 7));
+    for (final withHidden in const <bool>[false, true]) {
+      final store = storeOf(<CalendarEntry<String>>[
+        overnight,
+        if (withHidden) hidden,
+      ]);
+      await Harness(store, shown, allowsOverlaps: false).pump(tester);
+      if (withHidden) {
+        // Setup sanity: the hours leave the hidden entry no block.
+        expect(blocksOf("H"), findsNothing);
+      }
+      await moveBlockOnto(
+        tester,
+        blockFinder("O", tuesday),
+        slotRect(tester, shown, monday, 21 * 60),
+      );
+      if (!withHidden) {
+        // Setup sanity: the drop asks for Monday 21:00 to Tuesday 07:00.
+        expect(store.moves, <CalendarEntry<String>>[
+          overnight.copyWith(start: at(monday, 21), end: at(tuesday, 7)),
+        ]);
+        continue;
+      }
+      expect(movesSharingTime(store, hidden), isEmpty);
+      // The store holding the hidden entry, from before the grid's first
+      // frame: every change the gates and the hosts' semantics actions
+      // ask for covers days of the range alone, which the split reads.
+      expect(store.reads.toSet(), <({int first, int last})>{
+        daysOf(monday, sunday),
+      });
+    }
+  });
+
+  testWidgets("PG5 in Week the overlap check reads each day outside the "
+      "range once between store notifies, a store notify during a drag asks "
+      "the drop gate and a crossing's landing again, and a drop's own write "
+      "gives the board no new drag config", (tester) async {
+    final shown = Shown.week(monday);
+    final own = daysOf(monday, sunday);
+    bool isAfter(({int first, int last}) range) {
+      return range.first > own.last;
+    }
+
+    final ownOrAfter = predicate<({int first, int last})>((range) {
+      return range == own || isAfter(range);
+    }, "the grid's own range or one wholly after it");
+    final next = entryOf("N", nextMonday, at(nextMonday, 1));
+    final crossing = entryOf("X", at(saturday, 23, 30), at(sunday, 0, 30));
+
+    // A block held over Sunday's late slots, whose moves reach the next
+    // Monday.
+    var store = storeOf(<CalendarEntry<String>>[crossing, next]);
+    await Harness(store, shown, allowsOverlaps: false).pump(tester);
+    final block = tester.getRect(blockFinder("X", saturday));
+    final gesture = await lift(tester, block.center);
+    Future<void> holdOver(int minute) async {
+      final slot = slotRect(tester, shown, sunday, minute);
+      await gesture.moveTo(
+        block.center + slot.topLeft - block.topLeft + const Offset(0.0, 2.0),
+      );
+      await tester.pump();
+    }
+
+    await holdOver(20 * 60);
+    for (var i = 0; i < 2; i++) {
+      await holdOver(23 * 60 + 15);
+      await holdOver(23 * 60 + 30);
+    }
+    final beforeDelete = store.reads.where(isAfter).length;
+    final config = boardOf(tester).drag;
+    store.requestDelete("N");
+    await tester.pump();
+    await tester.pump();
+    final renewed = boardOf(tester).drag;
+    expect(renewed, isNot(same(config)));
+    expect(
+      (beforeDelete, store.reads.where(isAfter).length - beforeDelete),
+      (1, 1),
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(store.moves, <CalendarEntry<String>>[
+      crossing.copyWith(start: at(sunday, 23, 30), end: at(nextMonday, 0, 30)),
+    ]);
+    expect(boardOf(tester).drag, same(renewed));
+    expect(store.reads, everyElement(ownOrAfter));
+
+    // A block whose moves stay inside the range.
+    final meet = entryOf("T", at(tuesday, 10), at(tuesday, 11));
+    store = storeOf(<CalendarEntry<String>>[meet]);
+    await Harness(store, shown, allowsOverlaps: false).pump(tester);
+    final from = tester.getRect(blockFinder("T", tuesday));
+    final held = await lift(tester, from.center);
+    for (final (day, minute) in <(DateTime, int)>[
+      (tuesday, 14 * 60),
+      (wednesday, 10 * 60),
+    ]) {
+      final slot = slotRect(tester, shown, day, minute);
+      await held.moveTo(
+        from.center + slot.topLeft - from.topLeft + const Offset(0.0, 2.0),
+      );
+      await tester.pump();
+    }
+    await held.up();
+    await tester.pumpAndSettle();
+    // Setup sanity: the drop landed.
+    expect(store.moves, <CalendarEntry<String>>[
+      meet.copyWith(start: at(wednesday, 10), end: at(wednesday, 11)),
+    ]);
+    expect(store.reads.toSet(), <({int first, int last})>{own});
+
+    // A bar held over Sunday's 23:30 slot, whose hour reaches the next
+    // Monday.
+    final bar = allDayOf("A", saturday);
+    store = storeOf(<CalendarEntry<String>>[bar, next]);
+    await Harness(store, shown, allowsOverlaps: false).pump(tester);
+    final crossed = await liftTo(
+      tester,
+      tester.getCenter(barFinder("A")),
+      slotRect(tester, shown, sunday, 23 * 60 + 30).center,
+    );
+    expect(landingText(tester), noLandingLabel);
+    store.requestDelete("N");
+    await tester.pump();
+    await tester.pump();
+    expect(
+      landingText(tester),
+      landingLabel(
+        at(sunday, 23, 30),
+        at(nextMonday, 0, 30),
+        DateTime(2026, 1, 5),
+      ),
+    );
+    await crossed.up();
+    await tester.pumpAndSettle();
+    expect(store.moves, <CalendarEntry<String>>[
+      bar.copyWith(start: at(sunday, 23, 30), end: at(nextMonday, 0, 30)),
+    ]);
+    expect(store.reads, everyElement(ownOrAfter));
+  });
+
+  group("on the 25-hour day", skip: longDaySkip, () {
+    testWidgets("PG7 in Day, the second 01:40 to 02:10 released on the 01:00 "
+        "row records no move sharing time with the first 01:30 to the "
+        "second 01:30, whose block lies on the rows from 01:30", (
+      tester,
+    ) async {
+      final day = longDayStart;
+      final shown = Shown.day(day);
+      final repeated = entryOf(
+        "E1",
+        day.add(const Duration(minutes: 90)),
+        secondHalfPastOne,
+      );
+      final moved = entryOf(
+        "M",
+        secondHalfPastOne.add(const Duration(minutes: 10)),
+        at(day, 2, 10),
+      );
+      for (final withRepeated in const <bool>[false, true]) {
+        final store = storeOf(<CalendarEntry<String>>[
+          moved,
+          if (withRepeated) repeated,
+        ]);
+        await Harness(store, shown, allowsOverlaps: false).pump(tester);
+        final settled = store.reads.length;
+        final block = tester.getRect(blockFinder("M", day));
+        final row = slotRect(tester, shown, day, 60);
+        final gesture = await lift(tester, block.center);
+        await gesture.moveBy(Offset(0.0, row.top - block.top + 2.0));
+        await tester.pump();
+        final held = store.reads.length;
+        await gesture.up();
+        await tester.pumpAndSettle();
+        if (!withRepeated) {
+          // Setup sanity: the drop asks for the second 01:00 to the second
+          // 01:30.
+          expect(store.moves, <CalendarEntry<String>>[
+            moved.copyWith(
+              start: secondHalfPastOne.subtract(const Duration(minutes: 30)),
+              end: secondHalfPastOne,
+            ),
+          ]);
+          continue;
+        }
+        expect(movesSharingTime(store, repeated), isEmpty);
+        // The store holding the repeated entry: the split's read of the
+        // day alone, and none from the grid's first settled frame to the
+        // release, the gates searching what the split indexed.
+        expect(store.reads.toSet(), <({int first, int last})>{
+          daysOf(day, day),
+        });
+        expect(held - settled, 0);
+      }
+    });
+  });
+
+  testWidgets("PG1 in Week under a policy refusing any change of F that "
+      "ends after 12:00, a move of F onto the 12:00 slot and a drag of its "
+      "end handle to 12:30 record no move of F ending after 12:00", (
+    tester,
+  ) async {
+    final shown = Shown.week(monday);
+    final f = entryOf("F", at(tuesday, 10), at(tuesday, 11));
+    final refusing = ScriptedEditPolicy<String>(
+      admits: (entry, start, end) {
+        return entry.id != "F" || !end.isAfter(at(tuesday, 12));
+      },
+    );
+    List<CalendarEntry<String>> endingAfterNoon(MoveRecordingStore store) {
+      return <CalendarEntry<String>>[
+        for (final move in store.moves)
+          if (move.id == "F" && move.end.isAfter(at(tuesday, 12))) move,
+      ];
+    }
+
+    for (final policy in <CalendarEditPolicy<String>?>[null, refusing]) {
+      final moved = storeOf(<CalendarEntry<String>>[f]);
+      await Harness(moved, shown, editPolicy: policy).pump(tester);
+      await moveBlockOnto(
+        tester,
+        blockFinder("F", tuesday),
+        slotRect(tester, shown, tuesday, 12 * 60),
+      );
+
+      final resized = storeOf(<CalendarEntry<String>>[f]);
+      await Harness(resized, shown, editPolicy: policy).pump(tester);
+      final selecting = await lift(
+        tester,
+        tester.getCenter(blockFinder("F", tuesday)),
+      );
+      await selecting.up();
+      await tester.pumpAndSettle();
+      final block = tester.getRect(blockFinder("F", tuesday));
+      final from = Offset(block.center.dx, block.bottom - 2.0);
+      final to = Offset(
+        from.dx,
+        slotRect(tester, shown, tuesday, 12 * 60 + 15).bottom - 2.0,
+      );
+      final gesture = await tester.startGesture(from);
+      await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+      await tester.pump();
+      await gesture.moveTo(to);
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      if (policy == null) {
+        // Setup sanity: the unrestricted policy lets both gestures end F
+        // after 12:00.
+        expect(moved.moves, <CalendarEntry<String>>[
+          f.copyWith(start: at(tuesday, 12), end: at(tuesday, 13)),
+        ]);
+        expect(resized.moves, <CalendarEntry<String>>[
+          f.copyWith(end: at(tuesday, 12, 30)),
+        ]);
+        continue;
+      }
+      expect(endingAfterNoon(moved), isEmpty);
+      expect(endingAfterNoon(resized), isEmpty);
+    }
+  });
+
+  testWidgets("PG2 under a day limit of 2 a create drag from Monday 10:00 "
+      "to Thursday 12:00, a Monday bar's right grip dragged to Thursday and "
+      "Monday's end handle dragged into Thursday's 12:00 slot each end at "
+      "Wednesday's start, and with no limit they reach Thursday", (
+    tester,
+  ) async {
+    final shown = Shown.week(monday);
+    for (final limit in <int?>[2, null]) {
+      final harness = Harness(
+        storeOf(const <CalendarEntry<String>>[]),
+        shown,
+        maxDayCount: limit,
+      );
+      await harness.pump(tester);
+      // Setup sanity: the harness gives the grid the limit's policy.
+      expect(harness.policy.dayLimit, limit);
+      await createDrag(
+        tester,
+        slotRect(tester, shown, monday, 10 * 60).center,
+        slotRect(tester, shown, thursday, 12 * 60).center,
+      );
+      expect(harness.creates, <CreateRange>[
+        CreateRange(
+          start: at(monday, 10),
+          end: limit == null ? at(thursday, 12, 15) : wednesday,
+        ),
+      ], reason: "create under $limit");
+
+      final bar = await releaseBarEdge(
+        tester,
+        limit: limit,
+        id: "m",
+        day: monday,
+        side: AxisDirection.right,
+        over: thursday,
+      );
+      expect(
+        bar.moves.single.end,
+        limit == null ? friday : wednesday,
+        reason: "bar under $limit",
+      );
+
+      final end = await releaseEndOver(
+        tester,
+        entries: <CalendarEntry<String>>[
+          entryOf("e", at(monday, 10), at(monday, 11)),
+        ],
+        id: "e",
+        day: monday,
+        over: thursday,
+        minute: 12 * 60,
+        limit: limit,
+      );
+      expect(
+        end.moves.single.end,
+        limit == null ? at(thursday, 12, 15) : wednesday,
+        reason: "end handle under $limit",
+      );
+    }
+  });
+
+  testWidgets("PG4 in Week each gesture's pointer moves ask the policy at "
+      "most twice per gate call, three times in a bar's landing on the "
+      "slots, with 2 entries packed beside the moved one and with 200, and "
+      "no ask reads allowsOverlaps or dayLimit", (tester) async {
+    final shown = Shown.week(monday);
+
+    /// The asks of [asks] made outside a build, grouped by the gate call
+    /// each falls in: the size of each group.
+    List<int> groupSizes(List<PolicyAsk> asks) {
+      final groups = <int, int>{};
+      for (final ask in asks) {
+        if (ask.phase != SchedulerPhase.persistentCallbacks) {
+          groups[ask.gate] = (groups[ask.gate] ?? 0) + 1;
+        }
+      }
+      return groups.values.toList();
+    }
+
+    /// Ten pointer moves of [gesture] from [from] to [to], a frame after
+    /// each.
+    Future<void> tenMoves(TestGesture gesture, Offset from, Offset to) async {
+      for (var i = 1; i <= 10; i++) {
+        await gesture.moveTo(Offset.lerp(from, to, i / 10)!);
+        await tester.pump();
+      }
+    }
+
+    /// Selects the free entry with a long press let go in place.
+    Future<void> selectFree() async {
+      final selecting = await lift(
+        tester,
+        tester.getCenter(blockFinder("free", tuesday)),
+      );
+      await selecting.up();
+      await tester.pumpAndSettle();
+    }
+
+    final gestures = <String, Future<void> Function()>{
+      "move": () async {
+        final from = tester.getCenter(blockFinder("free", tuesday));
+        final gesture = await lift(tester, from);
+        await tenMoves(
+          gesture,
+          from,
+          slotRect(tester, shown, tuesday, 2 * 60).center,
+        );
+        await gesture.up();
+        await tester.pumpAndSettle();
+      },
+      "start": () async {
+        final block = tester.getRect(blockFinder("free", tuesday));
+        final from = Offset(block.center.dx, block.top + 2.0);
+        final gesture = await tester.startGesture(from);
+        await tenMoves(
+          gesture,
+          from,
+          Offset(from.dx, slotRect(tester, shown, tuesday, 2 * 60).top + 2.0),
+        );
+        await gesture.up();
+        await tester.pumpAndSettle();
+      },
+      "end": () async {
+        final block = tester.getRect(blockFinder("free", tuesday));
+        final from = Offset(block.center.dx, block.bottom - 2.0);
+        final gesture = await tester.startGesture(from);
+        await tenMoves(
+          gesture,
+          from,
+          slotRect(tester, shown, thursday, 12 * 60).center,
+        );
+        await gesture.up();
+        await tester.pumpAndSettle();
+      },
+      "bar": () async {
+        final from = tester.getCenter(barFinder("bar"));
+        final gesture = await lift(tester, from);
+        await tenMoves(
+          gesture,
+          from,
+          slotRect(tester, shown, tuesday, 10 * 60).center,
+        );
+        await gesture.up();
+        await tester.pumpAndSettle();
+      },
+    };
+
+    for (final count in const <int>[2, 200]) {
+      for (final allowsOverlaps in const <bool>[false, true]) {
+        for (final MapEntry(key: name, value: run) in gestures.entries) {
+          final policy = CountingEditPolicy<String>(
+            allowsOverlaps
+                ? const UnrestrictedEditPolicy<String>()
+                : const NoOverlapsPolicy<String>(),
+          );
+          final store = storeOf(<CalendarEntry<String>>[
+            for (var i = 0; i < count; i++)
+              entryOf("p$i", at(tuesday, 0, 5 * i), at(tuesday, 0, 5 * i + 5)),
+            entryOf("free", at(tuesday, 18), at(tuesday, 19)),
+            allDayOf("bar", monday),
+          ]);
+          await Harness(store, shown, editPolicy: policy).pump(tester);
+          if (name == "start" || name == "end") {
+            await selectFree();
+          }
+          final mark = policy.asked.length;
+          await run();
+          final asked = policy.asked.sublist(mark);
+          final reason = "$name with $count, allowsOverlaps $allowsOverlaps";
+          final sizes = groupSizes(asked);
+          // Setup sanity: the pointer path reached a gate.
+          expect(sizes, isNotEmpty, reason: reason);
+          expect(
+            sizes.reduce(math.max),
+            lessThanOrEqualTo(name == "bar" ? 3 : 2),
+            reason: reason,
+          );
+          expect(
+            asked.where((ask) {
+              return ask.name == "allowsOverlaps" || ask.name == "dayLimit";
+            }),
+            isEmpty,
+            reason: reason,
+          );
+        }
+      }
+    }
+  });
+}
+
+/// Lifts [block] at its centre, moves it so its top lies 2 px below
+/// [slot]'s, which the drop snaps to, lets go and lets the drop settle.
+Future<void> moveBlockOnto(WidgetTester tester, Finder block, Rect slot) async {
+  final from = tester.getRect(block);
+  final gesture = await lift(tester, from.center);
+  await gesture.moveBy(slot.topLeft - from.topLeft + const Offset(0.0, 2.0));
+  await tester.pump();
+  await gesture.up();
+  await tester.pumpAndSettle();
+}
+
+/// The moves [store] was asked for that share time with [other].
+List<CalendarEntry<String>> movesSharingTime(
+  MoveRecordingStore store,
+  CalendarEntry<String> other,
+) {
+  return <CalendarEntry<String>>[
+    for (final move in store.moves)
+      if (rangeSharesTime(move.start, move.end, other)) move,
+  ];
 }
 
 /// A text scaler whose every scale throws, so a build that lays text out

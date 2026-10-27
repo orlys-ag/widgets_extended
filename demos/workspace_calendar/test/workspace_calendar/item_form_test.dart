@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
-import 'package:widgets_extended/calendar/policy/history_lock.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/item_form.dart';
@@ -44,8 +43,9 @@ Future<void> openForm(
                   context,
                   store: store,
                   id: "item-1",
-                  lock: () {
-                    return HistoryLock.none;
+                  policy: const UnrestrictedEditPolicy<ItemPayload>(),
+                  now: () {
+                    return CalendarNow(time: wednesday, today: wednesday);
                   },
                   slotMinutes: slotMinutes,
                 );

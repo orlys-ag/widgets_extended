@@ -946,6 +946,45 @@ void main() {
     expect(idsOf(after), isNot(contains(id)));
   });
 
+  testWidgets("A12 allowing overlaps, a create and an update sharing time "
+      "are stored; refusing them, the same calls fail, and an item already "
+      "sharing time saves an update that keeps its times", (tester) async {
+    final api = MockCalendarApi(latency: latency, allowsOverlaps: true);
+    final busy = await stored(tester, api, envelope(start: 540, end: 600));
+    final moving = await stored(tester, api, envelope(start: 840, end: 900));
+    final later = await stored(tester, api, envelope(start: 960, end: 1020));
+    final sharing = envelope(title: "Sharing", start: 570, end: 630);
+    final onBusy = envelope(start: 555, end: 585);
+
+    final created = await answer(tester, api.create(sharing));
+    expect(created.error, isNull);
+    final shared = (created.value! as Map<String, Object?>)["id"]! as String;
+    final moved = await answer(tester, api.update(moving, onBusy));
+    expect(moved.error, isNull);
+    expect(
+      (await fetched(tester, api, moving))["start"],
+      utcText("2026-04-22T09:15"),
+    );
+
+    api.allowsOverlaps = false;
+    final before = await listed(tester, api, wednesday, wednesday);
+    expect(
+      await errorOf(tester, api.create(sharing)),
+      overlapWith(<String>[busy, moving, shared]),
+    );
+    expect(
+      await errorOf(tester, api.update(later, onBusy)),
+      overlapWith(<String>[busy, moving, shared]),
+    );
+    expect(await listed(tester, api, wednesday, wednesday), before);
+    final renamed = await answer(
+      tester,
+      api.update(shared, envelope(title: "Renamed", start: 570, end: 630)),
+    );
+    expect(renamed.error, isNull);
+    expect((await fetched(tester, api, shared))["title"], "Renamed");
+  });
+
   test("A9 the schemas' summary keys", () {
     final expected = <CalendarItemType, List<String>>{
       CalendarItemType.task: <String>["status", "priority"],

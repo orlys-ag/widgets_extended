@@ -2,10 +2,12 @@
 /// lock at the second 01:30 of the 25-hour day, Agenda's add, Month's long
 /// press and a tap on Day's 01:30 row create from that occurrence; on that
 /// day no create is offered over time an entry holds, though the entry is
-/// drawn on other rows, and a create drag runs to the entries around it in
-/// the occurrence its times take; and on the 23-hour day Agenda's add after
-/// an entry ending next to the skipped hour creates at the first slot the
-/// clock reads.
+/// drawn on other rows, a create drag runs to the entries around it in the
+/// occurrence its times take, and Month's long press under an earlier lock
+/// keeps to the hours; and on the 23-hour day Agenda's add after an entry
+/// ending next to the skipped hour creates at the first slot the clock
+/// reads, and Month's long press refuses a day where the clock skips the
+/// start or the end of each slot of its hours.
 library;
 
 import 'package:flutter/gestures.dart';
@@ -14,7 +16,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/policy/edit_policy.dart';
+import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
@@ -38,10 +43,14 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
   );
 }
 
-/// Pumps an editable calendar on [view] over [day] with [entries], its
-/// clock at [now], under the history lock of earlier today where [lock]
-/// holds, and returns the ranges it reports for a create. Agenda's add
-/// buttons read "add" and their minute.
+/// Pumps an editable calendar on [view] over [day] with [entries] in
+/// [hours] and slots of [slotMinutes], its clock at [now], under the
+/// history lock of earlier today where [lock] holds and the unrestricted
+/// policy otherwise, combined with a [NoOverlapsPolicy] where
+/// [allowsOverlaps] is false, and returns the ranges it reports for a
+/// create. Each day a create is
+/// refused on goes to [refusals]. Agenda's add buttons read "add" and
+/// their minute.
 Future<List<CreateRange>> pumpCalendar(
   WidgetTester tester, {
   required CalendarViewKind view,
@@ -49,11 +58,15 @@ Future<List<CreateRange>> pumpCalendar(
   required DateTime now,
   List<CalendarEntry<String>> entries = const <CalendarEntry<String>>[],
   bool lock = true,
+  bool allowsOverlaps = true,
+  DayHours hours = DayHours.allDay,
+  int slotMinutes = defaultSlotMinutes,
+  List<DateTime>? refusals,
 }) async {
   tester.view.devicePixelRatio = 1.0;
   tester.view.physicalSize = const Size(800.0, 1200.0);
   addTearDown(tester.view.reset);
-  final store = MemoryCalendarStore<String>(entries: entries);
+  final store = MemoryCalendarStore<String>(entries: entries, hours: hours);
   addTearDown(store.dispose);
   final controller = CalendarController(view: view, selectedDay: day);
   addTearDown(controller.dispose);
@@ -67,11 +80,18 @@ Future<List<CreateRange>> pumpCalendar(
           return now;
         },
         editable: true,
-        lockPast: lock,
-        lockEarlierToday: lock,
+        editPolicy: CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+          if (lock)
+            const HistoryLockPolicy<String>(lockEarlierToday: true)
+          else
+            const UnrestrictedEditPolicy<String>(),
+          if (!allowsOverlaps) const NoOverlapsPolicy<String>(),
+        ]),
+        slotMinutes: slotMinutes,
         onCreateRange: (range) async {
           creates.add(range);
         },
+        onCreateRefused: refusals?.add,
         addButtonBuilder: (context, details) {
           return GestureDetector(
             onTap: details.onPressed,
@@ -167,6 +187,27 @@ void main() {
       expect(creates, <CreateRange>[secondSlot()]);
     });
 
+    testWidgets("CV49 under the lock at the second 01:10, in hours from 01:30 "
+        "an entry holds to their end from the second 01:30, Month's long "
+        "press creates at the second 01:30, inside the hours", (tester) async {
+      final day = longDayStart;
+      final creates = await pumpCalendar(
+        tester,
+        view: CalendarViewKind.month,
+        day: day,
+        now: secondHalfPastOne.subtract(const Duration(minutes: 20)),
+        hours: const DayHours(90, 10 * 60),
+        entries: <CalendarEntry<String>>[
+          entryOf("busy", secondHalfPastOne, at(day, 10)),
+        ],
+      );
+      await tester.longPress(find.byKey(monthStripKey(day)));
+      await tester.pumpAndSettle();
+      // No slot of the hours from the lock is free, so the create takes the
+      // first of them, over the entry.
+      expect(creates, <CreateRange>[secondSlot()]);
+    });
+
     testWidgets("CV32 under the lock at the second 01:30, a tap on Day's "
         "01:30 row creates from the second 01:30", (tester) async {
       final day = longDayStart;
@@ -202,6 +243,7 @@ void main() {
         day: day,
         now: secondHalfPastOne,
         entries: <CalendarEntry<String>>[across()],
+        allowsOverlaps: false,
       );
       await tester.tapAt(slotRect(tester, 90).center);
       await tester.pumpAndSettle();
@@ -247,6 +289,7 @@ void main() {
         now: at(day, 0, 30),
         entries: <CalendarEntry<String>>[folds()],
         lock: false,
+        allowsOverlaps: false,
       );
       await tester.tapAt(slotRect(tester, 90).center);
       await tester.pumpAndSettle();
@@ -289,6 +332,7 @@ void main() {
         now: at(day, 0, 30),
         entries: <CalendarEntry<String>>[folds()],
         lock: false,
+        allowsOverlaps: false,
       );
       await dragSlots(tester, 120, 75);
       expect(creates, <CreateRange>[
@@ -316,6 +360,7 @@ void main() {
           ),
         ],
         lock: false,
+        allowsOverlaps: false,
       );
       await dragSlots(tester, 45, 105);
       expect(creates, <CreateRange>[
@@ -351,6 +396,74 @@ void main() {
         ),
       ]);
     });
+
+    testWidgets("CV42 in Week under the lock of earlier today at the second "
+        "01:30, an all-day entry on the next day dragged from the strip lands "
+        "at the second 01:30 when released on the 01:30 row, and at the "
+        "second 01:45 on the 01:45 row", (tester) async {
+      final day = longDayStart;
+      final next = dateOfDayNumber(dayNumber(day) + 1);
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(800.0, 1200.0);
+      addTearDown(tester.view.reset);
+      for (final (locked, minute) in const <(bool, int)>[
+        (false, 90),
+        (false, 105),
+        (true, 90),
+        (true, 105),
+      ]) {
+        final bar = entryOf("bar", next, dateOfDayNumber(dayNumber(next) + 1));
+        final store = MemoryCalendarStore<String>(
+          entries: <CalendarEntry<String>>[bar],
+        );
+        addTearDown(store.dispose);
+        final controller = CalendarController(
+          view: CalendarViewKind.week,
+          selectedDay: day,
+        );
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: CalendarView<String>(
+              key: ValueKey<(bool, int)>((locked, minute)),
+              store: store,
+              controller: controller,
+              // The 25-hour day is the week's first column, which
+              // [slotRect] reads, and the next day its second.
+              weekdays: WeekdaySet.all.startingOn(weekdayColumn(day)),
+              clock: () {
+                return secondHalfPastOne;
+              },
+              editable: true,
+              editPolicy: locked
+                  ? const HistoryLockPolicy<String>(lockEarlierToday: true)
+                  : null,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final from = tester.getCenter(find.byKey(allDayBarKey("bar")));
+        final to = slotRect(tester, minute).center;
+        final gesture = await tester.startGesture(from);
+        await tester.pump(kLongPressTimeout + kPressTimeout);
+        await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+        await tester.pump();
+        await gesture.moveTo(to);
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+        // Setup sanity, with no lock: the release lands on the row's first
+        // occurrence, so the gesture reaches the row.
+        final start = locked
+            ? secondHalfPastOne.add(Duration(minutes: minute - 90))
+            : day.add(Duration(minutes: minute));
+        expect(
+          store.storedEntry("bar"),
+          bar.copyWith(start: start, end: start.add(const Duration(hours: 1))),
+          reason: "locked: $locked, row $minute",
+        );
+      }
+    });
   });
 
   group("on the 23-hour day", skip: shortDaySkip, () {
@@ -375,6 +488,61 @@ void main() {
       expect(creates, <CreateRange>[
         CreateRange(start: at(day, 3), end: at(day, 3, 15)),
       ]);
+    });
+
+    testWidgets("CV48 in hours wholly inside the skipped hour, Month's long "
+        "press creates nothing and reports the day refused", (tester) async {
+      final day = shortDayStart;
+      final refusals = <DateTime>[];
+      final creates = await pumpCalendar(
+        tester,
+        view: CalendarViewKind.month,
+        day: day,
+        now: at(day, 0, 10),
+        lock: false,
+        hours: const DayHours(
+          easternSkippedHour * 60,
+          (easternSkippedHour + 1) * 60,
+        ),
+        slotMinutes: 60,
+        refusals: refusals,
+      );
+      await tester.longPress(find.byKey(monthStripKey(day)));
+      await tester.pumpAndSettle();
+      expect(creates, isEmpty);
+      expect(refusals, <DateTime>[day]);
+    });
+
+    testWidgets("CV51 in 60-minute slots from 01:00 to 03:00, Month's long "
+        "press creates at 01:00 the day before but refuses the 23-hour day, "
+        "whose clock skips an end of each slot", (tester) async {
+      final day = shortDayStart;
+      final dayBefore = addDays(day, -1);
+      final refusals = <DateTime>[];
+      final creates = await pumpCalendar(
+        tester,
+        view: CalendarViewKind.month,
+        day: day,
+        now: at(dayBefore, 0, 10),
+        lock: false,
+        hours: const DayHours(
+          (easternSkippedHour - 1) * 60,
+          (easternSkippedHour + 1) * 60,
+        ),
+        slotMinutes: 60,
+        refusals: refusals,
+      );
+      await tester.longPress(find.byKey(monthStripKey(dayBefore)));
+      await tester.pumpAndSettle();
+      // Setup sanity: the long press creates in these hours on a 24-hour day.
+      expect(creates, <CreateRange>[
+        CreateRange(start: at(dayBefore, 1), end: at(dayBefore, 2)),
+      ]);
+      creates.clear();
+      await tester.longPress(find.byKey(monthStripKey(day)));
+      await tester.pumpAndSettle();
+      expect(creates, isEmpty);
+      expect(refusals, <DateTime>[day]);
     });
   });
 }

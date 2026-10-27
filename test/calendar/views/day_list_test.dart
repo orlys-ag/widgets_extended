@@ -8,7 +8,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
-import 'package:widgets_extended/calendar/policy/history_lock.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
@@ -194,7 +193,6 @@ void main() {
           format: HourLabelFormat.twentyFourHour,
           hours: DayHours.allDay,
           editable: false,
-          lock: HistoryLock.none,
           selectedDay: day,
           today: day,
           now: now,

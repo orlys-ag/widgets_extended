@@ -119,6 +119,15 @@ void main() {
       slotMinuteChoices,
       CalendarEntry,
       CalendarDataSource,
+      CalendarEditPolicy,
+      CalendarNow,
+      CalendarResizeEdges,
+      UnrestrictedEditPolicy,
+      DayLimitPolicy,
+      NoOverlapsPolicy,
+      CalendarEditRules,
+      CalendarEarliestStart,
+      HistoryLockPolicy,
       CalendarStore,
       CachingCalendarStore,
       MemoryCalendarStore,
@@ -129,7 +138,6 @@ void main() {
       CalendarEntryChanged,
       CalendarStoreException,
       CalendarHoursException,
-      CalendarEntryOverlapException,
       CalendarWritePendingException,
       CalendarTheme,
       CalendarThemeData,
@@ -177,9 +185,11 @@ void main() {
     ];
   });
 
-  test("B2 the barrel shows by name, and of the views and the labels file "
-      "only the types and the range constants the calendar's signatures "
-      "use, no view and nothing of the history lock", () {
+  test("B2 the barrel shows by name; of the views and the labels file only "
+      "the types and the range constants the calendar's signatures use, and "
+      "no view; and of the policy layer exactly the two edit policy files, "
+      "with the policies and the types their signatures name, and the edit "
+      "rules", () {
     final source = File(barrelPath).readAsStringSync();
     final exports = exportsOf(source);
     // Every directive the barrel holds was read.
@@ -226,8 +236,31 @@ void main() {
       "MonthPicker",
       "DayCell",
     };
+    expect(
+      <String, Set<String>>{
+        for (final export in exports)
+          if (export.path.startsWith("lib/calendar/policy/"))
+            export.path: export.shown!.toSet(),
+      },
+      <String, Set<String>>{
+        "lib/calendar/policy/edit_policy.dart": <String>{
+          "CalendarEditPolicy",
+          "CalendarNow",
+          "CalendarResizeEdges",
+          "DayLimitPolicy",
+          "NoOverlapsPolicy",
+          "UnrestrictedEditPolicy",
+        },
+        "lib/calendar/policy/history_lock_policy.dart": <String>{
+          "HistoryLockPolicy",
+        },
+        "lib/calendar/policy/edit_rules.dart": <String>{
+          "CalendarEarliestStart",
+          "CalendarEditRules",
+        },
+      },
+    );
     for (final export in exports) {
-      expect(export.path, isNot("lib/calendar/policy/history_lock.dart"));
       expect(
         export.shown!.toSet().intersection(viewWidgets),
         isEmpty,

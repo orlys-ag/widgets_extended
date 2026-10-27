@@ -11,6 +11,8 @@ The contract of `CalendarStore` and its two stores. The conventions every layer 
 - **Imports**: of Flutter, only `package:flutter/foundation.dart`.
 - **`CalendarStore`** is listenable, and answers the entries covering a
   range, the load state of the range the calendar shows, and writes.
+- **Hours.** The store holds the calendar's one copy of its hours, which
+  its writes must lie in; a set of other hours notifies.
 - **Writes.** An entry has one write in flight at most, and a write on an
   entry that has one sends nothing and fails. A move, resize or delete
   reports its failure through the store's write-failure callback, the

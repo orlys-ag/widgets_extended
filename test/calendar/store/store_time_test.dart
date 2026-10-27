@@ -1,8 +1,8 @@
 /// Both stores on start and end: an overnight entry answered on each day
-/// it covers, the hours rule on an entry's start and its last day's end,
+/// it covers, a set of the hours notifying where they change, the hours
+/// rule on an entry's start and its last day's end,
 /// the overlap rule on instants with all-day entries exempt, minutes off
-/// the slot grid kept, the first free slot of a slot length, and the
-/// local zone's DST days answered once.
+/// the slot grid kept, and the local zone's DST days answered once.
 library;
 
 import 'dart:ui' show Color;
@@ -212,8 +212,8 @@ void main() {
     }
   });
 
-  test("SM3 a move onto a timed entry's time is refused, and an all-day "
-      "entry over a busy day is accepted", () {
+  test("SM3 a move onto a timed entry's time is stored with no failure, and "
+      "an all-day entry over a busy day is accepted", () {
     final busy = entryOf("busy", at(tuesday, 0, 30), at(tuesday, 1, 30));
     final task = entryOf("task", at(monday, 9), at(monday, 10));
     final failures = <CalendarWriteFailure>[];
@@ -224,18 +224,10 @@ void main() {
       failures: failures,
     )) {
       failures.clear();
-      store.requestMove(
-        task.copyWith(start: at(monday, 23), end: at(tuesday, 1)),
-      );
-      expect(failures, hasLength(1), reason: name);
-      final refusal = failures.single.error;
-      expect(refusal, isA<CalendarEntryOverlapException>(), reason: name);
-      expect(
-        (refusal as CalendarEntryOverlapException).conflictingIds,
-        <String>["busy"],
-        reason: name,
-      );
-      expect(store.storedEntry("task")!.start, at(monday, 9), reason: name);
+      final onto = task.copyWith(start: at(monday, 23), end: at(tuesday, 1));
+      store.requestMove(onto);
+      expect(failures, isEmpty, reason: name);
+      expect(store.storedEntry("task"), onto, reason: name);
 
       failures.clear();
       store.requestMove(task.copyWith(start: tuesday, end: wednesday));
@@ -259,43 +251,24 @@ void main() {
     }
   });
 
-  test("SM5 firstFreeRange with slotMinutes 30 steps by 30 minutes", () {
-    final task = entryOf("task", at(tuesday, 0, 10), at(tuesday, 0, 40));
+  test("SM8 a set of other hours notifies once, and a set of equal hours "
+      "notifies nothing", () {
+    const office = DayHours(8 * 60, 18 * 60);
     for (final (name, store) in storesOf(
-      <CalendarEntry<String>>[task],
+      const <CalendarEntry<String>>[],
       first: monday,
       last: wednesday,
     )) {
-      // 00:00 to 00:30 and 00:30 to 01:00 meet the task; at slot 15,
-      // 00:45 would be free.
-      expect(store.firstFreeRange(tuesday, slotMinutes: 30), (
-        start: at(tuesday, 1),
-        end: at(tuesday, 1, 30),
-      ), reason: name);
-      expect(store.firstFreeRange(tuesday, slotMinutes: 15), (
-        start: at(tuesday, 0, 45),
-        end: at(tuesday, 1),
-      ), reason: name);
-      // A start from 10:05 rounds up to 10:30.
-      expect(
-        store.firstFreeRange(
-          tuesday,
-          slotMinutes: 30,
-          from: at(tuesday, 10, 5),
-        ),
-        (start: at(tuesday, 10, 30), end: at(tuesday, 11)),
-        reason: name,
-      );
-      // So does one from 10:00:30, part of whose minute has passed.
-      expect(
-        store.firstFreeRange(
-          tuesday,
-          slotMinutes: 30,
-          from: at(tuesday, 10).add(const Duration(seconds: 30)),
-        ),
-        (start: at(tuesday, 10, 30), end: at(tuesday, 11)),
-        reason: name,
-      );
+      var notifications = 0;
+      store.addListener(() {
+        notifications++;
+      });
+      store.hours = office;
+      expect(store.hours, office, reason: name);
+      expect(notifications, 1, reason: name);
+      // Equal hours in another instance.
+      store.hours = DayHours(office.start, office.end);
+      expect(notifications, 1, reason: name);
     }
   });
 
@@ -348,25 +321,6 @@ void main() {
           "all-day",
           "repeated",
         ], reason: name);
-      }
-    });
-
-    test("SM7 a first-free search from the second 01:30 finds the slot "
-        "from the second 01:30", () {
-      final day = longDayStart;
-      for (final (name, store) in storesOf(
-        const <CalendarEntry<String>>[],
-        first: day,
-        last: day,
-      )) {
-        expect(
-          store.firstFreeRange(day, slotMinutes: 15, from: secondHalfPastOne),
-          (
-            start: secondHalfPastOne,
-            end: secondHalfPastOne.add(const Duration(minutes: 15)),
-          ),
-          reason: name,
-        );
       }
     });
   });

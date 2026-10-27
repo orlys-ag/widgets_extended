@@ -13,7 +13,8 @@ import 'package:flutter/scheduler.dart';
 import '../dates/calendar_dates.dart';
 import '../dates/calendar_labels.dart';
 import '../entries/calendar_entry.dart';
-import '../policy/history_lock.dart';
+import '../policy/edit_policy.dart';
+import '../policy/edit_rules.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
@@ -61,8 +62,8 @@ CalendarViewKind calendarOpeningView(
 }
 
 /// A tap on an entry: the [entry] as the store holds it, and whether it is
-/// [editable], in edit mode with the history lock not holding it
-/// [EntryHold.locked].
+/// [editable], in edit mode with [CalendarView.editPolicy] letting it be
+/// edited ([CalendarEditPolicy.mayEdit]).
 @immutable
 class CalendarEntryTapDetails<T> {
   const CalendarEntryTapDetails({required this.entry, required this.editable});
@@ -71,8 +72,8 @@ class CalendarEntryTapDetails<T> {
   final CalendarEntry<T> entry;
 
   /// Whether a host's form may change the entry: the calendar is
-  /// [CalendarView.editable] and the history lock does not hold the entry
-  /// [EntryHold.locked].
+  /// [CalendarView.editable] and its [CalendarView.editPolicy] lets the
+  /// entry be edited ([CalendarEditPolicy.mayEdit]).
   final bool editable;
 }
 
@@ -95,12 +96,14 @@ class CalendarEntryTapDetails<T> {
 ///   selected day: a selected day scrolls to its top, and a drag or a
 ///   fling of the list selects each day it brings to the top, its header
 ///   sticking while its entries scroll under it. An entry wholly outside
-///   [hours] shows only in a count on a notice banner. A line marks the
-///   current time over the rows of the clock's day. In edit mode the list
-///   marks each gap in [hours] with a dashed row whose button reports a
-///   create through [onCreateRange], and each card's builder receives the
-///   [CalendarCardDetails.onEdit] and [CalendarCardDetails.onDelete] the
-///   history lock allows, which report through [onEditRequest] and
+///   the store's hours shows only in a count on a notice banner. A line
+///   marks the current time over the rows of the clock's day. In edit mode
+///   the list marks each gap in the hours with a dashed row whose button
+///   reports a create through [onCreateRange], and each card's builder
+///   receives the [CalendarCardDetails.onEdit] and
+///   [CalendarCardDetails.onDelete]
+///   [editPolicy] allows ([CalendarEditPolicy.mayEdit],
+///   [CalendarEditPolicy.mayDelete]), which report through [onEditRequest] and
 ///   [onDeleteRequest]; the default card offers neither. A
 ///   drag of the list folds the month into the week of the selected day,
 ///   and the pull tab under the card folds or unfolds it as far as a drag
@@ -121,9 +124,13 @@ class CalendarEntryTapDetails<T> {
 ///   tap on a chip reports the entry, and a tap anywhere else on a day
 ///   opens that day in Day where [views] lists Day, and otherwise selects
 ///   it. In edit mode a long press on a day reports a create through
-///   [onCreateRange] at the day's first free slot the history lock leaves
-///   free, selecting the day when it is in the month, or, where the lock
-///   leaves no slot of [hours] that day, [onCreateRefused].
+///   [onCreateRange] at the day's first free slot from the earliest start
+///   [editPolicy] gives it ([CalendarEditPolicy.earliestStartOn]), or
+///   where none is free, at its first slot from that start, over an
+///   entry, selecting the day when it is in the month; or, where that
+///   start leaves no slot of the store's hours that day whose start and
+///   end the day's clock both read, as where the clock skips the start or
+///   the end of each, [onCreateRefused].
 ///
 /// An entry runs from its start to its end ([CalendarEntry]): Week and Day
 /// draw a timed entry as one block per shown day it covers, at its exact
@@ -138,8 +145,8 @@ class CalendarEntryTapDetails<T> {
 /// over empty slots reports one continuous range through [onCreateRange],
 /// across days too, and one over the strip's empty days an all-day range
 /// of them, which stays marked until its future completes. Out of edit mode the calendar is read-only. In
-/// edit mode the history lock, which [lockPast] and [lockEarlierToday]
-/// choose ([HistoryLock.of]), keeps the past as it is. A pinch of two
+/// edit mode [editPolicy] limits what the gestures change and where a new
+/// entry may start ([CalendarEditPolicy]). A pinch of two
 /// fingers on Week's, Day's or Month's grid sets the controller's zoom
 /// sizes. A selected day is always on a weekday [weekdays] shows. Every
 /// view rings today's number.
@@ -167,8 +174,9 @@ class CalendarEntryTapDetails<T> {
 ///
 /// The calendar opens no route, dialog or form but the built-in header's
 /// view menu, builds no `Scaffold` or app bar, and never writes [store]'s
-/// settings: the host sets the store's hours to [hours], which a debug
-/// build asserts. It disposes no store. It draws in the [CalendarTheme]
+/// settings. It shows and schedules in the store's hours
+/// ([CalendarStore.hours]), and builds again when a set of them notifies.
+/// It disposes no store. It draws in the [CalendarTheme]
 /// above it; with none, under a Material [Theme], in a
 /// [CalendarThemeExtension] of the [ThemeData], or with none the theme
 /// [CalendarThemeExtension.fromColorScheme] gives the [ColorScheme]; and
@@ -183,13 +191,14 @@ class CalendarEntryTapDetails<T> {
 ///
 /// [slotMinutes] is the slot of Week's and Day's grids, one row each, the
 /// step their gestures snap to, the length of the slot Agenda's add button
-/// and Month's long press create, and the grid those round the history
-/// lock's first free time up to. A value [slotMinuteChoices] does not hold
+/// and Month's long press create, and the grid those round the earliest
+/// start [editPolicy] gives a day up to
+/// ([CalendarEditPolicy.earliestStartOn]). A value [slotMinuteChoices] does not hold
 /// throws an [ArgumentError] from the build, in a release build as in a
-/// debug one, and [hours] off its grid ([DayHours.isOnSlotsOf]) fail an
-/// assertion in a debug build; the views show and schedule in [hours]
-/// rounded out to it ([DayHours.roundedOutTo]), which are [hours]
-/// themselves on the grid.
+/// debug one, and the store's hours off its grid ([DayHours.isOnSlotsOf])
+/// fail an assertion in a debug build; the views show and schedule in the
+/// store's hours rounded out to it ([DayHours.roundedOutTo]), which are
+/// the hours themselves on the grid.
 class CalendarView<T> extends StatefulWidget {
   const CalendarView({
     super.key,
@@ -197,14 +206,11 @@ class CalendarView<T> extends StatefulWidget {
     this.controller,
     this.views = CalendarViewKind.values,
     this.editable = false,
-    this.lockPast = false,
-    this.lockEarlierToday = false,
+    this.editPolicy,
     this.weekdays = WeekdaySet.all,
-    this.hours = DayHours.allDay,
     this.slotMinutes = defaultSlotMinutes,
     this.hourLabelFormat = HourLabelFormat.twentyFourHour,
     this.monthLayout = MonthLayout.fitScreen,
-    this.maxDayCount,
     this.clock,
     this.today,
     this.blockBuilder,
@@ -225,9 +231,9 @@ class CalendarView<T> extends StatefulWidget {
     this.headerBuilder,
   });
 
-  /// The entries the calendar shows and its views write; its hours must be
-  /// [hours]. The calendar asks it to show the range of days its view
-  /// shows, and never disposes it.
+  /// The entries the calendar shows and its views write, and the hours it
+  /// shows and schedules in ([CalendarStore.hours]). The calendar asks it
+  /// to show the range of days its view shows, and never disposes it.
   final CalendarStore<T> store;
 
   /// Holds the view, the selected day, the visible range and the zoom
@@ -244,28 +250,50 @@ class CalendarView<T> extends StatefulWidget {
 
   /// Whether the calendar is in edit mode: Week's and Day's blocks move
   /// and resize, a create gesture reports through [onCreateRange], and
-  /// Agenda's card builder receives the edit and delete requests the
-  /// history lock allows.
+  /// Agenda's card builder receives the edit and delete requests, as
+  /// [editPolicy] allows. Out of it the calendar asks [editPolicy] nothing.
   final bool editable;
 
-  /// Whether, in edit mode, the history lock holds the days before today.
-  final bool lockPast;
-
-  /// Whether, in edit mode and under [lockPast], the history lock holds
-  /// today up to the current minute too.
-  final bool lockEarlierToday;
+  /// What may change in edit mode, and where a new entry may start
+  /// ([CalendarEditPolicy]): Week's and Day's moves, resizes and creates,
+  /// Agenda's edit and delete requests and add buttons, Month's long
+  /// press, and a tap's [CalendarEntryTapDetails.editable]; null for an
+  /// [UnrestrictedEditPolicy]. The calendar asks it at the minute [clock]
+  /// reads and the day it marks as today ([CalendarNow]).
+  ///
+  /// Its [CalendarEditPolicy.dayLimit] is the most days, counting each day
+  /// it has any part of, that a create drag across days in Week, over the
+  /// slots or across the all-day strip, a strip bar's day-edge resize, and
+  /// Week's end handle dragged into a later day may give a range: one
+  /// dragged past them is held at the latest range they admit, which a
+  /// release writes or reports. A move keeps the days an entry covers,
+  /// except where it crosses a midnight, and no limit applies to it.
+  ///
+  /// Its [CalendarEditPolicy.allowsOverlaps] decides whether Week's and
+  /// Day's moves, resizes and creates may give an entry times another
+  /// entry shares: where it is true they go over other entries' times as
+  /// over free ones, the blocks sharing a day's time side by side; where
+  /// it is false none gives times that another timed entry shares, and a
+  /// move dropped onto another entry's time lands at the nearest free time
+  /// or goes back. Under either answer Agenda's add buttons create at a
+  /// free slot, and Month's long press does where one is left. The
+  /// calendar checks no write of the host's, and [store] refuses none for
+  /// sharing time: a host whose data forbids it refuses the write in its
+  /// data source.
+  ///
+  /// A policy not `==` to the last one given cancels a move or a resize in
+  /// flight, which then writes nothing, and ends a create range in flight,
+  /// which then creates nothing: a host passes a policy whose class defines
+  /// value equality, or the same instance in each build.
+  final CalendarEditPolicy<T>? editPolicy;
 
   /// The weekdays the calendar shows, and the one its weeks start on. A
   /// change moves a selected day it hides to the nearest shown one.
   final WeekdaySet weekdays;
 
-  /// The hours the calendar shows and schedules in; the store's hours must
-  /// be these, and they start and end on the grid of [slotMinutes], both of
-  /// which a debug build asserts.
-  final DayHours hours;
-
   /// The length of one slot, in minutes: one of [slotMinuteChoices], or the
-  /// build throws an [ArgumentError].
+  /// build throws an [ArgumentError]. The store's hours start and end on
+  /// its grid, which a debug build asserts.
   final int slotMinutes;
 
   /// The format Week's and Day's grids and Agenda's times label the hours
@@ -275,15 +303,6 @@ class CalendarView<T> extends StatefulWidget {
   /// How Month lays out a week whose chips its share of the height does
   /// not hold.
   final MonthLayout monthLayout;
-
-  /// The most days, counting each day it has any part of, that a create
-  /// drag across days in Week, over the slots or across the all-day strip,
-  /// a strip bar's day-edge resize, and Week's end handle dragged into a
-  /// later day may give a range: one dragged past them is held at the
-  /// latest range they admit, which a release writes or reports. A move
-  /// keeps the days an entry covers, except where it crosses a midnight,
-  /// and no limit applies to it. Null for no limit.
-  final int? maxDayCount;
 
   /// Reads the current time, which the calendar reads when first built and
   /// again at the start of each minute; null reads [DateTime.now].
@@ -347,8 +366,11 @@ class CalendarView<T> extends StatefulWidget {
   /// reports nothing. The calendar deletes nothing itself.
   final ValueChanged<CalendarEntry<T>>? onDeleteRequest;
 
-  /// Month's long press, in edit mode, on a day the history lock leaves no
-  /// slot of [hours] on; null reports nothing.
+  /// Month's long press, in edit mode, on a day where the earliest start
+  /// [editPolicy] gives it ([CalendarEditPolicy.earliestStartOn]) leaves no
+  /// slot of the store's hours whose start and end the day's clock both
+  /// read, as where the clock skips the start or the end of each; null
+  /// reports nothing.
   final ValueChanged<DateTime>? onCreateRefused;
 
   /// Whether the calendar builds a header; false builds none, whatever
@@ -395,11 +417,16 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     );
   }
 
-  /// The hours the views show and schedule in: [CalendarView.hours]
-  /// rounded out to the grid of [CalendarView.slotMinutes].
+  /// The hours the views show and schedule in: the store's
+  /// ([CalendarStore.hours]) rounded out to the grid of
+  /// [CalendarView.slotMinutes].
   DayHours get _hours {
-    return widget.hours.roundedOutTo(widget.slotMinutes);
+    return widget.store.hours.roundedOutTo(widget.slotMinutes);
   }
+
+  /// The store's hours as this state last took them, which
+  /// [_handleStoreChange] compares a notify's hours with.
+  late DayHours _storeHours;
 
   /// The clock's time, read again at the start of each minute.
   late final ValueNotifier<DateTime> _now;
@@ -412,8 +439,34 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// Fires at the start of the next minute, to read the clock again.
   Timer? _minuteTimer;
 
-  /// The history lock the lock choices give at the minute [_now] holds.
-  late HistoryLock _lock;
+  /// The policy the calendar takes where [CalendarView.editPolicy] is null.
+  late final UnrestrictedEditPolicy<T> _unrestricted =
+      UnrestrictedEditPolicy<T>();
+
+  CalendarEditPolicy<T> get _policy {
+    return widget.editPolicy ?? _unrestricted;
+  }
+
+  /// The rules [_rules] last gave, made at its first ask.
+  CalendarEditRules<T>? _madeRules;
+
+  /// The rules a create asks: [_policy] in [_hours] and slots of
+  /// [CalendarView.slotMinutes], made again only for a policy not `==` to
+  /// the last ([CalendarEditRules.updated]).
+  CalendarEditRules<T> get _rules {
+    final made = _madeRules;
+    return _madeRules = made == null
+        ? CalendarEditRules<T>(
+            policy: _policy,
+            hours: _hours,
+            slotMinutes: widget.slotMinutes,
+          )
+        : made.updated(
+            policy: _policy,
+            hours: _hours,
+            slotMinutes: widget.slotMinutes,
+          );
+  }
 
   /// A day of the month the calendar card shows and the header names
   /// since a slide of the month strip, a chevron or a drag of the week
@@ -494,11 +547,12 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     _takeViews();
     _now = ValueNotifier<DateTime>(_clock());
     _today = ValueNotifier<DateTime>(_todayAt(_now.value));
-    _lock = _lockAt(_now.value);
     final host = widget.controller;
     _ownsController = host == null;
     _bind(host ?? CalendarController(), shown: null);
     _scheduleMinute(_now.value);
+    _storeHours = widget.store.hours;
+    widget.store.addListener(_handleStoreChange);
   }
 
   @override
@@ -524,13 +578,9 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       _now.value = _clock();
       _scheduleMinute(_now.value);
     }
-    if (clockChanged ||
-        widget.today != oldWidget.today ||
-        widget.lockPast != oldWidget.lockPast ||
-        widget.lockEarlierToday != oldWidget.lockEarlierToday) {
-      // The build that follows shows them.
+    if (clockChanged || widget.today != oldWidget.today) {
+      // The build that follows shows it.
       _today.value = _todayAt(_now.value);
-      _lock = _lockAt(_now.value);
     }
     final viewsChanged = !listEquals(widget.views, oldWidget.views);
     if (viewsChanged) {
@@ -554,6 +604,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       _controller._selectedDay = day;
       _grid = MonthGrid.of(day, weekdays: widget.weekdays);
     }
+    if (widget.store != oldWidget.store) {
+      oldWidget.store.removeListener(_handleStoreChange);
+      widget.store.addListener(_handleStoreChange);
+      _storeHours = widget.store.hours;
+    }
     if (viewsChanged || weekdaysChanged || widget.store != oldWidget.store) {
       _scheduleAsk();
     }
@@ -561,6 +616,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
 
   @override
   void dispose() {
+    widget.store.removeListener(_handleStoreChange);
     _minuteTimer?.cancel();
     _noteLifecycle();
     _controller._detach(this);
@@ -730,22 +786,34 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     return calendarOpeningView(_views, view);
   }
 
+  /// Builds again where a notify of the store brings other hours, which
+  /// the views take from this state's build. The views follow the store's
+  /// entries and load state themselves, so any other notify builds
+  /// nothing here.
+  void _handleStoreChange() {
+    final hours = widget.store.hours;
+    if (hours == _storeHours) {
+      return;
+    }
+    setState(() {
+      _storeHours = hours;
+    });
+  }
+
   DateTime _todayAt(DateTime now) {
     return dateOnly(widget.today ?? now);
   }
 
-  HistoryLock _lockAt(DateTime now) {
-    return HistoryLock.of(
-      lockPast: widget.lockPast,
-      lockEarlierToday: widget.lockEarlierToday,
-      today: _todayAt(now),
-      now: now,
-    );
+  /// The time the calendar asks [_policy] at: the minute [_now] holds, on
+  /// the day [_today] marks.
+  CalendarNow _calendarNow() {
+    return CalendarNow(time: _now.value, today: _today.value);
   }
 
   /// Reads the clock again at the start of the minute after [now], and
-  /// from then on at the start of each. A new day or a new history lock
-  /// builds this state again.
+  /// from then on at the start of each. A minute on another day than the
+  /// last minute's builds this state again, so the views take it with the
+  /// today it brings; within a day the views follow [_now] themselves.
   void _scheduleMinute(DateTime now) {
     final intoMinute = Duration(
       seconds: now.second,
@@ -753,14 +821,12 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       microseconds: now.microsecond,
     );
     _minuteTimer = Timer(const Duration(minutes: 1) - intoMinute, () {
+      final last = _now.value;
       final next = _clock();
       _now.value = next;
-      final today = _todayAt(next);
-      final lock = _lockAt(next);
-      if (today != _today.value || lock != _lock) {
+      if (dateOnly(next) != dateOnly(last)) {
         setState(() {
-          _today.value = today;
-          _lock = lock;
+          _today.value = _todayAt(next);
         });
       }
       _scheduleMinute(next);
@@ -1138,9 +1204,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     onEntryTap(
       CalendarEntryTapDetails<T>(
         entry: entry,
-        editable:
-            widget.editable &&
-            _lock.holdOf(entry.start, entry.end) != EntryHold.locked,
+        editable: widget.editable && _policy.mayEdit(entry, _calendarNow()),
       ),
     );
   }
@@ -1179,44 +1243,27 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     _openCreateFlow(day);
   }
 
-  /// Reports a create on [day] at its first free slot from the history
-  /// lock's boundary, or where none after it is free, at the first slot
-  /// from the first time the lock leaves free whose times the clock reads
-  /// ([firstReadableSlot]); each in the boundary's occurrence where [day]'s
-  /// clock repeats its time, so none starts before the boundary. Where the
-  /// lock leaves no such slot in the hours, reports
-  /// [CalendarView.onCreateRefused] instead.
+  /// Reports a create on [day] at the first slot of the hours, from the
+  /// earliest start [_policy] gives it ([CalendarEditPolicy.earliestStartOn]),
+  /// that shares no time with an entry the store shows on it, or where
+  /// none is free, at the first slot of the hours from that start
+  /// ([CalendarEditRules.firstSlot]): each one whose times the clock reads,
+  /// in that start's occurrence where [day]'s clock repeats its time, so
+  /// none starts before it. Where it leaves no such slot in the hours,
+  /// reports [CalendarView.onCreateRefused] instead.
   void _openCreateFlow(DateTime day) {
-    final hours = _hours;
-    final slot = widget.slotMinutes;
-    final earliest = _lock.earliestStartOn(day, slotMinutes: slot);
-    if (earliest > hours.end - slot) {
+    final rules = _rules;
+    final start = rules.earliestStartOn(day, _calendarNow());
+    final shown = widget.store.entriesOn(day).map((shown) {
+      return shown.entry;
+    });
+    final slot =
+        rules.firstSlot(start, clearOf: shown) ?? rules.firstSlot(start);
+    if (slot == null) {
       widget.onCreateRefused?.call(day);
       return;
     }
-    // A boundary on [day] after its start leaves earliest past 0.
-    final from = earliest > 0 ? _lock.boundary : null;
-    final free = widget.store.firstFreeRange(
-      day,
-      slotMinutes: slot,
-      from: from,
-    );
-    if (from == null || !free.start.isBefore(from)) {
-      _createRange(CreateRange(start: free.start, end: free.end));
-      return;
-    }
-    final held = firstReadableSlot(
-      day,
-      earliest,
-      hours.end,
-      slot,
-      occurrence: from,
-    );
-    if (held == null) {
-      widget.onCreateRefused?.call(day);
-      return;
-    }
-    _createRange(CreateRange(start: held.start, end: held.end));
+    _createRange(CreateRange(start: slot.start, end: slot.end));
   }
 
   CalendarHeaderDetails _headerDetails() {
@@ -1323,7 +1370,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
               hours: _hours,
               slotMinutes: widget.slotMinutes,
               editable: widget.editable,
-              lock: _lock,
+              editPolicy: _policy,
               selectedDay: _day,
               today: _today.value,
               now: _now,
@@ -1396,15 +1443,13 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                     );
                   },
                   editable: widget.editable,
-                  lockPast: widget.lockPast,
-                  lockEarlierToday: widget.lockEarlierToday,
+                  editPolicy: _policy,
                   weekdays: widget.weekdays,
                   hours: _hours,
                   slotMinutes: widget.slotMinutes,
                   hourLabelFormat: widget.hourLabelFormat,
                   minDayWidth: controller.minDayWidth,
                   minSlotHeight: controller.minSlotHeight,
-                  maxDayCount: widget.maxDayCount,
                   storeRange: range,
                   // The week strip names Day's one day.
                   showsDayHeader: week,
@@ -1482,14 +1527,9 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       throw slotError;
     }
     assert(
-      widget.store.hours == widget.hours,
-      "A CalendarView's hours, ${widget.hours}, must be its store's, "
-      "${widget.store.hours}: set the store's hours with them.",
-    );
-    assert(
-      widget.hours.isOnSlotsOf(widget.slotMinutes),
-      "A CalendarView's hours, ${widget.hours}, must start and end on the "
-      "grid of its ${widget.slotMinutes}-minute slots.",
+      widget.store.hours.isOnSlotsOf(widget.slotMinutes),
+      "A CalendarView's store's hours, ${widget.store.hours}, must start and "
+      "end on the grid of its ${widget.slotMinutes}-minute slots.",
     );
     final header = _buildHeader();
     final Widget view;

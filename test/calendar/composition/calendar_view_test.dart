@@ -23,6 +23,7 @@ import 'package:widgets_extended/calendar/composition/calendar_view.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_day_badges.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
@@ -991,7 +992,7 @@ void main() {
           controller: controller,
           clock: fixedClock,
           editable: true,
-          lockPast: true,
+          editPolicy: const HistoryLockPolicy<String>(),
           cardBuilder: card,
           cardExtentOf: cardExtent,
           onEntryTap: reports ? taps.add : null,
@@ -1156,8 +1157,7 @@ void main() {
           controller: controller,
           clock: fixedClock,
           editable: true,
-          lockPast: true,
-          lockEarlierToday: true,
+          editPolicy: const HistoryLockPolicy<String>(lockEarlierToday: true),
           onCreateRange: (range) async {
             creates.add(range);
           },
@@ -1383,18 +1383,6 @@ void main() {
     expect(rebuilds, 0);
     expect(tester.getSize(area).height, isNot(before));
     await tester.pumpAndSettle();
-  });
-
-  testWidgets("CV16 a store whose hours are not the calendar's fails an "
-      "assertion", (tester) async {
-    final office = MemoryCalendarStore<String>(
-      hours: const DayHours(8 * 60, 18 * 60),
-    );
-    addTearDown(office.dispose);
-    await tester.pumpWidget(
-      app(CalendarView<String>(store: office, clock: fixedClock)),
-    );
-    expect(tester.takeException(), isA<AssertionError>());
   });
 
   testWidgets("CV17 new weekdays that hide the selected day move it at once "
@@ -1954,24 +1942,162 @@ void main() {
     final office = MemoryCalendarStore<String>(hours: hours);
     addTearDown(office.dispose);
     await tester.pumpWidget(
-      app(CalendarView<String>(store: office, clock: fixedClock, hours: hours)),
+      app(CalendarView<String>(store: office, clock: fixedClock)),
     );
     final error = tester.takeException();
     expect(error, isA<AssertionError>());
     expect("$error", contains("15-minute slots"));
     await tester.pumpWidget(
       app(
-        CalendarView<String>(
-          store: office,
-          clock: fixedClock,
-          hours: hours,
-          slotMinutes: 10,
-        ),
+        CalendarView<String>(store: office, clock: fixedClock, slotMinutes: 10),
       ),
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.byType(DayList<String>), findsOneWidget);
+  });
+
+  testWidgets("CV45 every view shows the store's hours, and a set of them "
+      "reaches the view shown", (tester) async {
+    const office = DayHours(8 * 60, 18 * 60);
+    const late = DayHours(10 * 60, 20 * 60);
+    final memory = MemoryCalendarStore<String>(hours: office);
+    addTearDown(memory.dispose);
+    final controller = CalendarController(view: CalendarViewKind.week);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      app(
+        CalendarView<String>(
+          store: memory,
+          controller: controller,
+          clock: fixedClock,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    DayHours gridHours() {
+      return tester
+          .widget<TimedGrid<String>>(find.byType(TimedGrid<String>))
+          .hours;
+    }
+
+    expect(gridHours(), office);
+    memory.hours = late;
+    await tester.pump();
+    expect(gridHours(), late);
+    controller.view = CalendarViewKind.agenda;
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<DayList<String>>(find.byType(DayList<String>)).hours,
+      late,
+    );
+    controller.view = CalendarViewKind.month;
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<MonthBoard<String>>(find.byType(MonthBoard<String>)).hours,
+      late,
+    );
+  });
+
+  testWidgets("CV46 a store notify that keeps the hours builds the calendar "
+      "nothing again, and a set of other hours builds it once", (tester) async {
+    final memory = MemoryCalendarStore<String>();
+    addTearDown(memory.dispose);
+    var headers = 0;
+    await tester.pumpWidget(
+      app(
+        CalendarView<String>(
+          store: memory,
+          clock: fixedClock,
+          headerBuilder: (context, details) {
+            headers++;
+            return const SizedBox(height: 40.0);
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final built = headers;
+    await memory.create(entryOf("talk", tuesday, 10 * 60, 11 * 60));
+    await tester.pumpAndSettle();
+    // Setup sanity: the create's notify reached Agenda's list.
+    expect(find.text("talk"), findsOneWidget);
+    expect(headers, built);
+    memory.hours = const DayHours(8 * 60, 18 * 60);
+    await tester.pump();
+    expect(headers, built + 1);
+  });
+
+  testWidgets("CV47 a new store's hours show and its sets reach the "
+      "calendar, and once the calendar leaves, a set of either store's "
+      "hours reaches it no more", (tester) async {
+    const office = DayHours(8 * 60, 18 * 60);
+    const late = DayHours(10 * 60, 20 * 60);
+    final first = MemoryCalendarStore<String>();
+    addTearDown(first.dispose);
+    final second = MemoryCalendarStore<String>(hours: office);
+    addTearDown(second.dispose);
+    Widget calendar(CalendarStore<String> store) {
+      return app(CalendarView<String>(store: store, clock: fixedClock));
+    }
+
+    DayHours listHours() {
+      return tester.widget<DayList<String>>(find.byType(DayList<String>)).hours;
+    }
+
+    await tester.pumpWidget(calendar(first));
+    await tester.pumpAndSettle();
+    expect(listHours(), DayHours.allDay);
+    await tester.pumpWidget(calendar(second));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(listHours(), office);
+    second.hours = late;
+    await tester.pump();
+    expect(listHours(), late);
+    await tester.pumpWidget(app(const SizedBox()));
+    // The second store's hours change first, so a listener the calendar
+    // left on either store finds other hours than it last took, and would
+    // build its disposed state.
+    second.hours = office;
+    first.hours = late;
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("CV50 after a store swap, a notify of the new store that keeps "
+      "its hours builds the calendar nothing again", (tester) async {
+    final first = MemoryCalendarStore<String>();
+    addTearDown(first.dispose);
+    final second = MemoryCalendarStore<String>(
+      hours: const DayHours(8 * 60, 18 * 60),
+    );
+    addTearDown(second.dispose);
+    var headers = 0;
+    Widget calendar(CalendarStore<String> store) {
+      return app(
+        CalendarView<String>(
+          store: store,
+          clock: fixedClock,
+          headerBuilder: (context, details) {
+            headers++;
+            return const SizedBox(height: 40.0);
+          },
+        ),
+      );
+    }
+
+    await tester.pumpWidget(calendar(first));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(calendar(second));
+    await tester.pumpAndSettle();
+    final built = headers;
+    await second.create(entryOf("talk", tuesday, 10 * 60, 11 * 60));
+    await tester.pumpAndSettle();
+    // Setup sanity: the create's notify reached Agenda's list.
+    expect(find.text("talk"), findsOneWidget);
+    expect(headers, built);
   });
 
   testWidgets("CV29 Month's long press at slot 30 reports a 30-minute range "
@@ -1992,8 +2118,7 @@ void main() {
           controller: controller,
           clock: fixedClock,
           editable: true,
-          lockPast: true,
-          lockEarlierToday: true,
+          editPolicy: const HistoryLockPolicy<String>(lockEarlierToday: true),
           slotMinutes: 30,
           onCreateRange: (range) async {
             creates.add(range);

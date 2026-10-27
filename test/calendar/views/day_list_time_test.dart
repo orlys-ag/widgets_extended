@@ -10,7 +10,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
-import 'package:widgets_extended/calendar/policy/history_lock.dart';
+import 'package:widgets_extended/calendar/policy/edit_policy.dart';
+import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
@@ -82,7 +83,7 @@ MemoryCalendarStore<String> storeOf(List<CalendarEntry<String>> entries) {
   return store;
 }
 
-/// Pumps the day list over [store] on [day], with [lock] and slots of
+/// Pumps the day list over [store] on [day], with [editPolicy] and slots of
 /// [slotMinutes], in edit mode unless not [editable]; [cards] records the
 /// details each card is built with, [creates] each create an add button
 /// reports, and an add button reads "add" and its minute.
@@ -90,7 +91,7 @@ Future<void> pumpList(
   WidgetTester tester,
   CalendarStore<String> store,
   DateTime day, {
-  HistoryLock lock = HistoryLock.none,
+  CalendarEditPolicy<String>? editPolicy,
   bool editable = true,
   int slotMinutes = 15,
   Map<String, List<CalendarCardDetails>>? cards,
@@ -111,7 +112,7 @@ Future<void> pumpList(
         hours: DayHours.allDay,
         slotMinutes: slotMinutes,
         editable: editable,
-        lock: lock,
+        editPolicy: editPolicy,
         selectedDay: day,
         today: day,
         now: now,
@@ -201,12 +202,7 @@ void main() {
       tester,
       store,
       tuesday,
-      lock: HistoryLock.of(
-        lockPast: true,
-        lockEarlierToday: false,
-        today: tuesday,
-        now: at(tuesday, 9),
-      ),
+      editPolicy: const HistoryLockPolicy<String>(),
       cards: cards,
     );
     expect(cards["night"], isNotEmpty);

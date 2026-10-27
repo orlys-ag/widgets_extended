@@ -930,4 +930,66 @@ void main() {
     expect(chosen.single.slotMinutes, 30);
     expect(chosen.single.hours, office);
   });
+
+  testWidgets("OS1 the sheet's overlap switch is off by default, and a tap "
+      "reports settings that allow overlaps", (tester) async {
+    final controller = CalendarController();
+    addTearDown(controller.dispose);
+    final chosen = <CalendarSettings>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(splashFactory: NoSplash.splashFactory),
+        home: Scaffold(
+          body: CalendarSettingsSheet(
+            settings: const CalendarSettings(),
+            controller: controller,
+            onChanged: chosen.add,
+          ),
+        ),
+      ),
+    );
+    final overlaps = find.byKey(allowsOverlapsKey);
+    expect(find.text("Allow overlapping items"), findsOneWidget);
+    expect(tester.widget<SwitchListTile>(overlaps).value, isFalse);
+    await tester.ensureVisible(overlaps);
+    await tester.pumpAndSettle();
+    await tester.tap(overlaps);
+    await tester.pumpAndSettle();
+    expect(chosen, <CalendarSettings>[
+      const CalendarSettings(allowsOverlaps: true),
+    ]);
+    expect(tester.widget<SwitchListTile>(overlaps).value, isTrue);
+  });
+
+  testWidgets("OS4 after each switch of the sheet the calendar's edit "
+      "policy is the one its settings give", (tester) async {
+    await pumpCalendar(tester, editing: true);
+    await pickMode(tester, "Week");
+    CalendarEditPolicy<ItemPayload>? shownPolicy() {
+      return tester
+          .widget<CalendarView<ItemPayload>>(
+            find.byType(CalendarView<ItemPayload>),
+          )
+          .editPolicy;
+    }
+
+    var settings = const CalendarSettings(editing: true);
+    expect(shownPolicy(), settings.editPolicy);
+    await openSettings(tester);
+    Future<void> flip(Key key, CalendarSettings next) async {
+      await tester.ensureVisible(find.byKey(key));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(key));
+      await tester.pumpAndSettle();
+      settings = next;
+      expect(shownPolicy(), settings.editPolicy, reason: "$settings");
+    }
+
+    await flip(lockPastKey, settings.copyWith(lockPast: true));
+    await flip(lockEarlierTodayKey, settings.copyWith(lockEarlierToday: true));
+    await flip(allowsOverlapsKey, settings.copyWith(allowsOverlaps: true));
+    await flip(lockPastKey, settings.copyWith(lockPast: false));
+    await flip(allowsOverlapsKey, settings.copyWith(allowsOverlaps: false));
+    await closeSettings(tester);
+  });
 }
