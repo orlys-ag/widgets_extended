@@ -423,7 +423,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               onEditRequest: _openEditForm,
               onDeleteRequest: _deleteFromCard,
               onCreateRefused: (day) {
-                _showMessage("Past times are locked.");
+                _showMessage("No new item can start on this day.");
               },
             ),
           ),

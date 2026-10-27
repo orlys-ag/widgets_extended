@@ -522,8 +522,10 @@ void main() {
     expect(top, findsNothing);
   });
 
-  testWidgets("K16 in Month a long press on a past day says it is locked "
-      "and creates nothing, and on a later day creates", (tester) async {
+  testWidgets("K16 in Month a long press on a past day says no new item "
+      "can start on it and creates nothing, and on a later day creates", (
+    tester,
+  ) async {
     await pumpLocked(tester);
     await pickMode(tester, "Month");
     Future<void> longPress(DateTime day) async {
@@ -535,7 +537,7 @@ void main() {
     }
 
     await longPress(monday);
-    expect(find.text("Past times are locked."), findsOneWidget);
+    expect(find.text("No new item can start on this day."), findsOneWidget);
     expect(find.text("New item"), findsNothing);
     await longPress(wednesday);
     expect(find.text("New item"), findsOneWidget);
