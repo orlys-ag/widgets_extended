@@ -6,8 +6,8 @@
 /// occurrence its times take, and Month's long press under an earlier lock
 /// keeps to the hours; and on the 23-hour day Agenda's add after an entry
 /// ending next to the skipped hour creates at the first slot the clock
-/// reads, and Month's long press refuses a day whose hours the clock
-/// skips.
+/// reads, and Month's long press refuses a day where the clock skips the
+/// start or the end of each slot of its hours.
 library;
 
 import 'package:flutter/gestures.dart';
@@ -505,6 +505,38 @@ void main() {
         slotMinutes: 60,
         refusals: refusals,
       );
+      await tester.longPress(find.byKey(monthStripKey(day)));
+      await tester.pumpAndSettle();
+      expect(creates, isEmpty);
+      expect(refusals, <DateTime>[day]);
+    });
+
+    testWidgets("CV51 in 60-minute slots from 01:00 to 03:00, Month's long "
+        "press creates at 01:00 the day before but refuses the 23-hour day, "
+        "whose clock skips an end of each slot", (tester) async {
+      final day = shortDayStart;
+      final dayBefore = addDays(day, -1);
+      final refusals = <DateTime>[];
+      final creates = await pumpCalendar(
+        tester,
+        view: CalendarViewKind.month,
+        day: day,
+        now: at(dayBefore, 0, 10),
+        lock: false,
+        hours: const DayHours(
+          (easternSkippedHour - 1) * 60,
+          (easternSkippedHour + 1) * 60,
+        ),
+        slotMinutes: 60,
+        refusals: refusals,
+      );
+      await tester.longPress(find.byKey(monthStripKey(dayBefore)));
+      await tester.pumpAndSettle();
+      // Setup sanity: the long press creates in these hours on a 24-hour day.
+      expect(creates, <CreateRange>[
+        CreateRange(start: at(dayBefore, 1), end: at(dayBefore, 2)),
+      ]);
+      creates.clear();
       await tester.longPress(find.byKey(monthStripKey(day)));
       await tester.pumpAndSettle();
       expect(creates, isEmpty);

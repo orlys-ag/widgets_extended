@@ -128,7 +128,9 @@ class CalendarEntryTapDetails<T> {
 ///   [editPolicy] gives it ([CalendarEditPolicy.earliestStartOn]), or
 ///   where none is free, at its first slot from that start, over an
 ///   entry, selecting the day when it is in the month; or, where that
-///   start leaves no slot of the store's hours that day, [onCreateRefused].
+///   start leaves no slot of the store's hours that day whose start and
+///   end the day's clock both read, as where the clock skips the start or
+///   the end of each, [onCreateRefused].
 ///
 /// An entry runs from its start to its end ([CalendarEntry]): Week and Day
 /// draw a timed entry as one block per shown day it covers, at its exact
@@ -366,7 +368,9 @@ class CalendarView<T> extends StatefulWidget {
 
   /// Month's long press, in edit mode, on a day where the earliest start
   /// [editPolicy] gives it ([CalendarEditPolicy.earliestStartOn]) leaves no
-  /// slot of the store's hours; null reports nothing.
+  /// slot of the store's hours whose start and end the day's clock both
+  /// read, as where the clock skips the start or the end of each; null
+  /// reports nothing.
   final ValueChanged<DateTime>? onCreateRefused;
 
   /// Whether the calendar builds a header; false builds none, whatever
