@@ -2368,11 +2368,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final slotHeight = math.max(
       widget.minSlotHeight,
       _share(
-        size.height -
-            _headerExtent -
-            _stripExtent -
-            _edgeAbove -
-            _edgeBelow,
+        size.height - _headerExtent - _stripExtent - _edgeAbove - _edgeBelow,
         _tracks.rowCount,
       ),
     );
@@ -3172,8 +3168,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// The last column [span] covers.
   static int _columnEndOf(BoardSpan span) {
-    return (span.endTrackOn(Axis.horizontal) - precisionErrorTolerance)
-            .ceil() -
+    return (span.endTrackOn(Axis.horizontal) - precisionErrorTolerance).ceil() -
         1;
   }
 
@@ -3621,9 +3616,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
       setState(() {
         _crossColumn = column;
-        _stripLanding = column == -1
-            ? null
-            : _stripLandingOf(drag.key, column);
+        _stripLanding = column == -1 ? null : _stripLandingOf(drag.key, column);
       });
       _updateStripMark();
       return;
@@ -3831,9 +3824,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// every cell, then at [_dragAt]. At most one is pending, and it does
   /// nothing once the drag has no [_dragPointer].
   void _scheduleCrossRead() {
-    if (_dragPointer == null ||
-        _crossReadPending ||
-        !_isCrossingDrag(_drag)) {
+    if (_dragPointer == null || _crossReadPending || !_isCrossingDrag(_drag)) {
       return;
     }
     _crossReadPending = true;
@@ -3900,7 +3891,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       } else {
         top -= _headerExtent;
         final strip = (top / _allDayRowHeight).floor();
-        row = strip < _stripRows ? _stripStart + strip : _tracks.firstSlotRow - 1;
+        row = strip < _stripRows
+            ? _stripStart + strip
+            : _tracks.firstSlotRow - 1;
       }
     } else if (_notices.below && y >= size.height - _noticeHeight) {
       row = _tracks.lastSlotRow + 1;
