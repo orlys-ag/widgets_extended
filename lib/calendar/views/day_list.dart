@@ -604,7 +604,6 @@ class DayList<T> extends StatefulWidget {
     required this.editable,
     this.editPolicy,
     required this.selectedDay,
-    required this.today,
     required this.now,
     required this.onTopDay,
     required this.onCreateRange,
@@ -648,16 +647,13 @@ class DayList<T> extends StatefulWidget {
   /// The day the list brings to its top; a shown day.
   final DateTime selectedDay;
 
-  /// The day the headers name as today.
-  final DateTime today;
-
-  /// The current time, which its owner sets again at the start of each
-  /// minute, and whose day's block marks it. The list asks [editPolicy] at
-  /// the [CalendarNow] of it and [today]: it follows a new minute on the
-  /// day of the minute it last took, building again in edit mode, and
-  /// takes a minute on another day at its next build, with that build's
-  /// [today].
-  final ValueListenable<DateTime> now;
+  /// The current time, whose day's block marks it, and the day the
+  /// headers name as today, which its owner sets again at the start of
+  /// each minute and where today changes. The list asks [editPolicy] at
+  /// it: a new minute on the day of the minute it last took, with the
+  /// same today, has the rows that show an answer ask again, and any
+  /// other value builds the rows again.
+  final ValueListenable<CalendarNow> now;
 
   /// A drag or a fling brought a new day under the list's top.
   final ValueChanged<DateTime> onTopDay;
@@ -758,15 +754,17 @@ class _DayListState<T> extends State<DayList<T>> {
   /// [_treeStands], so the rows build again only where they change.
   Widget? _treeWidget;
 
-  /// The widget, the rows and the day of [_nowDay] [_treeWidget] was made
+  /// The widget, the rows, [_nowDay] and [_today] [_treeWidget] was made
   /// with, or none once a change of the dependencies or a reassemble drops
   /// it.
   DayList<T>? _treeMadeFor;
   List<DayListRow>? _treeRows;
   DateTime? _treeNowDay;
+  DateTime? _treeToday;
 
-  /// A time a build of the widget took, which the build hands the rows
-  /// ([_askRowsAgain]).
+  /// A time on another day or with another today ([_handleNow]), or of
+  /// another clock ([didUpdateWidget]), which the next build hands the
+  /// rows ([_askRowsAgain]).
   CalendarNow? _pendingNow;
 
   /// Whether a build of the widget took a policy not `==` to the last,
@@ -800,8 +798,12 @@ class _DayListState<T> extends State<DayList<T>> {
   /// The rows mounted, which [_dayAtTop] and [_prefetchShown] read.
   final Set<_DayMarkerState> _markers = <_DayMarkerState>{};
 
-  /// The day [DayList.now] reads, whose block marks the current time.
-  late DateTime _nowDay = dateOnly(widget.now.value);
+  /// The day of the time [DayList.now] reads, whose block marks the
+  /// current time.
+  late DateTime _nowDay = dateOnly(widget.now.value.time);
+
+  /// The day [DayList.now] marks as today, which the headers name.
+  late DateTime _today = widget.now.value.today;
 
   /// The policy the list reads where [DayList.editPolicy] is null.
   late final UnrestrictedEditPolicy<T> _unrestricted =
@@ -832,15 +834,14 @@ class _DayListState<T> extends State<DayList<T>> {
           );
   }
 
-  /// The time the rows ask [_policy] at: [DayList.now] and [DayList.today]
-  /// as the list last took them, at a minute of the day it holds
-  /// ([_handleNow]) or in a build that changes either ([_askRowsAgain]).
+  /// The time the rows ask [_policy] at: [DayList.now] as the list last
+  /// took it, at a minute of the day it holds ([_handleNow]) or in the
+  /// build that follows another day, another today or another clock
+  /// ([_askRowsAgain]).
   /// The rows that show an answer listen to it, each asking again, at a
   /// new time or a new policy, and building again only where its own
   /// answer changes.
-  late final _RowsNow _calendarNow = _RowsNow(
-    CalendarNow(time: widget.now.value, today: widget.today),
-  );
+  late final _RowsNow _calendarNow = _RowsNow(widget.now.value);
 
   @override
   void initState() {
@@ -883,12 +884,12 @@ class _DayListState<T> extends State<DayList<T>> {
     if (widget.now != oldWidget.now) {
       oldWidget.now.removeListener(_handleNow);
       widget.now.addListener(_handleNow);
-      _nowDay = dateOnly(widget.now.value);
-    }
-    final time = widget.now.value;
-    if (time != _calendarNow.value.time ||
-        dateOnly(widget.today) != _calendarNow.value.today) {
-      _pendingNow = CalendarNow(time: time, today: widget.today);
+      final now = widget.now.value;
+      _nowDay = dateOnly(now.time);
+      _today = now.today;
+      if (now != _calendarNow.value) {
+        _pendingNow = now;
+      }
     }
     if (widget.editPolicy != oldWidget.editPolicy) {
       _policyChanged = true;
@@ -917,25 +918,26 @@ class _DayListState<T> extends State<DayList<T>> {
     super.dispose();
   }
 
-  /// Moves the marker of the current time to the block of a new day; the
-  /// markers follow the minutes themselves. A new minute on the day of the
-  /// minute the list holds becomes [_calendarNow], at which the rows that
-  /// show an answer ask [_policy] again; one on another day waits for the
-  /// build that comes with it, so it is never paired with the last day's
-  /// [DayList.today].
+  /// Follows [DayList.now]. A time on another day, or another today,
+  /// builds the list again, which moves the marker of the current time to
+  /// its day's block, names the new today and hands the rows the new value
+  /// ([_askRowsAgain]); the markers follow the minutes themselves. Any
+  /// other new value becomes [_calendarNow] at once, at which the rows
+  /// that show an answer ask [_policy] again.
   void _handleNow() {
-    final time = widget.now.value;
-    final day = dateOnly(time);
-    if (day != _nowDay) {
+    final now = widget.now.value;
+    final day = dateOnly(now.time);
+    if (day != _nowDay || now.today != _today) {
       setState(() {
         _nowDay = day;
+        _today = now.today;
+        _pendingNow = now;
       });
-    }
-    final held = _calendarNow.value.time;
-    if (time == held || day != dateOnly(held)) {
       return;
     }
-    _calendarNow.askAgain(CalendarNow(time: time, today: widget.today));
+    if (now != _calendarNow.value) {
+      _calendarNow.askAgain(now);
+    }
   }
 
   /// Holds the days around [day] and makes their rows.
@@ -1336,6 +1338,7 @@ class _DayListState<T> extends State<DayList<T>> {
       _treeMadeFor = widget;
       _treeRows = _rows;
       _treeNowDay = _nowDay;
+      _treeToday = _today;
     }
     _askRowsAgain(fresh: fresh);
     final Widget list = NotificationListener<ScrollNotification>(
@@ -1364,6 +1367,7 @@ class _DayListState<T> extends State<DayList<T>> {
     final current = widget;
     return identical(_treeRows, _rows) &&
         _treeNowDay == _nowDay &&
+        _treeToday == _today &&
         identical(made.store, current.store) &&
         identical(made.now, current.now) &&
         identical(made.cardBuilder, current.cardBuilder) &&
@@ -1373,8 +1377,7 @@ class _DayListState<T> extends State<DayList<T>> {
         made.format == current.format &&
         made.hours == current.hours &&
         made.slotMinutes == current.slotMinutes &&
-        made.editable == current.editable &&
-        dateOnly(made.today) == dateOnly(current.today);
+        made.editable == current.editable;
   }
 
   /// Hands the rows the time and the policy a build took: silently where
@@ -1635,7 +1638,7 @@ class _DayListState<T> extends State<DayList<T>> {
           children: <Widget>[
             Expanded(
               child: Text(
-                dayTitle(day, widget.today),
+                dayTitle(day, _today),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 strutStyle: empty
@@ -2277,17 +2280,18 @@ class _NowMarker extends StatelessWidget {
     required this.format,
   });
 
-  final ValueListenable<DateTime> now;
+  final ValueListenable<CalendarNow> now;
   final _NowSpan span;
   final DayHours hours;
   final HourLabelFormat format;
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<DateTime>(
+    return ValueListenableBuilder<CalendarNow>(
       valueListenable: now,
       builder: (context, now, child) {
-        final minute = now.hour * 60 + now.minute;
+        final time = now.time;
+        final minute = time.hour * 60 + time.minute;
         if (minute < hours.start || minute > hours.end) {
           return const SizedBox.shrink();
         }

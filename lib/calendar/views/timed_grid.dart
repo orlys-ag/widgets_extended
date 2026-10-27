@@ -687,7 +687,6 @@ class TimedGrid<T> extends StatefulWidget {
     required this.firstDay,
     required this.dayCount,
     required this.selectedDay,
-    required this.today,
     required this.now,
     required this.onSelectDay,
     required this.onOpenEntry,
@@ -734,15 +733,12 @@ class TimedGrid<T> extends StatefulWidget {
 
   final DateTime selectedDay;
 
-  /// The day whose column and header the grid marks as today.
-  final DateTime today;
-
-  /// The current time, which its owner sets again at the start of each
-  /// minute. The line marking it follows it without a rebuild from above.
-  /// The grid asks [editPolicy] at the [CalendarNow] of it and [today]: it
-  /// follows a new minute on the day of the minute it last took, and takes
-  /// a minute on another day at its next build, with that build's [today].
-  final ValueListenable<DateTime> now;
+  /// The current time and the day marked as today, which its owner sets
+  /// again at the start of each minute and where today changes. The grid
+  /// follows it without a rebuild from above: the line marking the time,
+  /// the column and the header marking today, and the answers it asks
+  /// [editPolicy] at it.
+  final ValueListenable<CalendarNow> now;
 
   final ValueChanged<DateTime> onSelectDay;
 
@@ -1122,8 +1118,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// The time the gates and the gestures ask [_policy] at: [TimedGrid.now]
-  /// and [TimedGrid.today] as the grid last took them, at a minute of the
-  /// day it holds ([_handleNow]) or in a build that changes either.
+  /// as the grid last took it, at its notify ([_handleNow]) or in a build
+  /// that gives the grid another clock.
   late CalendarNow _calendarNow;
 
   /// [_policy] at [_calendarNow] in edit mode, and null out of it, where
@@ -1219,14 +1215,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Where the line marking [TimedGrid.now] sits, or null where the grid
   /// does not show it.
-  late _NowMark? _nowMark = _nowMarkOf(widget.now.value);
+  late _NowMark? _nowMark = _nowMarkOf(widget.now.value.time);
 
   /// What the header cells show. The cell builder runs only when the board
   /// rebuilds a cell, so the header cells listen to this instead.
   late final ValueNotifier<_HeaderState> _header = ValueNotifier<_HeaderState>((
     tracks: _tracks,
     selectedDay: widget.selectedDay,
-    today: widget.today,
+    today: widget.now.value.today,
   ));
 
   /// The extents the axes were last given and the tracks they were given
@@ -1315,7 +1311,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       "$slotMinuteChoices.",
     );
     _takePolicy();
-    _calendarNow = CalendarNow(time: widget.now.value, today: widget.today);
+    _calendarNow = widget.now.value;
     _limits = ValueNotifier<_EditLimits<T>?>(_limitsOf());
     _pinch.holding.addListener(_handleHolding);
     _tap = TapGestureRecognizer(debugOwner: this)..onTapUp = _handleTapUp;
@@ -1357,7 +1353,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         return;
       }
       _board.jumpToCell(
-        _tracks.rowOf(_openingMinuteOf(_tracks, widget.now.value)),
+        _tracks.rowOf(_openingMinuteOf(_tracks, widget.now.value.time)),
         1,
       );
       // The jump put the opening line on the top edge; the label centred
@@ -1459,12 +1455,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (!widget.editable) {
       _selectedBlock.value = null;
     }
-    final time = widget.now.value;
-    final nowTaken =
-        time != _calendarNow.time ||
-        !_sameDate(widget.today, _calendarNow.today);
+    final now = widget.now.value;
+    final nowTaken = now != _calendarNow;
     if (nowTaken) {
-      _calendarNow = CalendarNow(time: time, today: widget.today);
+      _calendarNow = now;
     }
     // Compared first, so a build that changes none of them, as each pinch
     // update's is, makes no limits.
@@ -1472,15 +1466,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _limits.value = _limitsOf();
     }
     if (tracksChanged || nowChanged) {
-      _nowMark = _nowMarkOf(widget.now.value);
+      _nowMark = _nowMarkOf(now.time);
     }
     if (tracksChanged ||
         widget.selectedDay != oldWidget.selectedDay ||
-        widget.today != oldWidget.today) {
+        now.today != _header.value.today) {
       _header.value = (
         tracks: _tracks,
         selectedDay: widget.selectedDay,
-        today: widget.today,
+        today: now.today,
       );
     }
     // The axes first, so the items the sync places fit the lattice they
@@ -1535,11 +1529,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// [_limits]' value as the widget and the fields stand.
   _EditLimits<T>? _limitsOf() {
     return widget.editable ? _EditLimits<T>(_policy, _calendarNow) : null;
-  }
-
-  /// Whether [a] and [b] fall on the same day.
-  static bool _sameDate(DateTime a, DateTime b) {
-    return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
   /// Ends the gestures that new slots or hours leave on rows they no
@@ -3398,7 +3387,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (_crosses || _heldBar != null) {
       return times == null
           ? noLandingLabel
-          : landingLabel(times.start, times.end, widget.today);
+          : landingLabel(times.start, times.end, _calendarNow.today);
     }
     if (!drag.resolved) {
       return null;
@@ -3409,7 +3398,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (times == null) {
       return null;
     }
-    return landingLabel(times.start, times.end, widget.today);
+    return landingLabel(times.start, times.end, _calendarNow.today);
   }
 
   /// The wall minutes the landing outline paints for [times], what
@@ -3456,24 +3445,31 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return (column: column, minute: minute);
   }
 
-  /// Follows [TimedGrid.now], rebuilding only when the line moves, shows
-  /// or goes; and takes a new minute on the day of the minute it holds as
+  /// Follows [TimedGrid.now], rebuilding only when the line marking the
+  /// time moves, shows or goes, or today moves; takes the new value as
   /// [_calendarNow], writing [_limits] in edit mode and refilling a create
-  /// range's limits ([_refillRange]). A minute on another day waits for
-  /// the build that comes with it, so it is never paired with the last
-  /// day's [TimedGrid.today].
+  /// range's limits ([_refillRange]); and hands a new today to the header
+  /// cells.
   void _handleNow() {
-    final time = widget.now.value;
-    final mark = _nowMarkOf(time);
-    if (mark != _nowMark) {
+    final now = widget.now.value;
+    final mark = _nowMarkOf(now.time);
+    final todayMoved = now.today != _calendarNow.today;
+    if (mark != _nowMark || todayMoved) {
       setState(() {
         _nowMark = mark;
       });
     }
-    if (time == _calendarNow.time || !_sameDate(time, _calendarNow.time)) {
+    if (now == _calendarNow) {
       return;
     }
-    _calendarNow = CalendarNow(time: time, today: widget.today);
+    _calendarNow = now;
+    if (todayMoved) {
+      _header.value = (
+        tracks: _tracks,
+        selectedDay: widget.selectedDay,
+        today: now.today,
+      );
+    }
     if (widget.editable) {
       _limits.value = _limitsOf();
     }
@@ -4563,7 +4559,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
           background: _TimedGridPainter(
             styles: styles,
             tracks: _tracks,
-            today: widget.today,
+            today: _calendarNow.today,
             range:
                 _laterDayRangeOf(landing) ??
                 (rangeAnchor == null || rangeFocus == null

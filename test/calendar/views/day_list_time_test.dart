@@ -97,7 +97,9 @@ Future<void> pumpList(
   Map<String, List<CalendarCardDetails>>? cards,
   List<CreateRange>? creates,
 }) async {
-  final now = ValueNotifier<DateTime>(at(day, 9));
+  final now = ValueNotifier<CalendarNow>(
+    CalendarNow(time: at(day, 9), today: day),
+  );
   addTearDown(now.dispose);
   tester.view.devicePixelRatio = 1.0;
   tester.view.physicalSize = const Size(600.0, 2400.0);
@@ -114,7 +116,6 @@ Future<void> pumpList(
         editable: editable,
         editPolicy: editPolicy,
         selectedDay: day,
-        today: day,
         now: now,
         onTopDay: (day) {},
         onCreateRange: (range) {

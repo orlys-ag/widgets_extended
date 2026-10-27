@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
@@ -182,7 +183,9 @@ void main() {
       entries: <CalendarEntry<String>>[note],
     );
     addTearDown(store.dispose);
-    final now = ValueNotifier<DateTime>(nineOClock());
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: nineOClock(), today: day),
+    );
     addTearDown(now.dispose);
     final calls = <CalendarShownEntry<String>>[];
     await tester.pumpWidget(
@@ -194,7 +197,6 @@ void main() {
           hours: DayHours.allDay,
           editable: false,
           selectedDay: day,
-          today: day,
           now: now,
           onTopDay: (day) {},
           onCreateRange: (range) {},

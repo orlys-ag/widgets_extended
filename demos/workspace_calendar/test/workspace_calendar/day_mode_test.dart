@@ -198,7 +198,9 @@ Future<void> pumpGrid(
         dataSource: CalendarApiSource(MockCalendarApi(latency: harnessLatency)),
       );
   addTearDown(shown.dispose);
-  final now = ValueNotifier<DateTime>(DateTime(2026, 4, 21, 9));
+  final now = ValueNotifier<CalendarNow>(
+    CalendarNow(time: DateTime(2026, 4, 21, 9), today: today),
+  );
   addTearDown(now.dispose);
   shown.show(today, today);
   await tester.pumpWidget(
@@ -211,7 +213,6 @@ Future<void> pumpGrid(
             firstDay: today,
             dayCount: 1,
             selectedDay: today,
-            today: today,
             now: now,
             onSelectDay: (day) {},
             onOpenEntry: (id) {},

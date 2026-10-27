@@ -14,6 +14,7 @@ import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
@@ -354,8 +355,8 @@ void main() {
       entries: <CalendarEntry<String>>[note],
     );
     addTearDown(store.dispose);
-    final todayNotifier = ValueNotifier<DateTime>(day);
-    addTearDown(todayNotifier.dispose);
+    final now = ValueNotifier<CalendarNow>(CalendarNow(time: day, today: day));
+    addTearDown(now.dispose);
     final calls = <CalendarShownEntry<String>>[];
     await tester.pumpWidget(
       MaterialApp(
@@ -363,7 +364,7 @@ void main() {
           store: store,
           grid: MonthGrid.of(day),
           selectedDay: day,
-          today: todayNotifier,
+          now: now,
           onSelectDay: (day) {},
           onOpenDay: (day) {},
           onCreateOnDay: null,
@@ -412,8 +413,10 @@ void main() {
     addTearDown(store.dispose);
     store.show(grid.firstDay, grid.lastDay);
     expect(store.status, CalendarLoadStatus.ready);
-    final todayNotifier = ValueNotifier<DateTime>(april(21));
-    addTearDown(todayNotifier.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: april(21), today: april(21)),
+    );
+    addTearDown(now.dispose);
     final workweek = MonthGrid(2026, 4, weekdays: WeekdaySet.workweek);
     final june = MonthGrid(2026, 6);
     // The board's grid is not the one the store shows.
@@ -429,7 +432,7 @@ void main() {
             DateTime(shown.year, shown.month),
             shown.weekdays,
           ),
-          today: todayNotifier,
+          now: now,
           onSelectDay: (day) {},
           onOpenDay: (day) {},
           onCreateOnDay: null,
@@ -493,5 +496,67 @@ void main() {
     // The new scale laid the weeks out again.
     expect(identical(scaled.axis, rows.axis), isFalse);
     expect(store.isReadCalls, 0);
+  });
+
+  testWidgets("MB2 the clock alone, with no build from above, builds no day "
+      "cell again at a new minute of the same today, and moves the today "
+      "mark to the day a new today marks", (tester) async {
+    final store = MemoryCalendarStore<String>();
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 21, 9), today: april(21)),
+    );
+    addTearDown(now.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MonthBoard<String>(
+          store: store,
+          grid: grid,
+          selectedDay: april(21),
+          now: now,
+          onSelectDay: (day) {},
+          onOpenDay: (day) {},
+          onCreateOnDay: null,
+          onOpenEntry: (id) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    /// The semantics [day]'s cell builds, again at each change it follows.
+    Semantics cellOf(DateTime day) {
+      return tester.widget<Semantics>(
+        find
+            .descendant(
+              of: find.byKey(monthDayKey(day)),
+              matching: find.byType(Semantics),
+            )
+            .first,
+      );
+    }
+
+    bool marked(DateTime day) {
+      return cellOf(day).properties.label!.split(", ").contains("today");
+    }
+
+    // Setup sanity: April 21 is marked today, and April 22 is not.
+    expect(marked(april(21)), isTrue);
+    expect(marked(april(22)), isFalse);
+    final built = cellOf(april(21));
+
+    now.value = CalendarNow(
+      time: DateTime(2026, 4, 21, 9, 1),
+      today: april(21),
+    );
+    await tester.pump();
+    expect(identical(cellOf(april(21)), built), isTrue);
+
+    now.value = CalendarNow(
+      time: DateTime(2026, 4, 22, 0, 0, 30),
+      today: april(22),
+    );
+    await tester.pump();
+    expect(marked(april(22)), isTrue);
+    expect(marked(april(21)), isFalse);
   });
 }

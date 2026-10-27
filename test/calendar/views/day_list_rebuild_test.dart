@@ -11,6 +11,7 @@ import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
+import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
@@ -106,9 +107,8 @@ class UneditablePolicy extends CalendarEditPolicy<String> {
 /// [cards] and the details of each add button built in [adds].
 class ListHost {
   ListHost(this.store, {required this.day, required DateTime time, this.policy})
-    : now = ValueNotifier<DateTime>(time),
-      selectedDay = day,
-      today = day {
+    : now = ValueNotifier<CalendarNow>(CalendarNow(time: time, today: day)),
+      selectedDay = day {
     addTearDown(() {
       now.dispose();
     });
@@ -117,9 +117,8 @@ class ListHost {
 
   CalendarStore<String> store;
   final DateTime day;
-  ValueNotifier<DateTime> now;
+  ValueNotifier<CalendarNow> now;
   DateTime selectedDay;
-  DateTime today;
   CalendarEditPolicy<String>? policy;
   WeekdaySet weekdays = WeekdaySet.all;
   HourLabelFormat format = HourLabelFormat.twentyFourHour;
@@ -176,7 +175,6 @@ class ListHost {
                 editable: editable,
                 editPolicy: policy,
                 selectedDay: selectedDay,
-                today: today,
                 now: now,
                 onTopDay: (day) {
                   topDays.add(day);
@@ -421,17 +419,6 @@ void main() {
       expect(find.byKey(gap, skipOffstage: false), findsNothing);
     });
 
-    testWidgets("today", (tester) async {
-      final header = dayListHeaderKey(tuesday);
-      final title = dayTitle(tuesday, wednesday);
-      await changed(tester, (host) {
-        // Setup sanity: Tuesday is titled as today first.
-        expect(textUnder(header, title), findsNothing);
-        host.today = wednesday;
-      });
-      expect(textUnder(header, title), findsOneWidget);
-    });
-
     testWidgets("a new card builder", (tester) async {
       final card = entryCardKey(idOn(tuesday, 0));
       await changed(tester, (host) {
@@ -504,7 +491,9 @@ void main() {
           ),
         );
         addTearDown(host.now.dispose);
-        host.now = ValueNotifier<DateTime>(at(tuesday, 12, 30));
+        host.now = ValueNotifier<CalendarNow>(
+          CalendarNow(time: at(tuesday, 12, 30), today: tuesday),
+        );
       });
       expect(
         tester.getTopLeft(find.byKey(dayListNowKey)).dy,
@@ -578,7 +567,10 @@ void main() {
           ),
         );
       });
-      host.now.value = at(wednesday, 0, 0, 30);
+      host.now.value = CalendarNow(
+        time: at(wednesday, 0, 0, 30),
+        today: host.now.value.today,
+      );
       await tester.pumpAndSettle();
       expect(
         tester.getTopLeft(find.byKey(dayListNowKey)).dy,
@@ -690,5 +682,29 @@ void main() {
     tester.binding.buildOwner!.reassemble(tester.binding.rootElement!);
     await tester.pumpAndSettle();
     expect(identical(treeStyle(), style), isFalse);
+  });
+
+  testWidgets("DR7 a new today its clock alone brings, with no build from "
+      "above, titles the days by it and has the rows ask the policy at it", (
+    tester,
+  ) async {
+    final host = ListHost(
+      ReadsStore(entries: threeADay(tuesday, 2)),
+      day: tuesday,
+      time: at(tuesday, 8),
+      policy: const HistoryLockPolicy<String>(),
+    );
+    await host.pump(tester);
+    final header = dayListHeaderKey(tuesday);
+    final title = dayTitle(tuesday, wednesday);
+    // Setup sanity: Tuesday is titled as today, and its card, at or after
+    // the start of today, is editable.
+    expect(textUnder(header, title), findsNothing);
+    expect(host.cards[idOn(tuesday, 0)]!.onEdit, isNotNull);
+
+    host.now.value = CalendarNow(time: host.now.value.time, today: wednesday);
+    await tester.pumpAndSettle();
+    expect(textUnder(header, title), findsOneWidget);
+    expect(host.cards[idOn(tuesday, 0)]!.onEdit, isNull);
   });
 }
