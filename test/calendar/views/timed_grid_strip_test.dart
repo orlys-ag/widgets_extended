@@ -446,8 +446,8 @@ class Harness {
   final List<CreateRange> creates = <CreateRange>[];
   final List<String> opened = <String>[];
   final int _nowHour;
-  late final ValueNotifier<DateTime> now = ValueNotifier<DateTime>(
-    at(today, _nowHour),
+  late final ValueNotifier<CalendarNow> now = ValueNotifier<CalendarNow>(
+    CalendarNow(time: at(today, _nowHour), today: today),
   );
 
   /// [editPolicy], or with none the history lock under [lockPast], with
@@ -477,7 +477,6 @@ class Harness {
       firstDay: first,
       dayCount: shown.week ? 7 : 1,
       selectedDay: first,
-      today: today,
       now: now,
       onSelectDay: (day) {},
       onOpenEntry: opened.add,

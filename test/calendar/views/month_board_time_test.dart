@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
@@ -48,10 +49,7 @@ Shown shownOf(String id, DateTime start, DateTime end) {
 
 /// The placements of [shown] on [grid], by id: each one's week row, first
 /// column and column span.
-Map<String, List<(int, int, int)>> spansOf(
-  List<Shown> shown,
-  MonthGrid grid,
-) {
+Map<String, List<(int, int, int)>> spansOf(List<Shown> shown, MonthGrid grid) {
   final spans = <String, List<(int, int, int)>>{};
   for (final placement in monthPlacementsOf(shown, grid)) {
     final span = placement.span;
@@ -84,8 +82,10 @@ Future<void> pumpMonth(
 }) async {
   final store = MemoryCalendarStore<String>(entries: entries);
   addTearDown(store.dispose);
-  final today = ValueNotifier<DateTime>(selectedDay);
-  addTearDown(today.dispose);
+  final now = ValueNotifier<CalendarNow>(
+    CalendarNow(time: selectedDay, today: selectedDay),
+  );
+  addTearDown(now.dispose);
   tester.view.devicePixelRatio = 1.0;
   tester.view.physicalSize = const Size(700.0, 900.0);
   addTearDown(tester.view.reset);
@@ -96,7 +96,7 @@ Future<void> pumpMonth(
         grid: grid,
         hours: hours,
         selectedDay: selectedDay,
-        today: today,
+        now: now,
         onSelectDay: (day) {},
         onOpenDay: (day) {},
         onCreateOnDay: null,
@@ -153,8 +153,10 @@ void main() {
       ],
     );
     addTearDown(store.dispose);
-    final today = ValueNotifier<DateTime>(tuesday);
-    addTearDown(today.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: tuesday, today: tuesday),
+    );
+    addTearDown(now.dispose);
     tester.view.devicePixelRatio = 1.0;
     tester.view.physicalSize = const Size(700.0, 900.0);
     addTearDown(tester.view.reset);
@@ -164,7 +166,7 @@ void main() {
           store: store,
           grid: april,
           selectedDay: tuesday,
-          today: today,
+          now: now,
           onSelectDay: (day) {},
           onOpenDay: (day) {},
           onCreateOnDay: null,
@@ -207,10 +209,10 @@ void main() {
       april,
       office,
     );
-    expect(<String>[for (final entry in split.inside) entry.id], <String>[
-      "inside",
-      "all-day",
-    ]);
+    expect(
+      <String>[for (final entry in split.inside) entry.id],
+      <String>["inside", "all-day"],
+    );
     expect(countsByDay(split.later, april), <DateTime, int>{monday: 1});
     expect(countsByDay(split.earlier, april), <DateTime, int>{tuesday: 1});
   });

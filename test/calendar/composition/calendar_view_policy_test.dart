@@ -1571,4 +1571,89 @@ void main() {
       expect(built.toSet().length, built.length);
     });
   });
+
+  testWidgets("PV10 within a minute Week's blocks, Agenda's rows and cards "
+      "and Month's long press ask the policy at one CalendarNow, and the "
+      "next minute at one other", (tester) async {
+    final policy = _NowRecordingPolicy();
+    final host = Host(
+      storeOf(<CalendarEntry<String>>[
+        entryOf("B", at(tuesday, 10), at(tuesday, 11)),
+      ]),
+      view: CalendarViewKind.week,
+      day: tuesday,
+      time: at(tuesday, 9, 0, 30),
+      policy: policy,
+    );
+    await host.pump(tester);
+    Future<void> visitEachView() async {
+      host.controller.view = CalendarViewKind.agenda;
+      await tester.pumpAndSettle();
+      host.controller.view = CalendarViewKind.month;
+      await tester.pumpAndSettle();
+      await tester.longPress(find.byKey(monthStripKey(thursday)));
+      await tester.pumpAndSettle();
+      host.controller.view = CalendarViewKind.week;
+      await tester.pumpAndSettle();
+    }
+
+    await visitEachView();
+    // Setup sanity: each view asked, Month's long press among them.
+    expect(policy.askers, containsAll(<String>["mayMove", "mayEdit"]));
+    expect(host.creates, hasLength(1));
+    final first = Set<CalendarNow>.identity()..addAll(policy.nows);
+    expect(first, hasLength(1));
+
+    policy.nows.clear();
+    await tickTo(tester, host, at(tuesday, 9, 1, 30));
+    await visitEachView();
+    final second = Set<CalendarNow>.identity()..addAll(policy.nows);
+    expect(second, hasLength(1));
+    expect(second.single.time, at(tuesday, 9, 1, 30));
+  });
+}
+
+/// Allows everything, recording the [CalendarNow] each answer is asked
+/// at in [nows] and the name of each answer asked in [askers].
+class _NowRecordingPolicy extends CalendarEditPolicy<String> {
+  final List<CalendarNow> nows = <CalendarNow>[];
+  final Set<String> askers = <String>{};
+
+  void _note(String name, CalendarNow now) {
+    askers.add(name);
+    nows.add(now);
+  }
+
+  @override
+  bool mayMove(CalendarEntry<String> entry, CalendarNow now) {
+    _note("mayMove", now);
+    return true;
+  }
+
+  @override
+  CalendarResizeEdges resizableEdges(
+    CalendarEntry<String> entry,
+    CalendarNow now,
+  ) {
+    _note("resizableEdges", now);
+    return CalendarResizeEdges.both;
+  }
+
+  @override
+  bool mayEdit(CalendarEntry<String> entry, CalendarNow now) {
+    _note("mayEdit", now);
+    return true;
+  }
+
+  @override
+  bool mayDelete(CalendarEntry<String> entry, CalendarNow now) {
+    _note("mayDelete", now);
+    return true;
+  }
+
+  @override
+  DateTime? earliestStartOn(DateTime day, CalendarNow now) {
+    _note("earliestStartOn", now);
+    return day;
+  }
 }

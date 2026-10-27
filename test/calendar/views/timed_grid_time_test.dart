@@ -295,8 +295,8 @@ class Harness {
   int slotMinutes;
 
   final List<CreateRange> creates = <CreateRange>[];
-  final ValueNotifier<DateTime> now = ValueNotifier<DateTime>(
-    DateTime(2026, 1, 5, 9),
+  final ValueNotifier<CalendarNow> now = ValueNotifier<CalendarNow>(
+    CalendarNow(time: DateTime(2026, 1, 5, 9), today: DateTime(2026, 1, 5)),
   );
 
   TimedGrid<String> grid() {
@@ -306,7 +306,6 @@ class Harness {
       firstDay: shown.first,
       dayCount: shown.week ? 7 : 1,
       selectedDay: shown.first,
-      today: DateTime(2026, 1, 5),
       now: now,
       onSelectDay: (day) {},
       onOpenEntry: (id) {},

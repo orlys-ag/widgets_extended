@@ -13,6 +13,7 @@ import '../../board/board.dart';
 import '../dates/calendar_dates.dart';
 import '../dates/calendar_labels.dart';
 import '../entries/calendar_entry.dart';
+import '../policy/edit_policy.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_theme.dart';
@@ -669,7 +670,7 @@ class MonthBoard<T> extends StatefulWidget {
     this.hours = DayHours.allDay,
     this.hourLabelFormat = HourLabelFormat.twentyFourHour,
     required this.selectedDay,
-    required this.today,
+    required this.now,
     required this.onSelectDay,
     required this.onOpenDay,
     required this.onCreateOnDay,
@@ -707,8 +708,11 @@ class MonthBoard<T> extends StatefulWidget {
   /// A shown day of [grid]'s month.
   final DateTime selectedDay;
 
-  /// The day marked as today.
-  final ValueListenable<DateTime> today;
+  /// The current time and the day marked as today, which its owner sets
+  /// again at the start of each minute and where today changes. The
+  /// board marks [CalendarNow.today]; a new minute of the same today
+  /// builds no cell.
+  final ValueListenable<CalendarNow> now;
 
   /// A key moved the selection onto this day.
   final ValueChanged<DateTime> onSelectDay;
@@ -871,10 +875,11 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     onChanged: _handleBoardSelection,
   );
 
-  /// [MonthBoard.today], which the kept day cells listen to, so a new
-  /// listenable reaches the cells this state keeps.
+  /// The today of [MonthBoard.now], which the kept day cells listen to, so
+  /// a new listenable reaches the cells this state keeps and a new minute
+  /// of the same today notifies none.
   late final ValueNotifier<DateTime> _today = ValueNotifier<DateTime>(
-    widget.today.value,
+    widget.now.value.today,
   );
 
   /// Whether [MonthBoard.onCreateOnDay] is given, which the kept day cells
@@ -1020,7 +1025,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     // key moves from there.
     _writeSelection();
     widget.store.addListener(_handleStore);
-    widget.today.addListener(_handleToday);
+    widget.now.addListener(_handleNow);
     _pinch.holding.addListener(_handleHolding);
     _noteRange();
   }
@@ -1072,10 +1077,10 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       widget.store.addListener(_handleStore);
       _syncPending = true;
     }
-    if (widget.today != oldWidget.today) {
-      oldWidget.today.removeListener(_handleToday);
-      widget.today.addListener(_handleToday);
-      _today.value = widget.today.value;
+    if (widget.now != oldWidget.now) {
+      oldWidget.now.removeListener(_handleNow);
+      widget.now.addListener(_handleNow);
+      _today.value = widget.now.value.today;
     }
     _creates.value = widget.onCreateOnDay != null;
     _bannerHours.value = _bannerHoursOf(widget);
@@ -1109,7 +1114,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   @override
   void dispose() {
     widget.store.removeListener(_handleStore);
-    widget.today.removeListener(_handleToday);
+    widget.now.removeListener(_handleNow);
     _pinch.dispose();
     _scrollHold.release();
     // The board has unmounted by now: an element's children unmount
@@ -1157,8 +1162,8 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     });
   }
 
-  void _handleToday() {
-    _today.value = widget.today.value;
+  void _handleNow() {
+    _today.value = widget.now.value.today;
   }
 
   /// Notes whether the store has read every day of [MonthBoard.grid],

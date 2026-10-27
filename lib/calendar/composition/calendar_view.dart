@@ -428,13 +428,10 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// [_handleStoreChange] compares a notify's hours with.
   late DayHours _storeHours;
 
-  /// The clock's time, read again at the start of each minute.
-  late final ValueNotifier<DateTime> _now;
-
-  /// The day marked as today. The month board's cells listen to it,
-  /// because its cell builder re-runs only when an axis or a cell's
-  /// selection changes.
-  late final ValueNotifier<DateTime> _today;
+  /// The calendar's one clock: the time read at the start of each minute
+  /// and the day marked as today, which the views follow and the policy
+  /// is asked at ([_nowAt]).
+  late final ValueNotifier<CalendarNow> _now;
 
   /// Fires at the start of the next minute, to read the clock again.
   Timer? _minuteTimer;
@@ -545,12 +542,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   void initState() {
     super.initState();
     _takeViews();
-    _now = ValueNotifier<DateTime>(_clock());
-    _today = ValueNotifier<DateTime>(_todayAt(_now.value));
+    _now = ValueNotifier<CalendarNow>(_nowAt(_clock()));
     final host = widget.controller;
     _ownsController = host == null;
     _bind(host ?? CalendarController(), shown: null);
-    _scheduleMinute(_now.value);
+    _scheduleMinute(_now.value.time);
     _storeHours = widget.store.hours;
     widget.store.addListener(_handleStoreChange);
   }
@@ -572,15 +568,12 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   @override
   void didUpdateWidget(CalendarView<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final clockChanged = widget.clock != oldWidget.clock;
-    if (clockChanged) {
+    if (widget.clock != oldWidget.clock) {
       _minuteTimer?.cancel();
-      _now.value = _clock();
-      _scheduleMinute(_now.value);
-    }
-    if (clockChanged || widget.today != oldWidget.today) {
-      // The build that follows shows it.
-      _today.value = _todayAt(_now.value);
+      _now.value = _nowAt(_clock());
+      _scheduleMinute(_now.value.time);
+    } else if (widget.today != oldWidget.today) {
+      _now.value = _nowAt(_now.value.time);
     }
     final viewsChanged = !listEquals(widget.views, oldWidget.views);
     if (viewsChanged) {
@@ -625,9 +618,8 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     }
     _collapseController.dispose();
     _pickerShown.dispose();
-    // The views listening to these have unmounted by now: an element's
+    // The views listening to it have unmounted by now: an element's
     // children unmount before it does.
-    _today.dispose();
     _now.dispose();
     super.dispose();
   }
@@ -669,7 +661,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       view = _listedView(named);
     }
     final day = shownDayNear(
-      dateOnly(controller._selectedDay ?? shown?.day ?? _today.value),
+      dateOnly(controller._selectedDay ?? shown?.day ?? _now.value.today),
       widget.weekdays,
     );
     controller._visibleRange = _askedRange;
@@ -800,20 +792,17 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     });
   }
 
-  DateTime _todayAt(DateTime now) {
-    return dateOnly(widget.today ?? now);
-  }
-
-  /// The time the calendar asks [_policy] at: the minute [_now] holds, on
-  /// the day [_today] marks.
-  CalendarNow _calendarNow() {
-    return CalendarNow(time: _now.value, today: _today.value);
+  /// The clock reading [time] on the day the calendar marks as today:
+  /// [CalendarView.today], or with none [time]'s day.
+  CalendarNow _nowAt(DateTime time) {
+    return CalendarNow(time: time, today: widget.today ?? time);
   }
 
   /// Reads the clock again at the start of the minute after [now], and
-  /// from then on at the start of each. A minute on another day than the
-  /// last minute's builds this state again, so the views take it with the
-  /// today it brings; within a day the views follow [_now] themselves.
+  /// from then on at the start of each. The views follow [_now]
+  /// themselves; a minute that marks another day as today builds this
+  /// state again too, for the calendar card, its strips and the month
+  /// picker, which take today as a value.
   void _scheduleMinute(DateTime now) {
     final intoMinute = Duration(
       seconds: now.second,
@@ -822,14 +811,12 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     );
     _minuteTimer = Timer(const Duration(minutes: 1) - intoMinute, () {
       final last = _now.value;
-      final next = _clock();
+      final next = _nowAt(_clock());
       _now.value = next;
-      if (dateOnly(next) != dateOnly(last)) {
-        setState(() {
-          _today.value = _todayAt(next);
-        });
+      if (next.today != last.today) {
+        setState(() {});
       }
-      _scheduleMinute(next);
+      _scheduleMinute(next.time);
     });
   }
 
@@ -1204,7 +1191,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     onEntryTap(
       CalendarEntryTapDetails<T>(
         entry: entry,
-        editable: widget.editable && _policy.mayEdit(entry, _calendarNow()),
+        editable: widget.editable && _policy.mayEdit(entry, _now.value),
       ),
     );
   }
@@ -1253,7 +1240,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// reports [CalendarView.onCreateRefused] instead.
   void _openCreateFlow(DateTime day) {
     final rules = _rules;
-    final start = rules.earliestStartOn(day, _calendarNow());
+    final start = rules.earliestStartOn(day, _now.value);
     final shown = widget.store.entriesOn(day).map((shown) {
       return shown.entry;
     });
@@ -1300,7 +1287,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// The month picker, on [_pickerYear], filling the selected day's month
   /// and ringing today's.
   Widget _buildMonthPicker() {
-    final today = _today.value;
+    final today = _now.value.today;
     return MonthPicker(
       key: const ValueKey<String>("month-picker"),
       year: _pickerYear,
@@ -1320,7 +1307,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       store: widget.store,
       month: _cardMonth,
       selectedDay: _day,
-      today: _today.value,
+      today: _now.value.today,
       weekdays: widget.weekdays,
       stripRecalls: _stripRecalls,
       collapse: _collapseController,
@@ -1372,7 +1359,6 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
               editable: widget.editable,
               editPolicy: _policy,
               selectedDay: _day,
-              today: _today.value,
               now: _now,
               onTopDay: _select,
               onCreateRange: _createRange,
@@ -1431,7 +1417,6 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                   firstDay: firstDay,
                   dayCount: dayCount,
                   selectedDay: _day,
-                  today: _today.value,
                   now: _now,
                   onSelectDay: _select,
                   onOpenEntry: _openEntry,
@@ -1492,7 +1477,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                   hours: _hours,
                   hourLabelFormat: widget.hourLabelFormat,
                   selectedDay: _day,
-                  today: _today,
+                  now: _now,
                   onSelectDay: _select,
                   onOpenDay: _openDay,
                   onCreateOnDay: widget.editable ? _createOn : null,

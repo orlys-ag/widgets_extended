@@ -20,6 +20,7 @@ import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
@@ -88,6 +89,35 @@ Finder blockFinder(String id, [DateTime? day]) {
     final key = widget.key;
     return key is ValueKey<String> && key.value.startsWith("block-$id@");
   });
+}
+
+/// A canvas that records the rects drawn on it with their paints. Every
+/// other call is ignored.
+class RecordingCanvas implements Canvas {
+  final List<({Rect rect, Paint paint})> rects = <({Rect rect, Paint paint})>[];
+
+  @override
+  void drawRect(Rect rect, Paint paint) {
+    rects.add((rect: rect, paint: paint));
+  }
+
+  @override
+  void save() {}
+
+  @override
+  void restore() {}
+
+  @override
+  void clipRect(
+    Rect rect, {
+    ui.ClipOp clipOp = ui.ClipOp.intersect,
+    bool doAntiAlias = true,
+  }) {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) {
+    return null;
+  }
 }
 
 /// A data source that answers each read within the call, through a
@@ -393,7 +423,9 @@ void main() {
       entries: <CalendarEntry<String>>[note],
     );
     addTearDown(store.dispose);
-    final now = ValueNotifier<DateTime>(nineOClock());
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: nineOClock(), today: day),
+    );
     addTearDown(now.dispose);
     final calls = <CalendarShownEntry<String>>[];
     await tester.pumpWidget(
@@ -403,7 +435,6 @@ void main() {
           firstDay: day,
           dayCount: 1,
           selectedDay: day,
-          today: day,
           now: now,
           onSelectDay: (day) {},
           onOpenEntry: (id) {},
@@ -441,7 +472,9 @@ void main() {
     const size = Size(300.0, 400.0);
     final store = MemoryCalendarStore<String>();
     addTearDown(store.dispose);
-    final now = ValueNotifier<DateTime>(DateTime(2026, 4, 21, 9));
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 21, 9), today: tuesday),
+    );
     addTearDown(now.dispose);
     TimedGrid<String> grid({
       required HourLabelFormat format,
@@ -452,7 +485,6 @@ void main() {
         firstDay: monday,
         dayCount: 7,
         selectedDay: tuesday,
-        today: tuesday,
         now: now,
         onSelectDay: (day) {},
         onOpenEntry: (id) {},
@@ -528,7 +560,9 @@ void main() {
     );
     addTearDown(store.dispose);
     // After ended ends, while running runs and before later starts.
-    final now = ValueNotifier<DateTime>(DateTime(2026, 4, 21, 11, 7));
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 21, 11, 7), today: tuesday),
+    );
     addTearDown(now.dispose);
     TimedGrid<String> grid({
       required bool editable,
@@ -540,7 +574,6 @@ void main() {
         firstDay: monday,
         dayCount: 2,
         selectedDay: tuesday,
-        today: tuesday,
         now: now,
         onSelectDay: (day) {},
         onOpenEntry: (id) {},
@@ -665,7 +698,9 @@ void main() {
     addTearDown(store.dispose);
     // After ended ends, so a lock to now holds it; the grid opens scrolled
     // to 08:00, the hour before.
-    final now = ValueNotifier<DateTime>(DateTime(2026, 4, 21, 9, 7));
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 21, 9, 7), today: tuesday),
+    );
     addTearDown(now.dispose);
 
     bool dragEnabled() {
@@ -700,7 +735,6 @@ void main() {
         firstDay: monday,
         dayCount: 7,
         selectedDay: tuesday,
-        today: tuesday,
         now: now,
         onSelectDay: (day) {},
         onOpenEntry: (id) {},
@@ -733,7 +767,6 @@ void main() {
           firstDay: monday,
           dayCount: 7,
           selectedDay: tuesday,
-          today: tuesday,
           now: now,
           onSelectDay: (day) {},
           onOpenEntry: (id) {},
@@ -753,7 +786,6 @@ void main() {
           firstDay: monday,
           dayCount: 7,
           selectedDay: tuesday,
-          today: tuesday,
           now: now,
           onSelectDay: (day) {},
           onOpenEntry: (id) {},
@@ -770,7 +802,9 @@ void main() {
       "height are positive and finite", () {
     final store = MemoryCalendarStore<String>();
     addTearDown(store.dispose);
-    final now = ValueNotifier<DateTime>(DateTime(2026, 4, 21, 9));
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 21, 9), today: tuesday),
+    );
     addTearDown(now.dispose);
     TimedGrid<String> grid({
       double minDayWidth = minDayWidthLow,
@@ -781,7 +815,6 @@ void main() {
         firstDay: monday,
         dayCount: 7,
         selectedDay: tuesday,
-        today: tuesday,
         now: now,
         onSelectDay: (day) {},
         onOpenEntry: (id) {},
@@ -832,7 +865,9 @@ void main() {
       ],
     );
     addTearDown(store.dispose);
-    final now = ValueNotifier<DateTime>(nineOClock());
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: nineOClock(), today: tuesday),
+    );
     addTearDown(now.dispose);
     tester.view.devicePixelRatio = 1.0;
     tester.view.physicalSize = size;
@@ -847,7 +882,6 @@ void main() {
             firstDay: monday,
             dayCount: 7,
             selectedDay: tuesday,
-            today: tuesday,
             now: now,
             onSelectDay: (day) {},
             onOpenEntry: (id) {},
@@ -892,7 +926,9 @@ void main() {
     store.show(DateTime(2026, 4, 13), DateTime(2026, 4, 26));
     store.show(monday, DateTime(2026, 4, 24));
     expect(store.status, CalendarLoadStatus.ready);
-    final now = ValueNotifier<DateTime>(nineOClock());
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: nineOClock(), today: tuesday),
+    );
     addTearDown(now.dispose);
 
     TimedGrid<String> grid(
@@ -904,7 +940,6 @@ void main() {
         firstDay: tuesday,
         dayCount: 1,
         selectedDay: tuesday,
-        today: tuesday,
         now: now,
         onSelectDay: (day) {},
         onOpenEntry: (id) {},
@@ -982,7 +1017,9 @@ void main() {
     // Both weeks read, the next one first.
     store.show(nextMonday, nextSunday);
     store.show(monday, sunday);
-    final now = ValueNotifier<DateTime>(nineOClock());
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: nineOClock(), today: tuesday),
+    );
     addTearDown(now.dispose);
 
     TimedGrid<String> grid(DateTime first) {
@@ -991,7 +1028,6 @@ void main() {
         firstDay: first,
         dayCount: 7,
         selectedDay: first,
-        today: tuesday,
         now: now,
         onSelectDay: (day) {},
         onOpenEntry: (id) {},
@@ -1030,7 +1066,9 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     tester.view.physicalSize = size;
     addTearDown(tester.view.reset);
-    final now = ValueNotifier<DateTime>(nineOClock());
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: nineOClock(), today: tuesday),
+    );
     addTearDown(now.dispose);
 
     /// The colours the last frame shows at [points].
@@ -1086,7 +1124,6 @@ void main() {
                       firstDay: dayCount == 1 ? tuesday : monday,
                       dayCount: dayCount,
                       selectedDay: tuesday,
-                      today: tuesday,
                       now: now,
                       onSelectDay: (day) {},
                       onOpenEntry: (id) {},
@@ -1132,5 +1169,129 @@ void main() {
       await gesture.up();
       await tester.pumpAndSettle();
     }
+  });
+
+  testWidgets("TG9 a timed grid follows its clock with no build from "
+      "above: a minute of the same day holds a block it starts, a minute on "
+      "the next day that marks it today holds that day's block it starts "
+      "and rings its header, and a new today alone tints its column", (
+    tester,
+  ) async {
+    final wednesday = DateTime(2026, 4, 22);
+    final thursday = DateTime(2026, 4, 23);
+    CalendarEntry<String> entry(String id, DateTime day, int start, int end) {
+      return CalendarEntry<String>(
+        id: id,
+        start: at(day, start),
+        end: at(day, end),
+        title: id,
+        color: const Color(0xFF336699),
+        payload: id,
+      );
+    }
+
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        entry("later", tuesday, 14 * 60, 15 * 60),
+        entry("early", wednesday, 0, 60),
+      ],
+    );
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: at(tuesday, 13 * 60 + 59), today: tuesday),
+    );
+    addTearDown(now.dispose);
+    await pumpBoxed(
+      tester,
+      const Size(400.0, 800.0),
+      TimedGrid<String>(
+        store: store,
+        firstDay: monday,
+        dayCount: 4,
+        selectedDay: tuesday,
+        now: now,
+        onSelectDay: (day) {},
+        onOpenEntry: (id) {},
+        onCreate: (range) async {},
+        editable: true,
+        editPolicy: const HistoryLockPolicy<String>(lockEarlierToday: true),
+        hours: const DayHours(0, 16 * 60),
+        minDayWidth: 60.0,
+        minSlotHeight: 8.0,
+      ),
+    );
+    await tester.pumpAndSettle();
+    bool movable(String id) {
+      return tester
+          .widget<BoardDelayedDragHandle>(
+            find.descendant(
+              of: blockFinder(id),
+              matching: find.byType(BoardDelayedDragHandle),
+            ),
+          )
+          .enabled;
+    }
+
+    bool ringed(DateTime day) {
+      return tester
+              .widget<Container>(
+                find.descendant(
+                  of: find.byKey(dayHeaderKey(day)),
+                  matching: find.byType(Container),
+                ),
+              )
+              .foregroundDecoration !=
+          null;
+    }
+
+    /// The column whose slots the background tints as today's.
+    int tintedColumn() {
+      final viewport = viewportOf(tester);
+      final canvas = RecordingCanvas();
+      viewport.background!.paint(canvas, viewport);
+      final tint = const CalendarThemeData().primaryTint.toARGB32();
+      final left = canvas.rects
+          .where((record) {
+            return record.paint.color.toARGB32() == tint;
+          })
+          .single
+          .rect
+          .left;
+      final row = viewport.lastVisibleRow;
+      return <int>[
+        for (
+          var col = viewport.firstVisibleCol;
+          col <= viewport.lastVisibleCol;
+          col++
+        )
+          if (viewport.visibleCellRect(row, col).left == left) col,
+      ].single;
+    }
+
+    // Setup sanity: neither block has started, and Tuesday, the second
+    // day column, is marked today.
+    expect(movable("later"), isTrue);
+    expect(movable("early"), isTrue);
+    expect(ringed(tuesday), isTrue);
+    expect(tintedColumn(), 2);
+
+    now.value = CalendarNow(
+      time: at(tuesday, 14 * 60).add(const Duration(seconds: 30)),
+      today: tuesday,
+    );
+    await tester.pump();
+    expect(movable("later"), isFalse);
+
+    now.value = CalendarNow(
+      time: at(wednesday, 0).add(const Duration(seconds: 30)),
+      today: wednesday,
+    );
+    await tester.pump();
+    expect(movable("early"), isFalse);
+    expect(ringed(wednesday), isTrue);
+
+    now.value = CalendarNow(time: now.value.time, today: thursday);
+    await tester.pump();
+    expect(tintedColumn(), 4);
   });
 }
