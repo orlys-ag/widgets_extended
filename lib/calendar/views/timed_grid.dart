@@ -930,8 +930,8 @@ final class _Dragging extends _GridMode {
   ({String id, DateTime start, DateTime end})? lifted;
 
   /// The pointer of the press that started the drag, the first in
-  /// `_pressKeys` naming [key]; null for a drag no press of the grid
-  /// started, such as a semantics action's.
+  /// `_pressKeys` naming [key]; null where none names it, and once the
+  /// crossing is cleared ([clearCrossing]).
   int? pointer;
 
   /// Where [pointer] last moved during a crossing drag, in the board
