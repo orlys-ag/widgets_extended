@@ -17,11 +17,11 @@ import 'package:flutter/widgets.dart';
 
 import '../../sliver_tree/sliver_tree.dart';
 import '../dates/calendar_dates.dart';
-import '../dates/calendar_labels.dart';
 import '../policy/edit_policy.dart';
 import '../policy/edit_rules.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
+import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 import 'answer_builder.dart';
@@ -393,8 +393,8 @@ final class DayListGap extends DayListRow {
 
   @override
   String toString() {
-    return "DayListGap(${isoDate(day)}, ${clockLabel(start)}-"
-        "${clockLabel(end)})";
+    return "DayListGap(${isoDate(day)}, ${isoTime(start)}-"
+        "${isoTime(end)})";
   }
 }
 
@@ -622,7 +622,7 @@ class DayList<T> extends StatefulWidget {
   final WeekdaySet weekdays;
 
   /// How the times beside the cards and on the gap rows read, as
-  /// [hourLabel] writes them.
+  /// [CalendarLocalizations.formatTime] writes them.
   final HourLabelFormat format;
 
   /// The calendar's hours, which the gap rows cover; an item wholly
@@ -730,6 +730,9 @@ class _DayListState<T> extends State<DayList<T>> {
 
   /// What the rows draw with, the tree animates with and a reveal runs on.
   late _ListStyles _styles;
+
+  /// The text the rows read, as [_styles] their look.
+  late CalendarLocalizations _strings;
 
   /// The [dayNumber]s of the first and the last day the list holds.
   late int _first;
@@ -862,6 +865,7 @@ class _DayListState<T> extends State<DayList<T>> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _styles = _ListStyles.of(context);
+    _strings = CalendarLocalizations.of(context);
     _treeMadeFor = null;
   }
 
@@ -870,6 +874,7 @@ class _DayListState<T> extends State<DayList<T>> {
     _ListStyles._reset();
     super.reassemble();
     _styles = _ListStyles.of(context);
+    _strings = CalendarLocalizations.of(context);
     _treeMadeFor = null;
   }
 
@@ -1513,10 +1518,12 @@ class _DayListState<T> extends State<DayList<T>> {
         : wallMinuteOf(add.start) - dayNumber(day) * minutesPerDay;
     return _buildDashed(
       key: dayListGapKey(day, start),
-      label: hourLabel(start, widget.format),
+      label: _strings.formatTime(start, widget.format),
       day: day,
       addMinute: addMinute,
-      addLabel: "Add an item at ${hourLabel(addMinute, widget.format)}",
+      addLabel: _strings.addEntryAt(
+        _strings.formatTime(addMinute, widget.format),
+      ),
       onAdd: add == null
           ? null
           : () {
@@ -1638,7 +1645,7 @@ class _DayListState<T> extends State<DayList<T>> {
           children: <Widget>[
             Expanded(
               child: Text(
-                dayTitle(day, _today),
+                _strings.dayTitle(day, _today),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 strutStyle: empty
@@ -1652,7 +1659,7 @@ class _DayListState<T> extends State<DayList<T>> {
             ),
             if (count != null)
               Text(
-                entryCountLabel(count),
+                _strings.entryCount(count),
                 style: empty ? styles.emptyCount : styles.count,
               ),
           ],
@@ -1668,10 +1675,11 @@ class _DayListState<T> extends State<DayList<T>> {
   /// to fit the column, so a middle day reads 00:00-24:00; under either,
   /// the piece's length, from the entry's start or the day's to its end or
   /// the next day's start, on a chip behind an hourglass, scaled down where
-  /// the chip would not fit. An all-day row shows [allDayLabel] and no
-  /// chip. The card of a piece that starts before the hours is handed the
-  /// piece's start, for a strip across its top, and that of one that ends
-  /// after them its end, for a strip across its bottom. A row leaving for a
+  /// the chip would not fit. An all-day row shows
+  /// [CalendarLocalizations.allDay] and no chip. The card of a piece that
+  /// starts before the hours is handed the piece's start, for a strip
+  /// across its top, and that of one that ends after them its end, for a
+  /// strip across its bottom. A row leaving for a
   /// banner, whose piece has no minute inside the hours, shows the piece's
   /// own start and is handed neither.
   Widget _buildEntryRow(DayListEntry<T> row) {
@@ -1686,13 +1694,11 @@ class _DayListState<T> extends State<DayList<T>> {
     }
     final String time;
     if (allDay) {
-      time = allDayLabel;
+      time = _strings.allDay;
     } else if (row.first && row.last) {
-      time = hourLabel(start, widget.format);
+      time = _strings.formatTime(start, widget.format);
     } else {
-      time =
-          "${hourLabel(row.start, widget.format)}-"
-          "${hourLabel(row.end, widget.format)}";
+      time = _strings.formatTimeRange(row.start, row.end, widget.format);
     }
     final pieceStart = row.first ? calendarEntry.start : row.day;
     final pieceEnd = row.last ? calendarEntry.end : addDays(row.day, 1);
@@ -1737,7 +1743,7 @@ class _DayListState<T> extends State<DayList<T>> {
                           styles.durationIcon,
                           const SizedBox(width: 2.0),
                           Text(
-                            durationLabel(
+                            _strings.duration(
                               pieceEnd.difference(pieceStart).inMinutes,
                             ),
                             style: styles.durationLabel,
@@ -1774,10 +1780,10 @@ class _DayListState<T> extends State<DayList<T>> {
                 entry: entry,
                 builder: widget.cardBuilder ?? defaultCalendarCardBuilder<T>,
                 startsAt: inside && row.start < hours.start
-                    ? hourLabel(row.start, widget.format)
+                    ? _strings.formatTime(row.start, widget.format)
                     : null,
                 endsAt: inside && row.end > hours.end
-                    ? hourLabel(row.end, widget.format)
+                    ? _strings.formatTime(row.end, widget.format)
                     : null,
                 onEdit: answers.edits
                     ? () {
@@ -1803,17 +1809,11 @@ class _DayListState<T> extends State<DayList<T>> {
   /// in the timed grid's style for its rows outside the hours.
   Widget _buildHidden(DateTime day, int count, {required bool above}) {
     final minute = above ? widget.hours.start : widget.hours.end;
-    final side = above ? "before" : "after";
+    final time = _strings.formatTime(minute, widget.format);
     final styles = _styles;
     return Semantics(
       container: true,
-      label: hiddenRowLabel(
-        day,
-        count,
-        minute,
-        above: above,
-        format: widget.format,
-      ),
+      label: _strings.hiddenRow(day, count, time, above: above),
       excludeSemantics: true,
       child: Row(
         key: dayListHiddenKey(day, above: above),
@@ -1832,8 +1832,9 @@ class _DayListState<T> extends State<DayList<T>> {
                     const SizedBox(width: 4.0),
                     Expanded(
                       child: Text(
-                        "${moreEntriesLabel(count)} $side "
-                        "${hourLabel(minute, widget.format)}",
+                        above
+                            ? _strings.moreEntriesBefore(count, time)
+                            : _strings.moreEntriesAfter(count, time),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: styles.bannerLabel,
@@ -2313,7 +2314,11 @@ class _NowMarker extends StatelessWidget {
                     ? calendarCardStripExtent
                     : 0.0,
               ),
-              child: _NowLine(label: hourLabel(minute, format)),
+              child: _NowLine(
+                label: CalendarLocalizations.of(
+                  context,
+                ).formatTime(minute, format),
+              ),
             ),
           ),
         );

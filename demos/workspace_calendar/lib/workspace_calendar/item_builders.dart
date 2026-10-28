@@ -5,7 +5,6 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 
 import 'calendar_api_source.dart';
 import 'calendar_item.dart';
@@ -335,7 +334,7 @@ class HarborBlock extends StatelessWidget {
         border: Border(left: BorderSide(color: style.edge, width: 4.0)),
       ),
       child: details.detailed
-          ? _buildLines(item, styles)
+          ? _buildLines(item, styles, CalendarLocalizations.of(context))
           : _buildCompact(item, styles),
     );
     if (details.cutAtStart || details.cutAtEnd) {
@@ -410,7 +409,11 @@ class HarborBlock extends StatelessWidget {
 
   /// The title and the times, then each summary the item has, one per
   /// line, as [_BlockLinesDelegate] paints them.
-  Widget _buildLines(CalendarItem item, _HarborStyles styles) {
+  Widget _buildLines(
+    CalendarItem item,
+    _HarborStyles styles,
+    CalendarLocalizations strings,
+  ) {
     final schema = schemaOf(item.type);
     final summaries = <String>[];
     for (final key in schema.summaryKeys) {
@@ -435,7 +438,7 @@ class HarborBlock extends StatelessWidget {
                 style: styles.detailedTitle,
               ),
               Text(
-                entryTimesLabel(item.start, item.end),
+                strings.entryTimes(item.start, item.end),
                 maxLines: 1,
                 style: styles.detail,
               ),
@@ -535,7 +538,13 @@ class HarborChip extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4.0),
                 child: details.card
-                    ? _buildCardLines(title, item, style, styles)
+                    ? _buildCardLines(
+                        title,
+                        item,
+                        style,
+                        styles,
+                        CalendarLocalizations.of(context),
+                      )
                     : Align(alignment: Alignment.centerLeft, child: title),
               ),
             ),
@@ -557,6 +566,7 @@ class HarborChip extends StatelessWidget {
     CalendarItem item,
     HarborTypeStyle style,
     _HarborStyles styles,
+    CalendarLocalizations strings,
   ) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -569,7 +579,7 @@ class HarborChip extends StatelessWidget {
             const SizedBox(width: 3.0),
             Flexible(
               child: Text(
-                entryTimesLabel(item.start, item.end),
+                strings.entryTimes(item.start, item.end),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 softWrap: false,
@@ -686,7 +696,7 @@ class ItemCard extends StatelessWidget {
           if (startsAt != null)
             _strip(
               itemCardStartsAtKey(entry.id),
-              startsAtLabel(startsAt),
+              CalendarLocalizations.of(context).startsAt(startsAt),
               styles,
               top: true,
             ),
@@ -763,7 +773,7 @@ class ItemCard extends StatelessWidget {
           if (endsAt != null)
             _strip(
               itemCardEndsAtKey(entry.id),
-              endsAtLabel(endsAt),
+              CalendarLocalizations.of(context).endsAt(endsAt),
               styles,
               top: false,
             ),

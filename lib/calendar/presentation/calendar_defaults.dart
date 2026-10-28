@@ -5,10 +5,10 @@ library;
 
 import 'package:flutter/widgets.dart';
 
-import '../dates/calendar_labels.dart';
 import '../store/calendar_store.dart';
 import 'calendar_activity_indicator.dart';
 import 'calendar_builders.dart';
+import 'calendar_localizations.dart';
 import 'calendar_theme.dart';
 
 /// The height of the default card of an entry without strips at a text
@@ -64,6 +64,7 @@ Widget defaultCalendarBlockBuilder<T>(
   CalendarBlockDetails details,
 ) {
   final theme = CalendarTheme.of(context);
+  final strings = CalendarLocalizations.of(context);
   final calendarEntry = entry.entry;
   final Widget lines;
   if (details.detailed) {
@@ -79,7 +80,7 @@ Widget defaultCalendarBlockBuilder<T>(
             style: theme.detailedBlockTitleStyle.copyWith(color: theme.text),
           ),
           Text(
-            entryTimesLabel(calendarEntry.start, calendarEntry.end),
+            strings.entryTimes(calendarEntry.start, calendarEntry.end),
             maxLines: 1,
             style: theme.detailedBlockDetailStyle.copyWith(
               color: theme.textSecondary,
@@ -168,6 +169,7 @@ Widget defaultCalendarChipBuilder<T>(
   CalendarChipDetails details,
 ) {
   final theme = CalendarTheme.of(context);
+  final strings = CalendarLocalizations.of(context);
   final calendarEntry = entry.entry;
   const radius = Radius.circular(4.0);
   final Widget content;
@@ -184,7 +186,7 @@ Widget defaultCalendarChipBuilder<T>(
           style: theme.monthCardTitleStyle.copyWith(color: theme.text),
         ),
         Text(
-          entryTimesLabel(calendarEntry.start, calendarEntry.end),
+          strings.entryTimes(calendarEntry.start, calendarEntry.end),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           softWrap: false,
@@ -248,6 +250,7 @@ Widget defaultCalendarCardBuilder<T>(
   CalendarCardDetails details,
 ) {
   final theme = CalendarTheme.of(context);
+  final strings = CalendarLocalizations.of(context);
   final calendarEntry = entry.entry;
   final titleStyle = theme.entryCardTitleStyle;
   final startsAt = details.startsAt;
@@ -265,7 +268,7 @@ Widget defaultCalendarCardBuilder<T>(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          if (startsAt != null) _strip(startsAtLabel(startsAt), theme),
+          if (startsAt != null) _strip(strings.startsAt(startsAt), theme),
           Padding(
             padding: const EdgeInsets.fromLTRB(12.0, 8.0, 8.0, 8.0),
             child: SizedBox(
@@ -283,7 +286,7 @@ Widget defaultCalendarCardBuilder<T>(
               ),
             ),
           ),
-          if (endsAt != null) _strip(endsAtLabel(endsAt), theme),
+          if (endsAt != null) _strip(strings.endsAt(endsAt), theme),
         ],
       ),
     ),
@@ -365,7 +368,8 @@ Widget defaultCalendarLoadingBuilder(
   }
 }
 
-/// The default failure state: the sentence [readFailedLabel] and a Retry
+/// The default failure state: the sentence
+/// [CalendarLocalizations.readFailed] and a [CalendarLocalizations.retry]
 /// that calls [CalendarFailureState.retry], a semantics button of its own;
 /// on the cover the sentence centred above the Retry, in a day row the
 /// sentence beside it. It never shows the error.
@@ -374,6 +378,7 @@ Widget defaultCalendarFailureBuilder(
   CalendarFailureState state,
 ) {
   final theme = CalendarTheme.of(context);
+  final strings = CalendarLocalizations.of(context);
   final retry = Semantics(
     container: true,
     button: true,
@@ -383,7 +388,7 @@ Widget defaultCalendarFailureBuilder(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
         child: Text(
-          retryLabel,
+          strings.retry,
           style: theme.actionLabelStyle.copyWith(color: theme.primary),
         ),
       ),
@@ -398,7 +403,7 @@ Widget defaultCalendarFailureBuilder(
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24.0),
             child: Text(
-              readFailedLabel,
+              strings.readFailed,
               textAlign: TextAlign.center,
               style: message,
             ),
@@ -410,7 +415,7 @@ Widget defaultCalendarFailureBuilder(
     case CalendarStateSite.dayRow:
       return Row(
         children: <Widget>[
-          Expanded(child: Text(readFailedLabel, style: message)),
+          Expanded(child: Text(strings.readFailed, style: message)),
           retry,
         ],
       );

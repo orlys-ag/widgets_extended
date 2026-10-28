@@ -16,7 +16,6 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
@@ -1290,6 +1289,8 @@ Future<TestGesture> foldBy(WidgetTester tester, double distance) async {
   return gesture;
 }
 
+const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
+
 void main() {
   test("the sentinels' values differ from Harbor's, the built-in ones and "
       "each other's", () {
@@ -1527,7 +1528,8 @@ void main() {
         MonthCell.pillMargin.horizontal -
         MonthCell.pillPadding.horizontal;
     var widest = 0.0;
-    for (final name in monthNames) {
+    for (var month = 1; month <= DateTime.monthsPerYear; month++) {
+      final name = english.monthName(month);
       final painter = TextPainter(
         text: TextSpan(
           text: name,
@@ -2704,7 +2706,7 @@ void main() {
     final thursday = find.byKey(dayListHeaderKey(april(23)));
     expectText(
       tester,
-      textIn(thursday, dayTitle(april(23), april(21))),
+      textIn(thursday, english.dayTitle(april(23), april(21))),
       theme,
       "agendaHeaderTitleStyle",
       theme.text,
@@ -2784,7 +2786,7 @@ void main() {
     final sunday = find.byKey(dayListHeaderKey(april(26)));
     expectText(
       tester,
-      textIn(sunday, dayTitle(april(26), april(21))),
+      textIn(sunday, english.dayTitle(april(26), april(21))),
       theme,
       "agendaHeaderEmptyTitleStyle",
       theme.textMuted,

@@ -19,7 +19,7 @@ ValueKey<String> weekStripDayKey(DateTime day) {
 /// As many days side by side as [weekdays] holds of a week, opening on the
 /// shown days of [initialDay]'s week, or where it is null [selectedDay]'s,
 /// which starts on [weekdays]' first weekday. Each is a [DayCell]
-/// as Agenda's folded month shows it: its weekday's three-letter name
+/// as Agenda's folded month shows it: its weekday's abbreviation
 /// over its number on a circle, the selected day's in the primary colour,
 /// today's ringed, and badges on a day with items once the store has read
 /// it, one for each kind [dayBadges] gives its entries. The strip is as tall as a day ([stripCellHeight]), at any text

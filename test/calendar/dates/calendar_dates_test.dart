@@ -248,4 +248,18 @@ void main() {
       expect(DayHours.allDay.holdsEnd(1440), isTrue);
     });
   });
+
+  group("DI1 the developers' text", () {
+    test("isoTime writes hours and minutes, 1440 as 24:00, and the weekday "
+        "sets and day hours write themselves with it", () {
+      expect(isoTime(0), "00:00");
+      expect(isoTime(570), "09:30");
+      expect(isoTime(1440), "24:00");
+      expect(
+        WeekdaySet.workweek.startingOn(2).toString(),
+        "WeekdaySet(We, Th, Fr, Mo, Tu; from We)",
+      );
+      expect(const DayHours(480, 1080).toString(), "DayHours(08:00-18:00)");
+    });
+  });
 }

@@ -4,7 +4,7 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../dates/calendar_labels.dart';
+import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 
 /// A view of a `CalendarView`: Agenda's month over a list of its days,
@@ -97,29 +97,51 @@ class CalendarHeader extends StatelessWidget {
 
   final CalendarHeaderDetails details;
 
-  static String _viewLabel(CalendarViewKind view) {
+  static String _viewLabel(
+    CalendarLocalizations strings,
+    CalendarViewKind view,
+  ) {
     switch (view) {
       case CalendarViewKind.agenda:
-        return "Agenda";
+        return strings.agendaView;
       case CalendarViewKind.day:
-        return "Day";
+        return strings.dayView;
       case CalendarViewKind.week:
-        return "Week";
+        return strings.weekView;
       case CalendarViewKind.month:
-        return "Month";
+        return strings.monthView;
     }
   }
 
-  static String _unitLabel(CalendarStepUnit unit) {
+  static String _previousTooltip(
+    CalendarLocalizations strings,
+    CalendarStepUnit unit,
+  ) {
     switch (unit) {
       case CalendarStepUnit.day:
-        return "day";
+        return strings.previousDayTooltip;
       case CalendarStepUnit.week:
-        return "week";
+        return strings.previousWeekTooltip;
       case CalendarStepUnit.month:
-        return "month";
+        return strings.previousMonthTooltip;
       case CalendarStepUnit.year:
-        return "year";
+        return strings.previousYearTooltip;
+    }
+  }
+
+  static String _nextTooltip(
+    CalendarLocalizations strings,
+    CalendarStepUnit unit,
+  ) {
+    switch (unit) {
+      case CalendarStepUnit.day:
+        return strings.nextDayTooltip;
+      case CalendarStepUnit.week:
+        return strings.nextWeekTooltip;
+      case CalendarStepUnit.month:
+        return strings.nextMonthTooltip;
+      case CalendarStepUnit.year:
+        return strings.nextYearTooltip;
     }
   }
 
@@ -138,9 +160,13 @@ class CalendarHeader extends StatelessWidget {
       textScaler: MediaQuery.textScalerOf(context),
       maxLines: 1,
     );
+    final strings = CalendarLocalizations.of(context);
     var widest = 0.0;
-    for (final name in monthShortNames) {
-      painter.text = TextSpan(text: "$name $year", style: merged);
+    for (var month = 1; month <= DateTime.monthsPerYear; month++) {
+      painter.text = TextSpan(
+        text: strings.shortMonthYear(DateTime(year, month)),
+        style: merged,
+      );
       painter.layout();
       if (painter.width > widest) {
         widest = painter.width;
@@ -158,10 +184,10 @@ class CalendarHeader extends StatelessWidget {
       fontWeight: FontWeight.w600,
       color: theme.text,
     );
-    final unit = _unitLabel(details.stepUnit);
+    final strings = CalendarLocalizations.of(context);
     final year = details.pickerYear;
     final day = details.day;
-    final viewName = Text(_viewLabel(details.view), style: titleStyle);
+    final viewName = Text(_viewLabel(strings, details.view), style: titleStyle);
     return Row(
       children: <Widget>[
         Expanded(
@@ -169,7 +195,7 @@ class CalendarHeader extends StatelessWidget {
             children: <Widget>[
               IconButton(
                 icon: const Icon(Icons.chevron_left),
-                tooltip: "Previous $unit",
+                tooltip: _previousTooltip(strings, details.stepUnit),
                 color: theme.text,
                 visualDensity: VisualDensity.compact,
                 onPressed: details.onPrevious,
@@ -178,7 +204,9 @@ class CalendarHeader extends StatelessWidget {
               // narrow for it.
               Flexible(
                 child: Tooltip(
-                  message: year == null ? "Pick a month" : "Close the months",
+                  message: year == null
+                      ? strings.pickMonthTooltip
+                      : strings.closeMonthsTooltip,
                   child: InkWell(
                     borderRadius: BorderRadius.circular(8.0),
                     onTap: year == null
@@ -189,9 +217,7 @@ class CalendarHeader extends StatelessWidget {
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
                         child: Text(
-                          year == null
-                              ? "${monthShortNames[day.month - 1]} ${day.year}"
-                              : "$year",
+                          year == null ? strings.shortMonthYear(day) : "$year",
                           style: titleStyle,
                         ),
                       ),
@@ -201,7 +227,7 @@ class CalendarHeader extends StatelessWidget {
               ),
               IconButton(
                 icon: const Icon(Icons.chevron_right),
-                tooltip: "Next $unit",
+                tooltip: _nextTooltip(strings, details.stepUnit),
                 color: theme.text,
                 visualDensity: VisualDensity.compact,
                 onPressed: details.onNext,
@@ -216,7 +242,7 @@ class CalendarHeader extends StatelessWidget {
           )
         else
           PopupMenuButton<CalendarViewKind>(
-            tooltip: "Calendar view",
+            tooltip: strings.viewMenuTooltip,
             initialValue: details.view,
             color: theme.surface,
             onSelected: details.onSelectView,
@@ -225,7 +251,7 @@ class CalendarHeader extends StatelessWidget {
                 for (final value in details.views)
                   PopupMenuItem<CalendarViewKind>(
                     value: value,
-                    child: Text(_viewLabel(value)),
+                    child: Text(_viewLabel(strings, value)),
                   ),
               ];
             },

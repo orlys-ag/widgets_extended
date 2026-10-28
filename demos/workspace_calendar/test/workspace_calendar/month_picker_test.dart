@@ -5,7 +5,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/month_picker.dart';
@@ -34,7 +34,7 @@ MonthCell monthCell(WidgetTester tester, int year, int month) {
 Finder monthName(int year, int month) {
   return find.descendant(
     of: monthCellFinder(year, month),
-    matching: find.text(monthNames[month - 1]),
+    matching: find.text(english.monthName(month)),
   );
 }
 
@@ -158,6 +158,8 @@ void expectSmooth(List<double> heights, double from, double to) {
   expect(between, greaterThanOrEqualTo(5));
   expect(heights.last, moreOrLessEquals(to));
 }
+
+const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
 
 void main() {
   testWidgets("P1 in Agenda the title shows the selected day's year's "
@@ -387,7 +389,7 @@ void main() {
       expect(tester.getSize(monthCellFinder(2026, month)), january);
       expect(
         tester.getSemantics(monthCellFinder(2026, month)),
-        isSemantics(label: "${monthNames[month - 1]} 2026"),
+        isSemantics(label: "${english.monthName(month)} 2026"),
       );
     }
     semantics.dispose();

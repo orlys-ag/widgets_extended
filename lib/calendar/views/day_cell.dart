@@ -1,5 +1,5 @@
 /// One day of the calendar's month grid, and the letters or the
-/// three-letter names of the weekdays over the grid.
+/// abbreviations of the weekdays over the grid.
 library;
 
 import 'dart:math' as math;
@@ -8,8 +8,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import '../dates/calendar_dates.dart';
-import '../dates/calendar_labels.dart';
 import '../presentation/calendar_day_badges.dart';
+import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 
@@ -149,12 +149,14 @@ const double stripLabelGap = 2.0;
 /// Text lays it out in [context], at its text style and scale, then
 /// [stripLabelGap] and [dayCircleSize]. The line's height is set by the
 /// style's height, whatever the line reads. Makes [context] depend on the
-/// theme.
+/// theme and the localizations.
 double stripCellHeight(BuildContext context) {
   final defaultStyle = DefaultTextStyle.of(context);
   final painter = TextPainter(
     text: TextSpan(
-      text: weekdayAbbreviations.first,
+      text: CalendarLocalizations.of(
+        context,
+      ).weekdayAbbreviation(DateTime.monday),
       style: defaultStyle.style.merge(_DayCellStyles.of(context).stripWeekday),
     ),
     textDirection: TextDirection.ltr,
@@ -358,7 +360,7 @@ class _DayCellElement extends StatelessElement {
 /// [collapse] runs from 0, the month grid, to 1, the week strip. At 0 a
 /// day outside the shown month is muted on no circle and the weekday name
 /// is left to the header above the grid; at 1 every day reads at full
-/// strength on its circle and carries its weekday's three-letter name
+/// strength on its circle and carries its weekday's abbreviation
 /// above it. The
 /// cell listens to [collapse] itself, so the transition rebuilds the cells
 /// and not the board.
@@ -396,33 +398,22 @@ class DayCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = weekdayNames[weekdayColumn(day)];
-    final date = "${monthNames[day.month - 1]} ${day.day}";
+    final strings = CalendarLocalizations.of(context);
     final styles = _DayCellStyles.of(context);
     return Semantics(
       button: true,
       selected: isSelected,
-      label: badges.isEmpty
-          ? "$name, $date"
-          : "$name, $date, has ${_badgeLabels()}",
+      label: strings.dayWithBadges(day, <String?>[
+        for (final kind in badges) kind?.label,
+      ]),
       excludeSemantics: true,
       child: AnimatedBuilder(
         animation: collapse,
         builder: (context, child) {
-          return _buildAt(collapse.value, styles);
+          return _buildAt(collapse.value, styles, strings);
         },
       ),
     );
-  }
-
-  /// The badges' kinds as a screen reader hears them: each kind's label,
-  /// and the primary dot's "items" where it is the only badge and "other
-  /// items" beside kinds.
-  String _badgeLabels() {
-    return <String>[
-      for (final kind in badges)
-        kind?.label ?? (badges.length == 1 ? "items" : "other items"),
-    ].join(", ");
   }
 
   Widget _buildBadge(int index, int count, _DayCellStyles styles) {
@@ -443,7 +434,11 @@ class DayCell extends StatelessWidget {
     );
   }
 
-  Widget _buildAt(double t, _DayCellStyles styles) {
+  Widget _buildAt(
+    double t,
+    _DayCellStyles styles,
+    CalendarLocalizations strings,
+  ) {
     final TextStyle numberStyle;
     if (isSelected) {
       numberStyle = styles.selectedNumber;
@@ -495,7 +490,7 @@ class DayCell extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: stripLabelGap),
                   child: Text(
-                    weekdayAbbreviations[weekdayColumn(day)],
+                    strings.weekdayAbbreviation(day.weekday),
                     style: styles.stripWeekday,
                   ),
                 ),
@@ -513,7 +508,7 @@ class DayCell extends StatelessWidget {
 const double weekdayHeaderHeight = 32.0;
 
 /// The letters of the shown weekdays over a month grid, in [weekdays]'
-/// order, or with [abbreviated] their three-letter names as a [DayCell] in
+/// order, or with [abbreviated] their abbreviations as a [DayCell] in
 /// the week strip shows them, one per column: equal shares of the header's
 /// width, or with [columnWidth], columns that wide, scrolled across by
 /// [horizontal]'s offset as the grid under them is, and clipped to the
@@ -529,8 +524,9 @@ class WeekdayHeader extends StatelessWidget {
 
   final WeekdaySet weekdays;
 
-  /// Whether each column shows its weekday's three-letter name, "Mon",
-  /// rather than its letter.
+  /// Whether each column shows its weekday's abbreviation
+  /// ([CalendarLocalizations.weekdayAbbreviation]) rather than its letter
+  /// ([CalendarLocalizations.weekdayLetter]).
   final bool abbreviated;
 
   /// The width of each column; null for equal shares of the width.
@@ -549,12 +545,13 @@ class WeekdayHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final width = columnWidth;
     final styles = _DayCellStyles.of(context);
+    final strings = CalendarLocalizations.of(context);
     final letters = <Widget>[
       for (final column in weekdays.columns)
         if (width == null)
-          Expanded(child: _buildLetter(column, styles))
+          Expanded(child: _buildLetter(column, styles, strings))
         else
-          SizedBox(width: width, child: _buildLetter(column, styles)),
+          SizedBox(width: width, child: _buildLetter(column, styles, strings)),
     ];
     if (width == null) {
       return SizedBox(
@@ -588,14 +585,23 @@ class WeekdayHeader extends StatelessWidget {
     );
   }
 
-  Widget _buildLetter(int column, _DayCellStyles styles) {
+  /// The name of the weekday of [column], a [weekdayColumn], Monday 0.
+  Widget _buildLetter(
+    int column,
+    _DayCellStyles styles,
+    CalendarLocalizations strings,
+  ) {
+    final weekday = column + 1;
     if (abbreviated) {
       return Center(
-        child: Text(weekdayAbbreviations[column], style: styles.weekdayName),
+        child: Text(
+          strings.weekdayAbbreviation(weekday),
+          style: styles.weekdayName,
+        ),
       );
     }
     return Center(
-      child: Text(weekdayLetters[column], style: styles.weekdayLetter),
+      child: Text(strings.weekdayLetter(weekday), style: styles.weekdayLetter),
     );
   }
 }

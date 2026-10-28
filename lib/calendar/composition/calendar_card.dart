@@ -10,6 +10,7 @@ import 'package:flutter/rendering.dart';
 
 import '../dates/calendar_dates.dart';
 import '../presentation/calendar_day_badges.dart';
+import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 import '../views/day_cell.dart';
@@ -83,7 +84,7 @@ class CalendarHeaderCard extends StatelessWidget {
 }
 
 /// Agenda's and Day's calendar card: [header] over [month]'s days as a
-/// [MonthStrip] under the weekdays' three-letter names, which fold into
+/// [MonthStrip] under the weekdays' abbreviations, which fold into
 /// the week of [monthFoldDay] as [collapse] runs from 0 to 1, and at 1
 /// give way to a [WeekStrip] opening on that week, over a pull tab; the
 /// month picker, which [buildPicker] builds, comes in over the days as
@@ -535,9 +536,10 @@ class _PullTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final strings = CalendarLocalizations.of(context);
     return Semantics(
       button: true,
-      label: folded ? "Show the month" : "Show the week",
+      label: folded ? strings.showMonthLabel : strings.showWeekLabel,
       onTap: onTap,
       excludeSemantics: true,
       child: GestureDetector(

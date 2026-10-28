@@ -10,7 +10,6 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 
 import '../dates/calendar_dates.dart';
-import '../dates/calendar_labels.dart';
 import '../entries/calendar_entry.dart';
 import '../policy/overlap.dart';
 import '../store/calendar_store.dart';
@@ -251,7 +250,7 @@ final class GridPiece<T> extends GridShape<T> {
   @override
   String toString() {
     return "GridPiece(${shown.id}, ${isoDate(dateOfDayNumber(day))} "
-        "${clockRangeLabel(start, end)})";
+        "${isoTime(start)}-${isoTime(end)})";
   }
 }
 

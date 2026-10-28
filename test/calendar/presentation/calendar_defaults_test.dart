@@ -7,7 +7,6 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_defaults.dart';
 
 const Color colour = Color(0xFF8A2B4C);
@@ -150,6 +149,8 @@ double startAngleOf(WidgetTester tester) {
   expect(arcs, hasLength(1));
   return arcs.single.invocation.positionalArguments[1] as double;
 }
+
+const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
 
 void main() {
   test("BD1 the details and states are plain values that read their "
@@ -344,7 +345,10 @@ void main() {
     );
     expect(
       textsUnder(tester),
-      unorderedEquals(<String>["Standup", clockRangeLabel(540, 600)]),
+      unorderedEquals(<String>[
+        "Standup",
+        english.formatTimeRange(540, 600, HourLabelFormat.twentyFourHour),
+      ]),
     );
     expectText(
       tester,
@@ -354,7 +358,7 @@ void main() {
     );
     expectText(
       tester,
-      clockRangeLabel(540, 600),
+      english.formatTimeRange(540, 600, HourLabelFormat.twentyFourHour),
       distinct.detailedBlockDetailStyle,
       distinct.textSecondary,
     );
@@ -538,12 +542,15 @@ void main() {
     );
     expect(
       textsUnder(tester),
-      unorderedEquals(<String>["Standup", clockRangeLabel(540, 600)]),
+      unorderedEquals(<String>[
+        "Standup",
+        english.formatTimeRange(540, 600, HourLabelFormat.twentyFourHour),
+      ]),
     );
     expectText(tester, "Standup", distinct.monthCardTitleStyle, distinct.text);
     expectText(
       tester,
-      clockRangeLabel(540, 600),
+      english.formatTimeRange(540, 600, HourLabelFormat.twentyFourHour),
       distinct.monthCardTimeStyle,
       distinct.textSecondary,
     );
@@ -640,18 +647,18 @@ void main() {
     expect(both.last.height, calendarCardStripExtent);
     expectText(
       tester,
-      startsAtLabel("07:30"),
+      english.startsAt("07:30"),
       distinct.noticeStyle,
       distinct.onNotice,
     );
     expectText(
       tester,
-      endsAtLabel("19:30"),
+      english.endsAt("19:30"),
       distinct.noticeStyle,
       distinct.onNotice,
     );
     expect(
-      tester.getCenter(find.text(startsAtLabel("07:30"))).dy,
+      tester.getCenter(find.text(english.startsAt("07:30"))).dy,
       moreOrLessEquals(both.first.center.dy),
     );
 
@@ -659,13 +666,13 @@ void main() {
     final top = stripsOf();
     expect(top, hasLength(1));
     expect(top.single.top, tester.getRect(root).top);
-    expect(find.text(startsAtLabel("07:30")), findsOneWidget);
+    expect(find.text(english.startsAt("07:30")), findsOneWidget);
 
     await pumpCard(const CalendarCardDetails(endsAt: "19:30"));
     final bottom = stripsOf();
     expect(bottom, hasLength(1));
     expect(bottom.single.bottom, moreOrLessEquals(tester.getRect(root).bottom));
-    expect(find.text(endsAtLabel("19:30")), findsOneWidget);
+    expect(find.text(english.endsAt("19:30")), findsOneWidget);
 
     await pumpCard(const CalendarCardDetails(startsAt: "07:30"), pending: true);
     final opacity = widgetsUnder<Opacity>(tester);
@@ -848,7 +855,7 @@ void main() {
       expect(tester.takeException(), isNull, reason: "$site");
       expectText(
         tester,
-        readFailedLabel,
+        english.readFailed,
         distinct.messageStyle,
         distinct.error,
       );
@@ -859,20 +866,23 @@ void main() {
       );
       expectText(
         tester,
-        retryLabel,
+        english.retry,
         distinct.actionLabelStyle,
         distinct.primary,
       );
-      await tester.tap(find.text(retryLabel));
+      await tester.tap(find.text(english.retry));
       expect(retries, 1, reason: "$site");
-      final retryNode = tester.getSemantics(find.text(retryLabel));
+      final retryNode = tester.getSemantics(find.text(english.retry));
       expect(
         retryNode,
-        isSemantics(label: retryLabel, isButton: true, hasTapAction: true),
+        isSemantics(label: english.retry, isButton: true, hasTapAction: true),
         reason: "$site",
       );
       expect(
-        identical(retryNode, tester.getSemantics(find.text(readFailedLabel))),
+        identical(
+          retryNode,
+          tester.getSemantics(find.text(english.readFailed)),
+        ),
         isFalse,
         reason: "$site",
       );
@@ -921,7 +931,7 @@ void main() {
     }
     expect(shownTexts, isNotEmpty);
     for (final text in shownTexts) {
-      expect(<String>[readFailedLabel, retryLabel], contains(text));
+      expect(<String>[english.readFailed, english.retry], contains(text));
     }
   });
 

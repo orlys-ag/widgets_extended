@@ -16,7 +16,6 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
@@ -25,6 +24,7 @@ import 'package:widgets_extended/calendar/policy/overlap.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_activity_indicator.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_defaults.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_localizations.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
@@ -937,6 +937,8 @@ Future<MoveRecordingStore> releaseEndOver(
   return store;
 }
 
+const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
+
 void main() {
   testWidgets("TS1 the strip lies under the header, or at the grid's top in "
       "Day, and above the first slot, and its bars keep their rects while "
@@ -1052,7 +1054,7 @@ void main() {
       expect(
         tester.getSemantics(find.byKey(allDayMoreKey(tuesday))),
         matchesSemantics(
-          label: allDayMoreLabel(2),
+          label: english.allDayMore(2),
           isButton: true,
           hasTapAction: true,
         ),
@@ -1105,7 +1107,7 @@ void main() {
       expect(
         tester.getSemantics(less),
         matchesSemantics(
-          label: allDayLessLabel,
+          label: english.allDayLess,
           isButton: true,
           hasTapAction: true,
         ),
@@ -1504,7 +1506,7 @@ void main() {
   group("TX7 under lockPast", () {
     testWidgets("in Week each gesture onto a past day writes nothing, and "
         "while a block's pointer is over a past day's strip cell no strip "
-        "cell is marked and the landing label reads noLandingLabel", (
+        "cell is marked and the landing label reads english.noLanding", (
       tester,
     ) async {
       final shown = Shown.week(monday);
@@ -1579,7 +1581,7 @@ void main() {
         tester.getCenter(barFinder("thu")),
         slotRect(tester, shown, tuesday, 10 * 60).center,
       );
-      expect(landingText(tester), noLandingLabel, reason: "bar into a slot");
+      expect(landingText(tester), english.noLanding, reason: "bar into a slot");
       await gesture.up();
       await tester.pumpAndSettle();
       expect(store.moves, isEmpty, reason: "bar into a slot");
@@ -1600,7 +1602,7 @@ void main() {
           stripRect(tester, shown, tuesday).center,
         );
         expect(markedOf(tester, days), isEmpty, reason: "$others");
-        expect(landingText(tester), noLandingLabel, reason: "$others");
+        expect(landingText(tester), english.noLanding, reason: "$others");
         await gesture.up();
         await tester.pumpAndSettle();
         expect(store.moves, isEmpty, reason: "block into the strip $others");
@@ -1630,7 +1632,7 @@ void main() {
       // Setup sanity: the block lifted.
       expect(find.byKey(liftedBlockKey), findsOneWidget);
       expect(isMarked(tester, tuesday), isFalse);
-      expect(landingText(tester), noLandingLabel);
+      expect(landingText(tester), english.noLanding);
       await gesture.up();
       await tester.pumpAndSettle();
       expect(store.moves, isEmpty);
@@ -1667,7 +1669,7 @@ void main() {
       );
       expect(
         landingText(tester),
-        landingLabel(monday, thursday, DateTime(2026, 1, 5)),
+        english.landing(monday, thursday, DateTime(2026, 1, 5)),
       );
       await gesture.up();
       await tester.pumpAndSettle();
@@ -2328,7 +2330,7 @@ void main() {
       // Setup sanity: the crossing names the slot's hour.
       expect(
         landingText(tester),
-        landingLabel(at(monday, 5), at(monday, 6), DateTime(2026, 1, 5)),
+        english.landing(at(monday, 5), at(monday, 6), DateTime(2026, 1, 5)),
       );
       debugDropGateCount = 0;
       await moveTenTimes(tester, move, const Offset(1.0, 0.0));
@@ -2404,7 +2406,7 @@ void main() {
   testWidgets("TX17 while a bar's drag pointer is over a day's 10:00 slot the "
       "landing label names that day's 10:00 to 11:00 and the background "
       "outlines those slots, both following the pointer onto 14:00, and over "
-      "a slot an entry holds the label reads noLandingLabel and no outline "
+      "a slot an entry holds the label reads english.noLanding and no outline "
       "is drawn", (tester) async {
     final today = DateTime(2026, 1, 5);
     for (final shown in bothGrids()) {
@@ -2417,7 +2419,7 @@ void main() {
       );
       expect(
         landingText(tester),
-        landingLabel(at(tuesday, 10), at(tuesday, 11), today),
+        english.landing(at(tuesday, 10), at(tuesday, 11), today),
         reason: shown.name,
       );
       expect(strokedRects(tester), <Matcher>[
@@ -2429,7 +2431,7 @@ void main() {
       await tester.pump();
       expect(
         landingText(tester),
-        landingLabel(at(tuesday, 14), at(tuesday, 15), today),
+        english.landing(at(tuesday, 14), at(tuesday, 15), today),
         reason: shown.name,
       );
       expect(strokedRects(tester), <Matcher>[
@@ -2450,7 +2452,7 @@ void main() {
         tester.getCenter(barFinder("off")),
         slotRect(tester, shown, tuesday, 10 * 60).center,
       );
-      expect(landingText(tester), noLandingLabel, reason: shown.name);
+      expect(landingText(tester), english.noLanding, reason: shown.name);
       expect(strokedRects(tester), isEmpty, reason: shown.name);
       await over.up();
       await tester.pumpAndSettle();
@@ -2509,7 +2511,7 @@ void main() {
           var under = hourUnder(tester, shown, tuesday, pointer);
           expect(
             landingText(tester),
-            landingLabel(under.start, under.end, harness.today),
+            english.landing(under.start, under.end, harness.today),
             reason: shown.name,
           );
           if (changesRatio) {
@@ -2528,7 +2530,7 @@ void main() {
             under = hourUnder(tester, shown, tuesday, pointer);
             expect(
               landingText(tester),
-              landingLabel(under.start, under.end, harness.today),
+              english.landing(under.start, under.end, harness.today),
               reason: shown.name,
             );
           }
@@ -2628,7 +2630,7 @@ void main() {
           expect(under.start, isNot(at(tuesday, 10)), reason: shown.name);
           expect(
             landingText(tester),
-            landingLabel(under.start, under.end, harness.today),
+            english.landing(under.start, under.end, harness.today),
             reason: shown.name,
           );
           final minute = minuteOfDay(under.start);
@@ -2672,7 +2674,7 @@ void main() {
       expect(find.byKey(liftedBlockKey), findsOneWidget, reason: shown.name);
       expect(
         landingText(tester),
-        landingLabel(at(tuesday, 10), at(tuesday, 11), harness.today),
+        english.landing(at(tuesday, 10), at(tuesday, 11), harness.today),
         reason: shown.name,
       );
       const key = GridKey.bar("long");
@@ -2896,7 +2898,7 @@ void main() {
           );
           final written = storedOf(store, "meet");
           expect(
-            landingLabel(written.start, written.end, DateTime(2026, 1, 5)),
+            english.landing(written.start, written.end, DateTime(2026, 1, 5)),
             lastLabel,
             reason: reason,
           );
@@ -3127,7 +3129,7 @@ void main() {
     final shown = harness.shown;
     expect(
       landingText(tester),
-      landingLabel(at(monday, 22), at(wednesday, 12, 15), harness.today),
+      english.landing(at(monday, 22), at(wednesday, 12, 15), harness.today),
     );
     expect(strokedRects(tester), <Matcher>[
       nearRect(slotsRect(tester, shown, monday, 22 * 60, 24 * 60).deflate(1.0)),
@@ -3337,13 +3339,13 @@ void main() {
       tester.getCenter(barFinder("A")),
       slotRect(tester, shown, sunday, 23 * 60 + 30).center,
     );
-    expect(landingText(tester), noLandingLabel);
+    expect(landingText(tester), english.noLanding);
     store.requestDelete("N");
     await tester.pump();
     await tester.pump();
     expect(
       landingText(tester),
-      landingLabel(
+      english.landing(
         at(sunday, 23, 30),
         at(nextMonday, 0, 30),
         DateTime(2026, 1, 5),

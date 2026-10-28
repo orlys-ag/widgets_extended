@@ -180,6 +180,8 @@ Color textColorOf(WidgetTester tester, Finder text) {
   return tester.renderObject<RenderParagraph>(text).text.style!.color!;
 }
 
+const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
+
 void main() {
   testWidgets("W1 Week mode shows the timed grid", (tester) async {
     final api = MockCalendarApi.seeded(today, latency: harnessLatency);
@@ -1925,7 +1927,7 @@ void main() {
       cellRect(tester, rowOf(10 * 60), colOf(0)).topLeft - haul.topLeft,
     );
     await tester.pump();
-    expect(labelText(), noLandingLabel);
+    expect(labelText(), english.noLanding);
     expect(outlines(), isEmpty);
     await refused.up();
     await tester.pumpAndSettle();

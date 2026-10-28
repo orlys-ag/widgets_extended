@@ -11,11 +11,11 @@ import 'package:flutter/widgets.dart';
 
 import '../../board/board.dart';
 import '../dates/calendar_dates.dart';
-import '../dates/calendar_labels.dart';
 import '../entries/calendar_entry.dart';
 import '../policy/edit_policy.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
+import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 import 'day_cell.dart';
@@ -1941,48 +1941,6 @@ class _MonthGridPainter extends BoardBackgroundPainter {
   }
 }
 
-/// "Tuesday, April 21": [day] as the month board names it to a screen
-/// reader.
-String _dayLabel(DateTime day) {
-  return "${weekdayNames[weekdayColumn(day)]}, "
-      "${monthNames[day.month - 1]} ${day.day}";
-}
-
-/// What a screen reader says for [entry]'s chip: its title, the [kind]
-/// where there is one, its days and times, and that it is pending while it
-/// is: "Title, Monday, April 20, all day", "Title, Monday, April 20 to
-/// Wednesday, April 22, all day", "Title, Monday, April 20, 09:10 to
-/// 09:50", and for a timed entry over days "Title, Monday, April 20, 22:00
-/// to Tuesday, April 21, 02:00".
-String _chipLabel<T>(CalendarShownEntry<T> entry, String? kind) {
-  final calendarEntry = entry.entry;
-  final first = dateOfDayNumber(dayNumber(calendarEntry.start));
-  final last = dateOfDayNumber(
-    lastDayNumberOf(calendarEntry.start, calendarEntry.end),
-  );
-  final start = clockLabel(minuteOfDay(calendarEntry.start));
-  final end = clockLabel(endMinuteOfDay(calendarEntry.end));
-  final String when;
-  if (calendarEntry.isAllDay) {
-    when = first == last
-        ? "${_dayLabel(first)}, all day"
-        : "${_dayLabel(first)} to ${_dayLabel(last)}, all day";
-  } else if (first == last) {
-    when = "${_dayLabel(first)}, $start to $end";
-  } else {
-    when = "${_dayLabel(first)}, $start to ${_dayLabel(last)}, $end";
-  }
-  final label = kind == null
-      ? "${calendarEntry.title}, $when"
-      : "${calendarEntry.title}, $kind, $when";
-  return entry.pending ? "$label, pending" : label;
-}
-
-/// "1 more item" or "N more items", for a screen reader.
-String _hiddenLabel(int count) {
-  return count == 1 ? "1 more item" : "$count more items";
-}
-
 /// One day of the month board: a tap anywhere on it outside its chips
 /// opens the day, and a long press creates on it while [creates] holds and
 /// otherwise opens it as a tap does. Its number sits in the
@@ -2020,7 +1978,8 @@ class _MonthDayCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = _dayLabel(day);
+    final strings = CalendarLocalizations.of(context);
+    final label = strings.dayLabel(day);
     final styles = _MonthStyles.of(context);
     void open() {
       onOpen(day);
@@ -2048,19 +2007,23 @@ class _MonthDayCell extends StatelessWidget {
           selected: isSelected,
           label: <String>[
             label,
-            if (isToday) "today",
+            if (isToday) strings.today,
             if (hides.earlier > 0)
-              "${moreEntriesLabel(hides.earlier)} before "
-                  "${hourLabel(hours.hours.start, hours.format)}",
-            if (hides.count > 0) _hiddenLabel(hides.count),
+              strings.moreEntriesBefore(
+                hides.earlier,
+                strings.formatTime(hours.hours.start, hours.format),
+              ),
+            if (hides.count > 0) strings.moreEntries(hides.count),
             if (hides.later > 0)
-              "${moreEntriesLabel(hides.later)} after "
-                  "${hourLabel(hours.hours.end, hours.format)}",
+              strings.moreEntriesAfter(
+                hides.later,
+                strings.formatTime(hours.hours.end, hours.format),
+              ),
           ].join(", "),
-          hint: "Opens the day",
+          hint: strings.openDayHint,
           onTap: open,
           onLongPress: create,
-          onLongPressHint: create == null ? null : "create an item",
+          onLongPressHint: create == null ? null : strings.createEntryHint,
           excludeSemantics: true,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -2086,7 +2049,7 @@ class _MonthDayCell extends StatelessWidget {
                     height: monthHoursBannerExtent,
                     child: _buildBanner(
                       monthEarlierKey(day),
-                      "+${hides.earlier} earlier",
+                      strings.earlierCount(hides.earlier),
                       styles,
                     ),
                   ),
@@ -2098,7 +2061,7 @@ class _MonthDayCell extends StatelessWidget {
                     height: hides.laneExtent,
                     child: _buildBanner(
                       monthMoreKey(day),
-                      "+${hides.count} more",
+                      strings.moreCount(hides.count),
                       styles,
                     ),
                   ),
@@ -2110,7 +2073,7 @@ class _MonthDayCell extends StatelessWidget {
                     height: monthHoursBannerExtent,
                     child: _buildBanner(
                       monthLaterKey(day),
-                      "+${hides.later} later",
+                      strings.laterCount(hides.later),
                       styles,
                     ),
                   ),
@@ -2205,7 +2168,13 @@ class _MonthChipBox<T> extends StatelessWidget {
     return Semantics(
       container: true,
       button: !pending,
-      label: _chipLabel(entry, kindOf?.call(entry.entry)),
+      label: CalendarLocalizations.of(context).entryLabel(
+        title: entry.entry.title,
+        kind: kindOf?.call(entry.entry),
+        start: entry.entry.start,
+        end: entry.entry.end,
+        pending: pending,
+      ),
       onTap: pending ? null : open,
       excludeSemantics: true,
       child: SizedBox(
