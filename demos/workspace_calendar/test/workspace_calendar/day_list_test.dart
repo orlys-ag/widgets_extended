@@ -1141,4 +1141,26 @@ void main() {
       ItemCard.stripHeight,
     );
   });
+
+  testWidgets("L28 a delete from the card menu the mock API fails keeps the "
+      "card, under a snackbar naming the failure", (tester) async {
+    const latency = Duration(seconds: 1);
+    final api = await pumpCalendar(
+      tester,
+      editing: true,
+      api: MockCalendarApi.seeded(today, latency: latency),
+    );
+    api.failurePolicy = (request) {
+      return request.method == CalendarMethod.delete
+          ? "Deleting failed."
+          : null;
+    };
+    await cardAction(tester, brainstormId, "Delete");
+    await tester.tap(find.widgetWithText(TextButton, "Delete"));
+    await tester.pump();
+    await tester.pump(latency);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(SnackBar, "Deleting failed."), findsOneWidget);
+    expect(cardFinder(brainstormId), findsOneWidget);
+  });
 }

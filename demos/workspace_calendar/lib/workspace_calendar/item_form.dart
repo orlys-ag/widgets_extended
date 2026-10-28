@@ -485,14 +485,22 @@ class _ItemFormState extends State<_ItemForm> {
     }
   }
 
-  /// Asks first; a confirmed delete closes the form and then deletes.
+  /// Asks first; a confirmed delete closes the form and then deletes,
+  /// and the messenger the form showed under says why where it fails.
   Future<void> _delete() async {
     final confirmed = await confirmDelete(context);
     if (!confirmed || !mounted) {
       return;
     }
+    final messenger = ScaffoldMessenger.of(context);
     Navigator.of(context).pop();
-    widget.store.requestDelete(widget.item.id!);
+    try {
+      await widget.store.requestDelete(widget.item.id!);
+    } on Object catch (error) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(writeFailureMessage(error))));
+    }
   }
 
   /// Picks a day from [initial], and hands it to [onPicked].

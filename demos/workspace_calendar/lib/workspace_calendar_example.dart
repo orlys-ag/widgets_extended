@@ -191,7 +191,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _store = CachingCalendarStore<ItemPayload>(
       dataSource: CalendarApiSource(_api),
       hours: _settings.hours,
-      onWriteFailed: _handleWriteFailed,
     );
     _controller.addListener(_handleControllerChange);
   }
@@ -278,10 +277,19 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// A grid write or a delete failed, whatever shows now.
-  void _handleWriteFailed(CalendarWriteFailure failure) {
+  /// Writes a grid move or resize, and says why where it fails.
+  Future<void> _move(CalendarMoveRequest<ItemPayload> request) async {
+    try {
+      await _store.requestMove(request.requested);
+    } on Object catch (error) {
+      _showWriteFailure(error);
+    }
+  }
+
+  /// A grid write or a delete failed with [error], whatever shows now.
+  void _showWriteFailure(Object error) {
     if (mounted) {
-      _showMessage(writeFailureMessage(failure.error));
+      _showMessage(writeFailureMessage(error));
     }
   }
 
@@ -328,8 +336,13 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   Future<void> _deleteFromCard(CalendarItem item) async {
     final confirmed = await confirmDelete(context);
-    if (confirmed && mounted) {
-      _store.requestDelete(item.id!);
+    if (!confirmed || !mounted) {
+      return;
+    }
+    try {
+      await _store.requestDelete(item.id!);
+    } on Object catch (error) {
+      _showWriteFailure(error);
     }
   }
 
@@ -420,6 +433,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               dayBadges: harborDayBadges,
               onEntryTap: _openEntry,
               onCreateRange: _openCreateFlow,
+              onMoveRequest: _move,
               onEditRequest: _openEditForm,
               onDeleteRequest: _deleteFromCard,
               onCreateRefused: (day) {

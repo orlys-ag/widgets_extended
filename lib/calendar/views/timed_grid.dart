@@ -26,6 +26,7 @@ import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 import 'answer_builder.dart';
 import 'entry_split.dart';
+import 'move_request.dart';
 import 'pinch_zoom.dart';
 import 'timed_grid_layout.dart';
 
@@ -582,9 +583,12 @@ CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
 /// time, each from a press on either side of the edge, where a pill lies
 /// across it. A touch drag from another block's edge scrolls the grid as
 /// one anywhere else does. A move, a resize or a create that lands on a
-/// time the clock skips writes and reports nothing; one on a time it
-/// repeats keeps the occurrence the gesture began in. Out of edit mode the
-/// grid is read-only and asks [editPolicy] nothing: no block moves or
+/// time the clock skips requests and reports nothing; one on a time it
+/// repeats keeps the occurrence the gesture began in. Every other move or
+/// resize that lands is a [CalendarMoveRequest], which [onMoveRequest]
+/// receives and the grid shows at its requested times, pending, until its
+/// future completes. Out of edit mode the grid is read-only and asks
+/// [editPolicy] nothing: no block moves or
 /// resizes, and an empty slot creates nothing. In it [editPolicy] limits
 /// the gestures: a block or a bar whose entry it lets not move
 /// ([CalendarEditPolicy.mayMove]) takes no drag, a long press selecting it
@@ -657,11 +661,11 @@ CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
 /// selected block. No pinch starts while a block moves or resizes or a
 /// create range runs. New days, which a new [firstDay], [dayCount] or
 /// [weekdays] gives, cancel a move or a resize in flight, which then
-/// writes nothing, and end a create range in flight, which then creates
+/// requests nothing, and end a create range in flight, which then creates
 /// nothing. A new [slotMinutes] or [hours] cancels a move or a resize in
-/// flight, which then writes nothing, and ends a create range in flight
+/// flight, which then requests nothing, and ends a create range in flight
 /// and clears the range a create flow marks. A new [editPolicy] cancels a
-/// move or a resize in flight, which then writes nothing, and ends a
+/// move or a resize in flight, which then requests nothing, and ends a
 /// create range in flight, which then creates nothing; the range a create
 /// flow marks stays.
 ///
@@ -691,6 +695,7 @@ class TimedGrid<T> extends StatefulWidget {
     required this.onSelectDay,
     required this.onOpenEntry,
     required this.onCreate,
+    this.onMoveRequest,
     this.editable = false,
     this.editPolicy,
     this.weekdays = WeekdaySet.all,
@@ -749,6 +754,16 @@ class TimedGrid<T> extends StatefulWidget {
   /// picked, and completes when it closes.
   final Future<void> Function(CreateRange range) onCreate;
 
+  /// Takes each move or resize a gesture lands, and completes once the
+  /// host has written it or let it go. Until then the grid shows the
+  /// entry at its requested times and pending, as a pending write shows
+  /// it: a tap on it opens nothing, and no drag lifts it. Then the grid
+  /// shows the store's entry again. Null writes the request through the
+  /// store ([CalendarStore.requestMove]). A failure of the future, the
+  /// store's included, is not caught: a host that handles one passes a
+  /// function that does.
+  final Future<void> Function(CalendarMoveRequest<T> request)? onMoveRequest;
+
   /// Whether the grid is in edit mode: its blocks move and resize, and its
   /// empty slots take a create gesture, as [editPolicy] lets them. Out of
   /// it the grid is read-only, and asks [editPolicy] nothing.
@@ -764,7 +779,7 @@ class TimedGrid<T> extends StatefulWidget {
   /// or across the all-day strip, a bar's day-edge resize and, on more
   /// than one day column, an end handle dragged into a later day may give
   /// a range. One dragged past them is held at the latest range they
-  /// admit, which a release writes or reports. A move keeps the days an
+  /// admit, which a release requests or reports. A move keeps the days an
   /// entry covers, except where it crosses a midnight, and no limit
   /// applies to it. It reads [CalendarEditPolicy.allowsOverlaps] then
   /// too: where it is false, no move or resize gives an entry times that
@@ -1052,6 +1067,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// entry keeps those times. Set by [_handleDragStart], cleared by
   /// [_handleDragEnd].
   ({String id, DateTime start, DateTime end})? _lifted;
+
+  /// Each move or resize the grid requested ([_requestMove]), by its
+  /// entry's id, until the request's future completes. The grid's reads
+  /// of the store show the requested entry in place of the stored one,
+  /// pending ([_shownBetween], [_isPending]).
+  final Map<String, CalendarMoveRequest<T>> _held =
+      <String, CalendarMoveRequest<T>>{};
 
   /// What the last placement ([_placeLayout]) read: the split, the tracks,
   /// [_lifted] and the strip rows it placed bars in; null before the first.
@@ -1567,10 +1589,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _lifted = null;
   }
 
-  /// Cancels the board's drag, writing nothing: a span write of its key to
+  /// Cancels the board's drag, requesting nothing: a span write of its key to
   /// the span it holds, whose mutation cancel runs before the write and
   /// queues [_handleDragEnd]; and forgets the drag's crossing state, so its
-  /// release writes nothing.
+  /// release requests nothing.
   void _cancelBoardDrag() {
     final dragged = _drag?.key;
     if (dragged != null && _board.isDragging(dragged)) {
@@ -2041,6 +2063,66 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     setState(() {});
   }
 
+  /// Hands [request] to [TimedGrid.onMoveRequest], or with none writes it
+  /// ([CalendarStore.requestMove]), holding it in [_held] until the future
+  /// completes, or fails, a throw within the call included. The hold syncs
+  /// within the call ([_handleStore]), as a store write's notify does.
+  void _requestMove(CalendarMoveRequest<T> request) {
+    final id = request.entry.id!;
+    _held[id] = request;
+    _handleStore();
+    final onMoveRequest = widget.onMoveRequest;
+    final store = widget.store;
+    final moving = Future<void>.sync(() {
+      return onMoveRequest == null
+          ? store.requestMove(request.requested)
+          : onMoveRequest(request);
+    });
+    moving.whenComplete(() {
+      if (!identical(_held[id], request)) {
+        return;
+      }
+      _held.remove(id);
+      if (mounted) {
+        _handleStore();
+      }
+    });
+  }
+
+  /// Whether a write on the entry [id] runs in the store, or a request of
+  /// the grid's holds it ([_held]).
+  bool _isPending(String id) {
+    return _held.containsKey(id) || widget.store.isPending(id);
+  }
+
+  /// The entries the store shows on any day from [first] to [last], with
+  /// each move [_held] holds in place of its stored entry: its requested
+  /// entry, pending, where it covers one of those days and the store still
+  /// holds the entry. In the store's order ([compareCalendarEntries]).
+  List<CalendarShownEntry<T>> _shownBetween(DateTime first, DateTime last) {
+    final shown = widget.store.entriesBetween(first, last);
+    if (_held.isEmpty) {
+      return shown;
+    }
+    shown.removeWhere((entry) {
+      return _held.containsKey(entry.id);
+    });
+    final from = dayNumber(first);
+    final to = dayNumber(last);
+    for (final MapEntry(key: id, value: request) in _held.entries) {
+      final entry = request.requested;
+      if (widget.store.storedEntry(id) != null &&
+          dayNumber(entry.start) <= to &&
+          lastDayNumberOf(entry.start, entry.end) >= from) {
+        shown.add(CalendarShownEntry<T>(entry, pending: true));
+      }
+    }
+    shown.sort((a, b) {
+      return compareCalendarEntries(a.entry, b.entry);
+    });
+    return shown;
+  }
+
   /// Where the board's drag session runs and the policy forbids overlaps,
   /// makes [_editConfig] and [_fitlessConfig] again, which the next build
   /// hands the board, and reads a crossing's cell again after the frame
@@ -2050,7 +2132,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// drop gate again. A new config on a live session asks it again for
   /// the placement the pointer rests on ([BoardDragConfig.canDropAt]). The
   /// board tears its session down before it reports the drop, so a drop's
-  /// own write makes no config.
+  /// own request makes no config.
   void _askDragAgain() {
     final drag = _drag;
     if (_allowsOverlaps || drag == null || !_board.isDragging(drag.key)) {
@@ -2132,7 +2214,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   void _sync({bool animate = true}) {
     final ready = _daysReady;
     final shown = ready
-        ? widget.store.entriesBetween(widget.firstDay, _lastDay)
+        ? _shownBetween(widget.firstDay, _lastDay)
         : <CalendarShownEntry<T>>[];
     final layout = TimedGridLayout<T>.of(shown, _tracks, previous: _layout);
     _layout = layout;
@@ -2284,12 +2366,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     });
   }
 
-  /// Whether the board may lift [key]: not while a write on its entry
-  /// runs, and not when the hours do not hold the entry's start or end
-  /// ([DayHours.holdsTimes]), as for an entry an hours change left outside
-  /// them, whose cut-off minutes a drop would lose.
+  /// Whether the board may lift [key]: not while its entry is pending
+  /// ([_isPending]), and not when the hours do not hold the entry's start
+  /// or end ([DayHours.holdsTimes]), as for an entry an hours change left
+  /// outside them, whose cut-off minutes a drop would lose.
   bool _canDrag(GridKey key) {
-    if (widget.store.isPending(key.id)) {
+    if (_isPending(key.id)) {
       return false;
     }
     final shape = _board.itemOf(key);
@@ -2582,7 +2664,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
     if (firstDay < index.readFrom) {
       index.addAll(
-        widget.store.entriesBetween(
+        _shownBetween(
           dateOfDayNumber(firstDay),
           dateOfDayNumber(index.readFrom - 1),
         ),
@@ -2591,7 +2673,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     if (lastDay > index.readTo) {
       index.addAll(
-        widget.store.entriesBetween(
+        _shownBetween(
           dateOfDayNumber(index.readTo + 1),
           dateOfDayNumber(lastDay),
         ),
@@ -2728,13 +2810,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _commit(key, to, move: false);
   }
 
-  /// Writes the drop of [key] at [to]. Sends nothing for a pending entry,
-  /// for one whose start or end the hours do not hold, for a drop
-  /// [_timesOf] has no times for, and when the entry would not change. The
-  /// board asks [_canDropAt], and so [_policy], before it reports a drop,
-  /// a semantics move's at its activation too.
+  /// Requests the drop of [key] at [to] ([_requestMove]). Requests nothing
+  /// for a pending entry, for one whose start or end the hours do not
+  /// hold, for a drop [_timesOf] has no times for, and when the entry would
+  /// not change. The board asks [_canDropAt], and so [_policy], before it
+  /// reports a drop, a semantics move's at its activation too.
   void _commit(GridKey key, BoardSpan to, {required bool move}) {
-    if (widget.store.isPending(key.id)) {
+    if (_isPending(key.id)) {
       return;
     }
     final from = _board.spanOf(key);
@@ -2757,7 +2839,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (requested == stored) {
       return;
     }
-    widget.store.requestMove(requested);
+    _requestMove(
+      CalendarMoveRequest<T>(
+        entry: stored,
+        requested: requested,
+        kind: move ? CalendarMoveKind.move : CalendarMoveKind.resize,
+      ),
+    );
   }
 
   /// Notes the board's new drag: selects a move's entry, hands the board
@@ -2819,7 +2907,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Delivered after the drop's report, and possibly after the board has
-  /// left the tree. Puts back a lifted entry's pieces the drop's write
+  /// left the tree. Puts back a lifted entry's pieces the drop's request
   /// did not, under the board's style as it stands, so a drop's glide runs
   /// on and they enter as added blocks do.
   void _handleDragEnd(GridKey key, bool committed) {
@@ -3124,7 +3212,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// shows on the days the range covers, shown columns or not
   /// ([rangeSharesTime]).
   bool _sharesShownTime(String? id, DateTime start, DateTime end) {
-    final shown = widget.store.entriesBetween(
+    final shown = _shownBetween(
       dateOfDayNumber(dayNumber(start)),
       dateOfDayNumber(lastDayNumberOf(start, end)),
     );
@@ -3725,14 +3813,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// all-day on its day ([_stripLandingOf]), a bar over a slot or the row
   /// above the slots an hour from that slot ([_barLandingOf]), and an end
   /// handle over a later day's slot ends there ([_laterDayEndOf]), each
-  /// through one write, or none where the landing is refused; either way
-  /// [_crossSpent] then refuses the board's own report. A bar's day-edge
-  /// resize held at [CalendarEditRules.dayLimit] writes the range it is
-  /// held at. Both stores notify within the write, so the sync that follows
-  /// moves or drops the dragged key, which cancels the board's drag before
-  /// it hears the release, or leaves the dragged piece's span as it was,
-  /// as for a piece ending at the day's end, whose drag the board then
-  /// ends without a report.
+  /// through one request ([_requestMove]), or none where the landing is
+  /// refused; either way [_crossSpent] then refuses the board's own
+  /// report. A bar's day-edge resize held at [CalendarEditRules.dayLimit]
+  /// requests the range it is held at. The request's hold syncs within the
+  /// call ([_requestMove]).
   void _releaseCross(Offset local) {
     final drag = _drag;
     if (drag == null) {
@@ -3778,12 +3863,20 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     final id = drag.key.id;
     final stored = widget.store.storedEntry(id);
-    if (stored == null || widget.store.isPending(id)) {
+    if (stored == null || _isPending(id)) {
       return;
     }
     final requested = stored.copyWith(start: write.start, end: write.end);
     if (requested != stored) {
-      widget.store.requestMove(requested);
+      _requestMove(
+        CalendarMoveRequest<T>(
+          entry: stored,
+          requested: requested,
+          kind: drag.kind == BoardDragKind.move
+              ? CalendarMoveKind.move
+              : CalendarMoveKind.resize,
+        ),
+      );
     }
   }
 
@@ -4467,10 +4560,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (start == null || end == null) {
       return (next: next, previous: previous);
     }
-    for (final shown in widget.store.entriesBetween(
-      widget.firstDay,
-      _lastDay,
-    )) {
+    for (final shown in _shownBetween(widget.firstDay, _lastDay)) {
       final entry = shown.entry;
       if (entry.isAllDay) {
         continue;

@@ -22,6 +22,7 @@ import '../store/calendar_store.dart';
 import '../views/day_list.dart';
 import '../views/month_board.dart';
 import '../views/month_picker.dart';
+import '../views/move_request.dart';
 import '../views/pinch_zoom.dart';
 import '../views/timed_grid.dart';
 import 'calendar_card.dart';
@@ -141,10 +142,12 @@ class CalendarEntryTapDetails<T> {
 /// mode, which [editable] turns on, Week's and Day's blocks move, keeping
 /// the entry's length, and resize, a bar dropped on a slot makes its entry
 /// an hour long there, and a block dropped on a day of the strip makes its
-/// entry all-day on that day; in Week bars move and resize by days. A drag
-/// over empty slots reports one continuous range through [onCreateRange],
-/// across days too, and one over the strip's empty days an all-day range
-/// of them, which stays marked until its future completes. Out of edit mode the calendar is read-only. In
+/// entry all-day on that day; in Week bars move and resize by days. Each
+/// move and resize lands as a [CalendarMoveRequest], which [onMoveRequest]
+/// receives. A drag over empty slots reports one continuous range through
+/// [onCreateRange], across days too, and one over the strip's empty days an
+/// all-day range of them, which stays marked until its future completes.
+/// Out of edit mode the calendar is read-only. In
 /// edit mode [editPolicy] limits what the gestures change and where a new
 /// entry may start ([CalendarEditPolicy]). A pinch of two
 /// fingers on Week's, Day's or Month's grid sets the controller's zoom
@@ -224,6 +227,7 @@ class CalendarView<T> extends StatefulWidget {
     this.dayBadges,
     this.onEntryTap,
     this.onCreateRange,
+    this.onMoveRequest,
     this.onEditRequest,
     this.onDeleteRequest,
     this.onCreateRefused,
@@ -266,7 +270,7 @@ class CalendarView<T> extends StatefulWidget {
   /// slots or across the all-day strip, a strip bar's day-edge resize, and
   /// Week's end handle dragged into a later day may give a range: one
   /// dragged past them is held at the latest range they admit, which a
-  /// release writes or reports. A move keeps the days an entry covers,
+  /// release requests or reports. A move keeps the days an entry covers,
   /// except where it crosses a midnight, and no limit applies to it.
   ///
   /// Its [CalendarEditPolicy.allowsOverlaps] decides whether Week's and
@@ -282,7 +286,7 @@ class CalendarView<T> extends StatefulWidget {
   /// data source.
   ///
   /// A policy not `==` to the last one given cancels a move or a resize in
-  /// flight, which then writes nothing, and ends a create range in flight,
+  /// flight, which then requests nothing, and ends a create range in flight,
   /// which then creates nothing: a host passes a policy whose class defines
   /// value equality, or the same instance in each build.
   final CalendarEditPolicy<T>? editPolicy;
@@ -355,6 +359,17 @@ class CalendarView<T> extends StatefulWidget {
   /// day's first free slot in Month, a long press's. Null reports nothing,
   /// and the marked range clears at once.
   final Future<void> Function(CreateRange range)? onCreateRange;
+
+  /// A move or a resize the gestures landed in Week or Day, in edit mode,
+  /// whose entry shows at the requested times, pending, until the future
+  /// completes; the host writes it, or another entry in its place, to
+  /// [store] ([CalendarStore.requestMove]), or lets it go. Null writes it
+  /// to [store]. Only the grid that made the request holds it: another
+  /// view, or a grid built anew as a switch between Week and Day builds
+  /// one, shows the store's entry meanwhile. A failure of the future, the
+  /// store's included, is not caught: a host that handles one passes a
+  /// function that does.
+  final Future<void> Function(CalendarMoveRequest<T> request)? onMoveRequest;
 
   /// An edit request from an Agenda card, with the stored entry: a
   /// [cardBuilder] calling [CalendarCardDetails.onEdit] makes it; null
@@ -1421,6 +1436,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                   onSelectDay: _select,
                   onOpenEntry: _openEntry,
                   onCreate: _createRange,
+                  onMoveRequest: widget.onMoveRequest,
                   onZoom: (minSlotHeight, minDayWidth) {
                     controller.setZoom(
                       minSlotHeight: minSlotHeight,

@@ -40,7 +40,6 @@ class Recorder {
   final List<String> events = <String>[];
   final List<(CalendarEntry<String>?, CalendarEntry<String>?)> changes =
       <(CalendarEntry<String>?, CalendarEntry<String>?)>[];
-  final List<CalendarWriteFailure> failures = <CalendarWriteFailure>[];
 
   MemoryCalendarStore<String> store({
     List<CalendarEntry<String>> entries = const <CalendarEntry<String>>[],
@@ -53,15 +52,25 @@ class Recorder {
         events.add("changed");
         changes.add((old, entry));
       },
-      onWriteFailed: (failure) {
-        failures.add(failure);
-      },
     );
     store.addListener(() {
       events.add("notified");
     });
     return store;
   }
+}
+
+/// Listens to [call] at once, and completes with what it completed with:
+/// its value, or the error it failed with.
+Future<Object?> outcomeOf(Future<Object?> call) {
+  return call.then<Object?>(
+    (value) {
+      return value;
+    },
+    onError: (Object error) {
+      return error;
+    },
+  );
 }
 
 /// Listens to [call] at once and returns what it failed with so far, null
@@ -174,7 +183,7 @@ void main() {
   });
 
   test("MS4 a move applies within the call, notifying and then reporting "
-      "the change", () {
+      "the change, and completes with the moved entry", () async {
     final recorder = Recorder();
     final item = task("item-1", day, 600, 660);
     final store = recorder.store(entries: <CalendarEntry<String>>[item]);
@@ -186,7 +195,7 @@ void main() {
       storedSeen.add(store.storedEntry("item-1"));
     });
 
-    store.requestMove(moved);
+    final moving = outcomeOf(store.requestMove(moved));
     expect(store.storedEntry("item-1"), moved);
     expect(recorder.events, <String>["notified", "changed"]);
     expect(recorder.changes, <(CalendarEntry<String>?, CalendarEntry<String>?)>[
@@ -195,6 +204,7 @@ void main() {
     expect(storedSeen, <CalendarEntry<String>?>[moved]);
     expect(pendingSeen, <bool>[false]);
     expect(store.isPending("item-1"), isFalse);
+    expect(await moving, same(moved));
   });
 
   test("MS5 a refused write changes nothing", () async {
@@ -207,11 +217,12 @@ void main() {
       hours: const DayHours(480, 1080),
     );
 
-    store.requestMove(item.copyWith(start: at(day, 450), end: at(day, 510)));
-    expect(recorder.failures, hasLength(1));
-    expect(recorder.failures[0].id, "item-1");
+    final moved = errorOf(
+      store.requestMove(item.copyWith(start: at(day, 450), end: at(day, 510))),
+    );
+    await pumpEventQueue();
     expect(
-      recorder.failures[0].error,
+      moved(),
       isA<CalendarHoursException>()
           .having((error) => error.startOutside, "startOutside", isTrue)
           .having((error) => error.endOutside, "endOutside", isFalse),
@@ -254,23 +265,21 @@ void main() {
 
     recorder.events.clear();
     recorder.changes.clear();
-    store.requestDelete("item-1");
+    final deleting = outcomeOf(store.requestDelete("item-1"));
     expect(recorder.events, <String>["notified", "changed"]);
     expect(recorder.changes.single, (renamed, null));
     expect(store.storedEntry("item-1"), isNull);
     expect(idsOf(store.entriesOn(day)), <String>[created.id!]);
+    expect(await deleting, isNull);
 
     recorder.events.clear();
     final unknown = errorOf(store.update(task("item-9", day, 600, 660)));
-    store.requestMove(task("item-9", day, 600, 660));
-    store.requestDelete("item-9");
+    final moving = errorOf(store.requestMove(task("item-9", day, 600, 660)));
+    final removing = errorOf(store.requestDelete("item-9"));
     await pumpEventQueue();
     expect(unknown(), isA<ArgumentError>());
-    expect(recorder.failures, hasLength(2));
-    for (final failure in recorder.failures) {
-      expect(failure.id, "item-9");
-      expect(failure.error, isA<ArgumentError>());
-    }
+    expect(moving(), isA<ArgumentError>());
+    expect(removing(), isA<ArgumentError>());
     expect(recorder.events, isEmpty);
   });
 

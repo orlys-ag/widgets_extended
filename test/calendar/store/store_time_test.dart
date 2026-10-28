@@ -86,25 +86,19 @@ class OverlapSource implements CalendarDataSource<String> {
   }
 }
 
-/// One store of each kind holding [entries], under [hours], reporting a
-/// failed write to [failures]: an in-memory store, and a caching store
-/// over an [OverlapSource] that has shown and read [first] to [last].
+/// One store of each kind holding [entries], under [hours]: an in-memory
+/// store, and a caching store over an [OverlapSource] that has shown and
+/// read [first] to [last].
 List<(String, CalendarStore<String>)> storesOf(
   List<CalendarEntry<String>> entries, {
   required DateTime first,
   required DateTime last,
   DayHours hours = DayHours.allDay,
-  List<CalendarWriteFailure>? failures,
 }) {
-  final memory = MemoryCalendarStore<String>(
-    entries: entries,
-    hours: hours,
-    onWriteFailed: failures?.add,
-  );
+  final memory = MemoryCalendarStore<String>(entries: entries, hours: hours);
   final caching = CachingCalendarStore<String>(
     dataSource: OverlapSource(entries),
     hours: hours,
-    onWriteFailed: failures?.add,
   );
   addTearDown(memory.dispose);
   addTearDown(caching.dispose);
@@ -114,6 +108,19 @@ List<(String, CalendarStore<String>)> storesOf(
     ("memory", memory),
     ("caching", caching),
   ];
+}
+
+/// Listens to [call] at once, and completes with what it completed with:
+/// its value, or the error it failed with.
+Future<Object?> outcomeOf(Future<Object?> call) {
+  return call.then<Object?>(
+    (value) {
+      return value;
+    },
+    onError: (Object error) {
+      return error;
+    },
+  );
 }
 
 /// The ids of [shown], in order.
@@ -167,38 +174,40 @@ void main() {
     const office = DayHours(8 * 60, 18 * 60);
     final outside = entryOf("outside", at(monday, 6), at(monday, 7));
     final task = entryOf("task", at(monday, 9), at(monday, 10));
-    final failures = <CalendarWriteFailure>[];
     for (final (name, store) in storesOf(
       <CalendarEntry<String>>[outside, task],
       first: monday,
       last: wednesday,
       hours: office,
-      failures: failures,
     )) {
-      failures.clear();
-      store.requestMove(
-        task.copyWith(start: at(monday, 17), end: at(tuesday, 9)),
+      final overnight = outcomeOf(
+        store.requestMove(
+          task.copyWith(start: at(monday, 17), end: at(tuesday, 9)),
+        ),
       );
-      expect(failures, isEmpty, reason: name);
+      expect(store.storedEntry("task")!.end, at(tuesday, 9), reason: name);
+      expect(await overnight, store.storedEntry("task"), reason: name);
+
+      await expectLater(
+        store.requestMove(
+          task.copyWith(start: at(monday, 17), end: at(monday, 19)),
+        ),
+        throwsA(
+          isA<CalendarHoursException>()
+              .having((error) => error.start, "start", at(monday, 17))
+              .having((error) => error.end, "end", at(monday, 19))
+              .having((error) => error.startOutside, "startOutside", isFalse)
+              .having((error) => error.endOutside, "endOutside", isTrue),
+        ),
+        reason: name,
+      );
       expect(store.storedEntry("task")!.end, at(tuesday, 9), reason: name);
 
-      store.requestMove(
-        task.copyWith(start: at(monday, 17), end: at(monday, 19)),
+      final allDay = outcomeOf(
+        store.requestMove(task.copyWith(start: tuesday, end: wednesday)),
       );
-      expect(failures, hasLength(1), reason: name);
-      final refusal = failures.single.error;
-      expect(refusal, isA<CalendarHoursException>(), reason: name);
-      refusal as CalendarHoursException;
-      expect(refusal.start, at(monday, 17), reason: name);
-      expect(refusal.end, at(monday, 19), reason: name);
-      expect(refusal.startOutside, isFalse, reason: name);
-      expect(refusal.endOutside, isTrue, reason: name);
-      expect(store.storedEntry("task")!.end, at(tuesday, 9), reason: name);
-
-      failures.clear();
-      store.requestMove(task.copyWith(start: tuesday, end: wednesday));
-      expect(failures, isEmpty, reason: name);
       expect(store.storedEntry("task")!.isAllDay, isTrue, reason: name);
+      expect(await allDay, store.storedEntry("task"), reason: name);
 
       // The entry outside the hours keeps its times through an update.
       final renamed = await store.update(outside.copyWith(title: "renamed"));
@@ -213,26 +222,24 @@ void main() {
   });
 
   test("SM3 a move onto a timed entry's time is stored with no failure, and "
-      "an all-day entry over a busy day is accepted", () {
+      "an all-day entry over a busy day is accepted", () async {
     final busy = entryOf("busy", at(tuesday, 0, 30), at(tuesday, 1, 30));
     final task = entryOf("task", at(monday, 9), at(monday, 10));
-    final failures = <CalendarWriteFailure>[];
     for (final (name, store) in storesOf(
       <CalendarEntry<String>>[busy, task],
       first: monday,
       last: wednesday,
-      failures: failures,
     )) {
-      failures.clear();
       final onto = task.copyWith(start: at(monday, 23), end: at(tuesday, 1));
-      store.requestMove(onto);
-      expect(failures, isEmpty, reason: name);
+      final moving = outcomeOf(store.requestMove(onto));
       expect(store.storedEntry("task"), onto, reason: name);
+      expect(await moving, onto, reason: name);
 
-      failures.clear();
-      store.requestMove(task.copyWith(start: tuesday, end: wednesday));
-      expect(failures, isEmpty, reason: name);
+      final allDay = outcomeOf(
+        store.requestMove(task.copyWith(start: tuesday, end: wednesday)),
+      );
       expect(store.storedEntry("task")!.start, tuesday, reason: name);
+      expect(await allDay, store.storedEntry("task"), reason: name);
     }
   });
 

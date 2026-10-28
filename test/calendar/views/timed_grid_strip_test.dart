@@ -22,10 +22,12 @@ import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/policy/overlap.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_activity_indicator.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/views/entry_split.dart';
+import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
@@ -400,7 +402,8 @@ class HeldSource implements CalendarDataSource<String> {
 /// [size], 800 wide and 2000 tall by default, where every slot of the day
 /// shows at the default [minSlotHeight] and every day column at the
 /// default [minDayWidth]; [creates] records each create range it reports
-/// and [opened] each entry it opens. [editable], [first], [hours] and [slotMinutes]
+/// and [opened] each entry it opens, and [onMoveRequest] takes each move
+/// and resize it lands. [editable], [first], [hours] and [slotMinutes]
 /// start as given, and [rebuild] builds the grid again with them. The
 /// grid's policy is [editPolicy] where it is given, and otherwise the one
 /// [lockPast], [lockEarlierToday], [maxDayCount] and [allowsOverlaps]
@@ -418,6 +421,7 @@ class Harness {
     this.minSlotHeight = defaultMinSlotHeight,
     this.minDayWidth = minDayWidthLow,
     this.size = const Size(800.0, 2000.0),
+    this.onMoveRequest,
     DateTime? today,
     int nowHour = 9,
   }) : today = today ?? DateTime(2026, 1, 5),
@@ -437,6 +441,8 @@ class Harness {
   final double minDayWidth;
   final Size size;
   final DateTime today;
+  final Future<void> Function(CalendarMoveRequest<String> request)?
+  onMoveRequest;
 
   bool editable;
   DateTime first;
@@ -483,6 +489,7 @@ class Harness {
       onCreate: (range) async {
         creates.add(range);
       },
+      onMoveRequest: onMoveRequest,
       editable: editable,
       editPolicy: policy,
       hours: hours,
@@ -613,12 +620,13 @@ void expectTimes(
 Future<MoveRecordingStore> moveBarTwoColumns(
   WidgetTester tester, {
   DayHours hours = DayHours.allDay,
+  Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
 }) async {
   final shown = Shown.week(monday, hours: hours);
   final store = storeOf(<CalendarEntry<String>>[
     allDayOf("off", monday),
   ], hours: hours);
-  await Harness(store, shown).pump(tester);
+  await Harness(store, shown, onMoveRequest: onMoveRequest).pump(tester);
   final gesture = await liftTo(
     tester,
     tester.getCenter(barFinder("off")),
@@ -633,12 +641,15 @@ Future<MoveRecordingStore> moveBarTwoColumns(
 
 /// TX2's gesture: in Week, the leading edge of Tuesday and Wednesday's bar
 /// let go over Monday.
-Future<MoveRecordingStore> resizeBarStart(WidgetTester tester) async {
+Future<MoveRecordingStore> resizeBarStart(
+  WidgetTester tester, {
+  Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
+}) async {
   final shown = Shown.week(monday);
   final store = storeOf(<CalendarEntry<String>>[
     allDayOf("trip", tuesday, days: 2),
   ]);
-  await Harness(store, shown).pump(tester);
+  await Harness(store, shown, onMoveRequest: onMoveRequest).pump(tester);
   await selectBar(tester, "trip");
   final gesture = await holdEdge(
     tester,
@@ -656,12 +667,15 @@ Future<MoveRecordingStore> resizeBarStart(WidgetTester tester) async {
 
 /// TX3's gesture: in Week, the trailing edge of Tuesday and Wednesday's bar
 /// let go over Thursday.
-Future<MoveRecordingStore> resizeBarEnd(WidgetTester tester) async {
+Future<MoveRecordingStore> resizeBarEnd(
+  WidgetTester tester, {
+  Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
+}) async {
   final shown = Shown.week(monday);
   final store = storeOf(<CalendarEntry<String>>[
     allDayOf("trip", tuesday, days: 2),
   ]);
-  await Harness(store, shown).pump(tester);
+  await Harness(store, shown, onMoveRequest: onMoveRequest).pump(tester);
   await selectBar(tester, "trip");
   final gesture = await holdEdge(
     tester,
@@ -680,10 +694,11 @@ Future<MoveRecordingStore> resizeBarEnd(WidgetTester tester) async {
 /// TX4's first gesture: Tuesday's bar let go on Tuesday's 10:00 slot.
 Future<MoveRecordingStore> dropBarOnSlot(
   WidgetTester tester,
-  Shown shown,
-) async {
+  Shown shown, {
+  Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
+}) async {
   final store = storeOf(<CalendarEntry<String>>[allDayOf("off", tuesday)]);
-  await Harness(store, shown).pump(tester);
+  await Harness(store, shown, onMoveRequest: onMoveRequest).pump(tester);
   await dragTo(
     tester,
     tester.getCenter(barFinder("off")),
@@ -715,13 +730,14 @@ Future<MoveRecordingStore> dropWideBarOnSlot(
 /// cell, which a bar of another all-day entry covers.
 Future<MoveRecordingStore> dropBlockOnStrip(
   WidgetTester tester,
-  Shown shown,
-) async {
+  Shown shown, {
+  Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
+}) async {
   final store = storeOf(<CalendarEntry<String>>[
     entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
     allDayOf("other", tuesday),
   ]);
-  await Harness(store, shown).pump(tester);
+  await Harness(store, shown, onMoveRequest: onMoveRequest).pump(tester);
   await dragTo(
     tester,
     tester.getCenter(blockFinder("meet", tuesday)),
@@ -760,10 +776,16 @@ Future<(TestGesture, MoveRecordingStore)> holdBarEdge(
   required AxisDirection side,
   required DateTime over,
   List<CalendarEntry<String>> others = const <CalendarEntry<String>>[],
+  Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
 }) async {
   final shown = Shown.week(monday);
   final store = storeOf(<CalendarEntry<String>>[allDayOf(id, day), ...others]);
-  await Harness(store, shown, maxDayCount: limit).pump(tester);
+  await Harness(
+    store,
+    shown,
+    maxDayCount: limit,
+    onMoveRequest: onMoveRequest,
+  ).pump(tester);
   await selectBar(tester, id);
   final cell = stripRect(tester, shown, over);
   final gesture = await holdEdge(
@@ -799,6 +821,7 @@ Future<MoveRecordingStore> releaseBarEdge(
   required AxisDirection side,
   required DateTime over,
   List<CalendarEntry<String>> others = const <CalendarEntry<String>>[],
+  Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
 }) async {
   final (gesture, store) = await holdBarEdge(
     tester,
@@ -808,6 +831,7 @@ Future<MoveRecordingStore> releaseBarEdge(
     side: side,
     over: over,
     others: others,
+    onMoveRequest: onMoveRequest,
   );
   await gesture.up();
   await tester.pumpAndSettle();
@@ -835,10 +859,16 @@ Future<(TestGesture, MoveRecordingStore, Harness)> holdEndOver(
   required int minute,
   int? limit,
   bool outside = false,
+  Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
 }) async {
   final shown = Shown.week(monday);
   final store = storeOf(entries);
-  final harness = Harness(store, shown, maxDayCount: limit);
+  final harness = Harness(
+    store,
+    shown,
+    maxDayCount: limit,
+    onMoveRequest: onMoveRequest,
+  );
   await harness.pump(tester);
   final selecting = await lift(tester, tester.getCenter(blocksOf(id).first));
   await selecting.up();
@@ -880,6 +910,7 @@ Future<MoveRecordingStore> releaseEndOver(
   required int minute,
   int? limit,
   bool outside = false,
+  Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
 }) async {
   final (gesture, store, _) = await holdEndOver(
     tester,
@@ -890,6 +921,7 @@ Future<MoveRecordingStore> releaseEndOver(
     minute: minute,
     limit: limit,
     outside: outside,
+    onMoveRequest: onMoveRequest,
   );
   await gesture.up();
   await tester.pumpAndSettle();
@@ -3539,6 +3571,265 @@ void main() {
         }
       }
     }
+  });
+
+  testWidgets("MR1 with onMoveRequest each move and resize a gesture lands "
+      "reaches it once, as the stored entry, that entry at the times the "
+      "gesture gave it and the gesture's kind, and the store is asked for "
+      "no write", (tester) async {
+    final shown = Shown.week(monday);
+    final requests = <String, List<CalendarMoveRequest<String>>>{};
+    final stores = <String, MoveRecordingStore>{};
+    Future<void> Function(CalendarMoveRequest<String> request) recordAs(
+      String name,
+    ) {
+      final into = requests[name] = <CalendarMoveRequest<String>>[];
+      return (request) async {
+        into.add(request);
+      };
+    }
+
+    stores["bar move"] = await moveBarTwoColumns(
+      tester,
+      onMoveRequest: recordAs("bar move"),
+    );
+    stores["bar start"] = await resizeBarStart(
+      tester,
+      onMoveRequest: recordAs("bar start"),
+    );
+    stores["bar end"] = await resizeBarEnd(
+      tester,
+      onMoveRequest: recordAs("bar end"),
+    );
+    stores["bar on slot"] = await dropBarOnSlot(
+      tester,
+      shown,
+      onMoveRequest: recordAs("bar on slot"),
+    );
+    stores["block on strip"] = await dropBlockOnStrip(
+      tester,
+      shown,
+      onMoveRequest: recordAs("block on strip"),
+    );
+    stores["end on a later day"] = await releaseEndOver(
+      tester,
+      entries: <CalendarEntry<String>>[nightEntry()],
+      id: "night",
+      day: tuesday,
+      over: wednesday,
+      minute: 12 * 60,
+      onMoveRequest: recordAs("end on a later day"),
+    );
+    stores["bar end held"] = await releaseBarEdge(
+      tester,
+      limit: 3,
+      id: "m",
+      day: monday,
+      side: AxisDirection.right,
+      over: saturday,
+      onMoveRequest: recordAs("bar end held"),
+    );
+    final meet = entryOf("meet", at(tuesday, 10), at(tuesday, 11));
+    final blockStore = storeOf(<CalendarEntry<String>>[meet]);
+    await Harness(
+      blockStore,
+      shown,
+      onMoveRequest: recordAs("block move"),
+    ).pump(tester);
+    await moveBlockOnto(
+      tester,
+      blockFinder("meet", tuesday),
+      slotRect(tester, shown, tuesday, 14 * 60),
+    );
+    stores["block move"] = blockStore;
+
+    CalendarMoveRequest<String> request(
+      CalendarEntry<String> entry,
+      DateTime start,
+      DateTime end,
+      CalendarMoveKind kind,
+    ) {
+      return CalendarMoveRequest<String>(
+        entry: entry,
+        requested: entry.copyWith(start: start, end: end),
+        kind: kind,
+      );
+    }
+
+    const move = CalendarMoveKind.move;
+    const resize = CalendarMoveKind.resize;
+    final trip = allDayOf("trip", tuesday, days: 2);
+    final night = nightEntry();
+    expect(requests, <String, List<CalendarMoveRequest<String>>>{
+      "bar move": <CalendarMoveRequest<String>>[
+        request(allDayOf("off", monday), wednesday, thursday, move),
+      ],
+      "bar start": <CalendarMoveRequest<String>>[
+        request(trip, monday, thursday, resize),
+      ],
+      "bar end": <CalendarMoveRequest<String>>[
+        request(trip, tuesday, friday, resize),
+      ],
+      "bar on slot": <CalendarMoveRequest<String>>[
+        request(
+          allDayOf("off", tuesday),
+          at(tuesday, 10),
+          at(tuesday, 11),
+          move,
+        ),
+      ],
+      "block on strip": <CalendarMoveRequest<String>>[
+        request(meet, tuesday, wednesday, move),
+      ],
+      "end on a later day": <CalendarMoveRequest<String>>[
+        request(night, night.start, at(wednesday, 12, 15), resize),
+      ],
+      "bar end held": <CalendarMoveRequest<String>>[
+        request(allDayOf("m", monday), monday, thursday, resize),
+      ],
+      "block move": <CalendarMoveRequest<String>>[
+        request(meet, at(tuesday, 14), at(tuesday, 15), move),
+      ],
+    });
+    for (final MapEntry(key: name, value: store) in stores.entries) {
+      expect(store.moves, isEmpty, reason: name);
+    }
+  });
+
+  testWidgets("MR2 while a request's future runs, its block shows at the "
+      "requested times and pending, opening nothing on a tap and lifting "
+      "for no long press; once it completes the block shows the store's "
+      "entry, at its stored times where the host wrote nothing and at the "
+      "requested ones where it wrote the request", (tester) async {
+    final shown = Shown.week(monday);
+    final meet = entryOf("meet", at(tuesday, 10), at(tuesday, 11));
+    Finder spinner() {
+      return find.descendant(
+        of: blockFinder("meet", tuesday),
+        matching: find.byType(CalendarActivityIndicator),
+      );
+    }
+
+    for (final writes in const <bool>[false, true]) {
+      final reason = writes ? "written" : "let go";
+      final store = storeOf(<CalendarEntry<String>>[meet]);
+      final requests = <CalendarMoveRequest<String>>[];
+      final answer = Completer<void>();
+      final harness = Harness(
+        store,
+        shown,
+        onMoveRequest: (request) {
+          requests.add(request);
+          return answer.future;
+        },
+      );
+      await harness.pump(tester);
+      final stored = tester.getRect(blockFinder("meet", tuesday));
+      final inset = stored.top - slotRect(tester, shown, tuesday, 10 * 60).top;
+      final slot = slotRect(tester, shown, tuesday, 14 * 60);
+      // A pending block's indicator runs while the entry is pending, so
+      // the frames are pumped for a time rather than settled.
+      final gesture = await lift(tester, stored.center);
+      await gesture.moveBy(
+        slot.topLeft - stored.topLeft + const Offset(0.0, 2.0),
+      );
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      // Setup sanity: the drop made its one request, which runs.
+      expect(requests, hasLength(1), reason: reason);
+      final held = tester.getRect(blockFinder("meet", tuesday));
+      expect(held.top, closeTo(slot.top + inset, 0.01), reason: reason);
+      expect(held.height, closeTo(stored.height, 0.01), reason: reason);
+      expect(spinner(), findsOneWidget, reason: reason);
+
+      await tester.tap(blockFinder("meet", tuesday));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(harness.opened, isEmpty, reason: reason);
+      final pressing = await lift(tester, held.center);
+      expect(find.byKey(liftedBlockKey), findsNothing, reason: reason);
+      await pressing.up();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      if (writes) {
+        await store.requestMove(requests.single.requested);
+      }
+      answer.complete();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(spinner(), findsNothing, reason: reason);
+      expect(
+        tester.getRect(blockFinder("meet", tuesday)),
+        nearRect(writes ? held : stored),
+        reason: reason,
+      );
+      await tester.tap(blockFinder("meet", tuesday));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(harness.opened, <String>["meet"], reason: reason);
+    }
+  });
+
+  testWidgets("MR3 a request whose function throws within the call, and one "
+      "with none whose write the caching store fails, each show the block "
+      "at its stored times again, and their errors are not caught", (
+    tester,
+  ) async {
+    final shown = Shown.week(monday);
+    final meet = entryOf("meet", at(tuesday, 10), at(tuesday, 11));
+    final thrown = StateError("Refused.");
+    final uncaught = <Object>[];
+    // The drop runs in a zone of its own, which receives the errors the
+    // futures it starts leave uncaught. A pending block's indicator runs
+    // while the entry is pending, so the frames after it are pumped for
+    // a time rather than settled.
+    Future<void> dropInZone() async {
+      final from = tester.getRect(blockFinder("meet", tuesday));
+      final slot = slotRect(tester, shown, tuesday, 14 * 60);
+      final gesture = await lift(tester, from.center);
+      await runZonedGuarded(
+        () async {
+          await gesture.moveBy(
+            slot.topLeft - from.topLeft + const Offset(0.0, 2.0),
+          );
+          await tester.pump();
+          await gesture.up();
+        },
+        (error, stackTrace) {
+          uncaught.add(error);
+        },
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+    }
+
+    final memory = storeOf(<CalendarEntry<String>>[meet]);
+    await Harness(
+      memory,
+      shown,
+      onMoveRequest: (request) {
+        throw thrown;
+      },
+    ).pump(tester);
+    final stored = tester.getRect(blockFinder("meet", tuesday));
+    await dropInZone();
+    expect(uncaught, <Object>[same(thrown)]);
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
+
+    uncaught.clear();
+    final source = HeldSource(<CalendarEntry<String>>[meet]);
+    final caching = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(caching.dispose);
+    caching.show(monday, sunday);
+    await Harness(caching, shown).pump(tester);
+    await dropInZone();
+    // Setup sanity: with no onMoveRequest the drop wrote to the store.
+    expect(source.replaces, hasLength(1));
+    source.replaces.single.completeError(thrown);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(uncaught, <Object>[same(thrown)]);
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
   });
 }
 

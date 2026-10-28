@@ -17,11 +17,9 @@ typedef CalendarEntryChanged<T> =
 /// and a move, and refuses no write for sharing time with another entry.
 /// A write that passes is applied within the call, so no write is ever
 /// pending: the store notifies its listeners once, then calls [onChanged]
-/// with the old and the new entry.
-/// A refused move or delete reaches [onWriteFailed], and a refused create
-/// or update fails to its caller; neither changes anything or notifies.
-/// An update, move or delete of an id no entry has fails with an
-/// [ArgumentError], to the caller or through [onWriteFailed].
+/// with the old and the new entry. A refused write fails to its caller,
+/// changing nothing and notifying nothing. An update, move or delete of
+/// an id no entry has fails with an [ArgumentError].
 ///
 /// Every range is shown and every day read: [status] is ready, and [show],
 /// [retry] and [prefetch] do nothing.
@@ -32,7 +30,6 @@ class MemoryCalendarStore<T> extends CalendarStore<T> {
     Iterable<CalendarEntry<T>> entries = const <Never>[],
     this.onChanged,
     super.hours,
-    super.onWriteFailed,
   }) {
     _fill(_checked(entries));
   }
@@ -205,38 +202,36 @@ class MemoryCalendarStore<T> extends CalendarStore<T> {
     return entry;
   }
 
-  /// Moves or resizes the stored entry to [requested]. Reports through
-  /// [onWriteFailed], changing nothing, an [ArgumentError] for an id no
-  /// entry has, and a [CalendarHoursException] for a move [hoursRefusalOf]
-  /// refuses; a move onto another entry's time is applied. Throws an
-  /// [ArgumentError] for an entry with no id.
+  /// Moves or resizes the stored entry to [requested] and completes with
+  /// it; a move onto another entry's time is applied. Fails with an
+  /// [ArgumentError] for an entry with no id or an id no entry has, and
+  /// with a [CalendarHoursException] when [hoursRefusalOf] refuses it,
+  /// changing nothing.
   @override
-  void requestMove(CalendarEntry<T> requested) {
+  Future<CalendarEntry<T>> requestMove(CalendarEntry<T> requested) async {
     final id = requested.id;
     if (id == null) {
       throw ArgumentError.value(requested, "requested", "A move needs an id.");
     }
     final old = _index.stored(id);
     if (old == null) {
-      reportWriteFailure(id, ArgumentError.value(id, "id", "No entry."));
-      return;
+      throw ArgumentError.value(id, "id", "No entry.");
     }
     final refusal = hoursRefusalOf(requested);
     if (refusal != null) {
-      reportWriteFailure(id, refusal);
-      return;
+      throw refusal;
     }
     _apply(old, requested);
+    return requested;
   }
 
-  /// Deletes the entry [id]. Reports an [ArgumentError] through
-  /// [onWriteFailed], changing nothing, when no entry has it.
+  /// Deletes the entry [id], and completes. Fails with an [ArgumentError],
+  /// changing nothing, when no entry has it.
   @override
-  void requestDelete(String id) {
+  Future<void> requestDelete(String id) async {
     final old = _index.stored(id);
     if (old == null) {
-      reportWriteFailure(id, ArgumentError.value(id, "id", "No entry."));
-      return;
+      throw ArgumentError.value(id, "id", "No entry.");
     }
     _index.forget(id);
     notifyListeners();

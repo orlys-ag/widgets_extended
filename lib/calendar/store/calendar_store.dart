@@ -1,5 +1,5 @@
-/// What every calendar store answers and writes, the refusals and failures
-/// its writes report, and the index of entries by day both stores keep.
+/// What every calendar store answers and writes, the refusals its writes
+/// fail with, and the index of entries by day both stores keep.
 library;
 
 import 'dart:math' as math;
@@ -48,38 +48,6 @@ class CalendarShownEntry<T> {
     return "CalendarShownEntry($id, pending: $pending)";
   }
 }
-
-/// A move, a resize or a delete that failed or that the store refused,
-/// as a store's [CalendarStore.onWriteFailed] receives it.
-@immutable
-class CalendarWriteFailure {
-  /// The failure of the write on the entry [id], with [error].
-  const CalendarWriteFailure({
-    required this.id,
-    required this.error,
-    this.stackTrace,
-  });
-
-  /// The id of the entry the write was on.
-  final String id;
-
-  /// The data source's error, unchanged, or the [CalendarStoreException]
-  /// the store refused the write with.
-  final Object error;
-
-  /// Where the data source's error was thrown; null for a refusal the
-  /// store makes itself.
-  final StackTrace? stackTrace;
-
-  @override
-  String toString() {
-    return "CalendarWriteFailure($id, $error)";
-  }
-}
-
-/// Receives each move, resize or delete that fails or that the store
-/// refuses.
-typedef CalendarWriteFailed = void Function(CalendarWriteFailure failure);
 
 /// A write the store refuses itself, sending nothing to a data source.
 sealed class CalendarStoreException implements Exception {
@@ -143,14 +111,12 @@ final class CalendarWritePendingException extends CalendarStoreException {
 /// A store notifies its listeners whenever what it answers changes. An
 /// entry has one write in flight at most: while it runs the entry shows
 /// [CalendarShownEntry.pending], and a write on it sends nothing and fails
-/// with a [CalendarWritePendingException]. A move, a resize or a delete
-/// reports its failure through [onWriteFailed]; a create or an update
-/// fails to its caller.
+/// with a [CalendarWritePendingException]. Each write returns a future
+/// that completes once the write is stored, or fails to its caller with
+/// the error that kept it from being stored.
 abstract class CalendarStore<T> extends ChangeNotifier {
-  /// A store holding writes to [hours], reporting a failed move, resize or
-  /// delete to [onWriteFailed].
-  CalendarStore({DayHours hours = DayHours.allDay, this.onWriteFailed})
-    : _hours = hours;
+  /// A store holding writes to [hours].
+  CalendarStore({DayHours hours = DayHours.allDay}) : _hours = hours;
 
   DayHours _hours;
 
@@ -174,10 +140,6 @@ abstract class CalendarStore<T> extends ChangeNotifier {
     _hours = value;
     notifyListeners();
   }
-
-  /// Receives each move, resize or delete that fails or that the store
-  /// refuses; null drops them.
-  final CalendarWriteFailed? onWriteFailed;
 
   /// Whether every day of the shown range is read, or the read it waits
   /// on failed.
@@ -239,14 +201,16 @@ abstract class CalendarStore<T> extends ChangeNotifier {
   Future<CalendarEntry<T>> update(CalendarEntry<T> entry);
 
   /// Writes a grid move or resize to [requested], whose id names a stored
-  /// entry, whether or not it shares time with another entry. A failure,
-  /// or a refusal for the hours or for a write in flight, reaches
-  /// [onWriteFailed]. Throws an [ArgumentError] for an entry with no id.
-  void requestMove(CalendarEntry<T> requested);
+  /// entry, whether or not it shares time with another entry; completes
+  /// with the stored entry, or fails with the error that kept it from
+  /// being stored, the stored entry showing again. An entry with no id
+  /// fails with an [ArgumentError], and one [hoursRefusalOf] refuses with
+  /// a [CalendarHoursException].
+  Future<CalendarEntry<T>> requestMove(CalendarEntry<T> requested);
 
-  /// Deletes the entry [id]. A failure, or a refusal for a write in
-  /// flight, reaches [onWriteFailed].
-  void requestDelete(String id);
+  /// Deletes the entry [id]; completes once it is deleted, or fails with
+  /// the error that kept it from being deleted, the entry staying stored.
+  Future<void> requestDelete(String id);
 
   /// The refusal of [entry] for [hours], or null when the hours hold its
   /// start and its end ([DayHours.holdsTimes]), or when it keeps the start
@@ -267,15 +231,6 @@ abstract class CalendarStore<T> extends ChangeNotifier {
       hours: hours,
       start: entry.start,
       end: entry.end,
-    );
-  }
-
-  /// Calls [onWriteFailed], when set, with the failure of the write on
-  /// [id].
-  @protected
-  void reportWriteFailure(String id, Object error, [StackTrace? stackTrace]) {
-    onWriteFailed?.call(
-      CalendarWriteFailure(id: id, error: error, stackTrace: stackTrace),
     );
   }
 }
@@ -303,7 +258,7 @@ class CalendarEntryIndex<T> {
 
   final Map<String, CalendarEntry<T>> _stored = <String, CalendarEntry<T>>{};
 
-  /// Each open day's stored entries, in [_compare]'s order.
+  /// Each open day's stored entries, in [compareCalendarEntries]'s order.
   final Map<int, List<CalendarEntry<T>>> _byDay =
       <int, List<CalendarEntry<T>>>{};
 
@@ -311,7 +266,7 @@ class CalendarEntryIndex<T> {
   /// null when it files none.
   final Map<String, CalendarEntry<T>?> _pending = <String, CalendarEntry<T>?>{};
 
-  /// The entries the pending ids show, in [_compare]'s order.
+  /// The entries the pending ids show, in [compareCalendarEntries]'s order.
   final List<CalendarEntry<T>> _pendingList = <CalendarEntry<T>>[];
 
   /// The entry [id] as stored.
@@ -384,7 +339,7 @@ class CalendarEntryIndex<T> {
       }
     }
     for (final MapEntry(key: day, value: list) in opened.entries) {
-      list.sort(_compare);
+      list.sort(compareCalendarEntries);
       _byDay[day] = list;
     }
   }
@@ -487,7 +442,8 @@ class CalendarEntryIndex<T> {
         return shown;
       }
       if (j == _pendingList.length ||
-          (i < stored.length && _compare(stored[i], _pendingList[j]) < 0)) {
+          (i < stored.length &&
+              compareCalendarEntries(stored[i], _pendingList[j]) < 0)) {
         shown.add(CalendarShownEntry<T>(stored[i], pending: false));
         i++;
       } else {
@@ -588,7 +544,7 @@ class CalendarEntryIndex<T> {
     }
     var end = start + 1;
     while (end < shown.length &&
-        _compare(shown[end - 1].entry, shown[end].entry) < 0) {
+        compareCalendarEntries(shown[end - 1].entry, shown[end].entry) < 0) {
       end++;
     }
     return end;
@@ -607,7 +563,7 @@ class CalendarEntryIndex<T> {
     var i = start;
     var j = middle;
     while (i < middle && j < end) {
-      final order = _compare(from[i].entry, from[j].entry);
+      final order = compareCalendarEntries(from[i].entry, from[j].entry);
       if (order < 0) {
         into.add(from[i]);
         i++;
@@ -630,7 +586,7 @@ class CalendarEntryIndex<T> {
     }
   }
 
-  /// Files [entry] in [list] at its place in [_compare]'s order.
+  /// Files [entry] in [list] at its place in [compareCalendarEntries]'s order.
   void _insert(List<CalendarEntry<T>> list, CalendarEntry<T> entry) {
     list.insert(_lowerBound(list, entry), entry);
   }
@@ -649,7 +605,7 @@ class CalendarEntryIndex<T> {
     var high = list.length;
     while (low < high) {
       final middle = (low + high) >> 1;
-      if (_compare(list[middle], entry) < 0) {
+      if (compareCalendarEntries(list[middle], entry) < 0) {
         low = middle + 1;
       } else {
         high = middle;
@@ -659,8 +615,9 @@ class CalendarEntryIndex<T> {
   }
 }
 
-/// By start, end, title and id: a total order, as ids are distinct.
-int _compare<T>(CalendarEntry<T> a, CalendarEntry<T> b) {
+/// The order a store answers entries in: by start, end, title and id, a
+/// total order over entries with distinct ids.
+int compareCalendarEntries<T>(CalendarEntry<T> a, CalendarEntry<T> b) {
   final byStart = a.start.compareTo(b.start);
   if (byStart != 0) {
     return byStart;

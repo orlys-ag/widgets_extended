@@ -66,12 +66,11 @@ export 'store/calendar_store.dart'
         CalendarShownEntry,
         CalendarStore,
         CalendarStoreException,
-        CalendarWriteFailed,
-        CalendarWriteFailure,
         CalendarWritePendingException;
 export 'store/memory_calendar_store.dart'
     show CalendarEntryChanged, MemoryCalendarStore;
 export 'views/month_board.dart' show MonthLayout;
+export 'views/move_request.dart' show CalendarMoveKind, CalendarMoveRequest;
 export 'views/pinch_zoom.dart'
     show
         defaultMinSlotHeight,
