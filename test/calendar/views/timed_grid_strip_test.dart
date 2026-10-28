@@ -402,8 +402,9 @@ class HeldSource implements CalendarDataSource<String> {
 /// [size], 800 wide and 2000 tall by default, where every slot of the day
 /// shows at the default [minSlotHeight] and every day column at the
 /// default [minDayWidth]; [creates] records each create range it reports
-/// and [opened] each entry it opens, and [onMoveRequest] takes each move
-/// and resize it lands. [editable], [first], [hours] and [slotMinutes]
+/// and [opened] each entry it opens, [onMoveRequest] takes each move and
+/// resize it lands, and [onZoom] each zoom a pinch reports, which the grid
+/// does not show. [editable], [first], [hours] and [slotMinutes]
 /// start as given, and [rebuild] builds the grid again with them. The
 /// grid's policy is [editPolicy] where it is given, and otherwise the one
 /// [lockPast], [lockEarlierToday], [maxDayCount] and [allowsOverlaps]
@@ -422,6 +423,7 @@ class Harness {
     this.minDayWidth = minDayWidthLow,
     this.size = const Size(800.0, 2000.0),
     this.onMoveRequest,
+    this.onZoom,
     DateTime? today,
     int nowHour = 9,
   }) : today = today ?? DateTime(2026, 1, 5),
@@ -443,6 +445,7 @@ class Harness {
   final DateTime today;
   final Future<void> Function(CalendarMoveRequest<String> request)?
   onMoveRequest;
+  final void Function(double minSlotHeight, double minDayWidth)? onZoom;
 
   bool editable;
   DateTime first;
@@ -490,6 +493,7 @@ class Harness {
         creates.add(range);
       },
       onMoveRequest: onMoveRequest,
+      onZoom: onZoom,
       editable: editable,
       editPolicy: policy,
       hours: hours,
@@ -3830,6 +3834,388 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     expect(uncaught, <Object>[same(thrown)]);
     expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
+  });
+
+  testWidgets("GM1 while a block is lifted nothing creates: no drag or tap "
+      "pressed during the lift, and none pressed before it whose drag or "
+      "release comes during it; once the block is let go the same drag and "
+      "the same tap create", (tester) async {
+    final shown = Shown.week(monday);
+    final store = storeOf(<CalendarEntry<String>>[
+      entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
+    ]);
+    final harness = Harness(store, shown);
+    await harness.pump(tester);
+    final block = tester.getCenter(blockFinder("meet", tuesday));
+    final from = slotRect(tester, shown, thursday, 14 * 60).center;
+    final to = slotRect(tester, shown, thursday, 16 * 60).center;
+    for (final (drags, before) in const <(bool, bool)>[
+      (true, false),
+      (true, true),
+      (false, false),
+      (false, true),
+    ]) {
+      final reason =
+          "${drags ? "drag" : "tap"} pressed "
+          "${before ? "before" : "during"} the lift";
+      TestGesture? creating;
+      if (before) {
+        creating = await tester.startGesture(
+          from,
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pump();
+      }
+      final lifting = await lift(tester, block);
+      // Setup sanity: the block is lifted.
+      expect(find.byKey(liftedBlockKey), findsOneWidget, reason: reason);
+      creating ??= await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      if (drags) {
+        await creating.moveTo(Offset.lerp(from, to, 0.5)!);
+        await tester.pump();
+        await creating.moveTo(to);
+        await tester.pump();
+      }
+      await creating.up();
+      await tester.pump();
+      expect(harness.creates, isEmpty, reason: reason);
+      await lifting.up();
+      await tester.pumpAndSettle();
+    }
+
+    await createDrag(tester, from, to);
+    await tester.tapAt(from);
+    await tester.pumpAndSettle();
+    expect(harness.creates, <CreateRange>[
+      CreateRange(start: at(thursday, 14), end: at(thursday, 16, 15)),
+      CreateRange(start: at(thursday, 14), end: at(thursday, 14, 15)),
+    ]);
+  });
+
+  testWidgets("GM2 a block lifted while a create range runs ends the range: "
+      "the slots and the strip cells it marked clear, and its release "
+      "creates nothing", (tester) async {
+    final shown = Shown.week(monday);
+    for (final strip in const <bool>[false, true]) {
+      final reason = strip ? "strip" : "slots";
+      final store = storeOf(<CalendarEntry<String>>[
+        entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
+      ]);
+      final harness = Harness(store, shown);
+      await harness.pump(tester);
+      final from = strip
+          ? stripRect(tester, shown, thursday).center
+          : slotRect(tester, shown, thursday, 14 * 60).center;
+      final to = strip
+          ? stripRect(tester, shown, friday).center
+          : slotRect(tester, shown, thursday, 16 * 60).center;
+      final creating = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      await creating.moveTo(Offset.lerp(from, to, 0.5)!);
+      await tester.pump();
+      await creating.moveTo(to);
+      await tester.pump();
+      // Setup sanity: the range runs and is marked.
+      final ranged = strokedRects(tester);
+      if (strip) {
+        expect(markedOf(tester, <DateTime>[thursday, friday]), <DateTime>[
+          thursday,
+          friday,
+        ], reason: reason);
+      } else {
+        expect(ranged, hasLength(1), reason: reason);
+      }
+
+      final lifting = await lift(
+        tester,
+        tester.getCenter(blockFinder("meet", tuesday)),
+      );
+      // Setup sanity: the block is lifted.
+      expect(find.byKey(liftedBlockKey), findsOneWidget, reason: reason);
+      if (strip) {
+        expect(
+          markedOf(tester, <DateTime>[thursday, friday]),
+          isEmpty,
+          reason: reason,
+        );
+      } else {
+        // The lifted block's own landing outline is stroked in its place.
+        expect(
+          strokedRects(tester),
+          isNot(contains(ranged.single)),
+          reason: reason,
+        );
+      }
+      await creating.up();
+      await tester.pump();
+      expect(harness.creates, isEmpty, reason: reason);
+      await lifting.up();
+      await tester.pumpAndSettle();
+    }
+  });
+
+  testWidgets("GM3 a block lifted while a pinch zooms ends the pinch: the "
+      "fingers spreading on zoom nothing more", (tester) async {
+    final shown = Shown.week(monday);
+    final store = storeOf(<CalendarEntry<String>>[
+      entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
+    ]);
+    final zooms = <double>[];
+    final harness = Harness(
+      store,
+      shown,
+      onZoom: (minSlotHeight, minDayWidth) {
+        zooms.add(minSlotHeight);
+      },
+    );
+    await harness.pump(tester);
+    final focal = slotRect(tester, shown, thursday, 15 * 60).center;
+    final first = await tester.startGesture(focal - const Offset(0.0, 30.0));
+    final second = await tester.startGesture(focal + const Offset(0.0, 30.0));
+    Future<void> spread() async {
+      for (var i = 0; i < 3; i++) {
+        await first.moveBy(const Offset(0.0, -6.0));
+        await second.moveBy(const Offset(0.0, 6.0));
+        await tester.pump();
+      }
+    }
+
+    await spread();
+    // Setup sanity: the pinch zooms.
+    expect(zooms, isNotEmpty);
+    final lifting = await lift(
+      tester,
+      tester.getCenter(blockFinder("meet", tuesday)),
+    );
+    // Setup sanity: the block is lifted.
+    expect(find.byKey(liftedBlockKey), findsOneWidget);
+    zooms.clear();
+    await spread();
+    expect(zooms, isEmpty);
+    await lifting.up();
+    await first.up();
+    await second.up();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("GM4 while a create range runs or a pinch zooms no create "
+      "range or tap creates, pressed during it or, for the pinch, before it; "
+      "while either runs or a block is lifted no pinch zooms; and the "
+      "running gesture goes on", (tester) async {
+    final shown = Shown.week(monday);
+    for (final (running, other) in const <(String, String)>[
+      ("range", "range"),
+      ("range", "tap"),
+      ("range", "pinch"),
+      ("pinch", "range"),
+      ("pinch", "range pressed before it"),
+      ("pinch", "tap"),
+      ("pinch", "tap pressed before it"),
+      ("lift", "pinch"),
+    ]) {
+      final reason = "$other during a $running";
+      final store = storeOf(<CalendarEntry<String>>[
+        entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
+      ]);
+      final zooms = <double>[];
+      final harness = Harness(
+        store,
+        shown,
+        onZoom: (minSlotHeight, minDayWidth) {
+          zooms.add(minSlotHeight);
+        },
+      );
+      await harness.pump(tester);
+      final rangeFrom = slotRect(tester, shown, thursday, 14 * 60).center;
+      final rangeTo = slotRect(tester, shown, thursday, 16 * 60).center;
+      final otherFrom = slotRect(tester, shown, friday, 10 * 60).center;
+      final otherTo = slotRect(tester, shown, friday, 11 * 60).center;
+      // The hour gutter, where no press creates, so the pinch's touches
+      // leave the create tap free for the mouse.
+      final focal = cellRect(tester, shown.rowOf(18 * 60), 0).center;
+      final held = <TestGesture>[];
+      Future<TestGesture> press(Offset at) async {
+        final gesture = await tester.startGesture(
+          at,
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pump();
+        return gesture;
+      }
+
+      Future<void> spread() async {
+        for (var i = 0; i < 3; i++) {
+          await held[held.length - 2].moveBy(const Offset(0.0, -6.0));
+          await held.last.moveBy(const Offset(0.0, 6.0));
+          await tester.pump();
+        }
+      }
+
+      Future<void> pinch() async {
+        held.add(await tester.startGesture(focal - const Offset(0.0, 30.0)));
+        held.add(await tester.startGesture(focal + const Offset(0.0, 30.0)));
+        await spread();
+      }
+
+      final before = other.endsWith("before it")
+          ? await press(otherFrom)
+          : null;
+      TestGesture? ranging;
+      switch (running) {
+        case "range":
+          ranging = await press(rangeFrom);
+          await ranging.moveTo(Offset.lerp(rangeFrom, rangeTo, 0.5)!);
+          await tester.pump();
+          await ranging.moveTo(rangeTo);
+          await tester.pump();
+          // Setup sanity: the range runs.
+          expect(strokedRects(tester), hasLength(1), reason: reason);
+        case "pinch":
+          await pinch();
+          // Setup sanity: the pinch zooms.
+          expect(zooms, isNotEmpty, reason: reason);
+        case "lift":
+          held.add(await press(tester.getCenter(blockFinder("meet", tuesday))));
+          await tester.pump(kLongPressTimeout + kPressTimeout);
+          // Setup sanity: the block is lifted.
+          expect(find.byKey(liftedBlockKey), findsOneWidget, reason: reason);
+      }
+
+      zooms.clear();
+      if (other == "pinch") {
+        await pinch();
+        expect(zooms, isEmpty, reason: reason);
+      } else {
+        final creating = before ?? await press(otherFrom);
+        if (other.startsWith("range")) {
+          await creating.moveTo(otherTo);
+          await tester.pump();
+        }
+        await creating.up();
+        await tester.pump();
+        expect(harness.creates, isEmpty, reason: reason);
+      }
+
+      switch (running) {
+        case "range":
+          await ranging!.up();
+          await tester.pump();
+          expect(
+            <DateTime>[for (final range in harness.creates) range.start],
+            <DateTime>[at(thursday, 14)],
+            reason: reason,
+          );
+        case "pinch":
+          await spread();
+          expect(zooms, isNotEmpty, reason: reason);
+        case "lift":
+          expect(find.byKey(liftedBlockKey), findsOneWidget, reason: reason);
+      }
+      for (final gesture in held) {
+        await gesture.up();
+      }
+      await tester.pumpAndSettle();
+    }
+  });
+
+  testWidgets("GM5 a tap or a drag pressed before a create range and let go "
+      "while it runs creates nothing, and nor does a tap while a block lifted "
+      "during a pinch is held after the pinch's fingers lift; and the range "
+      "or the lift goes on", (tester) async {
+    final shown = Shown.week(monday);
+    for (final other in const <String>["tap", "range", "pinch"]) {
+      final reason = switch (other) {
+        "tap" => "tap pressed before a range",
+        "range" => "range pressed before a range",
+        _ => "tap during a lift, after the pinch it ended lets go",
+      };
+      final store = storeOf(<CalendarEntry<String>>[
+        entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
+      ]);
+      final zooms = <double>[];
+      final harness = Harness(
+        store,
+        shown,
+        onZoom: (minSlotHeight, minDayWidth) {
+          zooms.add(minSlotHeight);
+        },
+      );
+      await harness.pump(tester);
+      final rangeFrom = slotRect(tester, shown, thursday, 14 * 60).center;
+      final rangeTo = slotRect(tester, shown, thursday, 16 * 60).center;
+      final otherFrom = slotRect(tester, shown, friday, 10 * 60).center;
+      final otherTo = slotRect(tester, shown, friday, 11 * 60).center;
+      // The hour gutter, where no press creates.
+      final focal = cellRect(tester, shown.rowOf(18 * 60), 0).center;
+      Future<TestGesture> press(Offset at) async {
+        final gesture = await tester.startGesture(
+          at,
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pump();
+        return gesture;
+      }
+
+      if (other == "pinch") {
+        final first = await tester.startGesture(
+          focal - const Offset(0.0, 30.0),
+        );
+        final second = await tester.startGesture(
+          focal + const Offset(0.0, 30.0),
+        );
+        for (var i = 0; i < 3; i++) {
+          await first.moveBy(const Offset(0.0, -6.0));
+          await second.moveBy(const Offset(0.0, 6.0));
+          await tester.pump();
+        }
+        // Setup sanity: the pinch zooms.
+        expect(zooms, isNotEmpty, reason: reason);
+        final lifting = await press(
+          tester.getCenter(blockFinder("meet", tuesday)),
+        );
+        await tester.pump(kLongPressTimeout + kPressTimeout);
+        // Setup sanity: the block is lifted.
+        expect(find.byKey(liftedBlockKey), findsOneWidget, reason: reason);
+        await first.up();
+        await second.up();
+        await tester.pump();
+        final tapping = await press(otherFrom);
+        await tapping.up();
+        await tester.pump();
+        expect(harness.creates, isEmpty, reason: reason);
+        expect(find.byKey(liftedBlockKey), findsOneWidget, reason: reason);
+        await lifting.up();
+      } else {
+        final creating = await press(otherFrom);
+        final ranging = await press(rangeFrom);
+        await ranging.moveTo(Offset.lerp(rangeFrom, rangeTo, 0.5)!);
+        await tester.pump();
+        await ranging.moveTo(rangeTo);
+        await tester.pump();
+        // Setup sanity: the range runs.
+        expect(strokedRects(tester), hasLength(1), reason: reason);
+        if (other == "range") {
+          await creating.moveTo(otherTo);
+          await tester.pump();
+        }
+        await creating.up();
+        await tester.pump();
+        expect(harness.creates, isEmpty, reason: reason);
+        await ranging.up();
+        await tester.pump();
+        expect(
+          <DateTime>[for (final range in harness.creates) range.start],
+          <DateTime>[at(thursday, 14)],
+          reason: reason,
+        );
+      }
+      await tester.pumpAndSettle();
+    }
   });
 }
 
