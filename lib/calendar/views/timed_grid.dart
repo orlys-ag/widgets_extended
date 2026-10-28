@@ -658,16 +658,18 @@ CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
 /// one day column, the day width, from [minDayWidthLow] to
 /// [minDayWidthHigh]. While two fingers are down the grid does not scroll,
 /// and a finger that pinched clears no selection when it lifts off the
-/// selected block. No pinch starts while a block moves or resizes or a
-/// create range runs. New days, which a new [firstDay], [dayCount] or
-/// [weekdays] gives, cancel a move or a resize in flight, which then
-/// requests nothing, and end a create range in flight, which then creates
-/// nothing. A new [slotMinutes] or [hours] cancels a move or a resize in
-/// flight, which then requests nothing, and ends a create range in flight
-/// and clears the range a create flow marks. A new [editPolicy] cancels a
-/// move or a resize in flight, which then requests nothing, and ends a
-/// create range in flight, which then creates nothing; the range a create
-/// flow marks stays.
+/// selected block. The grid runs one gesture at a time: while a block or a bar
+/// moves or resizes, a create range runs or a pinch zooms, no pinch starts and
+/// no create range or tap creates, and a block or a bar lifted meanwhile ends a
+/// create range, which then creates nothing, or a pinch, which then zooms
+/// nothing more. New days, which a new [firstDay], [dayCount] or [weekdays]
+/// gives, cancel a move or a resize in flight, which then requests nothing, and
+/// end a create range in flight, which then creates nothing. A new
+/// [slotMinutes] or [hours] cancels a move or a resize in flight, which then
+/// requests nothing, and ends a create range in flight and clears the range a
+/// create flow marks. A new [editPolicy] cancels a move or a resize in flight,
+/// which then requests nothing, and ends a create range in flight, which then
+/// creates nothing; the range a create flow marks stays.
 ///
 /// With no [storeRange], the days are ready while the store's shown range
 /// holds every one of them and its status is ready. With one, they are
@@ -872,15 +874,120 @@ typedef _HeaderState = ({
   DateTime today,
 });
 
-/// The drag the board runs: its item, whether it moves or resizes which
-/// edge, whether the board has reported a target yet, and the placement a
-/// release would report, null where none is admitted.
-typedef _GridDrag = ({
-  GridKey key,
-  BoardDragKind kind,
-  bool resolved,
-  BoardSpan? target,
-});
+/// The gesture a grid runs, one at a time: none ([_Idle]), a pinch
+/// ([_Pinching]), a create range ([_Ranging]), or the board's drag of a
+/// block or a bar ([_Dragging]). A pinch and a create range start only
+/// from [_Idle]; the board starts its drag on its own, which ends a pinch
+/// or a create range running then. A mode ends at [_Idle], or at
+/// [_Dragging] where the board's drag ends it.
+sealed class _GridMode {
+  const _GridMode();
+}
+
+/// No gesture runs.
+final class _Idle extends _GridMode {
+  const _Idle();
+}
+
+/// A pinch zooming from the slot height and the day width the grid showed
+/// when it started.
+final class _Pinching extends _GridMode {
+  const _Pinching({required this.slot, required this.day});
+
+  final double slot;
+  final double day;
+}
+
+/// A create range being dragged, which the background paints.
+final class _Ranging<T> extends _GridMode {
+  const _Ranging(this.range);
+
+  final _RangeDrag<T> range;
+}
+
+/// The drag the board runs on [key], from the board's report of its start
+/// to the report of its end, and what the grid reads of it meanwhile: the
+/// pointer that drives it, and for a crossing drag the cell under that
+/// pointer and what a release there gives.
+final class _Dragging extends _GridMode {
+  _Dragging(this.key, this.kind);
+
+  final GridKey key;
+
+  /// Whether it moves, or resizes which edge.
+  final BoardDragKind kind;
+
+  /// Whether the board has reported a target yet.
+  bool resolved = false;
+
+  /// The placement a release would report, null where none is admitted.
+  BoardSpan? target;
+
+  /// The entry a move lifted, with the start and end it was lifted with,
+  /// while it shows more than one piece: the placement step leaves out its
+  /// pieces other than the dragged one while the shown entry keeps those
+  /// times.
+  ({String id, DateTime start, DateTime end})? lifted;
+
+  /// The pointer of the press that started the drag, the first in
+  /// `_pressKeys` naming [key]; null for a drag no press of the grid
+  /// started, such as a semantics action's.
+  int? pointer;
+
+  /// Where [pointer] last moved during a crossing drag, in the board
+  /// viewport's paint space; null from the lift to its first move.
+  Offset? at;
+
+  /// The cell a crossing drag's pointer is over, as the crossing reads it:
+  /// a block's strip column, a bar's day column and slot row, an end
+  /// handle's later day column and slot row; -1 for none.
+  int column = -1;
+  int row = -1;
+
+  /// The day column of the piece whose end a crossing resize drags, read
+  /// once at the drag's start so no pointer move looks the piece up; -1
+  /// for any other drag.
+  int resizedColumn = -1;
+
+  /// What a release over [column] gives the entry: a block's all-day day,
+  /// a bar's hour; null where the pointer is over no such cell or the
+  /// landing is refused.
+  ({DateTime start, DateTime end})? stripLanding;
+  ({DateTime start, DateTime end})? barLanding;
+
+  /// The end a release of an end handle over [column]'s later day gives
+  /// the entry; null where the pointer is over no later day's slot or the
+  /// end is refused.
+  DateTime? laterDayEnd;
+
+  /// The range a bar's day-edge resize past [CalendarEditRules.dayLimit] is
+  /// held at ([CalendarEditRules.heldToLimit]), which its release writes.
+  ({DateTime start, DateTime end})? heldBar;
+
+  /// Set once a crossing's release wrote or refused its landing, so the
+  /// drop gate refuses the board's own report of that release.
+  bool spent = false;
+
+  /// Whether the crossing names a cell, whose landing the label and the
+  /// marks show in place of the board target's.
+  bool get crosses {
+    return column >= 1;
+  }
+
+  /// Forgets the crossing: the pointer, the cell, the landings and the
+  /// held range. [spent] stays until the drag ends.
+  void clearCrossing() {
+    pointer = null;
+    at = null;
+    column = -1;
+    row = -1;
+    resizedColumn = -1;
+    stripLanding = null;
+    barLanding = null;
+    laterDayEnd = null;
+    heldBar = null;
+  }
+}
 
 /// What the all-day strip's cells show: the days of [tracks]; whether the
 /// strip is collapsed with a count row, [counted]; the bars each day column
@@ -932,10 +1039,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     onUpdate: _pinchTo,
     onEnd: _endPinch,
   );
-
-  /// The slot height and day width the grid showed when the running pinch
-  /// started; null while none runs.
-  ({double slot, double day})? _pinchFrom;
 
   /// Where the fingers of the pinch that last reported a zoom met, in the
   /// board viewport's coordinates, until the next fit of the axes holds
@@ -1061,13 +1164,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// The selected entry's handles, while they are built.
   final _HandlesSlot _handles = _HandlesSlot();
 
-  /// The entry a running move lifted, with the start and end it was
-  /// lifted with, while it shows more than one piece: the placement step
-  /// leaves out its pieces other than the dragged one while the shown
-  /// entry keeps those times. Set by [_handleDragStart], cleared by
-  /// [_handleDragEnd].
-  ({String id, DateTime start, DateTime end})? _lifted;
-
   /// Each move or resize the grid requested ([_requestMove]), by its
   /// entry's id, until the request's future completes. The grid's reads
   /// of the store show the requested entry in place of the stored one,
@@ -1076,7 +1172,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       <String, CalendarMoveRequest<T>>{};
 
   /// What the last placement ([_placeLayout]) read: the split, the tracks,
-  /// [_lifted] and the strip rows it placed bars in; null before the first.
+  /// the drag's [_Dragging.lifted] and the strip rows it placed bars in;
+  /// null before the first.
   /// While they are the same the board holds that placement's items, so a
   /// sync places nothing ([_placementCurrent]).
   ({
@@ -1163,55 +1260,27 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   final Map<int, ({Offset at, String id})> _pressesOff =
       <int, ({Offset at, String id})>{};
 
+  /// The gesture the grid runs: [_Idle] until a pinch ([_startPinch]), a
+  /// create range ([_beginRange]) or the board's drag ([_handleDragStart])
+  /// starts, and again once it ends.
+  _GridMode _mode = const _Idle();
+
   /// The drag the board runs, or null.
-  _GridDrag? _drag;
+  _Dragging? get _drag {
+    final mode = _mode;
+    return mode is _Dragging ? mode : null;
+  }
+
+  /// The range being dragged, which the background paints, or null.
+  _RangeDrag<T>? get _range {
+    final mode = _mode;
+    return mode is _Ranging<T> ? mode.range : null;
+  }
 
   /// The block or bar each pointer down on the grid pressed, or whose
   /// handles a press beside a selected block started a resize of, until
   /// that pointer's up or cancel.
   final Map<int, GridKey> _pressKeys = <int, GridKey>{};
-
-  /// The pointer of the press that started [_drag], the first in
-  /// [_pressKeys] naming its key; null for a drag no press of the grid
-  /// started, such as a semantics action's, and with no drag.
-  int? _dragPointer;
-
-  /// Where [_dragPointer] last moved during a crossing drag
-  /// ([_isCrossingDrag]), in the board viewport's paint space; null from
-  /// the lift to its first move.
-  Offset? _dragAt;
-
-  /// The cell a crossing drag's pointer is over, as the crossing reads it
-  /// ([_crossTo]): a block's strip column, a bar's day column and slot
-  /// row, an end handle's later day column and slot row; -1 for none.
-  int _crossColumn = -1;
-  int _crossRow = -1;
-
-  /// The day column of the piece whose end a crossing resize drags, read
-  /// once at the drag's start so no pointer move looks the piece up; -1
-  /// with no such drag.
-  int _resizedColumn = -1;
-
-  /// What a release over [_crossColumn] gives the entry: a block's all-day
-  /// day ([_stripLandingOf]), a bar's hour ([_barLandingOf]); null where the
-  /// pointer is over no such cell or the landing is refused.
-  ({DateTime start, DateTime end})? _stripLanding;
-  ({DateTime start, DateTime end})? _barLanding;
-
-  /// The end a release of an end handle over [_crossColumn]'s later day
-  /// gives the entry ([_laterDayEndOf]); null where the pointer is over no
-  /// later day's slot or the end is refused.
-  DateTime? _laterDayEnd;
-
-  /// The range a bar's day-edge resize past [CalendarEditRules.dayLimit] is
-  /// held at ([CalendarEditRules.heldToLimit]), which its release writes;
-  /// set by [_canDropAt].
-  ({DateTime start, DateTime end})? _heldBar;
-
-  /// Set once a crossing's release wrote or refused its landing, so
-  /// [_canDropAt] refuses the board's own report of that release; cleared
-  /// by [_handleDragEnd].
-  bool _crossSpent = false;
 
   /// Whether a post-frame read of the crossing's cell is scheduled
   /// ([_scheduleCrossRead]).
@@ -1219,9 +1288,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Whether a crossing drag listens to the two scroll controllers.
   bool _crossListening = false;
-
-  /// Whether a bar drags, so the board holds [_fitlessConfig].
-  bool _barDrags = false;
 
   /// The day columns of the all-day range whose create flow is open, which
   /// the strip marks; null while none is.
@@ -1295,9 +1361,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   late final TapGestureRecognizer _tap;
   late final ImmediateMultiDragGestureRecognizer _immediateRange;
   late final DelayedMultiDragGestureRecognizer _delayedRange;
-
-  /// The range being dragged, which the background paints.
-  _RangeDrag<T>? _range;
 
   /// Set when the grid's scroll ends and cleared by the next microtask. A
   /// touch down on a flinging grid ends the fling before the listener
@@ -1467,11 +1530,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (tracksChanged) {
       _tracks = tracks;
     }
-    final range = _range;
-    if (tracksChanged && range != null) {
+    if (tracksChanged && _range != null) {
       // Its cells are rows and columns of the tracks it began on.
-      range.detach();
-      _range = null;
+      _detachRange();
       _updateStripMark();
     }
     if (!widget.editable) {
@@ -1559,34 +1620,46 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// create flow marks. Runs before [_tracks] is replaced.
   void _cancelForNewSlots() {
     _cancelDrag();
-    _range?.detach();
-    _range = null;
+    _detachRange();
     _creating = null;
     _stripCreating = null;
     _updateStripMark();
   }
 
   /// Ends the gestures a new policy would answer otherwise, writing
-  /// nothing: cancels the board's drag ([_cancelBoardDrag]), keeping
-  /// [_lifted], so the [_handleDragEnd] the cancel queues puts a lifted
-  /// entry's other pieces back, and detaches a create range. The range a
-  /// create flow marks stays, as its range is reported already. Runs
-  /// before [_tracks] is replaced.
+  /// nothing: cancels the board's drag ([_cancelBoardDrag]), keeping its
+  /// [_Dragging.lifted], so the [_handleDragEnd] the cancel queues puts a
+  /// lifted entry's other pieces back, and detaches a create range. The
+  /// range a create flow marks stays, as its range is reported already.
+  /// Runs before [_tracks] is replaced.
   void _cancelForNewPolicy() {
     _cancelBoardDrag();
-    _range?.detach();
-    _range = null;
+    _detachRange();
     _updateStripMark();
   }
 
+  /// Detaches the create range in flight, which then reports nothing, and
+  /// leaves [_Ranging]; the caller updates the strip's marks.
+  void _detachRange() {
+    final range = _range;
+    if (range == null) {
+      return;
+    }
+    range.detach();
+    _mode = const _Idle();
+  }
+
   /// Cancels the board's drag on tracks about to be replaced, writing
-  /// nothing ([_cancelBoardDrag]), and forgets [_lifted], so the sync on
-  /// the new tracks puts a lifted entry's pieces back. Runs before
-  /// [_tracks] is replaced and so before any placement on the new tracks,
-  /// which may drop the dragged key.
+  /// nothing ([_cancelBoardDrag]), and forgets its [_Dragging.lifted], so
+  /// the sync on the new tracks puts a lifted entry's pieces back. Runs
+  /// before [_tracks] is replaced and so before any placement on the new
+  /// tracks, which may drop the dragged key.
   void _cancelDrag() {
     _cancelBoardDrag();
-    _lifted = null;
+    final drag = _drag;
+    if (drag != null) {
+      drag.lifted = null;
+    }
   }
 
   /// Cancels the board's drag, requesting nothing: a span write of its key to
@@ -1753,7 +1826,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return placed != null &&
         identical(placed.layout, _layout) &&
         placed.tracks == _tracks &&
-        placed.lifted == _lifted &&
+        placed.lifted == _drag?.lifted &&
         placed.shownRows == _shownStripRows;
   }
 
@@ -1794,10 +1867,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final shift = rows - _stripRows;
     _stripRows = rows;
     _tracks = _tracksOf(widget, rows);
-    final range = _range;
-    if (range != null) {
-      range.detach();
-      _range = null;
+    if (_range != null) {
+      _detachRange();
       _updateStripMark();
     }
     final creating = _creating;
@@ -1966,13 +2037,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
   }
 
-  /// Starts a pinch from the sizes the grid shows, unless a block moves
-  /// or resizes or a create range runs.
+  /// Starts a pinch from the sizes the grid shows, unless another gesture
+  /// runs: a block or a bar moving or resizing, a create range, or another
+  /// pinch.
   bool _startPinch(PinchAxis axis, Offset focal) {
-    if (_range != null || _drag != null) {
+    if (_mode is! _Idle) {
       return false;
     }
-    _pinchFrom = (slot: _slotHeight, day: _dayWidth);
+    _mode = _Pinching(slot: _slotHeight, day: _dayWidth);
     return true;
   }
 
@@ -1980,12 +2052,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// axis to, its scale times the size shown at its start, from
   /// [minSlotHeightLow] to [minSlotHeightHigh] or from [minDayWidthLow] to
   /// [minDayWidthHigh], and notes where its fingers meet for the fit that
-  /// follows. On one day column a pinch across zooms nothing.
+  /// follows. On one day column a pinch across zooms nothing, and nor does
+  /// one a drag of the board ended.
   void _pinchTo(PinchUpdate update) {
-    final from = _pinchFrom;
+    final from = _mode;
     final onZoom = widget.onZoom;
     final viewport = _findViewport();
-    if (from == null || onZoom == null || viewport == null) {
+    if (from is! _Pinching || onZoom == null || viewport == null) {
       return;
     }
     var slot = widget.minSlotHeight;
@@ -2010,7 +2083,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   void _endPinch() {
-    _pinchFrom = null;
+    if (_mode is _Pinching) {
+      _mode = const _Idle();
+    }
   }
 
   /// Holds the board's scrolling while two fingers are down, unless a
@@ -2018,7 +2093,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// lets it go after.
   void _handleHolding() {
     final viewport = _findViewport();
-    if (_pinch.holding.value && _range == null && _drag == null) {
+    if (_pinch.holding.value && (_mode is _Idle || _mode is _Pinching)) {
       _scrollHold.hold(<ScrollPosition?>[
         viewport?.verticalPosition,
         viewport?.horizontalPosition,
@@ -2248,17 +2323,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Turns the kept split into the board's items on the current tracks:
-  /// its pieces, leaving out, while [_lifted] names an entry the split
-  /// still shows with the times it was lifted with, that entry's pieces
-  /// other than the dragged one, and its bars in the strip rows it shows.
-  /// Under [BoardAnimationStyle.disabled] where [disable]
+  /// its pieces, leaving out, while the drag's [_Dragging.lifted] names an
+  /// entry the split still shows with the times it was lifted with, that
+  /// entry's pieces other than the dragged one, and its bars in the strip
+  /// rows it shows. Under [BoardAnimationStyle.disabled] where [disable]
   /// holds and where the placements drop the key a drag holds, so that key
   /// leaves with no exit and what replaces it shows at once, until a frame
   /// callback restores the styles' animation; otherwise under the board's
   /// style as it stands, so a drop's glide runs on.
   void _placeLayout({required bool disable}) {
     noteEntryPlace();
-    final lifted = _lifted;
+    final lifted = _drag?.lifted;
     _placed = (
       layout: _layout,
       tracks: _tracks,
@@ -2396,7 +2471,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// strip and the slots is a board drop: a piece stays inside its day's
   /// rows and a bar inside the strip's, and the grid writes a crossing
   /// itself at its pointer's release ([_handlePointerUp]), after which
-  /// every target is refused ([_crossSpent]). A piece's move needs
+  /// every target is refused ([_Dragging.spent]). A piece's move needs
   /// [_policy]'s [CalendarEditPolicy.mayMove], and its resize the edge it
   /// changes in [CalendarEditPolicy.resizableEdges]; then [_rules] must
   /// admit the times ([CalendarEditRules.admitsTimes]): two asks of the
@@ -2405,7 +2480,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ([_meetsOtherEntry]).
   bool _canDropAt(GridKey key, BoardSpan span) {
     noteDropGate();
-    if (_crossSpent) {
+    if (_drag?.spent ?? false) {
       return false;
     }
     if (key.isBar) {
@@ -2482,9 +2557,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// board's own item order, which the grid does not set, until the
   /// release stacks them in rows ([TimedGridLayout.bars]). A span of a running
   /// day-edge resize of the bar ([_barResizeOf]) past
-  /// [CalendarEditRules.dayLimit]'s days is refused, and holds [_heldBar]
-  /// at the range the limit admits, which the release writes; every other
-  /// span of that resize clears it.
+  /// [CalendarEditRules.dayLimit]'s days is refused, and holds the drag's
+  /// [_Dragging.heldBar] at the range the limit admits, which the release
+  /// writes; every other span of that resize clears it.
   bool _canDropBar(GridKey key, BoardSpan span) {
     if (span.rowStart < _stripStart ||
         span.endTrackOn(Axis.vertical) >
@@ -2573,12 +2648,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         1;
   }
 
-  /// Sets [_heldBar] and the strip's marks for it.
+  /// Sets the drag's [_Dragging.heldBar] and the strip's marks for it.
   void _holdBar(({DateTime start, DateTime end})? held) {
-    if (held == _heldBar) {
+    final drag = _drag;
+    if (drag == null || held == drag.heldBar) {
       return;
     }
-    _heldBar = held;
+    drag.heldBar = held;
     _updateStripMark();
   }
 
@@ -2848,13 +2924,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// Notes the board's new drag: selects a move's entry, hands the board
-  /// [_fitlessConfig] for a bar's drag, takes as [_dragPointer] the first
-  /// press of the grid on the dragged key, and for a crossing drag
-  /// ([_isCrossingDrag]) listens to the two scroll controllers until the
-  /// drag ends, noting for an end handle's the column it starts in
-  /// ([_resizedColumn]). The lift of a move of an entry with more than one
-  /// piece takes its other pieces off the board.
+  /// Notes the board's new drag, which ends a pinch or a create range
+  /// running then, the range reporting nothing: selects a move's entry,
+  /// hands the board [_fitlessConfig] for a bar's drag, takes as the drag's
+  /// [_Dragging.pointer] the first press of the grid on the dragged key,
+  /// and for a crossing drag ([_isCrossingDrag]) listens to the two scroll
+  /// controllers until the drag ends, noting for an end handle's the
+  /// column it starts in ([_Dragging.resizedColumn]). The lift of a move of
+  /// an entry with more than one piece takes its other pieces off the
+  /// board.
   void _handleDragStart(GridKey key, BoardDragKind kind) {
     if (!mounted) {
       return;
@@ -2862,20 +2940,25 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (kind == BoardDragKind.move) {
       _selectedBlock.value = key.id;
     }
+    final drag = _Dragging(key, kind);
+    final ranging = _range != null;
     setState(() {
-      _drag = (key: key, kind: kind, resolved: false, target: null);
-      _barDrags = key.isBar;
+      _detachRange();
+      _mode = drag;
     });
+    if (ranging) {
+      _updateStripMark();
+    }
     for (final MapEntry(key: pointer, value: pressed) in _pressKeys.entries) {
       if (pressed == key) {
-        _dragPointer = pointer;
+        drag.pointer = pointer;
         break;
       }
     }
-    if (_dragPointer != null && _isCrossingDrag(_drag)) {
+    if (drag.pointer != null && _isCrossingDrag(drag)) {
       _listenCross();
       if (kind == BoardDragKind.resizeRowEnd) {
-        _resizedColumn = _board.spanOf(key)?.colStart ?? -1;
+        drag.resizedColumn = _board.spanOf(key)?.colStart ?? -1;
       }
     }
     final shape = _board.itemOf(key);
@@ -2892,7 +2975,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     // Off the board, the entry's other pieces are no occupant the
     // make-room preview or the drop fit reads, and they leave at once.
     final entry = shape.shown.entry;
-    _lifted = (id: id, start: entry.start, end: entry.end);
+    drag.lifted = (id: id, start: entry.start, end: entry.end);
     _placeLayout(disable: true);
   }
 
@@ -2902,7 +2985,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return;
     }
     setState(() {
-      _drag = (key: key, kind: drag.kind, resolved: true, target: target?.span);
+      drag.resolved = true;
+      drag.target = target?.span;
     });
   }
 
@@ -2911,17 +2995,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// did not, under the board's style as it stands, so a drop's glide runs
   /// on and they enter as added blocks do.
   void _handleDragEnd(GridKey key, bool committed) {
-    if (!mounted || _drag == null) {
+    final drag = _drag;
+    if (!mounted || drag == null) {
       return;
     }
     setState(() {
-      _drag = null;
-      _barDrags = false;
-      _crossSpent = false;
+      _mode = const _Idle();
       _clearCross();
     });
-    if (_lifted != null) {
-      _lifted = null;
+    if (drag.lifted != null) {
       _placeLayout(disable: false);
     }
   }
@@ -2930,7 +3012,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// where the board's own drag does not: a block's move, into the strip;
   /// a bar's, into the slots; and on more than one day column a piece's
   /// end-handle resize, into a later day.
-  bool _isCrossingDrag(_GridDrag? drag) {
+  bool _isCrossingDrag(_Dragging? drag) {
     if (drag == null) {
       return false;
     }
@@ -2958,31 +3040,24 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _horizontalScroll.removeListener(_readCross);
   }
 
-  /// Forgets the drag's crossing state, its pointer and the cell, the
-  /// landings and the marks it read, and stops listening to the scroll.
-  /// [_crossSpent] stays until the drag ends.
+  /// Forgets the drag's crossing ([_Dragging.clearCrossing]) and the marks
+  /// it read, and stops listening to the scroll. The drag's
+  /// [_Dragging.spent] stays until the drag ends.
   void _clearCross() {
     _unlistenCross();
-    _dragPointer = null;
-    _dragAt = null;
-    _crossColumn = -1;
-    _crossRow = -1;
-    _resizedColumn = -1;
-    _stripLanding = null;
-    _barLanding = null;
-    _laterDayEnd = null;
-    _heldBar = null;
+    _drag?.clearCrossing();
     _updateStripMark();
   }
 
-  /// Reads the crossing's cell under [_dragAt], doing nothing before the
-  /// drag pointer's first move. Counted as it begins ([noteCellRead]), so
-  /// a listener left on a scroll controller after its drag counts too.
+  /// Reads the crossing's cell under the drag's [_Dragging.at], doing
+  /// nothing before the drag pointer's first move. Counted as it begins
+  /// ([noteCellRead]), so a listener left on a scroll controller after its
+  /// drag counts too.
   void _readCross() {
     noteCellRead();
-    final at = _dragAt;
     final drag = _drag;
-    if (at == null || drag == null || !mounted) {
+    final at = drag?.at;
+    if (drag == null || at == null || !mounted) {
       return;
     }
     _crossTo(drag, _rowAt(at.dy), _columnAt(at.dx));
@@ -2996,18 +3071,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// hour a release there gives ([_barLandingOf]); for an end handle's
   /// resize the slot under it on a day later than the piece's, and the end
   /// a release there gives ([_laterDayEndOf]).
-  void _crossTo(_GridDrag drag, int row, int col) {
+  void _crossTo(_Dragging drag, int row, int col) {
     if (drag.kind == BoardDragKind.resizeRowEnd) {
-      final later = _isLaterDaySlot(row, col);
+      final later = _isLaterDaySlot(drag, row, col);
       final column = later ? col : -1;
       final slotRow = later ? row : -1;
-      if (column == _crossColumn && slotRow == _crossRow) {
+      if (column == drag.column && slotRow == drag.row) {
         return;
       }
       setState(() {
-        _crossColumn = column;
-        _crossRow = slotRow;
-        _laterDayEnd = column == -1
+        drag.column = column;
+        drag.row = slotRow;
+        drag.laterDayEnd = column == -1
             ? null
             : _laterDayEndOf(drag.key, column, slotRow);
       });
@@ -3018,12 +3093,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     if (!drag.key.isBar) {
       final column = col >= 1 && _isStripRow(row) ? col : -1;
-      if (column == _crossColumn) {
+      if (column == drag.column) {
         return;
       }
       setState(() {
-        _crossColumn = column;
-        _stripLanding = column == -1 ? null : _stripLandingOf(drag.key, column);
+        drag.column = column;
+        drag.stripLanding = column == -1
+            ? null
+            : _stripLandingOf(drag.key, column);
       });
       _updateStripMark();
       return;
@@ -3037,25 +3114,25 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
     }
     final column = slotRow == -1 ? -1 : col;
-    if (column == _crossColumn && slotRow == _crossRow) {
+    if (column == drag.column && slotRow == drag.row) {
       return;
     }
     setState(() {
-      _crossColumn = column;
-      _crossRow = slotRow;
-      _barLanding = column == -1
+      drag.column = column;
+      drag.row = slotRow;
+      drag.barLanding = column == -1
           ? null
           : _barLandingOf(drag.key, column, slotRow);
     });
   }
 
   /// Whether [row] and [col] name a slot in a day column later than the
-  /// one of the piece whose end a crossing resize drags ([_resizedColumn]):
-  /// the columns show their days in order, so a later column is a later
-  /// day.
-  bool _isLaterDaySlot(int row, int col) {
-    return _resizedColumn >= 1 &&
-        col > _resizedColumn &&
+  /// one of the piece whose end [drag], a crossing resize, drags
+  /// ([_Dragging.resizedColumn]): the columns show their days in order, so
+  /// a later column is a later day.
+  bool _isLaterDaySlot(_Dragging drag, int row, int col) {
+    return drag.resizedColumn >= 1 &&
+        col > drag.resizedColumn &&
         row >= _tracks.firstSlotRow &&
         row <= _tracks.lastSlotRow;
   }
@@ -3228,17 +3305,21 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// a strip row change or a notice change gave, which move the slots
   /// under a still pointer, or after a store change, which can change
   /// what a release there gives ([_askDragAgain]): first as a move off
-  /// every cell, then at [_dragAt]. At most one is pending, and it does
-  /// nothing once the drag has no [_dragPointer].
+  /// every cell, then at the drag's [_Dragging.at]. At most one is
+  /// pending, and it does nothing once the drag has no [_Dragging.pointer].
   void _scheduleCrossRead() {
-    if (_dragPointer == null || _crossReadPending || !_isCrossingDrag(_drag)) {
+    final drag = _drag;
+    if (drag == null ||
+        drag.pointer == null ||
+        _crossReadPending ||
+        !_isCrossingDrag(drag)) {
       return;
     }
     _crossReadPending = true;
     SchedulerBinding.instance.addPostFrameCallback((_) {
       _crossReadPending = false;
       final drag = _drag;
-      if (!mounted || _dragPointer == null || drag == null) {
+      if (!mounted || drag == null || drag.pointer == null) {
         return;
       }
       _crossTo(drag, -1, -1);
@@ -3252,11 +3333,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// refused, or with its create flow open, covers.
   void _updateStripMark() {
     _StripMark? mark;
-    final landing = _stripLanding;
-    final held = _heldBar;
+    final drag = _drag;
+    final held = drag?.heldBar;
     final range = _range;
-    if (landing != null && _crossColumn >= 1) {
-      mark = (first: _crossColumn, last: _crossColumn);
+    if (drag != null && drag.stripLanding != null && drag.column >= 1) {
+      mark = (first: drag.column, last: drag.column);
     } else if (held != null) {
       mark = _columnsOf(held.start, held.end);
     } else if (range != null && range.strip && !range.refused) {
@@ -3411,12 +3492,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// Whether the crossing of [_drag] names a cell ([_crossTo]), whose
-  /// landing the label and the marks show in place of the board target's.
-  bool get _crosses {
-    return _crossColumn >= 1;
-  }
-
   /// The times a release of [_drag] would give its entry: a crossing's
   /// landing while it names a cell, the range a bar's day-edge resize is
   /// held at, and otherwise the board target's; null with no drag, before
@@ -3426,18 +3501,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (drag == null) {
       return null;
     }
-    if (_crosses) {
+    if (drag.crosses) {
       if (drag.kind == BoardDragKind.resizeRowEnd) {
-        final end = _laterDayEnd;
+        final end = drag.laterDayEnd;
         final shape = _board.itemOf(drag.key);
         if (end == null || shape == null) {
           return null;
         }
         return (start: shape.shown.entry.start, end: end);
       }
-      return drag.key.isBar ? _barLanding : _stripLanding;
+      return drag.key.isBar ? drag.barLanding : drag.stripLanding;
     }
-    final held = _heldBar;
+    final held = drag.heldBar;
     if (held != null) {
       return held;
     }
@@ -3472,7 +3547,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (drag == null) {
       return null;
     }
-    if (_crosses || _heldBar != null) {
+    if (drag.crosses || drag.heldBar != null) {
       return times == null
           ? noLandingLabel
           : landingLabel(times.start, times.end, _calendarNow.today);
@@ -3498,7 +3573,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (drag == null || times == null || drag.kind != BoardDragKind.move) {
       return null;
     }
-    if (drag.key.isBar != _crosses) {
+    if (drag.key.isBar != drag.crosses) {
       return null;
     }
     return wallSpanOf(times.start, times.end);
@@ -3515,7 +3590,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (drag == null ||
         times == null ||
         drag.kind != BoardDragKind.resizeRowEnd ||
-        !_crosses) {
+        !drag.crosses) {
       return null;
     }
     return wallSpanOf(times.start, times.end);
@@ -3637,17 +3712,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return cell;
   }
 
-  /// Whether a press at [global] may create: no range runs, the grid is
-  /// neither scrolling nor just stopped by this press, and either it lies
-  /// over a body cell whose slot is a time the clock reads, starting no
-  /// earlier than the earliest start [_policy] gives its day, in that
-  /// start's occurrence ([CalendarEarliestStart.occurrence]), no block
-  /// paints under it, and its slot is free ([_slotIsFree]); or over a
-  /// strip cell no bar paints over, of a day [_policy] lets an entry start
-  /// at its start. Asks the policy once, for the pressed column's day.
+  /// Whether a press at [global] may create: no gesture runs ([_Idle]),
+  /// the grid is neither scrolling nor just stopped by this press, and
+  /// either it lies over a body cell whose slot is a time the clock reads,
+  /// starting no earlier than the earliest start [_policy] gives its day,
+  /// in that start's occurrence ([CalendarEarliestStart.occurrence]), no
+  /// block paints under it, and its slot is free ([_slotIsFree]); or over
+  /// a strip cell no bar paints over, of a day [_policy] lets an entry
+  /// start at its start. Asks the policy once, for the pressed column's
+  /// day.
   bool _admits(Offset global) {
     final viewport = _findViewport();
-    if (viewport == null || _scrollJustStopped || _range != null) {
+    if (viewport == null || _scrollJustStopped || _mode is! _Idle) {
       return false;
     }
     final vertical = viewport.verticalPosition;
@@ -3765,10 +3841,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// binding routes it to the recognizers.
   void _handlePointerMove(PointerMoveEvent event) {
     _pinch.handleEvent(event);
-    if (event.pointer != _dragPointer || !_isCrossingDrag(_drag)) {
+    final drag = _drag;
+    if (drag == null ||
+        event.pointer != drag.pointer ||
+        !_isCrossingDrag(drag)) {
       return;
     }
-    _dragAt = event.localPosition;
+    drag.at = event.localPosition;
     _readCross();
   }
 
@@ -3779,7 +3858,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   void _handlePointerUp(PointerUpEvent event) {
     _pinch.handleEvent(event);
     _pressKeys.remove(event.pointer);
-    if (event.pointer == _dragPointer) {
+    if (event.pointer == _drag?.pointer) {
       _releaseCross(event.localPosition);
     }
     final press = _pressesOff.remove(event.pointer);
@@ -3801,7 +3880,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _pinch.handleEvent(event);
     _pressesOff.remove(event.pointer);
     _pressKeys.remove(event.pointer);
-    if (event.pointer == _dragPointer) {
+    if (event.pointer == _drag?.pointer) {
       setState(_clearCross);
     }
   }
@@ -3814,7 +3893,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// above the slots an hour from that slot ([_barLandingOf]), and an end
   /// handle over a later day's slot ends there ([_laterDayEndOf]), each
   /// through one request ([_requestMove]), or none where the landing is
-  /// refused; either way [_crossSpent] then refuses the board's own
+  /// refused; either way [_Dragging.spent] then refuses the board's own
   /// report. A bar's day-edge resize held at [CalendarEditRules.dayLimit]
   /// requests the range it is held at. The request's hold syncs within the
   /// call ([_requestMove]).
@@ -3829,7 +3908,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       final row = _rowAt(local.dy);
       final col = _columnAt(local.dx);
       if (drag.kind == BoardDragKind.resizeRowEnd) {
-        if (!_isLaterDaySlot(row, col)) {
+        if (!_isLaterDaySlot(drag, row, col)) {
           return;
         }
         final end = _laterDayEndOf(drag.key, col, row);
@@ -3854,9 +3933,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
           math.max(row, _tracks.firstSlotRow),
         );
       }
-      _crossSpent = true;
+      drag.spent = true;
     } else {
-      write = _heldBar;
+      write = drag.heldBar;
     }
     if (write == null) {
       return;
@@ -3913,9 +3992,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return viewport.itemAt(viewport.globalToLocal(global));
   }
 
+  /// Creates at the slot or the strip cell a tap let go over, unless
+  /// another gesture runs by then.
   void _handleTapUp(TapUpDetails details) {
     final viewport = _findViewport();
-    if (viewport == null) {
+    if (viewport == null || _mode is! _Idle) {
       return;
     }
     final local = viewport.globalToLocal(details.globalPosition);
@@ -3987,9 +4068,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
+  /// Begins a create range at [position], unless another gesture runs.
   Drag? _beginRange(Offset position) {
     final viewport = _findViewport();
-    if (viewport == null || _range != null) {
+    if (viewport == null || _mode is! _Idle) {
       return null;
     }
     final point = viewport.globalToLocal(position);
@@ -4000,7 +4082,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     final range = _RangeDrag<T>(this, anchor, point, strip: strip != null);
     setState(() {
-      _range = range;
+      _mode = _Ranging<T>(range);
     });
     _updateStripMark();
     return range;
@@ -4241,10 +4323,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       range.readLimit();
     } catch (exception, stack) {
       _reportPolicyThrow(exception, stack);
-      range.detach();
-      setState(() {
-        _range = null;
-      });
+      setState(_detachRange);
       _updateStripMark();
       return;
     }
@@ -4342,7 +4421,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return;
     }
     setState(() {
-      _range = null;
+      _mode = const _Idle();
     });
     _updateStripMark();
   }
@@ -4667,7 +4746,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             reachBelow: _notices.below ? _noticeHeight : 0.0,
           ),
           drag: widget.editable
-              ? (_barDrags || _allowsOverlaps ? _fitlessConfig : _editConfig)
+              ? ((drag?.key.isBar ?? false) || _allowsOverlaps
+                    ? _fitlessConfig
+                    : _editConfig)
               : _viewConfig,
           verticalDetails: ScrollableDetails.vertical(
             controller: _verticalScroll,
