@@ -1,8 +1,9 @@
 /// Every text the calendar shows and every label, value, hint and tooltip a
 /// screen reader hears comes from the [CalendarLocalizations] above it, and
 /// follows a change of them: each view, built in English, switches to
-/// localizations that mark every string they write, and then nothing but
-/// entry content and bare numbers reads unmarked, in the views, the
+/// localizations that bracket every string they write, and then each line,
+/// its bracketed spans taken out, holds nothing but the commas and spaces
+/// that joined them, entry content and bare numbers, in the views, the
 /// header, the calendar card, the month picker and the default builders.
 library;
 
@@ -28,97 +29,101 @@ import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/month_picker.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 
-/// What [_Marked] puts before each string it writes.
-const String mark = "~";
+/// [text] between the brackets [_Marked] puts around each string it
+/// writes.
+String bracketed(String text) {
+  return "[$text]";
+}
 
-/// English, with [mark] before every string, so a string the calendar
-/// writes some other way reads without it.
+/// English, with every string [bracketed], so a string the calendar
+/// writes some other way, or a word it adds to one, reads outside the
+/// brackets.
 class _Marked extends DefaultCalendarLocalizations {
   const _Marked();
 
   @override
   String monthName(int month) {
-    return "$mark${super.monthName(month)}";
+    return bracketed(super.monthName(month));
   }
 
   @override
   String weekdayAbbreviation(int weekday) {
-    return "$mark${super.weekdayAbbreviation(weekday)}";
+    return bracketed(super.weekdayAbbreviation(weekday));
   }
 
   @override
   String weekdayShortName(int weekday) {
-    return "$mark${super.weekdayShortName(weekday)}";
+    return bracketed(super.weekdayShortName(weekday));
   }
 
   @override
   String weekdayLetter(int weekday) {
-    return "$mark${super.weekdayLetter(weekday)}";
+    return bracketed(super.weekdayLetter(weekday));
   }
 
   @override
   String dayLabel(DateTime day) {
-    return "$mark${super.dayLabel(day)}";
+    return bracketed(super.dayLabel(day));
   }
 
   @override
   String dayTitle(DateTime day, DateTime today) {
-    return "$mark${super.dayTitle(day, today)}";
+    return bracketed(super.dayTitle(day, today));
   }
 
   @override
   String monthYear(DateTime month) {
-    return "$mark${super.monthYear(month)}";
+    return bracketed(super.monthYear(month));
   }
 
   @override
   String shortMonthYear(DateTime month) {
-    return "$mark${super.shortMonthYear(month)}";
+    return bracketed(super.shortMonthYear(month));
   }
 
   @override
   String formatTime(int minute, HourLabelFormat format) {
-    return "$mark${super.formatTime(minute, format)}";
+    return bracketed(super.formatTime(minute, format));
   }
 
   @override
   String formatTimeRange(int start, int end, HourLabelFormat format) {
-    return "$mark${super.formatTimeRange(start, end, format)}";
+    return bracketed(super.formatTimeRange(start, end, format));
   }
 
   @override
   String entryTimes(DateTime start, DateTime end, HourLabelFormat format) {
-    return "$mark${super.entryTimes(start, end, format)}";
+    return bracketed(super.entryTimes(start, end, format));
   }
 
   @override
   String get allDay {
-    return "$mark${super.allDay}";
+    return bracketed(super.allDay);
   }
 
   @override
   String duration(int minutes) {
-    return "$mark${super.duration(minutes)}";
+    return bracketed(super.duration(minutes));
   }
 
   @override
   String moreEntries(int count) {
-    return "$mark${super.moreEntries(count)}";
+    return bracketed(super.moreEntries(count));
   }
 
   @override
   String moreEntriesBefore(int count, String time) {
-    return "$mark${super.moreEntriesBefore(count, time)}";
+    return bracketed(super.moreEntriesBefore(count, time));
   }
 
   @override
   String moreEntriesAfter(int count, String time) {
-    return "$mark${super.moreEntriesAfter(count, time)}";
+    return bracketed(super.moreEntriesAfter(count, time));
   }
 
   @override
   String entryCount(int count) {
-    return "$mark${super.entryCount(count)}";
+    return bracketed(super.entryCount(count));
   }
 
   @override
@@ -128,47 +133,47 @@ class _Marked extends DefaultCalendarLocalizations {
     String time, {
     required bool above,
   }) {
-    return "$mark${super.hiddenRow(day, count, time, above: above)}";
+    return bracketed(super.hiddenRow(day, count, time, above: above));
   }
 
   @override
   String hiddenEntries(int count) {
-    return "$mark${super.hiddenEntries(count)}";
+    return bracketed(super.hiddenEntries(count));
   }
 
   @override
   String moreCount(int count) {
-    return "$mark${super.moreCount(count)}";
+    return bracketed(super.moreCount(count));
   }
 
   @override
   String earlierCount(int count) {
-    return "$mark${super.earlierCount(count)}";
+    return bracketed(super.earlierCount(count));
   }
 
   @override
   String laterCount(int count) {
-    return "$mark${super.laterCount(count)}";
+    return bracketed(super.laterCount(count));
   }
 
   @override
   String allDayMore(int count) {
-    return "$mark${super.allDayMore(count)}";
+    return bracketed(super.allDayMore(count));
   }
 
   @override
   String get allDayLess {
-    return "$mark${super.allDayLess}";
+    return bracketed(super.allDayLess);
   }
 
   @override
   String get showLess {
-    return "$mark${super.showLess}";
+    return bracketed(super.showLess);
   }
 
   @override
   String get noLanding {
-    return "$mark${super.noLanding}";
+    return bracketed(super.noLanding);
   }
 
   @override
@@ -178,7 +183,7 @@ class _Marked extends DefaultCalendarLocalizations {
     DateTime today,
     HourLabelFormat format,
   ) {
-    return "$mark${super.landing(start, end, today, format)}";
+    return bracketed(super.landing(start, end, today, format));
   }
 
   @override
@@ -198,137 +203,137 @@ class _Marked extends DefaultCalendarLocalizations {
       format: format,
       pending: pending,
     );
-    return "$mark$label";
+    return bracketed(label);
   }
 
   @override
   String get today {
-    return "$mark${super.today}";
+    return bracketed(super.today);
   }
 
   @override
   String get openDayHint {
-    return "$mark${super.openDayHint}";
+    return bracketed(super.openDayHint);
   }
 
   @override
   String get createEntryHint {
-    return "$mark${super.createEntryHint}";
+    return bracketed(super.createEntryHint);
   }
 
   @override
   String dayWithBadges(DateTime day, List<String?> kinds) {
-    return "$mark${super.dayWithBadges(day, kinds)}";
+    return bracketed(super.dayWithBadges(day, kinds));
   }
 
   @override
   String addEntryAt(String time) {
-    return "$mark${super.addEntryAt(time)}";
+    return bracketed(super.addEntryAt(time));
   }
 
   @override
   String get readFailed {
-    return "$mark${super.readFailed}";
+    return bracketed(super.readFailed);
   }
 
   @override
   String get retry {
-    return "$mark${super.retry}";
+    return bracketed(super.retry);
   }
 
   @override
   String startsAt(String time) {
-    return "$mark${super.startsAt(time)}";
+    return bracketed(super.startsAt(time));
   }
 
   @override
   String endsAt(String time) {
-    return "$mark${super.endsAt(time)}";
+    return bracketed(super.endsAt(time));
   }
 
   @override
   String get agendaView {
-    return "$mark${super.agendaView}";
+    return bracketed(super.agendaView);
   }
 
   @override
   String get dayView {
-    return "$mark${super.dayView}";
+    return bracketed(super.dayView);
   }
 
   @override
   String get weekView {
-    return "$mark${super.weekView}";
+    return bracketed(super.weekView);
   }
 
   @override
   String get monthView {
-    return "$mark${super.monthView}";
+    return bracketed(super.monthView);
   }
 
   @override
   String get previousDayTooltip {
-    return "$mark${super.previousDayTooltip}";
+    return bracketed(super.previousDayTooltip);
   }
 
   @override
   String get previousWeekTooltip {
-    return "$mark${super.previousWeekTooltip}";
+    return bracketed(super.previousWeekTooltip);
   }
 
   @override
   String get previousMonthTooltip {
-    return "$mark${super.previousMonthTooltip}";
+    return bracketed(super.previousMonthTooltip);
   }
 
   @override
   String get previousYearTooltip {
-    return "$mark${super.previousYearTooltip}";
+    return bracketed(super.previousYearTooltip);
   }
 
   @override
   String get nextDayTooltip {
-    return "$mark${super.nextDayTooltip}";
+    return bracketed(super.nextDayTooltip);
   }
 
   @override
   String get nextWeekTooltip {
-    return "$mark${super.nextWeekTooltip}";
+    return bracketed(super.nextWeekTooltip);
   }
 
   @override
   String get nextMonthTooltip {
-    return "$mark${super.nextMonthTooltip}";
+    return bracketed(super.nextMonthTooltip);
   }
 
   @override
   String get nextYearTooltip {
-    return "$mark${super.nextYearTooltip}";
+    return bracketed(super.nextYearTooltip);
   }
 
   @override
   String get pickMonthTooltip {
-    return "$mark${super.pickMonthTooltip}";
+    return bracketed(super.pickMonthTooltip);
   }
 
   @override
   String get closeMonthsTooltip {
-    return "$mark${super.closeMonthsTooltip}";
+    return bracketed(super.closeMonthsTooltip);
   }
 
   @override
   String get viewMenuTooltip {
-    return "$mark${super.viewMenuTooltip}";
+    return bracketed(super.viewMenuTooltip);
   }
 
   @override
   String get showMonthLabel {
-    return "$mark${super.showMonthLabel}";
+    return bracketed(super.showMonthLabel);
   }
 
   @override
   String get showWeekLabel {
-    return "$mark${super.showWeekLabel}";
+    return bracketed(super.showWeekLabel);
   }
 }
 
@@ -509,23 +514,42 @@ List<String> heardTexts(WidgetTester tester) {
 
 final RegExp _bareNumber = RegExp(r"^\+?\d+$");
 
-/// The lines of [texts] that lack [mark] and are neither [content] nor a
-/// bare number, such as a day's or a year's, or a "+N" count.
+/// A [bracketed] span with no bracket inside it.
+final RegExp _innermost = RegExp(r"\[[^\[\]]*\]");
+
+/// Nothing but the commas and spaces that join a label's parts.
+final RegExp _joins = RegExp(r"^[\s,]*$");
+
+/// [line] with its [bracketed] spans taken out, innermost first, until
+/// none is left.
+String unbracketed(String line) {
+  var rest = line;
+  while (true) {
+    final next = rest.replaceAll(_innermost, "");
+    if (next == rest) {
+      return rest;
+    }
+    rest = next;
+  }
+}
+
+/// The lines of [texts] that, [unbracketed], hold more than the commas
+/// and spaces of [_joins] and are neither [content] nor a bare number,
+/// such as a day's or a year's, or a "+N" count.
 List<String> unmarked(Iterable<String> texts) {
   return <String>[
     for (final text in texts)
       for (final line in text.split("\n"))
-        if (line.isNotEmpty &&
-            !line.contains(mark) &&
-            !content.contains(line) &&
-            !_bareNumber.hasMatch(line))
+        if (unbracketed(line) case final rest
+            when !_joins.hasMatch(rest) &&
+                !content.contains(rest.trim()) &&
+                !_bareNumber.hasMatch(rest.trim()))
           line,
   ];
 }
 
-/// Expects every line on stage and in the semantics tree to be marked,
-/// entry content and bare numbers aside; a line that is not is named
-/// with where it was found.
+/// Expects no line on stage or in the semantics tree to be [unmarked]; a
+/// line that is is named with where it was found.
 void expectMarked(WidgetTester tester, String where) {
   expect(
     <String>[
