@@ -23,6 +23,8 @@ import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/policy/overlap.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_activity_indicator.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_defaults.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
@@ -424,6 +426,7 @@ class Harness {
     this.size = const Size(800.0, 2000.0),
     this.onMoveRequest,
     this.onZoom,
+    this.blockBuilder,
     DateTime? today,
     int nowHour = 9,
   }) : today = today ?? DateTime(2026, 1, 5),
@@ -446,6 +449,7 @@ class Harness {
   final Future<void> Function(CalendarMoveRequest<String> request)?
   onMoveRequest;
   final void Function(double minSlotHeight, double minDayWidth)? onZoom;
+  final CalendarBlockBuilder<String>? blockBuilder;
 
   bool editable;
   DateTime first;
@@ -501,6 +505,7 @@ class Harness {
       minSlotHeight: minSlotHeight,
       minDayWidth: minDayWidth,
       showsDayHeader: shown.week,
+      blockBuilder: blockBuilder,
     );
   }
 
@@ -2149,6 +2154,92 @@ void main() {
         await gesture.up();
         await tester.pumpAndSettle();
       }
+    });
+
+    testWidgets("with a block's move held still in the middle of the slots, "
+        "ten jumps of 1 px of a scrollable inside another block read no "
+        "cell, and ten of the grid's vertical position read it ten times", (
+      tester,
+    ) async {
+      final shown = Shown.week(monday);
+      final inner = ScrollController();
+      addTearDown(inner.dispose);
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("meet", at(tuesday, 5), at(tuesday, 6)),
+          entryOf("talk", at(wednesday, 5), at(wednesday, 6)),
+        ]),
+        shown,
+        minSlotHeight: 40.0,
+        minDayWidth: 200.0,
+        blockBuilder: (context, entry, details) {
+          if (entry.id != "talk") {
+            return defaultCalendarBlockBuilder<String>(context, entry, details);
+          }
+          return SingleChildScrollView(
+            controller: inner,
+            child: const SizedBox(height: 1000.0),
+          );
+        },
+      );
+      await harness.pump(tester);
+      viewportOf(tester).verticalPosition!.jumpTo(0.0);
+      await tester.pump();
+      final viewport = viewportOf(tester);
+      final middle = viewport
+          .localToGlobal(Offset(0.0, viewport.size.height / 2))
+          .dy;
+      final gesture = await liftTo(
+        tester,
+        tester.getCenter(blockFinder("meet", tuesday)),
+        Offset(slotRect(tester, shown, tuesday, 0).center.dx, middle),
+      );
+      // Setup sanity: the drag runs, and the block's scrollable scrolls.
+      expect(find.byKey(liftedBlockKey), findsOneWidget);
+      expect(inner.position.maxScrollExtent, greaterThan(10.0));
+      debugCellReadCount = 0;
+      for (var i = 0; i < 10; i++) {
+        inner.jumpTo(inner.offset + 1.0);
+        await tester.pump();
+      }
+      expect(debugCellReadCount, 0, reason: "the block's scrollable");
+      final vertical = viewportOf(tester).verticalPosition!;
+      for (var i = 0; i < 10; i++) {
+        vertical.jumpTo(vertical.pixels + 1.0);
+        await tester.pump();
+      }
+      expect(debugCellReadCount, 10, reason: "the grid's vertical position");
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets("with a start-handle resize held still, ten jumps of 1 px of "
+        "the vertical position read no cell", (tester) async {
+      await pumpGrid(tester, <CalendarEntry<String>>[
+        entryOf("meet", at(tuesday, 5), at(tuesday, 6)),
+      ]);
+      final block = blockFinder("meet", tuesday);
+      final selecting = await lift(tester, tester.getCenter(block));
+      await selecting.up();
+      await tester.pumpAndSettle();
+      final top = tester.getRect(block);
+      final start = await tester.startGesture(
+        Offset(top.center.dx, top.top + 2.0),
+      );
+      await start.moveBy(const Offset(0.0, -30.0));
+      await tester.pump();
+      final vertical = viewportOf(tester).verticalPosition!;
+      // Setup sanity: the resize runs, and the hours scroll.
+      expect(landingText(tester), isNotNull);
+      expect(vertical.maxScrollExtent, greaterThan(10.0));
+      debugCellReadCount = 0;
+      for (var i = 0; i < 10; i++) {
+        vertical.jumpTo(vertical.pixels + 1.0);
+        await tester.pump();
+      }
+      expect(debugCellReadCount, 0);
+      await start.up();
+      await tester.pumpAndSettle();
     });
 
     testWidgets("once a block's move has been released, and once a "

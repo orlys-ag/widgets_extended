@@ -1207,10 +1207,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     null,
   );
 
-  /// The board's two scroll controllers, which relay the scroll of
-  /// whichever position the board's scrollables attach, so a listener
-  /// added to them hears the scroll across a position the scrollables
-  /// replace.
+  /// The board's two scroll controllers, through which the grid reads the
+  /// offsets of whichever positions the board's scrollables attach.
   final ScrollController _verticalScroll = ScrollController();
   final ScrollController _horizontalScroll = ScrollController();
 
@@ -1285,9 +1283,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// Whether a post-frame read of the crossing's cell is scheduled
   /// ([_scheduleCrossRead]).
   bool _crossReadPending = false;
-
-  /// Whether a crossing drag listens to the two scroll controllers.
-  bool _crossListening = false;
 
   /// The day columns of the all-day range whose create flow is open, which
   /// the strip marks; null while none is.
@@ -1641,12 +1636,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// Detaches the create range in flight, which then reports nothing, and
   /// leaves [_Ranging]; the caller updates the strip's marks.
   void _detachRange() {
-    final range = _range;
-    if (range == null) {
-      return;
+    if (_range != null) {
+      _mode = const _Idle();
     }
-    range.detach();
-    _mode = const _Idle();
   }
 
   /// Cancels the board's drag on tracks about to be replaced, writing
@@ -1746,8 +1738,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _tap.dispose();
     _immediateRange.dispose();
     _delayedRange.dispose();
-    _range?.detach();
-    _unlistenCross();
     widget.store.removeListener(_handleStore);
     _header.dispose();
     _hiddenCount.dispose();
@@ -2928,11 +2918,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// running then, the range reporting nothing: selects a move's entry,
   /// hands the board [_fitlessConfig] for a bar's drag, takes as the drag's
   /// [_Dragging.pointer] the first press of the grid on the dragged key,
-  /// and for a crossing drag ([_isCrossingDrag]) listens to the two scroll
-  /// controllers until the drag ends, noting for an end handle's the
-  /// column it starts in ([_Dragging.resizedColumn]). The lift of a move of
-  /// an entry with more than one piece takes its other pieces off the
-  /// board.
+  /// and for a crossing resize of an end handle ([_isCrossingDrag]) notes
+  /// the column it starts in ([_Dragging.resizedColumn]). The lift of a
+  /// move of an entry with more than one piece takes its other pieces off
+  /// the board.
   void _handleDragStart(GridKey key, BoardDragKind kind) {
     if (!mounted) {
       return;
@@ -2956,7 +2945,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
     }
     if (drag.pointer != null && _isCrossingDrag(drag)) {
-      _listenCross();
       if (kind == BoardDragKind.resizeRowEnd) {
         drag.resizedColumn = _board.spanOf(key)?.colStart ?? -1;
       }
@@ -3020,39 +3008,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         (drag.kind == BoardDragKind.resizeRowEnd && _tracks.columnCount > 1);
   }
 
-  /// Listens to the two scroll controllers for a crossing drag, so content
-  /// scrolling under its still pointer moves the cell it reads.
-  void _listenCross() {
-    if (_crossListening) {
-      return;
-    }
-    _crossListening = true;
-    _verticalScroll.addListener(_readCross);
-    _horizontalScroll.addListener(_readCross);
-  }
-
-  void _unlistenCross() {
-    if (!_crossListening) {
-      return;
-    }
-    _crossListening = false;
-    _verticalScroll.removeListener(_readCross);
-    _horizontalScroll.removeListener(_readCross);
-  }
-
   /// Forgets the drag's crossing ([_Dragging.clearCrossing]) and the marks
-  /// it read, and stops listening to the scroll. The drag's
-  /// [_Dragging.spent] stays until the drag ends.
+  /// it read. The drag's [_Dragging.spent] stays until the drag ends.
   void _clearCross() {
-    _unlistenCross();
     _drag?.clearCrossing();
     _updateStripMark();
   }
 
   /// Reads the crossing's cell under the drag's [_Dragging.at], doing
   /// nothing before the drag pointer's first move. Counted as it begins
-  /// ([noteCellRead]), so a listener left on a scroll controller after its
-  /// drag counts too.
+  /// ([noteCellRead]), so a read that finds no drag counts too.
   void _readCross() {
     noteCellRead();
     final drag = _drag;
@@ -3797,8 +3762,30 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       scheduleMicrotask(() {
         _scrollJustStopped = false;
       });
+    } else if (notification is ScrollUpdateNotification &&
+        notification.depth == 0) {
+      _followScroll();
     }
     return false;
+  }
+
+  /// Reads the running gesture again as the board's scroll moves the cells
+  /// under its pointer: a create range's focus ([_RangeDrag.refocus]), and
+  /// a crossing drag's cell ([_readCross]). The board reports both axes'
+  /// scroll at depth 0; a scrollable inside a block reports deeper, under
+  /// the board's viewport, and moves no cell.
+  void _followScroll() {
+    switch (_mode) {
+      case _Ranging(:final range):
+        range.refocus();
+      case _Dragging drag:
+        if (drag.pointer != null && _isCrossingDrag(drag)) {
+          _readCross();
+        }
+      case _Idle():
+      case _Pinching():
+        break;
+    }
   }
 
   /// Notes the block or bar a press lies over in [_pressKeys], starts a
@@ -4817,12 +4804,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 /// The pointer is tracked in the viewport's paint space, as the press
 /// converted plus the sum of every update's delta: a multi-drag recognizer
 /// reports the move that accepted it as a delta from the press, with the
-/// press's own position. The range listens to the grid's two scroll
-/// controllers for its length, which relay the scroll of whichever
-/// position the board's scrollables attach, so the focus stays the cell
-/// under the pointer while content scrolls beneath it, across a position
-/// a scrollable replaces too; and it reads that cell through the viewport
-/// the grid finds then, so a board built anew under it is read. Where the
+/// press's own position. The grid refocuses the range ([refocus]) on
+/// each scroll of its own scrollables ([_TimedGridState._followScroll]),
+/// so the focus stays the cell under the pointer while content scrolls
+/// beneath it; and it reads that cell through the viewport the grid finds
+/// then, so a board built anew under it is read. Where the
 /// grid's policy forbids overlaps, a range over the slots reads the
 /// entries that hold it once, when it begins, and again on a store notify
 /// ([readConflicts]).
@@ -4832,12 +4818,8 @@ class _RangeDrag<T> extends Drag {
       occurrences = List<DateTime?>.filled(anchor.col, null),
       firstFrom = List<int>.filled(anchor.col, 0),
       stripFrom = List<int>.filled(anchor.col, 0) {
-    // Read before the listeners are added: a policy throw here, which the
-    // recognizer reports as it answers no drag, then leaves none behind.
     readLimit();
     readConflicts();
-    _grid._verticalScroll.addListener(_refocus);
-    _grid._horizontalScroll.addListener(_refocus);
   }
 
   final _TimedGridState<T> _grid;
@@ -4932,10 +4914,12 @@ class _RangeDrag<T> extends Drag {
   @override
   void update(DragUpdateDetails details) {
     _point += details.delta;
-    _refocus();
+    refocus();
   }
 
-  void _refocus() {
+  /// Moves the focus toward the cell under the pointer, read at the
+  /// grid's scroll offsets as they stand.
+  void refocus() {
     final viewport = _grid._findViewport();
     if (viewport == null) {
       return;
@@ -4955,20 +4939,12 @@ class _RangeDrag<T> extends Drag {
 
   @override
   void end(DragEndDetails details) {
-    detach();
     _grid._endRange(this);
   }
 
   @override
   void cancel() {
-    detach();
     _grid._clearRange(this);
-  }
-
-  /// Stops listening to the scroll controllers.
-  void detach() {
-    _grid._verticalScroll.removeListener(_refocus);
-    _grid._horizontalScroll.removeListener(_refocus);
   }
 }
 
