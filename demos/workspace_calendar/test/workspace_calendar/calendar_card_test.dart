@@ -169,7 +169,7 @@ void main() {
       int.parse(parts[1]),
       <String>[
             for (var month = 1; month <= DateTime.monthsPerYear; month++)
-              english.monthShortName(month),
+              english.shortMonthYear(DateTime(2026, month)).split(" ").first,
           ].indexOf(parts[0]) +
           1,
     );

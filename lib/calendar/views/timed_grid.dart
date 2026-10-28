@@ -580,43 +580,39 @@ CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
 /// nowhere to land, and a move outlines the times it would land on.
 ///
 /// In edit mode a bar takes a long press as a block does. On a grid of more
-/// than one day column it moves by days, and once selected its left grip
-/// drags its first day and its right grip its last, where it does not
-/// continue past them; on one column it takes neither. Dropped with the
-/// pointer over a slot, or over the row above the first slot, a bar's
-/// entry becomes a timed one an hour long from that slot's start, in the
-/// occurrence of the earliest start [editPolicy] gives the day where its
-/// clock repeats that time, marked by the landing outline while the
-/// pointer is there; and a block dropped
-/// with the pointer over a day's strip cell makes its entry all-day on
-/// that day, the strip marking that day while the pointer is there. A drag
-/// across empty strip cells creates an all-day range of their days, as a
-/// tap on one creates its day. A line
-/// over the blocks marks the time [now] holds in its day's column, and the
-/// grid opens scrolled to the hour before it when it shows that day, at
-/// 08:00 otherwise, with that hour's label whole below the top edge. Each
-/// whole hour, and the start and the end of the hours, has a label centred
-/// on its line in the hour gutter, in [hourLabelFormat], which a room above
-/// the first slot and below the last, or the gutter beside a row counting
-/// entries outside the hours, keeps whole. A piece reaching past the hours
-/// shows its part inside them, and an entry whose start or end the hours
-/// do not hold ([DayHours.holdsTimes]) takes no move or resize: only an
-/// edit outside the grid changes it. A piece wholly outside them has no
-/// block. While some are before the hours, a yellow row frozen against the
-/// first slot, in place of the room above it, says
-/// [CalendarLocalizations.moreCount] in the column of each day with N of
-/// them, and while some are after them, a row frozen against the last
-/// slot does; the hour gutter runs on beside both. An
-/// entry on no shown day has no block either, and a pill in the day
-/// header's corner counts it. In edit mode empty body cells take a create
-/// gesture, reported through [onCreate]: a drag picks one continuous range
-/// from the earlier of its two slots to the later, across days too, at
-/// once with a mouse or a stylus and after a press and hold on touch, so a
-/// touch drag without one scrolls the grid, and a tap, or a hold let go
-/// where it began, picks its one slot. Where [editPolicy] forbids
-/// overlaps, a slot that shares time with an entry takes no create
-/// gesture. The range picked stays marked, as a
-/// range being dragged is, until the create flow [onCreate] opens closes.
+/// than one day column it moves by days, and once selected its left grip drags
+/// its first day and its right grip its last, where it does not continue past
+/// them; on one column it takes neither. Dropped with the pointer over a slot,
+/// or over the row above the first slot, a bar's entry becomes a timed one an
+/// hour long from that slot's start, in the occurrence of the earliest start
+/// [editPolicy] gives the day where its clock repeats that time, marked by the
+/// landing outline while the pointer is there; and a block dropped with the
+/// pointer over a day's strip cell makes its entry all-day on that day, the
+/// strip marking that day while the pointer is there. A drag across empty strip
+/// cells creates an all-day range of their days, as a tap on one creates its
+/// day. A line over the blocks marks the time [now] holds in its day's column,
+/// and the grid opens scrolled to the hour before it when it shows that day, at
+/// 08:00 otherwise, with that hour's label whole below the top edge. Each whole
+/// hour, and the start and the end of the hours, has a label centred on its
+/// line in the hour gutter, in [hourLabelFormat], which a room above the first
+/// slot and below the last, or the gutter beside a row counting entries outside
+/// the hours, keeps whole. A piece reaching past the hours shows its part
+/// inside them, and an entry whose start or end the hours do not hold
+/// ([DayHours.holdsTimes]) takes no move or resize: only an edit outside the
+/// grid changes it. A piece wholly outside them has no block. While some are
+/// before the hours, a yellow row frozen against the first slot, in place of
+/// the room above it, says [CalendarLocalizations.moreCount] in the column of
+/// each day with N of them, and while some are after them, a row frozen against
+/// the last slot does; the hour gutter runs on beside both. An entry on no
+/// shown day has no block either, and a pill in the day header's corner counts
+/// it. In edit mode empty body cells take a create gesture, reported through
+/// [onCreate]: a drag picks one continuous range from the earlier of its two
+/// slots to the later, across days too, at once with a mouse or a stylus and
+/// after a press and hold on touch, so a touch drag without one scrolls the
+/// grid, and a tap, or a hold let go where it began, picks its one slot. Where
+/// [editPolicy] forbids overlaps, a slot that shares time with an entry takes
+/// no create gesture. The range picked stays marked, as a range being dragged
+/// is, until the create flow [onCreate] opens closes.
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than [minDayWidth] and [minSlotHeight]; past those, it scrolls.
@@ -783,7 +779,10 @@ class TimedGrid<T> extends StatefulWidget {
   /// [slotMinuteChoices], which the grid's state asserts.
   final int slotMinutes;
 
-  /// The format the hour gutter labels the times in.
+  /// The format the grid writes times of day in: the hour gutter's
+  /// labels, the landing label, and the times its block and chip builders
+  /// write ([CalendarBlockDetails.hourLabelFormat],
+  /// [CalendarChipDetails.hourLabelFormat]).
   final HourLabelFormat hourLabelFormat;
 
   /// The least width of a day column, in logical pixels, positive and
@@ -1929,7 +1928,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// rows are replaced for new hours or a new slot length even at the same
   /// count, for new [_notices] or strip rows, and for a new [_labelRoom] or
   /// hour format, which also rebuilds the gutter cells and so what they
-  /// tell a screen reader.
+  /// tell a screen reader, and the blocks and bars, whose details carry
+  /// the format.
   void _fitAxes(Size size) {
     _size = size;
     final oldRows = _board.rows;
@@ -3473,10 +3473,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// What the landing label says for [_drag] in [strings]: the days and
-  /// times a release would give ([CalendarLocalizations.landing]), or
-  /// [CalendarLocalizations.noLanding] for a crossing whose landing is
-  /// refused and for a move with no target. Null with no drag, before its
-  /// first target, and for a resize with no target.
+  /// times a release would give, the times in [TimedGrid.hourLabelFormat]
+  /// ([CalendarLocalizations.landing]), or [CalendarLocalizations.noLanding]
+  /// for a crossing whose landing is refused and for a move with no
+  /// target. Null with no drag, before its first target, and for a resize
+  /// with no target.
   String? _landingText(
     CalendarLocalizations strings,
     ({DateTime start, DateTime end})? times,
@@ -3488,7 +3489,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (drag.crosses || drag.heldBar != null) {
       return times == null
           ? strings.noLanding
-          : strings.landing(times.start, times.end, _calendarNow.today);
+          : strings.landing(
+              times.start,
+              times.end,
+              _calendarNow.today,
+              widget.hourLabelFormat,
+            );
     }
     if (!drag.resolved) {
       return null;
@@ -3499,7 +3505,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (times == null) {
       return null;
     }
-    return strings.landing(times.start, times.end, _calendarNow.today);
+    return strings.landing(
+      times.start,
+      times.end,
+      _calendarNow.today,
+      widget.hourLabelFormat,
+    );
   }
 
   /// The wall minutes the landing outline paints for [times], what
@@ -4477,6 +4488,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         card: false,
         continuesBefore: bar.continuesBefore,
         continuesAfter: bar.continuesAfter,
+        hourLabelFormat: widget.hourLabelFormat,
       ),
       builder: _chipBuilder,
       selection: _selectedBlock,
@@ -4540,6 +4552,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         cutAtEnd: cutAtEnd,
         continuesBefore: !piece.first,
         continuesAfter: !piece.last,
+        hourLabelFormat: widget.hourLabelFormat,
       ),
       builder: _blockBuilder,
       selection: _selectedBlock,

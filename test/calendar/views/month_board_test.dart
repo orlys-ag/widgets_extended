@@ -1,8 +1,9 @@
 /// The month board: what its fit-to-screen layout keeps of each week (how
 /// many lanes a week holds, which chips it shows, and how many chips each
 /// day hides), the height a week rests at, the days that show cards, the
-/// bars an entry splits into, a chip drawn again for a new payload, and
-/// when its days are ready while the store shows another range.
+/// bars an entry splits into, a chip drawn again for a new payload, the
+/// hour format its chips are handed and heard in, and when its days are
+/// ready while the store shows another range.
 library;
 
 import 'dart:math' as math;
@@ -15,6 +16,8 @@ import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_localizations.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
@@ -558,5 +561,72 @@ void main() {
     await tester.pump();
     expect(marked(april(22)), isTrue);
     expect(marked(april(21)), isFalse);
+  });
+
+  testWidgets("HF4 a month board hands its chips its hour format and names "
+      "their times in it to a screen reader, and builds them again for a "
+      "new one", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final day = DateTime(2026, 4, 21);
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        CalendarEntry<String>(
+          id: "note-1",
+          start: DateTime(2026, 4, 21, 10),
+          end: DateTime(2026, 4, 21, 11),
+          title: "Note",
+          color: const Color(0xFF336699),
+          payload: "note",
+        ),
+      ],
+    );
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(CalendarNow(time: day, today: day));
+    addTearDown(now.dispose);
+    final formats = <HourLabelFormat>[];
+    // The same builder in both builds, so only the format changes.
+    Widget recordChip(
+      BuildContext context,
+      ShownItem entry,
+      CalendarChipDetails details,
+    ) {
+      formats.add(details.hourLabelFormat);
+      return Text(entry.entry.title);
+    }
+
+    Widget board(HourLabelFormat format) {
+      return MaterialApp(
+        home: MonthBoard<String>(
+          store: store,
+          grid: MonthGrid.of(day),
+          selectedDay: day,
+          now: now,
+          onSelectDay: (day) {},
+          onOpenDay: (day) {},
+          onCreateOnDay: null,
+          onOpenEntry: (id) {},
+          hourLabelFormat: format,
+          chipBuilder: recordChip,
+        ),
+      );
+    }
+
+    await tester.pumpWidget(board(HourLabelFormat.twelveHour));
+    await tester.pumpAndSettle();
+    expect(formats.toSet(), <HourLabelFormat>{HourLabelFormat.twelveHour});
+    expect(
+      find.bySemanticsLabel("Note, Tuesday, April 21, 10 AM to 11 AM"),
+      findsOneWidget,
+    );
+
+    formats.clear();
+    await tester.pumpWidget(board(HourLabelFormat.twentyFourHour));
+    await tester.pumpAndSettle();
+    expect(formats.toSet(), <HourLabelFormat>{HourLabelFormat.twentyFourHour});
+    expect(
+      find.bySemanticsLabel("Note, Tuesday, April 21, 10:00 to 11:00"),
+      findsOneWidget,
+    );
+    semantics.dispose();
   });
 }

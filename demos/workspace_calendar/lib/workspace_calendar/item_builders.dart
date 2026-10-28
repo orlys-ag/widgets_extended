@@ -438,7 +438,11 @@ class HarborBlock extends StatelessWidget {
                 style: styles.detailedTitle,
               ),
               Text(
-                strings.entryTimes(item.start, item.end),
+                strings.entryTimes(
+                  item.start,
+                  item.end,
+                  details.hourLabelFormat,
+                ),
                 maxLines: 1,
                 style: styles.detail,
               ),
@@ -559,8 +563,8 @@ class HarborChip extends StatelessWidget {
   }
 
   /// A card's [title] over its type's icon and [item]'s times, as
-  /// [entryTimesLabel] writes them, each line cut short where the day is
-  /// too narrow for it.
+  /// [CalendarLocalizations.entryTimes] writes them in the details' hour
+  /// format, each line cut short where the day is too narrow for it.
   Widget _buildCardLines(
     Text title,
     CalendarItem item,
@@ -579,7 +583,11 @@ class HarborChip extends StatelessWidget {
             const SizedBox(width: 3.0),
             Flexible(
               child: Text(
-                strings.entryTimes(item.start, item.end),
+                strings.entryTimes(
+                  item.start,
+                  item.end,
+                  details.hourLabelFormat,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 softWrap: false,

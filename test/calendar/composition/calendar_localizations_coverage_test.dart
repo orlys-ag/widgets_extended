@@ -42,16 +42,6 @@ class _Marked extends DefaultCalendarLocalizations {
   }
 
   @override
-  String monthShortName(int month) {
-    return "$mark${super.monthShortName(month)}";
-  }
-
-  @override
-  String weekdayName(int weekday) {
-    return "$mark${super.weekdayName(weekday)}";
-  }
-
-  @override
   String weekdayAbbreviation(int weekday) {
     return "$mark${super.weekdayAbbreviation(weekday)}";
   }
@@ -97,8 +87,8 @@ class _Marked extends DefaultCalendarLocalizations {
   }
 
   @override
-  String entryTimes(DateTime start, DateTime end) {
-    return "$mark${super.entryTimes(start, end)}";
+  String entryTimes(DateTime start, DateTime end, HourLabelFormat format) {
+    return "$mark${super.entryTimes(start, end, format)}";
   }
 
   @override
@@ -182,8 +172,13 @@ class _Marked extends DefaultCalendarLocalizations {
   }
 
   @override
-  String landing(DateTime start, DateTime end, DateTime today) {
-    return "$mark${super.landing(start, end, today)}";
+  String landing(
+    DateTime start,
+    DateTime end,
+    DateTime today,
+    HourLabelFormat format,
+  ) {
+    return "$mark${super.landing(start, end, today, format)}";
   }
 
   @override
@@ -192,6 +187,7 @@ class _Marked extends DefaultCalendarLocalizations {
     required String? kind,
     required DateTime start,
     required DateTime end,
+    required HourLabelFormat format,
     required bool pending,
   }) {
     final label = super.entryLabel(
@@ -199,6 +195,7 @@ class _Marked extends DefaultCalendarLocalizations {
       kind: kind,
       start: start,
       end: end,
+      format: format,
       pending: pending,
     );
     return "$mark$label";

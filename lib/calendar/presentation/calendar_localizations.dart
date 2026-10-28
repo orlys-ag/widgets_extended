@@ -49,14 +49,6 @@ abstract class CalendarLocalizations {
   /// The name of [month], as Month's picker shows it.
   String monthName(int month);
 
-  /// The short name of [month], for a host's own text; the header's title
-  /// reads [shortMonthYear].
-  String monthShortName(int month);
-
-  /// The name of [weekday], for a host's own text; the calendar names a day
-  /// through [dayLabel] and [dayTitle].
-  String weekdayName(int weekday);
-
   /// The abbreviation of [weekday], as the calendar card's weekday row and
   /// its week strip's days show it.
   String weekdayAbbreviation(int weekday);
@@ -93,10 +85,10 @@ abstract class CalendarLocalizations {
 
   /// The times of an entry from [start] to [end], as the default block and
   /// chip builders show them: [allDay] for a range from a day's start to a
-  /// day's start, and otherwise the times of day of [start] and [end] on
-  /// the 24-hour clock, where an end at the start of the day after
-  /// [start]'s is the midnight that ends that day.
-  String entryTimes(DateTime start, DateTime end);
+  /// day's start, and otherwise the times of day of [start] and [end] in
+  /// [format], where an end at the start of the day after [start]'s is
+  /// the midnight that ends that day.
+  String entryTimes(DateTime start, DateTime end, HourLabelFormat format);
 
   /// The times of an all-day entry.
   String get allDay;
@@ -153,17 +145,24 @@ abstract class CalendarLocalizations {
 
   /// The landing label for a drag that would give an entry the times
   /// [start] to [end]: its days as [dayTitle] names them against [today],
-  /// and its times, or for an all-day range that it is all day.
-  String landing(DateTime start, DateTime end, DateTime today);
+  /// and its times in [format], or for an all-day range that it is all
+  /// day.
+  String landing(
+    DateTime start,
+    DateTime end,
+    DateTime today,
+    HourLabelFormat format,
+  );
 
   /// What a screen reader hears for a Month chip: the entry's [title], its
-  /// [kind] where it has one, its days and times from [start] to [end],
-  /// and whether it is [pending].
+  /// [kind] where it has one, its days and its times from [start] to [end]
+  /// in [format], and whether it is [pending].
   String entryLabel({
     required String title,
     required String? kind,
     required DateTime start,
     required DateTime end,
+    required HourLabelFormat format,
     required bool pending,
   });
 
@@ -261,7 +260,10 @@ class DefaultCalendarLocalizations extends CalendarLocalizations {
   const DefaultCalendarLocalizations();
 
   /// A [LocalizationsDelegate] that loads [DefaultCalendarLocalizations]
-  /// for English.
+  /// for English. [CalendarLocalizations.of] finds the English default
+  /// without it; listed among an app's localization delegates, it makes a
+  /// debug build report an app locale that no delegate of
+  /// [CalendarLocalizations] supports.
   static const LocalizationsDelegate<CalendarLocalizations> delegate =
       _DefaultCalendarLocalizationsDelegate();
 
@@ -315,18 +317,7 @@ class DefaultCalendarLocalizations extends CalendarLocalizations {
     return _monthNames[month - 1];
   }
 
-  /// The first three letters of [monthName].
-  @override
-  String monthShortName(int month) {
-    return _monthNames[month - 1].substring(0, 3);
-  }
-
-  @override
-  String weekdayName(int weekday) {
-    return _weekdayNames[weekday - 1];
-  }
-
-  /// The first three letters of [weekdayName].
+  /// The first three letters of the weekday's name.
   @override
   String weekdayAbbreviation(int weekday) {
     return _weekdayNames[weekday - 1].substring(0, 3);
@@ -345,7 +336,8 @@ class DefaultCalendarLocalizations extends CalendarLocalizations {
   /// "Tuesday, April 21".
   @override
   String dayLabel(DateTime day) {
-    return "${weekdayName(day.weekday)}, ${monthName(day.month)} ${day.day}";
+    return "${_weekdayNames[day.weekday - 1]}, ${monthName(day.month)} "
+        "${day.day}";
   }
 
   /// "Today, April 21", "Monday, April 27", or with the year appended
@@ -365,7 +357,7 @@ class DefaultCalendarLocalizations extends CalendarLocalizations {
     } else if (offset == -1) {
       name = "Yesterday";
     } else {
-      name = weekdayName(day.weekday);
+      name = _weekdayNames[day.weekday - 1];
     }
     return "$name, $date";
   }
@@ -376,10 +368,11 @@ class DefaultCalendarLocalizations extends CalendarLocalizations {
     return "${monthName(month.month)} ${month.year}";
   }
 
-  /// "Apr 2026".
+  /// "Apr 2026": the first three letters of the month's name, and the
+  /// year.
   @override
   String shortMonthYear(DateTime month) {
-    return "${monthShortName(month.month)} ${month.year}";
+    return "${_monthNames[month.month - 1].substring(0, 3)} ${month.year}";
   }
 
   /// "09:30" on the 24-hour clock, where 1440 reads "24:00"; on the
@@ -410,20 +403,17 @@ class DefaultCalendarLocalizations extends CalendarLocalizations {
     return "${formatTime(start, format)}-${formatTime(end, format)}";
   }
 
-  /// "09:10-09:50", or "All day".
+  /// "09:10-09:50", "9:10 AM-9:50 AM" on the 12-hour clock, or "All
+  /// day".
   @override
-  String entryTimes(DateTime start, DateTime end) {
+  String entryTimes(DateTime start, DateTime end, HourLabelFormat format) {
     if (isDayStart(start) && isDayStart(end)) {
       return allDay;
     }
     final last = isDayStart(end) && dayNumber(end) == dayNumber(start) + 1
         ? minutesPerDay
         : minuteOfDay(end);
-    return formatTimeRange(
-      minuteOfDay(start),
-      last,
-      HourLabelFormat.twentyFourHour,
-    );
+    return formatTimeRange(minuteOfDay(start), last, format);
   }
 
   @override
@@ -541,9 +531,15 @@ class DefaultCalendarLocalizations extends CalendarLocalizations {
   /// "Today, April 21, 14:00-15:00"; for a range over more than one day
   /// "Monday, April 20, 22:00 to Tuesday, April 21, 02:00"; and for an
   /// all-day range "Monday, April 20, all day" or "Monday, April 20 to
-  /// Wednesday, April 22, all day".
+  /// Wednesday, April 22, all day"; the times as [formatTime] writes them
+  /// in [format].
   @override
-  String landing(DateTime start, DateTime end, DateTime today) {
+  String landing(
+    DateTime start,
+    DateTime end,
+    DateTime today,
+    HourLabelFormat format,
+  ) {
     final first = dayNumber(start);
     final last = lastDayNumberOf(start, end);
     final from = dayTitle(dateOfDayNumber(first), today);
@@ -552,16 +548,10 @@ class DefaultCalendarLocalizations extends CalendarLocalizations {
       return first == last ? "$from, all day" : "$from to $to, all day";
     }
     if (first == last) {
-      return "$from, ${entryTimes(start, end)}";
+      return "$from, ${entryTimes(start, end, format)}";
     }
-    final startTime = formatTime(
-      minuteOfDay(start),
-      HourLabelFormat.twentyFourHour,
-    );
-    final endTime = formatTime(
-      endMinuteOfDay(end),
-      HourLabelFormat.twentyFourHour,
-    );
+    final startTime = formatTime(minuteOfDay(start), format);
+    final endTime = formatTime(endMinuteOfDay(end), format);
     return "$from, $startTime to $to, $endTime";
   }
 
@@ -569,25 +559,20 @@ class DefaultCalendarLocalizations extends CalendarLocalizations {
   /// Wednesday, April 22, all day", "Title, Monday, April 20, 09:10 to
   /// 09:50", or for a timed entry over days "Title, Monday, April 20,
   /// 22:00 to Tuesday, April 21, 02:00", each with ", pending" while it is
-  /// [pending].
+  /// [pending]; the times as [formatTime] writes them in [format].
   @override
   String entryLabel({
     required String title,
     required String? kind,
     required DateTime start,
     required DateTime end,
+    required HourLabelFormat format,
     required bool pending,
   }) {
     final first = dateOfDayNumber(dayNumber(start));
     final last = dateOfDayNumber(lastDayNumberOf(start, end));
-    final startTime = formatTime(
-      minuteOfDay(start),
-      HourLabelFormat.twentyFourHour,
-    );
-    final endTime = formatTime(
-      endMinuteOfDay(end),
-      HourLabelFormat.twentyFourHour,
-    );
+    final startTime = formatTime(minuteOfDay(start), format);
+    final endTime = formatTime(endMinuteOfDay(end), format);
     final String when;
     if (isDayStart(start) && isDayStart(end)) {
       when = first == last

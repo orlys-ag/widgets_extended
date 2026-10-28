@@ -125,26 +125,86 @@ void main() {
       english.entryTimes(
         DateTime(2026, 4, 21, 9, 10),
         DateTime(2026, 4, 21, 9, 50),
+        HourLabelFormat.twentyFourHour,
       ),
       "09:10-09:50",
     );
     expect(
-      english.entryTimes(DateTime(2026, 4, 20, 22), DateTime(2026, 4, 21, 2)),
+      english.entryTimes(
+        DateTime(2026, 4, 20, 22),
+        DateTime(2026, 4, 21, 2),
+        HourLabelFormat.twentyFourHour,
+      ),
       "22:00-02:00",
     );
     expect(
-      english.entryTimes(DateTime(2026, 4, 20, 22), DateTime(2026, 4, 21)),
+      english.entryTimes(
+        DateTime(2026, 4, 20, 22),
+        DateTime(2026, 4, 21),
+        HourLabelFormat.twentyFourHour,
+      ),
       "22:00-24:00",
     );
     expect(
-      english.entryTimes(DateTime(2026, 4, 20), DateTime(2026, 4, 21)),
+      english.entryTimes(
+        DateTime(2026, 4, 20),
+        DateTime(2026, 4, 21),
+        HourLabelFormat.twentyFourHour,
+      ),
       "All day",
     );
     expect(
-      english.entryTimes(DateTime(2026, 4, 20), DateTime(2026, 4, 23)),
+      english.entryTimes(
+        DateTime(2026, 4, 20),
+        DateTime(2026, 4, 23),
+        HourLabelFormat.twentyFourHour,
+      ),
       "All day",
     );
     expect(english.allDay, "All day");
+  });
+
+  test("HF1 entryTimes, landing and entryLabel write their times in the "
+      "format they take", () {
+    const twelve = HourLabelFormat.twelveHour;
+    final today = DateTime(2026, 4, 15);
+    expect(
+      english.entryTimes(
+        DateTime(2026, 4, 21, 9, 10),
+        DateTime(2026, 4, 21, 9, 50),
+        twelve,
+      ),
+      "9:10 AM-9:50 AM",
+    );
+    expect(
+      english.landing(
+        DateTime(2026, 4, 15, 14),
+        DateTime(2026, 4, 15, 15),
+        today,
+        twelve,
+      ),
+      "Today, April 15, 2 PM-3 PM",
+    );
+    expect(
+      english.landing(
+        DateTime(2026, 4, 20, 22),
+        DateTime(2026, 4, 21, 2),
+        today,
+        twelve,
+      ),
+      "Monday, April 20, 10 PM to Tuesday, April 21, 2 AM",
+    );
+    expect(
+      english.entryLabel(
+        title: "Gym",
+        kind: null,
+        start: DateTime(2026, 4, 20, 9, 10),
+        end: DateTime(2026, 4, 20, 9, 50),
+        format: twelve,
+        pending: false,
+      ),
+      "Gym, Monday, April 20, 9:10 AM to 9:50 AM",
+    );
   });
 
   group("C7 formatTime", () {
@@ -173,13 +233,9 @@ void main() {
   });
 
   group("LC1 the English default", () {
-    test("names months and weekdays, whole, short, abbreviated and by "
+    test("names months, and weekdays short, abbreviated and by "
         "letter", () {
       expect(english.monthName(1), "January");
-      expect(english.monthShortName(5), "May");
-      expect(english.monthShortName(9), "Sep");
-      expect(english.weekdayName(DateTime.monday), "Monday");
-      expect(english.weekdayName(DateTime.sunday), "Sunday");
       expect(english.weekdayAbbreviation(DateTime.wednesday), "Wed");
       expect(english.weekdayShortName(DateTime.thursday), "Th");
       expect(english.weekdayLetter(DateTime.saturday), "S");
@@ -229,6 +285,7 @@ void main() {
           DateTime(2026, 4, 15, 14),
           DateTime(2026, 4, 15, 15),
           today,
+          HourLabelFormat.twentyFourHour,
         ),
         "Today, April 15, 14:00-15:00",
       );
@@ -237,15 +294,26 @@ void main() {
           DateTime(2026, 4, 20, 22),
           DateTime(2026, 4, 21, 2),
           today,
+          HourLabelFormat.twentyFourHour,
         ),
         "Monday, April 20, 22:00 to Tuesday, April 21, 02:00",
       );
       expect(
-        english.landing(DateTime(2026, 4, 20), DateTime(2026, 4, 21), today),
+        english.landing(
+          DateTime(2026, 4, 20),
+          DateTime(2026, 4, 21),
+          today,
+          HourLabelFormat.twentyFourHour,
+        ),
         "Monday, April 20, all day",
       );
       expect(
-        english.landing(DateTime(2026, 4, 20), DateTime(2026, 4, 23), today),
+        english.landing(
+          DateTime(2026, 4, 20),
+          DateTime(2026, 4, 23),
+          today,
+          HourLabelFormat.twentyFourHour,
+        ),
         "Monday, April 20 to Wednesday, April 22, all day",
       );
     });
@@ -258,6 +326,7 @@ void main() {
           kind: "Health",
           start: DateTime(2026, 4, 20),
           end: DateTime(2026, 4, 21),
+          format: HourLabelFormat.twentyFourHour,
           pending: true,
         ),
         "Gym, Health, Monday, April 20, all day, pending",
@@ -268,6 +337,7 @@ void main() {
           kind: null,
           start: DateTime(2026, 4, 20),
           end: DateTime(2026, 4, 23),
+          format: HourLabelFormat.twentyFourHour,
           pending: false,
         ),
         "Gym, Monday, April 20 to Wednesday, April 22, all day",
@@ -278,6 +348,7 @@ void main() {
           kind: null,
           start: DateTime(2026, 4, 20, 9, 10),
           end: DateTime(2026, 4, 20, 9, 50),
+          format: HourLabelFormat.twentyFourHour,
           pending: false,
         ),
         "Gym, Monday, April 20, 09:10 to 09:50",
@@ -288,6 +359,7 @@ void main() {
           kind: null,
           start: DateTime(2026, 4, 20, 22),
           end: DateTime(2026, 4, 21),
+          format: HourLabelFormat.twentyFourHour,
           pending: false,
         ),
         "Gym, Monday, April 20, 22:00 to 24:00",
@@ -298,6 +370,7 @@ void main() {
           kind: null,
           start: DateTime(2026, 4, 20, 22),
           end: DateTime(2026, 4, 21, 2),
+          format: HourLabelFormat.twentyFourHour,
           pending: false,
         ),
         "Gym, Monday, April 20, 22:00 to Tuesday, April 21, 02:00",

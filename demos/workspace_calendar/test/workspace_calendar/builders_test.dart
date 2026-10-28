@@ -1,7 +1,8 @@
 /// The views draw their entries and their loading and failure states only
 /// through the builders the composition hands them, the module's defaults
 /// where it hands none, and call each builder no more often than the base
-/// built the widget it replaces.
+/// built the widget it replaces; Harbor's builders write the times in the
+/// bar's hour format.
 library;
 
 import 'package:flutter/gestures.dart';
@@ -2279,5 +2280,39 @@ void main() {
       api.failurePolicy = null;
       await pumpFor(tester, second);
     }
+  });
+
+  testWidgets("HF6 with the bar's AM/PM switch on, Harbor's Day block and "
+      "Month card write their times on the 12-hour clock", (tester) async {
+    await pumpCalendar(
+      tester,
+      api: MockCalendarApi(
+        seed: <Map<String, Object?>>[taskJson("Hour", today, 16 * 60, 17 * 60)],
+        latency: harnessLatency,
+      ),
+      size: const Size(1200.0, 1600.0),
+    );
+    await openBar(tester);
+    await tester.tap(find.byKey(hourLabelFormatKey));
+    await tester.pumpAndSettle();
+    await closeBar(tester);
+
+    await pickMode(tester, "Day");
+    expect(
+      find.descendant(
+        of: blockFinder("item-1"),
+        matching: find.text("4 PM-5 PM"),
+      ),
+      findsOneWidget,
+    );
+
+    await pickMode(tester, "Month");
+    expect(
+      find.descendant(
+        of: find.byType(HarborChip),
+        matching: find.text("4 PM-5 PM"),
+      ),
+      findsOneWidget,
+    );
   });
 }

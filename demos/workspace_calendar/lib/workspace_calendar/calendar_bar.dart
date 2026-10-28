@@ -418,6 +418,17 @@ class _WeekStartMenu extends StatelessWidget {
 
   final ValueChanged<int> onSelected;
 
+  /// The weekdays' names, Monday first, as the menu lists them.
+  static const List<String> _weekdayNames = <String>[
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+  ];
+
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<int>(
@@ -431,9 +442,7 @@ class _WeekStartMenu extends StatelessWidget {
           for (var column = 0; column < DateTime.daysPerWeek; column++)
             PopupMenuItem<int>(
               value: column,
-              child: Text(
-                CalendarLocalizations.of(context).weekdayName(column + 1),
-              ),
+              child: Text(_weekdayNames[column]),
             ),
         ];
       },

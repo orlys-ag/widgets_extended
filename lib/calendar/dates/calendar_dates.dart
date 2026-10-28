@@ -460,7 +460,7 @@ String isoDate(DateTime date) {
 }
 
 /// "09:30" for [minute] minutes after midnight, and "24:00" for 1440: the
-/// time of day as the developer-facing `toString`s write it.
+/// time of day in ISO 8601's hours and minutes.
 String isoTime(int minute) {
   final hours = (minute ~/ 60).toString().padLeft(2, "0");
   final minutes = (minute % 60).toString().padLeft(2, "0");

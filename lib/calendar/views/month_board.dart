@@ -702,7 +702,9 @@ class MonthBoard<T> extends StatefulWidget {
   /// no chip, and its days count it on their banners.
   final DayHours hours;
 
-  /// The format the days' banners name [hours] in to a screen reader.
+  /// The format the days' banners name [hours] in to a screen reader, and
+  /// the chips write their entries' times in: to a screen reader, and
+  /// through [chipBuilder] ([CalendarChipDetails.hourLabelFormat]).
   final HourLabelFormat hourLabelFormat;
 
   /// A shown day of [grid]'s month.
@@ -1062,7 +1064,8 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   void didUpdateWidget(MonthBoard<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.chipBuilder != oldWidget.chipBuilder ||
-        widget.entryKindOf != oldWidget.entryKindOf) {
+        widget.entryKindOf != oldWidget.entryKindOf ||
+        widget.hourLabelFormat != oldWidget.hourLabelFormat) {
       _barBuilder = _barBuilderOf(widget);
       _chips.clear();
       _chipBuilder = (context, view) {
@@ -1778,6 +1781,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
         card: card,
         builder: _barBuilder,
         kindOf: widget.entryKindOf,
+        format: widget.hourLabelFormat,
         onOpen: _openEntry,
       ),
     );
@@ -2138,8 +2142,8 @@ class _MonthDayCell extends StatelessWidget {
 /// grows or shrinks the band, what [builder] draws for the chip: a chip one
 /// [monthLaneExtent] lane tall, or a [card] one [monthCardExtent] lane
 /// tall. The box is one semantics node of the chip's label, the kind
-/// [kindOf] answers, and its tap, and takes a tap anywhere in it, which
-/// does nothing while the chip is pending.
+/// [kindOf] answers and its times in [format], and its tap, and takes a
+/// tap anywhere in it, which does nothing while the chip is pending.
 class _MonthChipBox<T> extends StatelessWidget {
   const _MonthChipBox({
     super.key,
@@ -2147,6 +2151,7 @@ class _MonthChipBox<T> extends StatelessWidget {
     required this.card,
     required this.builder,
     required this.kindOf,
+    required this.format,
     required this.onOpen,
   });
 
@@ -2154,6 +2159,7 @@ class _MonthChipBox<T> extends StatelessWidget {
   final bool card;
   final CalendarChipBuilder<T> builder;
   final String? Function(CalendarEntry<T> entry)? kindOf;
+  final HourLabelFormat format;
   final ValueChanged<String> onOpen;
 
   @override
@@ -2173,6 +2179,7 @@ class _MonthChipBox<T> extends StatelessWidget {
         kind: kindOf?.call(entry.entry),
         start: entry.entry.start,
         end: entry.entry.end,
+        format: format,
         pending: pending,
       ),
       onTap: pending ? null : open,
@@ -2200,6 +2207,7 @@ class _MonthChipBox<T> extends StatelessWidget {
                     card: card,
                     continuesBefore: chip.continuesBefore,
                     continuesAfter: chip.continuesAfter,
+                    hourLabelFormat: format,
                   ),
                   builder: builder,
                 ),

@@ -1679,9 +1679,9 @@ class _DayListState<T> extends State<DayList<T>> {
   /// [CalendarLocalizations.allDay] and no chip. The card of a piece that
   /// starts before the hours is handed the piece's start, for a strip
   /// across its top, and that of one that ends after them its end, for a
-  /// strip across its bottom. A row leaving for a
-  /// banner, whose piece has no minute inside the hours, shows the piece's
-  /// own start and is handed neither.
+  /// strip across its bottom. A row leaving for a banner, whose piece has
+  /// no minute inside the hours, shows the piece's own start and is handed
+  /// neither.
   Widget _buildEntryRow(DayListEntry<T> row) {
     final entry = row.entry;
     final calendarEntry = entry.entry;

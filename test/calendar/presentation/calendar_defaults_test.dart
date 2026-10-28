@@ -165,17 +165,20 @@ void main() {
     expect(block.tall, isFalse);
     expect(block.cutAtStart, isTrue);
     expect(block.cutAtEnd, isFalse);
+    expect(block.hourLabelFormat, HourLabelFormat.twentyFourHour);
     CalendarBlockDetails blockOf({
       bool? detailed,
       bool? tall,
       bool? cutAtStart,
       bool? cutAtEnd,
+      HourLabelFormat? hourLabelFormat,
     }) {
       return CalendarBlockDetails(
         detailed: detailed ?? block.detailed,
         tall: tall ?? block.tall,
         cutAtStart: cutAtStart ?? block.cutAtStart,
         cutAtEnd: cutAtEnd ?? block.cutAtEnd,
+        hourLabelFormat: hourLabelFormat ?? block.hourLabelFormat,
       );
     }
 
@@ -188,6 +191,7 @@ void main() {
       "tall": blockOf(tall: true),
       "cutAtStart": blockOf(cutAtStart: false),
       "cutAtEnd": blockOf(cutAtEnd: true),
+      "hourLabelFormat": blockOf(hourLabelFormat: HourLabelFormat.twelveHour),
     }.entries) {
       expect(other.value, isNot(block), reason: other.key);
       expect(other.value.hashCode, isNot(block.hashCode), reason: other.key);
@@ -201,15 +205,18 @@ void main() {
     expect(chip.card, isTrue);
     expect(chip.continuesBefore, isFalse);
     expect(chip.continuesAfter, isTrue);
+    expect(chip.hourLabelFormat, HourLabelFormat.twentyFourHour);
     CalendarChipDetails chipOf({
       bool? card,
       bool? continuesBefore,
       bool? continuesAfter,
+      HourLabelFormat? hourLabelFormat,
     }) {
       return CalendarChipDetails(
         card: card ?? chip.card,
         continuesBefore: continuesBefore ?? chip.continuesBefore,
         continuesAfter: continuesAfter ?? chip.continuesAfter,
+        hourLabelFormat: hourLabelFormat ?? chip.hourLabelFormat,
       );
     }
 
@@ -221,6 +228,7 @@ void main() {
       "card": chipOf(card: false),
       "continuesBefore": chipOf(continuesBefore: true),
       "continuesAfter": chipOf(continuesAfter: false),
+      "hourLabelFormat": chipOf(hourLabelFormat: HourLabelFormat.twelveHour),
     }.entries) {
       expect(other.value, isNot(chip), reason: other.key);
       expect(other.value.hashCode, isNot(chip.hashCode), reason: other.key);
@@ -1000,5 +1008,48 @@ void main() {
       expect(tester.getSize(root).height, moreOrLessEquals(2.0));
       expect(rebuilt, isEmpty, reason: "detailed: $detailed");
     }
+  });
+
+  testWidgets("HF5 the detailed block default and the chip default's card "
+      "form write the times in their details' hour format", (tester) async {
+    final entry = shown();
+    await tester.pumpWidget(
+      host((context) {
+        return defaultCalendarBlockBuilder(
+          context,
+          entry,
+          const CalendarBlockDetails(
+            detailed: true,
+            tall: true,
+            cutAtStart: false,
+            cutAtEnd: false,
+            hourLabelFormat: HourLabelFormat.twelveHour,
+          ),
+        );
+      }),
+    );
+    expect(
+      textsUnder(tester),
+      unorderedEquals(<String>["Standup", "9 AM-10 AM"]),
+    );
+
+    await tester.pumpWidget(
+      host((context) {
+        return defaultCalendarChipBuilder(
+          context,
+          entry,
+          const CalendarChipDetails(
+            card: true,
+            continuesBefore: false,
+            continuesAfter: false,
+            hourLabelFormat: HourLabelFormat.twelveHour,
+          ),
+        );
+      }),
+    );
+    expect(
+      textsUnder(tester),
+      unorderedEquals(<String>["Standup", "9 AM-10 AM"]),
+    );
   });
 }

@@ -300,8 +300,11 @@ class CalendarView<T> extends StatefulWidget {
   /// its grid, which a debug build asserts.
   final int slotMinutes;
 
-  /// The format Week's and Day's grids and Agenda's times label the hours
-  /// in.
+  /// The format the calendar writes times of day in: Week's and Day's
+  /// hour labels and landing label, Agenda's times, Month's banners and
+  /// chips, and the times the entry builders write
+  /// ([CalendarBlockDetails.hourLabelFormat],
+  /// [CalendarChipDetails.hourLabelFormat]).
   final HourLabelFormat hourLabelFormat;
 
   /// How Month lays out a week whose chips its share of the height does
