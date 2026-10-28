@@ -5,7 +5,6 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/item_form.dart';
@@ -77,8 +76,13 @@ List<String> timeChoices(WidgetTester tester, String label) {
       matching: find.byType(DropdownButton<int>),
     ),
   );
-  return <String>[for (final item in dropdown.items!) clockLabel(item.value!)];
+  return <String>[
+    for (final item in dropdown.items!)
+      english.formatTime(item.value!, HourLabelFormat.twentyFourHour),
+  ];
 }
+
+const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
 
 void main() {
   testWidgets("IF1 the form shows Start date, Start time, End date, End "

@@ -6,6 +6,7 @@ library;
 import 'package:flutter/widgets.dart';
 
 import '../store/calendar_store.dart';
+import 'calendar_localizations.dart';
 
 /// The height of the strip a card builder draws across a card's top for
 /// [CalendarCardDetails.startsAt], and across its bottom for
@@ -104,7 +105,8 @@ typedef CalendarFailureBuilder =
 /// entry: the part of it on the block's day.
 @immutable
 final class CalendarBlockDetails {
-  /// The block's form, its room, its cut ends and its continued ends.
+  /// The block's form, its room, its cut ends, its continued ends and
+  /// the format of its times.
   const CalendarBlockDetails({
     required this.detailed,
     required this.tall,
@@ -112,6 +114,7 @@ final class CalendarBlockDetails {
     required this.cutAtEnd,
     this.continuesBefore = false,
     this.continuesAfter = false,
+    this.hourLabelFormat = HourLabelFormat.twentyFourHour,
   });
 
   /// Whether the grid shows one day column, with room for the times and
@@ -142,6 +145,11 @@ final class CalendarBlockDetails {
   /// block's.
   final bool continuesAfter;
 
+  /// The grid's `TimedGrid.hourLabelFormat`, in which the block writes
+  /// its entry's times, as the default builder does through
+  /// [CalendarLocalizations.entryTimes].
+  final HourLabelFormat hourLabelFormat;
+
   @override
   bool operator ==(Object other) {
     return other is CalendarBlockDetails &&
@@ -150,7 +158,8 @@ final class CalendarBlockDetails {
         other.cutAtStart == cutAtStart &&
         other.cutAtEnd == cutAtEnd &&
         other.continuesBefore == continuesBefore &&
-        other.continuesAfter == continuesAfter;
+        other.continuesAfter == continuesAfter &&
+        other.hourLabelFormat == hourLabelFormat;
   }
 
   @override
@@ -162,6 +171,7 @@ final class CalendarBlockDetails {
       cutAtEnd,
       continuesBefore,
       continuesAfter,
+      hourLabelFormat,
     );
   }
 
@@ -169,7 +179,8 @@ final class CalendarBlockDetails {
   String toString() {
     return "CalendarBlockDetails(detailed: $detailed, tall: $tall, "
         "cutAtStart: $cutAtStart, cutAtEnd: $cutAtEnd, continuesBefore: "
-        "$continuesBefore, continuesAfter: $continuesAfter)";
+        "$continuesBefore, continuesAfter: $continuesAfter, "
+        "hourLabelFormat: ${hourLabelFormat.name})";
   }
 }
 
@@ -177,11 +188,12 @@ final class CalendarBlockDetails {
 /// one bar's appearance, which a [CalendarChipBuilder] draws from.
 @immutable
 final class CalendarChipDetails {
-  /// The bar's form and its continued ends.
+  /// The bar's form, its continued ends and the format of its times.
   const CalendarChipDetails({
     required this.card,
     required this.continuesBefore,
     required this.continuesAfter,
+    this.hourLabelFormat = HourLabelFormat.twentyFourHour,
   });
 
   /// Whether the days are large enough for the card form: a bar one card
@@ -198,23 +210,31 @@ final class CalendarChipDetails {
   /// [continuesBefore] reads the first.
   final bool continuesAfter;
 
+  /// The view's hour format (`MonthBoard.hourLabelFormat` or
+  /// `TimedGrid.hourLabelFormat`), in which the bar writes its entry's
+  /// times, as the default builder's card form does through
+  /// [CalendarLocalizations.entryTimes].
+  final HourLabelFormat hourLabelFormat;
+
   @override
   bool operator ==(Object other) {
     return other is CalendarChipDetails &&
         other.card == card &&
         other.continuesBefore == continuesBefore &&
-        other.continuesAfter == continuesAfter;
+        other.continuesAfter == continuesAfter &&
+        other.hourLabelFormat == hourLabelFormat;
   }
 
   @override
   int get hashCode {
-    return Object.hash(card, continuesBefore, continuesAfter);
+    return Object.hash(card, continuesBefore, continuesAfter, hourLabelFormat);
   }
 
   @override
   String toString() {
     return "CalendarChipDetails(card: $card, continuesBefore: "
-        "$continuesBefore, continuesAfter: $continuesAfter)";
+        "$continuesBefore, continuesAfter: $continuesAfter, "
+        "hourLabelFormat: ${hourLabelFormat.name})";
   }
 }
 

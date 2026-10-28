@@ -7,7 +7,6 @@ import 'dart:ui' show Color;
 import 'package:flutter/foundation.dart';
 
 import '../dates/calendar_dates.dart';
-import '../dates/calendar_labels.dart';
 
 /// One entry of a calendar, carrying a payload of the host's type [T].
 ///
@@ -107,7 +106,7 @@ class CalendarEntry<T> {
   @override
   String toString() {
     return "CalendarEntry(${id ?? "draft"}, ${isoDate(start)} "
-        "${clockLabel(minuteOfDay(start))} to ${isoDate(end)} "
-        "${clockLabel(minuteOfDay(end))}, \"$title\", $payload)";
+        "${isoTime(minuteOfDay(start))} to ${isoDate(end)} "
+        "${isoTime(minuteOfDay(end))}, \"$title\", $payload)";
   }
 }

@@ -11,12 +11,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../dates/calendar_dates.dart';
-import '../dates/calendar_labels.dart';
 import '../entries/calendar_entry.dart';
 import '../policy/edit_policy.dart';
 import '../policy/edit_rules.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_day_badges.dart';
+import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 import '../views/day_list.dart';
@@ -85,7 +85,7 @@ class CalendarEntryTapDetails<T> {
 ///
 /// - Agenda: the calendar card's month over a list of the days, one after
 ///   another, each day's entries beside their times and lengths. The month
-///   is a `MonthStrip` under the weekdays' three-letter names, one month at
+///   is a `MonthStrip` under the weekdays' abbreviations, one month at
 ///   a time, each day a cell with its number on a circle and badges when
 ///   it has entries, one for each kind [dayBadges] gives them. A tap selects a day, and the arrow keys move the
 ///   selection once a tap has given the month focus. A horizontal drag
@@ -300,8 +300,11 @@ class CalendarView<T> extends StatefulWidget {
   /// its grid, which a debug build asserts.
   final int slotMinutes;
 
-  /// The format Week's and Day's grids and Agenda's times label the hours
-  /// in.
+  /// The format the calendar writes times of day in: Week's and Day's
+  /// hour labels and landing label, Agenda's times, Month's banners and
+  /// chips, and the times the entry builders write
+  /// ([CalendarBlockDetails.hourLabelFormat],
+  /// [CalendarChipDetails.hourLabelFormat]).
   final HourLabelFormat hourLabelFormat;
 
   /// How Month lays out a week whose chips its share of the height does

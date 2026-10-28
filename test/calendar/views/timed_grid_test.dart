@@ -17,12 +17,12 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_localizations.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
@@ -1293,5 +1293,71 @@ void main() {
     now.value = CalendarNow(time: now.value.time, today: thursday);
     await tester.pump();
     expect(tintedColumn(), 4);
+  });
+
+  testWidgets("HF3 a timed grid hands its blocks and its all-day bars its "
+      "hour format, and hands them a new one", (tester) async {
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        entryOf("standup", tuesday, 9 * 60, 10 * 60),
+        entryOf("off", tuesday, 0, 0, dayCount: 2),
+      ],
+    );
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: nineOClock(), today: tuesday),
+    );
+    addTearDown(now.dispose);
+    final blocks = <HourLabelFormat>[];
+    final bars = <HourLabelFormat>[];
+    // The same two builders in both builds, so only the format changes.
+    Widget recordBlock(
+      BuildContext context,
+      CalendarShownEntry<String> entry,
+      CalendarBlockDetails details,
+    ) {
+      blocks.add(details.hourLabelFormat);
+      return const SizedBox.expand();
+    }
+
+    Widget recordBar(
+      BuildContext context,
+      CalendarShownEntry<String> entry,
+      CalendarChipDetails details,
+    ) {
+      bars.add(details.hourLabelFormat);
+      return const SizedBox.expand();
+    }
+
+    Widget grid(HourLabelFormat format) {
+      return MaterialApp(
+        home: TimedGrid<String>(
+          store: store,
+          firstDay: monday,
+          dayCount: 7,
+          selectedDay: tuesday,
+          now: now,
+          onSelectDay: (day) {},
+          onOpenEntry: (id) {},
+          onCreate: (range) async {},
+          hours: const DayHours(8 * 60, 18 * 60),
+          hourLabelFormat: format,
+          blockBuilder: recordBlock,
+          chipBuilder: recordBar,
+        ),
+      );
+    }
+
+    await tester.pumpWidget(grid(HourLabelFormat.twelveHour));
+    await tester.pumpAndSettle();
+    expect(blocks.toSet(), <HourLabelFormat>{HourLabelFormat.twelveHour});
+    expect(bars.toSet(), <HourLabelFormat>{HourLabelFormat.twelveHour});
+
+    blocks.clear();
+    bars.clear();
+    await tester.pumpWidget(grid(HourLabelFormat.twentyFourHour));
+    await tester.pumpAndSettle();
+    expect(blocks.toSet(), <HourLabelFormat>{HourLabelFormat.twentyFourHour});
+    expect(bars.toSet(), <HourLabelFormat>{HourLabelFormat.twentyFourHour});
   });
 }

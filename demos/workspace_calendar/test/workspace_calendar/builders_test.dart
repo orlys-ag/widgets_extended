@@ -1,7 +1,8 @@
 /// The views draw their entries and their loading and failure states only
 /// through the builders the composition hands them, the module's defaults
 /// where it hands none, and call each builder no more often than the base
-/// built the widget it replaces.
+/// built the widget it replaces; Harbor's builders write the times in the
+/// bar's hour format.
 library;
 
 import 'package:flutter/gestures.dart';
@@ -10,7 +11,6 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
@@ -618,6 +618,8 @@ Future<void> stepUntil(
   }
 }
 
+const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
+
 void main() {
   testWidgets("BW1 Week draws each block through its builder, its pending "
       "state and its cut ends included", (tester) async {
@@ -896,16 +898,16 @@ void main() {
     await tester.tap(find.byTooltip("Next week"));
     await pumpFor(tester, const Duration(milliseconds: 1400));
     expect(
-      find.descendant(of: grid, matching: find.text(readFailedLabel)),
+      find.descendant(of: grid, matching: find.text(english.readFailed)),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: grid, matching: find.text(retryLabel)),
+      find.descendant(of: grid, matching: find.text(english.retry)),
       findsOneWidget,
     );
     expect(find.text("Reading failed."), findsNothing);
     api.failurePolicy = null;
-    await tester.tap(find.text(retryLabel));
+    await tester.tap(find.text(english.retry));
     await pumpFor(tester, const Duration(milliseconds: 1400));
     await tester.pumpAndSettle();
 
@@ -925,7 +927,13 @@ void main() {
     expect(
       find.descendant(
         of: blockFinder(brainstormId),
-        matching: find.text(clockRangeLabel(14 * 60, 15 * 60)),
+        matching: find.text(
+          english.formatTimeRange(
+            14 * 60,
+            15 * 60,
+            HourLabelFormat.twentyFourHour,
+          ),
+        ),
       ),
       findsOneWidget,
     );
@@ -960,15 +968,15 @@ void main() {
     await pumpFor(tester, const Duration(milliseconds: 1400));
     expect(find.text("Reading failed."), findsNothing);
     expect(
-      find.descendant(of: grid, matching: find.text(readFailedLabel)),
+      find.descendant(of: grid, matching: find.text(english.readFailed)),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: grid, matching: find.text(retryLabel)),
+      find.descendant(of: grid, matching: find.text(english.retry)),
       findsOneWidget,
     );
     dayApi.failurePolicy = null;
-    await tester.tap(find.text(retryLabel));
+    await tester.tap(find.text(english.retry));
     await pumpFor(tester, const Duration(milliseconds: 1400));
     await tester.pumpAndSettle();
   });
@@ -985,10 +993,10 @@ void main() {
     await pickMode(tester, "Week");
     await toggleWeekends(tester);
     expect(
-      find.bySemanticsLabel("${hiddenEntriesLabel(1)}\n+1"),
+      find.bySemanticsLabel("${english.hiddenEntries(1)}\n+1"),
       findsOneWidget,
     );
-    expect(find.byTooltip(hiddenEntriesLabel(1)), findsNothing);
+    expect(find.byTooltip(english.hiddenEntries(1)), findsNothing);
     expect(
       find.descendant(of: grid, matching: find.byType(Tooltip)),
       findsNothing,
@@ -1551,13 +1559,16 @@ void main() {
     api.failurePolicy = (request) {
       return request.method == CalendarMethod.list ? "Reading failed." : null;
     };
-    final failed = find.descendant(of: month, matching: find.text(retryLabel));
+    final failed = find.descendant(
+      of: month,
+      matching: find.text(english.retry),
+    );
     for (var i = 0; i < 3 && failed.evaluate().isEmpty; i++) {
       await tester.tap(find.byTooltip("Next month"));
       await pumpFor(tester, const Duration(milliseconds: 1400));
     }
     expect(
-      find.descendant(of: month, matching: find.text(readFailedLabel)),
+      find.descendant(of: month, matching: find.text(english.readFailed)),
       findsOneWidget,
     );
     expect(failed, findsOneWidget);
@@ -1585,7 +1596,13 @@ void main() {
     expect(
       find.descendant(
         of: bar,
-        matching: find.text(clockRangeLabel(14 * 60, 15 * 60)),
+        matching: find.text(
+          english.formatTimeRange(
+            14 * 60,
+            15 * 60,
+            HourLabelFormat.twentyFourHour,
+          ),
+        ),
       ),
       findsOneWidget,
     );
@@ -1978,11 +1995,11 @@ void main() {
     expect(failed, isNotEmpty);
     for (final row in failed.values) {
       expect(
-        find.descendant(of: row, matching: find.text(readFailedLabel)),
+        find.descendant(of: row, matching: find.text(english.readFailed)),
         findsOneWidget,
       );
       expect(
-        find.descendant(of: row, matching: find.text(retryLabel)),
+        find.descendant(of: row, matching: find.text(english.retry)),
         findsOneWidget,
       );
     }
@@ -2263,5 +2280,39 @@ void main() {
       api.failurePolicy = null;
       await pumpFor(tester, second);
     }
+  });
+
+  testWidgets("HF6 with the bar's AM/PM switch on, Harbor's Day block and "
+      "Month card write their times on the 12-hour clock", (tester) async {
+    await pumpCalendar(
+      tester,
+      api: MockCalendarApi(
+        seed: <Map<String, Object?>>[taskJson("Hour", today, 16 * 60, 17 * 60)],
+        latency: harnessLatency,
+      ),
+      size: const Size(1200.0, 1600.0),
+    );
+    await openBar(tester);
+    await tester.tap(find.byKey(hourLabelFormatKey));
+    await tester.pumpAndSettle();
+    await closeBar(tester);
+
+    await pickMode(tester, "Day");
+    expect(
+      find.descendant(
+        of: blockFinder("item-1"),
+        matching: find.text("4 PM-5 PM"),
+      ),
+      findsOneWidget,
+    );
+
+    await pickMode(tester, "Month");
+    expect(
+      find.descendant(
+        of: find.byType(HarborChip),
+        matching: find.text("4 PM-5 PM"),
+      ),
+      findsOneWidget,
+    );
   });
 }

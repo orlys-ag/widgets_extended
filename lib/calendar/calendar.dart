@@ -16,7 +16,6 @@ export 'dates/calendar_dates.dart'
         dayNumber,
         defaultSlotMinutes,
         slotMinuteChoices;
-export 'dates/calendar_labels.dart' show HourLabelFormat;
 export 'entries/calendar_data_source.dart' show CalendarDataSource;
 export 'entries/calendar_entry.dart' show CalendarEntry;
 export 'policy/edit_policy.dart'
@@ -57,6 +56,8 @@ export 'presentation/calendar_defaults.dart'
         defaultCalendarChipBuilder,
         defaultCalendarFailureBuilder,
         defaultCalendarLoadingBuilder;
+export 'presentation/calendar_localizations.dart'
+    show CalendarLocalizations, DefaultCalendarLocalizations, HourLabelFormat;
 export 'presentation/calendar_theme.dart' show CalendarTheme, CalendarThemeData;
 export 'store/caching_calendar_store.dart' show CachingCalendarStore;
 export 'store/calendar_store.dart'

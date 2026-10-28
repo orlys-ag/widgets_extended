@@ -7,7 +7,6 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_defaults.dart';
 
 const Color colour = Color(0xFF8A2B4C);
@@ -151,6 +150,8 @@ double startAngleOf(WidgetTester tester) {
   return arcs.single.invocation.positionalArguments[1] as double;
 }
 
+const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
+
 void main() {
   test("BD1 the details and states are plain values that read their "
       "arguments back, the block's and the chip's equal by their fields", () {
@@ -164,17 +165,20 @@ void main() {
     expect(block.tall, isFalse);
     expect(block.cutAtStart, isTrue);
     expect(block.cutAtEnd, isFalse);
+    expect(block.hourLabelFormat, HourLabelFormat.twentyFourHour);
     CalendarBlockDetails blockOf({
       bool? detailed,
       bool? tall,
       bool? cutAtStart,
       bool? cutAtEnd,
+      HourLabelFormat? hourLabelFormat,
     }) {
       return CalendarBlockDetails(
         detailed: detailed ?? block.detailed,
         tall: tall ?? block.tall,
         cutAtStart: cutAtStart ?? block.cutAtStart,
         cutAtEnd: cutAtEnd ?? block.cutAtEnd,
+        hourLabelFormat: hourLabelFormat ?? block.hourLabelFormat,
       );
     }
 
@@ -187,6 +191,7 @@ void main() {
       "tall": blockOf(tall: true),
       "cutAtStart": blockOf(cutAtStart: false),
       "cutAtEnd": blockOf(cutAtEnd: true),
+      "hourLabelFormat": blockOf(hourLabelFormat: HourLabelFormat.twelveHour),
     }.entries) {
       expect(other.value, isNot(block), reason: other.key);
       expect(other.value.hashCode, isNot(block.hashCode), reason: other.key);
@@ -200,15 +205,18 @@ void main() {
     expect(chip.card, isTrue);
     expect(chip.continuesBefore, isFalse);
     expect(chip.continuesAfter, isTrue);
+    expect(chip.hourLabelFormat, HourLabelFormat.twentyFourHour);
     CalendarChipDetails chipOf({
       bool? card,
       bool? continuesBefore,
       bool? continuesAfter,
+      HourLabelFormat? hourLabelFormat,
     }) {
       return CalendarChipDetails(
         card: card ?? chip.card,
         continuesBefore: continuesBefore ?? chip.continuesBefore,
         continuesAfter: continuesAfter ?? chip.continuesAfter,
+        hourLabelFormat: hourLabelFormat ?? chip.hourLabelFormat,
       );
     }
 
@@ -220,6 +228,7 @@ void main() {
       "card": chipOf(card: false),
       "continuesBefore": chipOf(continuesBefore: true),
       "continuesAfter": chipOf(continuesAfter: false),
+      "hourLabelFormat": chipOf(hourLabelFormat: HourLabelFormat.twelveHour),
     }.entries) {
       expect(other.value, isNot(chip), reason: other.key);
       expect(other.value.hashCode, isNot(chip.hashCode), reason: other.key);
@@ -344,7 +353,10 @@ void main() {
     );
     expect(
       textsUnder(tester),
-      unorderedEquals(<String>["Standup", clockRangeLabel(540, 600)]),
+      unorderedEquals(<String>[
+        "Standup",
+        english.formatTimeRange(540, 600, HourLabelFormat.twentyFourHour),
+      ]),
     );
     expectText(
       tester,
@@ -354,7 +366,7 @@ void main() {
     );
     expectText(
       tester,
-      clockRangeLabel(540, 600),
+      english.formatTimeRange(540, 600, HourLabelFormat.twentyFourHour),
       distinct.detailedBlockDetailStyle,
       distinct.textSecondary,
     );
@@ -538,12 +550,15 @@ void main() {
     );
     expect(
       textsUnder(tester),
-      unorderedEquals(<String>["Standup", clockRangeLabel(540, 600)]),
+      unorderedEquals(<String>[
+        "Standup",
+        english.formatTimeRange(540, 600, HourLabelFormat.twentyFourHour),
+      ]),
     );
     expectText(tester, "Standup", distinct.monthCardTitleStyle, distinct.text);
     expectText(
       tester,
-      clockRangeLabel(540, 600),
+      english.formatTimeRange(540, 600, HourLabelFormat.twentyFourHour),
       distinct.monthCardTimeStyle,
       distinct.textSecondary,
     );
@@ -640,18 +655,18 @@ void main() {
     expect(both.last.height, calendarCardStripExtent);
     expectText(
       tester,
-      startsAtLabel("07:30"),
+      english.startsAt("07:30"),
       distinct.noticeStyle,
       distinct.onNotice,
     );
     expectText(
       tester,
-      endsAtLabel("19:30"),
+      english.endsAt("19:30"),
       distinct.noticeStyle,
       distinct.onNotice,
     );
     expect(
-      tester.getCenter(find.text(startsAtLabel("07:30"))).dy,
+      tester.getCenter(find.text(english.startsAt("07:30"))).dy,
       moreOrLessEquals(both.first.center.dy),
     );
 
@@ -659,13 +674,13 @@ void main() {
     final top = stripsOf();
     expect(top, hasLength(1));
     expect(top.single.top, tester.getRect(root).top);
-    expect(find.text(startsAtLabel("07:30")), findsOneWidget);
+    expect(find.text(english.startsAt("07:30")), findsOneWidget);
 
     await pumpCard(const CalendarCardDetails(endsAt: "19:30"));
     final bottom = stripsOf();
     expect(bottom, hasLength(1));
     expect(bottom.single.bottom, moreOrLessEquals(tester.getRect(root).bottom));
-    expect(find.text(endsAtLabel("19:30")), findsOneWidget);
+    expect(find.text(english.endsAt("19:30")), findsOneWidget);
 
     await pumpCard(const CalendarCardDetails(startsAt: "07:30"), pending: true);
     final opacity = widgetsUnder<Opacity>(tester);
@@ -848,7 +863,7 @@ void main() {
       expect(tester.takeException(), isNull, reason: "$site");
       expectText(
         tester,
-        readFailedLabel,
+        english.readFailed,
         distinct.messageStyle,
         distinct.error,
       );
@@ -859,20 +874,23 @@ void main() {
       );
       expectText(
         tester,
-        retryLabel,
+        english.retry,
         distinct.actionLabelStyle,
         distinct.primary,
       );
-      await tester.tap(find.text(retryLabel));
+      await tester.tap(find.text(english.retry));
       expect(retries, 1, reason: "$site");
-      final retryNode = tester.getSemantics(find.text(retryLabel));
+      final retryNode = tester.getSemantics(find.text(english.retry));
       expect(
         retryNode,
-        isSemantics(label: retryLabel, isButton: true, hasTapAction: true),
+        isSemantics(label: english.retry, isButton: true, hasTapAction: true),
         reason: "$site",
       );
       expect(
-        identical(retryNode, tester.getSemantics(find.text(readFailedLabel))),
+        identical(
+          retryNode,
+          tester.getSemantics(find.text(english.readFailed)),
+        ),
         isFalse,
         reason: "$site",
       );
@@ -921,7 +939,7 @@ void main() {
     }
     expect(shownTexts, isNotEmpty);
     for (final text in shownTexts) {
-      expect(<String>[readFailedLabel, retryLabel], contains(text));
+      expect(<String>[english.readFailed, english.retry], contains(text));
     }
   });
 
@@ -990,5 +1008,48 @@ void main() {
       expect(tester.getSize(root).height, moreOrLessEquals(2.0));
       expect(rebuilt, isEmpty, reason: "detailed: $detailed");
     }
+  });
+
+  testWidgets("HF5 the detailed block default and the chip default's card "
+      "form write the times in their details' hour format", (tester) async {
+    final entry = shown();
+    await tester.pumpWidget(
+      host((context) {
+        return defaultCalendarBlockBuilder(
+          context,
+          entry,
+          const CalendarBlockDetails(
+            detailed: true,
+            tall: true,
+            cutAtStart: false,
+            cutAtEnd: false,
+            hourLabelFormat: HourLabelFormat.twelveHour,
+          ),
+        );
+      }),
+    );
+    expect(
+      textsUnder(tester),
+      unorderedEquals(<String>["Standup", "9 AM-10 AM"]),
+    );
+
+    await tester.pumpWidget(
+      host((context) {
+        return defaultCalendarChipBuilder(
+          context,
+          entry,
+          const CalendarChipDetails(
+            card: true,
+            continuesBefore: false,
+            continuesAfter: false,
+            hourLabelFormat: HourLabelFormat.twelveHour,
+          ),
+        );
+      }),
+    );
+    expect(
+      textsUnder(tester),
+      unorderedEquals(<String>["Standup", "9 AM-10 AM"]),
+    );
   });
 }

@@ -6,7 +6,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
@@ -28,9 +28,16 @@ const ValueKey<String> hourLabelFormatKey = ValueKey<String>(
   "bar-hour-label-format",
 );
 
-/// "08:00 - 18:00", or "8 AM - 6 PM", for [hours] in [format].
-String hoursLabel(DayHours hours, HourLabelFormat format) {
-  return "${hourLabel(hours.start, format)} - ${hourLabel(hours.end, format)}";
+/// "08:00 - 18:00", or "8 AM - 6 PM", for [hours] in [format], as
+/// [strings] write times.
+String hoursLabel(
+  DayHours hours,
+  HourLabelFormat format,
+  CalendarLocalizations strings,
+) {
+  final start = strings.formatTime(hours.start, format);
+  final end = strings.formatTime(hours.end, format);
+  return "$start - $end";
 }
 
 /// The calendar bar on [settings], in three parts: Today, which reports
@@ -196,7 +203,9 @@ class CalendarBar extends StatelessWidget {
                     ButtonSegment<int>(
                       value: weekdays.columnAt(offset),
                       label: Text(
-                        weekdayAbbreviations[weekdays.columnAt(offset)],
+                        CalendarLocalizations.of(
+                          context,
+                        ).weekdayAbbreviation(weekdays.columnAt(offset) + 1),
                         style: const TextStyle(fontSize: 13.0),
                       ),
                     ),
@@ -217,7 +226,11 @@ class CalendarBar extends StatelessWidget {
             const SizedBox(height: 8.0),
             _Part(
               title: "Hours",
-              value: hoursLabel(hours, format),
+              value: hoursLabel(
+                hours,
+                format,
+                CalendarLocalizations.of(context),
+              ),
               trailing: _LabeledSwitch(
                 switchKey: hourLabelFormatKey,
                 label: "AM/PM",
@@ -242,7 +255,9 @@ class CalendarBar extends StatelessWidget {
                 max: 24.0,
                 divisions: 24,
                 semanticFormatterCallback: (value) {
-                  return hourLabel(value.round() * 60, format);
+                  return CalendarLocalizations.of(
+                    context,
+                  ).formatTime(value.round() * 60, format);
                 },
                 onChanged: _setHours,
               ),
@@ -403,6 +418,17 @@ class _WeekStartMenu extends StatelessWidget {
 
   final ValueChanged<int> onSelected;
 
+  /// The weekdays' names, Monday first, as the menu lists them.
+  static const List<String> _weekdayNames = <String>[
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+  ];
+
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<int>(
@@ -416,7 +442,7 @@ class _WeekStartMenu extends StatelessWidget {
           for (var column = 0; column < DateTime.daysPerWeek; column++)
             PopupMenuItem<int>(
               value: column,
-              child: Text(weekdayNames[column]),
+              child: Text(_weekdayNames[column]),
             ),
         ];
       },
@@ -426,7 +452,9 @@ class _WeekStartMenu extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Text(
-              weekdayAbbreviations[firstColumn],
+              CalendarLocalizations.of(
+                context,
+              ).weekdayAbbreviation(firstColumn + 1),
               style: CalendarBar.titleStyle,
             ),
             const Icon(

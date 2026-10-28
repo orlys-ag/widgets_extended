@@ -11,7 +11,6 @@ library;
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 
 import 'calendar_api.dart';
 import 'calendar_api_source.dart';
@@ -419,7 +418,7 @@ class _ItemFormState extends State<_ItemForm> {
   static String _timeText(DateTime day, int minute) {
     final time = timeAtWallMinute(dayNumber(day) * minutesPerDay + minute);
     if (time == null) {
-      return "${isoDate(day)}T${clockLabel(minute)}";
+      return "${isoDate(day)}T${isoTime(minute)}";
     }
     return isoDateTime(time);
   }
@@ -574,7 +573,14 @@ class _ItemFormState extends State<_ItemForm> {
       ),
       items: <DropdownMenuItem<int>>[
         for (final minute in minutes)
-          DropdownMenuItem<int>(value: minute, child: Text(clockLabel(minute))),
+          DropdownMenuItem<int>(
+            value: minute,
+            child: Text(
+              CalendarLocalizations.of(
+                context,
+              ).formatTime(minute, HourLabelFormat.twentyFourHour),
+            ),
+          ),
       ],
       onChanged: _locked || fixed
           ? null

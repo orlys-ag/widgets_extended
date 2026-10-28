@@ -8,11 +8,11 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_localizations.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
@@ -257,6 +257,8 @@ Finder textUnder(Key key, String text) {
   );
 }
 
+const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
+
 void main() {
   testWidgets("DR1 a store write builds again, of the rows it had built, "
       "only those of the day it changes", (tester) async {
@@ -389,7 +391,7 @@ void main() {
     }
 
     testWidgets("the hour format", (tester) async {
-      final nine = hourLabel(9 * 60, HourLabelFormat.twelveHour);
+      final nine = english.formatTime(9 * 60, HourLabelFormat.twelveHour);
       final time = dayListTimeKey(idOn(tuesday, 0));
       await changed(tester, (host) {
         // Setup sanity: the time column reads the other format first.
@@ -505,7 +507,7 @@ void main() {
       const green = Color(0xFF00AA00);
       final title = textUnder(
         dayListHeaderKey(tuesday),
-        dayTitle(tuesday, tuesday),
+        english.dayTitle(tuesday, tuesday),
       );
       await changed(tester, (host) {
         // Setup sanity: the title is drawn in another colour first.
@@ -590,7 +592,7 @@ void main() {
       await host.pump(tester);
       final header = dayListHeaderKey(wednesday);
       // Setup sanity: Wednesday counts its three entries.
-      expect(textUnder(header, entryCountLabel(3)), findsOneWidget);
+      expect(textUnder(header, english.entryCount(3)), findsOneWidget);
       await store.create(
         CalendarEntry<String>(
           id: "added",
@@ -602,7 +604,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(textUnder(header, entryCountLabel(4)), findsOneWidget);
+      expect(textUnder(header, english.entryCount(4)), findsOneWidget);
       expect(
         find.byKey(entryCardKey("added"), skipOffstage: false),
         findsOneWidget,
@@ -623,7 +625,7 @@ void main() {
       // Setup sanity: Wednesday is loading, with no count.
       expect(find.byKey(loading, skipOffstage: false), findsOneWidget);
       expect(
-        textUnder(dayListHeaderKey(wednesday), entryCountLabel(3)),
+        textUnder(dayListHeaderKey(wednesday), english.entryCount(3)),
         findsNothing,
       );
       store.unread.clear();
@@ -635,7 +637,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        textUnder(dayListHeaderKey(wednesday), entryCountLabel(3)),
+        textUnder(dayListHeaderKey(wednesday), english.entryCount(3)),
         findsOneWidget,
       );
     });
@@ -696,7 +698,7 @@ void main() {
     );
     await host.pump(tester);
     final header = dayListHeaderKey(tuesday);
-    final title = dayTitle(tuesday, wednesday);
+    final title = english.dayTitle(tuesday, wednesday);
     // Setup sanity: Tuesday is titled as today, and its card, at or after
     // the start of today, is editable.
     expect(textUnder(header, title), findsNothing);

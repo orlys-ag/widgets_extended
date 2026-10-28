@@ -6,7 +6,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
-import '../dates/calendar_labels.dart';
+import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import 'day_cell.dart';
 
@@ -251,6 +251,7 @@ class _MonthPickerState extends State<MonthPicker>
     if (MediaQuery.boldTextOf(context)) {
       style = style.merge(const TextStyle(fontWeight: FontWeight.bold));
     }
+    final strings = CalendarLocalizations.of(context);
     final painter = TextPainter(
       textDirection: Directionality.of(context),
       maxLines: 1,
@@ -261,8 +262,8 @@ class _MonthPickerState extends State<MonthPicker>
     for (var tries = 0; tries < 4; tries++) {
       painter.textScaler = scaler;
       var widest = 0.0;
-      for (final name in monthNames) {
-        painter.text = TextSpan(text: name, style: style);
+      for (var month = 1; month <= DateTime.monthsPerYear; month++) {
+        painter.text = TextSpan(text: strings.monthName(month), style: style);
         painter.layout();
         widest = math.max(widest, painter.width);
       }
@@ -389,6 +390,7 @@ class MonthCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final styles = _PickerStyles.of(context);
+    final strings = CalendarLocalizations.of(context);
     final TextStyle nameStyle;
     if (isSelected) {
       nameStyle = styles.selectedName;
@@ -400,7 +402,7 @@ class MonthCell extends StatelessWidget {
     return Semantics(
       button: true,
       selected: isSelected,
-      label: "${monthNames[month.month - 1]} ${month.year}",
+      label: strings.monthYear(month),
       excludeSemantics: true,
       child: Container(
         margin: pillMargin,
@@ -410,7 +412,7 @@ class MonthCell extends StatelessWidget {
         decoration: isSelected ? styles.selectedPill : styles.pill,
         foregroundDecoration: isCurrent ? styles.ring : null,
         child: Text(
-          monthNames[month.month - 1],
+          strings.monthName(month.month),
           maxLines: 1,
           softWrap: false,
           textScaler: nameScaler,

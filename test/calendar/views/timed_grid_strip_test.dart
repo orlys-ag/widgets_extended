@@ -1,7 +1,8 @@
 /// The timed grid's all-day strip: its bars, rows, count and expansion, the
 /// gestures on bars within the strip, the crossings of a bar into the
 /// slots, of a block into the strip and of Week's end handle into a later
-/// day with their live marks, and the create ranges across the strip.
+/// day with their live marks, the create ranges across the strip, and the
+/// landing label's times in the grid's hour format.
 library;
 
 import 'dart:async';
@@ -16,7 +17,6 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
@@ -25,6 +25,7 @@ import 'package:widgets_extended/calendar/policy/overlap.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_activity_indicator.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_defaults.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_localizations.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
@@ -406,11 +407,12 @@ class HeldSource implements CalendarDataSource<String> {
 /// default [minDayWidth]; [creates] records each create range it reports
 /// and [opened] each entry it opens, [onMoveRequest] takes each move and
 /// resize it lands, and [onZoom] each zoom a pinch reports, which the grid
-/// does not show. [editable], [first], [hours] and [slotMinutes]
-/// start as given, and [rebuild] builds the grid again with them. The
-/// grid's policy is [editPolicy] where it is given, and otherwise the one
-/// [lockPast], [lockEarlierToday], [maxDayCount] and [allowsOverlaps]
-/// make ([policy]).
+/// does not show. The grid writes times in [hourLabelFormat]. [editable],
+/// [first], [hours] and [slotMinutes] start as given, and [rebuild]
+/// builds the grid again with them. The grid's policy is [editPolicy]
+/// where it is given, and otherwise the one [lockPast],
+/// [lockEarlierToday], [maxDayCount] and [allowsOverlaps] make
+/// ([policy]).
 class Harness {
   Harness(
     this.store,
@@ -427,6 +429,7 @@ class Harness {
     this.onMoveRequest,
     this.onZoom,
     this.blockBuilder,
+    this.hourLabelFormat = HourLabelFormat.twentyFourHour,
     DateTime? today,
     int nowHour = 9,
   }) : today = today ?? DateTime(2026, 1, 5),
@@ -450,6 +453,7 @@ class Harness {
   onMoveRequest;
   final void Function(double minSlotHeight, double minDayWidth)? onZoom;
   final CalendarBlockBuilder<String>? blockBuilder;
+  final HourLabelFormat hourLabelFormat;
 
   bool editable;
   DateTime first;
@@ -506,6 +510,7 @@ class Harness {
       minDayWidth: minDayWidth,
       showsDayHeader: shown.week,
       blockBuilder: blockBuilder,
+      hourLabelFormat: hourLabelFormat,
     );
   }
 
@@ -937,6 +942,8 @@ Future<MoveRecordingStore> releaseEndOver(
   return store;
 }
 
+const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
+
 void main() {
   testWidgets("TS1 the strip lies under the header, or at the grid's top in "
       "Day, and above the first slot, and its bars keep their rects while "
@@ -1052,7 +1059,7 @@ void main() {
       expect(
         tester.getSemantics(find.byKey(allDayMoreKey(tuesday))),
         matchesSemantics(
-          label: allDayMoreLabel(2),
+          label: english.allDayMore(2),
           isButton: true,
           hasTapAction: true,
         ),
@@ -1105,7 +1112,7 @@ void main() {
       expect(
         tester.getSemantics(less),
         matchesSemantics(
-          label: allDayLessLabel,
+          label: english.allDayLess,
           isButton: true,
           hasTapAction: true,
         ),
@@ -1504,7 +1511,7 @@ void main() {
   group("TX7 under lockPast", () {
     testWidgets("in Week each gesture onto a past day writes nothing, and "
         "while a block's pointer is over a past day's strip cell no strip "
-        "cell is marked and the landing label reads noLandingLabel", (
+        "cell is marked and the landing label reads english.noLanding", (
       tester,
     ) async {
       final shown = Shown.week(monday);
@@ -1579,7 +1586,7 @@ void main() {
         tester.getCenter(barFinder("thu")),
         slotRect(tester, shown, tuesday, 10 * 60).center,
       );
-      expect(landingText(tester), noLandingLabel, reason: "bar into a slot");
+      expect(landingText(tester), english.noLanding, reason: "bar into a slot");
       await gesture.up();
       await tester.pumpAndSettle();
       expect(store.moves, isEmpty, reason: "bar into a slot");
@@ -1600,7 +1607,7 @@ void main() {
           stripRect(tester, shown, tuesday).center,
         );
         expect(markedOf(tester, days), isEmpty, reason: "$others");
-        expect(landingText(tester), noLandingLabel, reason: "$others");
+        expect(landingText(tester), english.noLanding, reason: "$others");
         await gesture.up();
         await tester.pumpAndSettle();
         expect(store.moves, isEmpty, reason: "block into the strip $others");
@@ -1630,7 +1637,7 @@ void main() {
       // Setup sanity: the block lifted.
       expect(find.byKey(liftedBlockKey), findsOneWidget);
       expect(isMarked(tester, tuesday), isFalse);
-      expect(landingText(tester), noLandingLabel);
+      expect(landingText(tester), english.noLanding);
       await gesture.up();
       await tester.pumpAndSettle();
       expect(store.moves, isEmpty);
@@ -1667,7 +1674,12 @@ void main() {
       );
       expect(
         landingText(tester),
-        landingLabel(monday, thursday, DateTime(2026, 1, 5)),
+        english.landing(
+          monday,
+          thursday,
+          DateTime(2026, 1, 5),
+          HourLabelFormat.twentyFourHour,
+        ),
       );
       await gesture.up();
       await tester.pumpAndSettle();
@@ -2328,7 +2340,12 @@ void main() {
       // Setup sanity: the crossing names the slot's hour.
       expect(
         landingText(tester),
-        landingLabel(at(monday, 5), at(monday, 6), DateTime(2026, 1, 5)),
+        english.landing(
+          at(monday, 5),
+          at(monday, 6),
+          DateTime(2026, 1, 5),
+          HourLabelFormat.twentyFourHour,
+        ),
       );
       debugDropGateCount = 0;
       await moveTenTimes(tester, move, const Offset(1.0, 0.0));
@@ -2404,7 +2421,7 @@ void main() {
   testWidgets("TX17 while a bar's drag pointer is over a day's 10:00 slot the "
       "landing label names that day's 10:00 to 11:00 and the background "
       "outlines those slots, both following the pointer onto 14:00, and over "
-      "a slot an entry holds the label reads noLandingLabel and no outline "
+      "a slot an entry holds the label reads english.noLanding and no outline "
       "is drawn", (tester) async {
     final today = DateTime(2026, 1, 5);
     for (final shown in bothGrids()) {
@@ -2417,7 +2434,12 @@ void main() {
       );
       expect(
         landingText(tester),
-        landingLabel(at(tuesday, 10), at(tuesday, 11), today),
+        english.landing(
+          at(tuesday, 10),
+          at(tuesday, 11),
+          today,
+          HourLabelFormat.twentyFourHour,
+        ),
         reason: shown.name,
       );
       expect(strokedRects(tester), <Matcher>[
@@ -2429,7 +2451,12 @@ void main() {
       await tester.pump();
       expect(
         landingText(tester),
-        landingLabel(at(tuesday, 14), at(tuesday, 15), today),
+        english.landing(
+          at(tuesday, 14),
+          at(tuesday, 15),
+          today,
+          HourLabelFormat.twentyFourHour,
+        ),
         reason: shown.name,
       );
       expect(strokedRects(tester), <Matcher>[
@@ -2450,7 +2477,7 @@ void main() {
         tester.getCenter(barFinder("off")),
         slotRect(tester, shown, tuesday, 10 * 60).center,
       );
-      expect(landingText(tester), noLandingLabel, reason: shown.name);
+      expect(landingText(tester), english.noLanding, reason: shown.name);
       expect(strokedRects(tester), isEmpty, reason: shown.name);
       await over.up();
       await tester.pumpAndSettle();
@@ -2509,7 +2536,12 @@ void main() {
           var under = hourUnder(tester, shown, tuesday, pointer);
           expect(
             landingText(tester),
-            landingLabel(under.start, under.end, harness.today),
+            english.landing(
+              under.start,
+              under.end,
+              harness.today,
+              HourLabelFormat.twentyFourHour,
+            ),
             reason: shown.name,
           );
           if (changesRatio) {
@@ -2528,7 +2560,12 @@ void main() {
             under = hourUnder(tester, shown, tuesday, pointer);
             expect(
               landingText(tester),
-              landingLabel(under.start, under.end, harness.today),
+              english.landing(
+                under.start,
+                under.end,
+                harness.today,
+                HourLabelFormat.twentyFourHour,
+              ),
               reason: shown.name,
             );
           }
@@ -2628,7 +2665,12 @@ void main() {
           expect(under.start, isNot(at(tuesday, 10)), reason: shown.name);
           expect(
             landingText(tester),
-            landingLabel(under.start, under.end, harness.today),
+            english.landing(
+              under.start,
+              under.end,
+              harness.today,
+              HourLabelFormat.twentyFourHour,
+            ),
             reason: shown.name,
           );
           final minute = minuteOfDay(under.start);
@@ -2672,7 +2714,12 @@ void main() {
       expect(find.byKey(liftedBlockKey), findsOneWidget, reason: shown.name);
       expect(
         landingText(tester),
-        landingLabel(at(tuesday, 10), at(tuesday, 11), harness.today),
+        english.landing(
+          at(tuesday, 10),
+          at(tuesday, 11),
+          harness.today,
+          HourLabelFormat.twentyFourHour,
+        ),
         reason: shown.name,
       );
       const key = GridKey.bar("long");
@@ -2896,7 +2943,12 @@ void main() {
           );
           final written = storedOf(store, "meet");
           expect(
-            landingLabel(written.start, written.end, DateTime(2026, 1, 5)),
+            english.landing(
+              written.start,
+              written.end,
+              DateTime(2026, 1, 5),
+              HourLabelFormat.twentyFourHour,
+            ),
             lastLabel,
             reason: reason,
           );
@@ -3127,7 +3179,12 @@ void main() {
     final shown = harness.shown;
     expect(
       landingText(tester),
-      landingLabel(at(monday, 22), at(wednesday, 12, 15), harness.today),
+      english.landing(
+        at(monday, 22),
+        at(wednesday, 12, 15),
+        harness.today,
+        HourLabelFormat.twentyFourHour,
+      ),
     );
     expect(strokedRects(tester), <Matcher>[
       nearRect(slotsRect(tester, shown, monday, 22 * 60, 24 * 60).deflate(1.0)),
@@ -3337,16 +3394,17 @@ void main() {
       tester.getCenter(barFinder("A")),
       slotRect(tester, shown, sunday, 23 * 60 + 30).center,
     );
-    expect(landingText(tester), noLandingLabel);
+    expect(landingText(tester), english.noLanding);
     store.requestDelete("N");
     await tester.pump();
     await tester.pump();
     expect(
       landingText(tester),
-      landingLabel(
+      english.landing(
         at(sunday, 23, 30),
         at(nextMonday, 0, 30),
         DateTime(2026, 1, 5),
+        HourLabelFormat.twentyFourHour,
       ),
     );
     await crossed.up();
@@ -4307,6 +4365,40 @@ void main() {
       }
       await tester.pumpAndSettle();
     }
+  });
+
+  testWidgets("HF2 the landing label writes its times in the grid's hour "
+      "format, for a block moved in the slots and for a bar carried onto "
+      "them", (tester) async {
+    final shown = Shown.week(monday);
+    final store = storeOf(<CalendarEntry<String>>[
+      entryOf("task", at(wednesday, 9), at(wednesday, 10)),
+      allDayOf("off", tuesday),
+    ]);
+    await Harness(
+      store,
+      shown,
+      hourLabelFormat: HourLabelFormat.twelveHour,
+    ).pump(tester);
+    final slot = slotRect(tester, shown, wednesday, 9 * 60).height;
+    final block = await lift(
+      tester,
+      tester.getCenter(blockFinder("task", wednesday)),
+    );
+    await block.moveBy(Offset(0.0, slot * 2 + 2.0));
+    await tester.pump();
+    expect(landingText(tester), "Wednesday, April 22, 9:30 AM-10:30 AM");
+    await block.up();
+    await tester.pumpAndSettle();
+
+    final bar = await liftTo(
+      tester,
+      tester.getCenter(barFinder("off")),
+      slotRect(tester, shown, tuesday, 10 * 60).center,
+    );
+    expect(landingText(tester), "Tuesday, April 21, 10 AM-11 AM");
+    await bar.up();
+    await tester.pumpAndSettle();
   });
 }
 

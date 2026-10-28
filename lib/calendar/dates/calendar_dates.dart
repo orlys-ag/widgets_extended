@@ -9,8 +9,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
-import 'calendar_labels.dart';
-
 /// The slot length, in minutes, of a calendar given none: the step the
 /// timed grid's rows and gestures snap to.
 const int defaultSlotMinutes = 15;
@@ -84,6 +82,18 @@ int weekdayColumnOfDay(int day) {
 @immutable
 class WeekdaySet {
   const WeekdaySet._(this._bits, [this.firstColumn = 0]);
+
+  /// The columns' names in [toString], which is for developers and so is
+  /// not localized.
+  static const List<String> _columnNames = <String>[
+    "Mo",
+    "Tu",
+    "We",
+    "Th",
+    "Fr",
+    "Sa",
+    "Su",
+  ];
 
   /// The weekdays [columns] names, each 0 to 6, in weeks that start on
   /// the weekday [firstColumn] names.
@@ -183,11 +193,9 @@ class WeekdaySet {
 
   @override
   String toString() {
-    final names = <String>[
-      for (final column in columns) weekdayShortNames[column],
-    ];
+    final names = <String>[for (final column in columns) _columnNames[column]];
     return "WeekdaySet(${names.join(", ")}; "
-        "from ${weekdayShortNames[firstColumn]})";
+        "from ${_columnNames[firstColumn]})";
   }
 }
 
@@ -451,6 +459,14 @@ String isoDate(DateTime date) {
   return "$year-$month-$day";
 }
 
+/// "09:30" for [minute] minutes after midnight, and "24:00" for 1440: the
+/// time of day in ISO 8601's hours and minutes.
+String isoTime(int minute) {
+  final hours = (minute ~/ 60).toString().padLeft(2, "0");
+  final minutes = (minute % 60).toString().padLeft(2, "0");
+  return "$hours:$minutes";
+}
+
 final RegExp _isoDatePattern = RegExp(r"^(\d{4})-(\d{2})-(\d{2})$");
 
 /// The local midnight [text] names in the form [isoDate] writes, or null
@@ -680,6 +696,6 @@ class DayHours {
 
   @override
   String toString() {
-    return "DayHours(${clockLabel(start)}-${clockLabel(end)})";
+    return "DayHours(${isoTime(start)}-${isoTime(end)})";
   }
 }

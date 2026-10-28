@@ -139,6 +139,8 @@ void main() {
       CalendarWritePendingException,
       CalendarTheme,
       CalendarThemeData,
+      CalendarLocalizations,
+      DefaultCalendarLocalizations,
       CalendarBlockBuilder,
       CalendarChipBuilder,
       CalendarCardBuilder,
@@ -185,9 +187,10 @@ void main() {
     ];
   });
 
-  test("B2 the barrel shows by name; of the views and the labels file only "
-      "the types and the range constants the calendar's signatures use, and "
-      "no view; and of the policy layer exactly the two edit policy files, "
+  test("B2 the barrel shows by name; of the views only the types and the "
+      "range constants the calendar's signatures use, and no view; of the "
+      "localizations file the localizations, their English default and "
+      "HourLabelFormat; and of the policy layer exactly the two edit policy files, "
       "with the policies and the types their signatures name, and the edit "
       "rules", () {
     final source = File(barrelPath).readAsStringSync();
@@ -224,11 +227,16 @@ void main() {
     expect(
       <List<String>?>[
         for (final export in exports)
-          if (export.path == "lib/calendar/dates/calendar_labels.dart")
+          if (export.path ==
+              "lib/calendar/presentation/calendar_localizations.dart")
             export.shown,
       ],
       <List<String>>[
-        <String>["HourLabelFormat"],
+        <String>[
+          "CalendarLocalizations",
+          "DefaultCalendarLocalizations",
+          "HourLabelFormat",
+        ],
       ],
     );
     const viewWidgets = <String>{

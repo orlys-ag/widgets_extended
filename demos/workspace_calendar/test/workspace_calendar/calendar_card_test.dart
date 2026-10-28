@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
+import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
@@ -53,8 +53,7 @@ double gridHeight(WidgetTester tester) {
 /// columns across the grid.
 Offset cellTopLeft(WidgetTester tester, int row, int col) {
   final grid = tester.getRect(gridFinder());
-  return grid.topLeft +
-      Offset(col * grid.width / 7, row * rowHeight(tester));
+  return grid.topLeft + Offset(col * grid.width / 7, row * rowHeight(tester));
 }
 
 /// The month and year the header names, "Apr 2026".
@@ -71,6 +70,8 @@ String headerTitle(WidgetTester tester) {
 bool isSelected(WidgetTester tester, int year, int month, int day) {
   return tester.widget<DayCell>(dayFinder(year, month, day)).isSelected;
 }
+
+const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
 
 void main() {
   testWidgets("CC1 the card shows its month's days alone, on blank cells "
@@ -166,11 +167,13 @@ void main() {
     final parts = title.split(" ");
     final shown = DateTime(
       int.parse(parts[1]),
-      monthShortNames.indexOf(parts[0]) + 1,
+      <String>[
+            for (var month = 1; month <= DateTime.monthsPerYear; month++)
+              english.shortMonthYear(DateTime(2026, month)).split(" ").first,
+          ].indexOf(parts[0]) +
+          1,
     );
-    final first = tester.getTopLeft(
-      dayFinder(shown.year, shown.month, 1),
-    );
+    final first = tester.getTopLeft(dayFinder(shown.year, shown.month, 1));
     expect(first.dy, moreOrLessEquals(grid.top));
     expect(
       (first.dx - grid.left) / (grid.width / 7),

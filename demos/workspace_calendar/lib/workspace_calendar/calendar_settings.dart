@@ -12,7 +12,6 @@ library;
 import 'package:flutter/foundation.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/dates/calendar_labels.dart';
 
 import 'calendar_item.dart';
 import 'calendar_schema.dart';
@@ -34,12 +33,12 @@ Map<String, String> hoursErrorsOf(
   return <String, String>{
     if (!hours.holdsStart(minuteOfDay(start)))
       "start":
-          "The start is from ${clockLabel(hours.start)} to before "
-          "${clockLabel(hours.end)}, inside the calendar's hours.",
+          "The start is from ${isoTime(hours.start)} to before "
+          "${isoTime(hours.end)}, inside the calendar's hours.",
     if (!hours.holdsEnd(endMinuteOfDay(end)))
       "end":
-          "The end is from after ${clockLabel(hours.start)} to "
-          "${clockLabel(hours.end)}, inside the calendar's hours.",
+          "The end is from after ${isoTime(hours.start)} to "
+          "${isoTime(hours.end)}, inside the calendar's hours.",
   };
 }
 

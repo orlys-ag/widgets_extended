@@ -15,13 +15,13 @@ import 'package:flutter/widgets.dart';
 
 import '../../board/board.dart';
 import '../dates/calendar_dates.dart';
-import '../dates/calendar_labels.dart';
 import '../entries/calendar_entry.dart';
 import '../policy/edit_policy.dart';
 import '../policy/edit_rules.dart';
 import '../policy/overlap.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
+import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 import 'answer_builder.dart';
@@ -337,15 +337,6 @@ const ValueKey<String> allDayLessKey = ValueKey<String>("grid-all-day-less");
 /// column for.
 const ValueKey<String> hiddenCountKey = ValueKey<String>("grid-hidden-count");
 
-/// What a screen reader hears for the pill counting [count] items on no
-/// day the grid has a column for, before the pill's own "+N".
-String hiddenEntriesLabel(int count) {
-  if (count == 1) {
-    return "1 item is on a day not shown";
-  }
-  return "$count items are on days not shown";
-}
-
 /// The key of [day]'s cell in the row above the slots that counts the
 /// shown items before the hours.
 ValueKey<String> hiddenAboveKey(DateTime day) {
@@ -363,30 +354,6 @@ typedef _Notices = ({bool above, bool below});
 
 /// The key of the label naming where a drag lands.
 const ValueKey<String> landingLabelKey = ValueKey<String>("grid-landing-label");
-
-/// What the landing label says while a move has nowhere to land.
-const String noLandingLabel = "No free time near here";
-
-/// What the landing label says for a drag that would give an entry the
-/// times [start] to [end]: its first day, as [dayTitle] names it against
-/// [today], and its times ([entryTimesLabel]), as "Today, April 21,
-/// 14:00-15:00"; for a range over more than one day its last day too, as
-/// "Monday, April 20, 22:00 to Tuesday, April 21, 02:00"; and for an
-/// all-day range its days and "all day".
-String landingLabel(DateTime start, DateTime end, DateTime today) {
-  final first = dayNumber(start);
-  final last = lastDayNumberOf(start, end);
-  final from = dayTitle(dateOfDayNumber(first), today);
-  final to = dayTitle(dateOfDayNumber(last), today);
-  if (isDayStart(start) && isDayStart(end)) {
-    return first == last ? "$from, all day" : "$from to $to, all day";
-  }
-  if (first == last) {
-    return "$from, ${entryTimesLabel(start, end)}";
-  }
-  return "$from, ${clockLabel(minuteOfDay(start))} to $to, "
-      "${clockLabel(endMinuteOfDay(end))}";
-}
 
 /// The key of the shadow under the block a move carries.
 const ValueKey<String> liftedBlockKey = ValueKey<String>("grid-lifted-block");
@@ -421,8 +388,8 @@ class CreateRange {
 
   @override
   String toString() {
-    return "CreateRange(${isoDate(start)} ${clockLabel(minuteOfDay(start))} "
-        "to ${isoDate(end)} ${clockLabel(minuteOfDay(end))})";
+    return "CreateRange(${isoDate(start)} ${isoTime(minuteOfDay(start))} "
+        "to ${isoDate(end)} ${isoTime(minuteOfDay(end))})";
   }
 }
 
@@ -564,12 +531,13 @@ CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
 /// covers, and the bars sharing a day in rows of their own. Past three
 /// rows the strip shows three and, in a fourth, a "+N" pill on each day
 /// counting its bars below the third, a tap on which shows every row; a
-/// "Less" pill in the strip's first row over the gutter then collapses it
-/// again, and new days collapse it. With no all-day entry on a shown day
-/// the strip has no rows, and one empty row in edit mode. Each bar's
-/// content is what [chipBuilder] draws, told which of its ends continue
-/// past the shown days. A tap on a bar that is not pending reports
-/// [onOpenEntry] with its entry's id, in edit mode and out of it.
+/// [CalendarLocalizations.showLess] pill in the strip's first row over the
+/// gutter then collapses it again, and new days collapse it. With no
+/// all-day entry on a shown day the strip has no rows, and one empty row
+/// in edit mode. Each bar's content is what [chipBuilder] draws, told
+/// which of its ends continue past the shown days. A tap on a bar that
+/// is not pending reports [onOpenEntry] with its entry's id, in edit
+/// mode and out of it.
 ///
 /// In edit mode, which [editable] turns on, a long press on any block of
 /// an entry lifts the entry to move and selects its blocks; a tap anywhere
@@ -612,42 +580,39 @@ CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
 /// nowhere to land, and a move outlines the times it would land on.
 ///
 /// In edit mode a bar takes a long press as a block does. On a grid of more
-/// than one day column it moves by days, and once selected its left grip
-/// drags its first day and its right grip its last, where it does not
-/// continue past them; on one column it takes neither. Dropped with the
-/// pointer over a slot, or over the row above the first slot, a bar's
-/// entry becomes a timed one an hour long from that slot's start, in the
-/// occurrence of the earliest start [editPolicy] gives the day where its
-/// clock repeats that time, marked by the landing outline while the
-/// pointer is there; and a block dropped
-/// with the pointer over a day's strip cell makes its entry all-day on
-/// that day, the strip marking that day while the pointer is there. A drag
-/// across empty strip cells creates an all-day range of their days, as a
-/// tap on one creates its day. A line
-/// over the blocks marks the time [now] holds in its day's column, and the
-/// grid opens scrolled to the hour before it when it shows that day, at
-/// 08:00 otherwise, with that hour's label whole below the top edge. Each
-/// whole hour, and the start and the end of the hours, has a label centred
-/// on its line in the hour gutter, in [hourLabelFormat], which a room above
-/// the first slot and below the last, or the gutter beside a row counting
-/// entries outside the hours, keeps whole. A piece reaching past the hours
-/// shows its part inside them, and an entry whose start or end the hours
-/// do not hold ([DayHours.holdsTimes]) takes no move or resize: only an
-/// edit outside the grid changes it. A piece wholly outside them has no
-/// block. While some are before the hours, a yellow row frozen against the
-/// first slot, in place of the room above it, says "+N more" in the column
-/// of each day with N of them, and while some are after them, a row frozen
-/// against the last slot does; the hour gutter runs on beside both. An
-/// entry on no shown day has no block either, and a pill in the day
-/// header's corner counts it. In edit mode empty body cells take a create
-/// gesture, reported through [onCreate]: a drag picks one continuous range
-/// from the earlier of its two slots to the later, across days too, at
-/// once with a mouse or a stylus and after a press and hold on touch, so a
-/// touch drag without one scrolls the grid, and a tap, or a hold let go
-/// where it began, picks its one slot. Where [editPolicy] forbids
-/// overlaps, a slot that shares time with an entry takes no create
-/// gesture. The range picked stays marked, as a
-/// range being dragged is, until the create flow [onCreate] opens closes.
+/// than one day column it moves by days, and once selected its left grip drags
+/// its first day and its right grip its last, where it does not continue past
+/// them; on one column it takes neither. Dropped with the pointer over a slot,
+/// or over the row above the first slot, a bar's entry becomes a timed one an
+/// hour long from that slot's start, in the occurrence of the earliest start
+/// [editPolicy] gives the day where its clock repeats that time, marked by the
+/// landing outline while the pointer is there; and a block dropped with the
+/// pointer over a day's strip cell makes its entry all-day on that day, the
+/// strip marking that day while the pointer is there. A drag across empty strip
+/// cells creates an all-day range of their days, as a tap on one creates its
+/// day. A line over the blocks marks the time [now] holds in its day's column,
+/// and the grid opens scrolled to the hour before it when it shows that day, at
+/// 08:00 otherwise, with that hour's label whole below the top edge. Each whole
+/// hour, and the start and the end of the hours, has a label centred on its
+/// line in the hour gutter, in [hourLabelFormat], which a room above the first
+/// slot and below the last, or the gutter beside a row counting entries outside
+/// the hours, keeps whole. A piece reaching past the hours shows its part
+/// inside them, and an entry whose start or end the hours do not hold
+/// ([DayHours.holdsTimes]) takes no move or resize: only an edit outside the
+/// grid changes it. A piece wholly outside them has no block. While some are
+/// before the hours, a yellow row frozen against the first slot, in place of
+/// the room above it, says [CalendarLocalizations.moreCount] in the column of
+/// each day with N of them, and while some are after them, a row frozen against
+/// the last slot does; the hour gutter runs on beside both. An entry on no
+/// shown day has no block either, and a pill in the day header's corner counts
+/// it. In edit mode empty body cells take a create gesture, reported through
+/// [onCreate]: a drag picks one continuous range from the earlier of its two
+/// slots to the later, across days too, at once with a mouse or a stylus and
+/// after a press and hold on touch, so a touch drag without one scrolls the
+/// grid, and a tap, or a hold let go where it began, picks its one slot. Where
+/// [editPolicy] forbids overlaps, a slot that shares time with an entry takes
+/// no create gesture. The range picked stays marked, as a range being dragged
+/// is, until the create flow [onCreate] opens closes.
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than [minDayWidth] and [minSlotHeight]; past those, it scrolls.
@@ -814,7 +779,10 @@ class TimedGrid<T> extends StatefulWidget {
   /// [slotMinuteChoices], which the grid's state asserts.
   final int slotMinutes;
 
-  /// The format the hour gutter labels the times in.
+  /// The format the grid writes times of day in: the hour gutter's
+  /// labels, the landing label, and the times its block and chip builders
+  /// write ([CalendarBlockDetails.hourLabelFormat],
+  /// [CalendarChipDetails.hourLabelFormat]).
   final HourLabelFormat hourLabelFormat;
 
   /// The least width of a day column, in logical pixels, positive and
@@ -1960,7 +1928,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// rows are replaced for new hours or a new slot length even at the same
   /// count, for new [_notices] or strip rows, and for a new [_labelRoom] or
   /// hour format, which also rebuilds the gutter cells and so what they
-  /// tell a screen reader.
+  /// tell a screen reader, and the blocks and bars, whose details carry
+  /// the format.
   void _fitAxes(Size size) {
     _size = size;
     final oldRows = _board.rows;
@@ -3503,30 +3472,45 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     };
   }
 
-  /// What the landing label says for [_drag]: the days and times a release
-  /// would give, or [noLandingLabel] for a crossing whose landing is
-  /// refused and for a move with no target. Null with no drag, before its
-  /// first target, and for a resize with no target.
-  String? _landingText(({DateTime start, DateTime end})? times) {
+  /// What the landing label says for [_drag] in [strings]: the days and
+  /// times a release would give, the times in [TimedGrid.hourLabelFormat]
+  /// ([CalendarLocalizations.landing]), or [CalendarLocalizations.noLanding]
+  /// for a crossing whose landing is refused and for a move with no
+  /// target. Null with no drag, before its first target, and for a resize
+  /// with no target.
+  String? _landingText(
+    CalendarLocalizations strings,
+    ({DateTime start, DateTime end})? times,
+  ) {
     final drag = _drag;
     if (drag == null) {
       return null;
     }
     if (drag.crosses || drag.heldBar != null) {
       return times == null
-          ? noLandingLabel
-          : landingLabel(times.start, times.end, _calendarNow.today);
+          ? strings.noLanding
+          : strings.landing(
+              times.start,
+              times.end,
+              _calendarNow.today,
+              widget.hourLabelFormat,
+            );
     }
     if (!drag.resolved) {
       return null;
     }
     if (drag.target == null) {
-      return drag.kind == BoardDragKind.move ? noLandingLabel : null;
+      return drag.kind == BoardDragKind.move ? strings.noLanding : null;
     }
     if (times == null) {
       return null;
     }
-    return landingLabel(times.start, times.end, _calendarNow.today);
+    return strings.landing(
+      times.start,
+      times.end,
+      _calendarNow.today,
+      widget.hourLabelFormat,
+    );
   }
 
   /// The wall minutes the landing outline paints for [times], what
@@ -4462,31 +4446,23 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       // shows through. The foreground paints the hour labels over it; a
       // row whose top or bottom line is labelled names it to a screen
       // reader.
-      final label = _gutterLabelOf(cell.row);
-      if (label == null) {
+      final minutes = _gutterMinutesOf(cell.row);
+      if (minutes.isEmpty) {
         return const _GutterCell();
       }
-      return Semantics(
-        container: true,
-        label: label,
-        child: const _GutterCell(),
-      );
+      return _GutterLabel(minutes: minutes, format: widget.hourLabelFormat);
     }
     // Body cells build nothing: the background painter draws the grid.
     return null;
   }
 
-  /// What a screen reader hears for the gutter cell of [row]: the labels
-  /// the foreground paints on its top and bottom lines, or null where it
-  /// paints none.
-  String? _gutterLabelOf(int row) {
-    final format = widget.hourLabelFormat;
-    final labels = <String>[
-      if (_GridForegroundPainter.labelsRow(_tracks, row))
-        hourLabel(_tracks.minuteAt(row), format),
-      if (row == _tracks.lastSlotRow) hourLabel(_tracks.hours.end, format),
+  /// The minutes the foreground labels on the top and bottom lines of the
+  /// gutter cell of [row], which a screen reader hears it name.
+  List<int> _gutterMinutesOf(int row) {
+    return <int>[
+      if (_GridForegroundPainter.labelsRow(_tracks, row)) _tracks.minuteAt(row),
+      if (row == _tracks.lastSlotRow) _tracks.hours.end,
     ];
-    return labels.isEmpty ? null : labels.join(", ");
   }
 
   Widget _buildPlacement(
@@ -4512,6 +4488,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         card: false,
         continuesBefore: bar.continuesBefore,
         continuesAfter: bar.continuesAfter,
+        hourLabelFormat: widget.hourLabelFormat,
       ),
       builder: _chipBuilder,
       selection: _selectedBlock,
@@ -4575,6 +4552,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         cutAtEnd: cutAtEnd,
         continuesBefore: !piece.first,
         continuesAfter: !piece.last,
+        hourLabelFormat: widget.hourLabelFormat,
       ),
       builder: _blockBuilder,
       selection: _selectedBlock,
@@ -4688,10 +4666,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         const TextStyle(fontWeight: FontWeight.bold),
       );
     }
+    final strings = CalendarLocalizations.of(context);
     _hourLabels.update(
       labelStyle,
       MediaQuery.textScalerOf(context),
       widget.hourLabelFormat,
+      strings,
     );
     _labelRoom = _hourLabels.height / 2 + _HourLabels.gap;
     final slotRange = range == null || range.strip || range.refused
@@ -4772,7 +4752,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
                 child: ValueListenableBuilder<_StripMark?>(
                   valueListenable: _stripMark,
                   builder: (context, mark, child) {
-                    final text = _landingText(_landingTimes());
+                    final text = _landingText(strings, _landingTimes());
                     if (text == null) {
                       return const SizedBox.shrink();
                     }
@@ -4988,7 +4968,9 @@ class _DayHeaderCell extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   Text(
-                    weekdayShortNames[weekdayColumn(day)],
+                    CalendarLocalizations.of(
+                      context,
+                    ).weekdayShortName(day.weekday),
                     style: styles.headerWeekday,
                   ),
                   Container(
@@ -5477,10 +5459,31 @@ class _GutterCell extends StatelessWidget {
   }
 }
 
+/// A [_GutterCell] whose lines the foreground labels with [minutes], which
+/// a screen reader hears it name in [format].
+class _GutterLabel extends StatelessWidget {
+  const _GutterLabel({required this.minutes, required this.format});
+
+  final List<int> minutes;
+  final HourLabelFormat format;
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = CalendarLocalizations.of(context);
+    return Semantics(
+      container: true,
+      label: <String>[
+        for (final minute in minutes) strings.formatTime(minute, format),
+      ].join(", "),
+      child: const _GutterCell(),
+    );
+  }
+}
+
 /// The day header's corner over the gutter, on the surface colour: nothing,
 /// or a pill counting the shown entries on no day the grid has a column
-/// for, which a screen reader hears with [hiddenEntriesLabel] before the
-/// count.
+/// for, which a screen reader hears with
+/// [CalendarLocalizations.hiddenEntries] before the count.
 class _HiddenCount extends StatelessWidget {
   const _HiddenCount({required this.count});
 
@@ -5500,7 +5503,7 @@ class _HiddenCount extends StatelessWidget {
               return const SizedBox.shrink();
             }
             return Semantics(
-              label: hiddenEntriesLabel(value),
+              label: CalendarLocalizations.of(context).hiddenEntries(value),
               child: DecoratedBox(
                 key: hiddenCountKey,
                 decoration: styles.hiddenPill,
@@ -5524,8 +5527,8 @@ class _HiddenCount extends StatelessWidget {
 /// those before the hours in the row above the slots, or those after them
 /// in the row below when [above] is false. A soft yellow, with a rule on
 /// the side facing the slots and one between days, and while the day has
-/// some, an arrow pointing their way and "+N more", or "+N" in a column too
-/// narrow for that.
+/// some, an arrow pointing their way and [CalendarLocalizations.moreCount],
+/// or "+N" in a column too narrow for that.
 class _NoticeCell extends StatelessWidget {
   const _NoticeCell({
     required this.hidden,
@@ -5570,14 +5573,14 @@ class _NoticeCell extends StatelessWidget {
           return cell;
         }
         final hours = tracks.hours;
+        final strings = CalendarLocalizations.of(context);
         return Semantics(
           container: true,
-          label: hiddenRowLabel(
+          label: strings.hiddenRow(
             day,
             count,
-            above ? hours.start : hours.end,
+            strings.formatTime(above ? hours.start : hours.end, format),
             above: above,
-            format: format,
           ),
           excludeSemantics: true,
           child: cell,
@@ -5589,14 +5592,15 @@ class _NoticeCell extends StatelessWidget {
   static const double _arrowSize = 16.0;
   static const double _arrowGap = 2.0;
 
-  /// The arrow and "+N more", or "+N" in a cell too narrow for "+N more"
-  /// at its own size, scaled down in one too narrow for that.
+  /// The arrow and [CalendarLocalizations.moreCount], or "+N" in a cell too
+  /// narrow for that at its own size, scaled down in one too narrow for
+  /// that.
   Widget _buildMore(int count, _GridStyles styles) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6.0),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final more = "+$count more";
+          final more = CalendarLocalizations.of(context).moreCount(count);
           final painter = TextPainter(
             text: TextSpan(
               text: more,
@@ -5638,8 +5642,8 @@ class _NoticeCell extends StatelessWidget {
 /// edged in the primary colour while [mark] covers its column. The first
 /// row's cell carries [allDayCellKey]. In the collapsed strip's count row,
 /// while the day hides bars, a "+N" pill counting them ([allDayMoreKey]),
-/// which a screen reader hears as [allDayMoreLabel] and a tap on which
-/// reports [onExpand].
+/// which a screen reader hears as [CalendarLocalizations.allDayMore] and a
+/// tap on which reports [onExpand].
 class _StripCell extends StatelessWidget {
   const _StripCell({
     required this.strip,
@@ -5693,7 +5697,7 @@ class _StripCell extends StatelessWidget {
               : Semantics(
                   container: true,
                   button: true,
-                  label: allDayMoreLabel(count),
+                  label: CalendarLocalizations.of(context).allDayMore(count),
                   onTap: onExpand,
                   excludeSemantics: true,
                   child: GestureDetector(
@@ -5712,9 +5716,10 @@ class _StripCell extends StatelessWidget {
 }
 
 /// The all-day strip's first row over the gutter: the surface, holding
-/// while the strip is expanded past three rows a "Less" pill
-/// ([allDayLessKey]), which a screen reader hears as [allDayLessLabel] and
-/// a tap on which reports [onCollapse].
+/// while the strip is expanded past three rows a
+/// [CalendarLocalizations.showLess] pill ([allDayLessKey]), which a screen
+/// reader hears as [CalendarLocalizations.allDayLess] and a tap on which
+/// reports [onCollapse].
 class _StripCorner extends StatelessWidget {
   const _StripCorner({required this.strip, required this.onCollapse});
 
@@ -5732,10 +5737,11 @@ class _StripCorner extends StatelessWidget {
           if (!state.collapsible) {
             return const SizedBox.expand();
           }
+          final strings = CalendarLocalizations.of(context);
           return Semantics(
             container: true,
             button: true,
-            label: allDayLessLabel,
+            label: strings.allDayLess,
             onTap: onCollapse,
             excludeSemantics: true,
             child: GestureDetector(
@@ -5743,7 +5749,7 @@ class _StripCorner extends StatelessWidget {
               behavior: HitTestBehavior.opaque,
               onTap: onCollapse,
               child: Center(
-                child: _StripPill(text: "Less", styles: styles),
+                child: _StripPill(text: strings.showLess, styles: styles),
               ),
             ),
           );
@@ -6150,7 +6156,7 @@ class _GridForegroundPainter extends BoardForegroundPainter {
 }
 
 /// The hour labels a [_GridForegroundPainter] paints, each laid out once
-/// for one style, text scale and [HourLabelFormat].
+/// for one style, text scale, [HourLabelFormat] and [CalendarLocalizations].
 class _HourLabels {
   /// The space between a label's half and the end of the grid's room for
   /// it.
@@ -6159,20 +6165,30 @@ class _HourLabels {
   TextStyle _style = const TextStyle();
   TextScaler _scaler = TextScaler.noScaling;
   HourLabelFormat _format = HourLabelFormat.twentyFourHour;
+  CalendarLocalizations _strings = const DefaultCalendarLocalizations();
   final Map<int, TextPainter> _labels = <int, TextPainter>{};
 
   /// Moves on each time [update] drops the laid-out labels.
   int version = 0;
 
-  /// Lays the labels out anew from here on when [style], [scaler] or
-  /// [format] differs from the last.
-  void update(TextStyle style, TextScaler scaler, HourLabelFormat format) {
-    if (style == _style && scaler == _scaler && format == _format) {
+  /// Lays the labels out anew from here on when [style], [scaler],
+  /// [format] or [strings] differs from the last.
+  void update(
+    TextStyle style,
+    TextScaler scaler,
+    HourLabelFormat format,
+    CalendarLocalizations strings,
+  ) {
+    if (style == _style &&
+        scaler == _scaler &&
+        format == _format &&
+        strings == _strings) {
       return;
     }
     _style = style;
     _scaler = scaler;
     _format = format;
+    _strings = strings;
     _clear();
     version++;
   }
@@ -6181,7 +6197,10 @@ class _HourLabels {
   TextPainter of(int minute) {
     return _labels.putIfAbsent(minute, () {
       return TextPainter(
-        text: TextSpan(text: hourLabel(minute, _format), style: _style),
+        text: TextSpan(
+          text: _strings.formatTime(minute, _format),
+          style: _style,
+        ),
         textDirection: TextDirection.ltr,
         textScaler: _scaler,
         maxLines: 1,
