@@ -54,6 +54,11 @@ class FakeDataSource implements CalendarDataSource<String> {
   /// future, while set.
   Object? thrown;
 
+  /// While set, `read` answers these entries within the call through a
+  /// [SynchronousFuture], recording no call, and so do `replace`, with
+  /// the entry it writes, and `delete`.
+  List<CalendarEntry<String>>? answerNow;
+
   Future<R> _add<R>(FakeCall call) {
     calls.add(call);
     return call.completer.future.then((value) {
@@ -66,6 +71,12 @@ class FakeDataSource implements CalendarDataSource<String> {
     final error = thrown;
     if (error != null) {
       throw error;
+    }
+    final now = answerNow;
+    if (now != null) {
+      return SynchronousFuture<List<CalendarEntry<String>>>(
+        List<CalendarEntry<String>>.of(now),
+      );
     }
     return _add(FakeCall(SourceMethod.read, first: first, last: last));
   }
@@ -81,6 +92,9 @@ class FakeDataSource implements CalendarDataSource<String> {
     if (error != null) {
       throw error;
     }
+    if (answerNow != null) {
+      return SynchronousFuture<CalendarEntry<String>>(entry);
+    }
     return _add(FakeCall(SourceMethod.replace, id: entry.id, entry: entry));
   }
 
@@ -89,6 +103,9 @@ class FakeDataSource implements CalendarDataSource<String> {
     final error = thrown;
     if (error != null) {
       throw error;
+    }
+    if (answerNow != null) {
+      return SynchronousFuture<void>(null);
     }
     return _add(FakeCall(SourceMethod.delete, id: id));
   }
@@ -804,6 +821,27 @@ void main() {
       expect(store.storedEntry("item-9"), isNull);
     });
 
+    test("an update answered under another id fails, and the entry shows "
+        "as stored", () async {
+      final harness = Harness();
+      final store = harness.store;
+      final item = task("item-1", day, 600, 660);
+      store.show(weekFirst, weekLast);
+      harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+      await settle();
+      final updating = errorOf(store.update(retimed(item, 720, 780)));
+      harness.lastCall.succeed(
+        onDay(item, DateTime(2026, 4, 23)).copyWith(id: "item-9"),
+      );
+      await settle();
+      expect(updating(), isA<StateError>());
+      expect(store.isPending("item-1"), isFalse);
+      expect(store.entriesOn(day), <CalendarShownEntry<String>>[
+        CalendarShownEntry<String>(item, pending: false),
+      ]);
+      expect(store.storedEntry("item-9"), isNull);
+    });
+
     test("an update or a move of an entry with no id fails and sends "
         "nothing", () async {
       final harness = Harness();
@@ -1127,8 +1165,10 @@ void main() {
     await settle();
     expect(store.status, CalendarLoadStatus.failed);
 
+    final notifications = harness.notifications;
     final refreshing = completedOf(store.refresh());
     expect(store.status, CalendarLoadStatus.loading);
+    expect(harness.notifications, notifications + 1);
     expect(store.loadError, isNull);
     expect(harness.source.calls, hasLength(2));
     final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
@@ -1910,6 +1950,143 @@ void main() {
       "show": StateError,
       "retry": StateError,
       "refresh": StateError,
+    });
+  });
+
+  test("FR40 showing a range after a failure tells the listeners only that "
+      "it loads, though a read answers within the call", () async {
+    final harness = Harness();
+    final store = harness.store;
+    store.prefetch(DateTime(2026, 4, 13), DateTime(2026, 4, 19));
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    store.invalidate(DateTime(2026, 4, 13), DateTime(2026, 4, 13));
+    store.show(DateTime(2026, 4, 27), DateTime(2026, 5, 3));
+    harness.lastCall.fail();
+    await settle();
+    store.prefetch(DateTime(2026, 4, 20), DateTime(2026, 4, 28));
+    final seen = <CalendarLoadStatus>[];
+    store.addListener(() {
+      seen.add(store.status);
+    });
+
+    harness.source.answerNow = <CalendarEntry<String>>[
+      task("item-1", DateTime(2026, 4, 13), 600, 660),
+    ];
+    store.show(DateTime(2026, 4, 13), DateTime(2026, 4, 28));
+    expect(seen, <CalendarLoadStatus>[CalendarLoadStatus.loading]);
+  });
+
+  test("FR41 a call whose read or write answers within it notifies once, "
+      "and so does a read's answer whose read of changed days answers "
+      "within it", () async {
+    final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
+    final counts = <String, int>{};
+
+    var harness = Harness();
+    harness.store.show(weekFirst, weekLast);
+    harness.lastCall.fail();
+    await settle();
+    harness.source.answerNow = <CalendarEntry<String>>[item];
+    var notifications = harness.notifications;
+    harness.store.retry();
+    counts["retry"] = harness.notifications - notifications;
+    harness.source.answerNow = <CalendarEntry<String>>[];
+    notifications = harness.notifications;
+    harness.store.show(mayFirst, mayLast);
+    counts["show"] = harness.notifications - notifications;
+    notifications = harness.notifications;
+    harness.store.requestMove(retimed(item, 720, 780));
+    counts["requestMove"] = harness.notifications - notifications;
+    notifications = harness.notifications;
+    harness.store.update(retimed(item, 800, 860));
+    counts["update"] = harness.notifications - notifications;
+    notifications = harness.notifications;
+    harness.store.requestDelete("item-1");
+    counts["requestDelete"] = harness.notifications - notifications;
+
+    harness = Harness();
+    harness.store.show(weekFirst, weekLast);
+    harness.lastCall.fail();
+    await settle();
+    harness.source.answerNow = <CalendarEntry<String>>[item];
+    notifications = harness.notifications;
+    harness.store.refresh();
+    counts["refresh"] = harness.notifications - notifications;
+
+    harness = Harness();
+    harness.store.show(weekFirst, weekLast);
+    final week = harness.lastCall;
+    harness.store.invalidate(DateTime(2026, 4, 21), DateTime(2026, 4, 21));
+    harness.source.answerNow = <CalendarEntry<String>>[item];
+    notifications = harness.notifications;
+    week.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    counts["answer"] = harness.notifications - notifications;
+
+    expect(counts, <String, int>{
+      "retry": 1,
+      "show": 1,
+      "requestMove": 1,
+      "update": 1,
+      "requestDelete": 1,
+      "refresh": 1,
+      "answer": 1,
+    });
+  });
+
+  test("FR42 a write's contradicted answer whose days are read again within "
+      "the call notifies once", () async {
+    final counts = <String, int>{};
+    for (final write in <String>["move", "update", "create", "delete"]) {
+      final harness = Harness();
+      final store = harness.store;
+      final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
+      final moved = onDay(item, DateTime(2026, 4, 23));
+      final created = draft(DateTime(2026, 4, 23), 600, 660);
+      final stored = created.copyWith(id: "item-2");
+      store.show(weekFirst, weekLast);
+      harness.lastCall.succeed(<CalendarEntry<String>>[
+        if (write != "create") item,
+      ]);
+      await settle();
+      if (write == "move") {
+        store.requestMove(moved);
+      } else if (write == "update") {
+        store.update(moved);
+      } else if (write == "create") {
+        store.create(created);
+      } else {
+        store.requestDelete("item-1");
+      }
+      final sent = harness.lastCall;
+      // A read sent since the write answers what contradicts its answer.
+      final day = DateTime(2026, 4, write == "delete" ? 21 : 23);
+      store.invalidate(day, day);
+      harness.lastCall.succeed(<CalendarEntry<String>>[
+        if (write == "delete") item,
+      ]);
+      await settle();
+
+      harness.source.answerNow = <CalendarEntry<String>>[
+        if (write == "create") stored,
+      ];
+      final notifications = harness.notifications;
+      sent.succeed(
+        write == "create"
+            ? stored
+            : write == "delete"
+            ? null
+            : moved,
+      );
+      await settle();
+      counts[write] = harness.notifications - notifications;
+    }
+    expect(counts, <String, int>{
+      "move": 1,
+      "update": 1,
+      "create": 1,
+      "delete": 1,
     });
   });
 

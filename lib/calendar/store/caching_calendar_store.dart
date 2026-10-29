@@ -105,6 +105,11 @@ class _Day {
 /// answer removed the entry from days the write's answer does not cover
 /// leaves that answer standing.
 ///
+/// A call into the store, a public one or an answer that arrives later,
+/// notifies its listeners once at most. A read or a write that answers
+/// within the call, as a [SynchronousFuture]'s does, is applied within
+/// it and notified with it, so the listeners see the call's final state.
+///
 /// The store holds the source to its contract: a read answering an entry
 /// with no id fails as a read does, a create answering one with no id
 /// fails to its caller, and a write answered under another id than the one
@@ -185,6 +190,13 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   Object? _loadError;
   bool _disposed = false;
 
+  /// The calls into the store under way, nested ones included
+  /// ([_batch]).
+  int _depth = 0;
+
+  /// Whether a call under way changed what the store answers.
+  bool _notifyPending = false;
+
   /// Ready once every day of the shown range is read; failed once one of
   /// them is left unread with no read in flight, its last read having
   /// failed ([readFailed]), until the range is shown anew, retried or
@@ -216,17 +228,20 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     if (_disposed || (firstDay == _shownFirst && lastDay == _shownLast)) {
       return;
     }
-    _shownFirst = firstDay;
-    _shownLast = lastDay;
-    _showCount++;
-    final unread = _unreadSpan();
-    if (unread != null &&
-        _inFlightCovering(unread.first, unread.last) == null) {
-      _readShown(unread);
-    }
-    _readChangedShown();
-    _settleStatus(requested: true);
-    notifyListeners();
+    _batch(() {
+      _shownFirst = firstDay;
+      _shownLast = lastDay;
+      _showCount++;
+      _endFailure();
+      final unread = _unreadSpan();
+      if (unread != null &&
+          _inFlightCovering(unread.first, unread.last) == null) {
+        _readShown(unread);
+      }
+      _readChangedShown();
+      _settleStatus();
+      _notify();
+    });
   }
 
   /// Whether [day] is read. A changed day stays read.
@@ -268,12 +283,15 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     if (_disposed || _shownFirst == null) {
       return;
     }
-    final unread = _unreadSpan();
-    if (unread != null) {
-      _readShown(unread);
-    }
-    _settleStatus(requested: true);
-    notifyListeners();
+    _batch(() {
+      _endFailure();
+      final unread = _unreadSpan();
+      if (unread != null) {
+        _readShown(unread);
+      }
+      _settleStatus();
+      _notify();
+    });
   }
 
   /// Reads the unread and the changed days from [first] to [last], both
@@ -350,10 +368,13 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       return Future<void>.value();
     }
     final done = Completer<void>();
-    _send(first, last, done: done);
-    if (_settleStatus(requested: true)) {
-      notifyListeners();
-    }
+    _batch(() {
+      final ended = _endFailure();
+      _send(first, last, done: done);
+      if (_settleStatus() || ended) {
+        _notify();
+      }
+    });
     return done.future;
   }
 
@@ -507,13 +528,14 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// Sets [status] from the shown range's days, and returns whether it
   /// changed: ready once none is unread; failed once one is unread with
   /// no read in flight, its last read having failed; and otherwise
-  /// loading, a read in flight covering each unread one. A failed range
-  /// turns loading only where [requested], by a show, a retry or a
-  /// refresh, and not for a read it did not ask for. [failure], the
+  /// loading, a read in flight covering each unread one. A failed status
+  /// stays failed rather than turning loading, so a read the range did
+  /// not ask for leaves it failed; a show, a retry or a refresh ends it
+  /// before it sends its reads ([_endFailure]). [failure], the
   /// error of a read that just left a day of the range unread with no
   /// read in flight, is [loadError] while the range is failed, which
   /// otherwise keeps the latest such error.
-  bool _settleStatus({Object? failure, bool requested = false}) {
+  bool _settleStatus({Object? failure}) {
     final first = _shownFirst;
     final last = _shownLast;
     if (first == null || last == null) {
@@ -529,8 +551,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
         status = CalendarLoadStatus.loading;
       }
     }
-    if (!requested &&
-        _status == CalendarLoadStatus.failed &&
+    if (_status == CalendarLoadStatus.failed &&
         status == CalendarLoadStatus.loading) {
       status = CalendarLoadStatus.failed;
     }
@@ -543,6 +564,44 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     _status = status;
     _loadError = error;
     return true;
+  }
+
+  /// Ends a failed status before a show, a retry or a refresh sends its
+  /// reads, so a read answered within the call settles the range from
+  /// loading; returns whether it ended one.
+  bool _endFailure() {
+    if (_status != CalendarLoadStatus.failed) {
+      return false;
+    }
+    _status = CalendarLoadStatus.loading;
+    _loadError = null;
+    return true;
+  }
+
+  /// Runs [body], a call into the store, and notifies once as the
+  /// outermost such call returns, where any of it changed what the store
+  /// answers ([_notify]).
+  R _batch<R>(R Function() body) {
+    _depth++;
+    try {
+      return body();
+    } finally {
+      _depth--;
+      if (_depth == 0 && _notifyPending) {
+        _notifyPending = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Notes that what the store answers changed: notifies as the call
+  /// under way returns ([_batch]), or at once outside one.
+  void _notify() {
+    if (_depth > 0) {
+      _notifyPending = true;
+    } else {
+      notifyListeners();
+    }
   }
 
   /// Sends a read of [first] to [last], which [done], if given, waits on.
@@ -580,6 +639,17 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     if (_disposed) {
       return;
     }
+    _batch(() {
+      _applyAnswer(read, entries: entries, error: error);
+    });
+  }
+
+  /// The body of [_finishRead], in one call into the store.
+  void _applyAnswer(
+    _Read read, {
+    List<CalendarEntry<T>>? entries,
+    Object? error,
+  }) {
     _reads.remove(read);
     var answered = entries;
     var failure = error;
@@ -608,7 +678,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     }
     final settled = _settleStatus(failure: failedShown ? failure : null);
     if (settled || changed || failed) {
-      notifyListeners();
+      _notify();
     }
     if (answered != null) {
       _readChangedShown();
@@ -790,10 +860,10 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     if (_coversHeldDay(entry)) {
       if (_index.stored(id) != entry) {
         _index.put(entry);
-        notifyListeners();
+        _notify();
       }
     } else if (_index.forget(id) != null) {
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -801,7 +871,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   void _applyRemoved(String id) {
     _setTime(id, ++_clock);
     if (_index.forget(id) != null) {
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -880,8 +950,10 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
         throw StateError("The data source created an entry with no id.");
       }
       if (!_disposed && !_index.isPending(id)) {
-        _storeAnswer(id, created, sentAt);
-        notifyListeners();
+        _batch(() {
+          _storeAnswer(id, created, sentAt);
+          _notify();
+        });
       }
       return created;
     } finally {
@@ -896,39 +968,53 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// and fails with an [ArgumentError] for an entry with no id, with a
   /// [CalendarHoursException] when [hoursRefusalOf] refuses it, and with
   /// a [CalendarWritePendingException] on a pending entry. An answer under
-  /// another id fails with a [StateError].
+  /// another id fails with a [StateError]. An answer that arrives within
+  /// the call, as a [SynchronousFuture]'s does, is stored within it.
   @override
-  Future<CalendarEntry<T>> update(CalendarEntry<T> entry) async {
+  Future<CalendarEntry<T>> update(CalendarEntry<T> entry) {
     final id = entry.id;
     if (id == null) {
-      throw ArgumentError.value(entry, "entry", "An update needs an id.");
+      return Future<CalendarEntry<T>>.error(
+        ArgumentError.value(entry, "entry", "An update needs an id."),
+      );
     }
     final refusal = hoursRefusalOf(entry);
     if (refusal != null) {
-      throw refusal;
+      return Future<CalendarEntry<T>>.error(refusal);
     }
-    if (!_lock(id, null)) {
-      throw CalendarWritePendingException(id);
-    }
-    try {
-      final updated = await _dataSource.replace(entry);
-      if (updated.id != id) {
-        throw StateError(
-          "The data source replaced $id with an entry under ${updated.id}.",
+    return _batch(() {
+      if (!_lock(id, null)) {
+        return Future<CalendarEntry<T>>.error(
+          CalendarWritePendingException(id),
         );
       }
-      if (!_disposed) {
-        _applyConfirmed(updated);
-        notifyListeners();
-      }
-      return updated;
-    } on Object {
-      if (!_disposed) {
-        _release(id);
-        notifyListeners();
-      }
-      rethrow;
-    }
+      return Future<CalendarEntry<T>>.sync(() {
+        return _dataSource.replace(entry);
+      }).then<CalendarEntry<T>>(
+        (updated) {
+          if (updated.id != id) {
+            return _failWrite<CalendarEntry<T>>(
+              id,
+              StateError(
+                "The data source replaced $id with an entry under "
+                "${updated.id}.",
+              ),
+              StackTrace.current,
+            );
+          }
+          if (!_disposed) {
+            _batch(() {
+              _applyConfirmed(updated);
+              _notify();
+            });
+          }
+          return updated;
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          return _failWrite<CalendarEntry<T>>(id, error, stackTrace);
+        },
+      );
+    });
   }
 
   /// Writes a grid move or resize: [requested] shows, pending, until the
@@ -952,32 +1038,39 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     if (refusal != null) {
       return Future<CalendarEntry<T>>.error(refusal);
     }
-    if (!_lock(id, requested)) {
-      return Future<CalendarEntry<T>>.error(CalendarWritePendingException(id));
-    }
-    return Future<CalendarEntry<T>>.sync(() {
-      return _dataSource.replace(requested);
-    }).then<CalendarEntry<T>>(
-      (moved) {
-        if (moved.id != id) {
-          return _failWrite<CalendarEntry<T>>(
-            id,
-            StateError(
-              "The data source replaced $id with an entry under ${moved.id}.",
-            ),
-            StackTrace.current,
-          );
-        }
-        if (!_disposed) {
-          _applyConfirmed(moved);
-          notifyListeners();
-        }
-        return moved;
-      },
-      onError: (Object error, StackTrace stackTrace) {
-        return _failWrite<CalendarEntry<T>>(id, error, stackTrace);
-      },
-    );
+    return _batch(() {
+      if (!_lock(id, requested)) {
+        return Future<CalendarEntry<T>>.error(
+          CalendarWritePendingException(id),
+        );
+      }
+      return Future<CalendarEntry<T>>.sync(() {
+        return _dataSource.replace(requested);
+      }).then<CalendarEntry<T>>(
+        (moved) {
+          if (moved.id != id) {
+            return _failWrite<CalendarEntry<T>>(
+              id,
+              StateError(
+                "The data source replaced $id with an entry under "
+                "${moved.id}.",
+              ),
+              StackTrace.current,
+            );
+          }
+          if (!_disposed) {
+            _batch(() {
+              _applyConfirmed(moved);
+              _notify();
+            });
+          }
+          return moved;
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          return _failWrite<CalendarEntry<T>>(id, error, stackTrace);
+        },
+      );
+    });
   }
 
   /// Deletes [id]: the stored entry shows pending until the data source
@@ -987,23 +1080,27 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// pending entry.
   @override
   Future<void> requestDelete(String id) {
-    if (!_lock(id, null)) {
-      return Future<void>.error(CalendarWritePendingException(id));
-    }
-    return Future<void>.sync(() {
-      return _dataSource.delete(id);
-    }).then<void>(
-      (_) {
-        if (!_disposed) {
-          _storeAnswer(id, null, _writesSentAt[id]!);
-          _release(id);
-          notifyListeners();
-        }
-      },
-      onError: (Object error, StackTrace stackTrace) {
-        return _failWrite<void>(id, error, stackTrace);
-      },
-    );
+    return _batch(() {
+      if (!_lock(id, null)) {
+        return Future<void>.error(CalendarWritePendingException(id));
+      }
+      return Future<void>.sync(() {
+        return _dataSource.delete(id);
+      }).then<void>(
+        (_) {
+          if (!_disposed) {
+            _batch(() {
+              _storeAnswer(id, null, _writesSentAt[id]!);
+              _release(id);
+              _notify();
+            });
+          }
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          return _failWrite<void>(id, error, stackTrace);
+        },
+      );
+    });
   }
 
   /// Marks [id] pending, showing [shown] or, when null, the stored entry.
@@ -1015,7 +1112,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       return false;
     }
     _writesSentAt[id] = ++_clock;
-    notifyListeners();
+    _notify();
     return true;
   }
 
@@ -1031,7 +1128,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   Future<R> _failWrite<R>(String id, Object error, StackTrace stackTrace) {
     if (!_disposed) {
       _release(id);
-      notifyListeners();
+      _notify();
     }
     return Future<R>.error(error, stackTrace);
   }
