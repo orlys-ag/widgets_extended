@@ -31,7 +31,6 @@ import 'pinch_zoom.dart';
 import 'timed_grid_layout.dart';
 
 const double _headerHeight = 40.0;
-const double _gutterWidth = 56.0;
 
 /// The height of the rows above and below the slots that count the items
 /// outside the hours.
@@ -1278,6 +1277,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// The extents the axes were last given and the tracks they were given
   /// for. [_fitAxes] replaces an axis only when one of these changes.
+  double _gutterWidth = _HourLabels.minGutter;
   late double _dayWidth = widget.minDayWidth;
   late double _slotHeight = widget.minSlotHeight;
   late int _columnCount = _tracks.columnCount;
@@ -1916,8 +1916,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// The day columns across [size]'s width and the slot rows down its
-  /// height, each stretched to fill it and never smaller than
+  /// The hour gutter as wide as [_HourLabels.gutter], the day columns
+  /// across the rest of [size]'s width and the slot rows down its height,
+  /// each stretched to fill it and never smaller than
   /// [TimedGrid.minDayWidth] and [TimedGrid.minSlotHeight]. Called from the
   /// layout callback, so the
   /// first frame lays the board out at its size, and from
@@ -1934,9 +1935,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _size = size;
     final oldRows = _board.rows;
     final oldColumns = _board.columns;
+    final gutter = _hourLabels.gutter;
     final dayWidth = math.max(
       widget.minDayWidth,
-      _share(size.width - _gutterWidth, _tracks.columnCount),
+      _share(size.width - gutter, _tracks.columnCount),
     );
     final slotHeight = math.max(
       widget.minSlotHeight,
@@ -1945,7 +1947,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _tracks.rowCount,
       ),
     );
-    if (dayWidth != _dayWidth || _tracks.columnCount != _columnCount) {
+    if (gutter != _gutterWidth ||
+        dayWidth != _dayWidth ||
+        _tracks.columnCount != _columnCount) {
+      _gutterWidth = gutter;
       _dayWidth = dayWidth;
       _columnCount = _tracks.columnCount;
       _board.columns = _columnsConfig();
@@ -6161,6 +6166,12 @@ class _HourLabels {
   /// The space between a label's half and the end of the grid's room for
   /// it.
   static const double gap = 2.0;
+
+  /// The hour gutter's least width.
+  static const double minGutter = 56.0;
+
+  /// The width of the hour gutter the labels fit.
+  double gutter = minGutter;
 
   TextStyle _style = const TextStyle();
   TextScaler _scaler = TextScaler.noScaling;
