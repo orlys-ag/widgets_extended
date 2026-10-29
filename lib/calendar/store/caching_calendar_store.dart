@@ -627,6 +627,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     _index.open(opened);
     var changed = opened.isNotEmpty;
     final answered = <String>{};
+    final updated = <CalendarEntry<T>>[];
     for (final entry in entries) {
       final id = entry.id!;
       answered.add(id);
@@ -649,9 +650,12 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       }
       _setTime(id, at);
       if (_index.stored(id) != entry) {
-        _index.put(entry);
-        changed = true;
+        updated.add(entry);
       }
+    }
+    if (updated.isNotEmpty) {
+      _index.putAll(updated);
+      changed = true;
     }
     for (final day in filled) {
       for (final entry in _index.storedOn(day)) {

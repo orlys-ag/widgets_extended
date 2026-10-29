@@ -385,6 +385,53 @@ class CalendarEntryIndex<T> {
     }
   }
 
+  /// Stores each of [entries] as [put] does, the last of those sharing an
+  /// id in its place. Each day the entries or those they replace cover is
+  /// filtered once and merged once, so filing many entries under a day
+  /// costs a sort of them and the day's length, not a shift of the day's
+  /// list per entry.
+  void putAll(Iterable<CalendarEntry<T>> entries) {
+    final byId = <String, CalendarEntry<T>>{
+      for (final entry in entries) entry.id!: entry,
+    };
+    final removed = <int, Set<String>>{};
+    final added = <int, List<CalendarEntry<T>>>{};
+    for (final MapEntry(key: id, value: entry) in byId.entries) {
+      final old = _stored[id];
+      if (old != null) {
+        final last = _lastDayOf(old);
+        for (var day = _firstDayOf(old); day <= last; day++) {
+          if (_byDay.containsKey(day)) {
+            (removed[day] ??= <String>{}).add(id);
+          }
+        }
+      }
+      _stored[id] = entry;
+      if (_pending.containsKey(id) && _pending[id] == null) {
+        _pending[id] = entry;
+        _insert(_pendingList, entry);
+      }
+      final last = _lastDayOf(entry);
+      for (var day = _firstDayOf(entry); day <= last; day++) {
+        if (opensEveryDay || _byDay.containsKey(day)) {
+          (added[day] ??= <CalendarEntry<T>>[]).add(entry);
+        }
+      }
+    }
+    for (final MapEntry(key: day, value: ids) in removed.entries) {
+      final list = _byDay[day]!;
+      list.removeWhere((entry) {
+        return ids.contains(entry.id);
+      });
+      if (opensEveryDay && list.isEmpty) {
+        _byDay.remove(day);
+      }
+    }
+    for (final MapEntry(key: day, value: list) in added.entries) {
+      _insertAll(_byDay[day] ??= <CalendarEntry<T>>[], list);
+    }
+  }
+
   /// Removes the entry [id] and unfiles it; answers it, or null when none
   /// is stored.
   CalendarEntry<T>? forget(String id) {
@@ -613,6 +660,25 @@ class CalendarEntryIndex<T> {
   /// Files [entry] in [list] at its place in [compareCalendarEntries]'s order.
   void _insert(List<CalendarEntry<T>> list, CalendarEntry<T> entry) {
     list.insert(_lowerBound(list, entry), entry);
+  }
+
+  /// Files [entries], in no set order, in [list] at their places in
+  /// [compareCalendarEntries]'s order: sorts them, then merges them in from
+  /// the back, so no entry of [list] moves more than once.
+  void _insertAll(List<CalendarEntry<T>> list, List<CalendarEntry<T>> entries) {
+    entries.sort(compareCalendarEntries);
+    var i = list.length - 1;
+    var j = entries.length - 1;
+    list.addAll(entries);
+    for (var k = list.length - 1; j >= 0; k--) {
+      if (i >= 0 && compareCalendarEntries(list[i], entries[j]) > 0) {
+        list[k] = list[i];
+        i--;
+      } else {
+        list[k] = entries[j];
+        j--;
+      }
+    }
   }
 
   /// Takes [entry], which [list] holds, out of [list].
