@@ -31,16 +31,20 @@ The contract of `CalendarStore` and its two stores. The conventions every layer 
   days. A day once read stays read; a changed day keeps showing what the
   store holds while it is read again in the background, at once where the
   shown range holds it and otherwise once a show or a prefetch covers it,
-  and the load status does not change. No read is sent for a changed day
-  a read in flight covers; one more follows once that read answers. A
-  stream of `CalendarSourceChange`s, when given, is applied as it arrives:
-  a put or a removal without a read, a change of days as an `invalidate`,
-  and a change of all, or an error on the stream, as an `invalidate` of
-  every day. A write's answer that a change announced or a read answered
-  since the write was sent contradicts is not stored; the entry's days are
-  read again. A grid move or resize shows the requested entry, pending,
-  until the data source answers; a delete and an update show the stored
-  entry pending; a create shows nothing until the entry is stored.
+  and the load status does not change. No read is sent for changed days a
+  read in flight covers, nor while the store's read of the shown range's
+  changed days is in flight; one more follows once it answers. A stream
+  of `CalendarSourceChange`s, when given, is applied as it arrives: a put
+  or a removal without a read, a change of days as an `invalidate`, and a
+  change of all, or an error on the stream, as an `invalidate` of every
+  day. A write's answer that a change announced or a read answered since
+  the write was sent contradicts is not stored, and the days of both
+  entries, read or under a read in flight, are read again; a read that
+  removed the entry from days the answer does not cover does not
+  contradict it. A grid move or resize shows the requested entry,
+  pending, until the data source answers; a delete and an update show the
+  stored entry pending, as it is stored meanwhile; a create shows nothing
+  until the entry is stored.
 - **The in-memory store** holds the entries the host gives it, and is
   always loaded. It applies each write within the call, so none is
   pending. It is its entries' source, so `invalidate` and `refresh` do

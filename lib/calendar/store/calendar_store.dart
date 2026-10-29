@@ -279,6 +279,9 @@ class CalendarEntryIndex<T> {
   /// The entries the pending ids show, in [compareCalendarEntries]'s order.
   final List<CalendarEntry<T>> _pendingList = <CalendarEntry<T>>[];
 
+  /// The pending ids that show the stored entry, as it is stored meanwhile.
+  final Set<String> _showsStored = <String>{};
+
   /// The entry [id] as stored.
   CalendarEntry<T>? stored(String id) {
     return _stored[id];
@@ -302,17 +305,14 @@ class CalendarEntryIndex<T> {
 
   /// Stores [entry], whose id no stored entry has, without filing it under
   /// any day; false, changing nothing, when one has. A pending id that
-  /// shows no entry shows this one.
+  /// shows the stored entry shows this one.
   bool addIfAbsent(CalendarEntry<T> entry) {
     final id = entry.id!;
     if (_stored.containsKey(id)) {
       return false;
     }
     _stored[id] = entry;
-    if (_pending.containsKey(id) && _pending[id] == null) {
-      _pending[id] = entry;
-      _insert(_pendingList, entry);
-    }
+    _showStored(id, entry);
     return true;
   }
 
@@ -363,15 +363,12 @@ class CalendarEntryIndex<T> {
   /// Stores [entry] in place of the entry its id names, if any: unfiles
   /// the old one and files the new one under the days it covers, every one
   /// with [opensEveryDay], otherwise the open ones. A pending id that
-  /// shows no entry shows this one.
+  /// shows the stored entry shows this one.
   void put(CalendarEntry<T> entry) {
     final id = entry.id!;
     forget(id);
     _stored[id] = entry;
-    if (_pending.containsKey(id) && _pending[id] == null) {
-      _pending[id] = entry;
-      _insert(_pendingList, entry);
-    }
+    _showStored(id, entry);
     final last = _lastDayOf(entry);
     for (var day = _firstDayOf(entry); day <= last; day++) {
       var list = _byDay[day];
@@ -407,10 +404,7 @@ class CalendarEntryIndex<T> {
         }
       }
       _stored[id] = entry;
-      if (_pending.containsKey(id) && _pending[id] == null) {
-        _pending[id] = entry;
-        _insert(_pendingList, entry);
-      }
+      _showStored(id, entry);
       final last = _lastDayOf(entry);
       for (var day = _firstDayOf(entry); day <= last; day++) {
         if (opensEveryDay || _byDay.containsKey(day)) {
@@ -433,12 +427,13 @@ class CalendarEntryIndex<T> {
   }
 
   /// Removes the entry [id] and unfiles it; answers it, or null when none
-  /// is stored.
+  /// is stored. A pending id that shows the stored entry then shows none.
   CalendarEntry<T>? forget(String id) {
     final old = _stored.remove(id);
     if (old == null) {
       return null;
     }
+    _showStored(id, null);
     final last = _lastDayOf(old);
     for (var day = _firstDayOf(old); day <= last; day++) {
       final list = _byDay[day];
@@ -459,6 +454,7 @@ class CalendarEntryIndex<T> {
     _byDay.clear();
     _pending.clear();
     _pendingList.clear();
+    _showsStored.clear();
   }
 
   /// Whether a write on [id] runs.
@@ -467,11 +463,14 @@ class CalendarEntryIndex<T> {
   }
 
   /// Marks [id] pending, showing [shown] or, when null, the stored entry
-  /// if there is one. False, changing nothing, when [id] is pending
-  /// already.
+  /// if there is one, as [put], [putAll] and [forget] change it meanwhile.
+  /// False, changing nothing, when [id] is pending already.
   bool lock(String id, CalendarEntry<T>? shown) {
     if (_pending.containsKey(id)) {
       return false;
+    }
+    if (shown == null) {
+      _showsStored.add(id);
     }
     final filed = shown ?? _stored[id];
     _pending[id] = filed;
@@ -486,9 +485,26 @@ class CalendarEntryIndex<T> {
     if (!_pending.containsKey(id)) {
       return;
     }
+    _showsStored.remove(id);
     final filed = _pending.remove(id);
     if (filed != null) {
       _remove(_pendingList, filed);
+    }
+  }
+
+  /// Shows [entry], or none when null, for [id] where its pending write
+  /// shows the stored entry.
+  void _showStored(String id, CalendarEntry<T>? entry) {
+    if (!_showsStored.contains(id)) {
+      return;
+    }
+    final filed = _pending[id];
+    if (filed != null) {
+      _remove(_pendingList, filed);
+    }
+    _pending[id] = entry;
+    if (entry != null) {
+      _insert(_pendingList, entry);
     }
   }
 

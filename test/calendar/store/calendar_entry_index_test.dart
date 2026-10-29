@@ -111,4 +111,38 @@ void main() {
     expect(idsOn(index, 1), <String>["b", "c"]);
     expect(idsOn(index, 2), <String>["a"]);
   });
+
+  test("IX5 a pending id locked with no entry shows the stored entry as "
+      "put and forget change it; one locked with an entry keeps it", () {
+    final index = CalendarEntryIndex<String>(opensEveryDay: false);
+    index.open(<int>[day(0), day(1)]);
+    index.put(task("a", 600, 660));
+    index.lock("a", null);
+
+    final moved = task("a", 600, 660, dayOffset: 1);
+    index.put(moved);
+    expect(index.entriesOn(day(1)), <CalendarShownEntry<String>>[
+      CalendarShownEntry<String>(moved, pending: true),
+    ]);
+    index.forget("a");
+    expect(index.entriesOn(day(1)), isEmpty);
+
+    index.release("a");
+    final requested = task("a", 720, 780);
+    index.lock("a", requested);
+    index.put(moved);
+    expect(index.entriesOn(day(0)), <CalendarShownEntry<String>>[
+      CalendarShownEntry<String>(requested, pending: true),
+    ]);
+
+    index.lock("b", null);
+    index.clear();
+    index.open(<int>[day(0)]);
+    final kept = task("b", 720, 780);
+    index.lock("b", kept);
+    index.put(task("b", 600, 660));
+    expect(index.entriesOn(day(0)), <CalendarShownEntry<String>>[
+      CalendarShownEntry<String>(kept, pending: true),
+    ]);
+  });
 }

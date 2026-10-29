@@ -37,8 +37,7 @@ class _Read {
     return this.first <= first && this.last >= last;
   }
 
-  /// Records a change announced at the clock [at] on its days [first] to
-  /// [last].
+  /// Records a change at the clock [at] on its days [first] to [last].
   void markChanged(int first, int last, int at) {
     if (changedAt == 0) {
       changedFirst = first;
@@ -47,7 +46,7 @@ class _Read {
       changedFirst = math.min(changedFirst, first);
       changedLast = math.max(changedLast, last);
     }
-    changedAt = at;
+    changedAt = math.max(changedAt, at);
   }
 }
 
@@ -84,9 +83,12 @@ class _Day {
 /// source announces take a read day's entries to have changed: the day
 /// still shows what the store holds, and is read again in the background,
 /// at once where the shown range holds it and otherwise once a [show] or a
-/// [prefetch] covers it. No read is sent for a changed day that a read in
-/// flight covers; a day changed since that read was sent is read once more
-/// when it answers, so a burst of changes costs one more read.
+/// [prefetch] covers it. No read is sent for changed days that a read in
+/// flight covers, nor while a read the store sent of the shown range's
+/// changed days is in flight: once it answers, one read covers the shown
+/// range's days changed meanwhile, so a burst of changes costs one more
+/// read, on one day or many. Once it fails, they wait, as its own do, for
+/// the next [show], [prefetch], [refresh] or change.
 ///
 /// A write takes its entry pending from the call until the data source
 /// answers: a move or a resize shows the requested entry meanwhile, and an
@@ -147,6 +149,13 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// or a write is in flight, since whatever is sent later is newer than
   /// all of them.
   final Map<String, int> _entryTimes = <String, int>{};
+
+  /// By id, the read whose answer removed the entry, while that is what
+  /// [_entryTimes] holds for it.
+  final Map<String, _Read> _forgottenBy = <String, _Read>{};
+
+  /// The read in flight that [_readChangedShown] sent, if any.
+  _Read? _rereading;
 
   /// By id, the clock when the write in flight on the entry was sent.
   final Map<String, int> _writesSentAt = <String, int>{};
@@ -321,27 +330,15 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     if (_disposed || firstDay > lastDay) {
       return;
     }
-    final at = ++_clock;
-    for (final day in _readDaysIn(firstDay, lastDay)) {
-      _days[day]!.changedAt = at;
-    }
-    for (final read in _reads) {
-      if (read.first <= lastDay && read.last >= firstDay) {
-        read.markChanged(
-          math.max(firstDay, read.first),
-          math.min(lastDay, read.last),
-          at,
-        );
-      }
-    }
+    _markChanged(firstDay, lastDay, ++_clock);
     _readChangedShown();
   }
 
   /// Takes every entry to have changed, as [invalidate] does for every
   /// day, and reads the whole shown range again at once. Where the shown
   /// range has unread days it waits on that read, as after [retry];
-  /// otherwise its status stays ready, and a failed read leaves its days
-  /// changed. Completes once that read answers, or fails with the error it
+  /// otherwise it leaves the status as it is, and a failed read leaves its
+  /// days changed. Completes once that read answers, or fails with the error it
   /// failed with; completes at once before the first [show] and after
   /// [dispose], and when the store is disposed before the read answers.
   @override
@@ -430,20 +427,39 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     }
   }
 
-  /// Marks changed at the clock [at] each read day [entry] covers, except
-  /// those of [except], if given.
+  /// Marks changed at the clock [at] the days [entry] covers
+  /// ([_markChanged]), except those of [except], if given.
   void _markDaysOf(CalendarEntry<T> entry, int at, {_Read? except}) {
     final first = dayNumber(entry.start);
     final last = lastDayNumberOf(entry.start, entry.end);
-    if (except != null && except.covers(first, last)) {
+    if (except == null) {
+      _markChanged(first, last, at);
       return;
     }
+    if (first < except.first) {
+      _markChanged(first, math.min(last, except.first - 1), at);
+    }
+    if (last > except.last) {
+      _markChanged(math.max(first, except.last + 1), last, at);
+    }
+  }
+
+  /// Marks changed at the clock [at] the read days from [first] to [last],
+  /// and those days of each read in flight, so a read sent before [at]
+  /// leaves the days it fills changed.
+  void _markChanged(int first, int last, int at) {
     for (final day in _readDaysIn(first, last)) {
-      if (except != null && except.covers(day, day)) {
-        continue;
-      }
       final record = _days[day]!;
       record.changedAt = math.max(record.changedAt, at);
+    }
+    for (final read in _reads) {
+      if (read.first <= last && read.last >= first) {
+        read.markChanged(
+          math.max(first, read.first),
+          math.min(last, read.last),
+          at,
+        );
+      }
     }
   }
 
@@ -469,11 +485,12 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// Sends a read in the background of the shown range's changed days,
-  /// unless a read in flight covers them.
+  /// unless a read in flight covers them or the read it sent last is in
+  /// flight, which calls it again once it answers.
   void _readChangedShown() {
     final first = _shownFirst;
     final last = _shownLast;
-    if (first == null || last == null) {
+    if (first == null || last == null || _rereading != null) {
       return;
     }
     final changed = _changedSpanOf(first, last);
@@ -481,14 +498,14 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
         _inFlightCovering(changed.first, changed.last) != null) {
       return;
     }
-    _send(changed.first, changed.last, awaited: false);
+    _rereading = _send(changed.first, changed.last, awaited: false);
   }
 
   /// Sends a read of [first] to [last], which the shown range waits on
   /// when [awaited], and [done], if given, waits on. The shown range waits
   /// on it before the source is called, so an answer that arrives within
   /// the call, as a [SynchronousFuture]'s does, settles the range.
-  void _send(
+  _Read _send(
     int first,
     int last, {
     required bool awaited,
@@ -512,6 +529,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
         _finishRead(read, error: error);
       },
     );
+    return read;
   }
 
   /// A read's answer. A failed one marks [readFailed] each of its days that
@@ -529,6 +547,9 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       return;
     }
     _reads.remove(read);
+    if (identical(read, _rereading)) {
+      _rereading = null;
+    }
     var answered = entries;
     var failure = error;
     if (answered != null) {
@@ -664,7 +685,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
           continue;
         }
         _index.forget(id);
-        _setTime(id, at);
+        _setTime(id, at, forgottenBy: read);
         _markDaysOf(entry, at, except: read);
         changed = true;
       }
@@ -691,10 +712,17 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// Records that what happened at the clock [at] set or removed the entry
-  /// [id], while a read or a write is in flight.
-  void _setTime(String id, int at) {
-    if (_inFlight) {
-      _entryTimes[id] = at;
+  /// [id], while a read or a write is in flight: the answer of the read
+  /// [forgottenBy], if given, removed it.
+  void _setTime(String id, int at, {_Read? forgottenBy}) {
+    if (!_inFlight) {
+      return;
+    }
+    _entryTimes[id] = at;
+    if (forgottenBy == null) {
+      _forgottenBy.remove(id);
+    } else {
+      _forgottenBy[id] = forgottenBy;
     }
   }
 
@@ -702,6 +730,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   void _pruneEntryTimes() {
     if (!_inFlight) {
       _entryTimes.clear();
+      _forgottenBy.clear();
     }
   }
 
@@ -1006,10 +1035,13 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// announced change or a read's answer since the send set or removed the
   /// entry and left it other than [answer]. Which of the two the source
   /// holds is then unknown, so the store keeps what it holds and reads the
-  /// days of both again.
+  /// days of both again. A read whose answer removed the entry from days
+  /// [answer] does not cover leaves it as [answer] says.
   void _storeAnswer(String id, CalendarEntry<T>? answer, int sentAt) {
     final held = _index.stored(id);
-    if ((_entryTimes[id] ?? 0) > sentAt && held != answer) {
+    if ((_entryTimes[id] ?? 0) > sentAt &&
+        held != answer &&
+        !_removedElsewhere(id, answer)) {
       final at = ++_clock;
       if (held != null) {
         _markDaysOf(held, at);
@@ -1026,6 +1058,18 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       _index.put(answer);
     }
     _setTime(id, ++_clock);
+  }
+
+  /// Whether the latest to set or remove the entry [id] was a read whose
+  /// answer removed it, over days [answer] does not cover.
+  bool _removedElsewhere(String id, CalendarEntry<T>? answer) {
+    final read = _forgottenBy[id];
+    if (read == null || answer == null) {
+      return false;
+    }
+    final first = dayNumber(answer.start);
+    final last = lastDayNumberOf(answer.start, answer.end);
+    return last < read.first || first > read.last;
   }
 
   /// Stops listening to the source's changes, and completes each refresh

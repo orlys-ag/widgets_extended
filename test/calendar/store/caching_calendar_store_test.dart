@@ -1435,6 +1435,127 @@ void main() {
     expect(refreshing(), isTrue);
   });
 
+  test("FR20 a write's contradicted answer leaves its days changed under a "
+      "read in flight, which are read again once shown", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
+    store.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+    await settle();
+    final moved = onDay(item, DateTime(2026, 4, 28));
+    store.update(moved);
+    final write = harness.lastCall;
+    store.prefetch(DateTime(2026, 4, 27), DateTime(2026, 5, 3));
+    final prefetch = harness.lastCall;
+    store.invalidate(DateTime(2026, 4, 21), DateTime(2026, 4, 21));
+    harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+    await settle();
+
+    write.succeed(moved);
+    await settle();
+    prefetch.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    store.show(DateTime(2026, 4, 27), DateTime(2026, 5, 3));
+    expect(harness.source.calls, hasLength(6));
+    expect(
+      (harness.lastCall.first, harness.lastCall.last),
+      (DateTime(2026, 4, 28), DateTime(2026, 4, 28)),
+    );
+  });
+
+  test("FR21 a move's answer outside the days of a later read that removed "
+      "the entry is stored", () async {
+    for (final target in <int>[23, 20]) {
+      final harness = Harness();
+      final store = harness.store;
+      final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
+      store.show(weekFirst, weekLast);
+      harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+      await settle();
+      final moved = onDay(item, DateTime(2026, 4, target));
+      store.requestMove(moved);
+      final write = harness.lastCall;
+      store.invalidate(DateTime(2026, 4, 21), DateTime(2026, 4, 21));
+      harness.lastCall.succeed(<CalendarEntry<String>>[]);
+      await settle();
+
+      write.succeed(moved);
+      await settle();
+      expect(store.storedEntry("item-1"), moved, reason: "to the $target");
+      expect(harness.source.calls, hasLength(3), reason: "to the $target");
+    }
+  });
+
+  test("FR22 a move's answer on the days of a later read that removed the "
+      "entry is not stored", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
+    store.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+    await settle();
+    final moved = retimed(item, 720, 780);
+    store.requestMove(moved);
+    final write = harness.lastCall;
+    store.invalidate(DateTime(2026, 4, 21), DateTime(2026, 4, 21));
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+
+    write.succeed(moved);
+    await settle();
+    expect(store.storedEntry("item-1"), isNull);
+  });
+
+  test("FR23 changes on many shown days send one read, and one more once "
+      "it answers", () async {
+    final harness = Harness();
+    final store = harness.store;
+    store.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+
+    for (var day = 20; day <= 26; day++) {
+      store.invalidate(DateTime(2026, 4, day), DateTime(2026, 4, day));
+    }
+    expect(harness.source.calls, hasLength(2));
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    expect(harness.source.calls, hasLength(3));
+    expect(
+      (harness.lastCall.first, harness.lastCall.last),
+      (DateTime(2026, 4, 21), DateTime(2026, 4, 26)),
+    );
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    expect(harness.source.calls, hasLength(3));
+  });
+
+  test("FR24 a change on an unread day a read in flight covers outlives an "
+      "older read's answer removing an entry there", () async {
+    final harness = Harness();
+    final store = harness.store;
+    // From the 26th 22:00 to the 27th 01:00.
+    final spanning = task("item-1", DateTime(2026, 4, 26), 1320, 1500);
+    store.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[spanning]);
+    await settle();
+    store.invalidate(DateTime(2026, 4, 26), DateTime(2026, 4, 26));
+    final older = harness.lastCall;
+    store.prefetch(DateTime(2026, 4, 27), DateTime(2026, 5, 3));
+    final prefetch = harness.lastCall;
+    store.invalidate(DateTime(2026, 4, 27), DateTime(2026, 4, 27));
+
+    older.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    prefetch.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    store.show(DateTime(2026, 4, 27), DateTime(2026, 5, 3));
+    expect(harness.source.calls, hasLength(4));
+  });
+
   group("CF the changes the source announces", () {
     late StreamController<CalendarSourceChange<String>> changes;
 
@@ -1683,6 +1804,51 @@ void main() {
       await settle();
       expect(store.storedEntry("item-1"), renamed);
       expect(harness.source.calls, hasLength(3));
+    });
+
+    test("CF11 a pending delete shows the stored entry as a put changes "
+        "it", () async {
+      final harness = Harness(changes: changes.stream);
+      final store = harness.store;
+      final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
+      store.show(weekFirst, weekLast);
+      harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+      await settle();
+      store.requestDelete("item-1");
+
+      final moved = onDay(item, DateTime(2026, 4, 23));
+      changes.add(CalendarEntryPut<String>(moved));
+      await settle();
+      expect(
+        store.entriesOn(DateTime(2026, 4, 23)),
+        <CalendarShownEntry<String>>[
+          CalendarShownEntry<String>(moved, pending: true),
+        ],
+      );
+      expect(store.entriesOn(DateTime(2026, 4, 21)), isEmpty);
+    });
+
+    test("CF12 a change announced after a read removed the entry "
+        "contradicts a write's answer off that read's days", () async {
+      final harness = Harness(changes: changes.stream);
+      final store = harness.store;
+      final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
+      store.show(weekFirst, weekLast);
+      harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+      await settle();
+      final moved = onDay(item, DateTime(2026, 4, 23));
+      store.requestMove(moved);
+      final write = harness.lastCall;
+      store.invalidate(DateTime(2026, 4, 21), DateTime(2026, 4, 21));
+      harness.lastCall.succeed(<CalendarEntry<String>>[]);
+      await settle();
+
+      final elsewhere = onDay(item, DateTime(2026, 4, 25));
+      changes.add(CalendarEntryPut<String>(elsewhere));
+      await settle();
+      write.succeed(moved);
+      await settle();
+      expect(store.storedEntry("item-1"), elsewhere);
     });
   });
 }
