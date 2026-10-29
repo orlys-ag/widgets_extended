@@ -871,11 +871,78 @@ final class _Pinching extends _GridMode {
   final double day;
 }
 
-/// A create range being dragged, which the background paints.
-final class _Ranging<T> extends _GridMode {
-  const _Ranging(this.range);
+/// A create range being dragged, which the background paints: from the
+/// press at [anchor] to the body cell under the pointer, or for a range
+/// across the all-day strip, [strip], to the strip cell under it. Its
+/// drag, a [_RangeDrag], hands the grid each move, the release and a
+/// cancel.
+///
+/// The pointer, [point], is tracked in global coordinates, as the press
+/// plus the sum of every update's delta: a multi-drag recognizer reports
+/// the move that accepted it as a delta from the press, with the press's
+/// own position. The grid refocuses the range
+/// ([_TimedGridState._refocusRange]) on each scroll of its own
+/// scrollables ([_TimedGridState._followScroll]), so the focus stays the
+/// cell under the pointer while content scrolls beneath it; and it reads
+/// that cell through the board's controller then
+/// ([BoardController.cellAt]), so a board built anew under it is read.
+/// Where the grid's policy forbids overlaps, a range over the slots reads
+/// the entries that hold it once, when it begins, and again on a store
+/// notify ([_TimedGridState._readRangeConflicts]).
+final class _Ranging extends _GridMode {
+  _Ranging({required this.anchor, required this.point, required this.strip})
+    : focus = anchor,
+      occurrences = List<DateTime?>.filled(anchor.col, null),
+      firstFrom = List<int>.filled(anchor.col, 0),
+      stripFrom = List<int>.filled(anchor.col, 0);
 
-  final _RangeDrag<T> range;
+  /// The cell the range runs from: the pressed one, or one a refill moved
+  /// it to ([_TimedGridState._placeRangeAnchor]).
+  ({int row, int col}) anchor;
+
+  /// Whether the range runs over the all-day strip's cells, picking whole
+  /// days, rather than over the slots.
+  final bool strip;
+
+  /// The cell last under the pointer, as far as the range reaches: for a
+  /// range over the slots a body cell, unchanged while the pointer is over
+  /// the header, the gutter or past the lattice; for one across the strip
+  /// the anchor's row in the column of the strip cell last under it.
+  ({int row, int col}) focus;
+
+  /// Where the pointer is, in global coordinates.
+  Offset point;
+
+  /// Whether a refill left [anchor] on a day or a slot the range may not
+  /// start on, so the grid marks no range and the release creates nothing.
+  bool refused = false;
+
+  /// By column, `[c - 1]` for column `c`, from the first to [anchor]'s:
+  /// the earliest start the policy gives the column's day where it lies
+  /// after the day's start, the occurrence a range starting on that day
+  /// takes its times in, and null otherwise.
+  final List<DateTime?> occurrences;
+
+  /// By column as [occurrences]: the first wall minute a range starting on
+  /// the column's day may start at, the earliest start's own, one more
+  /// where it lies inside a minute, and the day's start for one at it or
+  /// before it; for a column before [anchor]'s whose day takes no start,
+  /// the next column's value, and for [anchor]'s own the next day's start.
+  final List<int> firstFrom;
+
+  /// By column as [occurrences]: the first column from it to [anchor]'s
+  /// whose day takes a start at the day's start, which a range across the
+  /// strip reaching earlier stops at, and [anchor]'s where none before it
+  /// does.
+  final List<int> stripFrom;
+
+  /// The wall minute of the earliest start after [anchor]'s slot, which a
+  /// range reaching later may not pass, or null.
+  int? nextStart;
+
+  /// The wall minute of the latest end before [anchor]'s slot, which a
+  /// range reaching earlier may not pass, or null.
+  int? previousEnd;
 }
 
 /// The drag the board runs on [key], from the board's report of its start
@@ -1243,9 +1310,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// The range being dragged, which the background paints, or null.
-  _RangeDrag<T>? get _range {
+  _Ranging? get _range {
     final mode = _mode;
-    return mode is _Ranging<T> ? mode.range : null;
+    return mode is _Ranging ? mode : null;
   }
 
   /// The block or bar each pointer down on the grid pressed, or whose
@@ -2096,8 +2163,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final range = _range;
     if (range != null && range.refused) {
       _placeRangeAnchor(range);
-    } else {
-      range?.readConflicts();
+    } else if (range != null) {
+      _readRangeConflicts(range);
     }
     _askDragAgain();
     setState(() {});
@@ -3729,14 +3796,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Reads the running gesture again as the board's scroll moves the cells
-  /// under its pointer: a create range's focus ([_RangeDrag.refocus]), and
+  /// under its pointer: a create range's focus ([_refocusRange]), and
   /// a crossing drag's cell ([_readCross]). The board reports both axes'
   /// scroll at depth 0; a scrollable inside a block reports deeper, under
   /// the board's viewport, and moves no cell.
   void _followScroll() {
     switch (_mode) {
-      case _Ranging(:final range):
-        range.refocus();
+      case _Ranging range:
+        _refocusRange(range);
       case _Dragging drag:
         if (drag.pointer != null && _isCrossingDrag(drag)) {
           _readCross();
@@ -4014,23 +4081,93 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (anchor == null) {
       return null;
     }
-    final range = _RangeDrag<T>(this, anchor, position, strip: strip != null);
+    final range = _Ranging(
+      anchor: anchor,
+      point: position,
+      strip: strip != null,
+    );
+    _readRangeLimit(range);
+    _readRangeConflicts(range);
     setState(() {
-      _mode = _Ranging<T>(range);
+      _mode = range;
     });
     _updateStripMark();
-    return range;
+    return _RangeDrag<T>(this, range);
   }
 
-  /// Moves [range]'s focus toward [focus], as far as [_reach] takes it, or
-  /// for a range across the strip [_reachStrip].
-  void _moveRange(_RangeDrag<T> range, ({int row, int col}) focus) {
+  /// Asks the grid's policy once for the earliest start on each column's
+  /// day, from [range]'s anchor's back to the first, at [_calendarNow],
+  /// and fills [range]'s [_Ranging.occurrences], [_Ranging.firstFrom] and
+  /// [_Ranging.stripFrom] in place.
+  void _readRangeLimit(_Ranging range) {
+    final tracks = _tracks;
+    final now = _calendarNow;
+    final occurrences = range.occurrences;
+    final firstFrom = range.firstFrom;
+    final stripFrom = range.stripFrom;
+    final anchor = range.anchor;
+    for (var col = anchor.col; col >= 1; col--) {
+      final index = col - 1;
+      final last = col == anchor.col;
+      final start = _rules.earliestStartOn(tracks.dateAt(col), now);
+      occurrences[index] = start.occurrence;
+      firstFrom[index] = start.closesDay && !last
+          ? firstFrom[index + 1]
+          : start.firstWallMinute;
+      stripFrom[index] = start.admitsDayStart || last
+          ? col
+          : stripFrom[index + 1];
+    }
+  }
+
+  /// Reads the entries next to [range]'s anchor's slot that hold it, in
+  /// the occurrence of its column's earliest start, into
+  /// [_Ranging.nextStart] and [_Ranging.previousEnd]. A range across the
+  /// strip, of all-day days, is held by none, and so is any range where
+  /// the grid's policy allows overlaps.
+  void _readRangeConflicts(_Ranging range) {
+    if (range.strip || _allowsOverlaps) {
+      range.nextStart = null;
+      range.previousEnd = null;
+      return;
+    }
+    final anchor = range.anchor;
+    final conflicts = _conflictsAround(
+      anchor,
+      range.occurrences[anchor.col - 1],
+    );
+    range.nextStart = conflicts.next;
+    range.previousEnd = conflicts.previous;
+  }
+
+  /// Moves [range]'s pointer by [delta], and its focus after it
+  /// ([_refocusRange]).
+  void _dragRange(_Ranging range, Offset delta) {
+    range.point += delta;
+    _refocusRange(range);
+  }
+
+  /// Moves [range]'s focus toward the cell under its pointer, read at the
+  /// grid's scroll offsets as they stand, as far as [_reach] takes it, or
+  /// for a range across the strip [_reachStrip]. Nothing where [range] is
+  /// not the running range.
+  void _refocusRange(_Ranging range) {
     if (!mounted || !identical(_range, range)) {
       return;
     }
+    final ({int row, int col})? cell;
+    if (range.strip) {
+      final over = _stripCellAt(range.point);
+      cell = over == null ? null : (row: range.anchor.row, col: over.col);
+    } else {
+      cell = _bodyCellAt(range.point);
+    }
+    if (cell == null || cell == range.focus) {
+      return;
+    }
     final reached = range.strip
-        ? _reachStrip(range, focus)
-        : _reach(range, focus);
+        ? _reachStrip(range, cell)
+        : _reach(range, cell);
     if (reached == range.focus) {
       return;
     }
@@ -4043,13 +4180,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// The focus a range across the strip from [range]'s anchor reaches
   /// toward [focus]'s column: held, toward earlier days, at the first
   /// column from it whose day [range]'s limits let an entry start at its
-  /// start ([_RangeDrag.stripFrom]), and at [CalendarEditRules.dayLimit]'s
+  /// start ([_Ranging.stripFrom]), and at [CalendarEditRules.dayLimit]'s
   /// days ([CalendarEditRules.heldToLimit]), however far past them [focus]
   /// lies. Constant work per call.
-  ({int row, int col}) _reachStrip(
-    _RangeDrag<T> range,
-    ({int row, int col}) focus,
-  ) {
+  ({int row, int col}) _reachStrip(_Ranging range, ({int row, int col}) focus) {
     final anchor = range.anchor;
     var col = focus.col;
     if (col < anchor.col) {
@@ -4081,10 +4215,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// cells' slots: held at the last slot that does not pass the nearest
   /// entry [range] read on either side of its anchor, for its start at the
   /// earliest start its limits give the focus's column
-  /// ([_RangeDrag.firstFrom]), and at [CalendarEditRules.dayLimit]'s days
+  /// ([_Ranging.firstFrom]), and at [CalendarEditRules.dayLimit]'s days
   /// ([CalendarEditRules.heldToLimit]), however far past them [focus] lies.
   /// Constant work per call: the entries and the limits were read before.
-  ({int row, int col}) _reach(_RangeDrag<T> range, ({int row, int col}) focus) {
+  ({int row, int col}) _reach(_Ranging range, ({int row, int col}) focus) {
     final anchor = range.anchor;
     final anchorWall = slotWallMinuteOf(_tracks, anchor);
     final focusWall = slotWallMinuteOf(_tracks, focus);
@@ -4203,10 +4337,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// Reports the range [range] was let go at: its anchor's slot where its
   /// focus never left it, and otherwise the range to its focus, each in
   /// the occurrence of the earliest start of the day it starts on
-  /// ([_RangeDrag.occurrences]); nothing where that range has an end the
+  /// ([_Ranging.occurrences]); nothing where that range has an end the
   /// clock skips, or while [range] is refused. A range across the strip
   /// reports the days of its columns ([_stripRangeOver]).
-  void _endRange(_RangeDrag<T> range) {
+  void _endRange(_Ranging range) {
     if (!mounted || !identical(_range, range)) {
       return;
     }
@@ -4243,7 +4377,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Refills the running create range's limits at a new [_calendarNow]
-  /// ([_RangeDrag.readLimit]) and places its anchor by them
+  /// ([_readRangeLimit]) and places its anchor by them
   /// ([_placeRangeAnchor]). A throw of the policy is reported, and the
   /// range is detached and cleared, so it creates nothing and no release
   /// reads limits two minutes gave. Runs after the now mark and [_limits]
@@ -4254,7 +4388,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return;
     }
     try {
-      range.readLimit();
+      _readRangeLimit(range);
     } catch (exception, stack) {
       _reportPolicyThrow(exception, stack);
       setState(_detachRange);
@@ -4271,13 +4405,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// slot of that column from that earliest start that a press there would
   /// start a range on ([_slotIsFree]); and where the column takes no
   /// start, where no slot of it from there is free, and for a range across
-  /// the strip, the anchor stays and [_RangeDrag.refused] holds, so the
+  /// the strip, the anchor stays and [_Ranging.refused] holds, so the
   /// grid marks no range and the release creates nothing, until a later
   /// placement admits it. A range over the slots then reads its conflicts
   /// again, and the focus is held again from the cell under the pointer,
   /// so a release with no move after it reports the range held. The grid
   /// builds again where the anchor, the focus or the refusal changed.
-  void _placeRangeAnchor(_RangeDrag<T> range) {
+  void _placeRangeAnchor(_Ranging range) {
     final was = (
       anchor: range.anchor,
       focus: range.focus,
@@ -4301,16 +4435,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
     }
     if (!range.strip) {
-      range.readConflicts();
+      _readRangeConflicts(range);
     }
     var target = range.focus;
     if (range.strip) {
-      final over = _stripCellAt(range._point);
+      final over = _stripCellAt(range.point);
       if (over != null) {
         target = (row: range.anchor.row, col: over.col);
       }
     } else {
-      target = _bodyCellAt(range._point) ?? target;
+      target = _bodyCellAt(range.point) ?? target;
     }
     range.focus = range.strip
         ? _reachStrip(range, target)
@@ -4347,7 +4481,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return null;
   }
 
-  void _clearRange(_RangeDrag<T> range) {
+  void _clearRange(_Ranging range) {
     if (!mounted || !identical(_range, range)) {
       return;
     }
@@ -4739,151 +4873,28 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 }
 
-/// A create range from the press at [anchor] to the body cell under the
-/// pointer, or for a range across the all-day strip, [strip], to the strip
-/// cell under it.
-///
-/// The pointer is tracked in global coordinates, as the press plus the
-/// sum of every update's delta: a multi-drag recognizer reports the move
-/// that accepted it as a delta from the press, with the press's own
-/// position. The grid refocuses the range ([refocus]) on each scroll of
-/// its own scrollables ([_TimedGridState._followScroll]), so the focus
-/// stays the cell under the pointer while content scrolls beneath it; and
-/// it reads that cell through the board's controller then
-/// ([BoardController.cellAt]), so a board built anew under it is read.
-/// Where the
-/// grid's policy forbids overlaps, a range over the slots reads the
-/// entries that hold it once, when it begins, and again on a store notify
-/// ([readConflicts]).
+/// The drag of a create range, which hands the grid each update's delta,
+/// the release and a cancel; the range's data is the grid's mode, a
+/// [_Ranging].
 class _RangeDrag<T> extends Drag {
-  _RangeDrag(this._grid, this.anchor, this._point, {required this.strip})
-    : focus = anchor,
-      occurrences = List<DateTime?>.filled(anchor.col, null),
-      firstFrom = List<int>.filled(anchor.col, 0),
-      stripFrom = List<int>.filled(anchor.col, 0) {
-    readLimit();
-    readConflicts();
-  }
+  _RangeDrag(this._grid, this._range);
 
   final _TimedGridState<T> _grid;
-
-  /// The cell the range runs from: the pressed one, or one a refill moved
-  /// it to ([_TimedGridState._placeRangeAnchor]).
-  ({int row, int col}) anchor;
-
-  /// Whether the range runs over the all-day strip's cells, picking whole
-  /// days, rather than over the slots.
-  final bool strip;
-
-  /// The cell last under the pointer, as far as the range reaches: for a
-  /// range over the slots a body cell, unchanged while the pointer is over
-  /// the header, the gutter or past the lattice; for one across the strip
-  /// the anchor's row in the column of the strip cell last under it.
-  ({int row, int col}) focus;
-
-  /// Whether a refill left [anchor] on a day or a slot the range may not
-  /// start on, so the grid marks no range and the release creates nothing.
-  bool refused = false;
-
-  /// By column, `[c - 1]` for column `c`, from the first to [anchor]'s:
-  /// the earliest start the policy gives the column's day where it lies
-  /// after the day's start, the occurrence a range starting on that day
-  /// takes its times in, and null otherwise.
-  final List<DateTime?> occurrences;
-
-  /// By column as [occurrences]: the first wall minute a range starting on
-  /// the column's day may start at, the earliest start's own, one more
-  /// where it lies inside a minute, and the day's start for one at it or
-  /// before it; for a column before [anchor]'s whose day takes no start,
-  /// the next column's value, and for [anchor]'s own the next day's start.
-  final List<int> firstFrom;
-
-  /// By column as [occurrences]: the first column from it to [anchor]'s
-  /// whose day takes a start at the day's start, which a range across the
-  /// strip reaching earlier stops at, and [anchor]'s where none before it
-  /// does.
-  final List<int> stripFrom;
-
-  /// The wall minute of the earliest start after [anchor]'s slot, which a
-  /// range reaching later may not pass, or null.
-  int? nextStart;
-
-  /// The wall minute of the latest end before [anchor]'s slot, which a
-  /// range reaching earlier may not pass, or null.
-  int? previousEnd;
-
-  Offset _point;
-
-  /// Asks the grid's policy once for the earliest start on each column's
-  /// day, from [anchor]'s back to the first, at the grid's [CalendarNow],
-  /// and fills [occurrences], [firstFrom] and [stripFrom] in place.
-  void readLimit() {
-    final grid = _grid;
-    final tracks = grid._tracks;
-    final rules = grid._rules;
-    final now = grid._calendarNow;
-    for (var col = anchor.col; col >= 1; col--) {
-      final index = col - 1;
-      final last = col == anchor.col;
-      final start = rules.earliestStartOn(tracks.dateAt(col), now);
-      occurrences[index] = start.occurrence;
-      firstFrom[index] = start.closesDay && !last
-          ? firstFrom[index + 1]
-          : start.firstWallMinute;
-      stripFrom[index] = start.admitsDayStart || last
-          ? col
-          : stripFrom[index + 1];
-    }
-  }
-
-  /// Reads the entries next to [anchor]'s slot that hold the range, in
-  /// the occurrence of its column's earliest start. A range across the
-  /// strip, of all-day days, is held by none, and so is any range where
-  /// the grid's policy allows overlaps.
-  void readConflicts() {
-    if (strip || _grid._allowsOverlaps) {
-      nextStart = null;
-      previousEnd = null;
-      return;
-    }
-    final conflicts = _grid._conflictsAround(
-      anchor,
-      occurrences[anchor.col - 1],
-    );
-    nextStart = conflicts.next;
-    previousEnd = conflicts.previous;
-  }
+  final _Ranging _range;
 
   @override
   void update(DragUpdateDetails details) {
-    _point += details.delta;
-    refocus();
-  }
-
-  /// Moves the focus toward the cell under the pointer, read at the
-  /// grid's scroll offsets as they stand.
-  void refocus() {
-    final ({int row, int col})? cell;
-    if (strip) {
-      final over = _grid._stripCellAt(_point);
-      cell = over == null ? null : (row: anchor.row, col: over.col);
-    } else {
-      cell = _grid._bodyCellAt(_point);
-    }
-    if (cell == null || cell == focus) {
-      return;
-    }
-    _grid._moveRange(this, cell);
+    _grid._dragRange(_range, details.delta);
   }
 
   @override
   void end(DragEndDetails details) {
-    _grid._endRange(this);
+    _grid._endRange(_range);
   }
 
   @override
   void cancel() {
-    _grid._clearRange(this);
+    _grid._clearRange(_range);
   }
 }
 
