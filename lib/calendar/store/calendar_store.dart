@@ -160,6 +160,16 @@ abstract class CalendarStore<T> extends ChangeNotifier {
   /// without showing them.
   void prefetch(DateTime first, DateTime last);
 
+  /// Takes every entry with a part in the days from [first] to [last],
+  /// both inclusive, to have changed at its source, so the store answers
+  /// those days anew.
+  void invalidate(DateTime first, DateTime last);
+
+  /// Takes every entry to have changed at its source, so the store answers
+  /// every day anew. Completes once the shown range is answered anew, or
+  /// fails with the error that kept it from being read.
+  Future<void> refresh();
+
   /// Whether [day] is read.
   bool isRead(DateTime day);
 
@@ -279,6 +289,12 @@ class CalendarEntryIndex<T> {
     return _stored.values;
   }
 
+  /// The stored entries filed under [day], in order; a new list, empty
+  /// when [day] is not open.
+  List<CalendarEntry<T>> storedOn(int day) {
+    return List<CalendarEntry<T>>.of(_byDay[day] ?? const <Never>[]);
+  }
+
   /// Whether [day] is open.
   bool isOpen(int day) {
     return _byDay.containsKey(day);
@@ -346,10 +362,16 @@ class CalendarEntryIndex<T> {
 
   /// Stores [entry] in place of the entry its id names, if any: unfiles
   /// the old one and files the new one under the days it covers, every one
-  /// with [opensEveryDay], otherwise the open ones.
+  /// with [opensEveryDay], otherwise the open ones. A pending id that
+  /// shows no entry shows this one.
   void put(CalendarEntry<T> entry) {
-    forget(entry.id!);
-    _stored[entry.id!] = entry;
+    final id = entry.id!;
+    forget(id);
+    _stored[id] = entry;
+    if (_pending.containsKey(id) && _pending[id] == null) {
+      _pending[id] = entry;
+      _insert(_pendingList, entry);
+    }
     for (var day = _firstDayOf(entry); day <= _lastDayOf(entry); day++) {
       var list = _byDay[day];
       if (list == null) {
