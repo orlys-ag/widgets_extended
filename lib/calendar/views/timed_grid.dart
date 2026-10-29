@@ -1014,8 +1014,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   );
 
   /// Where the fingers of the pinch that last reported a zoom met, in the
-  /// board viewport's coordinates, until the next fit of the axes holds
-  /// the lattice there ([_holdPinchFocal]).
+  /// board's coordinates ([_boardBox]), until the next fit of the axes
+  /// holds the lattice there ([_holdPinchFocal]).
   Offset? _pinchFocal;
 
   final ScrollHolder _scrollHold = ScrollHolder();
@@ -1321,10 +1321,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   final GlobalKey _boardKey = GlobalKey();
 
-  /// The board's viewport, found under [_boardKey] and kept while it is
-  /// attached.
-  RenderBoardViewport<GridKey>? _viewport;
-
   /// The create gestures. They live here rather than in the board, and are
   /// armed only for a press on an empty body cell, so a press on a block
   /// leaves the arena to the block's own move and resize gestures.
@@ -1413,7 +1409,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       );
       // The jump put the opening line on the top edge; the label centred
       // on it needs the room above it that the first line has.
-      final vertical = _findViewport()?.verticalPosition;
+      final vertical = _positionOf(_verticalScroll);
       if (vertical != null) {
         vertical.jumpTo(
           math.max(vertical.minScrollExtent, vertical.pixels - _labelRoom),
@@ -1980,12 +1976,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// and clears it.
   void _holdPinchFocal(BoardAxisConfig oldRows, BoardAxisConfig oldColumns) {
     final focal = _pinchFocal;
-    final viewport = _findViewport();
-    if (focal == null || viewport == null) {
+    if (focal == null) {
       return;
     }
     _pinchFocal = null;
-    final vertical = viewport.verticalPosition;
+    final vertical = _positionOf(_verticalScroll);
     if (vertical != null && !identical(oldRows.axis, _board.rows.axis)) {
       holdFocalAcrossAxisSwap(
         vertical,
@@ -1995,7 +1990,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         focal: focal.dy,
       );
     }
-    final horizontal = viewport.horizontalPosition;
+    final horizontal = _positionOf(_horizontalScroll);
     if (horizontal != null &&
         !identical(oldColumns.axis, _board.columns.axis)) {
       holdFocalAcrossAxisSwap(
@@ -2028,8 +2023,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   void _pinchTo(PinchUpdate update) {
     final from = _mode;
     final onZoom = widget.onZoom;
-    final viewport = _findViewport();
-    if (from is! _Pinching || onZoom == null || viewport == null) {
+    final box = _boardBox();
+    if (from is! _Pinching || onZoom == null || box == null) {
       return;
     }
     var slot = widget.minSlotHeight;
@@ -2049,7 +2044,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (slot == widget.minSlotHeight && day == widget.minDayWidth) {
       return;
     }
-    _pinchFocal = viewport.globalToLocal(update.focal);
+    _pinchFocal = box.globalToLocal(update.focal);
     onZoom(slot, day);
   }
 
@@ -2063,11 +2058,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// block drag or a create range runs, which no pinch starts beside, and
   /// lets it go after.
   void _handleHolding() {
-    final viewport = _findViewport();
     if (_pinch.holding.value && (_mode is _Idle || _mode is _Pinching)) {
       _scrollHold.hold(<ScrollPosition?>[
-        viewport?.verticalPosition,
-        viewport?.horizontalPosition,
+        _positionOf(_verticalScroll),
+        _positionOf(_horizontalScroll),
       ]);
     } else {
       _scrollHold.release();
@@ -3384,17 +3378,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Whether [answer], [_rowAt] or [_columnAt] of [at], agrees with the
-  /// board viewport's own [RenderBoardViewport.cellAt] there, read in the
-  /// gutter for a row and in the first row for a column, or a point a hair
-  /// either side, where the two may round a track edge apart.
+  /// board's own [BoardController.cellAt] there, read in the gutter for a
+  /// row and in the first row for a column, or a point a hair either side,
+  /// where the two may round a track edge apart.
   bool _debugAgrees(int answer, double at, {required bool vertical}) {
-    final viewport = _findViewport();
-    if (viewport == null || !viewport.hasSize) {
+    final box = _boardBox();
+    if (box == null) {
       return true;
     }
     int probe(double value) {
-      final cell = viewport.cellAt(
-        vertical ? Offset(0.0, value) : Offset(value, 0.0),
+      final cell = _board.cellAt(
+        box.localToGlobal(vertical ? Offset(0.0, value) : Offset(value, 0.0)),
       );
       if (cell == null) {
         return -1;
@@ -3604,40 +3598,24 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     widget.onSelectDay(day);
   }
 
-  RenderBoardViewport<GridKey>? _findViewport() {
-    final cached = _viewport;
-    if (cached != null && cached.attached) {
-      return cached;
-    }
-    _viewport = null;
-    final root = _boardKey.currentContext?.findRenderObject();
-    if (root == null) {
-      return null;
-    }
-    RenderBoardViewport<GridKey>? found;
-    void visit(RenderObject node) {
-      if (found != null) {
-        return;
-      }
-      if (node is RenderBoardViewport<GridKey>) {
-        found = node;
-        return;
-      }
-      node.visitChildren(visit);
-    }
-
-    visit(root);
-    _viewport = found;
-    return found;
+  /// The position [controller] drives, or null before the board's
+  /// scrollable attaches it.
+  static ScrollPosition? _positionOf(ScrollController controller) {
+    return controller.hasClients ? controller.position : null;
   }
 
-  /// The body cell painting under [local], a point in the viewport's paint
-  /// space, or null over the header, the gutter or past the lattice.
-  ({int row, int col})? _bodyCellAtLocal(
-    RenderBoardViewport<GridKey> viewport,
-    Offset local,
-  ) {
-    final cell = viewport.cellAt(local);
+  /// The board's own box, or null before the board's first layout. The
+  /// board's viewport fills it from its origin, so a point in it is a
+  /// point in the viewport's paint space.
+  RenderBox? _boardBox() {
+    final box = _boardKey.currentContext?.findRenderObject();
+    return box is RenderBox && box.hasSize ? box : null;
+  }
+
+  /// The body cell painting under [global], or null over the header, the
+  /// gutter or past the lattice.
+  ({int row, int col})? _bodyCellAt(Offset global) {
+    final cell = _board.cellAt(global);
     if (cell == null ||
         cell.row < _tracks.firstSlotRow ||
         cell.row > _tracks.lastSlotRow ||
@@ -3647,23 +3625,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return cell;
   }
 
-  /// [_bodyCellAtLocal] for a global point.
-  ({int row, int col})? _bodyCellAt(Offset global) {
-    final viewport = _findViewport();
-    if (viewport == null) {
-      return null;
-    }
-    return _bodyCellAtLocal(viewport, viewport.globalToLocal(global));
-  }
-
-  /// The all-day strip's cell painting under [local], a point in the
-  /// viewport's paint space, in a row that holds bars, or null elsewhere,
-  /// the collapsed strip's count row included.
-  ({int row, int col})? _stripCellAtLocal(
-    RenderBoardViewport<GridKey> viewport,
-    Offset local,
-  ) {
-    final cell = viewport.cellAt(local);
+  /// The all-day strip's cell painting under [global], in a row that holds
+  /// bars, or null elsewhere, the collapsed strip's count row included.
+  ({int row, int col})? _stripCellAt(Offset global) {
+    final cell = _board.cellAt(global);
     if (cell == null ||
         !_isStripRow(cell.row) ||
         (_stripCounted && cell.row >= _stripStart + collapsedStripRows) ||
@@ -3683,28 +3648,26 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// start at its start. Asks the policy once, for the pressed column's
   /// day.
   bool _admits(Offset global) {
-    final viewport = _findViewport();
-    if (viewport == null || _scrollJustStopped || _mode is! _Idle) {
+    if (_scrollJustStopped || _mode is! _Idle) {
       return false;
     }
-    final vertical = viewport.verticalPosition;
-    final horizontal = viewport.horizontalPosition;
+    final vertical = _positionOf(_verticalScroll);
+    final horizontal = _positionOf(_horizontalScroll);
     if ((vertical?.isScrollingNotifier.value ?? false) ||
         (horizontal?.isScrollingNotifier.value ?? false)) {
       return false;
     }
-    final local = viewport.globalToLocal(global);
-    final strip = _stripCellAtLocal(viewport, local);
+    final strip = _stripCellAt(global);
     if (strip != null) {
-      if (viewport.itemAt(local) != null) {
+      if (_board.itemAt(global) != null) {
         return false;
       }
       final day = _tracks.dateAt(strip.col);
       return _rules.earliestStartOn(day, _calendarNow).admitsDayStart;
     }
-    final cell = _bodyCellAtLocal(viewport, local);
+    final cell = _bodyCellAt(global);
     // A press on a block asks the policy nothing.
-    if (cell == null || viewport.itemAt(local) != null) {
+    if (cell == null || _board.itemAt(global) != null) {
       return false;
     }
     final day = _tracks.dateAt(cell.col);
@@ -3793,7 +3756,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ignores the pointer kinds it does not support.
   void _handlePointerDown(PointerDownEvent event) {
     _pinch.handleEvent(event);
-    final under = _keyAt(event.position);
+    final under = _board.itemAt(event.position);
     if (under != null) {
       _pressKeys[event.pointer] = under;
     }
@@ -3959,36 +3922,26 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     var cursor = MouseCursor.defer;
     if (!_handles.isEmpty &&
         _selectedBlock.value != null &&
-        _keyAt(event.position) == null &&
+        _board.itemAt(event.position) == null &&
         _bodyCellAt(event.position) != null) {
       cursor = _handles.cursorOutside(event.position);
     }
     _besideCursor.value = cursor;
   }
 
-  /// The key of the block that lies under [global], or null.
-  GridKey? _keyAt(Offset global) {
-    final viewport = _findViewport();
-    if (viewport == null) {
-      return null;
-    }
-    return viewport.itemAt(viewport.globalToLocal(global));
-  }
-
   /// Creates at the slot or the strip cell a tap let go over, unless
   /// another gesture runs by then.
   void _handleTapUp(TapUpDetails details) {
-    final viewport = _findViewport();
-    if (viewport == null || _mode is! _Idle) {
+    if (_mode is! _Idle) {
       return;
     }
-    final local = viewport.globalToLocal(details.globalPosition);
-    final strip = _stripCellAtLocal(viewport, local);
+    final global = details.globalPosition;
+    final strip = _stripCellAt(global);
     if (strip != null) {
       _create(strip, strip, _stripRangeOver(strip.col, strip.col), strip: true);
       return;
     }
-    final cell = _bodyCellAtLocal(viewport, local);
+    final cell = _bodyCellAt(global);
     if (cell == null) {
       return;
     }
@@ -4053,17 +4006,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Begins a create range at [position], unless another gesture runs.
   Drag? _beginRange(Offset position) {
-    final viewport = _findViewport();
-    if (viewport == null || _mode is! _Idle) {
+    if (_mode is! _Idle) {
       return null;
     }
-    final point = viewport.globalToLocal(position);
-    final strip = _stripCellAtLocal(viewport, point);
-    final anchor = strip ?? _bodyCellAtLocal(viewport, point);
+    final strip = _stripCellAt(position);
+    final anchor = strip ?? _bodyCellAt(position);
     if (anchor == null) {
       return null;
     }
-    final range = _RangeDrag<T>(this, anchor, point, strip: strip != null);
+    final range = _RangeDrag<T>(this, anchor, position, strip: strip != null);
     setState(() {
       _mode = _Ranging<T>(range);
     });
@@ -4352,17 +4303,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (!range.strip) {
       range.readConflicts();
     }
-    final viewport = _findViewport();
     var target = range.focus;
-    if (viewport != null) {
-      if (range.strip) {
-        final over = _stripCellAtLocal(viewport, range._point);
-        if (over != null) {
-          target = (row: range.anchor.row, col: over.col);
-        }
-      } else {
-        target = _bodyCellAtLocal(viewport, range._point) ?? target;
+    if (range.strip) {
+      final over = _stripCellAt(range._point);
+      if (over != null) {
+        target = (row: range.anchor.row, col: over.col);
       }
+    } else {
+      target = _bodyCellAt(range._point) ?? target;
     }
     range.focus = range.strip
         ? _reachStrip(range, target)
@@ -4795,14 +4743,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 /// pointer, or for a range across the all-day strip, [strip], to the strip
 /// cell under it.
 ///
-/// The pointer is tracked in the viewport's paint space, as the press
-/// converted plus the sum of every update's delta: a multi-drag recognizer
-/// reports the move that accepted it as a delta from the press, with the
-/// press's own position. The grid refocuses the range ([refocus]) on
-/// each scroll of its own scrollables ([_TimedGridState._followScroll]),
-/// so the focus stays the cell under the pointer while content scrolls
-/// beneath it; and it reads that cell through the viewport the grid finds
-/// then, so a board built anew under it is read. Where the
+/// The pointer is tracked in global coordinates, as the press plus the
+/// sum of every update's delta: a multi-drag recognizer reports the move
+/// that accepted it as a delta from the press, with the press's own
+/// position. The grid refocuses the range ([refocus]) on each scroll of
+/// its own scrollables ([_TimedGridState._followScroll]), so the focus
+/// stays the cell under the pointer while content scrolls beneath it; and
+/// it reads that cell through the board's controller then
+/// ([BoardController.cellAt]), so a board built anew under it is read.
+/// Where the
 /// grid's policy forbids overlaps, a range over the slots reads the
 /// entries that hold it once, when it begins, and again on a store notify
 /// ([readConflicts]).
@@ -4914,16 +4863,12 @@ class _RangeDrag<T> extends Drag {
   /// Moves the focus toward the cell under the pointer, read at the
   /// grid's scroll offsets as they stand.
   void refocus() {
-    final viewport = _grid._findViewport();
-    if (viewport == null) {
-      return;
-    }
     final ({int row, int col})? cell;
     if (strip) {
-      final over = _grid._stripCellAtLocal(viewport, _point);
+      final over = _grid._stripCellAt(_point);
       cell = over == null ? null : (row: anchor.row, col: over.col);
     } else {
-      cell = _grid._bodyCellAtLocal(viewport, _point);
+      cell = _grid._bodyCellAt(_point);
     }
     if (cell == null || cell == focus) {
       return;

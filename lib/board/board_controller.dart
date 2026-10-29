@@ -1208,6 +1208,36 @@ class BoardController<TKey, TItem> {
     return _orchestrator.frozenInsetOf(axis);
   }
 
+  /// The cell that PAINTS under the GLOBAL point [global]: a frozen cell
+  /// where its band paints, a scrolled one elsewhere, read through the
+  /// geometry as it paints mid track resize. Null where no cell paints
+  /// there, past the lattice or past the viewport beside a band, and
+  /// with no board mounted on this controller or before its first
+  /// layout. A geometric query: it does not ask what else the app paints
+  /// over the board there.
+  ({int row, int col})? cellAt(Offset global) {
+    _assertNotDisposed();
+    final port = _renderPort;
+    if (port == null || !port.isLaidOut) {
+      return null;
+    }
+    return port.cellAt(port.globalToPaintLocal(global));
+  }
+
+  /// The key of the topmost item painted under the GLOBAL point
+  /// [global], or null where none is or a frozen cell painted above it
+  /// covers the point. An item animating out and the item being dragged
+  /// are passed over. Null with no board mounted on this controller or
+  /// before its first layout. A geometric query, as [cellAt] is.
+  TKey? itemAt(Offset global) {
+    _assertNotDisposed();
+    final port = _renderPort;
+    if (port == null || !port.isLaidOut) {
+      return null;
+    }
+    return port.itemAt(port.globalToPaintLocal(global));
+  }
+
   /// Drops every mounted cell's cached measurement and schedules one
   /// layout that re-measures each, except a cell that shows nothing for a
   /// null builder answer, which still contributes nothing to its track.

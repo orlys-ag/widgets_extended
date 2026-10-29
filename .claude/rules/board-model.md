@@ -97,7 +97,11 @@ The contract of `Fenwick`, the axes, spans and the start rule, `SpanIndex`, `Ove
   Mutators fire one structural notification
   each; `markDragging` stores bit 2 with an `onMutationCancel` hook whose
   lifetime is the bit's, and every span mutator touching the dragged key
-  cancels the drag BEFORE mutating. The ordered `dispose` script asserts the
+  cancels the drag BEFORE mutating. `cellAt` and `itemAt` take a GLOBAL
+  point, convert it through the registered port's `globalToPaintLocal`
+  and answer the port's own `cellAt` and `itemAt`, null with no port or
+  one not laid out; the controller restates neither query. The ordered
+  `dispose` script asserts the
   listener lists are empty first (a mounted board still subscribed means
   something is about to read a disposed controller), then runs the
   orchestrator (tickers before the vsync dies), then the animation
