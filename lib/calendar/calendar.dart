@@ -16,7 +16,14 @@ export 'dates/calendar_dates.dart'
         dayNumber,
         defaultSlotMinutes,
         slotMinuteChoices;
-export 'entries/calendar_data_source.dart' show CalendarDataSource;
+export 'entries/calendar_data_source.dart'
+    show
+        CalendarAllChanged,
+        CalendarDataSource,
+        CalendarDaysChanged,
+        CalendarEntryPut,
+        CalendarEntryRemoved,
+        CalendarSourceChange;
 export 'entries/calendar_entry.dart' show CalendarEntry;
 export 'policy/edit_policy.dart'
     show

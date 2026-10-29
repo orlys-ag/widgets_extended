@@ -160,6 +160,16 @@ abstract class CalendarStore<T> extends ChangeNotifier {
   /// without showing them.
   void prefetch(DateTime first, DateTime last);
 
+  /// Takes every entry with a part in the days from [first] to [last],
+  /// both inclusive, to have changed at its source, so the store answers
+  /// those days anew.
+  void invalidate(DateTime first, DateTime last);
+
+  /// Takes every entry to have changed at its source, so the store answers
+  /// every day anew. Completes once the shown range is answered anew, or
+  /// fails with the error that kept it from being read.
+  Future<void> refresh();
+
   /// Whether [day] is read.
   bool isRead(DateTime day);
 
@@ -269,6 +279,9 @@ class CalendarEntryIndex<T> {
   /// The entries the pending ids show, in [compareCalendarEntries]'s order.
   final List<CalendarEntry<T>> _pendingList = <CalendarEntry<T>>[];
 
+  /// The pending ids that show the stored entry, as it is stored meanwhile.
+  final Set<String> _showsStored = <String>{};
+
   /// The entry [id] as stored.
   CalendarEntry<T>? stored(String id) {
     return _stored[id];
@@ -279,6 +292,12 @@ class CalendarEntryIndex<T> {
     return _stored.values;
   }
 
+  /// The stored entries filed under [day], in order; a new list, empty
+  /// when [day] is not open.
+  List<CalendarEntry<T>> storedOn(int day) {
+    return List<CalendarEntry<T>>.of(_byDay[day] ?? const <Never>[]);
+  }
+
   /// Whether [day] is open.
   bool isOpen(int day) {
     return _byDay.containsKey(day);
@@ -286,17 +305,14 @@ class CalendarEntryIndex<T> {
 
   /// Stores [entry], whose id no stored entry has, without filing it under
   /// any day; false, changing nothing, when one has. A pending id that
-  /// shows no entry shows this one.
+  /// shows the stored entry shows this one.
   bool addIfAbsent(CalendarEntry<T> entry) {
     final id = entry.id!;
     if (_stored.containsKey(id)) {
       return false;
     }
     _stored[id] = entry;
-    if (_pending.containsKey(id) && _pending[id] == null) {
-      _pending[id] = entry;
-      _insert(_pendingList, entry);
-    }
+    _showStored(id, entry);
     return true;
   }
 
@@ -346,11 +362,15 @@ class CalendarEntryIndex<T> {
 
   /// Stores [entry] in place of the entry its id names, if any: unfiles
   /// the old one and files the new one under the days it covers, every one
-  /// with [opensEveryDay], otherwise the open ones.
+  /// with [opensEveryDay], otherwise the open ones. A pending id that
+  /// shows the stored entry shows this one.
   void put(CalendarEntry<T> entry) {
-    forget(entry.id!);
-    _stored[entry.id!] = entry;
-    for (var day = _firstDayOf(entry); day <= _lastDayOf(entry); day++) {
+    final id = entry.id!;
+    forget(id);
+    _stored[id] = entry;
+    _showStored(id, entry);
+    final last = _lastDayOf(entry);
+    for (var day = _firstDayOf(entry); day <= last; day++) {
       var list = _byDay[day];
       if (list == null) {
         if (!opensEveryDay) {
@@ -362,14 +382,60 @@ class CalendarEntryIndex<T> {
     }
   }
 
+  /// Stores each of [entries] as [put] does, the last of those sharing an
+  /// id in its place. Each day the entries or those they replace cover is
+  /// filtered once and merged once, so filing many entries under a day
+  /// costs a sort of them and the day's length, not a shift of the day's
+  /// list per entry.
+  void putAll(Iterable<CalendarEntry<T>> entries) {
+    final byId = <String, CalendarEntry<T>>{
+      for (final entry in entries) entry.id!: entry,
+    };
+    final removed = <int, Set<String>>{};
+    final added = <int, List<CalendarEntry<T>>>{};
+    for (final MapEntry(key: id, value: entry) in byId.entries) {
+      final old = _stored[id];
+      if (old != null) {
+        final last = _lastDayOf(old);
+        for (var day = _firstDayOf(old); day <= last; day++) {
+          if (_byDay.containsKey(day)) {
+            (removed[day] ??= <String>{}).add(id);
+          }
+        }
+      }
+      _stored[id] = entry;
+      _showStored(id, entry);
+      final last = _lastDayOf(entry);
+      for (var day = _firstDayOf(entry); day <= last; day++) {
+        if (opensEveryDay || _byDay.containsKey(day)) {
+          (added[day] ??= <CalendarEntry<T>>[]).add(entry);
+        }
+      }
+    }
+    for (final MapEntry(key: day, value: ids) in removed.entries) {
+      final list = _byDay[day]!;
+      list.removeWhere((entry) {
+        return ids.contains(entry.id);
+      });
+      if (opensEveryDay && list.isEmpty) {
+        _byDay.remove(day);
+      }
+    }
+    for (final MapEntry(key: day, value: list) in added.entries) {
+      _insertAll(_byDay[day] ??= <CalendarEntry<T>>[], list);
+    }
+  }
+
   /// Removes the entry [id] and unfiles it; answers it, or null when none
-  /// is stored.
+  /// is stored. A pending id that shows the stored entry then shows none.
   CalendarEntry<T>? forget(String id) {
     final old = _stored.remove(id);
     if (old == null) {
       return null;
     }
-    for (var day = _firstDayOf(old); day <= _lastDayOf(old); day++) {
+    _showStored(id, null);
+    final last = _lastDayOf(old);
+    for (var day = _firstDayOf(old); day <= last; day++) {
       final list = _byDay[day];
       if (list == null) {
         continue;
@@ -388,6 +454,7 @@ class CalendarEntryIndex<T> {
     _byDay.clear();
     _pending.clear();
     _pendingList.clear();
+    _showsStored.clear();
   }
 
   /// Whether a write on [id] runs.
@@ -396,11 +463,14 @@ class CalendarEntryIndex<T> {
   }
 
   /// Marks [id] pending, showing [shown] or, when null, the stored entry
-  /// if there is one. False, changing nothing, when [id] is pending
-  /// already.
+  /// if there is one, as [put], [putAll] and [forget] change it meanwhile.
+  /// False, changing nothing, when [id] is pending already.
   bool lock(String id, CalendarEntry<T>? shown) {
     if (_pending.containsKey(id)) {
       return false;
+    }
+    if (shown == null) {
+      _showsStored.add(id);
     }
     final filed = shown ?? _stored[id];
     _pending[id] = filed;
@@ -415,9 +485,26 @@ class CalendarEntryIndex<T> {
     if (!_pending.containsKey(id)) {
       return;
     }
+    _showsStored.remove(id);
     final filed = _pending.remove(id);
     if (filed != null) {
       _remove(_pendingList, filed);
+    }
+  }
+
+  /// Shows [entry], or none when null, for [id] where its pending write
+  /// shows the stored entry.
+  void _showStored(String id, CalendarEntry<T>? entry) {
+    if (!_showsStored.contains(id)) {
+      return;
+    }
+    final filed = _pending[id];
+    if (filed != null) {
+      _remove(_pendingList, filed);
+    }
+    _pending[id] = entry;
+    if (entry != null) {
+      _insert(_pendingList, entry);
     }
   }
 
@@ -589,6 +676,25 @@ class CalendarEntryIndex<T> {
   /// Files [entry] in [list] at its place in [compareCalendarEntries]'s order.
   void _insert(List<CalendarEntry<T>> list, CalendarEntry<T> entry) {
     list.insert(_lowerBound(list, entry), entry);
+  }
+
+  /// Files [entries], in no set order, in [list] at their places in
+  /// [compareCalendarEntries]'s order: sorts them, then merges them in from
+  /// the back, so no entry of [list] moves more than once.
+  void _insertAll(List<CalendarEntry<T>> list, List<CalendarEntry<T>> entries) {
+    entries.sort(compareCalendarEntries);
+    var i = list.length - 1;
+    var j = entries.length - 1;
+    list.addAll(entries);
+    for (var k = list.length - 1; j >= 0; k--) {
+      if (i >= 0 && compareCalendarEntries(list[i], entries[j]) > 0) {
+        list[k] = list[i];
+        i--;
+      } else {
+        list[k] = entries[j];
+        j--;
+      }
+    }
   }
 
   /// Takes [entry], which [list] holds, out of [list].

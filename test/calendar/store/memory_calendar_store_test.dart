@@ -342,4 +342,22 @@ void main() {
     expect(a.hashCode, b.hashCode);
     expect(a == CalendarShownEntry<String>(item, pending: false), isFalse);
   });
+
+  test(
+    "MS10 invalidate and refresh change nothing and notify nothing",
+    () async {
+      final recorder = Recorder();
+      final item = task("item-1", day, 600, 660);
+      final store = recorder.store(entries: <CalendarEntry<String>>[item]);
+      store.invalidate(day, day);
+      var refreshed = false;
+      store.refresh().then((_) {
+        refreshed = true;
+      });
+      await pumpEventQueue();
+      expect(refreshed, isTrue);
+      expect(recorder.events, isEmpty);
+      expect(idsOf(store.entriesOn(day)), <String>["item-1"]);
+    },
+  );
 }

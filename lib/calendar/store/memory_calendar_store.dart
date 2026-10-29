@@ -22,7 +22,9 @@ typedef CalendarEntryChanged<T> =
 /// an id no entry has fails with an [ArgumentError].
 ///
 /// Every range is shown and every day read: [status] is ready, and [show],
-/// [retry] and [prefetch] do nothing.
+/// [retry] and [prefetch] do nothing. The store is its entries' source,
+/// changed through its writes and [entries], so [invalidate] and [refresh]
+/// do nothing either.
 class MemoryCalendarStore<T> extends CalendarStore<T> {
   /// A store holding [entries], each with an id no other has. Throws an
   /// [ArgumentError] for an entry with no id or with a repeated one.
@@ -108,6 +110,16 @@ class MemoryCalendarStore<T> extends CalendarStore<T> {
   /// Does nothing: every day is read.
   @override
   void prefetch(DateTime first, DateTime last) {}
+
+  /// Does nothing: the store is its entries' source.
+  @override
+  void invalidate(DateTime first, DateTime last) {}
+
+  /// Completes at once: the store is its entries' source.
+  @override
+  Future<void> refresh() {
+    return Future<void>.value();
+  }
 
   /// True: every day is read.
   @override
