@@ -444,6 +444,10 @@ re-lanes slide. An `updateItem` whose re-sort moves a lane fires one
 structural notification naming the keys it re-laned and no item-data
 notification, in a `runBatch` or outside one. An order that throws is
 reported through `FlutterError.reportError`, and that sort orders by id.
+- Added `BoardController.cellAt` and `BoardController.itemAt`, which name the
+cell and the topmost item painting under a global point, so an app's own
+gestures over the board need not find its render object. Both answer null with
+no board mounted on the controller and before its first layout.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin with no clip, so it was drawn over whatever sat above the scroll
 view: a tree short enough to fit its viewport declares no visual overflow, so

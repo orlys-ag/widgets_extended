@@ -361,7 +361,8 @@ passes `horizontalDetails: ScrollableDetails.horizontal(reverse: true)`.
 **The model.** `addItem`, `moveItem`, `resizeItem`, `removeItem` and
 `updateItem` change one item; `setItems` replaces them all, diffing by key.
 `itemCount`, `keys`, `itemsAt` and `itemsIn` read them back.
-`animateScrollToCell`, `jumpToCell` and `revealCell` scroll to a cell, and
+`animateScrollToCell`, `jumpToCell` and `revealCell` scroll to a cell,
+`cellAt` and `itemAt` name what paints under a global point, and
 `BoardAnimationStyle` times every animation (`BoardAnimationStyle.disabled`
 snaps them). An item builder's `view.presence` is the item's enter/exit ramp
 as an `Animation<double>`, so `FadeTransition(opacity: view.presence, ...)`
