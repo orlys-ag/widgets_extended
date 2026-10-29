@@ -105,8 +105,9 @@ typedef PaintedLabel = ({Rect ink, int lines, List<double> ends, Rect clip});
 /// logical pixel. The test font draws each character as a square as wide
 /// as the font size, so a label 5 characters long at 11 px is 55 px wide.
 class Harness {
-  Harness({List<CalendarEntry<String>> entries = const []})
-    : store = MemoryCalendarStore<String>(entries: entries);
+  Harness({
+    List<CalendarEntry<String>> entries = const <CalendarEntry<String>>[],
+  }) : store = MemoryCalendarStore<String>(entries: entries);
 
   final MemoryCalendarStore<String> store;
   final ValueNotifier<CalendarNow> now = ValueNotifier<CalendarNow>(
@@ -264,9 +265,16 @@ void main() {
     // "08:00" and the rest are 55 px, 5 px past the least gutter's 50.
     expect(gutterOf(tester), 67.0);
     final labels = labelsOf(tester);
-    expect(labels.map((label) => label.lines).toSet(), <int>{1});
     expect(
-      labels.map((label) => (label.ink.left, label.ink.right)).toSet(),
+      labels.map((label) {
+        return label.lines;
+      }).toSet(),
+      <int>{1},
+    );
+    expect(
+      labels.map((label) {
+        return (label.ink.left, label.ink.right);
+      }).toSet(),
       <(double, double)>{(6.0, 61.0)},
     );
     final viewport = viewportOf(tester);
@@ -282,7 +290,9 @@ void main() {
     expect(gutterOf(tester), 56.0);
     final labels = labelsOf(tester);
     expect(
-      labels.map((label) => (label.ink.right, label.ink.width)).toSet(),
+      labels.map((label) {
+        return (label.ink.right, label.ink.width);
+      }).toSet(),
       <(double, double)>{(50.0, 50.0)},
     );
   });
@@ -301,8 +311,18 @@ void main() {
     expect(gutterOf(tester), 56.0);
     final labels = labelsOf(tester);
     // 8 AM, 9 AM, 10 AM, 11 AM and the end, 12 PM.
-    expect(labels.map((label) => label.lines), <int>[1, 1, 2, 2, 2]);
-    expect(labels.map((label) => label.ink.right).toSet(), <double>{50.0});
+    expect(
+      labels.map((label) {
+        return label.lines;
+      }),
+      <int>[1, 1, 2, 2, 2],
+    );
+    expect(
+      labels.map((label) {
+        return label.ink.right;
+      }).toSet(),
+      <double>{50.0},
+    );
     // The first slot is row 2, under the day header and the room.
     expect(labels[0].ink.center.dy, lineAbove(tester, 2));
     expect(labels[2].ink.center.dy, lineAbove(tester, 10));
@@ -320,7 +340,12 @@ void main() {
         ..zooms = true;
       await harness.pump(tester);
       expect(gutterOf(tester), 67.0);
-      expect(labelsOf(tester).map((label) => label.lines).toSet(), <int>{1});
+      expect(
+        labelsOf(tester).map((label) {
+          return label.lines;
+        }).toSet(),
+        <int>{1},
+      );
     });
 
     testWidgets("at the grid's least slot height where no pinch zooms it", (
@@ -364,7 +389,12 @@ void main() {
     await harness.pump(tester);
     expect(gutterOf(tester), 96.0);
     final labels = labelsOf(tester);
-    expect(labels.map((label) => label.ink.right).toSet(), <double>{90.0});
+    expect(
+      labels.map((label) {
+        return label.ink.right;
+      }).toSet(),
+      <double>{90.0},
+    );
     for (final label in labels) {
       expect(label.ink.width, lessThanOrEqualTo(84.0));
       expect(label.ink.width, greaterThan(83.0));
@@ -377,9 +407,12 @@ void main() {
       ..labelStyle = const TextStyle(fontSize: 12.0, height: 1.0);
     await harness.rebuild(tester);
     expect(gutterOf(tester), 96.0);
-    expect(labelsOf(tester).map((label) => label.ink.width).toSet(), <double>{
-      84.0,
-    });
+    expect(
+      labelsOf(tester).map((label) {
+        return label.ink.width;
+      }).toSet(),
+      <double>{84.0},
+    );
   });
 
   group("GF6 the gutter fits the labels again for a new", () {
@@ -452,8 +485,9 @@ void main() {
     });
   });
 
-  testWidgets("GF7 a pinch zooms the grid and leaves the gutter and its "
-      "labels as they are", (tester) async {
+  testWidgets("GF7 a pinch zooms the grid and leaves the gutter as it is", (
+    tester,
+  ) async {
     // 30-minute slots: the hours hold two lines at the 16 px the grid
     // opens at, and not at the 8 px the pinch reaches. All day, the slots
     // are taller than the view and do not stretch.
@@ -536,7 +570,12 @@ void main() {
     final region = viewportOf(tester).scrolledRegion;
     // 8 AM, on the region's top edge, is one line among two-line ones.
     expect(labels.first.lines, 1);
-    expect(labels.map((label) => label.lines), contains(2));
+    expect(
+      labels.map((label) {
+        return label.lines;
+      }),
+      contains(2),
+    );
     expect(labels.first.ink.center.dy, region.top);
     expect(labels.first.clip.top, region.top - 11.0 / 2);
   });
@@ -551,7 +590,36 @@ void main() {
     await harness.pump(tester);
     expect(gutterOf(tester), 56.0);
     final labels = labelsOf(tester);
-    expect(labels.map((label) => label.lines).toSet(), <int>{2});
-    expect(labels.expand((label) => label.ends).toSet(), <double>{50.0});
+    expect(
+      labels.map((label) {
+        return label.lines;
+      }).toSet(),
+      <int>{2},
+    );
+    expect(
+      labels.expand((label) {
+        return label.ends;
+      }).toSet(),
+      <double>{50.0},
+    );
+  });
+
+  testWidgets("GF11 a label whose words a no-break space joins is not broken "
+      "inside a word, and widens the gutter", (tester) async {
+    // The line breaker keeps "ab" and "cd" together, so a 50 px line ends
+    // after the "c".
+    final harness = Harness()
+      ..strings = _Times((minute) {
+        return "ab cd";
+      })
+      ..zooms = true;
+    await harness.pump(tester);
+    expect(gutterOf(tester), 67.0);
+    expect(
+      labelsOf(tester).map((label) {
+        return label.lines;
+      }).toSet(),
+      <int>{1},
+    );
   });
 }

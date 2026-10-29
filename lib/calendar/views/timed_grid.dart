@@ -616,7 +616,7 @@ CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than [minDayWidth] and [minSlotHeight]; past those, it scrolls.
 /// The hour gutter is 56 px wide where the labels fit it on one line, or on
-/// two broken between words where the closest labelled lines hold them at
+/// two broken after a space where the closest labelled lines hold them at
 /// the least slot height: [minSlotHeightLow] where a pinch zooms the grid,
 /// and [minSlotHeight] where none does, so a pinch leaves the gutter as it
 /// is. Otherwise it is as wide as the widest label and 6 px on each side,
@@ -1923,9 +1923,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// The hour gutter as wide as [_HourLabels.gutter], the day columns
+  /// The hour gutter as wide as [_HourLabels.gutter], then the day columns
   /// across the rest of [size]'s width and the slot rows down its height,
-  /// each stretched to fill it and never smaller than
+  /// the columns and the rows stretched to fill it and never smaller than
   /// [TimedGrid.minDayWidth] and [TimedGrid.minSlotHeight]. Called from the
   /// layout callback, so the
   /// first frame lays the board out at its size, and from
@@ -6174,7 +6174,7 @@ class _GridForegroundPainter extends BoardForegroundPainter {
 ///
 /// The labels take the first of these that fits them: one line each in a
 /// gutter [minGutter] wide, [inset] inside its right edge; up to two lines
-/// each in that room, broken only between words, where the closest
+/// each in that room, broken only after a space, where the closest
 /// labelled lines lie the tallest label apart at the least slot height;
 /// one line each in a gutter as wide as the widest label and [inset] on
 /// each side, up to [maxGutter]; and one line each in a gutter [maxGutter]
@@ -6190,8 +6190,8 @@ class _HourLabels {
   /// The hour gutter's greatest width.
   static const double maxGutter = 96.0;
 
-  /// The spaces between a label's words.
-  static final RegExp _spaces = RegExp(r"\s+");
+  /// A space, after which a label's line may end.
+  static final RegExp _space = RegExp(r"\s");
 
   /// The space between a label and the gutter's right edge, and in a
   /// gutter wider than [minGutter], between the widest label and its left
@@ -6291,7 +6291,7 @@ class _HourLabels {
     const room = minGutter - inset;
     if (widest > room) {
       _layOut(_scaler, room);
-      if (!_wrapsWithin(room)) {
+      if (!_wraps()) {
         _layOut(_scaler, null);
         if (widest + 2 * inset <= maxGutter) {
           gutter = widest + 2 * inset;
@@ -6324,43 +6324,32 @@ class _HourLabels {
     return widest;
   }
 
-  /// Whether the labels, laid out on up to two lines [room] wide, fit
-  /// them, each broken only between words, and the closest labelled lines
-  /// lie the tallest apart at the least slot height.
-  bool _wrapsWithin(double room) {
-    // A word wider than the room is broken inside, so each word between
-    // the spaces is measured on its own line.
-    final word = TextPainter(
-      textDirection: TextDirection.ltr,
-      textScaler: _layoutScaler,
-      maxLines: 1,
-    );
+  /// Whether the labels, laid out on up to two lines, fit them, each
+  /// broken only after a space, and the closest labelled lines lie the
+  /// tallest apart at the least slot height.
+  bool _wraps() {
     var tallest = 0.0;
-    try {
-      for (final minute in _minutes) {
-        final label = of(minute);
-        if (label.didExceedMaxLines) {
-          return false;
-        }
-        final text = _strings.formatTime(minute, _format);
-        for (final part in text.split(_spaces)) {
-          word
-            ..text = TextSpan(text: part, style: _style)
-            ..layout();
-          if (word.width > room) {
-            return false;
-          }
-        }
-        tallest = math.max(tallest, label.height);
+    for (final minute in _minutes) {
+      final label = of(minute);
+      if (label.didExceedMaxLines || !_breaksAfterSpace(label)) {
+        return false;
       }
-    } finally {
-      word.dispose();
+      tallest = math.max(tallest, label.height);
     }
     var closest = double.infinity;
     for (var i = 1; i < _minutes.length; i++) {
       closest = math.min(closest, (_minutes[i] - _minutes[i - 1]).toDouble());
     }
     return tallest <= closest * _leastSlot / _slotMinutes;
+  }
+
+  /// Whether [label]'s first line holds all its text or ends after a
+  /// space. The line breaker ends it inside a word where the word is wider
+  /// than the line, or where a no-break space joins it to the next.
+  static bool _breaksAfterSpace(TextPainter label) {
+    final text = label.plainText;
+    final end = label.getLineBoundary(const TextPosition(offset: 0)).end;
+    return end >= text.length || (end > 0 && _space.hasMatch(text[end - 1]));
   }
 
   /// Lays the labels out on one line each at a smaller text scale at which
