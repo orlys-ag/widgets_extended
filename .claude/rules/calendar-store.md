@@ -28,13 +28,14 @@ The contract of `CalendarStore` and its two stores. The conventions every layer 
   changed. A failed read leaves its unread days unread, so the next read
   that covers them reads them again; a failed read the shown range waits
   on leaves it loading while another read in flight covers its unread
-  days, and any read that leaves a failed range with no unread day makes
-  it ready. A day once read stays read; a changed day keeps showing what the
-  store holds while it is read again in the background, at once where the
-  shown range holds it and otherwise once a show or a prefetch covers it,
-  and the load status does not change. No read is sent for changed days a
-  read in flight covers, nor while the store's read of the shown range's
-  changed days is in flight; one more follows once it answers. A stream
+  days, and any read that leaves the shown range with no unread day makes
+  it ready. A day once read stays read; a changed day keeps showing what
+  the store holds while it is read again in the background, at once where
+  the shown range holds it and otherwise once a show or a prefetch covers
+  it, and the load status does not change. A background read of the shown
+  range's changed days spans only those no read in flight covers; a day
+  changed since the read covering it was sent is read once more when that
+  read answers. A stream
   of `CalendarSourceChange`s, when given, is applied as it arrives: a put
   or a removal without a read, a change of days as an `invalidate`, and a
   change of all, or an error on the stream, as an `invalidate` of every
