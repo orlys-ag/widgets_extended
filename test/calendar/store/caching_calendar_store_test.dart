@@ -1556,6 +1556,28 @@ void main() {
     expect(harness.source.calls, hasLength(4));
   });
 
+  test("FR25 a read that leaves a failed shown range with no unread day "
+      "makes it ready", () async {
+    final harness = Harness();
+    final store = harness.store;
+    store.show(weekFirst, weekLast);
+    harness.lastCall.fail();
+    await settle();
+    expect(store.status, CalendarLoadStatus.failed);
+
+    store.prefetch(DateTime(2026, 4, 20), DateTime(2026, 4, 23));
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    expect(store.status, CalendarLoadStatus.failed);
+    final notifications = harness.notifications;
+    store.prefetch(DateTime(2026, 4, 24), DateTime(2026, 4, 26));
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    expect(store.status, CalendarLoadStatus.ready);
+    expect(store.loadError, isNull);
+    expect(harness.notifications, notifications + 1);
+  });
+
   group("CF the changes the source announces", () {
     late StreamController<CalendarSourceChange<String>> changes;
 

@@ -290,8 +290,9 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// Reads the unread and the changed days from [first] to [last], both
   /// inclusive, without showing them, so the markers of days about to show
   /// appear once read. Sends nothing where a read in flight covers them.
-  /// Changes neither the shown range nor [status], and a failed read leaves
-  /// its unread days unread and marks them [readFailed].
+  /// Changes neither the shown range nor [status], except that a read
+  /// leaving a failed range with no unread day makes it ready, and a failed
+  /// read leaves its unread days unread and marks them [readFailed].
   @override
   void prefetch(DateTime first, DateTime last) {
     final firstDay = dayNumber(first);
@@ -534,7 +535,8 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
 
   /// A read's answer. A failed one marks [readFailed] each of its days that
   /// no read has filled and no read in flight covers. A read the shown
-  /// range does not wait on changes no load state, so it notifies only
+  /// range does not wait on changes no load state, except that one leaving
+  /// a failed range with no unread day makes it ready, so it notifies only
   /// when it changed what the store answers, or failed. A read that
   /// answers sends the read again of the shown range's days announced
   /// changed meanwhile.
@@ -574,6 +576,10 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       }
     }
     if (!identical(_awaited, read)) {
+      if (_status == CalendarLoadStatus.failed && _unreadSpan() == null) {
+        _status = CalendarLoadStatus.ready;
+        _loadError = null;
+      }
       if (changed || failed) {
         notifyListeners();
       }
