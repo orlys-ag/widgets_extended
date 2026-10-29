@@ -669,12 +669,12 @@ void main() {
       "still shows", (tester) async {
     tester.platformDispatcher.textScaleFactorTestValue = 2.0;
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-    // The rooms and 96 slots of 8 px overflow a 600 px grid, which scrolls.
+    // The rooms and 96 slots of 4 px overflow a 300 px grid, which scrolls.
     await pumpGrid(
       tester,
       const CalendarSettings(),
-      minSlotHeight: 8.0,
-      size: const Size(390.0, 600.0),
+      minSlotHeight: 4.0,
+      size: const Size(390.0, 300.0),
     );
     final grid = gridViewport(tester);
     final position = grid.verticalPosition!;
@@ -686,16 +686,16 @@ void main() {
     expect(grid.rectOfCell(0, 1)!.height, near(first.height / 2 + 2.0));
     final nineRow = dayRowOf(9 * 60);
     final nine = grid.rectOfCell(nineRow, 1)!;
-    expect(nine.height, near(8.0));
+    expect(nine.height, near(4.0));
     final label = paintGridForeground(tester).paragraphs.singleWhere((label) {
       return (label.offset.dy + label.paragraph.height / 2 - nine.top).abs() <
           0.5;
     });
     final half = label.paragraph.height / 2;
-    // The test font draws each digit as a solid square of the font size,
-    // 22 px here, so the label's lower half reaches past 09:00's slot into
-    // the next. The pixel is inside the last digit, which ends at the
-    // label's right edge.
+    // The labels shrink to fit the widest gutter, and the test font draws
+    // each digit as a solid square of the font size, about 16.5 px here, so
+    // the label's lower half reaches past 09:00's slot into the next. The
+    // pixel is inside the last digit, which ends at the label's right edge.
     final ink = grid.localToGlobal(
       label.offset +
           Offset(
@@ -708,12 +708,13 @@ void main() {
 
     // With 09:00's slot scrolled to 1 px above the grid, its row does not
     // show, and the lower half of its label still does.
-    position.jumpTo(position.pixels + nine.top + 9.0);
+    final above = nine.height + 1.0;
+    position.jumpTo(position.pixels + nine.top + above);
     await tester.pump();
     expect(grid.firstVisibleRow, nineRow + 1);
     expect(
       paintGridForeground(tester).paragraphs.where((label) {
-        return (label.offset.dy - (-9.0 - half)).abs() < 0.5;
+        return (label.offset.dy - (-above - half)).abs() < 0.5;
       }),
       hasLength(1),
     );
@@ -722,7 +723,7 @@ void main() {
     // the upper half of its label still does.
     final noonRow = dayRowOf(12 * 60);
     final height = grid.size.height;
-    final noonTop = -9.0 + (noonRow - nineRow) * nine.height;
+    final noonTop = -above + (noonRow - nineRow) * nine.height;
     position.jumpTo(position.pixels + noonTop - (height + 3.0));
     await tester.pump();
     expect(grid.lastVisibleRow, noonRow - 1);
@@ -758,13 +759,14 @@ void main() {
     expect(gutterLabelFinder("09:00"), findsOneWidget);
     expect(gutterLabelFinder("12:00"), findsOneWidget);
 
-    // A larger text scale lays the labels out again.
+    // A larger text scale, at which the labels still fit the widest
+    // gutter, lays them out again.
     final height = labels.first.paragraph.height;
-    tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 1.4;
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
     await tester.pump();
     final scaled = paintGridForeground(tester).paragraphs.first.paragraph;
-    expect(scaled.height, near(2 * height));
+    expect(scaled.height, near(1.4 * height));
     // The room above the first slot grows with them.
     expect(grid.rectOfCell(0, 1)!.height, near(scaled.height / 2 + 2.0));
     semantics.dispose();
@@ -983,13 +985,14 @@ void main() {
     // the slots: row 1 is 08:00's slot and row 24 13:45's.
     final grid = gridViewport(tester);
     final box = grid.localToGlobal(Offset.zero) & grid.size;
+    final gutter = grid.frozenInsetOf(Axis.horizontal);
     final top = tester.getRect(above);
     final bottom = tester.getRect(below);
     expect(top.top, near(box.top));
-    expect(top.left, near(box.left + 56.0));
+    expect(top.left, near(box.left + gutter));
     expect(top.right, near(box.right));
     expect(bottom.bottom, near(box.bottom));
-    expect(bottom.left, near(box.left + 56.0));
+    expect(bottom.left, near(box.left + gutter));
     expect(cellRect(tester, 1, dayColumn).top, near(top.bottom));
     expect(cellRect(tester, 24, dayColumn).bottom, near(bottom.top));
 
@@ -1051,7 +1054,7 @@ void main() {
     expect(clips().first.top, near(region.top - half));
     expect(clips().first.bottom, near(region.bottom + half));
     expect(clips().first.left, 0.0);
-    expect(clips().first.right, 56.0);
+    expect(clips().first.right, grid.frozenInsetOf(Axis.horizontal));
 
     // Scrolled 3 px, 08:00's line lies 3 px beneath the row, and its label
     // reaches 3 px less above the edge.
