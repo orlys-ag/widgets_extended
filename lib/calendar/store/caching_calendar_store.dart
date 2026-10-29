@@ -84,9 +84,10 @@ class _Day {
 /// still shows what the store holds, and is read again in the background,
 /// at once where the shown range holds it and otherwise once a [show] or a
 /// [prefetch] covers it. A background read of the shown range's changed
-/// days spans only those that no read in flight covers; a day changed
-/// since the read covering it was sent is read once more when that read
-/// answers, so a burst of changes on a day being read costs one more read.
+/// days runs from the first to the last of them that no read in flight
+/// covers; a shown day changed since the read covering it was sent is
+/// read once more when that read answers, so a burst of changes on a
+/// shown day being read costs one more read.
 ///
 /// A write takes its entry pending from the call until the data source
 /// answers: a move or a resize shows the requested entry meanwhile, and an
@@ -96,9 +97,10 @@ class _Day {
 /// [hoursRefusalOf] refuses, with a [CalendarHoursException]. The store
 /// refuses no write for sharing time with another entry; a data source
 /// that forbids it fails the write. A write's answer takes the entry's
-/// place unless, since the write was sent, an announced change or a read's
-/// answer set or removed the entry and left it other than the write's
-/// answer: which of the two the source holds is then unknown, so the store
+/// place unless a change announced since the write was sent set or
+/// removed the entry and left it other than the write's answer, or a read
+/// sent since did so or answered a day the write's answer covers without
+/// it: which of the two the source holds is then unknown, so the store
 /// keeps what it holds and reads the days of both again. A read whose
 /// answer removed the entry from days the write's answer does not cover
 /// leaves that answer standing.
@@ -536,10 +538,10 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// A read's answer. A failed one marks [readFailed] each of its days that
   /// no read has filled and no read in flight covers. A read the shown
   /// range does not wait on changes no load state, except that one leaving
-  /// the shown range with no unread day makes it ready, so it notifies only
-  /// when it changed what the store answers, or failed. A read that
-  /// answers sends the read again of the shown range's days announced
-  /// changed meanwhile.
+  /// the shown range with no unread day makes it ready, waiting on no
+  /// read, so it notifies only when it changed what the store answers, or
+  /// failed. A read that answers sends the read again of the shown
+  /// range's days announced changed meanwhile.
   void _finishRead(
     _Read read, {
     List<CalendarEntry<T>>? entries,
@@ -578,6 +580,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
           _unreadSpan() == null) {
         _status = CalendarLoadStatus.ready;
         _loadError = null;
+        _awaited = null;
       }
       if (changed || failed) {
         notifyListeners();
@@ -1036,17 +1039,14 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// Stores [answer], what a write sent at the clock [sentAt] left under
-  /// [id], or forgets the entry for a null [answer], a delete's; unless an
-  /// announced change or a read's answer since the send set or removed the
-  /// entry and left it other than [answer]. Which of the two the source
+  /// [id], or forgets the entry for a null [answer], a delete's; unless it
+  /// differs from the entry held and a change announced or a read sent
+  /// since contradicts it ([_contradicted]). Which of the two the source
   /// holds is then unknown, so the store keeps what it holds and reads the
-  /// days of both again. A read whose answer removed the entry from days
-  /// [answer] does not cover leaves it as [answer] says.
+  /// days of both again.
   void _storeAnswer(String id, CalendarEntry<T>? answer, int sentAt) {
     final held = _index.stored(id);
-    if ((_entryTimes[id] ?? 0) > sentAt &&
-        held != answer &&
-        !_removedElsewhere(id, answer)) {
+    if (held != answer && _contradicted(id, answer, sentAt)) {
       final at = ++_clock;
       if (held != null) {
         _markDaysOf(held, at);
@@ -1063,6 +1063,19 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       _index.put(answer);
     }
     _setTime(id, ++_clock);
+  }
+
+  /// Whether a change announced since the clock [sentAt], or a read sent
+  /// since, contradicts [answer], a write's answer under [id] other than
+  /// the entry held: the change or the read's answer set or removed the
+  /// entry, unless the latest to do so was a read whose answer removed it
+  /// from days [answer] does not cover; or the read filled a day [answer]
+  /// covers, and so left the entry other than [answer] there.
+  bool _contradicted(String id, CalendarEntry<T>? answer, int sentAt) {
+    if ((_entryTimes[id] ?? 0) > sentAt && !_removedElsewhere(id, answer)) {
+      return true;
+    }
+    return answer != null && _filledAfter(answer, sentAt);
   }
 
   /// Whether the latest to set or remove the entry [id] was a read whose

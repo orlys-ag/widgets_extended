@@ -33,17 +33,18 @@ The contract of `CalendarStore` and its two stores. The conventions every layer 
   the store holds while it is read again in the background, at once where
   the shown range holds it and otherwise once a show or a prefetch covers
   it, and the load status does not change. A background read of the shown
-  range's changed days spans only those no read in flight covers; a day
-  changed since the read covering it was sent is read once more when that
-  read answers. A stream
+  range's changed days runs from the first to the last of them that no
+  read in flight covers; a shown day changed since the read covering it
+  was sent is read once more when that read answers. A stream
   of `CalendarSourceChange`s, when given, is applied as it arrives: a put
   or a removal without a read, a change of days as an `invalidate`, and a
   change of all, or an error on the stream, as an `invalidate` of every
-  day. A write's answer that a change announced or a read answered since
-  the write was sent contradicts is not stored, and the days of both
-  entries, read or under a read in flight, are read again; a read that
-  removed the entry from days the answer does not cover does not
-  contradict it. A grid move or resize shows the requested entry,
+  day. A write's answer that a change announced since the write was
+  sent, or a read sent since, contradicts is not stored, and the days of
+  both entries, read or under a read in flight, are read again; a read
+  that removed the entry from days the answer does not cover does not
+  contradict it, and one that answered a day the answer covers without
+  the entry does. A grid move or resize shows the requested entry,
   pending, until the data source answers; a delete and an update show the
   stored entry pending, as it is stored meanwhile; a create shows nothing
   until the entry is stored.

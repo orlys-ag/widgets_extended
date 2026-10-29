@@ -1668,6 +1668,82 @@ void main() {
     expect(store.loadError, same(failure));
   });
 
+  test("FR30 the read the shown range waited on, once other reads made it "
+      "ready, notifies only when it changes what the store answers", () async {
+    final notified = <int>[];
+    for (final answer in <List<CalendarEntry<String>>?>[
+      <CalendarEntry<String>>[],
+      null,
+      <CalendarEntry<String>>[task("item-1", DateTime(2026, 4, 24), 600, 660)],
+    ]) {
+      final harness = Harness();
+      final store = harness.store;
+      store.show(weekFirst, weekLast);
+      final week = harness.lastCall;
+      store.show(DateTime(2026, 4, 27), DateTime(2026, 5, 3));
+      final mayWeek = harness.lastCall;
+      store.show(DateTime(2026, 4, 23), DateTime(2026, 4, 29));
+      final awaited = harness.lastCall;
+      week.succeed(<CalendarEntry<String>>[]);
+      mayWeek.succeed(<CalendarEntry<String>>[]);
+      await settle();
+      final notifications = harness.notifications;
+      if (answer == null) {
+        awaited.fail();
+      } else {
+        awaited.succeed(answer);
+      }
+      await settle();
+      notified.add(harness.notifications - notifications);
+    }
+    expect(notified, <int>[0, 0, 1]);
+  });
+
+  test("FR31 a move's answer on a day a read sent since answered without "
+      "the entry is not stored, and the days of both are read again", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
+    store.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+    await settle();
+    final moved = onDay(item, DateTime(2026, 4, 23));
+    store.requestMove(moved);
+    final write = harness.lastCall;
+    store.invalidate(DateTime(2026, 4, 23), DateTime(2026, 4, 23));
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+
+    write.succeed(moved);
+    await settle();
+    expect(store.storedEntry("item-1"), item);
+    expect(
+      (harness.lastCall.first, harness.lastCall.last),
+      (DateTime(2026, 4, 21), DateTime(2026, 4, 23)),
+    );
+  });
+
+  test("FR32 a create's answer on a day a read sent since answered without "
+      "it is not stored, and its days are read again", () async {
+    final harness = Harness();
+    final store = harness.store;
+    store.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    final created = draft(DateTime(2026, 4, 23), 600, 660);
+    final creating = store.create(created);
+    final write = harness.lastCall;
+    store.invalidate(DateTime(2026, 4, 23), DateTime(2026, 4, 23));
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+
+    final answer = created.copyWith(id: "item-1");
+    write.succeed(answer);
+    await creating;
+    expect(store.storedEntry("item-1"), isNull);
+    expect(harness.source.calls, hasLength(4));
+  });
+
   group("CF the changes the source announces", () {
     late StreamController<CalendarSourceChange<String>> changes;
 
