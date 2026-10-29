@@ -32,10 +32,9 @@ class _Read {
   int changedLast = 0;
   int changedAt = 0;
 
-  /// Whether the read covers [first] to [last] and was sent after the
-  /// clock [since].
-  bool covers(int first, int last, int since) {
-    return this.first <= first && this.last >= last && sentAt > since;
+  /// Whether the read covers [first] to [last].
+  bool covers(int first, int last) {
+    return this.first <= first && this.last >= last;
   }
 
   /// Records a change announced at the clock [at] on its days [first] to
@@ -76,15 +75,18 @@ class _Day {
 /// was sent. It replaces what the store holds there: each entry it answers
 /// takes the place of the held one, and each held entry it does not answer
 /// is forgotten, except where a later read, a write confirmed since or a
-/// change announced since told the store otherwise. A failed read leaves
-/// its unread days unread, so the next read that covers them reads them
-/// again.
+/// change announced since told the store otherwise. A forgotten entry that
+/// also lay on read days outside the read leaves those days changed, since
+/// what the source holds there is unknown. A failed read leaves its unread
+/// days unread, so the next read that covers them reads them again.
 ///
 /// A day once read stays read. [invalidate], [refresh] and the changes the
 /// source announces take a read day's entries to have changed: the day
 /// still shows what the store holds, and is read again in the background,
 /// at once where the shown range holds it and otherwise once a [show] or a
-/// [prefetch] covers it.
+/// [prefetch] covers it. No read is sent for a changed day that a read in
+/// flight covers; a day changed since that read was sent is read once more
+/// when it answers, so a burst of changes costs one more read.
 ///
 /// A write takes its entry pending from the call until the data source
 /// answers: a move or a resize shows the requested entry meanwhile, and an
@@ -93,7 +95,11 @@ class _Day {
 /// with a [CalendarWritePendingException], and so does one
 /// [hoursRefusalOf] refuses, with a [CalendarHoursException]. The store
 /// refuses no write for sharing time with another entry; a data source
-/// that forbids it fails the write.
+/// that forbids it fails the write. A write's answer takes the entry's
+/// place unless, since the write was sent, an announced change or a read's
+/// answer set or removed the entry and left it other than the write's
+/// answer: which of the two the source holds is then unknown, so the store
+/// keeps what it holds and reads the days of both again.
 ///
 /// The store holds the source to its contract: a read answering an entry
 /// with no id fails as a read does, a create answering one with no id
@@ -106,8 +112,8 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// first [show], and applying each change [changes] announces, if given,
   /// until it is disposed: a [CalendarEntryPut] or a [CalendarEntryRemoved]
   /// is applied without a read, a [CalendarDaysChanged] is an [invalidate]
-  /// of its days, and a [CalendarAllChanged], or an error on the stream,
-  /// takes every entry to have changed, as [refresh] does.
+  /// of its days, and a [CalendarAllChanged], or an error on the stream, is
+  /// an [invalidate] of every day.
   CachingCalendarStore({
     required CalendarDataSource<T> dataSource,
     Stream<CalendarSourceChange<T>>? changes,
@@ -121,8 +127,9 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// The subscription to the changes the source announces, if any.
   StreamSubscription<CalendarSourceChange<T>>? _changes;
 
-  /// The store's clock, counted up by each read sent, write confirmed and
-  /// change announced, which orders what each tells of the source.
+  /// The store's clock, counted up by each read and write sent, write
+  /// confirmed and change announced, which orders what each tells of the
+  /// source.
   int _clock = 0;
 
   /// Each read day, by [dayNumber].
@@ -131,10 +138,21 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// The clock when every entry was last taken to have changed.
   int _allChangedAt = 0;
 
+  /// The clock of the latest-sent read that has filled a day, so a read
+  /// sent before it is the only kind that checks for days filled later.
+  int _newestFillAt = 0;
+
   /// By id, the clock of what last set or removed the entry: a read's
   /// send, a confirmed write or an announced change. Kept only while a read
-  /// is in flight, since every read sent later is newer than all of them.
+  /// or a write is in flight, since whatever is sent later is newer than
+  /// all of them.
   final Map<String, int> _entryTimes = <String, int>{};
+
+  /// By id, the clock when the write in flight on the entry was sent.
+  final Map<String, int> _writesSentAt = <String, int>{};
+
+  /// The creates in flight.
+  int _creating = 0;
 
   /// The [show] calls that changed the shown range.
   int _showCount = 0;
@@ -179,9 +197,9 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// Shows [first] to [last], both inclusive. A range whose days are all
   /// read is ready at once; otherwise the range waits on the earliest-sent
   /// read in flight that covers its unread days, or sends a read for them
-  /// and its changed days. Changed days of the range that no read sent
-  /// since they changed covers are read again in the background. Showing
-  /// the range already shown changes nothing.
+  /// and its changed days. Changed days of the range that no read in
+  /// flight covers are read again in the background. Showing the range
+  /// already shown changes nothing.
   @override
   void show(DateTime first, DateTime last) {
     final firstDay = dayNumber(first);
@@ -199,7 +217,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       _status = CalendarLoadStatus.ready;
     } else {
       _status = CalendarLoadStatus.loading;
-      final inFlight = _inFlightCovering(unread.first, unread.last, 0);
+      final inFlight = _inFlightCovering(unread.first, unread.last);
       if (inFlight != null) {
         _awaited = inFlight;
       } else {
@@ -262,10 +280,9 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
 
   /// Reads the unread and the changed days from [first] to [last], both
   /// inclusive, without showing them, so the markers of days about to show
-  /// appear once read. Sends nothing where reads in flight cover them: for
-  /// the unread days any read, and for the changed ones a read sent since
-  /// they changed. Changes neither the shown range nor [status], and a
-  /// failed read leaves its unread days unread and marks them [readFailed].
+  /// appear once read. Sends nothing where a read in flight covers them.
+  /// Changes neither the shown range nor [status], and a failed read leaves
+  /// its unread days unread and marks them [readFailed].
   @override
   void prefetch(DateTime first, DateTime last) {
     final firstDay = dayNumber(first);
@@ -274,13 +291,13 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     int? to;
     final unread = _unreadSpanOf(firstDay, lastDay);
     if (unread != null &&
-        _inFlightCovering(unread.first, unread.last, 0) == null) {
+        _inFlightCovering(unread.first, unread.last) == null) {
       from = unread.first;
       to = unread.last;
     }
     final changed = _changedSpanOf(firstDay, lastDay);
     if (changed != null &&
-        _inFlightCovering(changed.first, changed.last, changed.since) == null) {
+        _inFlightCovering(changed.first, changed.last) == null) {
       from = math.min(from ?? changed.first, changed.first);
       to = math.max(to ?? changed.last, changed.last);
     }
@@ -294,17 +311,19 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// to have changed. Each read day of them still shows what the store
   /// holds, and is read again: at once where the shown range holds it, and
   /// otherwise once a [show] or a [prefetch] covers it. A read in flight
-  /// over them leaves them changed once it answers. Notifies nothing.
+  /// over them leaves them changed once it answers. It notifies nothing
+  /// itself: a read it sends notifies once it changes what the store
+  /// answers, within the call where the source answers within it.
   @override
   void invalidate(DateTime first, DateTime last) {
     final firstDay = dayNumber(first);
     final lastDay = dayNumber(last);
-    if (firstDay > lastDay) {
+    if (_disposed || firstDay > lastDay) {
       return;
     }
     final at = ++_clock;
-    for (final record in _readDaysIn(firstDay, lastDay)) {
-      record.changedAt = at;
+    for (final day in _readDaysIn(firstDay, lastDay)) {
+      _days[day]!.changedAt = at;
     }
     for (final read in _reads) {
       if (read.first <= lastDay && read.last >= firstDay) {
@@ -323,33 +342,29 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// range has unread days it waits on that read, as after [retry];
   /// otherwise its status stays ready, and a failed read leaves its days
   /// changed. Completes once that read answers, or fails with the error it
-  /// failed with; completes at once before the first [show], and when the
-  /// store is disposed before the read answers.
+  /// failed with; completes at once before the first [show] and after
+  /// [dispose], and when the store is disposed before the read answers.
   @override
   Future<void> refresh() {
-    final done = Completer<void>();
-    _changeAll(done);
-    return done.future;
-  }
-
-  /// Takes every entry to have changed and reads the whole shown range
-  /// again, completing [done], if given, once that read answers.
-  void _changeAll([Completer<void>? done]) {
+    if (_disposed) {
+      return Future<void>.value();
+    }
     _allChangedAt = ++_clock;
     final first = _shownFirst;
     final last = _shownLast;
     if (first == null || last == null) {
-      done?.complete();
-      return;
+      return Future<void>.value();
     }
+    final done = Completer<void>();
     if (_unreadSpan() == null) {
       _send(first, last, awaited: false, done: done);
-      return;
+    } else {
+      _status = CalendarLoadStatus.loading;
+      _loadError = null;
+      _send(first, last, awaited: true, done: done);
+      notifyListeners();
     }
-    _status = CalendarLoadStatus.loading;
-    _loadError = null;
-    _send(first, last, awaited: true, done: done);
-    notifyListeners();
+    return done.future;
   }
 
   /// The first to the last unread day of the shown range, or null when
@@ -375,59 +390,67 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     return (first: first, last: last!);
   }
 
-  /// The first to the last changed day from [firstDay] to [lastDay], and
-  /// the clock of the latest change among them, or null when none is. A
-  /// changed day is a read day with a change announced on it since the
-  /// read that last filled it was sent.
-  ({int first, int last, int since})? _changedSpanOf(
-    int firstDay,
-    int lastDay,
-  ) {
+  /// The first to the last changed day from [firstDay] to [lastDay], or
+  /// null when none is. A changed day is a read day with a change announced
+  /// on it since the read that last filled it was sent.
+  ({int first, int last})? _changedSpanOf(int firstDay, int lastDay) {
     int? first;
     int? last;
-    var since = 0;
     for (var day = firstDay; day <= lastDay; day++) {
       final record = _days[day];
       if (record == null) {
         continue;
       }
-      final changedAt = math.max(record.changedAt, _allChangedAt);
-      if (changedAt > record.filledAt) {
+      if (math.max(record.changedAt, _allChangedAt) > record.filledAt) {
         first ??= day;
         last = day;
-        since = math.max(since, changedAt);
       }
     }
     if (first == null) {
       return null;
     }
-    return (first: first, last: last!, since: since);
+    return (first: first, last: last!);
   }
 
-  /// The read days from [first] to [last], walking the shorter of the span
-  /// and the read days.
-  Iterable<_Day> _readDaysIn(int first, int last) sync* {
+  /// The [dayNumber]s of the read days from [first] to [last], walking the
+  /// shorter of the span and the read days.
+  Iterable<int> _readDaysIn(int first, int last) sync* {
     if (last - first < _days.length) {
       for (var day = first; day <= last; day++) {
-        final record = _days[day];
-        if (record != null) {
-          yield record;
+        if (_days.containsKey(day)) {
+          yield day;
         }
       }
     } else {
-      for (final MapEntry(key: day, value: record) in _days.entries) {
+      for (final day in _days.keys) {
         if (day >= first && day <= last) {
-          yield record;
+          yield day;
         }
       }
     }
   }
 
-  /// The earliest-sent read in flight covering [first] to [last] that was
-  /// sent after the clock [since].
-  _Read? _inFlightCovering(int first, int last, int since) {
+  /// Marks changed at the clock [at] each read day [entry] covers, except
+  /// those of [except], if given.
+  void _markDaysOf(CalendarEntry<T> entry, int at, {_Read? except}) {
+    final first = dayNumber(entry.start);
+    final last = lastDayNumberOf(entry.start, entry.end);
+    if (except != null && except.covers(first, last)) {
+      return;
+    }
+    for (final day in _readDaysIn(first, last)) {
+      if (except != null && except.covers(day, day)) {
+        continue;
+      }
+      final record = _days[day]!;
+      record.changedAt = math.max(record.changedAt, at);
+    }
+  }
+
+  /// The earliest-sent read in flight covering [first] to [last].
+  _Read? _inFlightCovering(int first, int last) {
     for (final read in _reads) {
-      if (read.covers(first, last, since)) {
+      if (read.covers(first, last)) {
         return read;
       }
     }
@@ -446,7 +469,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// Sends a read in the background of the shown range's changed days,
-  /// unless a read in flight sent since they changed covers them.
+  /// unless a read in flight covers them.
   void _readChangedShown() {
     final first = _shownFirst;
     final last = _shownLast;
@@ -455,7 +478,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     }
     final changed = _changedSpanOf(first, last);
     if (changed == null ||
-        _inFlightCovering(changed.first, changed.last, changed.since) != null) {
+        _inFlightCovering(changed.first, changed.last) != null) {
       return;
     }
     _send(changed.first, changed.last, awaited: false);
@@ -518,14 +541,12 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       }
     }
     final changed = answered != null && _applyRead(read, answered);
-    if (_reads.isEmpty) {
-      _entryTimes.clear();
-    }
+    _pruneEntryTimes();
     var failed = false;
     if (answered == null) {
       for (var day = read.first; day <= read.last; day++) {
         if (!_days.containsKey(day) &&
-            _inFlightCovering(day, day, 0) == null &&
+            _inFlightCovering(day, day) == null &&
             _failedDays.add(day)) {
           failed = true;
         }
@@ -537,14 +558,20 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       }
     } else {
       _awaited = null;
+      final unread = _unreadSpan();
       // A failed read leaves the range ready when another read has filled
-      // its days since.
-      if (answered != null || _unreadSpan() == null) {
+      // its days since, and loading while one in flight covers them.
+      if (answered != null || unread == null) {
         _status = CalendarLoadStatus.ready;
         _loadError = null;
       } else {
-        _status = CalendarLoadStatus.failed;
-        _loadError = failure;
+        final other = _inFlightCovering(unread.first, unread.last);
+        if (other != null) {
+          _awaited = other;
+        } else {
+          _status = CalendarLoadStatus.failed;
+          _loadError = failure;
+        }
       }
       notifyListeners();
     }
@@ -568,10 +595,11 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// later filled. Each entry it answers replaces the held one, and each
   /// held entry on a day it fills that it does not answer is forgotten,
   /// except an entry a write confirmed or a change announced since set or
-  /// removed. An answered entry covering a day a read sent later filled
-  /// without it is out of date there, so the days it covers here are left
-  /// changed, to be read again; so are those with a change announced while
-  /// the read was in flight.
+  /// removed. A forgotten entry leaves changed the read days it covers
+  /// outside the read. An answered entry covering a day a read sent later
+  /// filled without it is out of date there, so the days it covers here are
+  /// left changed, to be read again; so are those with a change announced
+  /// while the read was in flight.
   bool _applyRead(_Read read, List<CalendarEntry<T>> entries) {
     final at = read.sentAt;
     final opened = <int>[];
@@ -586,6 +614,9 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
         record.filledAt = at;
         filled.add(day);
       }
+    }
+    if (filled.isNotEmpty) {
+      _newestFillAt = math.max(_newestFillAt, at);
     }
     if (read.changedAt != 0) {
       for (var day = read.changedFirst; day <= read.changedLast; day++) {
@@ -602,7 +633,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       if ((_entryTimes[id] ?? 0) > at) {
         continue;
       }
-      if (_filledAfter(entry, at)) {
+      if (_newestFillAt > at && _filledAfter(entry, at)) {
         final first = math.max(dayNumber(entry.start), read.first);
         final last = math.min(
           lastDayNumberOf(entry.start, entry.end),
@@ -630,6 +661,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
         }
         _index.forget(id);
         _setTime(id, at);
+        _markDaysOf(entry, at, except: read);
         changed = true;
       }
     }
@@ -640,19 +672,32 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   bool _filledAfter(CalendarEntry<T> entry, int at) {
     final first = dayNumber(entry.start);
     final last = lastDayNumberOf(entry.start, entry.end);
-    for (final record in _readDaysIn(first, last)) {
-      if (record.filledAt > at) {
+    for (final day in _readDaysIn(first, last)) {
+      if (_days[day]!.filledAt > at) {
         return true;
       }
     }
     return false;
   }
 
+  /// Whether a read or a write is in flight, which [_entryTimes] is kept
+  /// for.
+  bool get _inFlight {
+    return _reads.isNotEmpty || _writesSentAt.isNotEmpty || _creating > 0;
+  }
+
   /// Records that what happened at the clock [at] set or removed the entry
-  /// [id], while a read is in flight.
+  /// [id], while a read or a write is in flight.
   void _setTime(String id, int at) {
-    if (_reads.isNotEmpty) {
+    if (_inFlight) {
       _entryTimes[id] = at;
+    }
+  }
+
+  /// Drops [_entryTimes] once no read or write is in flight.
+  void _pruneEntryTimes() {
+    if (!_inFlight) {
+      _entryTimes.clear();
     }
   }
 
@@ -680,6 +725,13 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       return;
     }
     _changeAll();
+  }
+
+  /// Takes every entry to have changed, and reads the shown range's read
+  /// days again.
+  void _changeAll() {
+    _allChangedAt = ++_clock;
+    _readChangedShown();
   }
 
   /// Stores [entry], which the source announced stored, where it covers a
@@ -772,17 +824,23 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     if (refusal != null) {
       throw refusal;
     }
-    final created = await _dataSource.create(draft);
-    final id = created.id;
-    if (id == null) {
-      throw StateError("The data source created an entry with no id.");
+    final sentAt = ++_clock;
+    _creating++;
+    try {
+      final created = await _dataSource.create(draft);
+      final id = created.id;
+      if (id == null) {
+        throw StateError("The data source created an entry with no id.");
+      }
+      if (!_disposed && !_index.isPending(id)) {
+        _storeAnswer(id, created, sentAt);
+        notifyListeners();
+      }
+      return created;
+    } finally {
+      _creating--;
+      _pruneEntryTimes();
     }
-    if (!_disposed && !_index.isPending(id)) {
-      _index.put(created);
-      _setTime(id, ++_clock);
-      notifyListeners();
-    }
-    return created;
   }
 
   /// Writes [entry], whose id names a stored entry; the entry shows
@@ -819,7 +877,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       return updated;
     } on Object {
       if (!_disposed) {
-        _index.release(id);
+        _release(id);
         notifyListeners();
       }
       rethrow;
@@ -890,9 +948,8 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     }).then<void>(
       (_) {
         if (!_disposed) {
-          _index.release(id);
-          _index.forget(id);
-          _setTime(id, ++_clock);
+          _storeAnswer(id, null, _writesSentAt[id]!);
+          _release(id);
           notifyListeners();
         }
       },
@@ -910,26 +967,61 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     if (!_index.lock(id, shown)) {
       return false;
     }
+    _writesSentAt[id] = ++_clock;
     notifyListeners();
     return true;
+  }
+
+  /// Ends the pending write on [id].
+  void _release(String id) {
+    _index.release(id);
+    _writesSentAt.remove(id);
+    _pruneEntryTimes();
   }
 
   /// Ends the pending write on [id], which failed with [error], showing the
   /// stored entry again; returns a future that fails with [error].
   Future<R> _failWrite<R>(String id, Object error, StackTrace stackTrace) {
     if (!_disposed) {
-      _index.release(id);
+      _release(id);
       notifyListeners();
     }
     return Future<R>.error(error, stackTrace);
   }
 
-  /// Ends the pending write on [entry]'s id and stores [entry], filed
-  /// under the read days it covers.
+  /// Ends the pending write on [entry]'s id and stores [entry], its
+  /// answer ([_storeAnswer]).
   void _applyConfirmed(CalendarEntry<T> entry) {
-    _index.release(entry.id!);
-    _index.put(entry);
-    _setTime(entry.id!, ++_clock);
+    final id = entry.id!;
+    _storeAnswer(id, entry, _writesSentAt[id]!);
+    _release(id);
+  }
+
+  /// Stores [answer], what a write sent at the clock [sentAt] left under
+  /// [id], or forgets the entry for a null [answer], a delete's; unless an
+  /// announced change or a read's answer since the send set or removed the
+  /// entry and left it other than [answer]. Which of the two the source
+  /// holds is then unknown, so the store keeps what it holds and reads the
+  /// days of both again.
+  void _storeAnswer(String id, CalendarEntry<T>? answer, int sentAt) {
+    final held = _index.stored(id);
+    if ((_entryTimes[id] ?? 0) > sentAt && held != answer) {
+      final at = ++_clock;
+      if (held != null) {
+        _markDaysOf(held, at);
+      }
+      if (answer != null) {
+        _markDaysOf(answer, at);
+      }
+      _readChangedShown();
+      return;
+    }
+    if (answer == null) {
+      _index.forget(id);
+    } else {
+      _index.put(answer);
+    }
+    _setTime(id, ++_clock);
   }
 
   /// Stops listening to the source's changes, and completes each refresh

@@ -372,7 +372,8 @@ class CalendarEntryIndex<T> {
       _pending[id] = entry;
       _insert(_pendingList, entry);
     }
-    for (var day = _firstDayOf(entry); day <= _lastDayOf(entry); day++) {
+    final last = _lastDayOf(entry);
+    for (var day = _firstDayOf(entry); day <= last; day++) {
       var list = _byDay[day];
       if (list == null) {
         if (!opensEveryDay) {
@@ -391,7 +392,8 @@ class CalendarEntryIndex<T> {
     if (old == null) {
       return null;
     }
-    for (var day = _firstDayOf(old); day <= _lastDayOf(old); day++) {
+    final last = _lastDayOf(old);
+    for (var day = _firstDayOf(old); day <= last; day++) {
       final list = _byDay[day];
       if (list == null) {
         continue;
