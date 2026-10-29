@@ -456,7 +456,8 @@ void main() {
     await pickMode(tester, "Week");
     final grid = gridViewport(tester);
     final cell = cellRect(tester, rowOf(9 * 60), colOf(0));
-    expect(cell.width, near((grid.size.width - 56.0) / 7));
+    final gutter = grid.frozenInsetOf(Axis.horizontal);
+    expect(cell.width, near((grid.size.width - gutter) / 7));
     expect(cell.height, near(16.0));
 
     await openSettings(tester);
@@ -566,14 +567,16 @@ void main() {
     expect(gutterLabelFinder("13:00"), findsOneWidget);
     // The test font gives every character one width, which "08:00" holds
     // five of.
-    List<double> widths() {
-      return <double>[
+    List<List<double>> lineWidths() {
+      return <List<double>>[
         for (final label in paintGridForeground(tester).paragraphs)
-          label.paragraph.longestLine,
+          <double>[
+            for (final line in label.paragraph.computeLineMetrics()) line.width,
+          ],
       ];
     }
 
-    final character = widths().first / 5;
+    final character = lineWidths().first.single / 5;
 
     await openBar(tester);
     Finder twelveHour() {
@@ -588,21 +591,24 @@ void main() {
     expect(gutterLabelFinder("12 PM"), findsOneWidget);
     expect(gutterLabelFinder("1 PM"), findsOneWidget);
     expect(gutterLabelFinder("6 PM"), findsOneWidget);
-    const labels = <String>[
-      "8 AM",
-      "9 AM",
-      "10 AM",
-      "11 AM",
-      "12 PM",
-      "1 PM",
-      "2 PM",
-      "3 PM",
-      "4 PM",
-      "5 PM",
-      "6 PM",
+    // A label wider than the gutter's 50 px room, five characters, breaks
+    // between its words.
+    const labels = <List<String>>[
+      <String>["8 AM"],
+      <String>["9 AM"],
+      <String>["10", "AM"],
+      <String>["11", "AM"],
+      <String>["12", "PM"],
+      <String>["1 PM"],
+      <String>["2 PM"],
+      <String>["3 PM"],
+      <String>["4 PM"],
+      <String>["5 PM"],
+      <String>["6 PM"],
     ];
-    expect(widths(), <double>[
-      for (final label in labels) label.length * character,
+    expect(lineWidths(), <List<double>>[
+      for (final lines in labels)
+        <double>[for (final line in lines) line.length * character],
     ]);
 
     await openBar(tester);
@@ -651,7 +657,7 @@ void main() {
     expect(grid.rectOfCell(0, 6), isNull);
     expect(
       cellRect(tester, rowOf(9 * 60), 5).width,
-      near((grid.size.width - 56.0) / 5),
+      near((grid.size.width - grid.frozenInsetOf(Axis.horizontal)) / 5),
     );
     expect(blockFinder(weekendId), findsNothing);
     expect(

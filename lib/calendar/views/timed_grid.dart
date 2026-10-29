@@ -31,7 +31,6 @@ import 'pinch_zoom.dart';
 import 'timed_grid_layout.dart';
 
 const double _headerHeight = 40.0;
-const double _gutterWidth = 56.0;
 
 /// The height of the rows above and below the slots that count the items
 /// outside the hours.
@@ -616,6 +615,12 @@ CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than [minDayWidth] and [minSlotHeight]; past those, it scrolls.
+/// The hour gutter is 56 px wide where the labels fit it on one line, or on
+/// two broken after a space where the closest labelled lines hold them at
+/// the least slot height: [minSlotHeightLow] where a pinch zooms the grid,
+/// and [minSlotHeight] where none does, so a pinch leaves the gutter as it
+/// is. Otherwise it is as wide as the widest label and 6 px on each side,
+/// up to 96 px, past which the labels shrink to fit it.
 /// A pinch of two fingers zooms the grid around the point between them,
 /// reporting through [onZoom] the least sizes it zooms to, from the sizes
 /// the grid shows: a pinch up and down the slot height, from
@@ -1278,6 +1283,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// The extents the axes were last given and the tracks they were given
   /// for. [_fitAxes] replaces an axis only when one of these changes.
+  double _gutterWidth = _HourLabels.minGutter;
   late double _dayWidth = widget.minDayWidth;
   late double _slotHeight = widget.minSlotHeight;
   late int _columnCount = _tracks.columnCount;
@@ -1288,9 +1294,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   late int _rowStripRows = _stripRows;
   late HourLabelFormat _rowFormat = widget.hourLabelFormat;
 
-  /// The room above the first slot and below the last: half an hour label
-  /// and the gap beside it, so the labels centred on the first and the
-  /// last line show whole. Each build sets it from the labels' height.
+  /// The room above the first slot and below the last: half the tallest
+  /// hour label and the gap beside it, so the labels centred on the first
+  /// and the last line show whole. Each build sets it from the labels'
+  /// height.
   double _labelRoom = _initialLabelRoom;
 
   /// [_labelRoom] before the first build measures the labels, which the
@@ -1916,8 +1923,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// The day columns across [size]'s width and the slot rows down its
-  /// height, each stretched to fill it and never smaller than
+  /// The hour gutter as wide as [_HourLabels.gutter], then the day columns
+  /// across the rest of [size]'s width and the slot rows down its height,
+  /// the columns and the rows stretched to fill it and never smaller than
   /// [TimedGrid.minDayWidth] and [TimedGrid.minSlotHeight]. Called from the
   /// layout callback, so the
   /// first frame lays the board out at its size, and from
@@ -1934,9 +1942,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _size = size;
     final oldRows = _board.rows;
     final oldColumns = _board.columns;
+    final gutter = _hourLabels.gutter;
     final dayWidth = math.max(
       widget.minDayWidth,
-      _share(size.width - _gutterWidth, _tracks.columnCount),
+      _share(size.width - gutter, _tracks.columnCount),
     );
     final slotHeight = math.max(
       widget.minSlotHeight,
@@ -1945,7 +1954,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _tracks.rowCount,
       ),
     );
-    if (dayWidth != _dayWidth || _tracks.columnCount != _columnCount) {
+    if (gutter != _gutterWidth ||
+        dayWidth != _dayWidth ||
+        _tracks.columnCount != _columnCount) {
+      _gutterWidth = gutter;
       _dayWidth = dayWidth;
       _columnCount = _tracks.columnCount;
       _board.columns = _columnsConfig();
@@ -4672,6 +4684,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       MediaQuery.textScalerOf(context),
       widget.hourLabelFormat,
       strings,
+      _tracks,
+      widget.onZoom == null ? widget.minSlotHeight : minSlotHeightLow,
     );
     _labelRoom = _hourLabels.height / 2 + _HourLabels.gap;
     final slotRange = range == null || range.strip || range.refused
@@ -6009,9 +6023,6 @@ class _GridForegroundPainter extends BoardForegroundPainter {
     required this.reachBelow,
   });
 
-  /// The space between a label and the gutter's right edge.
-  static const double _labelEnd = 6.0;
-
   /// Holds the paint of the line marking the current time.
   final _GridStyles styles;
 
@@ -6028,8 +6039,8 @@ class _GridForegroundPainter extends BoardForegroundPainter {
   final GridTracks tracks;
   final _HourLabels labels;
 
-  /// [_HourLabels.version] when this painter was made, so a new style or
-  /// text scale repaints.
+  /// [_HourLabels.version] when this painter was made, so labels laid out
+  /// anew repaint.
   final int labelsVersion;
 
   /// Where the line marking the current time sits, or null.
@@ -6069,16 +6080,18 @@ class _GridForegroundPainter extends BoardForegroundPainter {
 
     final half = labels.height / 2;
     // A label is clipped to the gutter of the scrolled region, and past
-    // its top edge by half a label less how far its line lies above that
-    // edge, up to [reachAbove], and past its bottom edge likewise. So it
-    // shows whole beside a frozen row while its line shows, and sinks into
-    // the row's edge as its line scrolls beneath the row.
+    // its top edge by half its height less how far its line lies above
+    // that edge, up to [reachAbove], and past its bottom edge likewise. So
+    // it shows whole beside a frozen row while its line shows, and sinks
+    // into the row's edge as its line scrolls beneath the row.
     void paintOn(int minute, double line) {
-      final above = (half - math.max(0.0, region.top - line)).clamp(
+      final label = labels.of(minute);
+      final own = label.height / 2;
+      final above = (own - math.max(0.0, region.top - line)).clamp(
         0.0,
         reachAbove,
       );
-      final below = (half - math.max(0.0, line - region.bottom)).clamp(
+      final below = (own - math.max(0.0, line - region.bottom)).clamp(
         0.0,
         reachBelow,
       );
@@ -6091,7 +6104,7 @@ class _GridForegroundPainter extends BoardForegroundPainter {
           region.bottom + below,
         ),
       );
-      _paintLabel(canvas, minute, first.right, line - half);
+      _paintLabel(canvas, label, first.right, line - own);
       canvas.restore();
     }
 
@@ -6111,11 +6124,10 @@ class _GridForegroundPainter extends BoardForegroundPainter {
     }
   }
 
-  /// Paints the label of [minute] with its top at [top] and its right
-  /// edge [_labelEnd] inside [right].
-  void _paintLabel(Canvas canvas, int minute, double right, double top) {
-    final label = labels.of(minute);
-    label.paint(canvas, Offset(right - _labelEnd - label.width, top));
+  /// Paints [label] with its top at [top] and its right edge
+  /// [_HourLabels.inset] inside [right].
+  void _paintLabel(Canvas canvas, TextPainter label, double right, double top) {
+    label.paint(canvas, Offset(right - _HourLabels.inset - label.width, top));
   }
 
   void _paintNow(Canvas canvas, BoardGeometryView geometry, _NowMark now) {
@@ -6155,62 +6167,205 @@ class _GridForegroundPainter extends BoardForegroundPainter {
   }
 }
 
-/// The hour labels a [_GridForegroundPainter] paints, each laid out once
-/// for one style, text scale, [HourLabelFormat] and [CalendarLocalizations].
+/// The hour labels a [_GridForegroundPainter] paints and the width of the
+/// hour gutter they fit, laid out once for one style, text scale,
+/// [HourLabelFormat], [CalendarLocalizations], hours, slot length and
+/// least slot height.
+///
+/// The labels take the first of these that fits them: one line each in a
+/// gutter [minGutter] wide, [inset] inside its right edge; up to two lines
+/// each in that room, broken only after a space, where the closest
+/// labelled lines lie the tallest label apart at the least slot height;
+/// one line each in a gutter as wide as the widest label and [inset] on
+/// each side, up to [maxGutter]; and one line each in a gutter [maxGutter]
+/// wide, at a smaller text scale at which the widest fits it.
 class _HourLabels {
   /// The space between a label's half and the end of the grid's room for
   /// it.
   static const double gap = 2.0;
 
+  /// The hour gutter's least width.
+  static const double minGutter = 56.0;
+
+  /// The hour gutter's greatest width.
+  static const double maxGutter = 96.0;
+
+  /// A space, after which a label's line may end.
+  static final RegExp _space = RegExp(r"\s");
+
+  /// The space between a label and the gutter's right edge, and in a
+  /// gutter wider than [minGutter], between the widest label and its left
+  /// edge.
+  static const double inset = 6.0;
+
   TextStyle _style = const TextStyle();
   TextScaler _scaler = TextScaler.noScaling;
   HourLabelFormat _format = HourLabelFormat.twentyFourHour;
   CalendarLocalizations _strings = const DefaultCalendarLocalizations();
+  DayHours? _hours;
+  int _slotMinutes = defaultSlotMinutes;
+  double _leastSlot = 0.0;
+
+  /// The minutes of the labelled lines, from the top: the first slot's,
+  /// each whole hour's after it, and the end of the hours.
+  List<int> _minutes = const <int>[];
+
+  /// The text scaler [of] lays the labels out at.
+  TextScaler _layoutScaler = TextScaler.noScaling;
+
+  /// The width [of] lays the labels out on up to two lines in, or null
+  /// for one line each.
+  double? _wrapWidth;
+
   final Map<int, TextPainter> _labels = <int, TextPainter>{};
 
-  /// Moves on each time [update] drops the laid-out labels.
+  /// The width of the hour gutter the labels fit.
+  double gutter = minGutter;
+
+  /// The height of the tallest label.
+  double height = 0.0;
+
+  /// Moves on each time [update] lays the labels out anew.
   int version = 0;
 
-  /// Lays the labels out anew from here on when [style], [scaler],
-  /// [format] or [strings] differs from the last.
+  /// Fits the labels anew when [style], [scaler], [format], [strings],
+  /// [tracks]' hours or slot length, or [leastSlot], the least height a
+  /// slot lays out at, differs from the last.
   void update(
     TextStyle style,
     TextScaler scaler,
     HourLabelFormat format,
     CalendarLocalizations strings,
+    GridTracks tracks,
+    double leastSlot,
   ) {
     if (style == _style &&
         scaler == _scaler &&
         format == _format &&
-        strings == _strings) {
+        strings == _strings &&
+        tracks.hours == _hours &&
+        tracks.slotMinutes == _slotMinutes &&
+        leastSlot == _leastSlot) {
       return;
     }
     _style = style;
     _scaler = scaler;
     _format = format;
     _strings = strings;
-    _clear();
+    _hours = tracks.hours;
+    _slotMinutes = tracks.slotMinutes;
+    _leastSlot = leastSlot;
+    _minutes = <int>[
+      for (var row = tracks.firstSlotRow; row <= tracks.lastSlotRow; row++)
+        if (_GridForegroundPainter.labelsRow(tracks, row)) tracks.minuteAt(row),
+      tracks.hours.end,
+    ];
+    _fit();
     version++;
   }
 
   /// The label naming [minute], laid out.
   TextPainter of(int minute) {
     return _labels.putIfAbsent(minute, () {
+      final wrapWidth = _wrapWidth;
       return TextPainter(
         text: TextSpan(
           text: _strings.formatTime(minute, _format),
           style: _style,
         ),
+        textAlign: TextAlign.right,
         textDirection: TextDirection.ltr,
-        textScaler: _scaler,
-        maxLines: 1,
-      )..layout();
+        textScaler: _layoutScaler,
+        maxLines: wrapWidth == null ? 1 : 2,
+        textWidthBasis: TextWidthBasis.longestLine,
+      )..layout(maxWidth: wrapWidth ?? double.infinity);
     });
   }
 
-  /// The height every label lays out at.
-  double get height {
-    return of(0).height;
+  /// Lays the labels out the first way that fits them ([_HourLabels]),
+  /// and sets [gutter] and [height] from them.
+  void _fit() {
+    _layOut(_scaler, null);
+    gutter = minGutter;
+    final widest = _widest();
+    const room = minGutter - inset;
+    if (widest > room) {
+      _layOut(_scaler, room);
+      if (!_wraps()) {
+        _layOut(_scaler, null);
+        if (widest + 2 * inset <= maxGutter) {
+          gutter = widest + 2 * inset;
+        } else {
+          gutter = maxGutter;
+          _shrink(maxGutter - 2 * inset, widest);
+        }
+      }
+    }
+    height = 0.0;
+    for (final minute in _minutes) {
+      height = math.max(height, of(minute).height);
+    }
+  }
+
+  /// Drops the labels laid out, so [of] lays them out at [scaler], on up
+  /// to two lines [wrapWidth] wide, or where it is null on one line each.
+  void _layOut(TextScaler scaler, double? wrapWidth) {
+    _clear();
+    _layoutScaler = scaler;
+    _wrapWidth = wrapWidth;
+  }
+
+  /// The width of the widest label.
+  double _widest() {
+    var widest = 0.0;
+    for (final minute in _minutes) {
+      widest = math.max(widest, of(minute).width);
+    }
+    return widest;
+  }
+
+  /// Whether the labels, laid out on up to two lines, fit them, each
+  /// broken only after a space, and the closest labelled lines lie the
+  /// tallest apart at the least slot height.
+  bool _wraps() {
+    var tallest = 0.0;
+    for (final minute in _minutes) {
+      final label = of(minute);
+      if (label.didExceedMaxLines || !_breaksAfterSpace(label)) {
+        return false;
+      }
+      tallest = math.max(tallest, label.height);
+    }
+    var closest = double.infinity;
+    for (var i = 1; i < _minutes.length; i++) {
+      closest = math.min(closest, (_minutes[i] - _minutes[i - 1]).toDouble());
+    }
+    return tallest <= closest * _leastSlot / _slotMinutes;
+  }
+
+  /// Whether [label]'s first line holds all its text or ends after a
+  /// space. The line breaker ends it inside a word where the word is wider
+  /// than the line, or where a no-break space joins it to the next.
+  static bool _breaksAfterSpace(TextPainter label) {
+    final text = label.plainText;
+    final end = label.getLineBoundary(const TextPosition(offset: 0)).end;
+    return end >= text.length || (end > 0 && _space.hasMatch(text[end - 1]));
+  }
+
+  /// Lays the labels out on one line each at a smaller text scale at which
+  /// [widest], their width at the one they are laid out at, fits [room].
+  void _shrink(double room, double widest) {
+    final fontSize = _style.fontSize ?? kDefaultFontSize;
+    var scaler = _scaler;
+    // A label's width does not quite follow its font size, so a smaller
+    // scaler aims half a pixel inside the room and is measured again,
+    // until the widest fits.
+    for (var tries = 0; tries < 4 && widest > room; tries++) {
+      final size = scaler.scale(fontSize) * (room - 0.5) / widest;
+      scaler = TextScaler.linear(math.max(0.0, size) / fontSize);
+      _layOut(scaler, null);
+      widest = _widest();
+    }
   }
 
   void dispose() {
