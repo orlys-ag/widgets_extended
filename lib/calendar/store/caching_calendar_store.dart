@@ -207,12 +207,12 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// read in flight that covers its unread days, or sends a read for them
   /// and its changed days. Changed days of the range that no read in
   /// flight covers are read again in the background. Showing the range
-  /// already shown changes nothing.
+  /// already shown changes nothing, and so does a show after [dispose].
   @override
   void show(DateTime first, DateTime last) {
     final firstDay = dayNumber(first);
     final lastDay = dayNumber(last);
-    if (firstDay == _shownFirst && lastDay == _shownLast) {
+    if (_disposed || (firstDay == _shownFirst && lastDay == _shownLast)) {
       return;
     }
     _shownFirst = firstDay;
@@ -269,9 +269,10 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
 
   /// Sends a new read for the shown range's unread days and its changed
   /// days; with none unread it sends nothing and the range is ready.
+  /// Does nothing before the first [show] and after [dispose].
   @override
   void retry() {
-    if (_shownFirst == null) {
+    if (_disposed || _shownFirst == null) {
       return;
     }
     _loadError = null;
@@ -292,8 +293,12 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// Changes neither the shown range nor [status], except that a read
   /// leaving the shown range with no unread day makes it ready, and a
   /// failed read leaves its unread days unread and marks them [readFailed].
+  /// Sends nothing after [dispose].
   @override
   void prefetch(DateTime first, DateTime last) {
+    if (_disposed) {
+      return;
+    }
     final firstDay = dayNumber(first);
     final lastDay = dayNumber(last);
     int? from;
@@ -322,7 +327,8 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// otherwise once a [show] or a [prefetch] covers it. A read in flight
   /// over them leaves them changed once it answers. It notifies nothing
   /// itself: a read it sends notifies once it changes what the store
-  /// answers, within the call where the source answers within it.
+  /// answers, within the call where the source answers within it. Does
+  /// nothing after [dispose].
   @override
   void invalidate(DateTime first, DateTime last) {
     final firstDay = dayNumber(first);

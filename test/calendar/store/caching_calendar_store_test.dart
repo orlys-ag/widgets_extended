@@ -1744,6 +1744,24 @@ void main() {
     expect(harness.source.calls, hasLength(4));
   });
 
+  test("FR33 a disposed store sends nothing for a prefetch, a show or a "
+      "retry", () async {
+    final harness = Harness();
+    final store = harness.store;
+    store.show(weekFirst, weekLast);
+    harness.lastCall.fail();
+    await settle();
+    expect(store.isRead(weekFirst), isFalse);
+    store.dispose();
+
+    store.prefetch(mayFirst, mayLast);
+    expect(harness.source.calls, hasLength(1));
+    expect(() => store.show(mayFirst, mayLast), returnsNormally);
+    expect(harness.source.calls, hasLength(1));
+    expect(store.retry, returnsNormally);
+    expect(harness.source.calls, hasLength(1));
+  });
+
   group("CF the changes the source announces", () {
     late StreamController<CalendarSourceChange<String>> changes;
 
