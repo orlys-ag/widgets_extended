@@ -181,32 +181,32 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   int? _shownFirst;
   int? _shownLast;
 
-  /// The read the shown range waits on.
-  _Read? _awaited;
-
   CalendarLoadStatus _status = CalendarLoadStatus.loading;
   Object? _loadError;
   bool _disposed = false;
 
-  /// Whether every day of the shown range is read, or the read it waits
-  /// on failed. Loading before the first [show].
+  /// Ready once every day of the shown range is read; failed once one of
+  /// them is left unread with no read in flight, its last read having
+  /// failed ([readFailed]), until the range is shown anew, retried or
+  /// refreshed, or every day of it is read; and otherwise loading, as
+  /// before the first [show].
   @override
   CalendarLoadStatus get status {
     return _status;
   }
 
-  /// The error the read the shown range waited on failed with, as the
-  /// data source failed it, while [status] is failed.
+  /// The error of the read whose failure left the shown range failed, as
+  /// the data source failed it, while [status] is failed.
   @override
   Object? get loadError {
     return _loadError;
   }
 
   /// Shows [first] to [last], both inclusive. A range whose days are all
-  /// read is ready at once; otherwise the range waits on the earliest-sent
-  /// read in flight that covers its unread days, or sends a read for them
-  /// and its changed days. Changed days of the range that no read in
-  /// flight covers are read again in the background. Showing the range
+  /// read is ready at once; otherwise it is loading, and sends a read of
+  /// its unread days and its changed days unless a read in flight covers
+  /// the unread ones. Changed days of the range that no read in flight
+  /// covers are read again in the background. Showing the range
   /// already shown changes nothing, and so does a show after [dispose].
   @override
   void show(DateTime first, DateTime last) {
@@ -218,21 +218,13 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     _shownFirst = firstDay;
     _shownLast = lastDay;
     _showCount++;
-    _loadError = null;
     final unread = _unreadSpan();
-    if (unread == null) {
-      _awaited = null;
-      _status = CalendarLoadStatus.ready;
-    } else {
-      _status = CalendarLoadStatus.loading;
-      final inFlight = _inFlightCovering(unread.first, unread.last);
-      if (inFlight != null) {
-        _awaited = inFlight;
-      } else {
-        _sendAwaited(unread);
-      }
+    if (unread != null &&
+        _inFlightCovering(unread.first, unread.last) == null) {
+      _readShown(unread);
     }
     _readChangedShown();
+    _settleStatus(requested: true);
     notifyListeners();
   }
 
@@ -275,25 +267,22 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     if (_disposed || _shownFirst == null) {
       return;
     }
-    _loadError = null;
     final unread = _unreadSpan();
-    if (unread == null) {
-      _awaited = null;
-      _status = CalendarLoadStatus.ready;
-    } else {
-      _status = CalendarLoadStatus.loading;
-      _sendAwaited(unread);
+    if (unread != null) {
+      _readShown(unread);
     }
+    _settleStatus(requested: true);
     notifyListeners();
   }
 
   /// Reads the unread and the changed days from [first] to [last], both
   /// inclusive, without showing them, so the markers of days about to show
-  /// appear once read. Sends nothing where a read in flight covers them.
-  /// Changes neither the shown range nor [status], except that a read
-  /// leaving the shown range with no unread day makes it ready, and a
-  /// failed read leaves its unread days unread and marks them [readFailed].
-  /// Sends nothing after [dispose].
+  /// appear once read. Sends nothing where a read in flight covers them,
+  /// and nothing after [dispose]. Changes neither the shown range nor
+  /// [status], except that a read leaving the shown range with no unread
+  /// day makes it ready: a failed shown range stays failed while the
+  /// prefetch reads its days. A failed read leaves its unread days unread
+  /// and marks them [readFailed].
   @override
   void prefetch(DateTime first, DateTime last) {
     if (_disposed) {
@@ -318,7 +307,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     if (from == null || to == null) {
       return;
     }
-    _send(from, to, awaited: false);
+    _send(from, to);
   }
 
   /// Takes the entries on the days from [first] to [last], both inclusive,
@@ -341,9 +330,9 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// Takes every entry to have changed, as [invalidate] does for every
-  /// day, and reads the whole shown range again at once. Where the shown
-  /// range has unread days it waits on that read, as after [retry];
-  /// otherwise its status stays ready, and a failed read leaves its days
+  /// day, and reads the whole shown range again at once, so a failed
+  /// shown range is loading again, as after [retry]. A range whose days
+  /// are all read stays ready, and a failed read leaves its days
   /// changed. Completes once that read answers, or fails with the error it
   /// failed with; completes at once before the first [show] and after
   /// [dispose], and when the store is disposed before the read answers.
@@ -359,12 +348,8 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       return Future<void>.value();
     }
     final done = Completer<void>();
-    if (_unreadSpan() == null) {
-      _send(first, last, awaited: false, done: done);
-    } else {
-      _status = CalendarLoadStatus.loading;
-      _loadError = null;
-      _send(first, last, awaited: true, done: done);
+    _send(first, last, done: done);
+    if (_settleStatus(requested: true)) {
       notifyListeners();
     }
     return done.future;
@@ -485,14 +470,13 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     return null;
   }
 
-  /// Sends the read the shown range waits on: of its [unread] days and its
-  /// changed days, as one span.
-  void _sendAwaited(({int first, int last}) unread) {
+  /// Sends a read of the shown range's [unread] days and its changed days,
+  /// as one span.
+  void _readShown(({int first, int last}) unread) {
     final changed = _changedSpanOf(_shownFirst!, _shownLast!);
     _send(
       changed == null ? unread.first : math.min(unread.first, changed.first),
       changed == null ? unread.last : math.max(unread.last, changed.last),
-      awaited: true,
     );
   }
 
@@ -508,24 +492,51 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     if (changed == null) {
       return;
     }
-    _send(changed.first, changed.last, awaited: false);
+    _send(changed.first, changed.last);
   }
 
-  /// Sends a read of [first] to [last], which the shown range waits on
-  /// when [awaited], and [done], if given, waits on. The shown range waits
-  /// on it before the source is called, so an answer that arrives within
-  /// the call, as a [SynchronousFuture]'s does, settles the range.
-  void _send(
-    int first,
-    int last, {
-    required bool awaited,
-    Completer<void>? done,
-  }) {
+  /// Sets [status] from the shown range's days, and returns whether it
+  /// changed: ready once none is unread; failed once one is unread with
+  /// no read in flight, its last read having failed; and otherwise
+  /// loading, a read in flight covering each unread one. A failed range
+  /// turns loading only where [requested], by a show, a retry or a
+  /// refresh, and not for a read it did not ask for. [failure], the
+  /// error of a read that failed, is [loadError] once that read leaves
+  /// the range failed.
+  bool _settleStatus({Object? failure, bool requested = false}) {
+    final first = _shownFirst;
+    final last = _shownLast;
+    if (first == null || last == null) {
+      return false;
+    }
+    var status = CalendarLoadStatus.ready;
+    for (var day = first; day <= last; day++) {
+      if (!_days.containsKey(day)) {
+        if (_failedDays.contains(day)) {
+          status = CalendarLoadStatus.failed;
+          break;
+        }
+        status = CalendarLoadStatus.loading;
+      }
+    }
+    if (status == _status ||
+        (!requested &&
+            _status == CalendarLoadStatus.failed &&
+            status == CalendarLoadStatus.loading)) {
+      return false;
+    }
+    _status = status;
+    _loadError = status == CalendarLoadStatus.failed ? failure : null;
+    return true;
+  }
+
+  /// Sends a read of [first] to [last], which [done], if given, waits on.
+  /// The read is in flight, and its days no longer [readFailed], before
+  /// the source is called, so an answer that arrives within the call, as
+  /// a [SynchronousFuture]'s does, finishes it.
+  void _send(int first, int last, {Completer<void>? done}) {
     final read = _Read(first, last, ++_clock, done);
     _reads.add(read);
-    if (awaited) {
-      _awaited = read;
-    }
     _failedDays.removeWhere((day) {
       return day >= first && day <= last;
     });
@@ -542,12 +553,10 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// A read's answer. A failed one marks [readFailed] each of its days that
-  /// no read has filled and no read in flight covers. A read the shown
-  /// range does not wait on changes no load state, except that one leaving
-  /// the shown range with no unread day makes it ready, waiting on no
-  /// read, so it notifies only when it changed what the store answers, or
-  /// failed. A read that answers sends the read again of the shown
-  /// range's days announced changed meanwhile.
+  /// no read has filled and no read in flight covers. A read that answers
+  /// sends the read again of the shown range's days announced changed
+  /// meanwhile. It notifies when it changed [status], what the store
+  /// answers, or [readFailed].
   void _finishRead(
     _Read read, {
     List<CalendarEntry<T>>? entries,
@@ -580,34 +589,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
         }
       }
     }
-    if (!identical(_awaited, read)) {
-      if (_status != CalendarLoadStatus.ready &&
-          _shownFirst != null &&
-          _unreadSpan() == null) {
-        _status = CalendarLoadStatus.ready;
-        _loadError = null;
-        _awaited = null;
-      }
-      if (changed || failed) {
-        notifyListeners();
-      }
-    } else {
-      _awaited = null;
-      final unread = _unreadSpan();
-      // A failed read leaves the range ready when another read has filled
-      // its days since, and loading while one in flight covers them.
-      if (answered != null || unread == null) {
-        _status = CalendarLoadStatus.ready;
-        _loadError = null;
-      } else {
-        final other = _inFlightCovering(unread.first, unread.last);
-        if (other != null) {
-          _awaited = other;
-        } else {
-          _status = CalendarLoadStatus.failed;
-          _loadError = failure;
-        }
-      }
+    if (_settleStatus(failure: failure) || changed || failed) {
       notifyListeners();
     }
     if (answered != null) {

@@ -9,8 +9,10 @@ import 'package:flutter/foundation.dart';
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
 
-/// Whether every day of the range a store shows is read, or the read it
-/// waits on failed.
+/// Whether every day of the range a store shows is read (ready), or one
+/// of its unread days was left with no read on the way, its last read
+/// having failed, and the range was not shown, retried or refreshed
+/// since (failed); loading otherwise.
 enum CalendarLoadStatus { loading, failed, ready }
 
 /// An entry as a view shows it: [pending] while a write on it runs.
@@ -141,12 +143,14 @@ abstract class CalendarStore<T> extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Whether every day of the shown range is read, or the read it waits
-  /// on failed.
+  /// Ready once every day of the shown range is read; failed once one of
+  /// them is left unread with no read on the way, its last read having
+  /// failed, until the range is shown anew, retried or refreshed, or
+  /// every day of it is read; and loading otherwise.
   CalendarLoadStatus get status;
 
-  /// The error the read the shown range waited on failed with, while
-  /// [status] is [CalendarLoadStatus.failed]; null otherwise.
+  /// The error of the read whose failure left the shown range failed,
+  /// while [status] is [CalendarLoadStatus.failed]; null otherwise.
   Object? get loadError;
 
   /// Shows [first] to [last], both inclusive, reading the days not read
