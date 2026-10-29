@@ -195,8 +195,9 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     return _status;
   }
 
-  /// The error of the read whose failure left the shown range failed, as
-  /// the data source failed it, while [status] is failed.
+  /// The error of the latest read whose failure left a day of the shown
+  /// range unread with no read in flight, as the data source failed it,
+  /// while [status] is failed.
   @override
   Object? get loadError {
     return _loadError;
@@ -278,11 +279,12 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// Reads the unread and the changed days from [first] to [last], both
   /// inclusive, without showing them, so the markers of days about to show
   /// appear once read. Sends nothing where a read in flight covers them,
-  /// and nothing after [dispose]. Changes neither the shown range nor
-  /// [status], except that a read leaving the shown range with no unread
-  /// day makes it ready: a failed shown range stays failed while the
-  /// prefetch reads its days. A failed read leaves its unread days unread
-  /// and marks them [readFailed].
+  /// and nothing after [dispose]. Changes no shown range. Its read counts
+  /// toward [status] as any read does: one leaving the shown range with
+  /// no unread day makes it ready, and a failed one leaving a day of it
+  /// unread with no read in flight makes it failed; a failed shown range
+  /// stays failed while the prefetch reads its days. A failed read leaves
+  /// its unread days unread and marks them [readFailed].
   @override
   void prefetch(DateTime first, DateTime last) {
     if (_disposed) {
@@ -460,6 +462,13 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     }
   }
 
+  /// Whether the shown range holds [day], a [dayNumber].
+  bool _shows(int day) {
+    final first = _shownFirst;
+    final last = _shownLast;
+    return first != null && last != null && first <= day && day <= last;
+  }
+
   /// The earliest-sent read in flight covering [first] to [last].
   _Read? _inFlightCovering(int first, int last) {
     for (final read in _reads) {
@@ -501,8 +510,9 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// loading, a read in flight covering each unread one. A failed range
   /// turns loading only where [requested], by a show, a retry or a
   /// refresh, and not for a read it did not ask for. [failure], the
-  /// error of a read that failed, is [loadError] once that read leaves
-  /// the range failed.
+  /// error of a read that just left a day of the range unread with no
+  /// read in flight, is [loadError] while the range is failed, which
+  /// otherwise keeps the latest such error.
   bool _settleStatus({Object? failure, bool requested = false}) {
     final first = _shownFirst;
     final last = _shownLast;
@@ -519,14 +529,19 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
         status = CalendarLoadStatus.loading;
       }
     }
-    if (status == _status ||
-        (!requested &&
-            _status == CalendarLoadStatus.failed &&
-            status == CalendarLoadStatus.loading)) {
+    if (!requested &&
+        _status == CalendarLoadStatus.failed &&
+        status == CalendarLoadStatus.loading) {
+      status = CalendarLoadStatus.failed;
+    }
+    final error = status == CalendarLoadStatus.failed
+        ? failure ?? _loadError
+        : null;
+    if (status == _status && identical(error, _loadError)) {
       return false;
     }
     _status = status;
-    _loadError = status == CalendarLoadStatus.failed ? failure : null;
+    _loadError = error;
     return true;
   }
 
@@ -580,16 +595,19 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     final changed = answered != null && _applyRead(read, answered);
     _pruneEntryTimes();
     var failed = false;
+    var failedShown = false;
     if (answered == null) {
       for (var day = read.first; day <= read.last; day++) {
         if (!_days.containsKey(day) &&
             _inFlightCovering(day, day) == null &&
             _failedDays.add(day)) {
           failed = true;
+          failedShown = failedShown || _shows(day);
         }
       }
     }
-    if (_settleStatus(failure: failure) || changed || failed) {
+    final settled = _settleStatus(failure: failedShown ? failure : null);
+    if (settled || changed || failed) {
       notifyListeners();
     }
     if (answered != null) {

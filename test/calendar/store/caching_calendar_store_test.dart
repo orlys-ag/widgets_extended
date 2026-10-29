@@ -1856,6 +1856,63 @@ void main() {
     expect(store.loadError, isNull);
   });
 
+  test("FR38 a failed shown range's loadError is the latest read failure "
+      "that left a day of it with no read", () async {
+    final harness = Harness();
+    final store = harness.store;
+    store.show(DateTime(2026, 4, 21), DateTime(2026, 4, 25));
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    store.prefetch(DateTime(2026, 4, 19), DateTime(2026, 4, 20));
+    final early = harness.lastCall;
+    store.show(DateTime(2026, 4, 20), DateTime(2026, 4, 26));
+    final first = harness.lastCall.fail("First.");
+    await settle();
+    store.prefetch(DateTime(2026, 4, 26), DateTime(2026, 4, 27));
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+
+    store.prefetch(mayFirst, mayLast);
+    harness.lastCall.fail("Elsewhere.");
+    await settle();
+    expect(store.loadError, same(first));
+    final second = early.fail("Second.");
+    await settle();
+    expect(store.loadError, same(second));
+  });
+
+  test("FR39 a show, a retry or a refresh whose read fails within the call "
+      "leaves that read's error", () async {
+    final errors = <String, Type>{};
+    for (final call in <String>["show", "retry", "refresh"]) {
+      final source = SyncSource();
+      final store = CachingCalendarStore<String>(dataSource: source);
+      source.readError = const SourceFailure("First.");
+      store.show(weekFirst, weekLast);
+      await settle();
+      source.readError = null;
+      // An entry with no id fails the read, within the call.
+      source.entries = <CalendarEntry<String>>[
+        draft(DateTime(2026, 4, 21), 600, 660),
+      ];
+      if (call == "show") {
+        store.show(DateTime(2026, 4, 21), DateTime(2026, 4, 27));
+      } else if (call == "retry") {
+        store.retry();
+      } else {
+        errorOf(store.refresh());
+      }
+      await settle();
+      errors[call] = store.loadError.runtimeType;
+      store.dispose();
+    }
+    expect(errors, <String, Type>{
+      "show": StateError,
+      "retry": StateError,
+      "refresh": StateError,
+    });
+  });
+
   group("CF the changes the source announces", () {
     late StreamController<CalendarSourceChange<String>> changes;
 

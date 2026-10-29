@@ -149,8 +149,9 @@ abstract class CalendarStore<T> extends ChangeNotifier {
   /// every day of it is read; and loading otherwise.
   CalendarLoadStatus get status;
 
-  /// The error of the read whose failure left the shown range failed,
-  /// while [status] is [CalendarLoadStatus.failed]; null otherwise.
+  /// The error of the latest read whose failure left a day of the shown
+  /// range unread with no read on the way, while [status] is
+  /// [CalendarLoadStatus.failed]; null otherwise.
   Object? get loadError;
 
   /// Shows [first] to [last], both inclusive, reading the days not read
