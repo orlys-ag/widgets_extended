@@ -11,6 +11,7 @@ import '../entries/calendar_entry.dart';
 /// when their [color] and [label] are.
 @immutable
 class CalendarBadgeKind {
+  /// The kind whose dot is [color], named [label].
   const CalendarBadgeKind({required this.color, required this.label});
 
   /// The fill of the kind's dot.
@@ -55,6 +56,7 @@ class CalendarBadgeKind {
 /// instance rather than making one in each build.
 @immutable
 class CalendarDayBadges<T> {
+  /// The badges of [kinds], each entry's kind as [kindOf] answers it.
   const CalendarDayBadges({required this.kinds, required this.kindOf});
 
   /// The kinds, in the order their dots run.

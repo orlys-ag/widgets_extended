@@ -17,8 +17,11 @@ const int defaultSlotMinutes = 15;
 /// them to an hour and so to a day.
 const List<int> slotMinuteChoices = <int>[5, 10, 15, 20, 30, 60];
 
+/// The minutes of a day on the wall clock, which [DayHours] and the wall
+/// minutes ([wallMinuteOf]) count in whatever the day's length.
 const int minutesPerDay = 1440;
 
+/// The local midnight of [date]'s day.
 DateTime dateOnly(DateTime date) {
   return DateTime(date.year, date.month, date.day);
 }
@@ -125,6 +128,7 @@ class WeekdaySet {
   /// The [weekdayColumn] of the weekday a week starts on.
   final int firstColumn;
 
+  /// Whether the set holds no weekday.
   bool get isEmpty {
     return _bits == 0;
   }

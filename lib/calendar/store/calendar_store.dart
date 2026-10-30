@@ -13,7 +13,17 @@ import '../entries/calendar_entry.dart';
 /// of its unread days is marked [CalendarStore.readFailed], its last read
 /// having failed, though another read of it may be on the way (failed);
 /// loading otherwise.
-enum CalendarLoadStatus { loading, failed, ready }
+enum CalendarLoadStatus {
+  /// No unread day of the range is marked failed, and one or more is
+  /// unread.
+  loading,
+
+  /// An unread day of the range is marked [CalendarStore.readFailed].
+  failed,
+
+  /// Every day of the range is read.
+  ready,
+}
 
 /// An entry as a view shows it: [pending] while a write on it runs.
 @immutable

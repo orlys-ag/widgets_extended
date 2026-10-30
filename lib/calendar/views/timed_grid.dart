@@ -361,6 +361,7 @@ const ValueKey<String> liftedBlockKey = ValueKey<String>("grid-lifted-block");
 /// [end], an exclusive end, both local times.
 @immutable
 class CreateRange {
+  /// The range from [start] to [end].
   const CreateRange({required this.start, required this.end});
 
   /// Where the range starts.

@@ -10,11 +10,37 @@ import '../presentation/calendar_theme.dart';
 /// A view of a `CalendarView`: Agenda's month over a list of its days,
 /// Day's timed grid of one day under the week strip, Week's timed grid of
 /// a week, and Month's weeks of chips.
-enum CalendarViewKind { agenda, day, week, month }
+enum CalendarViewKind {
+  /// Agenda: the calendar card's month over a list of its days.
+  agenda,
+
+  /// Day: the timed grid of one day under the week strip.
+  day,
+
+  /// Week: the timed grid of a week.
+  week,
+
+  /// Month: the month's weeks of chips.
+  month,
+}
 
 /// What the header's chevrons step by: a day, a week, a month, or a year
 /// of the month picker.
-enum CalendarStepUnit { day, week, month, year }
+enum CalendarStepUnit {
+  /// A day, as Day steps.
+  day,
+
+  /// A week, as Week steps, and Agenda while its calendar card is folded
+  /// into the week strip.
+  week,
+
+  /// A month, as Month steps, and Agenda while its calendar card shows
+  /// the month.
+  month,
+
+  /// A year, as the month picker steps while it is open.
+  year,
+}
 
 /// What a calendar header shows and the actions it calls, which a
 /// [CalendarHeaderBuilder] receives.

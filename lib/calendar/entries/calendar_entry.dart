@@ -53,8 +53,13 @@ class CalendarEntry<T> {
   /// time up to it, not the minute it names.
   final DateTime end;
 
+  /// The entry's name, which the default builders draw and Month's chips
+  /// give a screen reader; a store orders entries of the same start and
+  /// end by it.
   final String title;
 
+  /// The entry's colour, which the default builders fill its box with a
+  /// tint of and draw its edge in.
   final Color color;
 
   /// The host's value, compared by its own `==`.

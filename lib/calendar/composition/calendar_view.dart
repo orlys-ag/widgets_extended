@@ -67,6 +67,7 @@ CalendarViewKind calendarOpeningView(
 /// edited ([CalendarEditPolicy.mayEdit]).
 @immutable
 class CalendarEntryTapDetails<T> {
+  /// A tap on [entry], [editable] or not.
   const CalendarEntryTapDetails({required this.entry, required this.editable});
 
   /// The stored entry, without a pending move's requested time.
@@ -204,6 +205,7 @@ class CalendarEntryTapDetails<T> {
 /// store's hours rounded out to it ([DayHours.roundedOutTo]), which are
 /// the hours themselves on the grid.
 class CalendarView<T> extends StatefulWidget {
+  /// A calendar of [store]'s entries in the views [views] lists.
   const CalendarView({
     super.key,
     required this.store,
