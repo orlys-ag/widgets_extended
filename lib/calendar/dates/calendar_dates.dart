@@ -93,9 +93,10 @@ int weekdayColumnOfDay(int day) {
   return (day + 3) % 7;
 }
 
-/// A set of weekdays, each named by its [weekdayColumn], Monday 0 and
-/// Sunday 6, and the weekday a week starts on, [firstColumn]: the shown
-/// weekdays and their order, in every view of the calendar.
+/// A set of weekdays, each named by its weekday column
+/// (`CalendarDates.weekdayColumn`), Monday 0 and Sunday 6, and the
+/// weekday a week starts on, [firstColumn]: the shown weekdays and their
+/// order, in every view of the calendar.
 @immutable
 final class WeekdaySet {
   const WeekdaySet._(this._bits, [this.firstColumn = 0]);
@@ -139,7 +140,8 @@ final class WeekdaySet {
   /// Bit `n` is set when the set holds the column `n`.
   final int _bits;
 
-  /// The [weekdayColumn] of the weekday a week starts on.
+  /// The weekday column (`CalendarDates.weekdayColumn`) of the weekday a
+  /// week starts on.
   final int firstColumn;
 
   /// Whether the set holds no weekday.
@@ -176,8 +178,8 @@ final class WeekdaySet {
     return addDays(dateOnly(date), -offsetOf(weekdayColumn(date)));
   }
 
-  /// The [dayNumber] of the first day of the week holding the [dayNumber]
-  /// [day].
+  /// The day number (`CalendarDates.dayNumber`) of the first day of the
+  /// week holding the day numbered [day].
   int weekStartOfDay(int day) {
     return day - offsetOf(weekdayColumnOfDay(day));
   }
@@ -187,7 +189,8 @@ final class WeekdaySet {
     return _bits & (1 << column) != 0;
   }
 
-  /// Whether the set holds the weekday of the [dayNumber] [day].
+  /// Whether the set holds the weekday of the day numbered [day]
+  /// (`CalendarDates.dayNumber`).
   bool containsDay(int day) {
     return containsColumn(weekdayColumnOfDay(day));
   }
@@ -676,7 +679,8 @@ final class DayHours {
   /// These hours widened to the grid of [slotMinutes]-minute slots from
   /// midnight: [start] rounded down and [end] up to it, so the hours
   /// themselves where they lie on it. [slotMinutes] divides a day, as each
-  /// of [slotMinuteChoices] does, so the end stays inside the day.
+  /// of `CalendarDates.slotMinuteChoices` does, so the end stays inside
+  /// the day.
   DayHours roundedOutTo(int slotMinutes) {
     if (isOnSlotsOf(slotMinutes)) {
       return this;
@@ -706,9 +710,10 @@ final class DayHours {
 
   /// Whether these hours hold the range from [from] to [to]: every range
   /// from a day start to a day start, an all-day range, which no hours
-  /// limit; and any other whose start's [minuteOfDay] they hold as a start
-  /// and whose end's minute on its last day ([endMinuteOfDay]) they hold
-  /// as an end, so an overnight range may cross the hours' end and start.
+  /// limit; and any other whose start's minute of its day
+  /// (`CalendarDates.minuteOfDay`) they hold as a start and whose end's
+  /// minute on its last day (`CalendarDates.endMinuteOfDay`) they hold as
+  /// an end, so an overnight range may cross the hours' end and start.
   bool holdsTimes(DateTime from, DateTime to) {
     if (isDayStart(from) && isDayStart(to)) {
       return true;

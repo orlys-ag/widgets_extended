@@ -75,7 +75,7 @@
         "^demos/workspace_calendar/"
       ],
       "guidance": [],
-      "vocabulary": "Demo vocabulary: demos/workspace_calendar is demo code on the library by path, never part of it: an app that imports the calendar module's files directly and hosts its CalendarView (lib/calendar/composition/) in workspace_calendar_example.dart, inside its own Scaffold and app bar, driving it through a CalendarController and answering its callbacks with its own forms and SnackBars, over a CachingCalendarStore of the module on a CalendarApiSource, the demo's data source over a CalendarApi (the seeded MockCalendarApi). The demo owns its item types and schema, the JSON envelope and its validation, the item form and lockErrorsOf, the entry builders (item_builders.dart), the Harbor theme values, CalendarSettings and the settings sheet, and the calendar bar."
+      "vocabulary": "Demo vocabulary: demos/workspace_calendar is demo code on the library by path, never part of it: an app that imports the library only through package:widgets_extended/widgets_extended.dart, as PA1 checks, while its tests may import the module's files, and hosts its CalendarView (lib/calendar/composition/) in workspace_calendar_example.dart, inside its own Scaffold and app bar, driving it through a CalendarController and answering its callbacks with its own forms and SnackBars, over a CachingCalendarStore of the module on a CalendarApiSource, the demo's data source over a CalendarApi (the seeded MockCalendarApi). The demo owns its item types and schema, the JSON envelope and its validation, the item form and lockErrorsOf, the entry builders (item_builders.dart), the Harbor theme values, CalendarSettings and the settings sheet, and the calendar bar."
     }
   },
   "gates": [

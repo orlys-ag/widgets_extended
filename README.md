@@ -378,7 +378,9 @@ fades an item in and out as the board grows and shrinks it.
 `CalendarView` shows your entries in Agenda, Day, Week and Month views,
 under a header that names the month and switches between them. It is
 experimental: its API may change in any release, a patch release
-included, until it is declared stable.
+included, until it is declared stable. Its API is what
+`package:widgets_extended/widgets_extended.dart` shows; any other name its
+files declare is internal.
 
 An entry is a `CalendarEntry<T>`: an id, null for a draft no store holds
 yet, a start and an exclusive end in local time on whole minutes, a title,
@@ -410,23 +412,25 @@ your `CalendarDataSource` (`read`, `create`, `replace` and `delete`), keeps
 showing what it holds while it reads changed days again, and applies the
 changes a stream of `CalendarSourceChange`s announces, if you give one;
 `invalidate` and `refresh` tell it that entries changed at the source, so
-it reads those days again. `CalendarDates` holds the civil-date helpers
-the calendar counts days and minutes with, such as `addDays` and
-`dayNumber`.
+it reads those days again. A store of your own extends `CalendarStore`
+and answers entries in the order `compareCalendarEntries` gives.
+`CalendarDates` holds the civil-date helpers the calendar counts days and
+minutes with, such as `addDays` and `dayNumber`.
 
 **Editing.** With `editable: true`, Week's and Day's blocks move and
 resize, and a create gesture reports its range through `onCreateRange`. A
 move or a resize goes to `onMoveRequest`, or, where that is null, straight
 to the store's `requestMove`. A tap on an entry in Week, Day or Month
 reports through `onEntryTap`, and a card builder of yours that calls
-`CalendarCardDetails.onEdit` or `onDelete` through `onEditRequest` or
-`onDeleteRequest`. The calendar opens no form, and writes nothing but a
-move or a resize that no `onMoveRequest` takes. An `editPolicy` limits the
-gestures: `HistoryLockPolicy` keeps the past as it is, `NoOverlapsPolicy`
-keeps Week's and Day's moves, resizes and creates off other timed entries'
-times, `DayLimitPolicy` caps the days a range covers, and
-`CalendarEditPolicy.all` combines them. A policy of your own extends
-`CalendarEditPolicy`, in a class you declare `final` or `base`.
+`CalendarCardDetails.onEdit` or `onDelete` reports through
+`onEditRequest` or `onDeleteRequest`. The calendar opens no form, and
+writes nothing but a move or a resize that no `onMoveRequest` takes. An
+`editPolicy` limits the gestures: `HistoryLockPolicy` keeps the past as
+it is, `NoOverlapsPolicy` keeps Week's and Day's moves, resizes and
+creates off other timed entries' times, `DayLimitPolicy` caps the days a
+range covers, and `CalendarEditPolicy.all` combines them. A policy of
+your own extends `CalendarEditPolicy`, in a class you declare `final` or
+`base`.
 
 **Look and words.** A `CalendarThemeData` holds every colour, text style,
 motion and icon the views draw. Give it through a `CalendarTheme`, or in a
@@ -441,6 +445,14 @@ yours, or `showsHeader: false`, the calendar needs neither. The block,
 chip, card, add-button, loading and failure builders replace what the
 views draw, and `CalendarLocalizations` writes every word, in US English
 by default.
+
+**Testing.** A test drives a real `CalendarController` and fills a
+`MemoryCalendarStore` with the entries it needs; a `CachingCalendarStore`
+over a fake or mock `CalendarDataSource` tests reads, writes and
+failures. `CalendarController`, the stores, `CalendarEditPolicy` and the
+localizations are `base` classes, which no class outside the package
+implements, so a mock that implements one does not compile; a spy
+extends one in a `final` class and overrides what it records.
 
 `demos/workspace_calendar/` is a complete calendar app on the public API.
 

@@ -66,8 +66,7 @@ final class CalendarEntry<T> {
   final T payload;
 
   /// Whether the entry covers whole days: [start] and [end] are each the
-  /// start of a day ([isDayStart]), so a day of 23 or 25 hours is one
-  /// whole day.
+  /// start of a day, so a day of 23 or 25 hours is one whole day.
   bool get isAllDay {
     return isDayStart(start) && isDayStart(end);
   }

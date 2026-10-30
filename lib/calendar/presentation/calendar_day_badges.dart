@@ -41,7 +41,8 @@ final class CalendarBadgeKind {
 
 /// The badges on the days of Agenda's and Day's calendar card: a dot for
 /// each kind of entry a day shows, where without them a day with entries
-/// carries one dot in the [CalendarThemeData.primary] colour.
+/// carries one dot in the theme's primary colour
+/// (`CalendarThemeData.primary`).
 ///
 /// A day carries a dot for each of [kinds] that [kindOf] answers for one
 /// of its shown entries, in the order of [kinds], and after them one in
