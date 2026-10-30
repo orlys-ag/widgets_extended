@@ -103,9 +103,15 @@ class MemoryCalendarStore<T> extends CalendarStore<T> {
   @override
   void show(DateTime first, DateTime last) {}
 
-  /// Does nothing: no read fails.
+  /// Does nothing: no read fails. Throws an [ArgumentError] where one of
+  /// [first] and [last] is given without the other, as
+  /// [CalendarStore.retry] does.
   @override
-  void retry() {}
+  void retry([DateTime? first, DateTime? last]) {
+    if ((first == null) != (last == null)) {
+      throw ArgumentError("A retry takes both first and last, or neither.");
+    }
+  }
 
   /// Does nothing: every day is read.
   @override

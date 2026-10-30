@@ -1,14 +1,19 @@
 /// The day list: the rows it lays out for a day's entries, its gaps and
-/// its banners outside the hours, and a card drawn again for a new
-/// payload.
+/// its banners outside the hours, a card drawn again for a new payload,
+/// and a failed row's retry.
 library;
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_localizations.dart';
+import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
@@ -61,6 +66,47 @@ List<Object> rowsOf(
         _ => throw StateError("$row is not an item, a gap or a banner."),
       },
   ];
+}
+
+/// A data source whose reads wait in [held] for the test to answer them.
+class HeldReads implements CalendarDataSource<String> {
+  final List<
+    ({
+      DateTime first,
+      DateTime last,
+      Completer<List<CalendarEntry<String>>> answer,
+    })
+  >
+  held =
+      <
+        ({
+          DateTime first,
+          DateTime last,
+          Completer<List<CalendarEntry<String>>> answer,
+        })
+      >[];
+
+  @override
+  Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    final answer = Completer<List<CalendarEntry<String>>>();
+    held.add((first: first, last: last, answer: answer));
+    return answer.future;
+  }
+
+  @override
+  Future<CalendarEntry<String>> create(CalendarEntry<String> draft) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<CalendarEntry<String>> replace(CalendarEntry<String> entry) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<void> delete(String id) {
+    throw UnimplementedError();
+  }
 }
 
 void main() {
@@ -226,5 +272,75 @@ void main() {
       find.descendant(of: card, matching: find.text("second")),
       findsOneWidget,
     );
+  });
+
+  testWidgets("BA11 a failed row's retry ends the failed marks of the weeks "
+      "of the mounted rows in one read, so their rows show loading at "
+      "once", (tester) async {
+    final day = DateTime(2026, 4, 21);
+    final source = HeldReads();
+    final store = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: nineOClock(), today: day),
+    );
+    addTearDown(now.dispose);
+    final failures = <CalendarFailureState>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DayList<String>(
+          store: store,
+          weekdays: WeekdaySet.all,
+          format: HourLabelFormat.twentyFourHour,
+          hours: DayHours.allDay,
+          editable: false,
+          selectedDay: day,
+          now: now,
+          onTopDay: (day) {},
+          onCreateRange: (range) {},
+          onEdit: (id) {},
+          onDelete: (id) {},
+          loadingBuilder: (context, state) {
+            return const SizedBox(height: 24.0);
+          },
+          failureBuilder: (context, state) {
+            failures.add(state);
+            return const SizedBox(height: 48.0);
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // The list reads the weeks of the rows it builds, and again once the
+    // failed rows it builds then mount; each of those reads fails.
+    for (var answered = 0; answered < source.held.length; answered++) {
+      source.held[answered].answer.completeError(StateError("Offline."));
+      await tester.pumpAndSettle();
+    }
+    final failed = <DateTime>[
+      for (
+        var d = addDays(day, -14);
+        !d.isAfter(addDays(day, 28));
+        d = addDays(d, 1)
+      )
+        if (find.byKey(dayListFailedKey(d)).evaluate().isNotEmpty) d,
+    ];
+    expect(failed, contains(day));
+    final reads = source.held.length;
+
+    failures.last.retry();
+    expect(source.held, hasLength(reads + 1));
+    expect(
+      (source.held.last.first, source.held.last.last),
+      (
+        WeekdaySet.all.weekStartOf(failed.first),
+        addDays(WeekdaySet.all.weekStartOf(failed.last), 6),
+      ),
+    );
+    await tester.pump();
+    expect(<DateTime>[
+      for (final d in failed)
+        if (find.byKey(dayListLoadingKey(d)).evaluate().isNotEmpty) d,
+    ], failed);
   });
 }

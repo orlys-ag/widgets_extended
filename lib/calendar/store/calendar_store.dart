@@ -143,26 +143,31 @@ abstract class CalendarStore<T> extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Ready once every day of the shown range is read; failed once one of
-  /// them is left unread with no read on the way, its last read having
-  /// failed, until the range is shown anew, retried or refreshed, or
-  /// every day of it is read; and loading otherwise.
+  /// Follows from the shown range's days alone: ready once none of them is
+  /// unread, failed while an unread one is [readFailed], and loading
+  /// otherwise.
   CalendarLoadStatus get status;
 
-  /// The error of the latest read whose failure left a day of the shown
-  /// range unread with no read on the way, while [status] is
-  /// [CalendarLoadStatus.failed]; null otherwise.
+  /// The error of the latest read whose failure marked a day of the shown
+  /// range [readFailed], while [status] is [CalendarLoadStatus.failed];
+  /// null otherwise.
   Object? get loadError;
 
   /// Shows [first] to [last], both inclusive, reading the days not read
-  /// yet.
+  /// yet, which ends their [readFailed] marks.
   void show(DateTime first, DateTime last);
 
-  /// Reads again the shown range's unread days after its read failed.
-  void retry();
+  /// Ends the [readFailed] marks of the shown range's days and, where
+  /// given, of the days from [first] to [last], both inclusive, and reads
+  /// those of them not read yet: the marked ones though a read is on the
+  /// way, and the others with no second read where one is. Throws an
+  /// [ArgumentError] where one of [first] and [last] is given without the
+  /// other.
+  void retry([DateTime? first, DateTime? last]);
 
   /// Reads the unread days from [first] to [last], both inclusive,
-  /// without showing them.
+  /// without showing them. The read leaves each [readFailed] mark until
+  /// it fills the day.
   void prefetch(DateTime first, DateTime last);
 
   /// Takes every entry with a part in the days from [first] to [last],
@@ -178,7 +183,8 @@ abstract class CalendarStore<T> extends ChangeNotifier {
   /// Whether [day] is read.
   bool isRead(DateTime day);
 
-  /// Whether the last read of [day], which is unread, failed.
+  /// Whether the last read of [day], which is unread, failed: true until a
+  /// read fills the day or a [show], a [retry] or a [refresh] reads it.
   bool readFailed(DateTime day);
 
   /// Whether the shown range is exactly [first] to [last].

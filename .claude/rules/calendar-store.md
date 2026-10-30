@@ -26,13 +26,22 @@ The contract of `CalendarStore` and its two stores. The conventions every layer 
   reads and writes sent, writes confirmed and changes announced. An entry
   a read forgets that also lay on read days outside it leaves those days
   changed. A failed read leaves its unread days unread, so the next read
-  that covers them reads them again. The shown range is ready once none of
-  its days is unread, failed once one of them is left unread with no read
-  in flight, its last read having failed, and loading otherwise, however
-  many reads cover its unread days. A failed range turns loading only on a
-  show, a retry or a refresh, not for a read it did not ask for, such as a
-  prefetch, though any read that leaves it with no unread day makes it
-  ready. A day once read stays read; a changed day keeps showing what the
+  that covers them reads them again, and marks failed each of them that
+  no read a show, a retry or a refresh asked for since it was sent
+  covers in flight, whether sent or taken over. A mark ends only when a
+  read fills the day or a show, a retry or a refresh reads it, by
+  sending a read or by taking over one in flight; a read the store sends
+  in the background, such as a prefetch, ends a mark only by filling the
+  day, and keeps no failed read from making one. The shown range's
+  status follows from its days alone: ready once none is unread, failed
+  while an unread one is marked, and loading otherwise, however many
+  reads cover its unread days. A retry ends the marks of the shown
+  range's days and of the days it is given, and reads them again: the
+  marked days with a read of its own, and the rest of their unread and
+  changed days as a prefetch does, taking over a read in flight that
+  covers the unread ones; as one read where the two spans to read
+  overlap or touch.
+  A day once read stays read; a changed day keeps showing what the
   store holds while it is read again in the background, at once where the
   shown range holds it and otherwise once a show or a prefetch covers it,
   and a day being changed does not change the load status. A background

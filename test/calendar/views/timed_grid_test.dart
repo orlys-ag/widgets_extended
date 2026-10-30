@@ -8,6 +8,7 @@
 /// moves off that range.
 library;
 
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -177,6 +178,55 @@ class CountingStore extends CachingCalendarStore<String> {
   bool isRead(DateTime day) {
     isReadCalls++;
     return super.isRead(day);
+  }
+}
+
+/// A data source whose reads fail while [fails] is set, and otherwise
+/// wait in [held] for the test to answer them.
+class HeldSource implements CalendarDataSource<String> {
+  bool fails = true;
+
+  final List<
+    ({
+      DateTime first,
+      DateTime last,
+      Completer<List<CalendarEntry<String>>> answer,
+    })
+  >
+  held =
+      <
+        ({
+          DateTime first,
+          DateTime last,
+          Completer<List<CalendarEntry<String>>> answer,
+        })
+      >[];
+
+  @override
+  Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    if (fails) {
+      return Future<List<CalendarEntry<String>>>.error(
+        StateError("The read failed."),
+      );
+    }
+    final answer = Completer<List<CalendarEntry<String>>>();
+    held.add((first: first, last: last, answer: answer));
+    return answer.future;
+  }
+
+  @override
+  Future<CalendarEntry<String>> create(CalendarEntry<String> draft) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<CalendarEntry<String>> replace(CalendarEntry<String> entry) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<void> delete(String id) {
+    throw UnimplementedError();
   }
 }
 
@@ -1359,5 +1409,62 @@ void main() {
     await tester.pumpAndSettle();
     expect(blocks.toSet(), <HourLabelFormat>{HourLabelFormat.twentyFourHour});
     expect(bars.toSet(), <HourLabelFormat>{HourLabelFormat.twentyFourHour});
+  });
+
+  testWidgets("TG10 a grid of one day whose owner asks the store for its "
+      "week covers the week's failed read, and the cover's retry reads the "
+      "week, so the grid loads and then shows the day", (tester) async {
+    const size = Size(300.0, 400.0);
+    final source = HeldSource();
+    final store = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: nineOClock(), today: tuesday),
+    );
+    addTearDown(now.dispose);
+    final week = (first: monday, last: DateTime(2026, 4, 26));
+    CalendarFailureState? failure;
+
+    store.show(week.first, week.last);
+    await pumpBoxed(
+      tester,
+      size,
+      TimedGrid<String>(
+        store: store,
+        firstDay: tuesday,
+        dayCount: 1,
+        selectedDay: tuesday,
+        now: now,
+        onSelectDay: (day) {},
+        onOpenEntry: (id) {},
+        onCreate: (range) async {},
+        storeRange: week,
+        loadingBuilder: loadingText,
+        failureBuilder: (context, state) {
+          failure = state;
+          return failureText(context, state);
+        },
+      ),
+    );
+    await tester.pump();
+    expect(find.text("failed"), findsOneWidget);
+
+    source.fails = false;
+    failure!.retry();
+    await tester.pump();
+    expect(find.text("loading"), findsOneWidget);
+    expect(
+      <(DateTime, DateTime)>[
+        for (final read in source.held) (read.first, read.last),
+      ],
+      <(DateTime, DateTime)>[(week.first, week.last)],
+    );
+
+    source.held.single.answer.complete(<CalendarEntry<String>>[
+      entryOf("talk", tuesday, 10 * 60, 11 * 60),
+    ]);
+    await tester.pumpAndSettle();
+    expect(find.text("loading"), findsNothing);
+    expect(blockFinder("talk"), findsOneWidget);
   });
 }

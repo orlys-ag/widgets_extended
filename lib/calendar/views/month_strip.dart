@@ -153,10 +153,7 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
 
   /// The month at index 0: [MonthStrip.month] when the strip was first
   /// built. Each index after or before it is the next or previous month.
-  late final DateTime _origin = DateTime(
-    widget.month.year,
-    widget.month.month,
-  );
+  late final DateTime _origin = DateTime(widget.month.year, widget.month.month);
 
   final ScrollController _scroll = ScrollController();
 
@@ -180,6 +177,9 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
   /// Counts the slides that follow [MonthStrip.month], so the end of one a
   /// later slide stopped leaves [_following] to that later one.
   int _follows = 0;
+
+  /// Whether a frame will read the month the strip rests on.
+  bool _prefetchScheduled = false;
 
   /// The theme above the strip, whose motion a slide takes when it starts.
   late CalendarThemeData _theme;
@@ -296,9 +296,7 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
   /// starts, so the fold shrinks one month to one of its weeks.
   void _handleCollapse() {
     final extent = _extent;
-    if (widget.collapse.value <= 0.0 ||
-        !_scroll.hasClients ||
-        extent == null) {
+    if (widget.collapse.value <= 0.0 || !_scroll.hasClients || extent == null) {
       return;
     }
     final pixels = _scroll.position.pixels;
@@ -322,7 +320,8 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
   }
 
   /// Reports a new month at the middle while the strip moves other than to
-  /// follow [MonthStrip.month], and reads the month it rests on.
+  /// follow [MonthStrip.month], and reads the month it rests on, after the
+  /// frame ([_schedulePrefetch]).
   bool _handleScroll(ScrollNotification notification) {
     final extent = _extent;
     if (notification.depth != 0 || extent == null || extent <= 0.0) {
@@ -339,9 +338,29 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
         }
       }
     } else if (notification is ScrollEndNotification) {
-      _prefetch(_monthAt(position.round()));
+      _schedulePrefetch();
     }
     return false;
+  }
+
+  /// After the frame, reads the month the strip rests on, once however
+  /// many scrolls end in it, and asks for that frame where none is under
+  /// way: a scroll can end during layout, as
+  /// [BallisticScrollActivity.applyNewDimensions] ends one where the
+  /// physics gives it no new simulation, when the store must not notify.
+  void _schedulePrefetch() {
+    if (_prefetchScheduled) {
+      return;
+    }
+    _prefetchScheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _prefetchScheduled = false;
+      final extent = _extent;
+      if (mounted && _scroll.hasClients && extent != null && extent > 0.0) {
+        _prefetch(_monthAt((_scroll.position.pixels / extent).round()));
+      }
+    });
+    SchedulerBinding.instance.ensureVisualUpdate();
   }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
