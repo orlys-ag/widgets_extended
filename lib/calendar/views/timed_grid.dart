@@ -553,7 +553,8 @@ CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
 /// time the clock skips requests and reports nothing; one on a time it
 /// repeats keeps the occurrence the gesture began in. Every other move or
 /// resize that lands is a [CalendarMoveRequest], which [onMoveRequest]
-/// receives and the grid shows at its requested times, pending, until its
+/// receives, or with none the store writes ([CalendarStore.requestMove]),
+/// and which the grid shows at its requested times, pending, until that
 /// future completes. Out of edit mode the grid is read-only and asks
 /// [editPolicy] nothing: no block moves or
 /// resizes, and an empty slot creates nothing. In it [editPolicy] limits
@@ -723,7 +724,9 @@ class TimedGrid<T> extends StatefulWidget {
   final ValueChanged<String> onOpenEntry;
 
   /// Opens the create flow for the range a create gesture on empty cells
-  /// picked, and completes when it closes.
+  /// picked, and completes when it closes. A failure of the function,
+  /// whether it throws within the call or its future fails, is not caught:
+  /// a host that handles one passes a function that does.
   final Future<void> Function(CreateRange range) onCreate;
 
   /// Takes each move or resize a gesture lands, and completes once the
@@ -731,9 +734,11 @@ class TimedGrid<T> extends StatefulWidget {
   /// entry at its requested times and pending, as a pending write shows
   /// it: a tap on it opens nothing, and no drag lifts it. Then the grid
   /// shows the store's entry again. Null writes the request through the
-  /// store ([CalendarStore.requestMove]). A failure of the future, the
-  /// store's included, is not caught: a host that handles one passes a
-  /// function that does.
+  /// store ([CalendarStore.requestMove]) and catches the write's failure,
+  /// as a failed write shows the stored entry again; a host that wants to
+  /// see failures passes its own function. A failure of the function,
+  /// whether it throws within the call or its future fails, is not caught:
+  /// a host that handles one passes a function that does.
   final Future<void> Function(CalendarMoveRequest<T> request)? onMoveRequest;
 
   /// Whether the grid is in edit mode: its blocks move and resize, and its
@@ -2174,17 +2179,27 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ([CalendarStore.requestMove]), holding it in [_held] until the future
   /// completes, or fails, a throw within the call included. The hold syncs
   /// within the call ([_handleStore]), as a store write's notify does.
+  ///
+  /// A failure of the store's write, whether [CalendarStore.requestMove]
+  /// throws within the call or its future fails, is caught, as a failed
+  /// write shows the stored entry again. A failure of
+  /// [TimedGrid.onMoveRequest], either way, is left uncaught in the zone.
   void _requestMove(CalendarMoveRequest<T> request) {
     final id = request.entry.id!;
     _held[id] = request;
     _handleStore();
     final onMoveRequest = widget.onMoveRequest;
     final store = widget.store;
-    final moving = Future<void>.sync(() {
-      return onMoveRequest == null
-          ? store.requestMove(request.requested)
-          : onMoveRequest(request);
-    });
+    final Future<void> moving;
+    if (onMoveRequest == null) {
+      moving = Future<CalendarEntry<T>>.sync(() {
+        return store.requestMove(request.requested);
+      }).then<void>((_) {}, onError: (Object error) {});
+    } else {
+      moving = Future<void>.sync(() {
+        return onMoveRequest(request);
+      });
+    }
     moving.whenComplete(() {
       if (!identical(_held[id], request)) {
         return;
@@ -2920,9 +2935,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Requests the drop of [key] at [to] ([_requestMove]). Requests nothing
   /// for a pending entry, for one whose start or end the hours do not
-  /// hold, for a drop [_timesOf] has no times for, and when the entry would
-  /// not change. The board asks [_canDropAt], and so [_policy], before it
-  /// reports a drop, a semantics move's at its activation too.
+  /// hold, for a drop [_timesOf] has no times for, and for one that keeps
+  /// the entry's times. The board asks [_canDropAt], and so [_policy],
+  /// before it reports a drop, a semantics move's at its activation too.
+  ///
+  /// A drop changes only the entry's times, so the times alone tell
+  /// whether it changes the entry: a comparison of the entries would run
+  /// the payload's `==`, the host's code, which may throw.
   void _commit(GridKey key, BoardSpan to, {required bool move}) {
     if (_isPending(key.id)) {
       return;
@@ -2940,17 +2959,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       GridPiece<T>() => _timesOf(shape, stored, from, to, move: move),
       GridBar<T>() => _barTimesOf(stored, from, to, move: move),
     };
-    if (times == null) {
-      return;
-    }
-    final requested = stored.copyWith(start: times.start, end: times.end);
-    if (requested == stored) {
+    if (times == null ||
+        (times.start == stored.start && times.end == stored.end)) {
       return;
     }
     _requestMove(
       CalendarMoveRequest<T>(
         entry: stored,
-        requested: requested,
+        requested: stored.copyWith(start: times.start, end: times.end),
         kind: move ? CalendarMoveKind.move : CalendarMoveKind.resize,
       ),
     );
@@ -3906,10 +3922,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// above the slots an hour from that slot ([_barLandingOf]), and an end
   /// handle over a later day's slot ends there ([_laterDayEndOf]), each
   /// through one request ([_requestMove]), or none where the landing is
-  /// refused; either way [_Dragging.spent] then refuses the board's own
-  /// report. A bar's day-edge resize held at [CalendarEditRules.dayLimit]
-  /// requests the range it is held at. The request's hold syncs within the
-  /// call ([_requestMove]).
+  /// refused or keeps the entry's times, compared alone as in [_commit];
+  /// either way [_Dragging.spent] then refuses the board's own report. A
+  /// bar's day-edge resize held at [CalendarEditRules.dayLimit] requests
+  /// the range it is held at. The request's hold syncs within the call
+  /// ([_requestMove]).
   void _releaseCross(Offset local) {
     final drag = _drag;
     if (drag == null) {
@@ -3955,21 +3972,20 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     final id = drag.key.id;
     final stored = widget.store.storedEntry(id);
-    if (stored == null || _isPending(id)) {
+    if (stored == null ||
+        _isPending(id) ||
+        (write.start == stored.start && write.end == stored.end)) {
       return;
     }
-    final requested = stored.copyWith(start: write.start, end: write.end);
-    if (requested != stored) {
-      _requestMove(
-        CalendarMoveRequest<T>(
-          entry: stored,
-          requested: requested,
-          kind: drag.kind == BoardDragKind.move
-              ? CalendarMoveKind.move
-              : CalendarMoveKind.resize,
-        ),
-      );
-    }
+    _requestMove(
+      CalendarMoveRequest<T>(
+        entry: stored,
+        requested: stored.copyWith(start: write.start, end: write.end),
+        kind: drag.kind == BoardDragKind.move
+            ? CalendarMoveKind.move
+            : CalendarMoveKind.resize,
+      ),
+    );
   }
 
   /// Starts a resize of a selected block for a press over a body cell,
@@ -4029,7 +4045,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// Reports [range] through [TimedGrid.onCreate], marking until the
   /// create flow closes the range from the slot of [anchor] to that of
   /// [focus], or for a range across the strip, [strip], the strip cells of
-  /// their columns and those between.
+  /// their columns and those between. A throw within the call ends the
+  /// mark as a failure of the future does, and is left uncaught in the
+  /// zone as that failure is.
   void _create(
     ({int row, int col}) anchor,
     ({int row, int col}) focus,
@@ -4050,7 +4068,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
     });
     _updateStripMark();
-    widget.onCreate(range).whenComplete(() {
+    Future<void>.sync(() {
+      return widget.onCreate(range);
+    }).whenComplete(() {
       if (mounted && create == _creates) {
         setState(() {
           _creating = null;

@@ -1202,8 +1202,9 @@ class _DayListState<T> extends State<DayList<T>> {
   static const double _failedRowExtent = 48.0;
 
   /// Reports a new top day while a drag, or the fling after it, scrolls
-  /// the list, and reads the days near those it shows once it rests. A
-  /// scroll that reveals a day reports none.
+  /// the list, and reads the days near those it shows once it rests, after
+  /// the frame ([_schedulePrefetch]). A scroll that reveals a day reports
+  /// none.
   bool _handleScroll(ScrollNotification notification) {
     if (notification.depth != 0) {
       return false;
@@ -1222,7 +1223,7 @@ class _DayListState<T> extends State<DayList<T>> {
         _scheduleTopDayCheck();
       }
       _dragScrolling = false;
-      _prefetchShown();
+      _schedulePrefetch();
     }
     return false;
   }
@@ -1289,9 +1290,12 @@ class _DayListState<T> extends State<DayList<T>> {
   }
 
   /// After the frame, reads the weeks of the days the list holds built,
-  /// once however many rows mount in it: a row can mount with no scroll
-  /// to end, as when the tree corrects its offset for a height it
-  /// measured.
+  /// once however many rows mount and scrolls end in it, and asks for that
+  /// frame where none is under way. A row can mount with no scroll to end,
+  /// as when the tree corrects its offset for a height it measured, and a
+  /// scroll can end during layout, as
+  /// [BallisticScrollActivity.applyNewDimensions] ends one where the
+  /// physics gives it no new simulation, when the store must not notify.
   void _schedulePrefetch() {
     if (_prefetchScheduled) {
       return;
@@ -1303,11 +1307,13 @@ class _DayListState<T> extends State<DayList<T>> {
         _prefetchShown();
       }
     });
+    SchedulerBinding.instance.ensureVisualUpdate();
   }
 
-  /// Reads the unread days of the weeks of the mounted rows' days, as the
-  /// week strip reads the weeks of the days it shows.
-  void _prefetchShown() {
+  /// The weeks of the mounted rows' days, from the first day of the
+  /// earliest to the last day of the latest, as [dayNumber]s; null while
+  /// no row is mounted.
+  ({int first, int last})? _mountedWeeks() {
     int? first;
     int? last;
     for (final marker in _markers) {
@@ -1316,22 +1322,42 @@ class _DayListState<T> extends State<DayList<T>> {
       last = last == null ? number : math.max(last, number);
     }
     if (first == null || last == null) {
-      return;
+      return null;
     }
     final weekdays = widget.weekdays;
-    widget.store.prefetch(
-      dateOfDayNumber(weekdays.weekStartOfDay(first)),
-      dateOfDayNumber(weekdays.weekStartOfDay(last) + DateTime.daysPerWeek - 1),
+    return (
+      first: weekdays.weekStartOfDay(first),
+      last: weekdays.weekStartOfDay(last) + DateTime.daysPerWeek - 1,
     );
   }
 
-  /// Reads the shown range again when its read failed, and the days near
-  /// the mounted rows.
-  void _retry() {
-    if (widget.store.status == CalendarLoadStatus.failed) {
-      widget.store.retry();
+  /// Reads the unread days of [_mountedWeeks], as the week strip reads the
+  /// weeks of the days it shows.
+  void _prefetchShown() {
+    final weeks = _mountedWeeks();
+    if (weeks == null) {
+      return;
     }
-    _prefetchShown();
+    widget.store.prefetch(
+      dateOfDayNumber(weeks.first),
+      dateOfDayNumber(weeks.last),
+    );
+  }
+
+  /// A failed row's retry: one [CalendarStore.retry] of the store's shown
+  /// range and [_mountedWeeks], which ends their days' failed marks, so
+  /// the rows of those days show loading at once, and reads their unread
+  /// days; with no row mounted, of the shown range alone.
+  void _retry() {
+    final weeks = _mountedWeeks();
+    if (weeks == null) {
+      widget.store.retry();
+      return;
+    }
+    widget.store.retry(
+      dateOfDayNumber(weeks.first),
+      dateOfDayNumber(weeks.last),
+    );
   }
 
   @override

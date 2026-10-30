@@ -15,6 +15,9 @@ The contract of the four views and their parts. The conventions every layer foll
   from `CalendarLocalizations`. It builds entry content and the loading and
   failure states through the presentation layer's builders, and takes its
   edit limits from the policy layer.
+- **Store calls.** A view calls a store method that can notify, such as
+  `prefetch`, `retry` or a write, from a gesture or after the frame, never
+  during layout.
 - **No UI of its own.** A view opens no route, dialog or form: it reports a
   tap on an entry, a create range, a move or resize request, and edit and
   delete requests through callbacks.

@@ -127,6 +127,9 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
   /// later slide stopped leaves [_following] to that later one.
   int _follows = 0;
 
+  /// Whether a frame will read the weeks of the days the strip shows.
+  bool _prefetchScheduled = false;
+
   /// The theme above the strip, whose motion a slide takes when it starts.
   late CalendarThemeData _theme;
 
@@ -250,7 +253,7 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
 
   /// Reports a new day at the middle while the strip moves other than to
   /// follow the selected day, and reads the weeks of the days it shows
-  /// once it rests.
+  /// once it rests, after the frame ([_schedulePrefetch]).
   bool _handleScroll(ScrollNotification notification) {
     final extent = _extent;
     if (notification.depth != 0 || extent == null) {
@@ -267,14 +270,43 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
         }
       }
     } else if (notification is ScrollEndNotification) {
-      final first = _dayAt((start + _epsilon).floor());
-      final last = _dayAt((start + _count - _epsilon).ceil() - 1);
-      widget.store.prefetch(
-        shownDaysOfWeek(first, widget.weekdays).first,
-        shownDaysOfWeek(last, widget.weekdays).last,
-      );
+      _schedulePrefetch();
     }
     return false;
+  }
+
+  /// After the frame, reads the weeks of the days the strip shows, once
+  /// however many scrolls end in it, and asks for that frame where none is
+  /// under way: a scroll can end during layout, as
+  /// [BallisticScrollActivity.applyNewDimensions] ends one where the
+  /// physics gives it no new simulation, when the store must not notify.
+  void _schedulePrefetch() {
+    if (_prefetchScheduled) {
+      return;
+    }
+    _prefetchScheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _prefetchScheduled = false;
+      if (mounted) {
+        _prefetchShown();
+      }
+    });
+    SchedulerBinding.instance.ensureVisualUpdate();
+  }
+
+  /// Reads the weeks of the days the strip shows.
+  void _prefetchShown() {
+    final extent = _extent;
+    if (extent == null || !_scroll.hasClients) {
+      return;
+    }
+    final start = _scroll.position.pixels / extent;
+    final first = _dayAt((start + _epsilon).floor());
+    final last = _dayAt((start + _count - _epsilon).ceil() - 1);
+    widget.store.prefetch(
+      shownDaysOfWeek(first, widget.weekdays).first,
+      shownDaysOfWeek(last, widget.weekdays).last,
+    );
   }
 
   @override

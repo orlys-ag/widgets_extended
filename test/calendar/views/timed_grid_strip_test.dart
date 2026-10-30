@@ -29,6 +29,7 @@ import 'package:widgets_extended/calendar/presentation/calendar_localizations.da
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
+import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/entry_split.dart';
 import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
@@ -108,17 +109,13 @@ class Shown {
   /// The row of the first slot of the grid shown now: its board's row
   /// count less its slot rows and the room below them.
   int get firstSlotRow {
-    final grid =
-        find.byType(TimedGrid<String>).evaluate().single.widget
-            as TimedGrid<String>;
+    final grid = gridNow();
     return rowCountNow() - grid.hours.slotCountOf(grid.slotMinutes) - 1;
   }
 
   /// The row of the slot starting at [minute] of the grid shown now.
   int rowOf(int minute) {
-    final grid =
-        find.byType(TimedGrid<String>).evaluate().single.widget
-            as TimedGrid<String>;
+    final grid = gridNow();
     return firstSlotRow + (minute - grid.hours.start) ~/ grid.slotMinutes;
   }
 
@@ -132,11 +129,30 @@ class Shown {
   }
 }
 
-/// The number of rows of the grid's board shown now.
+/// The grid shown now, whatever its payload type.
+TimedGrid<Object?> gridNow() {
+  return find
+          .byWidgetPredicate((widget) {
+            return widget is TimedGrid<Object?>;
+          })
+          .evaluate()
+          .single
+          .widget
+      as TimedGrid<Object?>;
+}
+
+/// The number of rows of the grid's board shown now, whatever its payload
+/// type.
 int rowCountNow() {
   final board =
-      find.byType(Board<GridKey, GridShape<String>>).evaluate().single.widget
-          as Board<GridKey, GridShape<String>>;
+      find
+              .byWidgetPredicate((widget) {
+                return widget is Board<GridKey, GridShape<Object?>>;
+              })
+              .evaluate()
+              .single
+              .widget
+          as Board<GridKey, GridShape<Object?>>;
   return board.controller.rows.axis.trackCount;
 }
 
@@ -404,8 +420,9 @@ class HeldSource implements CalendarDataSource<String> {
 /// What a test pumps: the grid of [shown] over [store], in a view of
 /// [size], 800 wide and 2000 tall by default, where every slot of the day
 /// shows at the default [minSlotHeight] and every day column at the
-/// default [minDayWidth]; [creates] records each create range it reports
-/// and [opened] each entry it opens, [onMoveRequest] takes each move and
+/// default [minDayWidth]; [creates] records each create range it reports,
+/// unless [onCreate] takes them, and [opened] each entry it opens,
+/// [onMoveRequest] takes each move and
 /// resize it lands, and [onZoom] each zoom a pinch reports, which the grid
 /// does not show. The grid writes times in [hourLabelFormat]. [editable],
 /// [first], [hours] and [slotMinutes] start as given, and [rebuild]
@@ -427,6 +444,7 @@ class Harness {
     this.minDayWidth = minDayWidthLow,
     this.size = const Size(800.0, 2000.0),
     this.onMoveRequest,
+    this.onCreate,
     this.onZoom,
     this.blockBuilder,
     this.hourLabelFormat = HourLabelFormat.twentyFourHour,
@@ -451,6 +469,7 @@ class Harness {
   final DateTime today;
   final Future<void> Function(CalendarMoveRequest<String> request)?
   onMoveRequest;
+  final Future<void> Function(CreateRange range)? onCreate;
   final void Function(double minSlotHeight, double minDayWidth)? onZoom;
   final CalendarBlockBuilder<String>? blockBuilder;
   final HourLabelFormat hourLabelFormat;
@@ -497,9 +516,11 @@ class Harness {
       now: now,
       onSelectDay: (day) {},
       onOpenEntry: opened.add,
-      onCreate: (range) async {
-        creates.add(range);
-      },
+      onCreate:
+          onCreate ??
+          (range) async {
+            creates.add(range);
+          },
       onMoveRequest: onMoveRequest,
       onZoom: onZoom,
       editable: editable,
@@ -940,6 +961,195 @@ Future<MoveRecordingStore> releaseEndOver(
   await gesture.up();
   await tester.pumpAndSettle();
   return store;
+}
+
+/// Lifts the block of "meet" on Tuesday in [shown], drops it with its top
+/// on Tuesday's 14:00 slot, and pumps a second of frames: a pending block's
+/// indicator runs while its entry is pending, so the frames do not settle.
+///
+/// An error left uncaught in the test's own zone ends the test as failed
+/// ([TestWidgetsFlutterBinding] runs the test body in a zone whose handler
+/// reports it), before [WidgetTester.takeException] can take it. So the
+/// drop's move and release run in a zone of their own, which adds to
+/// [uncaught] each error the futures they start leave uncaught.
+Future<void> dropMeetInZone(
+  WidgetTester tester,
+  Shown shown,
+  List<Object> uncaught,
+) async {
+  final from = tester.getRect(blockFinder("meet", tuesday));
+  final slot = slotRect(tester, shown, tuesday, 14 * 60);
+  final gesture = await lift(tester, from.center);
+  await runZonedGuarded(
+    () async {
+      await gesture.moveBy(
+        slot.topLeft - from.topLeft + const Offset(0.0, 2.0),
+      );
+      await tester.pump();
+      await gesture.up();
+    },
+    (error, stackTrace) {
+      uncaught.add(error);
+    },
+  );
+  await tester.pump();
+  await tester.pump(const Duration(seconds: 1));
+}
+
+/// A [MoveRecordingStore] whose [requestMove] records the move and throws
+/// [thrown] within the call.
+class ThrowingMoveStore extends MoveRecordingStore {
+  ThrowingMoveStore(List<CalendarEntry<String>> entries, this.thrown)
+    : super(entries: entries);
+
+  final Object thrown;
+
+  @override
+  Future<CalendarEntry<String>> requestMove(CalendarEntry<String> requested) {
+    moves.add(requested);
+    throw thrown;
+  }
+}
+
+/// What [TimedGrid.onCreate] throws within the call in CR1.
+class CreateFailure implements Exception {}
+
+/// What [MemoryCalendarStore.onChanged] throws in MR6.
+class HostFailure implements Exception {
+  const HostFailure();
+}
+
+/// What a [Brittle] payload's `==` throws.
+class BrittleFailure implements Exception {
+  const BrittleFailure();
+}
+
+/// A payload whose `==` throws a [BrittleFailure] while [brittle] is set,
+/// as a host's payload's `==` can, and counts each such call in
+/// [compared]; otherwise any two are equal.
+class Brittle {
+  bool brittle = false;
+  int compared = 0;
+
+  @override
+  bool operator ==(Object other) {
+    if (brittle) {
+      compared++;
+      throw const BrittleFailure();
+    }
+    return other is Brittle;
+  }
+
+  @override
+  int get hashCode {
+    return 0;
+  }
+}
+
+/// An entry from [start] to [end] carrying [payload].
+CalendarEntry<Brittle> brittleEntryOf(
+  String id,
+  DateTime start,
+  DateTime end,
+  Brittle payload,
+) {
+  return CalendarEntry<Brittle>(
+    id: id,
+    start: start,
+    end: end,
+    title: id,
+    color: const Color(0xFF336699),
+    payload: payload,
+  );
+}
+
+/// Pumps Week from Monday, in edit mode, over an in-memory store of
+/// [entries], under a day limit of [maxDayCount] where it is given, and
+/// returns the list its onMoveRequest adds each request to.
+Future<List<CalendarMoveRequest<Brittle>>> pumpBrittleWeek(
+  WidgetTester tester,
+  List<CalendarEntry<Brittle>> entries, {
+  int? maxDayCount,
+}) async {
+  final store = MemoryCalendarStore<Brittle>(entries: entries);
+  addTearDown(store.dispose);
+  final today = DateTime(2026, 1, 5);
+  final now = ValueNotifier<CalendarNow>(
+    CalendarNow(time: at(today, 9), today: today),
+  );
+  addTearDown(now.dispose);
+  final requests = <CalendarMoveRequest<Brittle>>[];
+  tester.view.devicePixelRatio = 1.0;
+  tester.view.physicalSize = const Size(800.0, 2000.0);
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(
+    MaterialApp(
+      home: TimedGrid<Brittle>(
+        key: UniqueKey(),
+        store: store,
+        firstDay: monday,
+        dayCount: 7,
+        selectedDay: monday,
+        now: now,
+        onSelectDay: (day) {},
+        onOpenEntry: (id) {},
+        onCreate: (range) async {},
+        onMoveRequest: (request) async {
+          requests.add(request);
+        },
+        editable: true,
+        editPolicy: maxDayCount == null
+            ? null
+            : DayLimitPolicy<Brittle>(maxDayCount),
+        slotMinutes: 15,
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+  return requests;
+}
+
+/// Lets [gesture] go with [payload]'s `==` throwing during the release
+/// alone: the blocks the frames after it build compare the entries they
+/// show, a payload's `==` included.
+Future<void> releaseBrittle(TestGesture gesture, Brittle payload) async {
+  payload.brittle = true;
+  try {
+    await gesture.up();
+  } finally {
+    payload.brittle = false;
+  }
+}
+
+/// Selects "late", Monday 22:00 to Wednesday 00:00, with a long press let
+/// go in place, presses the end grip of its Tuesday block, drags it over
+/// Wednesday's 12:00 slot, and returns the gesture still held.
+Future<TestGesture> holdLateEndOverWednesday(WidgetTester tester) async {
+  final shown = Shown.week(monday);
+  final selecting = await lift(
+    tester,
+    tester.getCenter(blocksOf("late").first),
+  );
+  await selecting.up();
+  await tester.pumpAndSettle();
+  // Setup sanity: the entry is selected, and its Tuesday block holds its
+  // end grip.
+  expect(
+    find.descendant(
+      of: blockFinder("late", tuesday),
+      matching: find.byKey(blockGripKey("late", AxisDirection.down)),
+    ),
+    findsOneWidget,
+  );
+  final block = tester.getRect(blockFinder("late", tuesday));
+  final from = Offset(block.center.dx, block.bottom - 2.0);
+  final to = slotRect(tester, shown, wednesday, 12 * 60).center;
+  final gesture = await tester.startGesture(from);
+  await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+  await tester.pump();
+  await gesture.moveTo(to);
+  await tester.pump();
+  return gesture;
 }
 
 const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
@@ -3923,66 +4133,279 @@ void main() {
     }
   });
 
-  testWidgets("MR3 a request whose function throws within the call, and one "
-      "with none whose write the caching store fails, each show the block "
-      "at its stored times again, and their errors are not caught", (
-    tester,
-  ) async {
+  testWidgets("MR3 a request whose future fails after the call, and one "
+      "whose function throws within it, each show the block at its stored "
+      "times again, and their errors are not caught", (tester) async {
     final shown = Shown.week(monday);
     final meet = entryOf("meet", at(tuesday, 10), at(tuesday, 11));
     final thrown = StateError("Refused.");
     final uncaught = <Object>[];
-    // The drop runs in a zone of its own, which receives the errors the
-    // futures it starts leave uncaught. A pending block's indicator runs
-    // while the entry is pending, so the frames after it are pumped for
-    // a time rather than settled.
-    Future<void> dropInZone() async {
-      final from = tester.getRect(blockFinder("meet", tuesday));
-      final slot = slotRect(tester, shown, tuesday, 14 * 60);
+    final answers = <Completer<void>>[];
+    await Harness(
+      storeOf(<CalendarEntry<String>>[meet]),
+      shown,
+      onMoveRequest: (request) {
+        // Made in the drop's zone, where the grid listens to it: a
+        // future's error reaches no listener in another error zone
+        // ([Zone.inSameErrorZone]).
+        final answer = Completer<void>();
+        answers.add(answer);
+        return answer.future;
+      },
+    ).pump(tester);
+    final stored = tester.getRect(blockFinder("meet", tuesday));
+    final requested = stored.translate(
+      0.0,
+      slotRect(tester, shown, tuesday, 14 * 60).top -
+          slotRect(tester, shown, tuesday, 10 * 60).top,
+    );
+    await dropMeetInZone(tester, shown, uncaught);
+    // Setup sanity: the drop's request runs, its block held at the
+    // requested times.
+    expect(answers, hasLength(1));
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(requested));
+    answers.single.completeError(thrown);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(uncaught, <Object>[same(thrown)]);
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
+
+    uncaught.clear();
+    await Harness(
+      storeOf(<CalendarEntry<String>>[meet]),
+      shown,
+      onMoveRequest: (request) {
+        throw thrown;
+      },
+    ).pump(tester);
+    await dropMeetInZone(tester, shown, uncaught);
+    expect(uncaught, <Object>[same(thrown)]);
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
+  });
+
+  testWidgets("MR4 with no onMoveRequest, a move whose write the caching "
+      "store fails leaves no error uncaught, and its block shows the stored "
+      "entry again, at its stored times and not pending", (tester) async {
+    final shown = Shown.week(monday);
+    final source = HeldSource(<CalendarEntry<String>>[
+      entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
+    ]);
+    final store = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(store.dispose);
+    store.show(monday, sunday);
+    await Harness(store, shown).pump(tester);
+    final stored = tester.getRect(blockFinder("meet", tuesday));
+    final requested = stored.translate(
+      0.0,
+      slotRect(tester, shown, tuesday, 14 * 60).top -
+          slotRect(tester, shown, tuesday, 10 * 60).top,
+    );
+    final uncaught = <Object>[];
+    await dropMeetInZone(tester, shown, uncaught);
+    // Setup sanity: the drop's move shows at the requested times, and the
+    // grid wrote it through the store.
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(requested));
+    expect(source.replaces, hasLength(1));
+    source.replaces.single.completeError(StateError("Offline."));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(uncaught, isEmpty);
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
+    expect(
+      find.descendant(
+        of: blockFinder("meet", tuesday),
+        matching: find.byType(CalendarActivityIndicator),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets("MR5 with no onMoveRequest, a move whose write the store "
+      "throws within the call leaves no error uncaught, and its block shows "
+      "at its stored times again", (tester) async {
+    final shown = Shown.week(monday);
+    final meet = entryOf("meet", at(tuesday, 10), at(tuesday, 11));
+    final store = ThrowingMoveStore(<CalendarEntry<String>>[
+      meet,
+    ], StateError("Refused."));
+    addTearDown(store.dispose);
+    await Harness(store, shown).pump(tester);
+    final stored = tester.getRect(blockFinder("meet", tuesday));
+    final uncaught = <Object>[];
+    await dropMeetInZone(tester, shown, uncaught);
+    // Setup sanity: the grid wrote the drop's move through the store.
+    expect(store.moves, <CalendarEntry<String>>[
+      meet.copyWith(start: at(tuesday, 14), end: at(tuesday, 15)),
+    ]);
+    expect(uncaught, isEmpty);
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
+  });
+
+  testWidgets("MR6 with no onMoveRequest, a move the in-memory store "
+      "stores, whose onChanged then throws, leaves no error uncaught and "
+      "reports the throw", (tester) async {
+    final shown = Shown.week(monday);
+    final meet = entryOf("meet", at(tuesday, 10), at(tuesday, 11));
+    const thrown = HostFailure();
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[meet],
+      onChanged: (old, entry) {
+        throw thrown;
+      },
+    );
+    addTearDown(store.dispose);
+    await Harness(store, shown).pump(tester);
+    final uncaught = <Object>[];
+    await dropMeetInZone(tester, shown, uncaught);
+    // Setup sanity: the store stored the drop's move.
+    expect(
+      store.storedEntry("meet"),
+      meet.copyWith(start: at(tuesday, 14), end: at(tuesday, 15)),
+    );
+    expect(uncaught, isEmpty);
+    expect(tester.takeException(), same(thrown));
+  });
+
+  testWidgets("MR7 a block dropped back where it was requests nothing, and "
+      "with a payload whose == throws during the release throws nothing and "
+      "compares no payload; dropped on another slot with that payload, it "
+      "requests the move", (tester) async {
+    final shown = Shown.week(monday);
+    final payload = Brittle();
+    final meet = brittleEntryOf(
+      "meet",
+      at(tuesday, 10),
+      at(tuesday, 11),
+      payload,
+    );
+    final requests = await pumpBrittleWeek(tester, <CalendarEntry<Brittle>>[
+      meet,
+    ]);
+    final from = tester.getRect(blockFinder("meet", tuesday));
+    final away =
+        slotRect(tester, shown, tuesday, 12 * 60).top -
+        slotRect(tester, shown, tuesday, 10 * 60).top;
+    // Lifts the block, carries it two hours down and back, and returns the
+    // gesture still held.
+    Future<TestGesture> carryBack() async {
       final gesture = await lift(tester, from.center);
+      await gesture.moveBy(Offset(0.0, away));
+      await tester.pump();
+      await gesture.moveBy(Offset(0.0, -away));
+      await tester.pump();
+      return gesture;
+    }
+
+    // With the payload's == answering, so a request would reach the
+    // grid's onMoveRequest: where it throws, the grid's sync of a request
+    // keeping the times compares the payloads before that.
+    var gesture = await carryBack();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(requests, isEmpty);
+
+    gesture = await carryBack();
+    await releaseBrittle(gesture, payload);
+    expect(tester.takeException(), isNull);
+    expect(payload.compared, 0);
+    await tester.pumpAndSettle();
+
+    final slot = slotRect(tester, shown, tuesday, 14 * 60);
+    gesture = await lift(tester, from.center);
+    await gesture.moveBy(slot.topLeft - from.topLeft + const Offset(0.0, 2.0));
+    await tester.pump();
+    await releaseBrittle(gesture, payload);
+    await tester.pumpAndSettle();
+    expect(
+      <(DateTime, DateTime, CalendarMoveKind)>[
+        for (final request in requests)
+          (request.requested.start, request.requested.end, request.kind),
+      ],
+      <(DateTime, DateTime, CalendarMoveKind)>[
+        (at(tuesday, 14), at(tuesday, 15), CalendarMoveKind.move),
+      ],
+    );
+  });
+
+  testWidgets("MR8 an end handle dragged into a later day and held at the "
+      "day limit at the end its entry has requests nothing, and with a "
+      "payload whose == throws during the release throws nothing and "
+      "compares no payload; with no limit, it requests the later end", (
+    tester,
+  ) async {
+    final payload = Brittle();
+    final late = brittleEntryOf("late", at(monday, 22), wednesday, payload);
+    var requests = await pumpBrittleWeek(tester, <CalendarEntry<Brittle>>[
+      late,
+    ], maxDayCount: 2);
+    // With the payload's == answering first, as in MR7.
+    var gesture = await holdLateEndOverWednesday(tester);
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(requests, isEmpty);
+
+    gesture = await holdLateEndOverWednesday(tester);
+    await releaseBrittle(gesture, payload);
+    expect(tester.takeException(), isNull);
+    expect(payload.compared, 0);
+    await tester.pumpAndSettle();
+
+    requests = await pumpBrittleWeek(tester, <CalendarEntry<Brittle>>[late]);
+    gesture = await holdLateEndOverWednesday(tester);
+    await releaseBrittle(gesture, payload);
+    await tester.pumpAndSettle();
+    expect(
+      <(DateTime, DateTime, CalendarMoveKind)>[
+        for (final request in requests)
+          (request.requested.start, request.requested.end, request.kind),
+      ],
+      <(DateTime, DateTime, CalendarMoveKind)>[
+        (at(monday, 22), at(wednesday, 12, 15), CalendarMoveKind.resize),
+      ],
+    );
+  });
+
+  testWidgets("CR1 a create whose onCreate throws within the call clears "
+      "its marked range, and the throw is left uncaught in the zone, as a "
+      "failure of its future is", (tester) async {
+    for (final shown in bothGrids()) {
+      final created = <CreateRange>[];
+      final failure = CreateFailure();
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[]),
+        shown,
+        onCreate: (range) {
+          created.add(range);
+          throw failure;
+        },
+      );
+      await harness.pump(tester);
+      final from = slotRect(tester, shown, tuesday, 10 * 60).center;
+      final to = slotRect(tester, shown, tuesday, 12 * 60).center;
+      final gesture = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+      await tester.pump();
+      await gesture.moveTo(to);
+      await tester.pump();
+      // The release runs in a zone of its own, as in [dropMeetInZone].
+      final uncaught = <Object>[];
       await runZonedGuarded(
         () async {
-          await gesture.moveBy(
-            slot.topLeft - from.topLeft + const Offset(0.0, 2.0),
-          );
-          await tester.pump();
           await gesture.up();
         },
         (error, stackTrace) {
           uncaught.add(error);
         },
       );
-      await tester.pump();
-      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(created, hasLength(1), reason: shown.name);
+      expect(strokedRects(tester), isEmpty, reason: shown.name);
+      expect(tester.takeException(), isNull, reason: shown.name);
+      expect(uncaught, <Matcher>[same(failure)], reason: shown.name);
     }
-
-    final memory = storeOf(<CalendarEntry<String>>[meet]);
-    await Harness(
-      memory,
-      shown,
-      onMoveRequest: (request) {
-        throw thrown;
-      },
-    ).pump(tester);
-    final stored = tester.getRect(blockFinder("meet", tuesday));
-    await dropInZone();
-    expect(uncaught, <Object>[same(thrown)]);
-    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
-
-    uncaught.clear();
-    final source = HeldSource(<CalendarEntry<String>>[meet]);
-    final caching = CachingCalendarStore<String>(dataSource: source);
-    addTearDown(caching.dispose);
-    caching.show(monday, sunday);
-    await Harness(caching, shown).pump(tester);
-    await dropInZone();
-    // Setup sanity: with no onMoveRequest the drop wrote to the store.
-    expect(source.replaces, hasLength(1));
-    source.replaces.single.completeError(thrown);
-    await tester.pump();
-    await tester.pump(const Duration(seconds: 1));
-    expect(uncaught, <Object>[same(thrown)]);
-    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
   });
 
   testWidgets("GM1 while a block is lifted nothing creates: no drag or tap "

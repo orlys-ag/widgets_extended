@@ -4,6 +4,7 @@ library;
 
 import 'dart:ui' show Color;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 
@@ -90,6 +91,11 @@ Object? Function() errorOf(Future<Object?> call) {
 
 List<String> idsOf(List<CalendarShownEntry<String>> shown) {
   return <String>[for (final entry in shown) entry.id];
+}
+
+/// What MS12's [MemoryCalendarStore.onChanged] throws.
+class HostFailure implements Exception {
+  const HostFailure();
 }
 
 final DateTime day = DateTime(2026, 4, 22);
@@ -358,6 +364,109 @@ void main() {
       expect(refreshed, isTrue);
       expect(recorder.events, isEmpty);
       expect(idsOf(store.entriesOn(day)), <String>["item-1"]);
+    },
+  );
+
+  test("MS11 a retry of a range changes nothing and notifies nothing, and "
+      "one given one of first and last throws an ArgumentError", () {
+    final recorder = Recorder();
+    final item = task("item-1", day, 600, 660);
+    final store = recorder.store(entries: <CalendarEntry<String>>[item]);
+    final last = DateTime(2026, 4, 28);
+    store.retry(day, last);
+    expect(recorder.events, isEmpty);
+    expect(store.entries, <CalendarEntry<String>>[item]);
+    expect(() {
+      store.retry(day);
+    }, throwsArgumentError);
+    expect(() {
+      store.retry(null, last);
+    }, throwsArgumentError);
+  });
+
+  test(
+    "MS12 a create, an update, a move and a delete whose onChanged "
+    "throws each apply their change and complete as they would without "
+    "the throw, and the throw is reported after the store notifies",
+    () async {
+      final item = task("item-1", day, 600, 660);
+      final draft = task(null, day, 840, 900);
+      final created = draft.copyWith(id: "entry-1");
+      final renamed = item.copyWith(title: "Renamed");
+      final moved = item.copyWith(start: at(day, 720), end: at(day, 780));
+      final writes =
+          <
+            String,
+            (
+              Future<Object?> Function(MemoryCalendarStore<String> store),
+              Object?,
+              List<CalendarEntry<String>>,
+            )
+          >{
+            "create": (
+              (store) {
+                return store.create(draft);
+              },
+              created,
+              <CalendarEntry<String>>[item, created],
+            ),
+            "update": (
+              (store) {
+                return store.update(renamed);
+              },
+              renamed,
+              <CalendarEntry<String>>[renamed],
+            ),
+            "move": (
+              (store) {
+                return store.requestMove(moved);
+              },
+              moved,
+              <CalendarEntry<String>>[moved],
+            ),
+            "delete": (
+              (store) {
+                return store.requestDelete("item-1");
+              },
+              null,
+              <CalendarEntry<String>>[],
+            ),
+          };
+      for (final MapEntry(key: name, value: (write, completed, held))
+          in writes.entries) {
+        const thrown = HostFailure();
+        final events = <String>[];
+        final reported = <Object>[];
+        final store = MemoryCalendarStore<String>(
+          entries: <CalendarEntry<String>>[item],
+          onChanged: (old, entry) {
+            events.add("changed");
+            throw thrown;
+          },
+        );
+        store.addListener(() {
+          events.add("notified");
+        });
+        final onError = FlutterError.onError;
+        FlutterError.onError = (details) {
+          events.add("reported");
+          reported.add(details.exception);
+        };
+        final Object? outcome;
+        try {
+          outcome = await outcomeOf(write(store));
+        } finally {
+          FlutterError.onError = onError;
+        }
+        expect(outcome, completed, reason: name);
+        expect(store.entries, unorderedEquals(held), reason: name);
+        expect(events, <String>[
+          "notified",
+          "changed",
+          "reported",
+        ], reason: name);
+        expect(reported, <Object>[same(thrown)], reason: name);
+      }
     },
   );
 }

@@ -1,6 +1,8 @@
 /// The store that holds the entries the host gives it.
 library;
 
+import 'package:flutter/foundation.dart';
+
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
 import 'calendar_store.dart';
@@ -17,9 +19,13 @@ typedef CalendarEntryChanged<T> =
 /// and a move, and refuses no write for sharing time with another entry.
 /// A write that passes is applied within the call, so no write is ever
 /// pending: the store notifies its listeners once, then calls [onChanged]
-/// with the old and the new entry. A refused write fails to its caller,
-/// changing nothing and notifying nothing. An update, move or delete of
-/// an id no entry has fails with an [ArgumentError].
+/// with the old and the new entry. A throw from [onChanged] is reported
+/// through [FlutterError.reportError], as [ChangeNotifier.notifyListeners]
+/// reports a listener's, and fails no write: the write has applied its
+/// change by then, and completes as it would without the throw. A
+/// refused write fails to its caller, changing nothing and notifying
+/// nothing. An update, move or delete of an id no entry has fails with an
+/// [ArgumentError].
 ///
 /// Every range is shown and every day read: [status] is ready, and [show],
 /// [retry] and [prefetch] do nothing. The store is its entries' source,
@@ -37,7 +43,9 @@ class MemoryCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// Receives each create, update, move and delete the store applies,
-  /// after its listeners.
+  /// after its listeners. A throw from it is reported through
+  /// [FlutterError.reportError] and fails no write, which has applied its
+  /// change by then.
   final CalendarEntryChanged<T>? onChanged;
 
   final CalendarEntryIndex<T> _index = CalendarEntryIndex<T>(
@@ -103,9 +111,15 @@ class MemoryCalendarStore<T> extends CalendarStore<T> {
   @override
   void show(DateTime first, DateTime last) {}
 
-  /// Does nothing: no read fails.
+  /// Does nothing: no read fails. Throws an [ArgumentError] where one of
+  /// [first] and [last] is given without the other, as
+  /// [CalendarStore.retry] does.
   @override
-  void retry() {}
+  void retry([DateTime? first, DateTime? last]) {
+    if ((first == null) != (last == null)) {
+      throw ArgumentError("A retry takes both first and last, or neither.");
+    }
+  }
 
   /// Does nothing: every day is read.
   @override
@@ -247,7 +261,7 @@ class MemoryCalendarStore<T> extends CalendarStore<T> {
     }
     _index.forget(id);
     notifyListeners();
-    onChanged?.call(old, null);
+    _reportChange(old, null);
   }
 
   /// The stored entry [id] names; throws an [ArgumentError], named [name],
@@ -267,6 +281,32 @@ class MemoryCalendarStore<T> extends CalendarStore<T> {
   void _apply(CalendarEntry<T>? old, CalendarEntry<T> entry) {
     _index.put(entry);
     notifyListeners();
-    onChanged?.call(old, entry);
+    _reportChange(old, entry);
+  }
+
+  /// Calls [onChanged] with [old] and [entry], once the change is applied
+  /// and the listeners notified. A throw from it is reported through
+  /// [FlutterError.reportError], as [ChangeNotifier.notifyListeners]
+  /// reports a listener's, rather than fail a write that applied its
+  /// change.
+  void _reportChange(CalendarEntry<T>? old, CalendarEntry<T>? entry) {
+    final onChanged = this.onChanged;
+    if (onChanged == null) {
+      return;
+    }
+    try {
+      onChanged(old, entry);
+    } on Object catch (exception, stack) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: exception,
+          stack: stack,
+          library: "widgets_extended calendar",
+          context: ErrorDescription(
+            "while calling the onChanged of a MemoryCalendarStore",
+          ),
+        ),
+      );
+    }
   }
 }
