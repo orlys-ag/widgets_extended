@@ -108,8 +108,9 @@ typedef CalendarHeaderBuilder =
 /// year, or the month picker's year while it shows, and opens or closes
 /// the picker when tapped; and the name of the view shown, with a menu of
 /// [CalendarHeaderDetails.views] where it lists more than one. Drawn in the
-/// [CalendarTheme] above [context]. Its menu needs [MaterialLocalizations]
-/// above it.
+/// [CalendarTheme] above [context], under a transparent [Material] of the
+/// ambient text style that it puts in where no [Material] is above it. Its
+/// menu needs [MaterialLocalizations] above it.
 Widget defaultCalendarHeaderBuilder(
   BuildContext context,
   CalendarHeaderDetails details,
@@ -214,7 +215,7 @@ class CalendarHeader extends StatelessWidget {
     final year = details.pickerYear;
     final day = details.day;
     final viewName = Text(_viewLabel(strings, details.view), style: titleStyle);
-    return Row(
+    final row = Row(
       children: <Widget>[
         Expanded(
           child: Row(
@@ -297,6 +298,18 @@ class CalendarHeader extends StatelessWidget {
             ),
           ),
       ],
+    );
+    // The chevrons, the title's ink and the menu need a Material above
+    // them. One put in keeps the ambient text style, which _titleWidth
+    // measures the title in.
+    if (LookupBoundary.findAncestorWidgetOfExactType<Material>(context) !=
+        null) {
+      return row;
+    }
+    return Material(
+      type: MaterialType.transparency,
+      textStyle: DefaultTextStyle.of(context).style,
+      child: row,
     );
   }
 }

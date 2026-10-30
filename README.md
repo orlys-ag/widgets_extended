@@ -432,9 +432,12 @@ times, `DayLimitPolicy` caps the days a range covers, and
 motion and icon the views draw. Give it through a `CalendarTheme`, or in a
 Material app through a `CalendarThemeExtension`. A Material app with
 neither gets one derived from its `ColorScheme`, and an app with no
-Material theme the built-in one. The built-in header's view menu needs
-`MaterialLocalizations` above the calendar, as a `MaterialApp` gives;
-without them, pass `showsHeader: false` or a `headerBuilder`. The block,
+Material theme the built-in one. In an app with no `Material` above the
+calendar, the built-in header puts a transparent one above itself; its
+view menu, shown where the calendar lists more than one view, needs
+`MaterialLocalizations`, which a `MaterialApp` gives and another app adds
+with `DefaultMaterialLocalizations.delegate`. With a `headerBuilder` of
+yours, or `showsHeader: false`, the calendar needs neither. The block,
 chip, card, add-button, loading and failure builders replace what the
 views draw, and `CalendarLocalizations` writes every word, in US English
 by default.

@@ -168,8 +168,9 @@ final class CalendarEntryTapDetails<T> {
 /// year; a month picked selects its day of the selected day's day of the
 /// month, as a month step does. [headerBuilder] builds the header in
 /// place of the built-in one, and [showsHeader] false builds none, nor in
-/// Week and Month the header's card. The built-in header's view menu needs
-/// [MaterialLocalizations] above the calendar.
+/// Week and Month the header's card. The built-in header puts a
+/// transparent [Material] above itself where none is above, and its view
+/// menu needs [MaterialLocalizations] above the calendar.
 ///
 /// [controller] holds the view and the selected day, which the host sets
 /// and listens to, the range of days the calendar asks [store] to show,
