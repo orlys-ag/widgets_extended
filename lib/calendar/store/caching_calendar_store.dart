@@ -190,11 +190,11 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   Object? _loadError;
   bool _disposed = false;
 
-  /// The calls into the store under way, nested ones included
-  /// ([_batch]).
+  /// How many [_batch] calls are under way, nested ones included.
   int _depth = 0;
 
-  /// Whether a call under way changed what the store answers.
+  /// Whether a [_notify] came while a [_batch] call was under way, which
+  /// the outermost one has yet to notify.
   bool _notifyPending = false;
 
   /// Ready once every day of the shown range is read; failed once one of
@@ -219,8 +219,12 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// read is ready at once; otherwise it is loading, and sends a read of
   /// its unread days and its changed days unless a read in flight covers
   /// the unread ones. Changed days of the range that no read in flight
-  /// covers are read again in the background. Showing the range
-  /// already shown changes nothing, and so does a show after [dispose].
+  /// covers are read again in the background. A read the source answers
+  /// within the call, as a [SynchronousFuture]'s does, is applied within
+  /// it, so the call can leave the range ready, or failed where such a
+  /// read failed and left a day of it unread with no read in flight.
+  /// Showing the range already shown changes nothing, and so does a show
+  /// after [dispose].
   @override
   void show(DateTime first, DateTime last) {
     final firstDay = dayNumber(first);
@@ -232,14 +236,13 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       _shownFirst = firstDay;
       _shownLast = lastDay;
       _showCount++;
-      _endFailure();
       final unread = _unreadSpan();
       if (unread != null &&
           _inFlightCovering(unread.first, unread.last) == null) {
         _readShown(unread);
       }
       _readChangedShown();
-      _settleStatus();
+      _settleStatus(requested: true);
       _notify();
     });
   }
@@ -284,12 +287,11 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       return;
     }
     _batch(() {
-      _endFailure();
       final unread = _unreadSpan();
       if (unread != null) {
         _readShown(unread);
       }
-      _settleStatus();
+      _settleStatus(requested: true);
       _notify();
     });
   }
@@ -351,7 +353,8 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
 
   /// Takes every entry to have changed, as [invalidate] does for every
   /// day, and reads the whole shown range again at once, so a failed
-  /// shown range is loading again, as after [retry]. A range whose days
+  /// shown range is loading again, as after [retry], unless the source
+  /// answers that read within the call, as for [show]. A range whose days
   /// are all read stays ready, and a failed read leaves its days
   /// changed. Completes once that read answers, or fails with the error it
   /// failed with; completes at once before the first [show] and after
@@ -369,9 +372,8 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     }
     final done = Completer<void>();
     _batch(() {
-      final ended = _endFailure();
       _send(first, last, done: done);
-      if (_settleStatus() || ended) {
+      if (_settleStatus(requested: true)) {
         _notify();
       }
     });
@@ -528,14 +530,13 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// Sets [status] from the shown range's days, and returns whether it
   /// changed: ready once none is unread; failed once one is unread with
   /// no read in flight, its last read having failed; and otherwise
-  /// loading, a read in flight covering each unread one. A failed status
-  /// stays failed rather than turning loading, so a read the range did
-  /// not ask for leaves it failed; a show, a retry or a refresh ends it
-  /// before it sends its reads ([_endFailure]). [failure], the
-  /// error of a read that just left a day of the range unread with no
-  /// read in flight, is [loadError] while the range is failed, which
-  /// otherwise keeps the latest such error.
-  bool _settleStatus({Object? failure}) {
+  /// loading, a read in flight covering each unread one. A failed range
+  /// turns loading only where [requested], as a show, a retry or a
+  /// refresh settles it once it has sent its reads, and not for a read it
+  /// did not ask for. [failure], the error of a read that just left a day
+  /// of the range unread with no read in flight, is [loadError] while the
+  /// range is failed, which otherwise keeps the latest such error.
+  bool _settleStatus({Object? failure, bool requested = false}) {
     final first = _shownFirst;
     final last = _shownLast;
     if (first == null || last == null) {
@@ -551,7 +552,8 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
         status = CalendarLoadStatus.loading;
       }
     }
-    if (_status == CalendarLoadStatus.failed &&
+    if (!requested &&
+        _status == CalendarLoadStatus.failed &&
         status == CalendarLoadStatus.loading) {
       status = CalendarLoadStatus.failed;
     }
@@ -566,21 +568,9 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     return true;
   }
 
-  /// Ends a failed status before a show, a retry or a refresh sends its
-  /// reads, so a read answered within the call settles the range from
-  /// loading; returns whether it ended one.
-  bool _endFailure() {
-    if (_status != CalendarLoadStatus.failed) {
-      return false;
-    }
-    _status = CalendarLoadStatus.loading;
-    _loadError = null;
-    return true;
-  }
-
-  /// Runs [body], a call into the store, and notifies once as the
-  /// outermost such call returns, where any of it changed what the store
-  /// answers ([_notify]).
+  /// Runs [body] as one call into the store. A [_notify] while a [_batch]
+  /// call is under way is left to the outermost one, which notifies once
+  /// as it ends if any came.
   R _batch<R>(R Function() body) {
     _depth++;
     try {
@@ -594,8 +584,9 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     }
   }
 
-  /// Notes that what the store answers changed: notifies as the call
-  /// under way returns ([_batch]), or at once outside one.
+  /// Notes that what the store answers changed: the outermost [_batch]
+  /// call under way notifies as it ends, and with none under way this
+  /// notifies at once.
   void _notify() {
     if (_depth > 0) {
       _notifyPending = true;

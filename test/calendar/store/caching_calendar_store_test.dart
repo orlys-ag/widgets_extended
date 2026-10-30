@@ -332,6 +332,41 @@ class SyncSource implements CalendarDataSource<String> {
   }
 }
 
+/// A data source whose reads take [script]'s answers in turn: a list
+/// answers within the call, through a [SynchronousFuture], and a null
+/// leaves the read in flight for good.
+class ScriptedSource implements CalendarDataSource<String> {
+  final List<List<CalendarEntry<String>>?> script =
+      <List<CalendarEntry<String>>?>[];
+
+  int reads = 0;
+
+  @override
+  Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    reads++;
+    final answer = script.removeAt(0);
+    if (answer == null) {
+      return Completer<List<CalendarEntry<String>>>().future;
+    }
+    return SynchronousFuture<List<CalendarEntry<String>>>(answer);
+  }
+
+  @override
+  Future<CalendarEntry<String>> create(CalendarEntry<String> draft) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<CalendarEntry<String>> replace(CalendarEntry<String> entry) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<void> delete(String id) {
+    throw UnimplementedError();
+  }
+}
+
 void main() {
   test("M1 a read range sends nothing", () async {
     final harness = Harness();
@@ -1969,6 +2004,34 @@ void main() {
       "retry": StateError,
       "refresh": StateError,
     });
+  });
+
+  test("FR39a a show whose read fails within the call leaves the range "
+      "loading while its read of the changed days covers the failed "
+      "ones", () async {
+    final source = ScriptedSource();
+    final store = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(store.dispose);
+    source.script.addAll(<List<CalendarEntry<String>>?>[
+      <CalendarEntry<String>>[],
+      <CalendarEntry<String>>[],
+    ]);
+    store.prefetch(weekFirst, weekFirst);
+    store.prefetch(weekLast, weekLast);
+    store.invalidate(weekFirst, weekLast);
+    // The show's read of its unread and changed days answers an entry
+    // with no id within the call, which fails it; its read of the
+    // changed days, sent next, stays in flight.
+    source.script.addAll(<List<CalendarEntry<String>>?>[
+      <CalendarEntry<String>>[draft(DateTime(2026, 4, 21), 600, 660)],
+      null,
+    ]);
+
+    store.show(weekFirst, weekLast);
+    expect(source.reads, 4);
+    expect(store.readFailed(DateTime(2026, 4, 21)), isFalse);
+    expect(store.status, CalendarLoadStatus.loading);
+    expect(store.loadError, isNull);
   });
 
   test("FR40 showing a range after a failure tells the listeners only that "
