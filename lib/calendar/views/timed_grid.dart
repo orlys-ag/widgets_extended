@@ -2932,9 +2932,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Requests the drop of [key] at [to] ([_requestMove]). Requests nothing
   /// for a pending entry, for one whose start or end the hours do not
-  /// hold, for a drop [_timesOf] has no times for, and when the entry would
-  /// not change. The board asks [_canDropAt], and so [_policy], before it
-  /// reports a drop, a semantics move's at its activation too.
+  /// hold, for a drop [_timesOf] has no times for, and for one that keeps
+  /// the entry's times. The board asks [_canDropAt], and so [_policy],
+  /// before it reports a drop, a semantics move's at its activation too.
+  ///
+  /// A drop changes only the entry's times, so the times alone tell
+  /// whether it changes the entry: a comparison of the entries would run
+  /// the payload's `==`, the host's code, which may throw.
   void _commit(GridKey key, BoardSpan to, {required bool move}) {
     if (_isPending(key.id)) {
       return;
@@ -2952,17 +2956,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       GridPiece<T>() => _timesOf(shape, stored, from, to, move: move),
       GridBar<T>() => _barTimesOf(stored, from, to, move: move),
     };
-    if (times == null) {
-      return;
-    }
-    final requested = stored.copyWith(start: times.start, end: times.end);
-    if (requested == stored) {
+    if (times == null ||
+        (times.start == stored.start && times.end == stored.end)) {
       return;
     }
     _requestMove(
       CalendarMoveRequest<T>(
         entry: stored,
-        requested: requested,
+        requested: stored.copyWith(start: times.start, end: times.end),
         kind: move ? CalendarMoveKind.move : CalendarMoveKind.resize,
       ),
     );
@@ -3918,10 +3919,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// above the slots an hour from that slot ([_barLandingOf]), and an end
   /// handle over a later day's slot ends there ([_laterDayEndOf]), each
   /// through one request ([_requestMove]), or none where the landing is
-  /// refused; either way [_Dragging.spent] then refuses the board's own
-  /// report. A bar's day-edge resize held at [CalendarEditRules.dayLimit]
-  /// requests the range it is held at. The request's hold syncs within the
-  /// call ([_requestMove]).
+  /// refused or keeps the entry's times, compared alone as in [_commit];
+  /// either way [_Dragging.spent] then refuses the board's own report. A
+  /// bar's day-edge resize held at [CalendarEditRules.dayLimit] requests
+  /// the range it is held at. The request's hold syncs within the call
+  /// ([_requestMove]).
   void _releaseCross(Offset local) {
     final drag = _drag;
     if (drag == null) {
@@ -3967,21 +3969,20 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     final id = drag.key.id;
     final stored = widget.store.storedEntry(id);
-    if (stored == null || _isPending(id)) {
+    if (stored == null ||
+        _isPending(id) ||
+        (write.start == stored.start && write.end == stored.end)) {
       return;
     }
-    final requested = stored.copyWith(start: write.start, end: write.end);
-    if (requested != stored) {
-      _requestMove(
-        CalendarMoveRequest<T>(
-          entry: stored,
-          requested: requested,
-          kind: drag.kind == BoardDragKind.move
-              ? CalendarMoveKind.move
-              : CalendarMoveKind.resize,
-        ),
-      );
-    }
+    _requestMove(
+      CalendarMoveRequest<T>(
+        entry: stored,
+        requested: stored.copyWith(start: write.start, end: write.end),
+        kind: drag.kind == BoardDragKind.move
+            ? CalendarMoveKind.move
+            : CalendarMoveKind.resize,
+      ),
+    );
   }
 
   /// Starts a resize of a selected block for a press over a body cell,

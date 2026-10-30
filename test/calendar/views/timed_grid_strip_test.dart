@@ -29,6 +29,7 @@ import 'package:widgets_extended/calendar/presentation/calendar_localizations.da
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
+import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/entry_split.dart';
 import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
@@ -108,17 +109,13 @@ class Shown {
   /// The row of the first slot of the grid shown now: its board's row
   /// count less its slot rows and the room below them.
   int get firstSlotRow {
-    final grid =
-        find.byType(TimedGrid<String>).evaluate().single.widget
-            as TimedGrid<String>;
+    final grid = gridNow();
     return rowCountNow() - grid.hours.slotCountOf(grid.slotMinutes) - 1;
   }
 
   /// The row of the slot starting at [minute] of the grid shown now.
   int rowOf(int minute) {
-    final grid =
-        find.byType(TimedGrid<String>).evaluate().single.widget
-            as TimedGrid<String>;
+    final grid = gridNow();
     return firstSlotRow + (minute - grid.hours.start) ~/ grid.slotMinutes;
   }
 
@@ -132,11 +129,30 @@ class Shown {
   }
 }
 
-/// The number of rows of the grid's board shown now.
+/// The grid shown now, whatever its payload type.
+TimedGrid<Object?> gridNow() {
+  return find
+          .byWidgetPredicate((widget) {
+            return widget is TimedGrid<Object?>;
+          })
+          .evaluate()
+          .single
+          .widget
+      as TimedGrid<Object?>;
+}
+
+/// The number of rows of the grid's board shown now, whatever its payload
+/// type.
 int rowCountNow() {
   final board =
-      find.byType(Board<GridKey, GridShape<String>>).evaluate().single.widget
-          as Board<GridKey, GridShape<String>>;
+      find
+              .byWidgetPredicate((widget) {
+                return widget is Board<GridKey, GridShape<Object?>>;
+              })
+              .evaluate()
+              .single
+              .widget
+          as Board<GridKey, GridShape<Object?>>;
   return board.controller.rows.axis.trackCount;
 }
 
@@ -988,6 +1004,144 @@ class ThrowingMoveStore extends MoveRecordingStore {
     moves.add(requested);
     throw thrown;
   }
+}
+
+/// What [MemoryCalendarStore.onChanged] throws in MR6.
+class HostFailure implements Exception {
+  const HostFailure();
+}
+
+/// What a [Brittle] payload's `==` throws.
+class BrittleFailure implements Exception {
+  const BrittleFailure();
+}
+
+/// A payload whose `==` throws a [BrittleFailure] while [brittle] is set,
+/// as a host's payload's `==` can, and counts each such call in
+/// [compared]; otherwise any two are equal.
+class Brittle {
+  bool brittle = false;
+  int compared = 0;
+
+  @override
+  bool operator ==(Object other) {
+    if (brittle) {
+      compared++;
+      throw const BrittleFailure();
+    }
+    return other is Brittle;
+  }
+
+  @override
+  int get hashCode {
+    return 0;
+  }
+}
+
+/// An entry from [start] to [end] carrying [payload].
+CalendarEntry<Brittle> brittleEntryOf(
+  String id,
+  DateTime start,
+  DateTime end,
+  Brittle payload,
+) {
+  return CalendarEntry<Brittle>(
+    id: id,
+    start: start,
+    end: end,
+    title: id,
+    color: const Color(0xFF336699),
+    payload: payload,
+  );
+}
+
+/// Pumps Week from Monday, in edit mode, over an in-memory store of
+/// [entries], under a day limit of [maxDayCount] where it is given, and
+/// returns the list its onMoveRequest adds each request to.
+Future<List<CalendarMoveRequest<Brittle>>> pumpBrittleWeek(
+  WidgetTester tester,
+  List<CalendarEntry<Brittle>> entries, {
+  int? maxDayCount,
+}) async {
+  final store = MemoryCalendarStore<Brittle>(entries: entries);
+  addTearDown(store.dispose);
+  final today = DateTime(2026, 1, 5);
+  final now = ValueNotifier<CalendarNow>(
+    CalendarNow(time: at(today, 9), today: today),
+  );
+  addTearDown(now.dispose);
+  final requests = <CalendarMoveRequest<Brittle>>[];
+  tester.view.devicePixelRatio = 1.0;
+  tester.view.physicalSize = const Size(800.0, 2000.0);
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(
+    MaterialApp(
+      home: TimedGrid<Brittle>(
+        key: UniqueKey(),
+        store: store,
+        firstDay: monday,
+        dayCount: 7,
+        selectedDay: monday,
+        now: now,
+        onSelectDay: (day) {},
+        onOpenEntry: (id) {},
+        onCreate: (range) async {},
+        onMoveRequest: (request) async {
+          requests.add(request);
+        },
+        editable: true,
+        editPolicy: maxDayCount == null
+            ? null
+            : DayLimitPolicy<Brittle>(maxDayCount),
+        slotMinutes: 15,
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+  return requests;
+}
+
+/// Lets [gesture] go with [payload]'s `==` throwing during the release
+/// alone: the blocks the frames after it build compare the entries they
+/// show, a payload's `==` included.
+Future<void> releaseBrittle(TestGesture gesture, Brittle payload) async {
+  payload.brittle = true;
+  try {
+    await gesture.up();
+  } finally {
+    payload.brittle = false;
+  }
+}
+
+/// Selects "late", Monday 22:00 to Wednesday 00:00, with a long press let
+/// go in place, presses the end grip of its Tuesday block, drags it over
+/// Wednesday's 12:00 slot, and returns the gesture still held.
+Future<TestGesture> holdLateEndOverWednesday(WidgetTester tester) async {
+  final shown = Shown.week(monday);
+  final selecting = await lift(
+    tester,
+    tester.getCenter(blocksOf("late").first),
+  );
+  await selecting.up();
+  await tester.pumpAndSettle();
+  // Setup sanity: the entry is selected, and its Tuesday block holds its
+  // end grip.
+  expect(
+    find.descendant(
+      of: blockFinder("late", tuesday),
+      matching: find.byKey(blockGripKey("late", AxisDirection.down)),
+    ),
+    findsOneWidget,
+  );
+  final block = tester.getRect(blockFinder("late", tuesday));
+  final from = Offset(block.center.dx, block.bottom - 2.0);
+  final to = slotRect(tester, shown, wednesday, 12 * 60).center;
+  final gesture = await tester.startGesture(from);
+  await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+  await tester.pump();
+  await gesture.moveTo(to);
+  await tester.pump();
+  return gesture;
 }
 
 const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
@@ -4077,6 +4231,130 @@ void main() {
     ]);
     expect(uncaught, isEmpty);
     expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
+  });
+
+  testWidgets("MR6 with no onMoveRequest, a move the in-memory store "
+      "stores, whose onChanged then throws, leaves no error uncaught and "
+      "reports the throw", (tester) async {
+    final shown = Shown.week(monday);
+    final meet = entryOf("meet", at(tuesday, 10), at(tuesday, 11));
+    const thrown = HostFailure();
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[meet],
+      onChanged: (old, entry) {
+        throw thrown;
+      },
+    );
+    addTearDown(store.dispose);
+    await Harness(store, shown).pump(tester);
+    final uncaught = <Object>[];
+    await dropMeetInZone(tester, shown, uncaught);
+    // Setup sanity: the store stored the drop's move.
+    expect(
+      store.storedEntry("meet"),
+      meet.copyWith(start: at(tuesday, 14), end: at(tuesday, 15)),
+    );
+    expect(uncaught, isEmpty);
+    expect(tester.takeException(), same(thrown));
+  });
+
+  testWidgets("MR7 a block dropped back where it was requests nothing, and "
+      "with a payload whose == throws during the release throws nothing and "
+      "compares no payload; dropped on another slot with that payload, it "
+      "requests the move", (tester) async {
+    final shown = Shown.week(monday);
+    final payload = Brittle();
+    final meet = brittleEntryOf(
+      "meet",
+      at(tuesday, 10),
+      at(tuesday, 11),
+      payload,
+    );
+    final requests = await pumpBrittleWeek(tester, <CalendarEntry<Brittle>>[
+      meet,
+    ]);
+    final from = tester.getRect(blockFinder("meet", tuesday));
+    final away =
+        slotRect(tester, shown, tuesday, 12 * 60).top -
+        slotRect(tester, shown, tuesday, 10 * 60).top;
+    // Lifts the block, carries it two hours down and back, and returns the
+    // gesture still held.
+    Future<TestGesture> carryBack() async {
+      final gesture = await lift(tester, from.center);
+      await gesture.moveBy(Offset(0.0, away));
+      await tester.pump();
+      await gesture.moveBy(Offset(0.0, -away));
+      await tester.pump();
+      return gesture;
+    }
+
+    // With the payload's == answering, so a request would reach the
+    // grid's onMoveRequest: where it throws, the grid's sync of a request
+    // keeping the times compares the payloads before that.
+    var gesture = await carryBack();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(requests, isEmpty);
+
+    gesture = await carryBack();
+    await releaseBrittle(gesture, payload);
+    expect(tester.takeException(), isNull);
+    expect(payload.compared, 0);
+    await tester.pumpAndSettle();
+
+    final slot = slotRect(tester, shown, tuesday, 14 * 60);
+    gesture = await lift(tester, from.center);
+    await gesture.moveBy(slot.topLeft - from.topLeft + const Offset(0.0, 2.0));
+    await tester.pump();
+    await releaseBrittle(gesture, payload);
+    await tester.pumpAndSettle();
+    expect(
+      <(DateTime, DateTime, CalendarMoveKind)>[
+        for (final request in requests)
+          (request.requested.start, request.requested.end, request.kind),
+      ],
+      <(DateTime, DateTime, CalendarMoveKind)>[
+        (at(tuesday, 14), at(tuesday, 15), CalendarMoveKind.move),
+      ],
+    );
+  });
+
+  testWidgets("MR8 an end handle dragged into a later day and held at the "
+      "day limit at the end its entry has requests nothing, and with a "
+      "payload whose == throws during the release throws nothing and "
+      "compares no payload; with no limit, it requests the later end", (
+    tester,
+  ) async {
+    final payload = Brittle();
+    final late = brittleEntryOf("late", at(monday, 22), wednesday, payload);
+    var requests = await pumpBrittleWeek(tester, <CalendarEntry<Brittle>>[
+      late,
+    ], maxDayCount: 2);
+    // With the payload's == answering first, as in MR7.
+    var gesture = await holdLateEndOverWednesday(tester);
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(requests, isEmpty);
+
+    gesture = await holdLateEndOverWednesday(tester);
+    await releaseBrittle(gesture, payload);
+    expect(tester.takeException(), isNull);
+    expect(payload.compared, 0);
+    await tester.pumpAndSettle();
+
+    requests = await pumpBrittleWeek(tester, <CalendarEntry<Brittle>>[late]);
+    gesture = await holdLateEndOverWednesday(tester);
+    await releaseBrittle(gesture, payload);
+    await tester.pumpAndSettle();
+    expect(
+      <(DateTime, DateTime, CalendarMoveKind)>[
+        for (final request in requests)
+          (request.requested.start, request.requested.end, request.kind),
+      ],
+      <(DateTime, DateTime, CalendarMoveKind)>[
+        (at(monday, 22), at(wednesday, 12, 15), CalendarMoveKind.resize),
+      ],
+    );
   });
 
   testWidgets("GM1 while a block is lifted nothing creates: no drag or tap "
