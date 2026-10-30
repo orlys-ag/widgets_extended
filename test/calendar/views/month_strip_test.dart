@@ -123,14 +123,13 @@ void main() {
     expect(
       first.left,
       moreOrLessEquals(
-        strip.left + weekdayColumn(browsed.last) * strip.width / 7,
+        strip.left +
+            CalendarDates.weekdayColumn(browsed.last) * strip.width / 7,
       ),
     );
   });
 
-  testWidgets("MS2 under next the same fling moves one month", (
-    tester,
-  ) async {
+  testWidgets("MS2 under next the same fling moves one month", (tester) async {
     final browsed = await pumpStrip(tester, MonthStripSnap.next);
 
     await tester.fling(

@@ -176,7 +176,7 @@ void main() {
     expect(first.dy, moreOrLessEquals(grid.top));
     expect(
       (first.dx - grid.left) / (grid.width / 7),
-      moreOrLessEquals(weekdayColumn(shown).toDouble()),
+      moreOrLessEquals(CalendarDates.weekdayColumn(shown).toDouble()),
     );
     expect(find.text("Today, April 21"), findsOneWidget);
   });

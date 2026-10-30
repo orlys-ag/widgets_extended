@@ -7,6 +7,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../dates/calendar_date_helpers.dart';
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
 import 'edit_policy.dart';
@@ -48,17 +49,18 @@ final class CalendarEarliestStart {
   }
 
   /// The instant whose occurrence a range starting on [day] takes its
-  /// times in where [day]'s clock repeats them ([timeAtWallMinute]):
-  /// [earliest] where it lies after [day]'s start, and null otherwise.
+  /// times in where [day]'s clock repeats them
+  /// ([CalendarDates.timeAtWallMinute]): [earliest] where it lies after
+  /// [day]'s start, and null otherwise.
   DateTime? get occurrence {
     final earliest = this.earliest;
     return earliest != null && earliest.isAfter(day) ? earliest : null;
   }
 
-  /// The first wall minute ([wallMinuteOf]) a start may take: [day]'s
-  /// start where [admitsDayStart], the next day's start where [closesDay],
-  /// and otherwise [earliest]'s, one more where it lies inside a minute,
-  /// since a minute any part of which has passed is past.
+  /// The first wall minute ([CalendarDates.wallMinuteOf]) a start may
+  /// take: [day]'s start where [admitsDayStart], the next day's start
+  /// where [closesDay], and otherwise [earliest]'s, one more where it lies
+  /// inside a minute, since a minute any part of which has passed is past.
   int get firstWallMinute {
     final number = dayNumber(day);
     final earliest = this.earliest;
@@ -76,9 +78,9 @@ final class CalendarEarliestStart {
   }
 
   /// The minute of [day] from which the slots of [slotMinutes] from
-  /// midnight start no earlier than [earliest]: [minutesPerDay] where
-  /// [closesDay], and otherwise [firstWallMinute]'s minute of the day,
-  /// rounded up to the slot grid.
+  /// midnight start no earlier than [earliest]:
+  /// [CalendarDates.minutesPerDay] where [closesDay], and otherwise
+  /// [firstWallMinute]'s minute of the day, rounded up to the slot grid.
   int firstSlotMinute(int slotMinutes) {
     if (closesDay) {
       return minutesPerDay;
@@ -271,9 +273,10 @@ final class CalendarEditRules<T> {
   /// ([rangeSharesTime]) with any of [clearOf]; null where none does, as
   /// on a day [start] closes. [from] and [until] are minutes of the day.
   ///
-  /// A slot is [slotMinutes] of wall-clock time ([timeAtWallMinute]), so
-  /// on a day whose clock repeats a stretch, one from the stretch's first
-  /// pass to a time after it lasts that stretch longer.
+  /// A slot is [slotMinutes] of wall-clock time
+  /// ([CalendarDates.timeAtWallMinute]), so on a day whose clock repeats a
+  /// stretch, one from the stretch's first pass to a time after it lasts
+  /// that stretch longer.
   ({DateTime start, DateTime end})? firstSlot(
     CalendarEarliestStart start, {
     Iterable<CalendarEntry<T>> clearOf = const <Never>[],

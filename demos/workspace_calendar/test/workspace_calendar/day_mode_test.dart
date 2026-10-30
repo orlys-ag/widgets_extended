@@ -414,9 +414,9 @@ void main() {
     await tester.pump();
     expect(listCalls(api), lists + 1);
     final read = api.requests.last;
-    final monday = addDays(readTo, 1);
+    final monday = CalendarDates.addDays(readTo, 1);
     expect(read.first, monday);
-    expect(read.last, addDays(monday, 6));
+    expect(read.last, CalendarDates.addDays(monday, 6));
     final overlay = find.descendant(
       of: find.byType(TimedGrid<ItemPayload>),
       matching: find.byType(CircularProgressIndicator),
@@ -430,8 +430,12 @@ void main() {
     for (var day = 1; day <= 6; day++) {
       await tester.tap(find.byTooltip("Next day"));
       await tester.pump();
-      expect(gridDay(tester), addDays(monday, day));
-      expect(overlay, findsNothing, reason: "${addDays(monday, day)}");
+      expect(gridDay(tester), CalendarDates.addDays(monday, day));
+      expect(
+        overlay,
+        findsNothing,
+        reason: "${CalendarDates.addDays(monday, day)}",
+      );
     }
     expect(listCalls(api), lists + 1);
     await tester.pumpAndSettle();

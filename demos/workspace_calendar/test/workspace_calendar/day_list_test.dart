@@ -444,7 +444,7 @@ void main() {
   testWidgets("L11 the list adds days as its top nears the last day it "
       "holds", (tester) async {
     await pumpCalendar(tester);
-    final past = addDays(today, dayListWindowDays + 10);
+    final past = CalendarDates.addDays(today, dayListWindowDays + 10);
     for (var i = 0; i < 40 && selectedDay(tester).isBefore(past); i++) {
       await tester.fling(
         find.byType(DayList<ItemPayload>),

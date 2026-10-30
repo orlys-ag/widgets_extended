@@ -9,26 +9,36 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+/// {@template widgets_extended.calendar.defaultSlotMinutes}
 /// The slot length, in minutes, of a calendar given none: the step the
 /// timed grid's rows and gestures snap to.
+/// {@endtemplate}
 const int defaultSlotMinutes = 15;
 
+/// {@template widgets_extended.calendar.slotMinuteChoices}
 /// The slot lengths, in minutes, a calendar takes, each a whole number of
 /// them to an hour and so to a day.
+/// {@endtemplate}
 const List<int> slotMinuteChoices = <int>[5, 10, 15, 20, 30, 60];
 
+/// {@template widgets_extended.calendar.minutesPerDay}
 /// The minutes of a day on the wall clock, which [DayHours] and the wall
 /// minutes ([wallMinuteOf]) count in whatever the day's length.
+/// {@endtemplate}
 const int minutesPerDay = 1440;
 
-/// The local midnight of [date]'s day.
+/// {@template widgets_extended.calendar.dateOnly}
+/// The start of [date]'s day, built from its year, month and day.
+/// {@endtemplate}
 DateTime dateOnly(DateTime date) {
   return DateTime(date.year, date.month, date.day);
 }
 
+/// {@template widgets_extended.calendar.addDays}
 /// [date] moved by [days] calendar days. Built from the fields rather than
 /// by adding a `Duration`, so a daylight-saving change cannot move the
 /// result off midnight.
+/// {@endtemplate}
 DateTime addDays(DateTime date, int days) {
   return DateTime(date.year, date.month, date.day + days);
 }
@@ -55,7 +65,9 @@ int daysBetween(DateTime from, DateTime to) {
   return end.difference(start).inDays;
 }
 
+/// {@template widgets_extended.calendar.weekdayColumn}
 /// The column [date] falls in, in a week that starts on Monday.
+/// {@endtemplate}
 int weekdayColumn(DateTime date) {
   return date.weekday - 1;
 }
@@ -65,9 +77,11 @@ DateTime weekStartOf(DateTime date) {
   return addDays(dateOnly(date), -weekdayColumn(date));
 }
 
+/// {@template widgets_extended.calendar.dayNumber}
 /// Whole days from 1970-01-01 to [date]'s day, counted in UTC from its
 /// year, month and day fields, so the time of day and daylight saving
 /// play no part.
+/// {@endtemplate}
 int dayNumber(DateTime date) {
   final utc = DateTime.utc(date.year, date.month, date.day);
   return utc.millisecondsSinceEpoch ~/ Duration.millisecondsPerDay;
@@ -249,7 +263,9 @@ List<DateTime> shownDaysOfWeek(DateTime day, WeekdaySet weekdays) {
   ];
 }
 
+/// {@template widgets_extended.calendar.dateOfDayNumber}
 /// The local midnight of [day], the inverse of [dayNumber].
+/// {@endtemplate}
 DateTime dateOfDayNumber(int day) {
   final utc = DateTime.fromMillisecondsSinceEpoch(
     day * Duration.millisecondsPerDay,
@@ -265,25 +281,32 @@ bool isDayStart(DateTime time) {
   return time == DateTime(time.year, time.month, time.day);
 }
 
+/// {@template widgets_extended.calendar.minuteOfDay}
 /// The minutes after midnight [time]'s wall clock reads.
+/// {@endtemplate}
 int minuteOfDay(DateTime time) {
   return time.hour * 60 + time.minute;
 }
 
+/// {@template widgets_extended.calendar.endMinuteOfDay}
 /// The minute of its last day an end at [end] lies at: [minutesPerDay] for
 /// a day start, which ends the day before, and [minuteOfDay] otherwise.
+/// {@endtemplate}
 int endMinuteOfDay(DateTime end) {
   return isDayStart(end) ? minutesPerDay : minuteOfDay(end);
 }
 
+/// {@template widgets_extended.calendar.wallMinuteOf}
 /// [time] on the wall-clock coordinate: its [dayNumber] times
 /// [minutesPerDay], plus 0 for a day start and its [minuteOfDay]
 /// otherwise. A day's 24:00 is the next day's minute 0.
+/// {@endtemplate}
 int wallMinuteOf(DateTime time) {
   return dayNumber(time) * minutesPerDay +
       (isDayStart(time) ? 0 : minuteOfDay(time));
 }
 
+/// {@template widgets_extended.calendar.timeAtWallMinute}
 /// The instant the wall minute [wall] names: for minute 0 of a day its
 /// start, and otherwise the time its day's clock reads at that hour and
 /// minute; null for a time the clock skips.
@@ -292,6 +315,7 @@ int wallMinuteOf(DateTime time) {
 /// the earlier, or the later where [from] lies on the same day and is
 /// itself a later occurrence ([isLaterOccurrence]), so a gesture that
 /// began in the repeated stretch stays in the occurrence it began in.
+/// {@endtemplate}
 DateTime? timeAtWallMinute(int wall, {DateTime? from}) {
   // Floored, so a wall minute before the epoch's day keeps its minute.
   final minute = wall % minutesPerDay;
@@ -349,8 +373,10 @@ Duration repeatedStretchOf(DateTime day) {
   return change > Duration.zero ? change : Duration.zero;
 }
 
+/// {@template widgets_extended.calendar.isLaterOccurrence}
 /// Whether [time] is the later instant of a wall time its day's clock
 /// reads twice.
+/// {@endtemplate}
 bool isLaterOccurrence(DateTime time) {
   return time != timeAtWallMinute(wallMinuteOf(time));
 }
@@ -422,9 +448,11 @@ int lastWallMinuteNotAfter(DateTime time, {DateTime? from}) {
   return null;
 }
 
+/// {@template widgets_extended.calendar.lastDayNumberOf}
 /// The [dayNumber] of the last day a range from [start] to [end], end
 /// exclusive, has a part in: the day before an end at a day start, and the
 /// end's own day otherwise.
+/// {@endtemplate}
 int lastDayNumberOf(DateTime start, DateTime end) {
   return isDayStart(end) ? dayNumber(end) - 1 : dayNumber(end);
 }

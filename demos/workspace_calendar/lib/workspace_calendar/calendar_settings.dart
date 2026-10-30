@@ -30,11 +30,11 @@ Map<String, String> hoursErrorsOf(
     return const <String, String>{};
   }
   return <String, String>{
-    if (!hours.holdsStart(minuteOfDay(start)))
+    if (!hours.holdsStart(CalendarDates.minuteOfDay(start)))
       "start":
           "The start is from ${isoTime(hours.start)} to before "
           "${isoTime(hours.end)}, inside the calendar's hours.",
-    if (!hours.holdsEnd(endMinuteOfDay(end)))
+    if (!hours.holdsEnd(CalendarDates.endMinuteOfDay(end)))
       "end":
           "The end is from after ${isoTime(hours.start)} to "
           "${isoTime(hours.end)}, inside the calendar's hours.",
@@ -70,7 +70,7 @@ class CalendarSettings {
     this.allowsOverlaps = false,
     this.weekdays = WeekdaySet.all,
     this.hours = DayHours.allDay,
-    this.slotMinutes = defaultSlotMinutes,
+    this.slotMinutes = CalendarDates.defaultSlotMinutes,
     this.hourLabelFormat = HourLabelFormat.twentyFourHour,
     this.monthLayout = MonthLayout.fitScreen,
   });

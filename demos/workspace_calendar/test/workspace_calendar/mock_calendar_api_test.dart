@@ -66,7 +66,7 @@ Map<String, Object?> envelope({
   Map<String, Object?>? fields,
 }) {
   final first = day ?? wednesday;
-  final last = addDays(first, dayCount - 1);
+  final last = CalendarDates.addDays(first, dayCount - 1);
   return <String, Object?>{
     "type": type.id,
     "title": title,
@@ -102,8 +102,12 @@ Map<String, Object?> timed(
 /// 23 hours, as [isoDateTime] would write its half hour; null where the
 /// zone has no such day.
 String? _skippedHalfHour() {
-  for (var day = DateTime(2026); day.year == 2026; day = addDays(day, 1)) {
-    if (addDays(day, 1).difference(day).inHours != 23) {
+  for (
+    var day = DateTime(2026);
+    day.year == 2026;
+    day = CalendarDates.addDays(day, 1)
+  ) {
+    if (CalendarDates.addDays(day, 1).difference(day).inHours != 23) {
       continue;
     }
     for (var hour = 0; hour < 24; hour++) {

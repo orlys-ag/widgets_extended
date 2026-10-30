@@ -382,7 +382,9 @@ Map<String, String> validateItemJson(Map<String, Object?> json) {
     if (!end.isAfter(start)) {
       errors["end"] = "The end must be after the start.";
     } else if (!isAllowedDayCount(
-      lastDayNumberOf(start, end) - dayNumber(start) + 1,
+      CalendarDates.lastDayNumberOf(start, end) -
+          CalendarDates.dayNumber(start) +
+          1,
     )) {
       errors["end"] = "The item covers 1 to $maxDayCount days.";
     }

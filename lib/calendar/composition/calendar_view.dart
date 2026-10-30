@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../dates/calendar_date_helpers.dart';
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
 import '../policy/edit_policy.dart';
@@ -198,12 +199,13 @@ final class CalendarEntryTapDetails<T> {
 /// step their gestures snap to, the length of the slot Agenda's add button
 /// and Month's long press create, and the grid those round the earliest
 /// start [editPolicy] gives a day up to
-/// ([CalendarEditPolicy.earliestStartOn]). A value [slotMinuteChoices] does not hold
-/// throws an [ArgumentError] from the build, in a release build as in a
-/// debug one, and the store's hours off its grid ([DayHours.isOnSlotsOf])
-/// fail an assertion in a debug build; the views show and schedule in the
-/// store's hours rounded out to it ([DayHours.roundedOutTo]), which are
-/// the hours themselves on the grid.
+/// ([CalendarEditPolicy.earliestStartOn]). A value
+/// [CalendarDates.slotMinuteChoices] does not hold throws an
+/// [ArgumentError] from the build, in a release build as in a debug one,
+/// and the store's hours off its grid ([DayHours.isOnSlotsOf]) fail an
+/// assertion in a debug build; the views show and schedule in the store's
+/// hours rounded out to it ([DayHours.roundedOutTo]), which are the hours
+/// themselves on the grid.
 class CalendarView<T> extends StatefulWidget {
   /// A calendar of [store]'s entries in the views [views] lists.
   const CalendarView({
@@ -298,9 +300,10 @@ class CalendarView<T> extends StatefulWidget {
   /// change moves a selected day it hides to the nearest shown one.
   final WeekdaySet weekdays;
 
-  /// The length of one slot, in minutes: one of [slotMinuteChoices], or the
-  /// build throws an [ArgumentError]. The store's hours start and end on
-  /// its grid, which a debug build asserts.
+  /// The length of one slot, in minutes: one of
+  /// [CalendarDates.slotMinuteChoices], or the build throws an
+  /// [ArgumentError]. The store's hours start and end on its grid, which a
+  /// debug build asserts.
   final int slotMinutes;
 
   /// The format the calendar writes times of day in: Week's and Day's
@@ -429,7 +432,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   ArgumentError? _viewsError;
 
   /// The error the build throws for a [CalendarView.slotMinutes] that
-  /// [slotMinuteChoices] does not hold, or null.
+  /// [CalendarDates.slotMinuteChoices] does not hold, or null.
   ArgumentError? get _slotMinutesError {
     final slotMinutes = widget.slotMinutes;
     if (slotMinuteChoices.contains(slotMinutes)) {

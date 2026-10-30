@@ -735,7 +735,7 @@ void main() {
     final readTo = lastDayListed(api);
     await stepDayTo(tester, readTo);
     expect(gridDay(tester), readTo);
-    final unread = addDays(readTo, 1);
+    final unread = CalendarDates.addDays(readTo, 1);
     await tester.tap(find.byTooltip("Next day"));
     await tester.pump();
     await tester.pump(oneFrame);
@@ -756,7 +756,7 @@ void main() {
     };
     final weekEnd = lastDayListed(api);
     await stepDayTo(tester, weekEnd);
-    final failedDay = addDays(weekEnd, 1);
+    final failedDay = CalendarDates.addDays(weekEnd, 1);
     await tester.tap(find.byTooltip("Next day"));
     await tester.pump();
     await tester.pump(second);

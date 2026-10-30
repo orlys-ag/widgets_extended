@@ -47,7 +47,9 @@ Finder stripDay(DateTime day) {
 
 /// [count] days from [first], one after another.
 List<DateTime> run(DateTime first, int count) {
-  return <DateTime>[for (var i = 0; i < count; i++) addDays(first, i)];
+  return <DateTime>[
+    for (var i = 0; i < count; i++) CalendarDates.addDays(first, i),
+  ];
 }
 
 /// The days whose cells' middles the strip shows, left to right. The strip

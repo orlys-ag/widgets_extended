@@ -424,10 +424,10 @@ void main() {
       for (final json in listed) {
         final item = itemFromJson(json);
         final itemFirst = firstDayOf(item);
-        final itemLast = addDays(itemFirst, daysOf(item) - 1);
+        final itemLast = CalendarDates.addDays(itemFirst, daysOf(item) - 1);
         for (var row = 0; row < grid.weekCount; row++) {
           final monday = grid.dateAt(row, 0);
-          final sunday = addDays(monday, 6);
+          final sunday = CalendarDates.addDays(monday, 6);
           final first = itemFirst.isAfter(monday) ? itemFirst : monday;
           final last = itemLast.isBefore(sunday) ? itemLast : sunday;
           if (first.isAfter(last)) {
@@ -460,7 +460,7 @@ void main() {
       );
       final board = tester.getRect(monthBoardFinder());
       for (var row = 0; row < 5; row++) {
-        final day = addDays(DateTime(2026, 3, 30), 7 * row);
+        final day = CalendarDates.addDays(DateTime(2026, 3, 30), 7 * row);
         expect(tester.getSize(dayFinder(day)).height, near(board.height / 5));
       }
       expect(
@@ -1558,7 +1558,7 @@ void main() {
 
       final mondays = <DateTime>[
         for (var row = 0; row < 5; row++)
-          addDays(DateTime(2026, 3, 30), 7 * row),
+          CalendarDates.addDays(DateTime(2026, 3, 30), 7 * row),
       ];
       final first = monthCellRect(tester, mondays.first);
       final last = monthCellRect(tester, may(3));
@@ -1571,11 +1571,17 @@ void main() {
         for (var col = 1; col < 7; col++)
           (
             Offset(
-              monthCellRect(tester, addDays(mondays.first, col)).left,
+              monthCellRect(
+                tester,
+                CalendarDates.addDays(mondays.first, col),
+              ).left,
               first.top,
             ),
             Offset(
-              monthCellRect(tester, addDays(mondays.first, col)).left,
+              monthCellRect(
+                tester,
+                CalendarDates.addDays(mondays.first, col),
+              ).left,
               last.bottom,
             ),
           ),

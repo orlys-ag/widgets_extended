@@ -113,20 +113,20 @@ void main() {
     <Object>[
       DayHours,
       WeekdaySet,
-      dayNumber,
-      dateOfDayNumber,
-      defaultSlotMinutes,
-      slotMinuteChoices,
-      addDays,
-      dateOnly,
-      endMinuteOfDay,
-      isLaterOccurrence,
-      lastDayNumberOf,
-      minuteOfDay,
-      minutesPerDay,
-      timeAtWallMinute,
-      wallMinuteOf,
-      weekdayColumn,
+      CalendarDates.dayNumber,
+      CalendarDates.dateOfDayNumber,
+      CalendarDates.defaultSlotMinutes,
+      CalendarDates.slotMinuteChoices,
+      CalendarDates.addDays,
+      CalendarDates.dateOnly,
+      CalendarDates.endMinuteOfDay,
+      CalendarDates.isLaterOccurrence,
+      CalendarDates.lastDayNumberOf,
+      CalendarDates.minuteOfDay,
+      CalendarDates.minutesPerDay,
+      CalendarDates.timeAtWallMinute,
+      CalendarDates.wallMinuteOf,
+      CalendarDates.weekdayColumn,
       CalendarEntry,
       CalendarDataSource,
       CalendarEditPolicy,
@@ -203,14 +203,28 @@ void main() {
       "localizations file the localizations, their English default and "
       "HourLabelFormat; and of the policy layer exactly the two edit policy files, "
       "with the policies and the types their signatures name, the edit "
-      "rules, and the overlap rule's test of two entries", () {
+      "rules, and the overlap rule's test of two entries; and of the dates "
+      "layer exactly the day hours, the weekday sets and CalendarDates", () {
     final source = File(barrelPath).readAsStringSync();
     final exports = exportsOf(source);
     // Every directive the barrel holds was read.
     expect(exports, hasLength(directiveUris(source).length));
-    expect(<String>[
-      for (final export in exports) export.path,
-    ], contains("lib/calendar/dates/calendar_dates.dart"));
+    expect(
+      <String, Set<String>>{
+        for (final export in exports)
+          if (export.path.startsWith("lib/calendar/dates/"))
+            export.path: export.shown!.toSet(),
+      },
+      <String, Set<String>>{
+        "lib/calendar/dates/calendar_dates.dart": <String>{
+          "DayHours",
+          "WeekdaySet",
+        },
+        "lib/calendar/dates/calendar_date_helpers.dart": <String>{
+          "CalendarDates",
+        },
+      },
+    );
     for (final export in exports) {
       expect(export.shown, isNotNull, reason: export.path);
     }

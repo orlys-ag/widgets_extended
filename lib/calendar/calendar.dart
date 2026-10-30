@@ -17,24 +17,8 @@ export 'composition/calendar_header.dart'
 export 'composition/calendar_theme_extension.dart' show CalendarThemeExtension;
 export 'composition/calendar_view.dart'
     show CalendarController, CalendarEntryTapDetails, CalendarView;
-export 'dates/calendar_dates.dart'
-    show
-        DayHours,
-        WeekdaySet,
-        addDays,
-        dateOfDayNumber,
-        dateOnly,
-        dayNumber,
-        defaultSlotMinutes,
-        endMinuteOfDay,
-        isLaterOccurrence,
-        lastDayNumberOf,
-        minuteOfDay,
-        minutesPerDay,
-        slotMinuteChoices,
-        timeAtWallMinute,
-        wallMinuteOf,
-        weekdayColumn;
+export 'dates/calendar_date_helpers.dart' show CalendarDates;
+export 'dates/calendar_dates.dart' show DayHours, WeekdaySet;
 export 'entries/calendar_data_source.dart'
     show
         CalendarAllChanged,

@@ -95,12 +95,16 @@ class MockCalendarApi implements CalendarApi {
     return _call(
       CalendarRequest(
         method: CalendarMethod.list,
-        first: dateOnly(first),
-        last: dateOnly(last),
+        first: CalendarDates.dateOnly(first),
+        last: CalendarDates.dateOnly(last),
       ),
       () {
         final ids = <String>{};
-        for (var day = dayNumber(first); day <= dayNumber(last); day++) {
+        for (
+          var day = CalendarDates.dayNumber(first);
+          day <= CalendarDates.dayNumber(last);
+          day++
+        ) {
           ids.addAll(_idsByDay[day] ?? const <String>{});
         }
         final items = <Map<String, Object?>>[for (final id in ids) _items[id]!];
@@ -254,8 +258,8 @@ class MockCalendarApi implements CalendarApi {
     final item = itemFromJson(body);
     final seen = <String>{};
     final conflicts = <String>[];
-    final last = lastDayNumberOf(item.start, item.end);
-    for (var day = dayNumber(item.start); day <= last; day++) {
+    final last = CalendarDates.lastDayNumberOf(item.start, item.end);
+    for (var day = CalendarDates.dayNumber(item.start); day <= last; day++) {
       for (final id in _idsByDay[day] ?? const <String>{}) {
         if (id == ownId || !seen.add(id)) {
           continue;
@@ -312,8 +316,8 @@ class MockCalendarApi implements CalendarApi {
 /// in, from its start's day to [lastDayNumberOf].
 Iterable<int> _coveredDaysOf(Map<String, Object?> stored) sync* {
   final item = itemFromJson(stored);
-  final last = lastDayNumberOf(item.start, item.end);
-  for (var day = dayNumber(item.start); day <= last; day++) {
+  final last = CalendarDates.lastDayNumberOf(item.start, item.end);
+  for (var day = CalendarDates.dayNumber(item.start); day <= last; day++) {
     yield day;
   }
 }

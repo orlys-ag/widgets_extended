@@ -14,7 +14,9 @@ void main() {
   ) async {
     await tester.pumpWidget(const WorkspaceCalendarApp());
     expect(find.byType(WorkspaceCalendarExample), findsOneWidget);
-    final loading = find.byKey(dayListLoadingKey(dateOnly(DateTime.now())));
+    final loading = find.byKey(
+      dayListLoadingKey(CalendarDates.dateOnly(DateTime.now())),
+    );
     await tester.pump(const Duration(milliseconds: 599));
     expect(loading, findsOneWidget);
     // The read lands, and the row leaves over the list's motion.

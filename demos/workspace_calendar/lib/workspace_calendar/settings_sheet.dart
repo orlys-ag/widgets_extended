@@ -193,7 +193,7 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
               expandedInsets: EdgeInsets.zero,
               showSelectedIcon: false,
               segments: <ButtonSegment<int>>[
-                for (final minutes in slotMinuteChoices)
+                for (final minutes in CalendarDates.slotMinuteChoices)
                   ButtonSegment<int>(value: minutes, label: Text("$minutes")),
               ],
               selected: <int>{_settings.slotMinutes},

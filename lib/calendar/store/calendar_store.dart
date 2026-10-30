@@ -6,6 +6,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../dates/calendar_date_helpers.dart';
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
 
@@ -92,7 +93,7 @@ final class CalendarHoursException extends CalendarStoreException {
   }
 
   /// Whether [hours] do not hold [end]'s minute of its last day as an end
-  /// ([DayHours.holdsEnd], [endMinuteOfDay]).
+  /// ([DayHours.holdsEnd], [CalendarDates.endMinuteOfDay]).
   bool get endOutside {
     return !hours.holdsEnd(endMinuteOfDay(end));
   }

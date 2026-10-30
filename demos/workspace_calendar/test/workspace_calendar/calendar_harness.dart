@@ -110,17 +110,22 @@ DateTime atMinute(DateTime day, int minute) {
 /// The minutes after midnight of [item]'s start, and of its end on the
 /// last day it has a part in, 1440 for an end at a day's start.
 (int, int) minutesOf(CalendarItem item) {
-  return (minuteOfDay(item.start), endMinuteOfDay(item.end));
+  return (
+    CalendarDates.minuteOfDay(item.start),
+    CalendarDates.endMinuteOfDay(item.end),
+  );
 }
 
 /// The day of [item]'s start.
 DateTime firstDayOf(CalendarItem item) {
-  return dateOfDayNumber(dayNumber(item.start));
+  return CalendarDates.dateOfDayNumber(CalendarDates.dayNumber(item.start));
 }
 
 /// The days [item] has a part in, from its start's day to its last.
 int daysOf(CalendarItem item) {
-  return lastDayNumberOf(item.start, item.end) - dayNumber(item.start) + 1;
+  return CalendarDates.lastDayNumberOf(item.start, item.end) -
+      CalendarDates.dayNumber(item.start) +
+      1;
 }
 
 /// The week grid's column of the day [weekday] days after [monday]:
@@ -168,7 +173,10 @@ Finder formDateShows(String label, String date) {
 void expectFormDays(String day, int days) {
   expect(formDateShows("Start date", day), findsOneWidget);
   expect(
-    formDateShows("End date", isoDate(addDays(parseIsoDate(day)!, days - 1))),
+    formDateShows(
+      "End date",
+      isoDate(CalendarDates.addDays(parseIsoDate(day)!, days - 1)),
+    ),
     findsOneWidget,
   );
 }
@@ -207,7 +215,7 @@ Map<String, Object?> taskJson(
     "type": "task",
     "title": title,
     "start": isoDateTime(atMinute(day, start)),
-    "end": isoDateTime(atMinute(addDays(day, dayCount - 1), end)),
+    "end": isoDateTime(atMinute(CalendarDates.addDays(day, dayCount - 1), end)),
     "fields": <String, Object?>{"status": "toDo"},
   };
 }

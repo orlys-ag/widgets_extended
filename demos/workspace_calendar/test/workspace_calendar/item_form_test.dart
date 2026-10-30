@@ -28,7 +28,7 @@ CalendarItem task(DateTime start, DateTime end) {
 Future<void> openForm(
   WidgetTester tester,
   CalendarStore<ItemPayload> store, {
-  int slotMinutes = defaultSlotMinutes,
+  int slotMinutes = CalendarDates.defaultSlotMinutes,
 }) async {
   await tester.pumpWidget(
     MaterialApp(

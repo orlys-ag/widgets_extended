@@ -875,8 +875,8 @@ void main() {
     expect(find.text("Slot length"), findsOneWidget);
     expect(<int>[
       for (final segment in slotLengthButtons(tester).segments) segment.value,
-    ], slotMinuteChoices);
-    expect(slotMinuteChoices, <int>[5, 10, 15, 20, 30, 60]);
+    ], CalendarDates.slotMinuteChoices);
+    expect(CalendarDates.slotMinuteChoices, <int>[5, 10, 15, 20, 30, 60]);
     expect(slotLengthButtons(tester).selected, <int>{15});
   });
 

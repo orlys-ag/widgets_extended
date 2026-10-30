@@ -43,7 +43,7 @@ DateTime? _laterHalfPast() {
     }
     for (var minutes = 30; minutes < 25 * 60; minutes += 60) {
       final time = day.add(Duration(minutes: minutes));
-      if (isLaterOccurrence(time)) {
+      if (CalendarDates.isLaterOccurrence(time)) {
         return time;
       }
     }
@@ -157,7 +157,9 @@ void main() {
       final again = itemFromJson(item.toJson());
       expect(again.start, second);
       expect(again.end, second.add(const Duration(minutes: 30)));
-      final first = timeAtWallMinute(wallMinuteOf(second))!;
+      final first = CalendarDates.timeAtWallMinute(
+        CalendarDates.wallMinuteOf(second),
+      )!;
       final across = calendarItem(
         type: CalendarItemType.task,
         title: "Across",

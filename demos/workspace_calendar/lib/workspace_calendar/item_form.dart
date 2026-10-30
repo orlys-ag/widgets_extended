@@ -28,7 +28,7 @@ Future<void> showCreateFlow(
   required CreateRange range,
   required CalendarEditPolicy<ItemPayload> policy,
   required ValueGetter<CalendarNow> now,
-  int slotMinutes = defaultSlotMinutes,
+  int slotMinutes = CalendarDates.defaultSlotMinutes,
 }) async {
   final type = await showDialog<CalendarItemType>(
     context: context,
@@ -88,7 +88,7 @@ Future<void> showEditForm(
   required String id,
   required CalendarEditPolicy<ItemPayload> policy,
   required ValueGetter<CalendarNow> now,
-  int slotMinutes = defaultSlotMinutes,
+  int slotMinutes = CalendarDates.defaultSlotMinutes,
 }) async {
   final item = store.storedEntry(id);
   if (item == null) {
@@ -179,10 +179,11 @@ Map<String, String> lockErrorsOf<T>(
       };
     }
   }
-  final day = dateOnly(to.start);
+  final day = CalendarDates.dateOnly(to.start);
   final earliest = policy.earliestStartOn(day, now);
   // An earliest start on a later day leaves none on this one.
-  if (earliest == null || dayNumber(earliest) > dayNumber(day)) {
+  if (earliest == null ||
+      CalendarDates.dayNumber(earliest) > CalendarDates.dayNumber(day)) {
     return const <String, String>{"start": "Past days are locked."};
   }
   if (to.start.isBefore(earliest)) {
@@ -198,7 +199,7 @@ Future<void> _showForm(
   bool readOnly = false,
   CalendarEditPolicy<ItemPayload>? policy,
   ValueGetter<CalendarNow>? now,
-  int slotMinutes = defaultSlotMinutes,
+  int slotMinutes = CalendarDates.defaultSlotMinutes,
 }) {
   return showDialog<void>(
     context: context,
@@ -263,19 +264,21 @@ class _ItemFormState extends State<_ItemForm> {
   );
 
   /// The day of the item's start.
-  late DateTime _startDate = dateOfDayNumber(dayNumber(widget.item.start));
+  late DateTime _startDate = CalendarDates.dateOfDayNumber(
+    CalendarDates.dayNumber(widget.item.start),
+  );
 
   /// The start's minute of [_startDate].
-  late int _startMinute = minuteOfDay(widget.item.start);
+  late int _startMinute = CalendarDates.minuteOfDay(widget.item.start);
 
   /// The last day the item has a part in.
-  late DateTime _endDate = dateOfDayNumber(
-    lastDayNumberOf(widget.item.start, widget.item.end),
+  late DateTime _endDate = CalendarDates.dateOfDayNumber(
+    CalendarDates.lastDayNumberOf(widget.item.start, widget.item.end),
   );
 
   /// The end's minute of [_endDate], 1440 for an end at the start of the
   /// day after it.
-  late int _endMinute = endMinuteOfDay(widget.item.end);
+  late int _endMinute = CalendarDates.endMinuteOfDay(widget.item.end);
 
   /// Whether the item covers whole days, from [_startDate]'s start to the
   /// start of the day after [_endDate], and the time fields hide.
@@ -404,7 +407,7 @@ class _ItemFormState extends State<_ItemForm> {
           ? isoDateTime(_startDate)
           : _timeText(_startDate, _startMinute),
       "end": _allDay
-          ? isoDateTime(addDays(_endDate, 1))
+          ? isoDateTime(CalendarDates.addDays(_endDate, 1))
           : _timeText(_endDate, _endMinute),
       "fields": fields,
     };
@@ -415,7 +418,9 @@ class _ItemFormState extends State<_ItemForm> {
   /// 24:00 is the next day's start; and a time the clock skips as its own
   /// text, which the validator then reports.
   static String _timeText(DateTime day, int minute) {
-    final time = timeAtWallMinute(dayNumber(day) * minutesPerDay + minute);
+    final time = CalendarDates.timeAtWallMinute(
+      CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay + minute,
+    );
     if (time == null) {
       return "${isoDate(day)}T${isoTime(minute)}";
     }
@@ -514,7 +519,7 @@ class _ItemFormState extends State<_ItemForm> {
     );
     if (picked != null && mounted) {
       setState(() {
-        onPicked(dateOnly(picked));
+        onPicked(CalendarDates.dateOnly(picked));
       });
     }
   }

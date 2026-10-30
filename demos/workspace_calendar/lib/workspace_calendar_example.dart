@@ -216,7 +216,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   /// The day the calendar marks as today when called.
   DateTime _today() {
-    return dateOnly(widget.today ?? widget.clock());
+    return CalendarDates.dateOnly(widget.today ?? widget.clock());
   }
 
   /// The time the calendar's edit policy answers at when called, which a

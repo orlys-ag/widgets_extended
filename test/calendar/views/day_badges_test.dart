@@ -187,15 +187,16 @@ class HeldReads implements CalendarDataSource<String> {
 
   @override
   Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
-    final from = dayNumber(first);
-    final to = dayNumber(last);
+    final from = CalendarDates.dayNumber(first);
+    final to = CalendarDates.dayNumber(last);
     final completer = Completer<List<CalendarEntry<String>>>();
     reads.add((
       first: first,
       answer: () {
         completer.complete(<CalendarEntry<String>>[
           for (final entry in entries)
-            if (dayNumber(entry.start) <= to && dayNumber(entry.start) >= from)
+            if (CalendarDates.dayNumber(entry.start) <= to &&
+                CalendarDates.dayNumber(entry.start) >= from)
               entry,
         ]);
       },
