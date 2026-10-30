@@ -368,7 +368,8 @@ class ScriptedSource implements CalendarDataSource<String> {
 }
 
 /// A data source whose reads answer [entries] within the call, through
-/// a [SynchronousFuture], and whose writes answer the entry written, a
+/// a [SynchronousFuture], or through an ordinary future while
+/// [readLater] is set, and whose writes answer the entry written, a
 /// create's under [createdId] or else a new id: within the call, through
 /// a [SynchronousFuture] or, while [thenThrows] is set, a [ThenThrows];
 /// or through an ordinary future while [later] is set. Each write counts
@@ -377,6 +378,8 @@ class WriteNowSource<P> implements CalendarDataSource<P> {
   List<CalendarEntry<P>> entries = <CalendarEntry<P>>[];
 
   bool later = false;
+
+  bool readLater = false;
 
   bool thenThrows = false;
 
@@ -397,9 +400,11 @@ class WriteNowSource<P> implements CalendarDataSource<P> {
 
   @override
   Future<List<CalendarEntry<P>>> read(DateTime first, DateTime last) {
-    return SynchronousFuture<List<CalendarEntry<P>>>(
-      List<CalendarEntry<P>>.of(entries),
-    );
+    final answer = List<CalendarEntry<P>>.of(entries);
+    if (readLater) {
+      return Future<List<CalendarEntry<P>>>.value(answer);
+    }
+    return SynchronousFuture<List<CalendarEntry<P>>>(answer);
   }
 
   @override
@@ -480,6 +485,29 @@ Map<String, Future<Object?> Function()> writesOf(
       return store.create(draft(item.start, 900, 960));
     },
   };
+}
+
+/// Runs [body] in a zone that notes the errors it leaves uncaught, with
+/// [FlutterError.onError] noting each error reported, then settles; the
+/// types of both, in the order they came.
+Future<({List<Type> uncaught, List<Type> reported})> caughtIn(
+  void Function() body,
+) async {
+  final uncaught = <Type>[];
+  final reported = <Type>[];
+  final onError = FlutterError.onError;
+  FlutterError.onError = (details) {
+    reported.add(details.exception.runtimeType);
+  };
+  try {
+    runZonedGuarded(body, (error, stack) {
+      uncaught.add(error.runtimeType);
+    });
+    await settle();
+  } finally {
+    FlutterError.onError = onError;
+  }
+  return (uncaught: uncaught, reported: reported);
 }
 
 void main() {
@@ -963,11 +991,13 @@ void main() {
       harness.lastCall.succeed(<CalendarEntry<String>>[]);
       await settle();
       final created = draft(day, 600, 660);
+      final notifications = harness.notifications;
       final creating = errorOf(store.create(created));
       harness.lastCall.succeed(created);
       await settle();
       expect(creating(), isA<StateError>());
       expect(store.entriesOn(day), isEmpty);
+      expect(harness.notifications, notifications);
     });
 
     test("a move answered under another id fails, and the entry shows as "
@@ -998,16 +1028,27 @@ void main() {
       harness.lastCall.succeed(<CalendarEntry<String>>[item]);
       await settle();
       final updating = errorOf(store.update(retimed(item, 720, 780)));
+      final notifications = harness.notifications;
       harness.lastCall.succeed(
         onDay(item, DateTime(2026, 4, 23)).copyWith(id: "item-9"),
       );
       await settle();
-      expect(updating(), isA<StateError>());
+      expect(
+        updating(),
+        isA<StateError>().having(
+          (error) {
+            return error.message;
+          },
+          "message",
+          contains("under item-9"),
+        ),
+      );
       expect(store.isPending("item-1"), isFalse);
       expect(store.entriesOn(day), <CalendarShownEntry<String>>[
         CalendarShownEntry<String>(item, pending: false),
       ]);
       expect(store.storedEntry("item-9"), isNull);
+      expect(harness.notifications, notifications + 1);
     });
 
     test("a write answered within the call is stored within it, and its "
@@ -1081,12 +1122,11 @@ void main() {
       );
     });
 
-    test("a write whose answer the store fails to store fails with that "
-        "error, and the entry shows as stored", () async {
-      final thrown = <String, Type>{};
+    test("a write whose answer's payload's == throws stores the answer, "
+        "and the throw is reported", () async {
       final failures = <String, Type>{};
-      final pending = <String, bool>{};
-      final counts = <String, int>{};
+      final stored = <String, bool>{};
+      final reported = <String, List<Type>>{};
       for (final write in <String>["update", "move", "create"]) {
         for (final later in <bool>[false, true]) {
           final name = later ? "$write later" : write;
@@ -1102,16 +1142,12 @@ void main() {
           source.entries = <CalendarEntry<Brittle>>[item];
           final store = CachingCalendarStore<Brittle>(dataSource: source);
           store.show(weekFirst, weekLast);
-          var notifications = 0;
-          store.addListener(() {
-            notifications++;
-          });
           // Storing the answer compares it with the held entry, through
           // the answer's payload's ==, which throws.
           final written = item.copyWith(payload: const Brittle(brittle: true));
           source.createdId = "item-1";
-          Object? Function()? failure;
-          try {
+          late Object? Function() failure;
+          final caught = await caughtIn(() {
             failure = errorOf(switch (write) {
               "update" => store.update(written),
               "move" => store.requestMove(written),
@@ -1125,41 +1161,111 @@ void main() {
                 ),
               ),
             });
-          } on Object catch (error) {
-            thrown[name] = error.runtimeType;
-          }
-          await settle();
-          failures[name] = failure?.call().runtimeType ?? Null;
-          if (write != "create") {
-            pending[name] = store.isPending("item-1");
-          }
-          counts[name] = notifications;
+          });
+          failures[name] = failure().runtimeType;
+          stored[name] = store.storedEntry("item-1")!.payload.brittle;
+          reported[name] = caught.reported;
           store.dispose();
         }
       }
-      expect(thrown, isEmpty);
-      expect(failures, <String, Type>{
-        "update": BrittleFailure,
-        "update later": BrittleFailure,
-        "move": BrittleFailure,
-        "move later": BrittleFailure,
-        "create": BrittleFailure,
-        "create later": BrittleFailure,
+      final names = <String>[
+        for (final write in <String>["update", "move", "create"])
+          for (final suffix in <String>["", " later"]) "$write$suffix",
+      ];
+      expect(failures, <String, Type>{for (final name in names) name: Null});
+      expect(stored, <String, bool>{for (final name in names) name: true});
+      expect(reported, <String, List<Type>>{
+        for (final name in names) name: <Type>[BrittleFailure],
       });
-      expect(pending, <String, bool>{
-        "update": false,
-        "update later": false,
-        "move": false,
-        "move later": false,
+    });
+
+    test("a read whose answer's payload's == throws stores the answer, "
+        "and the throw is reported", () async {
+      final uncaught = <String, List<Type>>{};
+      final stored = <String, bool>{};
+      final reported = <String, List<Type>>{};
+      for (final later in <bool>[false, true]) {
+        final name = later ? "later" : "within the call";
+        final item = CalendarEntry<Brittle>(
+          id: "item-1",
+          start: at(day, 600),
+          end: at(day, 660),
+          title: "Task",
+          color: taskColor,
+          payload: const Brittle(),
+        );
+        final source = WriteNowSource<Brittle>()
+          ..entries = <CalendarEntry<Brittle>>[item];
+        final store = CachingCalendarStore<Brittle>(dataSource: source);
+        store.show(weekFirst, weekLast);
+        source
+          ..readLater = later
+          ..entries = <CalendarEntry<Brittle>>[
+            item.copyWith(payload: const Brittle(brittle: true)),
+          ];
+        // Applying the read compares its answer with the held entry,
+        // through the answer's payload's ==, which throws.
+        final caught = await caughtIn(() {
+          store.invalidate(day, day);
+        });
+        uncaught[name] = caught.uncaught;
+        stored[name] = store.storedEntry("item-1")!.payload.brittle;
+        reported[name] = caught.reported;
+        store.dispose();
+      }
+      expect(uncaught, <String, List<Type>>{
+        "within the call": <Type>[],
+        "later": <Type>[],
       });
-      expect(counts, <String, int>{
-        "update": 1,
-        "update later": 2,
-        "move": 1,
-        "move later": 2,
-        "create": 0,
-        "create later": 0,
+      expect(stored, <String, bool>{"within the call": true, "later": true});
+      expect(reported, <String, List<Type>>{
+        "within the call": <Type>[BrittleFailure],
+        "later": <Type>[BrittleFailure],
       });
+    });
+
+    test("an announced entry whose payload's == throws is stored, and the "
+        "throw is reported", () async {
+      final item = CalendarEntry<Brittle>(
+        id: "item-1",
+        start: at(day, 600),
+        end: at(day, 660),
+        title: "Task",
+        color: taskColor,
+        payload: const Brittle(),
+      );
+      final changes = StreamController<CalendarSourceChange<Brittle>>();
+      late CachingCalendarStore<Brittle> store;
+      var notifications = 0;
+      final caught = await caughtIn(() {
+        store = CachingCalendarStore<Brittle>(
+          dataSource: WriteNowSource<Brittle>()
+            ..entries = <CalendarEntry<Brittle>>[item],
+          changes: changes.stream,
+        );
+        store.show(weekFirst, weekLast);
+        store.addListener(() {
+          notifications++;
+        });
+        // Applying the put compares it with the held entry, through its
+        // payload's ==, which throws.
+        changes.add(
+          CalendarEntryPut<Brittle>(
+            item.copyWith(payload: const Brittle(brittle: true)),
+          ),
+        );
+      });
+      expect(caught.uncaught, isEmpty);
+      expect(
+        (
+          brittle: store.storedEntry("item-1")!.payload.brittle,
+          notifications: notifications,
+        ),
+        (brittle: true, notifications: 1),
+      );
+      expect(caught.reported, <Type>[BrittleFailure]);
+      await changes.close();
+      store.dispose();
     });
 
     test("a write whose data source call throws ends the pending write "

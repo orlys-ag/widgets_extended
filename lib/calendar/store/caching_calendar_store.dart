@@ -120,6 +120,12 @@ class _Day {
 /// written fails as that write fails, each with a [StateError]. A source
 /// call that throws instead of failing its future fails as its future
 /// would.
+///
+/// An entry a read, an announced change or a write's answer brings is
+/// compared with the one the store holds only to tell whether it
+/// changes anything: a comparison that throws, as a payload's `==` can,
+/// is reported through [FlutterError.reportError] and counts as a
+/// change.
 class CachingCalendarStore<T> extends CalendarStore<T> {
   /// A store reading and writing through [dataSource], loading until the
   /// first [show], and applying each change [changes] announces, if given,
@@ -754,7 +760,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
         continue;
       }
       _setTime(id, at);
-      if (_index.stored(id) != entry) {
+      if (_differs(_index.stored(id), entry)) {
         updated.add(entry);
       }
     }
@@ -775,6 +781,28 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       }
     }
     return changed;
+  }
+
+  /// Whether [entry] differs from [held], the entry the store holds under
+  /// its id, as `!=` answers. The store compares the two only to tell
+  /// whether [entry] changes what it holds, so where comparing them
+  /// throws, as a payload's `==` can, the throw is reported through
+  /// [FlutterError.reportError] and [entry] counts as a change, rather
+  /// than leave a read, an announced change or a write half applied.
+  bool _differs(CalendarEntry<T>? held, CalendarEntry<T>? entry) {
+    try {
+      return held != entry;
+    } on Object catch (exception, stack) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: exception,
+          stack: stack,
+          library: "widgets_extended calendar",
+          context: ErrorDescription("while comparing calendar entries"),
+        ),
+      );
+      return true;
+    }
   }
 
   /// Whether a read sent after the clock [at] filled a day [entry] covers.
@@ -858,7 +886,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     final id = entry.id!;
     _setTime(id, ++_clock);
     if (_coversHeldDay(entry)) {
-      if (_index.stored(id) != entry) {
+      if (_differs(_index.stored(id), entry)) {
         _index.put(entry);
         _notify();
       }
@@ -936,8 +964,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// [CalendarHoursException] for a draft outside [hours]. An answer with
   /// no id fails with a [StateError] and stores nothing; one whose id has
   /// a write in flight, as after a read that brought the entry and a move
-  /// of it, completes and changes nothing. An answer the store fails to
-  /// store, as where a payload's `==` throws, fails with that error.
+  /// of it, completes and changes nothing.
   @override
   Future<CalendarEntry<T>> create(CalendarEntry<T> draft) {
     if (_disposed) {
@@ -972,10 +999,9 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// [ArgumentError] for an entry with no id, with a
   /// [CalendarHoursException] when [hoursRefusalOf] refuses it, and with
   /// a [CalendarWritePendingException] on a pending entry. An answer under
-  /// another id fails with a [StateError], and an answer the store fails
-  /// to store, as where a payload's `==` throws, with that error, the
-  /// entry showing as stored again. An answer that arrives within the
-  /// call, as a [SynchronousFuture]'s does, is stored within it.
+  /// another id fails with a [StateError], the entry showing as stored
+  /// again. An answer that arrives within the call, as a
+  /// [SynchronousFuture]'s does, is stored within it.
   @override
   Future<CalendarEntry<T>> update(CalendarEntry<T> entry) {
     final id = entry.id;
@@ -1010,9 +1036,8 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// [CalendarHoursException] when [hoursRefusalOf] refuses it, and with
   /// a [CalendarWritePendingException] on a pending entry; a move onto
   /// another entry's time is sent. An answer under another id fails with
-  /// a [StateError], and an answer the store fails to store, as where a
-  /// payload's `==` throws, with that error. An answer that arrives within
-  /// the call, as a [SynchronousFuture]'s does, is stored within it.
+  /// a [StateError]. An answer that arrives within the call, as a
+  /// [SynchronousFuture]'s does, is stored within it.
   @override
   Future<CalendarEntry<T>> requestMove(CalendarEntry<T> requested) {
     final id = requested.id;
@@ -1222,7 +1247,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// days of both again.
   void _storeAnswer(String id, CalendarEntry<T>? answer, int sentAt) {
     final held = _index.stored(id);
-    if (held != answer && _contradicted(id, answer, sentAt)) {
+    if (_differs(held, answer) && _contradicted(id, answer, sentAt)) {
       final at = ++_clock;
       if (held != null) {
         _markDaysOf(held, at);
