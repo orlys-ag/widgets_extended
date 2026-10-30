@@ -898,20 +898,30 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// [answered] or [failed] runs once at most. A throw within [call] is
   /// its failure, heard within the call. A throw from the future's `then`
   /// before an answer or a failure is heard is its failure too; one after
-  /// is dropped, as [answered] or [failed] has run.
+  /// is dropped, as [answered] or [failed] has run. A throw from [answered]
+  /// or [failed] is the store's own, never the source's failure: it
+  /// escapes the call where the future answers within it, as a
+  /// [SynchronousFuture]'s does, and otherwise fails the future `then`
+  /// returns, as any callback's throw does.
   void _callSource<A>(
     Future<A> Function() call,
     void Function(A answer) answered,
     void Function(Object error, StackTrace stackTrace) failed,
   ) {
     var heard = false;
+    Object? own;
 
     void answer(A value) {
       if (heard) {
         return;
       }
       heard = true;
-      answered(value);
+      try {
+        answered(value);
+      } on Object catch (error) {
+        own = error;
+        rethrow;
+      }
     }
 
     void fail(Object error, StackTrace stackTrace) {
@@ -919,12 +929,20 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
         return;
       }
       heard = true;
-      failed(error, stackTrace);
+      try {
+        failed(error, stackTrace);
+      } on Object catch (error) {
+        own = error;
+        rethrow;
+      }
     }
 
     try {
       call().then<void>(answer, onError: fail);
     } on Object catch (error, stackTrace) {
+      if (identical(error, own)) {
+        rethrow;
+      }
       fail(error, stackTrace);
     }
   }

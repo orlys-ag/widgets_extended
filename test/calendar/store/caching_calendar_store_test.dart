@@ -1242,6 +1242,62 @@ void main() {
       });
     });
 
+    test("a throw from the store's own handling of a read's answer escapes, "
+        "within the call as later", () async {
+      final uncaught = <String, List<Type>>{};
+      final reported = <String, List<Type>>{};
+      for (final later in <bool>[false, true]) {
+        final name = later ? "later" : "within the call";
+        final item = CalendarEntry<Brittle>(
+          id: "item-1",
+          start: at(day, 600),
+          end: at(day, 660),
+          title: "Task",
+          color: taskColor,
+          payload: const Brittle(),
+        );
+        final source = WriteNowSource<Brittle>()
+          ..entries = <CalendarEntry<Brittle>>[item];
+        final store = CachingCalendarStore<Brittle>(dataSource: source);
+        store.show(weekFirst, weekLast);
+        source
+          ..readLater = later
+          ..entries = <CalendarEntry<Brittle>>[
+            item.copyWith(payload: const Brittle(brittle: true)),
+          ];
+        // Applying the read reports the throw of the answer's payload's ==
+        // through FlutterError.onError, which throws in turn, as a host's
+        // can.
+        final onError = FlutterError.onError;
+        FlutterError.onError = (details) {
+          (reported[name] ??= <Type>[]).add(details.exception.runtimeType);
+          throw StateError("Host.");
+        };
+        try {
+          runZonedGuarded(
+            () {
+              store.invalidate(day, day);
+            },
+            (error, stack) {
+              (uncaught[name] ??= <Type>[]).add(error.runtimeType);
+            },
+          );
+          await settle();
+        } finally {
+          FlutterError.onError = onError;
+        }
+        store.dispose();
+      }
+      expect(reported, <String, List<Type>>{
+        "within the call": <Type>[BrittleFailure],
+        "later": <Type>[BrittleFailure],
+      });
+      expect(uncaught, <String, List<Type>>{
+        "within the call": <Type>[StateError],
+        "later": <Type>[StateError],
+      });
+    });
+
     test("an announced entry whose payload's == throws is stored, and the "
         "throw is reported", () async {
       final item = CalendarEntry<Brittle>(
