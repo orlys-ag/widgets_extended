@@ -10,7 +10,7 @@ import '../entries/calendar_entry.dart';
 /// name in what a screen reader hears for the day. Two kinds are equal
 /// when their [color] and [label] are.
 @immutable
-class CalendarBadgeKind {
+final class CalendarBadgeKind {
   /// The kind whose dot is [color], named [label].
   const CalendarBadgeKind({required this.color, required this.label});
 
@@ -55,7 +55,7 @@ class CalendarBadgeKind {
 /// are given badges not identical to the last, so a host keeps one
 /// instance rather than making one in each build.
 @immutable
-class CalendarDayBadges<T> {
+final class CalendarDayBadges<T> {
   /// The badges of [kinds], each entry's kind as [kindOf] answers it.
   const CalendarDayBadges({required this.kinds, required this.kindOf});
 

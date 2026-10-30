@@ -16,7 +16,7 @@ import 'overlap.dart';
 /// [CalendarEditPolicy.earliestStartOn] answered for it, and the times a
 /// create on [day] reads from that answer.
 @immutable
-class CalendarEarliestStart {
+final class CalendarEarliestStart {
   /// The start [earliest] that a policy gave [day], a day's start; a
   /// [day] that is not one fails an assertion in a debug build.
   CalendarEarliestStart(this.day, this.earliest)
@@ -125,7 +125,7 @@ class CalendarEarliestStart {
 /// Two compare equal where their type arguments, policies, hours and slot
 /// lengths do.
 @immutable
-class CalendarEditRules<T> {
+final class CalendarEditRules<T> {
   /// The rules of [policy] in [hours] and slots of [slotMinutes], reading
   /// the policy's day limit and its answer on overlaps now. A day limit
   /// under 1 fails an assertion in a debug build.

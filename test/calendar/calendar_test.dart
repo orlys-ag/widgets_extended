@@ -312,6 +312,64 @@ void main() {
     }
   });
 
+  test("B4 each class the barrel shows is final or sealed but those a host "
+      "extends or implements: the widgets, the controller, the stores, the "
+      "data source, the edit policies and the localizations", () {
+    const extended = <String>{
+      "CalendarView",
+      "CalendarActivityIndicator",
+      "CalendarTheme",
+      "CalendarController",
+      "CalendarStore",
+      "CachingCalendarStore",
+      "MemoryCalendarStore",
+      "CalendarDataSource",
+      "CalendarEditPolicy",
+      "UnrestrictedEditPolicy",
+      "DayLimitPolicy",
+      "NoOverlapsPolicy",
+      "HistoryLockPolicy",
+      "CalendarLocalizations",
+      "DefaultCalendarLocalizations",
+    };
+    final declaration = RegExp(
+      r"^((?:(?:abstract|base|final|interface|sealed)\s+)*)class\s+(\w+)",
+      multiLine: true,
+    );
+    // A file the barrel exports may export the file that declares a name,
+    // so every file of the module is read.
+    final shown = <String>{
+      for (final export in exportsOf(File(barrelPath).readAsStringSync()))
+        ...export.shown!,
+    };
+    final classes = <String>{};
+    final wrong = <String>[];
+    for (final file in moduleFiles()) {
+      final source = File(file).readAsStringSync();
+      for (final match in declaration.allMatches(source)) {
+        final name = match.group(2)!;
+        if (!shown.contains(name)) {
+          continue;
+        }
+        classes.add(name);
+        final modifiers = match.group(1)!.split(RegExp(r"\s+"));
+        final closed =
+            modifiers.contains("final") || modifiers.contains("sealed");
+        if (closed == extended.contains(name)) {
+          wrong.add(name);
+        }
+      }
+    }
+    // The scan reads closed and open declarations alike, and finds every
+    // class the list names.
+    expect(
+      classes,
+      containsAll(<String>["CalendarEntry", "CalendarStoreException"]),
+    );
+    expect(classes, containsAll(extended));
+    expect(wrong, isEmpty);
+  });
+
   test("LY1 each file imports the package's files by relative paths, up "
       "the layer table, and the board and sliver_tree modules only "
       "through their barrels", () {

@@ -83,7 +83,7 @@ int weekdayColumnOfDay(int day) {
 /// Sunday 6, and the weekday a week starts on, [firstColumn]: the shown
 /// weekdays and their order, in every view of the calendar.
 @immutable
-class WeekdaySet {
+final class WeekdaySet {
   const WeekdaySet._(this._bits, [this.firstColumn = 0]);
 
   /// The columns' names in [toString], which is for developers and so is
@@ -611,7 +611,7 @@ class MonthGrid {
 /// The part of each day a calendar shows and schedules in: from [start]
 /// to [end] minutes after midnight.
 @immutable
-class DayHours {
+final class DayHours {
   /// The hours from [start] to [end] minutes after midnight, with [start]
   /// before [end], inside one day.
   const DayHours(this.start, this.end)

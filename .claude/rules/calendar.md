@@ -43,6 +43,14 @@ Normative for `lib/calendar/`, the calendar module: `CalendarView`, a calendar o
 - **One barrel.** `lib/calendar/calendar.dart` is the module's public
   surface and exports through explicit `show` clauses; anything it does not
   show is internal, whatever its name.
+- **The public API grows by additions.** Every class the barrel shows is
+  `final` or `sealed`, so a new field breaks no host, but those a host
+  extends or implements: the widgets, `CalendarController`, the stores,
+  `CalendarDataSource`, the edit policies and the localizations. A new
+  `CalendarEditPolicy` question or `CalendarLocalizations` word comes with
+  a default, so a host's subclass still compiles, and a new arrangement of
+  an existing view, such as a column per person or room in Day and Week,
+  is a parameter, not a new `CalendarViewKind`.
 - **Tests mirror the layers.** A test of a layer's code sits in the
   matching directory under `test/calendar/`, and a test that needs entries
   supplies them through the in-memory store.

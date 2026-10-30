@@ -14,7 +14,7 @@ import '../entries/calendar_entry.dart';
 /// Compared and hashed by [time] and [today]. [timeOnToday] is computed
 /// once, when the value is made.
 @immutable
-class CalendarNow {
+final class CalendarNow {
   /// The time [time], with [today] taken to its local midnight.
   factory CalendarNow({required DateTime time, required DateTime today}) {
     final day = DateTime(today.year, today.month, today.day);

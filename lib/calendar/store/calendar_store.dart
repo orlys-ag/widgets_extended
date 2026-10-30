@@ -27,7 +27,7 @@ enum CalendarLoadStatus {
 
 /// An entry as a view shows it: [pending] while a write on it runs.
 @immutable
-class CalendarShownEntry<T> {
+final class CalendarShownEntry<T> {
   /// The [entry] a view shows, and whether a write on it runs.
   const CalendarShownEntry(this.entry, {required this.pending});
 
