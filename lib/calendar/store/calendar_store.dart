@@ -10,9 +10,9 @@ import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
 
 /// Whether every day of the range a store shows is read (ready), or one
-/// of its unread days was left with no read on the way, its last read
-/// having failed, and the range was not shown, retried or refreshed
-/// since (failed); loading otherwise.
+/// of its unread days is marked [CalendarStore.readFailed], its last read
+/// having failed, though another read of it may be on the way (failed);
+/// loading otherwise.
 enum CalendarLoadStatus { loading, failed, ready }
 
 /// An entry as a view shows it: [pending] while a write on it runs.
@@ -150,23 +150,25 @@ abstract class CalendarStore<T> extends ChangeNotifier {
   /// otherwise.
   CalendarLoadStatus get status;
 
-  /// The error of the latest read whose failure marked a day of the shown
-  /// range [readFailed], while [status] is [CalendarLoadStatus.failed];
-  /// null otherwise.
+  /// While [status] is [CalendarLoadStatus.failed], the error of the
+  /// latest failed read among those whose [readFailed] marks stand on the
+  /// shown range's unread days; null otherwise.
   Object? get loadError;
 
   /// Shows [first] to [last], both inclusive, reading the days not read
-  /// yet, which ends their [readFailed] marks: the marked ones though a
-  /// read is on the way, as [retry] does, and the others with no second
-  /// read where one is.
+  /// yet, which ends their [readFailed] marks: the marked ones with a read
+  /// of their own though a read is on the way, as [retry] does, and the
+  /// others with one read from the first to the last of them, or with none
+  /// where one read on the way covers them all.
   void show(DateTime first, DateTime last);
 
   /// Ends the [readFailed] marks of the shown range's days and, where
   /// given, of the days from [first] to [last], both inclusive, and reads
-  /// those of them not read yet: the marked ones though a read is on the
-  /// way, and the others with no second read where one is. Throws an
-  /// [ArgumentError] where one of [first] and [last] is given without the
-  /// other.
+  /// those of them not read yet: the marked ones with a read of their own
+  /// though a read is on the way, and, of each of the two ranges, the
+  /// others with one read from the first to the last of them, or with none
+  /// where one read on the way covers them all. Throws an [ArgumentError]
+  /// where one of [first] and [last] is given without the other.
   void retry([DateTime? first, DateTime? last]);
 
   /// Reads the unread days from [first] to [last], both inclusive,

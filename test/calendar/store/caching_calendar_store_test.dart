@@ -64,6 +64,9 @@ class FakeDataSource implements CalendarDataSource<String> {
   /// none of them.
   final List<FakeCall> answeredNow = <FakeCall>[];
 
+  /// Runs at each `read` call, before it answers, while set.
+  void Function()? onRead;
+
   /// The first and the last day of each read in [answeredNow].
   List<(DateTime, DateTime)> get readsNow {
     return <(DateTime, DateTime)>[
@@ -81,6 +84,7 @@ class FakeDataSource implements CalendarDataSource<String> {
 
   @override
   Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    onRead?.call();
     final error = thrown;
     if (error != null) {
       throw error;
@@ -368,18 +372,21 @@ class ScriptedSource implements CalendarDataSource<String> {
 }
 
 /// A data source whose reads answer [entries] within the call, through
-/// a [SynchronousFuture], or through an ordinary future while
-/// [readLater] is set, and whose writes answer the entry written, a
-/// create's under [createdId] or else a new id: within the call, through
-/// a [SynchronousFuture] or, while [thenThrows] is set, a [ThenThrows];
-/// or through an ordinary future while [later] is set. Each write counts
-/// toward [writes], then runs [onWrite], if set, before it answers.
+/// a [SynchronousFuture] or, while [readThenThrows] is set, a
+/// [ThenThrows]; or through an ordinary future while [readLater] is set.
+/// Its writes answer the entry written, a create's under [createdId] or
+/// else a new id: within the call, through a [SynchronousFuture] or,
+/// while [thenThrows] is set, a [ThenThrows]; or through an ordinary
+/// future while [later] is set. Each write counts toward [writes], then
+/// runs [onWrite], if set, before it answers.
 class WriteNowSource<P> implements CalendarDataSource<P> {
   List<CalendarEntry<P>> entries = <CalendarEntry<P>>[];
 
   bool later = false;
 
   bool readLater = false;
+
+  bool readThenThrows = false;
 
   bool thenThrows = false;
 
@@ -403,6 +410,9 @@ class WriteNowSource<P> implements CalendarDataSource<P> {
     final answer = List<CalendarEntry<P>>.of(entries);
     if (readLater) {
       return Future<List<CalendarEntry<P>>>.value(answer);
+    }
+    if (readThenThrows) {
+      return ThenThrows<List<CalendarEntry<P>>>(answer);
     }
     return SynchronousFuture<List<CalendarEntry<P>>>(answer);
   }
@@ -1512,34 +1522,34 @@ void main() {
     expect(store.loadError, isNull);
   });
 
-  test(
-    "CS4 a data source call that throws fails as its future would",
-    () async {
-      final harness = Harness();
-      final store = harness.store;
-      final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
-      final other = task("item-2", DateTime(2026, 4, 22), 600, 660);
-      store.show(weekFirst, weekLast);
-      harness.lastCall.succeed(<CalendarEntry<String>>[item, other]);
-      await settle();
+  test("CS4 a data source call that throws fails within the call, with the "
+      "error it threw", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
+    final other = task("item-2", DateTime(2026, 4, 22), 600, 660);
+    store.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[item, other]);
+    await settle();
 
-      const thrown = SourceFailure("Thrown.");
-      harness.source.thrown = thrown;
-      expect(() => store.show(aprilFirst, aprilLast), returnsNormally);
-      final moving = errorOf(store.requestMove(retimed(item, 720, 780)));
-      final deleting = errorOf(store.requestDelete("item-2"));
-      await settle();
-      expect(store.status, CalendarLoadStatus.failed);
-      expect(store.loadError, same(thrown));
-      expect(store.isRead(aprilFirst), isFalse);
-      expect(moving(), same(thrown));
-      expect(deleting(), same(thrown));
-      expect(store.isPending("item-1"), isFalse);
-      expect(store.isPending("item-2"), isFalse);
-      expect(idsOn(store, DateTime(2026, 4, 21)), <String>["item-1"]);
-      expect(idsOn(store, DateTime(2026, 4, 22)), <String>["item-2"]);
-    },
-  );
+    const thrown = SourceFailure("Thrown.");
+    harness.source.thrown = thrown;
+    expect(() => store.show(aprilFirst, aprilLast), returnsNormally);
+    // The read fails within the call, as a write does.
+    expect(store.status, CalendarLoadStatus.failed);
+    final moving = errorOf(store.requestMove(retimed(item, 720, 780)));
+    final deleting = errorOf(store.requestDelete("item-2"));
+    await settle();
+    expect(store.status, CalendarLoadStatus.failed);
+    expect(store.loadError, same(thrown));
+    expect(store.isRead(aprilFirst), isFalse);
+    expect(moving(), same(thrown));
+    expect(deleting(), same(thrown));
+    expect(store.isPending("item-1"), isFalse);
+    expect(store.isPending("item-2"), isFalse);
+    expect(idsOn(store, DateTime(2026, 4, 21)), <String>["item-1"]);
+    expect(idsOn(store, DateTime(2026, 4, 22)), <String>["item-2"]);
+  });
 
   test("CS5 a range merges each read day's entries and the pending ones, "
       "each once, in order", () async {
@@ -3547,6 +3557,175 @@ void main() {
       (harness.lastCall.first, harness.lastCall.last),
       (elsewhere, elsewhere),
     );
+  });
+
+  test("FR65 a failed shown range's loadError is the error of the latest "
+      "failure among the marks on its unread days, as reads fill "
+      "them", () async {
+    final harness = Harness();
+    final store = harness.store;
+    store.show(DateTime(2026, 4, 21), DateTime(2026, 4, 25));
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    store.show(weekFirst, weekLast);
+    final shown = harness.lastCall;
+    store.retry(DateTime(2026, 4, 19), weekFirst);
+    final early = harness.lastCall;
+    store.retry(weekLast, DateTime(2026, 4, 27));
+    final late = harness.lastCall;
+    shown.fail();
+    await settle();
+    final first = early.fail("First.");
+    await settle();
+    final second = late.fail("Second.");
+    await settle();
+    expect(
+      (store.readFailed(weekFirst), store.readFailed(weekLast)),
+      (true, true),
+    );
+    expect(store.loadError, same(second));
+
+    // A read in the background fills the 26th, the only shown day the
+    // second failure marked.
+    store.prefetch(weekLast, weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    expect((store.status, store.loadError), (CalendarLoadStatus.failed, first));
+  });
+
+  test("FR66 a retry notifies only where it changes the status or the "
+      "loadError, or leaves a mark it ended ended", () async {
+    final counts = <String, int>{};
+    final mayWeekFirst = DateTime(2026, 5, 4);
+    final mayWeekLast = DateTime(2026, 5, 10);
+    for (final retried in <String>["marked again", "new error", "in flight"]) {
+      final harness = Harness();
+      final store = harness.store;
+      store.show(weekFirst, weekLast);
+      if (retried == "new error") {
+        harness.lastCall.fail();
+      } else {
+        harness.lastCall.succeed(<CalendarEntry<String>>[]);
+        await settle();
+        store.prefetch(mayWeekFirst, mayWeekLast);
+        harness.lastCall.fail();
+      }
+      await settle();
+      final notifications = harness.notifications;
+      final calls = harness.source.calls.length;
+      if (retried != "in flight") {
+        // An entry with no id fails the read within the call.
+        harness.source.answerNow = <CalendarEntry<String>>[
+          draft(weekFirst, 600, 660),
+        ];
+      }
+
+      if (retried == "new error") {
+        store.retry();
+        expect(
+          (store.status, store.loadError.runtimeType),
+          (CalendarLoadStatus.failed, StateError),
+          reason: retried,
+        );
+      } else {
+        store.retry(mayWeekFirst, mayWeekLast);
+        expect(
+          (
+            store.readFailed(mayWeekFirst),
+            store.status,
+            harness.source.calls.length - calls,
+            harness.source.readsNow.length,
+          ),
+          retried == "marked again"
+              ? (true, CalendarLoadStatus.ready, 0, 1)
+              : (false, CalendarLoadStatus.ready, 1, 0),
+          reason: retried,
+        );
+      }
+      counts[retried] = harness.notifications - notifications;
+    }
+    expect(counts, <String, int>{
+      "marked again": 0,
+      "new error": 1,
+      "in flight": 1,
+    });
+  });
+
+  test("FR67 a store disposed within a read's data source call sends no "
+      "other read", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final mayWeekFirst = DateTime(2026, 5, 4);
+    final mayWeekLast = DateTime(2026, 5, 10);
+    store.show(weekFirst, weekLast);
+    harness.lastCall.fail();
+    await settle();
+    store.prefetch(mayWeekFirst, mayWeekLast);
+    harness.lastCall.fail();
+    await settle();
+    final calls = harness.source.calls.length;
+    var reads = 0;
+    harness.source.onRead = () {
+      reads++;
+      if (reads == 1) {
+        store.dispose();
+      }
+    };
+
+    // The retry reads the shown range and the range it is given apart.
+    store.retry(mayWeekFirst, mayWeekLast);
+    expect((reads, harness.source.calls.length - calls), (1, 1));
+  });
+
+  test("FR68 a read future that throws from then once it answered is taken "
+      "at its answer, and the throw escapes no call", () async {
+    final thrown = <String, Object>{};
+    final stored = <String, CalendarEntry<String>?>{};
+    final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
+    final renamed = item.copyWith(title: "Renamed");
+    for (final call in <String>[
+      "show",
+      "prefetch",
+      "retry",
+      "refresh",
+      "invalidate",
+    ]) {
+      final source = WriteNowSource<String>()
+        ..entries = <CalendarEntry<String>>[item];
+      final store = CachingCalendarStore<String>(dataSource: source);
+      if (call != "show") {
+        store.show(weekFirst, weekLast);
+      }
+      source
+        ..readThenThrows = true
+        ..entries = <CalendarEntry<String>>[renamed];
+      try {
+        switch (call) {
+          case "show":
+            store.show(weekFirst, weekLast);
+          case "prefetch":
+            store.prefetch(mayFirst, mayLast);
+          case "retry":
+            store.retry(mayFirst, mayLast);
+          case "refresh":
+            errorOf(store.refresh());
+          default:
+            store.invalidate(weekFirst, weekLast);
+        }
+      } on Object catch (error) {
+        thrown[call] = error;
+      }
+      stored[call] = store.storedEntry("item-1");
+      store.dispose();
+    }
+    expect(thrown, isEmpty);
+    expect(stored, <String, CalendarEntry<String>?>{
+      "show": renamed,
+      "prefetch": renamed,
+      "retry": renamed,
+      "refresh": renamed,
+      "invalidate": renamed,
+    });
   });
 
   group("CF the changes the source announces", () {
