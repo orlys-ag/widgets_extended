@@ -237,10 +237,11 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// The count of failed reads, which orders their marks in [_failedDays].
   int _failures = 0;
 
-  /// The days whose marks the [retry] under way ended, while it sends its
-  /// reads; null otherwise. A read that fails within the call and marks
-  /// one of them again leaves the notification to the retry.
-  Set<int>? _retryEnded;
+  /// The days whose marks the [retry] or [refresh] under way ended, while
+  /// it sends its reads ([_sendEnded]); null otherwise. A read that fails
+  /// within the call and marks one of them again leaves the notification
+  /// to that call.
+  Set<int>? _endedMarks;
 
   int? _shownFirst;
   int? _shownLast;
@@ -397,9 +398,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
         givenSpan = _retrySpan(firstDay, lastDay);
         _endFailed(firstDay, lastDay, ended);
       }
-      final outer = _retryEnded;
-      _retryEnded = ended;
-      try {
+      _sendEnded(ended, () {
         if (shownSpan != null &&
             givenSpan != null &&
             shownSpan.first <= givenSpan.last + 1 &&
@@ -417,16 +416,30 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
             _send(givenSpan.first, givenSpan.last, requested: true);
           }
         }
-      } finally {
-        _retryEnded = outer;
-      }
-      if (_settleStatus() ||
-          ended.any((day) {
-            return !_failedDays.containsKey(day);
-          })) {
-        _notify();
-      }
+      });
     });
+  }
+
+  /// Runs [send], the reads of a [retry] or a [refresh] that ended the
+  /// marks of [ended], with [ended] as [_endedMarks], then notifies where
+  /// [status] or [loadError] changed, or a mark of [ended] is still ended,
+  /// counting what the source answers within the call: a read that fails
+  /// within it and marks those days again, leaving [status] and
+  /// [loadError] as they were, changes nothing.
+  void _sendEnded(Set<int> ended, void Function() send) {
+    final outer = _endedMarks;
+    _endedMarks = ended;
+    try {
+      send();
+    } finally {
+      _endedMarks = outer;
+    }
+    if (_settleStatus() ||
+        ended.any((day) {
+          return !_failedDays.containsKey(day);
+        })) {
+      _notify();
+    }
   }
 
   /// Reads the unread and the changed days from [first] to [last], both
@@ -476,10 +489,12 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// [readFailed] mark of each of its days, so a failed shown range is
   /// loading again, as after [retry], unless the source answers that read
   /// within the call, as for [show]. A range whose days are all read
-  /// stays ready, and a failed read leaves its days changed. Completes
-  /// once that read answers, or fails with the error it failed with;
-  /// completes at once before the first [show] and after [dispose], and
-  /// when the store is disposed before the read answers.
+  /// stays ready, and a failed read leaves its days changed. Notifies as a
+  /// [retry] does, only where it changes something: a read that fails
+  /// within the call with the error the range's marks hold notifies
+  /// nothing. Completes once that read answers, or fails with the error it
+  /// failed with; completes at once before the first [show] and after
+  /// [dispose], and when the store is disposed before the read answers.
   @override
   Future<void> refresh() {
     if (_disposed) {
@@ -493,11 +508,11 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     }
     final done = Completer<void>();
     _batch(() {
-      final ended = _endFailed(first, last);
-      _send(first, last, done: done, requested: true);
-      if (_settleStatus() || ended) {
-        _notify();
-      }
+      final ended = <int>{};
+      _endFailed(first, last, ended);
+      _sendEnded(ended, () {
+        _send(first, last, done: done, requested: true);
+      });
     });
     return done.future;
   }
@@ -955,9 +970,9 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   /// ([_requestedSince]), whatever a read in flight in the background will
   /// answer; a day marked already keeps its mark and the mark's error. It
   /// notifies when it changed [status], [loadError], what the store
-  /// answers, or [readFailed], except that it leaves to a [retry] under
-  /// way the marks it makes again on the days the retry ended
-  /// ([_retryEnded]).
+  /// answers, or [readFailed], except that it leaves to a [retry] or a
+  /// [refresh] under way the marks it makes again on the days that call
+  /// ended ([_endedMarks]).
   void _finishRead(
     _Read read, {
     List<CalendarEntry<T>>? entries,
@@ -991,7 +1006,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     }
     final changed = answered != null && _applyRead(read, answered);
     _pruneEntryTimes();
-    final retryEnded = _retryEnded;
+    final endedMarks = _endedMarks;
     var failed = false;
     if (answered == null) {
       final mark = (error: failure!, order: ++_failures);
@@ -1000,7 +1015,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
             !_requestedSince(read, day) &&
             !_failedDays.containsKey(day)) {
           _failedDays[day] = mark;
-          failed = failed || retryEnded == null || !retryEnded.contains(day);
+          failed = failed || endedMarks == null || !endedMarks.contains(day);
         }
       }
     }

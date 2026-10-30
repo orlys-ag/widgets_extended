@@ -3916,6 +3916,36 @@ void main() {
     );
   });
 
+  test("FR73 a refresh notifies only where it changes the status or the "
+      "loadError, or leaves a mark it ended ended", () async {
+    final outcomes = <String, (CalendarLoadStatus, int)>{};
+    for (final refreshed in <String>["same error", "new error", "in flight"]) {
+      final harness = Harness();
+      final store = harness.store;
+      store.show(weekFirst, weekLast);
+      final error = harness.lastCall.fail();
+      await settle();
+      final notifications = harness.notifications;
+      if (refreshed == "same error") {
+        harness.source.thrown = error;
+      } else if (refreshed == "new error") {
+        harness.source.thrown = SourceFailure("Offline again.");
+      }
+
+      store.refresh().then<void>((_) {}, onError: (Object error) {});
+      outcomes[refreshed] = (
+        store.status,
+        harness.notifications - notifications,
+      );
+      await settle();
+    }
+    expect(outcomes, <String, (CalendarLoadStatus, int)>{
+      "same error": (CalendarLoadStatus.failed, 0),
+      "new error": (CalendarLoadStatus.failed, 1),
+      "in flight": (CalendarLoadStatus.loading, 1),
+    });
+  });
+
   group("CF the changes the source announces", () {
     late StreamController<CalendarSourceChange<String>> changes;
 
