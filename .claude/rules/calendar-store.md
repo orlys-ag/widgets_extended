@@ -29,13 +29,14 @@ The contract of `CalendarStore` and its two stores. The conventions every layer 
   that covers them reads them again, and marks failed each of them that
   no read a show, a retry or a refresh asked for since it was sent
   covers in flight, whether sent or taken over. A mark ends only when a
-  read fills the day or a show, a retry or a refresh reads it, by
-  sending a read or by taking over one in flight; a read the store sends
-  in the background, such as a prefetch, ends a mark only by filling the
-  day, and keeps no failed read from making one. The shown range's
-  status follows from its days alone: ready once none is unread, failed
-  while an unread one is marked, and loading otherwise, however many
-  reads cover its unread days. A retry ends the marks of the shown
+  read fills the day or a show, a retry or a refresh reads it, which
+  each does with a read of its own though a read in flight covers the
+  day, since that read may fail as the last one did; a read the store
+  sends in the background, such as a prefetch, ends a mark only by
+  filling the day, and keeps no failed read from making one. The shown
+  range's status follows from its days alone: ready once none is unread,
+  failed while an unread one is marked, and loading otherwise, however
+  many reads cover its unread days. A retry ends the marks of the shown
   range's days and of the days it is given, and reads them again: the
   marked days with a read of its own, and the rest of their unread and
   changed days as a prefetch does, taking over a read in flight that

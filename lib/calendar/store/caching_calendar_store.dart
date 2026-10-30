@@ -86,10 +86,11 @@ class _Day {
 /// marks [readFailed] each of them that no read a [show], a [retry] or a
 /// [refresh] asked for since it was sent covers in flight. A mark ends
 /// once a read fills the day or a [show], a [retry] or a [refresh] reads
-/// it, by sending a read or by taking over one in flight; a read the store
-/// sends in the background, such as a [prefetch], ends a mark only by
-/// filling the day, and keeps no failed read from making one. The shown
-/// range's [status] follows from its days and their marks alone.
+/// it, which each does with a read of its own though a read in flight
+/// covers the day, since that read may fail as the last one did; a read
+/// the store sends in the background, such as a [prefetch], ends a mark
+/// only by filling the day, and keeps no failed read from making one. The
+/// shown range's [status] follows from its days and their marks alone.
 ///
 /// A day once read stays read. [invalidate], [refresh] and the changes the
 /// source announces take a read day's entries to have changed: the day
@@ -240,12 +241,15 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// Shows [first] to [last], both inclusive. A range whose days are all
-  /// read is ready at once; otherwise it is loading, and sends a read of
-  /// its unread days and its changed days unless a read in flight covers
-  /// the unread ones, which the show then takes over as its own. Changed
-  /// days of the range that no read in flight covers are read again too,
-  /// which the range does not wait on. The show ends the [readFailed] mark
-  /// of each day it reads.
+  /// read is ready at once; otherwise it is loading. Where no read in
+  /// flight covers its unread days, the show sends one read of them and of
+  /// its changed days. Where one does, the show takes that read over as
+  /// its own, and reads the range's [readFailed] days again with a read of
+  /// its own, as [retry] does, since the read in flight may fail as the
+  /// last one did. Changed days of the range that no read in flight covers
+  /// are read again too, in one read with those [readFailed] days, and the
+  /// range does not wait on them. The show ends the [readFailed] mark of
+  /// each day it reads.
   /// A read the source answers within the call, as a [SynchronousFuture]'s
   /// does, is applied within it, so the call can leave the range ready, or
   /// failed where such a read failed and left a day of it unread with no
@@ -262,6 +266,7 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       _shownFirst = firstDay;
       _shownLast = lastDay;
       _showCount++;
+      ({int first, int last})? failed;
       final unread = _unreadSpan();
       if (unread != null) {
         final covering = _inFlightCovering(unread.first, unread.last);
@@ -269,10 +274,10 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
           _readShown(unread);
         } else {
           _takeOver(covering);
-          _endFailed(unread.first, unread.last);
+          failed = _failedSpanOf(unread.first, unread.last);
         }
       }
-      _readChangedShown(requested: true);
+      _readChangedShown(requested: true, failed: failed);
       _settleStatus();
       _notify();
     });
@@ -537,11 +542,21 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
 
   /// The span a [retry] of [firstDay] to [lastDay] reads: from the first
   /// to the last of their [readFailed] days, which it reads though a read
-  /// in flight covers them, and of the days [_spanToRead] leaves to read,
-  /// taking over the read in flight that covers the unread days it leaves
-  /// out; null when that leaves nothing to read. Called before the retry
-  /// ends the marks.
+  /// in flight covers them ([_failedSpanOf]), and of the days
+  /// [_spanToRead] leaves to read, taking over the read in flight that
+  /// covers the unread days it leaves out; null when that leaves nothing
+  /// to read. Called before the retry ends the marks.
   ({int first, int last})? _retrySpan(int firstDay, int lastDay) {
+    return _joined(
+      _failedSpanOf(firstDay, lastDay),
+      _spanToRead(firstDay, lastDay, takeOver: true),
+    );
+  }
+
+  /// The first to the last [readFailed] day from [firstDay] to [lastDay],
+  /// or null when none is, walking the shorter of the span and the marked
+  /// days.
+  ({int first, int last})? _failedSpanOf(int firstDay, int lastDay) {
     int? from;
     int? to;
     void take(int day) {
@@ -560,17 +575,27 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     } else {
       _failedDays.forEach(take);
     }
-    final rest = _spanToRead(firstDay, lastDay, takeOver: true);
-    if (rest != null) {
-      take(rest.first);
-      take(rest.last);
-    }
     final spanFirst = from;
     final spanLast = to;
     if (spanFirst == null || spanLast == null) {
       return null;
     }
     return (first: spanFirst, last: spanLast);
+  }
+
+  /// The span from the first to the last day of [a] and [b], either of
+  /// which may be null; null when both are.
+  ({int first, int last})? _joined(
+    ({int first, int last})? a,
+    ({int first, int last})? b,
+  ) {
+    if (a == null) {
+      return b;
+    }
+    if (b == null) {
+      return a;
+    }
+    return (first: math.min(a.first, b.first), last: math.max(a.last, b.last));
   }
 
   /// Takes [read] over as the own read of a [show], a [retry] or a
@@ -693,23 +718,28 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// Sends a read from the first to the last of the shown range's changed
-  /// days that no read in flight covers: in the background, or where
-  /// [requested], as a [show]'s own read, which ends the [readFailed]
-  /// marks over its span.
-  void _readChangedShown({bool requested = false}) {
+  /// days that no read in flight covers and, where given, of [failed], the
+  /// span of the shown range's [readFailed] days a [show] reads though a
+  /// read in flight covers them: in the background, or where [requested],
+  /// as a [show]'s own read, which ends the [readFailed] marks over its
+  /// span.
+  void _readChangedShown({
+    bool requested = false,
+    ({int first, int last})? failed,
+  }) {
     final first = _shownFirst;
     final last = _shownLast;
     if (first == null || last == null) {
       return;
     }
-    final changed = _changedSpanOf(first, last, uncovered: true);
-    if (changed == null) {
+    final span = _joined(_changedSpanOf(first, last, uncovered: true), failed);
+    if (span == null) {
       return;
     }
     if (requested) {
-      _endFailed(changed.first, changed.last);
+      _endFailed(span.first, span.last);
     }
-    _send(changed.first, changed.last, requested: requested);
+    _send(span.first, span.last, requested: requested);
   }
 
   /// Sets [status] from the shown range's days, and returns whether it or

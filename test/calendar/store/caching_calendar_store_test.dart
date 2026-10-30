@@ -2623,7 +2623,7 @@ void main() {
     harness.lastCall.succeed(<CalendarEntry<String>>[]);
     await settle();
     store.invalidate(DateTime(2026, 4, 13), DateTime(2026, 4, 13));
-    store.show(DateTime(2026, 4, 27), DateTime(2026, 5, 3));
+    store.show(DateTime(2026, 4, 20), DateTime(2026, 4, 21));
     harness.lastCall.fail();
     await settle();
     store.prefetch(DateTime(2026, 4, 20), DateTime(2026, 4, 28));
@@ -2635,9 +2635,11 @@ void main() {
     harness.source.answerNow = <CalendarEntry<String>>[
       task("item-1", DateTime(2026, 4, 13), 600, 660),
     ];
+    // One read answers within the call, of the changed day and the failed
+    // ones; the prefetch's days after them are left loading.
     store.show(DateTime(2026, 4, 13), DateTime(2026, 4, 28));
     expect(harness.source.readsNow, <(DateTime, DateTime)>[
-      (DateTime(2026, 4, 13), DateTime(2026, 4, 13)),
+      (DateTime(2026, 4, 13), DateTime(2026, 4, 21)),
     ]);
     expect(idsOn(store, DateTime(2026, 4, 13)), <String>["item-1"]);
     expect(seen, <CalendarLoadStatus>[CalendarLoadStatus.loading]);
@@ -3074,6 +3076,138 @@ void main() {
       (harness.lastCall.first, harness.lastCall.last),
       (DateTime(2026, 4, 27), DateTime(2026, 4, 28)),
     );
+  });
+
+  test("FR53 a show over days marked readFailed that a read in flight "
+      "covers reads them with a read of its own, so the failure of the "
+      "read in flight marks none of them, and the range is ready once its "
+      "own read answers, whether the read in flight fails before or after "
+      "it", () async {
+    final nextFirst = DateTime(2026, 4, 27);
+    final nextLast = DateTime(2026, 5, 3);
+    for (final staleFails in <String>["before", "after"]) {
+      final harness = Harness();
+      final store = harness.store;
+      List<DateTime> marked() {
+        return <DateTime>[
+          for (var i = 0; i < 7; i++)
+            DateTime(nextFirst.year, nextFirst.month, nextFirst.day + i),
+        ].where(store.readFailed).toList();
+      }
+
+      store.show(weekFirst, weekLast);
+      harness.lastCall.succeed(<CalendarEntry<String>>[]);
+      await settle();
+      store.prefetch(nextFirst, nextLast);
+      harness.lastCall.fail();
+      await settle();
+      store.prefetch(nextFirst, nextLast);
+      final stale = harness.lastCall;
+      expect(
+        (stale.first, stale.last, stale.completer.isCompleted),
+        (nextFirst, nextLast, false),
+      );
+      expect(store.readFailed(nextFirst), isTrue);
+
+      store.show(nextFirst, nextLast);
+      expect(harness.source.calls, hasLength(4));
+      final fresh = harness.lastCall;
+      expect((fresh.first, fresh.last), (nextFirst, nextLast));
+      expect(store.readFailed(nextFirst), isFalse);
+      expect(store.status, CalendarLoadStatus.loading);
+
+      if (staleFails == "before") {
+        stale.fail();
+        await settle();
+        expect(marked(), isEmpty);
+        fresh.succeed(<CalendarEntry<String>>[]);
+        await settle();
+        expect(store.status, CalendarLoadStatus.ready);
+      } else {
+        fresh.succeed(<CalendarEntry<String>>[]);
+        await settle();
+        expect(store.status, CalendarLoadStatus.ready);
+        stale.fail();
+        await settle();
+        expect(store.status, CalendarLoadStatus.ready);
+      }
+    }
+  });
+
+  test("FR54 a show whose range holds no day marked readFailed takes over "
+      "the read in flight that covers its unread days, sending no read, "
+      "though that read covers marked days outside the range", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final mayWeekFirst = DateTime(2026, 5, 4);
+    final mayWeekLast = DateTime(2026, 5, 10);
+    store.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    store.prefetch(mayWeekFirst, mayWeekLast);
+    harness.lastCall.fail();
+    await settle();
+    store.prefetch(DateTime(2026, 4, 27), DateTime(2026, 4, 30));
+    final older = harness.lastCall;
+    store.prefetch(DateTime(2026, 4, 27), mayWeekLast);
+    final covering = harness.lastCall;
+    expect(
+      (covering.first, covering.last, covering.completer.isCompleted),
+      (DateTime(2026, 4, 27), mayWeekLast, false),
+    );
+    expect(store.readFailed(mayWeekFirst), isTrue);
+    final calls = harness.source.calls.length;
+
+    store.show(DateTime(2026, 4, 27), DateTime(2026, 5, 3));
+    expect(harness.source.calls, hasLength(calls));
+    // The read taken over was asked for after the older one was sent, so
+    // the older one's failure marks none of the days it covers.
+    older.fail();
+    await settle();
+    expect(store.status, CalendarLoadStatus.loading);
+  });
+
+  test("FR55 a show reads its days marked readFailed under a read in "
+      "flight and its changed days no read in flight covers as one read, "
+      "with no other read where the changed days lie around the marked "
+      "ones", () async {
+    final reads = <String, List<(DateTime?, DateTime?)>>{};
+    for (final changed in <String>["before", "around"]) {
+      final harness = Harness();
+      final store = harness.store;
+      store.prefetch(DateTime(2026, 4, 13), DateTime(2026, 4, 19));
+      harness.lastCall.succeed(<CalendarEntry<String>>[]);
+      store.prefetch(DateTime(2026, 4, 27), DateTime(2026, 5, 3));
+      harness.lastCall.succeed(<CalendarEntry<String>>[]);
+      await settle();
+      store.invalidate(DateTime(2026, 4, 13), DateTime(2026, 4, 13));
+      if (changed == "around") {
+        store.invalidate(DateTime(2026, 4, 27), DateTime(2026, 4, 27));
+      }
+      store.prefetch(weekFirst, weekLast);
+      harness.lastCall.fail();
+      await settle();
+      store.prefetch(weekFirst, weekLast);
+      final stale = harness.lastCall;
+      expect(
+        (stale.first, stale.last, stale.completer.isCompleted),
+        (weekFirst, weekLast, false),
+      );
+      expect(store.readFailed(weekFirst), isTrue);
+      final calls = harness.source.calls.length;
+
+      store.show(DateTime(2026, 4, 13), DateTime(2026, 4, 27));
+      reads[changed] = <(DateTime?, DateTime?)>[
+        for (final call in harness.source.calls.skip(calls))
+          (call.first, call.last),
+      ];
+    }
+    expect(reads["before"], <(DateTime?, DateTime?)>[
+      (DateTime(2026, 4, 13), weekLast),
+    ]);
+    expect(reads["around"], <(DateTime?, DateTime?)>[
+      (DateTime(2026, 4, 13), DateTime(2026, 4, 27)),
+    ]);
   });
 
   group("CF the changes the source announces", () {

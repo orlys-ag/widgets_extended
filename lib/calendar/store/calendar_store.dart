@@ -154,7 +154,9 @@ abstract class CalendarStore<T> extends ChangeNotifier {
   Object? get loadError;
 
   /// Shows [first] to [last], both inclusive, reading the days not read
-  /// yet, which ends their [readFailed] marks.
+  /// yet, which ends their [readFailed] marks: the marked ones though a
+  /// read is on the way, as [retry] does, and the others with no second
+  /// read where one is.
   void show(DateTime first, DateTime last);
 
   /// Ends the [readFailed] marks of the shown range's days and, where
