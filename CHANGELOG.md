@@ -23,10 +23,17 @@ deletes through `onEditRequest` and `onDeleteRequest`. A
 the views draw; builders replace the blocks, chips, cards, add buttons and
 the loading and failure states; and `CalendarLocalizations` writes every
 word. `CalendarDates` holds the civil-date helpers the calendar counts
-days and minutes with, and `entriesShareTime` is the overlap rule's test
-of whether two entries share time. A host extends `CalendarController`,
-the stores, `CalendarEditPolicy` and the localizations in classes it
-declares `final` or `base`.
+days and minutes with, `CalendarController` the limits a pinch zooms
+within, and `NoOverlapsPolicy.entriesShareTime` the policy's test of
+whether two entries share time; `compareCalendarEntries` is the order a
+store answers entries in. A host extends `CalendarController`, the
+stores, `CalendarEditPolicy` and the localizations in classes it declares
+`final` or `base`.
+- `package:widgets_extended/widgets_extended.dart` exports the calendar,
+so an app that also imports a library declaring one of its names, as
+`syncfusion_flutter_calendar` declares `CalendarController`,
+`CalendarDataSource` and `CalendarView`, imports one of the two with
+`hide` or a prefix.
 - Added `board`: a two-axis scrolling lattice. `Board` is the widget and
 `BoardController` owns the model (`addItem`, `moveItem`, `resizeItem`,
 `removeItem`, `setItems`); a `BoardCellBuilder` fills every `(row, col)` cell

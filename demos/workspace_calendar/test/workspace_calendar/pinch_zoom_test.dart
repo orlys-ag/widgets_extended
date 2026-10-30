@@ -9,7 +9,6 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart'
     show isoDate;
 import 'package:widgets_extended/calendar/views/month_board.dart';
-import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
@@ -132,7 +131,7 @@ void main() {
     await pinch(tester, focal, axis: Axis.vertical, step: 8.0, steps: 20);
     expect(
       slotRect(tester, 12 * 60, 2).height,
-      moreOrLessEquals(minSlotHeightHigh),
+      moreOrLessEquals(CalendarController.minSlotHeightHigh),
     );
 
     await pinch(
@@ -143,7 +142,10 @@ void main() {
       steps: 20,
       spread: 300.0,
     );
-    expect(await sliderValue(tester, slotHeightSliderKey), minSlotHeightLow);
+    expect(
+      await sliderValue(tester, slotHeightSliderKey),
+      CalendarController.minSlotHeightLow,
+    );
   });
 
   testWidgets("Z2 in Week a pinch across zooms the days around the point "
@@ -171,13 +173,16 @@ void main() {
     await pinch(tester, focal, axis: Axis.horizontal, step: 8.0, steps: 20);
     expect(
       slotRect(tester, 12 * 60, 2).width,
-      moreOrLessEquals(minDayWidthHigh),
+      moreOrLessEquals(CalendarController.minDayWidthHigh),
     );
 
     await pickMode(tester, "Day");
     final day = cellRect(tester, dayRowOf(12 * 60), 1);
     await pinch(tester, day.center, axis: Axis.horizontal, step: -4.0);
-    expect(await sliderValue(tester, dayWidthSliderKey), minDayWidthHigh);
+    expect(
+      await sliderValue(tester, dayWidthSliderKey),
+      CalendarController.minDayWidthHigh,
+    );
   });
 
   testWidgets("Z3 two fingers dragged together do not scroll Week, and one "
@@ -233,7 +238,10 @@ void main() {
     await pinch(tester, focal, axis: Axis.vertical, step: 8.0, steps: 20);
     expect(
       monthDayRect(tester, day).height,
-      moreOrLessEquals(maxMonthWeekScale * before.height, epsilon: 0.1),
+      moreOrLessEquals(
+        CalendarController.maxMonthWeekScale * before.height,
+        epsilon: 0.1,
+      ),
     );
 
     await pinch(
@@ -247,7 +255,7 @@ void main() {
     expect(monthDayRect(tester, day).height, before.height);
     expect(
       await sliderValue(tester, slotHeightSliderKey),
-      defaultMinSlotHeight,
+      CalendarController.defaultMinSlotHeight,
     );
 
     final narrow = monthDayRect(tester, day);

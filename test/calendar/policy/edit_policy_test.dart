@@ -534,5 +534,24 @@ void main() {
       expect(unrestricted, isNot(policy));
       expect(policy, isNot(unrestricted));
     });
+
+    test("EP17 its test of two entries, of any payload types: two timed "
+        "entries whose instants meet share time, two that only touch do "
+        "not, nor does an all-day entry with a timed one", () {
+      final nine = entryOf("nine", at(tuesday, 9), at(tuesday, 10));
+      final half = entryOf("half", at(tuesday, 9, 30), at(tuesday, 10, 30));
+      final ten = entryOf("ten", at(tuesday, 10), at(tuesday, 11));
+      final allDay = CalendarEntry<int>(
+        id: "day",
+        start: tuesday,
+        end: wednesday,
+        title: "day",
+        color: const Color(0xFF336699),
+        payload: 1,
+      );
+      expect(NoOverlapsPolicy.entriesShareTime(nine, half), isTrue);
+      expect(NoOverlapsPolicy.entriesShareTime(nine, ten), isFalse);
+      expect(NoOverlapsPolicy.entriesShareTime(allDay, nine), isFalse);
+    });
   });
 }

@@ -222,10 +222,13 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
                     Slider(
                       key: dayWidthSliderKey,
                       value: controller.minDayWidth,
-                      min: minDayWidthLow,
-                      max: minDayWidthHigh,
-                      divisions: ((minDayWidthHigh - minDayWidthLow) / 4.0)
-                          .round(),
+                      min: CalendarController.minDayWidthLow,
+                      max: CalendarController.minDayWidthHigh,
+                      divisions:
+                          ((CalendarController.minDayWidthHigh -
+                                      CalendarController.minDayWidthLow) /
+                                  4.0)
+                              .round(),
                       onChanged: (value) {
                         controller.minDayWidth = value.roundToDouble();
                       },
@@ -239,10 +242,13 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
                     Slider(
                       key: slotHeightSliderKey,
                       value: controller.minSlotHeight,
-                      min: minSlotHeightLow,
-                      max: minSlotHeightHigh,
-                      divisions: ((minSlotHeightHigh - minSlotHeightLow) / 2.0)
-                          .round(),
+                      min: CalendarController.minSlotHeightLow,
+                      max: CalendarController.minSlotHeightHigh,
+                      divisions:
+                          ((CalendarController.minSlotHeightHigh -
+                                      CalendarController.minSlotHeightLow) /
+                                  2.0)
+                              .round(),
                       onChanged: (value) {
                         controller.minSlotHeight = value.roundToDouble();
                       },

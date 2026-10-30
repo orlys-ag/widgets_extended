@@ -38,7 +38,6 @@ export 'policy/edit_policy.dart'
         UnrestrictedEditPolicy;
 export 'policy/edit_rules.dart' show CalendarEarliestStart, CalendarEditRules;
 export 'policy/history_lock_policy.dart' show HistoryLockPolicy;
-export 'policy/overlap.dart' show entriesShareTime;
 export 'presentation/calendar_activity_indicator.dart'
     show CalendarActivityIndicator;
 export 'presentation/calendar_builders.dart'
@@ -78,17 +77,10 @@ export 'store/calendar_store.dart'
         CalendarShownEntry,
         CalendarStore,
         CalendarStoreException,
-        CalendarWritePendingException;
+        CalendarWritePendingException,
+        compareCalendarEntries;
 export 'store/memory_calendar_store.dart'
     show CalendarEntryChanged, MemoryCalendarStore;
 export 'views/month_board.dart' show MonthLayout;
 export 'views/move_request.dart' show CalendarMoveKind, CalendarMoveRequest;
-export 'views/pinch_zoom.dart'
-    show
-        defaultMinSlotHeight,
-        maxMonthWeekScale,
-        minDayWidthHigh,
-        minDayWidthLow,
-        minSlotHeightHigh,
-        minSlotHeightLow;
 export 'views/timed_grid.dart' show CreateRange;

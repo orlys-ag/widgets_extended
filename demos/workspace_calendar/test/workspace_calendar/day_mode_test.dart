@@ -185,7 +185,7 @@ Future<int> pixelAt(WidgetTester tester, Offset point) async {
 Future<void> pumpGrid(
   WidgetTester tester,
   CalendarSettings settings, {
-  double minSlotHeight = defaultMinSlotHeight,
+  double minSlotHeight = CalendarController.defaultMinSlotHeight,
   Size size = const Size(390.0, 844.0),
   CalendarStore<ItemPayload>? store,
 }) async {
@@ -222,7 +222,7 @@ Future<void> pumpGrid(
             weekdays: settings.weekdays,
             hours: settings.hours,
             hourLabelFormat: settings.hourLabelFormat,
-            minDayWidth: minDayWidthLow,
+            minDayWidth: CalendarController.minDayWidthLow,
             minSlotHeight: minSlotHeight,
             showsDayHeader: false,
           ),

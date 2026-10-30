@@ -252,8 +252,8 @@ class MockCalendarApi implements CalendarApi {
   }
 
   /// The stored ids, other than [ownId], that the valid [body] may not
-  /// share time with ([entriesShareTime]), read from the index of the days
-  /// it covers.
+  /// share time with ([NoOverlapsPolicy.entriesShareTime]), read from the
+  /// index of the days it covers.
   List<String> _conflictsOf(Map<String, Object?> body, String? ownId) {
     final item = itemFromJson(body);
     final seen = <String>{};
@@ -264,7 +264,10 @@ class MockCalendarApi implements CalendarApi {
         if (id == ownId || !seen.add(id)) {
           continue;
         }
-        if (entriesShareTime(item, itemFromJson(_items[id]!))) {
+        if (NoOverlapsPolicy.entriesShareTime(
+          item,
+          itemFromJson(_items[id]!),
+        )) {
           conflicts.add(id);
         }
       }

@@ -42,19 +42,25 @@ Normative for `lib/calendar/`, the calendar module: `CalendarView`, a calendar o
   `Duration`, so a day of 23 or 25 hours at a DST change is one day.
 - **One barrel.** `lib/calendar/calendar.dart` is the module's public
   surface and exports through explicit `show` clauses; anything it does not
-  show is internal, whatever its name.
+  show is internal, whatever its name. A top-level function or constant it
+  shows has `calendar` in its name; any other helper is a static member of
+  a class it shows.
 - **The public API grows by additions.** Each class the barrel shows says
   how a host builds on it: one a host extends (`CalendarController`,
   `CalendarStore` and its two stores, `CalendarEditPolicy`,
   `CalendarLocalizations` and its English default) is `base`,
   `CalendarDataSource` is an `interface`, the widgets are neither, and
   every other class is `final` or `sealed`. A later release adds to the
-  API without breaking a host: a member added to a `base` class has a
-  default, a field added to a class is a getter or an optional named
-  parameter, a new ability of a data source is a new interface, no shown
-  type gains a type parameter, and no shown enum or sealed class gains a
-  value or a subtype, which a host's exhaustive `switch` would miss, so a
-  new arrangement of a view is a parameter, not a new `CalendarViewKind`.
+  API so that a host's code still compiles: a member added to a `base`
+  class has a default, which breaks only a host subclass that declares a
+  member of the same name; a field added to a class is a getter or an
+  optional named parameter; the function type of a builder or callback
+  gains no parameter, so what a release adds to its input is a field of
+  the details class it takes, or else a new callback; a new ability of a
+  data source is a new interface; no shown type gains a type parameter;
+  and no shown enum or sealed class gains a value or a subtype, which a
+  host's exhaustive `switch` would miss, so a new arrangement of a view
+  is a parameter, not a new `CalendarViewKind`.
 - **Tests mirror the layers.** A test of a layer's code sits in the
   matching directory under `test/calendar/`, and a test that needs entries
   supplies them through the in-memory store.

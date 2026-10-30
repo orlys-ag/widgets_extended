@@ -1988,13 +1988,13 @@ void main() {
     }
 
     await openSettings(tester);
-    await setSlotHeight(tester, minSlotHeightLow);
+    await setSlotHeight(tester, CalendarController.minSlotHeightLow);
     await closeSettings(tester);
     expect(height(), near(share));
     expect(viewport.verticalPosition!.maxScrollExtent, 0.0);
 
     await openSettings(tester);
-    await setSlotHeight(tester, minSlotHeightHigh);
+    await setSlotHeight(tester, CalendarController.minSlotHeightHigh);
     await closeSettings(tester);
     expect(height(), near(3 * share));
     // The fourth week lies below the board's height at the new scale, and

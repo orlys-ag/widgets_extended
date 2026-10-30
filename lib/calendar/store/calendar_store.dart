@@ -753,7 +753,8 @@ class CalendarEntryIndex<T> {
 }
 
 /// The order a store answers entries in: by start, end, title and id, a
-/// total order over entries with distinct ids.
+/// total order over entries with distinct ids. [a] and [b] have ids. A
+/// host's own [CalendarStore] sorts the entries it answers with it.
 int compareCalendarEntries<T>(CalendarEntry<T> a, CalendarEntry<T> b) {
   final byStart = a.start.compareTo(b.start);
   if (byStart != 0) {

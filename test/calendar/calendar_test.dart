@@ -138,8 +138,9 @@ void main() {
       CalendarEditRules,
       CalendarEarliestStart,
       HistoryLockPolicy,
-      entriesShareTime,
+      NoOverlapsPolicy.entriesShareTime,
       CalendarStore,
+      compareCalendarEntries,
       CachingCalendarStore,
       MemoryCalendarStore,
       CalendarShownEntry,
@@ -189,22 +190,21 @@ void main() {
       CalendarMoveKind,
       HourLabelFormat,
       MonthLayout,
-      minDayWidthLow,
-      minDayWidthHigh,
-      minSlotHeightLow,
-      minSlotHeightHigh,
-      defaultMinSlotHeight,
-      maxMonthWeekScale,
+      CalendarController.minDayWidthLow,
+      CalendarController.minDayWidthHigh,
+      CalendarController.minSlotHeightLow,
+      CalendarController.minSlotHeightHigh,
+      CalendarController.defaultMinSlotHeight,
+      CalendarController.maxMonthWeekScale,
     ];
   });
 
-  test("B2 the barrel shows by name; of the views only the types and the "
-      "range constants the calendar's signatures use, and no view; of the "
-      "localizations file the localizations, their English default and "
-      "HourLabelFormat; and of the policy layer exactly the two edit policy files, "
-      "with the policies and the types their signatures name, the edit "
-      "rules, and the overlap rule's test of two entries; and of the dates "
-      "layer exactly the day hours, the weekday sets and CalendarDates", () {
+  test("B2 the barrel shows by name; of the views only the types the "
+      "calendar's signatures use, and no view; of the localizations file "
+      "the localizations, their English default and HourLabelFormat; of the "
+      "policy layer exactly the policies, the types their signatures name "
+      "and the edit rules; and of the dates layer exactly the day hours, "
+      "the weekday sets and CalendarDates", () {
     final source = File(barrelPath).readAsStringSync();
     final exports = exportsOf(source);
     // Every directive the barrel holds was read.
@@ -238,14 +238,6 @@ void main() {
       "lib/calendar/views/move_request.dart": <String>{
         "CalendarMoveKind",
         "CalendarMoveRequest",
-      },
-      "lib/calendar/views/pinch_zoom.dart": <String>{
-        "defaultMinSlotHeight",
-        "maxMonthWeekScale",
-        "minDayWidthHigh",
-        "minDayWidthLow",
-        "minSlotHeightHigh",
-        "minSlotHeightLow",
       },
       "lib/calendar/views/timed_grid.dart": <String>{"CreateRange"},
     });
@@ -295,7 +287,6 @@ void main() {
           "CalendarEarliestStart",
           "CalendarEditRules",
         },
-        "lib/calendar/policy/overlap.dart": <String>{"entriesShareTime"},
       },
     );
     for (final export in exports) {
@@ -328,7 +319,8 @@ void main() {
 
   test("B4 each class the barrel shows says how a host builds on it: a "
       "class a host extends is base, the data source an interface, the "
-      "widgets neither, and every other class final or sealed", () {
+      "widgets neither, and every other class final or sealed; and each "
+      "function or constant it shows names the calendar", () {
     const widgets = <String>{
       "CalendarView",
       "CalendarActivityIndicator",
@@ -362,6 +354,7 @@ void main() {
     // so every file of the module is read.
     final declared = <String>{};
     final kindOf = <String, String>{};
+    final functionsAndConstants = <String>{};
     for (final file in moduleFiles()) {
       final source = File(file).readAsStringSync();
       for (final match in classDeclaration.allMatches(source)) {
@@ -378,7 +371,11 @@ void main() {
             : "open";
       }
       for (final match in otherDeclaration.allMatches(source)) {
-        declared.add((match.group(1) ?? match.group(2) ?? match.group(3))!);
+        final name = (match.group(1) ?? match.group(2) ?? match.group(3))!;
+        declared.add(name);
+        if (match.group(1) == null) {
+          functionsAndConstants.add(name);
+        }
       }
     }
     // Every name the barrel shows has a declaration the scan reads, and
@@ -406,6 +403,20 @@ void main() {
                     ? "interface"
                     : "closed"))
           name: kindOf[name]!,
+    }, isEmpty);
+    // The scan reads a function and a constant the barrel shows.
+    expect(
+      functionsAndConstants,
+      containsAll(<String>{
+        "defaultCalendarHeaderBuilder",
+        "calendarCardStripExtent",
+      }),
+    );
+    expect(<String>{
+      for (final name in shown)
+        if (functionsAndConstants.contains(name) &&
+            !name.toLowerCase().contains("calendar"))
+          name,
     }, isEmpty);
   });
 

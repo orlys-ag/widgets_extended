@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
+import 'overlap.dart' as overlap;
 
 /// The time a [CalendarEditPolicy] answers at: the clock reading [time],
 /// and [today], the day the calendar marks as today, which a host may pin
@@ -267,6 +268,17 @@ final class DayLimitPolicy<T> extends CalendarEditPolicy<T> {
 final class NoOverlapsPolicy<T> extends CalendarEditPolicy<T> {
   /// Forbids overlaps.
   const NoOverlapsPolicy();
+
+  /// Whether [a] and [b] share time, as this policy reads it: never where
+  /// either is all-day, and otherwise where their instants meet. A data
+  /// source that refuses the writes this policy refuses tests each write's
+  /// entry against the stored ones with it.
+  static bool entriesShareTime(
+    CalendarEntry<Object?> a,
+    CalendarEntry<Object?> b,
+  ) {
+    return overlap.entriesShareTime(a, b);
+  }
 
   @override
   bool get allowsOverlaps {

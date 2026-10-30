@@ -24,7 +24,7 @@ import '../views/day_list.dart';
 import '../views/month_board.dart';
 import '../views/month_picker.dart';
 import '../views/move_request.dart';
-import '../views/pinch_zoom.dart';
+import '../views/pinch_zoom.dart' as pinch;
 import '../views/timed_grid.dart';
 import 'calendar_card.dart';
 import 'calendar_header.dart';

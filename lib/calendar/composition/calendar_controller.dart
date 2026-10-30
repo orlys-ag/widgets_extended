@@ -22,6 +22,25 @@ typedef _Observed = ({CalendarViewKind? view, DateTime? day, _Range? range});
 /// that frame, never inside a build. A set on an unbound controller is
 /// kept until a calendar binds it.
 base class CalendarController extends ChangeNotifier {
+  /// The least [minDayWidth] a pinch zooms to, and its default.
+  static const double minDayWidthLow = pinch.minDayWidthLow;
+
+  /// The most [minDayWidth] a pinch zooms to.
+  static const double minDayWidthHigh = pinch.minDayWidthHigh;
+
+  /// The least [minSlotHeight] a pinch zooms to.
+  static const double minSlotHeightLow = pinch.minSlotHeightLow;
+
+  /// The most [minSlotHeight] a pinch zooms to.
+  static const double minSlotHeightHigh = pinch.minSlotHeightHigh;
+
+  /// The default [minSlotHeight], at and under which [monthWeekScale] is 1.
+  static const double defaultMinSlotHeight = pinch.defaultMinSlotHeight;
+
+  /// The most [monthWeekScale] a pinch zooms to: [minSlotHeightHigh] over
+  /// [defaultMinSlotHeight].
+  static const double maxMonthWeekScale = pinch.maxMonthWeekScale;
+
   /// A controller of [view] and [selectedDay], each null for the
   /// calendar's own choice when it binds it, the first view it lists and
   /// today's nearest shown day, and of the least sizes, logical pixels of
@@ -109,8 +128,8 @@ base class CalendarController extends ChangeNotifier {
   /// calendar; a bound one always has one.
   ///
   /// Set on a bound controller, the calendar selects the shown day nearest
-  /// [value]'s day ([shownDayNear]); on an unbound one, [value]'s day is
-  /// kept until a calendar binds it.
+  /// [value]'s day; on an unbound one, [value]'s day is kept until a
+  /// calendar binds it.
   DateTime get selectedDay {
     final day = _selectedDay;
     if (day == null) {
