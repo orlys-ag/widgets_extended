@@ -15,8 +15,9 @@ The contract of `CalendarStore` and its two stores. The conventions every layer 
   its writes must lie in; a set of other hours notifies.
 - **Writes.** An entry has one write in flight at most, and a write on an
   entry that has one sends nothing and fails. Every write completes once
-  it is stored, or fails to its caller; a failed move, resize or delete
-  shows the stored entry again.
+  the store's source, a data source or the store itself, has stored it,
+  with what the source stored, or fails to its caller; a failed move,
+  resize or delete shows the stored entry again.
 - **Freshness.** `invalidate` and `refresh` take entries to have changed at
   their source, so the store answers those days anew.
 - **The caching store** reads through a data source by days. A read's
@@ -52,15 +53,21 @@ The contract of `CalendarStore` and its two stores. The conventions every layer 
   stream of `CalendarSourceChange`s, when given, is applied as it arrives:
   a put or a removal without a read, a change of days as an `invalidate`,
   and a change of all, or an error on the stream, as an `invalidate` of
-  every day. A write's answer that a change announced since the write was
-  sent, or a read sent since, contradicts is not stored, and the days of
-  both entries, read or under a read in flight, are read again; a read
-  that removed the entry from days the answer does not cover does not
-  contradict it, and one that answered a day the answer covers without the
-  entry does. A grid move or resize shows the requested entry, pending,
-  until the data source answers; a delete and an update show the stored
-  entry pending, as it is stored meanwhile; a create shows nothing until
-  the entry is stored.
+  every day. Where a change announced since a write was sent, or a read
+  sent since, contradicts the write's answer, the store keeps what it
+  holds, and the days of both entries, read or under a read in flight,
+  are read again; the read's answer may arrive before the write's or
+  after it. A read contradicts the answer where it answers the entry
+  otherwise or answers a day the answer covers without the entry, and not
+  where it removed the entry from days the answer does not cover. The
+  write completes with its data source's answer all the same. A read sent
+  later that removed an entry tells nothing of the days it did not cover,
+  so an older read's answer of the entry stands, unless a read sent later
+  filled a day the answered entry covers, which leaves it unstored and its
+  days in the older read to read again. A grid move or resize shows the
+  requested entry, pending, until the data source answers; a delete and
+  an update show the stored entry pending, as it is stored meanwhile; a
+  create shows nothing until the entry is stored.
 - **The in-memory store** holds the entries the host gives it, and is
   always loaded. It applies each write within the call, so none is
   pending. It is its entries' source, so `invalidate` and `refresh` do

@@ -114,8 +114,10 @@ final class CalendarWritePendingException extends CalendarStoreException {
 /// entry has one write in flight at most: while it runs the entry shows
 /// [CalendarShownEntry.pending], and a write on it sends nothing and fails
 /// with a [CalendarWritePendingException]. Each write returns a future
-/// that completes once the write is stored, or fails to its caller with
-/// the error that kept it from being stored.
+/// that completes once the store's source, a data source it writes
+/// through or the store itself, has stored the write, with what the
+/// source stored, or fails to its caller with the error that kept it from
+/// being stored.
 abstract class CalendarStore<T> extends ChangeNotifier {
   /// A store holding writes to [hours].
   CalendarStore({DayHours hours = DayHours.allDay}) : _hours = hours;
@@ -212,27 +214,29 @@ abstract class CalendarStore<T> extends ChangeNotifier {
   /// The entry [id] as stored, without a pending move's requested time.
   CalendarEntry<T>? storedEntry(String id);
 
-  /// Stores [draft]; completes with the stored entry, which has an id, or
-  /// fails with the error that kept it from being stored. A draft outside
-  /// [hours] fails with a [CalendarHoursException].
+  /// Stores [draft]; completes with the entry as the store's source stored
+  /// it, which has an id, or fails with the error that kept it from being
+  /// stored. A draft outside [hours] fails with a [CalendarHoursException].
   Future<CalendarEntry<T>> create(CalendarEntry<T> draft);
 
   /// Writes [entry] over the stored entry its id names; completes with the
-  /// stored entry, or fails with the error that kept it from being
-  /// stored. An entry with no id fails with an [ArgumentError], and one
-  /// [hoursRefusalOf] refuses with a [CalendarHoursException].
+  /// entry as the store's source stored it, or fails with the error that
+  /// kept it from being stored. An entry with no id fails with an
+  /// [ArgumentError], and one [hoursRefusalOf] refuses with a
+  /// [CalendarHoursException].
   Future<CalendarEntry<T>> update(CalendarEntry<T> entry);
 
   /// Writes a grid move or resize to [requested], whose id names a stored
   /// entry, whether or not it shares time with another entry; completes
-  /// with the stored entry, or fails with the error that kept it from
-  /// being stored, the stored entry showing again. An entry with no id
-  /// fails with an [ArgumentError], and one [hoursRefusalOf] refuses with
-  /// a [CalendarHoursException].
+  /// with the entry as the store's source stored it, or fails with the
+  /// error that kept it from being stored, the stored entry showing again.
+  /// An entry with no id fails with an [ArgumentError], and one
+  /// [hoursRefusalOf] refuses with a [CalendarHoursException].
   Future<CalendarEntry<T>> requestMove(CalendarEntry<T> requested);
 
-  /// Deletes the entry [id]; completes once it is deleted, or fails with
-  /// the error that kept it from being deleted, the entry staying stored.
+  /// Deletes the entry [id]; completes once the store's source deleted it,
+  /// or fails with the error that kept it from being deleted, the entry
+  /// staying stored.
   Future<void> requestDelete(String id);
 
   /// The refusal of [entry] for [hours], or null when the hours hold its
