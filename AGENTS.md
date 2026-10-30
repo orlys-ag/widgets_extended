@@ -9,15 +9,9 @@ A Flutter package (`widgets_extended`) providing rich utility widgets, in these 
 - **sliver_tree**: a high-performance sliver-based tree widget with animated expand/collapse, FLIP reorder slides, node diffing, drag-and-drop reordering, and sticky headers.
 - **sectioned_sliver_list**: a sectioned list (sections + items) built on top of the sliver_tree stack (`SectionedListController` wraps a `TreeController` + `TreeSyncController` with section/item-typed keys).
 - **board**: a two-axis lattice viewport built on `RenderTwoDimensionalViewport`, with spanning items, overlap lanes, animated enter/exit and slides, drag-and-drop moves and resizes, cell and range selection, and frozen tracks.
+- **calendar**: a calendar widget (`CalendarView`) with Agenda, Day, Week and Month views on the board and sliver_tree modules, whose rules are in `.claude/rules/calendar.md`. Its barrel is `lib/calendar/calendar.dart`, and its API is experimental: it may change in a minor release until it is declared stable.
 
 The barrel file `lib/widgets_extended.dart` re-exports each of them.
-
-A fourth module, calendar, is in progress in `lib/calendar/`: a calendar widget
-(`CalendarView`) with Agenda, Day, Week and Month views on the board and
-sliver_tree modules, whose rules are in `.claude/rules/calendar.md`. Its barrel
-is `lib/calendar/calendar.dart`; `lib/widgets_extended.dart` does not export it
-yet, and no package release ships while `lib/calendar/` exists and
-`lib/widgets_extended.dart` does not export it.
 
 `demos/workspace_calendar/` is a tracked demo app, a month, week and day
 calendar on the board and the synced sliver tree. It depends on the library by
