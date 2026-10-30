@@ -367,11 +367,13 @@ class CalendarView<T> extends StatefulWidget {
   /// whose entry shows at the requested times, pending, until the future
   /// completes; the host writes it, or another entry in its place, to
   /// [store] ([CalendarStore.requestMove]), or lets it go. Null writes it
-  /// to [store]. Only the grid that made the request holds it: another
+  /// to [store] and catches the write's failure, as a failed write shows
+  /// the stored entry again; a host that wants to see failures passes its
+  /// own function. Only the grid that made the request holds it: another
   /// view, or a grid built anew as a switch between Week and Day builds
-  /// one, shows the store's entry meanwhile. A failure of the future, the
-  /// store's included, is not caught: a host that handles one passes a
-  /// function that does.
+  /// one, shows the store's entry meanwhile. A failure of the function,
+  /// whether it throws within the call or its future fails, is not caught:
+  /// a host that handles one passes a function that does.
   final Future<void> Function(CalendarMoveRequest<T> request)? onMoveRequest;
 
   /// An edit request from an Agenda card, with the stored entry: a

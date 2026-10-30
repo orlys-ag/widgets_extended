@@ -731,9 +731,11 @@ class TimedGrid<T> extends StatefulWidget {
   /// entry at its requested times and pending, as a pending write shows
   /// it: a tap on it opens nothing, and no drag lifts it. Then the grid
   /// shows the store's entry again. Null writes the request through the
-  /// store ([CalendarStore.requestMove]). A failure of the future, the
-  /// store's included, is not caught: a host that handles one passes a
-  /// function that does.
+  /// store ([CalendarStore.requestMove]) and catches the write's failure,
+  /// as a failed write shows the stored entry again; a host that wants to
+  /// see failures passes its own function. A failure of the function,
+  /// whether it throws within the call or its future fails, is not caught:
+  /// a host that handles one passes a function that does.
   final Future<void> Function(CalendarMoveRequest<T> request)? onMoveRequest;
 
   /// Whether the grid is in edit mode: its blocks move and resize, and its
@@ -2174,17 +2176,27 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ([CalendarStore.requestMove]), holding it in [_held] until the future
   /// completes, or fails, a throw within the call included. The hold syncs
   /// within the call ([_handleStore]), as a store write's notify does.
+  ///
+  /// A failure of the store's write, whether [CalendarStore.requestMove]
+  /// throws within the call or its future fails, is caught, as a failed
+  /// write shows the stored entry again. A failure of
+  /// [TimedGrid.onMoveRequest], either way, is left uncaught in the zone.
   void _requestMove(CalendarMoveRequest<T> request) {
     final id = request.entry.id!;
     _held[id] = request;
     _handleStore();
     final onMoveRequest = widget.onMoveRequest;
     final store = widget.store;
-    final moving = Future<void>.sync(() {
-      return onMoveRequest == null
-          ? store.requestMove(request.requested)
-          : onMoveRequest(request);
-    });
+    final Future<void> moving;
+    if (onMoveRequest == null) {
+      moving = Future<CalendarEntry<T>>.sync(() {
+        return store.requestMove(request.requested);
+      }).then<void>((_) {}, onError: (Object error) {});
+    } else {
+      moving = Future<void>.sync(() {
+        return onMoveRequest(request);
+      });
+    }
     moving.whenComplete(() {
       if (!identical(_held[id], request)) {
         return;

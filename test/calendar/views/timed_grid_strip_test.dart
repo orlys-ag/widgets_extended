@@ -942,6 +942,54 @@ Future<MoveRecordingStore> releaseEndOver(
   return store;
 }
 
+/// Lifts the block of "meet" on Tuesday in [shown], drops it with its top
+/// on Tuesday's 14:00 slot, and pumps a second of frames: a pending block's
+/// indicator runs while its entry is pending, so the frames do not settle.
+///
+/// An error left uncaught in the test's own zone ends the test as failed
+/// ([TestWidgetsFlutterBinding] runs the test body in a zone whose handler
+/// reports it), before [WidgetTester.takeException] can take it. So the
+/// drop's move and release run in a zone of their own, which adds to
+/// [uncaught] each error the futures they start leave uncaught.
+Future<void> dropMeetInZone(
+  WidgetTester tester,
+  Shown shown,
+  List<Object> uncaught,
+) async {
+  final from = tester.getRect(blockFinder("meet", tuesday));
+  final slot = slotRect(tester, shown, tuesday, 14 * 60);
+  final gesture = await lift(tester, from.center);
+  await runZonedGuarded(
+    () async {
+      await gesture.moveBy(
+        slot.topLeft - from.topLeft + const Offset(0.0, 2.0),
+      );
+      await tester.pump();
+      await gesture.up();
+    },
+    (error, stackTrace) {
+      uncaught.add(error);
+    },
+  );
+  await tester.pump();
+  await tester.pump(const Duration(seconds: 1));
+}
+
+/// A [MoveRecordingStore] whose [requestMove] records the move and throws
+/// [thrown] within the call.
+class ThrowingMoveStore extends MoveRecordingStore {
+  ThrowingMoveStore(List<CalendarEntry<String>> entries, this.thrown)
+    : super(entries: entries);
+
+  final Object thrown;
+
+  @override
+  Future<CalendarEntry<String>> requestMove(CalendarEntry<String> requested) {
+    moves.add(requested);
+    throw thrown;
+  }
+}
+
 const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
 
 void main() {
@@ -3923,65 +3971,111 @@ void main() {
     }
   });
 
-  testWidgets("MR3 a request whose function throws within the call, and one "
-      "with none whose write the caching store fails, each show the block "
-      "at its stored times again, and their errors are not caught", (
-    tester,
-  ) async {
+  testWidgets("MR3 a request whose future fails after the call, and one "
+      "whose function throws within it, each show the block at its stored "
+      "times again, and their errors are not caught", (tester) async {
     final shown = Shown.week(monday);
     final meet = entryOf("meet", at(tuesday, 10), at(tuesday, 11));
     final thrown = StateError("Refused.");
     final uncaught = <Object>[];
-    // The drop runs in a zone of its own, which receives the errors the
-    // futures it starts leave uncaught. A pending block's indicator runs
-    // while the entry is pending, so the frames after it are pumped for
-    // a time rather than settled.
-    Future<void> dropInZone() async {
-      final from = tester.getRect(blockFinder("meet", tuesday));
-      final slot = slotRect(tester, shown, tuesday, 14 * 60);
-      final gesture = await lift(tester, from.center);
-      await runZonedGuarded(
-        () async {
-          await gesture.moveBy(
-            slot.topLeft - from.topLeft + const Offset(0.0, 2.0),
-          );
-          await tester.pump();
-          await gesture.up();
-        },
-        (error, stackTrace) {
-          uncaught.add(error);
-        },
-      );
-      await tester.pump();
-      await tester.pump(const Duration(seconds: 1));
-    }
-
-    final memory = storeOf(<CalendarEntry<String>>[meet]);
+    final answers = <Completer<void>>[];
     await Harness(
-      memory,
+      storeOf(<CalendarEntry<String>>[meet]),
+      shown,
+      onMoveRequest: (request) {
+        // Made in the drop's zone, where the grid listens to it: a
+        // future's error reaches no listener in another error zone
+        // ([Zone.inSameErrorZone]).
+        final answer = Completer<void>();
+        answers.add(answer);
+        return answer.future;
+      },
+    ).pump(tester);
+    final stored = tester.getRect(blockFinder("meet", tuesday));
+    final requested = stored.translate(
+      0.0,
+      slotRect(tester, shown, tuesday, 14 * 60).top -
+          slotRect(tester, shown, tuesday, 10 * 60).top,
+    );
+    await dropMeetInZone(tester, shown, uncaught);
+    // Setup sanity: the drop's request runs, its block held at the
+    // requested times.
+    expect(answers, hasLength(1));
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(requested));
+    answers.single.completeError(thrown);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(uncaught, <Object>[same(thrown)]);
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
+
+    uncaught.clear();
+    await Harness(
+      storeOf(<CalendarEntry<String>>[meet]),
       shown,
       onMoveRequest: (request) {
         throw thrown;
       },
     ).pump(tester);
-    final stored = tester.getRect(blockFinder("meet", tuesday));
-    await dropInZone();
+    await dropMeetInZone(tester, shown, uncaught);
     expect(uncaught, <Object>[same(thrown)]);
     expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
+  });
 
-    uncaught.clear();
-    final source = HeldSource(<CalendarEntry<String>>[meet]);
-    final caching = CachingCalendarStore<String>(dataSource: source);
-    addTearDown(caching.dispose);
-    caching.show(monday, sunday);
-    await Harness(caching, shown).pump(tester);
-    await dropInZone();
-    // Setup sanity: with no onMoveRequest the drop wrote to the store.
+  testWidgets("MR4 with no onMoveRequest, a move whose write the caching "
+      "store fails leaves no error uncaught, and its block shows the stored "
+      "entry again, at its stored times and not pending", (tester) async {
+    final shown = Shown.week(monday);
+    final source = HeldSource(<CalendarEntry<String>>[
+      entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
+    ]);
+    final store = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(store.dispose);
+    store.show(monday, sunday);
+    await Harness(store, shown).pump(tester);
+    final stored = tester.getRect(blockFinder("meet", tuesday));
+    final requested = stored.translate(
+      0.0,
+      slotRect(tester, shown, tuesday, 14 * 60).top -
+          slotRect(tester, shown, tuesday, 10 * 60).top,
+    );
+    final uncaught = <Object>[];
+    await dropMeetInZone(tester, shown, uncaught);
+    // Setup sanity: the drop's move shows at the requested times, and the
+    // grid wrote it through the store.
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(requested));
     expect(source.replaces, hasLength(1));
-    source.replaces.single.completeError(thrown);
+    source.replaces.single.completeError(StateError("Offline."));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
-    expect(uncaught, <Object>[same(thrown)]);
+    expect(uncaught, isEmpty);
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
+    expect(
+      find.descendant(
+        of: blockFinder("meet", tuesday),
+        matching: find.byType(CalendarActivityIndicator),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets("MR5 with no onMoveRequest, a move whose write the store "
+      "throws within the call leaves no error uncaught, and its block shows "
+      "at its stored times again", (tester) async {
+    final shown = Shown.week(monday);
+    final meet = entryOf("meet", at(tuesday, 10), at(tuesday, 11));
+    final store = ThrowingMoveStore(<CalendarEntry<String>>[
+      meet,
+    ], StateError("Refused."));
+    addTearDown(store.dispose);
+    await Harness(store, shown).pump(tester);
+    final stored = tester.getRect(blockFinder("meet", tuesday));
+    final uncaught = <Object>[];
+    await dropMeetInZone(tester, shown, uncaught);
+    // Setup sanity: the grid wrote the drop's move through the store.
+    expect(store.moves, <CalendarEntry<String>>[
+      meet.copyWith(start: at(tuesday, 14), end: at(tuesday, 15)),
+    ]);
+    expect(uncaught, isEmpty);
     expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
   });
 
