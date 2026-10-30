@@ -12,10 +12,20 @@ export 'dates/calendar_dates.dart'
     show
         DayHours,
         WeekdaySet,
+        addDays,
         dateOfDayNumber,
+        dateOnly,
         dayNumber,
         defaultSlotMinutes,
-        slotMinuteChoices;
+        endMinuteOfDay,
+        isLaterOccurrence,
+        lastDayNumberOf,
+        minuteOfDay,
+        minutesPerDay,
+        slotMinuteChoices,
+        timeAtWallMinute,
+        wallMinuteOf,
+        weekdayColumn;
 export 'entries/calendar_data_source.dart'
     show
         CalendarAllChanged,
@@ -35,6 +45,7 @@ export 'policy/edit_policy.dart'
         UnrestrictedEditPolicy;
 export 'policy/edit_rules.dart' show CalendarEarliestStart, CalendarEditRules;
 export 'policy/history_lock_policy.dart' show HistoryLockPolicy;
+export 'policy/overlap.dart' show entriesShareTime;
 export 'presentation/calendar_activity_indicator.dart'
     show CalendarActivityIndicator;
 export 'presentation/calendar_builders.dart'

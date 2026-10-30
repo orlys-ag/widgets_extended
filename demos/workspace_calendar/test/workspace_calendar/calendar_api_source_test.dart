@@ -10,7 +10,7 @@ import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 
 void main() {
   test("AS1 the source reads and writes items through the API", () async {

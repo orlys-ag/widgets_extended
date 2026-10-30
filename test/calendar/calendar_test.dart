@@ -117,6 +117,16 @@ void main() {
       dateOfDayNumber,
       defaultSlotMinutes,
       slotMinuteChoices,
+      addDays,
+      dateOnly,
+      endMinuteOfDay,
+      isLaterOccurrence,
+      lastDayNumberOf,
+      minuteOfDay,
+      minutesPerDay,
+      timeAtWallMinute,
+      wallMinuteOf,
+      weekdayColumn,
       CalendarEntry,
       CalendarDataSource,
       CalendarEditPolicy,
@@ -128,6 +138,7 @@ void main() {
       CalendarEditRules,
       CalendarEarliestStart,
       HistoryLockPolicy,
+      entriesShareTime,
       CalendarStore,
       CachingCalendarStore,
       MemoryCalendarStore,
@@ -191,8 +202,8 @@ void main() {
       "range constants the calendar's signatures use, and no view; of the "
       "localizations file the localizations, their English default and "
       "HourLabelFormat; and of the policy layer exactly the two edit policy files, "
-      "with the policies and the types their signatures name, and the edit "
-      "rules", () {
+      "with the policies and the types their signatures name, the edit "
+      "rules, and the overlap rule's test of two entries", () {
     final source = File(barrelPath).readAsStringSync();
     final exports = exportsOf(source);
     // Every directive the barrel holds was read.
@@ -270,6 +281,7 @@ void main() {
           "CalendarEarliestStart",
           "CalendarEditRules",
         },
+        "lib/calendar/policy/overlap.dart": <String>{"entriesShareTime"},
       },
     );
     for (final export in exports) {

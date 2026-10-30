@@ -4,8 +4,7 @@ library;
 
 import 'dart:async';
 
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/policy/overlap.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_api.dart';
 import 'calendar_item.dart';

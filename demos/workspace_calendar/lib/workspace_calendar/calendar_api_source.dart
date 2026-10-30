@@ -3,7 +3,7 @@
 /// sentences it shows for a failed read.
 library;
 
-import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_api.dart';
 import 'calendar_item.dart';

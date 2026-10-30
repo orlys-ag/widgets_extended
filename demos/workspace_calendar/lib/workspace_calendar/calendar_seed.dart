@@ -2,7 +2,7 @@
 /// calendar opens on.
 library;
 
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_schema.dart';
 
@@ -252,7 +252,7 @@ const List<_WeekEntry> _weekEntries = <_WeekEntry>[
 /// start to the start of the day five days on.
 List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
   final day = dateOnly(today);
-  final weekStart = weekStartOf(day);
+  final weekStart = WeekdaySet.all.weekStartOf(day);
   final seed = <Map<String, Object?>>[];
   final keptDays = <DateTime>{};
   for (final task in _keptTasks) {
