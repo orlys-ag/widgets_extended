@@ -545,7 +545,7 @@ List<DayListRow> dayListRowsOf<T>(
 /// the cards pointing down; and a dashed row for each gap in [hours] that
 /// no item covers, an empty day's across the hours, with a button, which
 /// [addButtonBuilder] draws and a screen reader hears as adding an item at
-/// its time, that reports [onCreateIn]; what [loadingBuilder] draws while
+/// its time, that reports [onCreateRange]; what [loadingBuilder] draws while
 /// the day is unread; and after a failed read, what [failureBuilder] draws,
 /// with a retry that reads the shown days again. Times read in [format].
 /// Unless [editable], the list has no dashed rows and hands the card
