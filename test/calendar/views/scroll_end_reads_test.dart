@@ -18,13 +18,15 @@ import 'package:widgets_extended/calendar/views/week_strip.dart';
 final DateTime tuesday = DateTime(2026, 4, 21);
 
 /// A store with no entries that records the scheduler's phase at each
-/// prefetch.
+/// prefetch, and the days it reads.
 class PhaseStore extends MemoryCalendarStore<String> {
   final List<SchedulerPhase> prefetches = <SchedulerPhase>[];
+  final List<(DateTime, DateTime)> reads = <(DateTime, DateTime)>[];
 
   @override
   void prefetch(DateTime first, DateTime last) {
     prefetches.add(SchedulerBinding.instance.schedulerPhase);
+    reads.add((first, last));
   }
 }
 
@@ -97,25 +99,27 @@ Future<void> pumpSized(
 
 /// Ends a scroll of [view] in the layout of a frame, that of [resize]'s
 /// new size, and then outside any frame, and returns the phases of
-/// [store]'s prefetches after the first, and whether a frame was asked
-/// for after the second.
-Future<(List<SchedulerPhase>, bool)> endScrolls(
+/// [store]'s prefetches after the first and the days they read, and
+/// whether a frame was asked for after the second.
+Future<(List<SchedulerPhase>, List<(DateTime, DateTime)>, bool)> endScrolls(
   WidgetTester tester,
   PhaseStore store,
   Finder view,
   void Function() resize,
 ) async {
   store.prefetches.clear();
+  store.reads.clear();
   final position = positionOf(tester, view);
   position.beginActivity(EndsOnNewDimensions(position));
   resize();
   await tester.pump();
   final inLayout = List<SchedulerPhase>.of(store.prefetches);
+  final read = List<(DateTime, DateTime)>.of(store.reads);
 
   await tester.pumpAndSettle();
   position.beginActivity(EndsOnNewDimensions(position));
   position.goIdle();
-  return (inLayout, tester.binding.hasScheduledFrame);
+  return (inLayout, read, tester.binding.hasScheduledFrame);
 }
 
 void main() {
@@ -147,7 +151,7 @@ void main() {
     );
     await pumpSized(tester, view, width: width, height: height);
 
-    final (inLayout, asked) = await endScrolls(
+    final (inLayout, _, asked) = await endScrolls(
       tester,
       store,
       find.byType(DayList<String>),
@@ -159,7 +163,7 @@ void main() {
     expect(asked, isTrue);
   });
 
-  testWidgets("SE2 the week strip reads the weeks it shows after the frame "
+  testWidgets("SE2 the week strip reads the week it shows after the frame "
       "whose layout ends its scroll, and asks for a frame for a scroll that "
       "ends outside one", (tester) async {
     final store = PhaseStore();
@@ -176,7 +180,7 @@ void main() {
     );
     await pumpSized(tester, view, width: width);
 
-    final (inLayout, asked) = await endScrolls(
+    final (inLayout, read, asked) = await endScrolls(
       tester,
       store,
       find.byType(WeekStrip<String>),
@@ -185,6 +189,10 @@ void main() {
       },
     );
     expect(inLayout, <SchedulerPhase>[SchedulerPhase.postFrameCallbacks]);
+    // Tuesday's week, from Monday.
+    expect(read, <(DateTime, DateTime)>[
+      (DateTime(2026, 4, 20), DateTime(2026, 4, 26)),
+    ]);
     expect(asked, isTrue);
   });
 
@@ -208,7 +216,7 @@ void main() {
     );
     await pumpSized(tester, view, width: width);
 
-    final (inLayout, asked) = await endScrolls(
+    final (inLayout, read, asked) = await endScrolls(
       tester,
       store,
       find.byType(MonthStrip<String>),
@@ -217,6 +225,11 @@ void main() {
       },
     );
     expect(inLayout, <SchedulerPhase>[SchedulerPhase.postFrameCallbacks]);
+    // April's grid, from the Monday before its first day to the Sunday
+    // after its last.
+    expect(read, <(DateTime, DateTime)>[
+      (DateTime(2026, 3, 30), DateTime(2026, 5, 3)),
+    ]);
     expect(asked, isTrue);
   });
 }

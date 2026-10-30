@@ -144,7 +144,8 @@ class CalendarEntryTapDetails<T> {
 /// an hour long there, and a block dropped on a day of the strip makes its
 /// entry all-day on that day; in Week bars move and resize by days. Each
 /// move and resize lands as a [CalendarMoveRequest], which [onMoveRequest]
-/// receives. A drag over empty slots reports one continuous range through
+/// receives, or with none [store] writes ([CalendarStore.requestMove]). A
+/// drag over empty slots reports one continuous range through
 /// [onCreateRange], across days too, and one over the strip's empty days an
 /// all-day range of them, which stays marked until its future completes.
 /// Out of edit mode the calendar is read-only. In
@@ -360,7 +361,9 @@ class CalendarView<T> extends StatefulWidget {
   /// gesture picked in Week or Day, which stays marked until the future
   /// completes; a gap's first free slot in Agenda, the add button's; and a
   /// day's first free slot in Month, a long press's. Null reports nothing,
-  /// and the marked range clears at once.
+  /// and the marked range clears at once. A failure of the function,
+  /// whether it throws within the call or its future fails, is not caught:
+  /// a host that handles one passes a function that does.
   final Future<void> Function(CreateRange range)? onCreateRange;
 
   /// A move or a resize the gestures landed in Week or Day, in edit mode,

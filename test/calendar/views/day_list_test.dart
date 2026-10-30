@@ -343,4 +343,78 @@ void main() {
         if (find.byKey(dayListLoadingKey(d)).evaluate().isNotEmpty) d,
     ], failed);
   });
+
+  testWidgets("BA12 a failed row's retry, while the store shows a failed "
+      "range of its own, the week before the mounted rows, ends the marks "
+      "of both in one read, so the status and every failed row show "
+      "loading", (tester) async {
+    final day = DateTime(2026, 5, 5);
+    final weekStart = WeekdaySet.all.weekStartOf(day);
+    final shownFirst = addDays(weekStart, -7);
+    final shownLast = addDays(weekStart, -1);
+    final source = HeldReads();
+    final store = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(store.dispose);
+    store.show(shownFirst, shownLast);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 5, 5, 9), today: day),
+    );
+    addTearDown(now.dispose);
+    final failures = <CalendarFailureState>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DayList<String>(
+          store: store,
+          weekdays: WeekdaySet.all,
+          format: HourLabelFormat.twentyFourHour,
+          hours: DayHours.allDay,
+          editable: false,
+          selectedDay: day,
+          now: now,
+          onTopDay: (day) {},
+          onCreateRange: (range) {},
+          onEdit: (id) {},
+          onDelete: (id) {},
+          loadingBuilder: (context, state) {
+            return const SizedBox(height: 24.0);
+          },
+          failureBuilder: (context, state) {
+            failures.add(state);
+            return const SizedBox(height: 48.0);
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (var answered = 0; answered < source.held.length; answered++) {
+      source.held[answered].answer.completeError(StateError("Offline."));
+      await tester.pumpAndSettle();
+    }
+    // Setup sanity: the shown range failed, and the list shows failed rows
+    // of days after it.
+    expect(store.status, CalendarLoadStatus.failed);
+    final failed = <DateTime>[
+      for (
+        var d = addDays(day, -14);
+        !d.isAfter(addDays(day, 28));
+        d = addDays(d, 1)
+      )
+        if (find.byKey(dayListFailedKey(d)).evaluate().isNotEmpty) d,
+    ];
+    expect(failed, contains(day));
+    final reads = source.held.length;
+
+    failures.last.retry();
+    expect(store.status, CalendarLoadStatus.loading);
+    expect(source.held, hasLength(reads + 1));
+    expect(
+      (source.held.last.first, source.held.last.last),
+      (shownFirst, addDays(WeekdaySet.all.weekStartOf(failed.last), 6)),
+    );
+    await tester.pump();
+    expect(<DateTime>[
+      for (final d in failed)
+        if (find.byKey(dayListLoadingKey(d)).evaluate().isNotEmpty) d,
+    ], failed);
+  });
 }

@@ -553,7 +553,8 @@ CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
 /// time the clock skips requests and reports nothing; one on a time it
 /// repeats keeps the occurrence the gesture began in. Every other move or
 /// resize that lands is a [CalendarMoveRequest], which [onMoveRequest]
-/// receives and the grid shows at its requested times, pending, until its
+/// receives, or with none the store writes ([CalendarStore.requestMove]),
+/// and which the grid shows at its requested times, pending, until that
 /// future completes. Out of edit mode the grid is read-only and asks
 /// [editPolicy] nothing: no block moves or
 /// resizes, and an empty slot creates nothing. In it [editPolicy] limits
@@ -723,7 +724,9 @@ class TimedGrid<T> extends StatefulWidget {
   final ValueChanged<String> onOpenEntry;
 
   /// Opens the create flow for the range a create gesture on empty cells
-  /// picked, and completes when it closes.
+  /// picked, and completes when it closes. A failure of the function,
+  /// whether it throws within the call or its future fails, is not caught:
+  /// a host that handles one passes a function that does.
   final Future<void> Function(CreateRange range) onCreate;
 
   /// Takes each move or resize a gesture lands, and completes once the

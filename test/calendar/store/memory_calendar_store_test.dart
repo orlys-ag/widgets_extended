@@ -370,10 +370,12 @@ void main() {
   test("MS11 a retry of a range changes nothing and notifies nothing, and "
       "one given one of first and last throws an ArgumentError", () {
     final recorder = Recorder();
-    final store = recorder.store();
+    final item = task("item-1", day, 600, 660);
+    final store = recorder.store(entries: <CalendarEntry<String>>[item]);
     final last = DateTime(2026, 4, 28);
     store.retry(day, last);
     expect(recorder.events, isEmpty);
+    expect(store.entries, <CalendarEntry<String>>[item]);
     expect(() {
       store.retry(day);
     }, throwsArgumentError);
