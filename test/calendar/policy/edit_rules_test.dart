@@ -43,7 +43,7 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
 /// A policy with the day limit [dayLimit] and the answer on overlaps
 /// [allowsOverlaps], admitting a change where [admits] does, that counts
 /// each ask by the member's name in [asks]. Compared by identity.
-class _Asking extends CalendarEditPolicy<String> {
+final class _Asking extends CalendarEditPolicy<String> {
   _Asking({int? dayLimit, bool allowsOverlaps = true, this.admits})
     : _dayLimit = dayLimit,
       _allowsOverlaps = allowsOverlaps;

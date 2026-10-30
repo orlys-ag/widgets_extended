@@ -28,7 +28,7 @@ final DateTime tuesday = DateTime(2026, 4, 21);
 const Size viewSize = Size(800.0, 600.0);
 
 /// English, but for the times of day, which [write] writes.
-class _Times extends DefaultCalendarLocalizations {
+final class _Times extends DefaultCalendarLocalizations {
   const _Times(this.write);
 
   final String Function(int minute) write;

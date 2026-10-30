@@ -170,7 +170,7 @@ class _Day {
 /// changes anything: a comparison that throws, as a payload's `==` can,
 /// is reported through [FlutterError.reportError] and counts as a
 /// change.
-class CachingCalendarStore<T> extends CalendarStore<T> {
+base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// A store reading and writing through [dataSource], loading until the
   /// first [show], and applying each change [changes] announces, if given,
   /// until it is disposed: a [CalendarEntryPut] or a [CalendarEntryRemoved]

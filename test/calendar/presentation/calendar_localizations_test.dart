@@ -12,7 +12,7 @@ const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
 
 /// English, but for the months, which it names "M1" to "M12", so a lookup
 /// shows which localizations it found.
-class _Numbered extends DefaultCalendarLocalizations {
+final class _Numbered extends DefaultCalendarLocalizations {
   const _Numbered();
 
   @override

@@ -128,8 +128,9 @@ final class CalendarWritePendingException extends CalendarStoreException {
 /// that completes once the store's source, a data source it writes
 /// through or the store itself, has stored the write, with what the
 /// source stored, or fails to its caller with the error that kept it from
-/// being stored.
-abstract class CalendarStore<T> extends ChangeNotifier {
+/// being stored. A host's own store extends this class, in a class it
+/// declares `final` or `base`.
+abstract base class CalendarStore<T> extends ChangeNotifier {
   /// A store holding writes to [hours].
   CalendarStore({DayHours hours = DayHours.allDay}) : _hours = hours;
 

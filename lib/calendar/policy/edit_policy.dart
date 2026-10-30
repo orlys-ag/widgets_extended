@@ -94,12 +94,12 @@ enum CalendarResizeEdges {
 /// entry may start: each answer asked of an entry, a change or a day, at
 /// the time [CalendarNow] gives.
 ///
-/// A host extends or implements it, overriding what it limits: every
-/// member answers permissively here, so a subclass overriding nothing
-/// limits nothing. The answers are questions: they must not mutate, and
-/// answer from what they are given and the policy's own final fields
-/// alone. An answer that throws is the host's error. A subclass with
-/// fields compares them in `==` and `hashCode`.
+/// A host extends it, in a class it declares `final` or `base`, and
+/// overrides what it limits: every member answers permissively here, so a
+/// subclass overriding nothing limits nothing. The answers are questions:
+/// they must not mutate, and answer from what they are given and the
+/// policy's own final fields alone. An answer that throws is the host's
+/// error. A subclass with fields compares them in `==` and `hashCode`.
 ///
 /// The views ask it in edit mode only, and read [dayLimit] and
 /// [allowsOverlaps] each time they take a policy. An answer that throws in
@@ -112,7 +112,7 @@ enum CalendarResizeEdges {
 /// move, a resize or a create range in flight, so a host's policy defines
 /// value equality, or is kept as one instance across builds.
 @immutable
-abstract class CalendarEditPolicy<T> {
+abstract base class CalendarEditPolicy<T> {
   /// Const, so a subclass can be const.
   const CalendarEditPolicy();
 
@@ -203,7 +203,7 @@ abstract class CalendarEditPolicy<T> {
 /// `editPolicy` takes.
 ///
 /// Two compare equal where their runtime types are the same.
-class UnrestrictedEditPolicy<T> extends CalendarEditPolicy<T> {
+final class UnrestrictedEditPolicy<T> extends CalendarEditPolicy<T> {
   /// Limits nothing.
   const UnrestrictedEditPolicy();
 
@@ -229,7 +229,7 @@ class UnrestrictedEditPolicy<T> extends CalendarEditPolicy<T> {
 ///
 /// Two compare equal where their runtime types and [dayLimit] are the
 /// same.
-class DayLimitPolicy<T> extends CalendarEditPolicy<T> {
+final class DayLimitPolicy<T> extends CalendarEditPolicy<T> {
   /// Limits a range to [dayLimit] days; a [dayLimit] under 1 fails an
   /// assertion in a debug build.
   const DayLimitPolicy(this.dayLimit)
@@ -264,7 +264,7 @@ class DayLimitPolicy<T> extends CalendarEditPolicy<T> {
 /// policies ([CalendarEditPolicy.all]), it forbids overlaps under them.
 ///
 /// Two compare equal where their runtime types are the same.
-class NoOverlapsPolicy<T> extends CalendarEditPolicy<T> {
+final class NoOverlapsPolicy<T> extends CalendarEditPolicy<T> {
   /// Forbids overlaps.
   const NoOverlapsPolicy();
 
@@ -290,7 +290,7 @@ class NoOverlapsPolicy<T> extends CalendarEditPolicy<T> {
 }
 
 /// The policy [CalendarEditPolicy.all] makes of [policies].
-class _AllEditPolicies<T> extends CalendarEditPolicy<T> {
+final class _AllEditPolicies<T> extends CalendarEditPolicy<T> {
   const _AllEditPolicies(this.policies);
 
   /// The policies each answer asks, in order; unmodifiable.

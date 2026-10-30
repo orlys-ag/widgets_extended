@@ -22,8 +22,10 @@ enum HourLabelFormat {
 ///
 /// [CalendarLocalizations.of] reads the instance the nearest [Localizations]
 /// loaded, and [DefaultCalendarLocalizations] where it loaded none. To
-/// translate the calendar, a host subclasses this class and adds a
-/// [LocalizationsDelegate] of it to its app's localization delegates.
+/// translate the calendar, a host extends this class, or
+/// [DefaultCalendarLocalizations] to change some of its words, in a class
+/// it declares `final` or `base`, and adds a [LocalizationsDelegate] of it
+/// to its app's localization delegates.
 ///
 /// Each member returns a whole label, sentence or hint, so a translation
 /// orders its words and forms its plurals as its language needs. A member
@@ -31,7 +33,7 @@ enum HourLabelFormat {
 /// [DateTime.weekday], [DateTime.monday] 1 to [DateTime.sunday] 7, and a
 /// month a [DateTime.month], 1 to 12. A minute is a minute after midnight,
 /// 0 to 1440, where 1440 is the midnight that ends the day.
-abstract class CalendarLocalizations {
+abstract base class CalendarLocalizations {
   /// Lets a subclass have a const constructor.
   const CalendarLocalizations();
 
@@ -255,7 +257,7 @@ abstract class CalendarLocalizations {
 }
 
 /// [CalendarLocalizations] in US English.
-class DefaultCalendarLocalizations extends CalendarLocalizations {
+base class DefaultCalendarLocalizations extends CalendarLocalizations {
   /// The US English text.
   const DefaultCalendarLocalizations();
 

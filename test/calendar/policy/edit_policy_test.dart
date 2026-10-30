@@ -33,13 +33,13 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
 }
 
 /// A policy that overrides nothing.
-class _Plain extends CalendarEditPolicy<String> {
+final class _Plain extends CalendarEditPolicy<String> {
   const _Plain();
 }
 
 /// A policy giving the answers it is made with, recording each ask in
 /// [log] as its [name] and the member's. Compared by identity.
-class _Answering extends CalendarEditPolicy<String> {
+final class _Answering extends CalendarEditPolicy<String> {
   const _Answering(
     this.name,
     this.log, {
@@ -129,7 +129,7 @@ class _Answering extends CalendarEditPolicy<String> {
 }
 
 /// A policy whose move answer throws a [StateError].
-class _Throwing extends CalendarEditPolicy<String> {
+final class _Throwing extends CalendarEditPolicy<String> {
   const _Throwing();
 
   @override

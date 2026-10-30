@@ -43,14 +43,18 @@ Normative for `lib/calendar/`, the calendar module: `CalendarView`, a calendar o
 - **One barrel.** `lib/calendar/calendar.dart` is the module's public
   surface and exports through explicit `show` clauses; anything it does not
   show is internal, whatever its name.
-- **The public API grows by additions.** Every class the barrel shows is
-  `final` or `sealed`, so a new field breaks no host, but those a host
-  extends or implements: the widgets, `CalendarController`, the stores,
-  `CalendarDataSource`, the edit policies and the localizations. A new
-  `CalendarEditPolicy` question or `CalendarLocalizations` word comes with
-  a default, so a host's subclass still compiles, and a new arrangement of
-  an existing view, such as a column per person or room in Day and Week,
-  is a parameter, not a new `CalendarViewKind`.
+- **The public API grows by additions.** Each class the barrel shows says
+  how a host builds on it: one a host extends (`CalendarController`,
+  `CalendarStore` and its two stores, `CalendarEditPolicy`,
+  `CalendarLocalizations` and its English default) is `base`,
+  `CalendarDataSource` is an `interface`, the widgets are neither, and
+  every other class is `final` or `sealed`. A later release adds to the
+  API without breaking a host: a member added to a `base` class has a
+  default, a field added to a class is a getter or an optional named
+  parameter, a new ability of a data source is a new interface, no shown
+  type gains a type parameter, and no shown enum or sealed class gains a
+  value or a subtype, which a host's exhaustive `switch` would miss, so a
+  new arrangement of a view is a parameter, not a new `CalendarViewKind`.
 - **Tests mirror the layers.** A test of a layer's code sits in the
   matching directory under `test/calendar/`, and a test that needs entries
   supplies them through the in-memory store.

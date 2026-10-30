@@ -21,7 +21,7 @@ typedef _Observed = ({CalendarViewKind? view, DateTime? day, _Range? range});
 /// store, or left, applies its values at once and notifies once after
 /// that frame, never inside a build. A set on an unbound controller is
 /// kept until a calendar binds it.
-class CalendarController extends ChangeNotifier {
+base class CalendarController extends ChangeNotifier {
   /// A controller of [view] and [selectedDay], each null for the
   /// calendar's own choice when it binds it, the first view it lists and
   /// today's nearest shown day, and of the least sizes, logical pixels of

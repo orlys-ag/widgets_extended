@@ -326,62 +326,87 @@ void main() {
     }
   });
 
-  test("B4 each class the barrel shows is final or sealed but those a host "
-      "extends or implements: the widgets, the controller, the stores, the "
-      "data source, the edit policies and the localizations", () {
-    const extended = <String>{
+  test("B4 each class the barrel shows says how a host builds on it: a "
+      "class a host extends is base, the data source an interface, the "
+      "widgets neither, and every other class final or sealed", () {
+    const widgets = <String>{
       "CalendarView",
       "CalendarActivityIndicator",
       "CalendarTheme",
+    };
+    const bases = <String>{
       "CalendarController",
       "CalendarStore",
-      "CachingCalendarStore",
       "MemoryCalendarStore",
-      "CalendarDataSource",
+      "CachingCalendarStore",
       "CalendarEditPolicy",
-      "UnrestrictedEditPolicy",
-      "DayLimitPolicy",
-      "NoOverlapsPolicy",
-      "HistoryLockPolicy",
       "CalendarLocalizations",
       "DefaultCalendarLocalizations",
     };
-    final declaration = RegExp(
-      r"^((?:(?:abstract|base|final|interface|sealed)\s+)*)class\s+(\w+)",
-      multiLine: true,
-    );
-    // A file the barrel exports may export the file that declares a name,
-    // so every file of the module is read.
+    const interfaces = <String>{"CalendarDataSource"};
     final shown = <String>{
       for (final export in exportsOf(File(barrelPath).readAsStringSync()))
         ...export.shown!,
     };
-    final classes = <String>{};
-    final wrong = <String>[];
+    final classDeclaration = RegExp(
+      r"^((?:(?:abstract|base|final|interface|sealed)\s+)*)class\s+(\w+)",
+      multiLine: true,
+    );
+    final otherDeclaration = RegExp(
+      r"^(?:enum|typedef|mixin|extension\s+type)\s+(\w+)"
+      r"|^(?:const|final)\s+(?:[\w<>?, ]+\s+)?(\w+)\s*="
+      r"|^[A-Za-z][\w<>?, ]*\s+(\w+)(?:<[^>(]*>)?\(",
+      multiLine: true,
+    );
+    // A file the barrel exports may export the file that declares a name,
+    // so every file of the module is read.
+    final declared = <String>{};
+    final kindOf = <String, String>{};
     for (final file in moduleFiles()) {
       final source = File(file).readAsStringSync();
-      for (final match in declaration.allMatches(source)) {
+      for (final match in classDeclaration.allMatches(source)) {
         final name = match.group(2)!;
-        if (!shown.contains(name)) {
-          continue;
-        }
-        classes.add(name);
-        final modifiers = match.group(1)!.split(RegExp(r"\s+"));
-        final closed =
-            modifiers.contains("final") || modifiers.contains("sealed");
-        if (closed == extended.contains(name)) {
-          wrong.add(name);
-        }
+        declared.add(name);
+        final modifiers = match.group(1)!.split(RegExp(r"\s+")).toSet();
+        kindOf[name] =
+            modifiers.contains("final") || modifiers.contains("sealed")
+            ? "closed"
+            : modifiers.contains("base")
+            ? "base"
+            : modifiers.contains("interface")
+            ? "interface"
+            : "open";
+      }
+      for (final match in otherDeclaration.allMatches(source)) {
+        declared.add((match.group(1) ?? match.group(2) ?? match.group(3))!);
       }
     }
-    // The scan reads closed and open declarations alike, and finds every
-    // class the list names.
+    // Every name the barrel shows has a declaration the scan reads, and
+    // the scan reads a class of each kind.
+    expect(shown.difference(declared), isEmpty);
     expect(
-      classes,
-      containsAll(<String>["CalendarEntry", "CalendarStoreException"]),
+      kindOf.keys,
+      containsAll(<String>{
+        ...widgets,
+        ...bases,
+        ...interfaces,
+        "CalendarEntry",
+        "CalendarStoreException",
+      }),
     );
-    expect(classes, containsAll(extended));
-    expect(wrong, isEmpty);
+    expect(<String, String>{
+      for (final name in shown)
+        if (kindOf.containsKey(name) &&
+            kindOf[name] !=
+                (widgets.contains(name)
+                    ? "open"
+                    : bases.contains(name)
+                    ? "base"
+                    : interfaces.contains(name)
+                    ? "interface"
+                    : "closed"))
+          name: kindOf[name]!,
+    }, isEmpty);
   });
 
   test("LY1 each file imports the package's files by relative paths, up "
