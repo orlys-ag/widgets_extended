@@ -45,7 +45,7 @@ enum CalendarStepUnit {
 /// What a calendar header shows and the actions it calls, which a
 /// [CalendarHeaderBuilder] receives.
 @immutable
-class CalendarHeaderDetails {
+final class CalendarHeaderDetails {
   /// The header's state and actions.
   const CalendarHeaderDetails({
     required this.view,

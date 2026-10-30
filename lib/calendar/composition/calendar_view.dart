@@ -66,7 +66,7 @@ CalendarViewKind calendarOpeningView(
 /// [editable], in edit mode with [CalendarView.editPolicy] letting it be
 /// edited ([CalendarEditPolicy.mayEdit]).
 @immutable
-class CalendarEntryTapDetails<T> {
+final class CalendarEntryTapDetails<T> {
   /// A tap on [entry], [editable] or not.
   const CalendarEntryTapDetails({required this.entry, required this.editable});
 

@@ -16,7 +16,7 @@ import '../dates/calendar_dates.dart';
 /// immutable, and two entries are equal when every field is, the payload
 /// compared by its own `==`.
 @immutable
-class CalendarEntry<T> {
+final class CalendarEntry<T> {
   /// An entry from [start] to [end].
   ///
   /// In a debug build each of these is asserted on its own: [start] and

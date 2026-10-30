@@ -22,7 +22,7 @@ enum CalendarMoveKind {
 /// `CalendarStore.requestMove` of [requested] writes it, and one of
 /// [entry] writes the entry back as it was.
 @immutable
-class CalendarMoveRequest<T> {
+final class CalendarMoveRequest<T> {
   /// The [kind] of gesture that gives [entry] the times of [requested].
   const CalendarMoveRequest({
     required this.entry,
