@@ -109,6 +109,10 @@ class _Day {
 /// notifies its listeners once at most. A read or a write that answers
 /// within the call, as a [SynchronousFuture]'s does, is applied within
 /// it and notified with it, so the listeners see the call's final state.
+/// A write returns a future of its own, never the data source's, whose
+/// callbacks run in a later microtask than the call that ends the write,
+/// so after that call has notified. A write after [dispose] sends nothing
+/// and fails with a [StateError].
 ///
 /// The store holds the source to its contract: a read answering an entry
 /// with no id fails as a read does, a create answering one with no id
@@ -579,7 +583,12 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
       _depth--;
       if (_depth == 0 && _notifyPending) {
         _notifyPending = false;
-        notifyListeners();
+        // [body] can dispose the store, as a data source's write can from
+        // within its call, after which [notifyListeners] throws in debug
+        // builds.
+        if (!_disposed) {
+          notifyListeners();
+        }
       }
     }
   }
@@ -921,183 +930,254 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
 
   /// Stores [draft] through the data source; completes with the stored
   /// entry, or fails with the source's error. Nothing is shown before the
-  /// source answers. A draft outside [hours] sends nothing and fails with
-  /// a [CalendarHoursException]. An answer with no id fails with a
-  /// [StateError] and stores nothing; one whose id has a write in flight,
-  /// as after a read that brought the entry and a move of it, completes
-  /// and changes nothing.
+  /// source answers, and an answer that arrives within the call, as a
+  /// [SynchronousFuture]'s does, is stored within it. It sends nothing
+  /// and fails with a [StateError] after [dispose], and with a
+  /// [CalendarHoursException] for a draft outside [hours]. An answer with
+  /// no id fails with a [StateError] and stores nothing; one whose id has
+  /// a write in flight, as after a read that brought the entry and a move
+  /// of it, completes and changes nothing. An answer the store fails to
+  /// store, as where a payload's `==` throws, fails with that error.
   @override
-  Future<CalendarEntry<T>> create(CalendarEntry<T> draft) async {
+  Future<CalendarEntry<T>> create(CalendarEntry<T> draft) {
+    if (_disposed) {
+      return _refuse(_disposedError());
+    }
     final refusal = hoursRefusalOf(draft);
     if (refusal != null) {
-      throw refusal;
+      return _refuse(refusal);
     }
-    final sentAt = ++_clock;
-    _creating++;
-    try {
-      final created = await _dataSource.create(draft);
-      final id = created.id;
-      if (id == null) {
-        throw StateError("The data source created an entry with no id.");
-      }
-      if (!_disposed && !_index.isPending(id)) {
-        _batch(() {
+    return _write<CalendarEntry<T>, CalendarEntry<T>>(
+      send: () {
+        return _dataSource.create(draft);
+      },
+      store: (created, sentAt) {
+        final id = created.id;
+        if (id == null) {
+          throw StateError("The data source created an entry with no id.");
+        }
+        if (!_disposed && !_index.isPending(id)) {
           _storeAnswer(id, created, sentAt);
           _notify();
-        });
-      }
-      return created;
-    } finally {
-      _creating--;
-      _pruneEntryTimes();
-    }
+        }
+        return created;
+      },
+    );
   }
 
   /// Writes [entry], whose id names a stored entry; the entry shows
   /// pending, as stored, until the data source answers. Completes with the
   /// stored entry, or fails with the source's error. It sends nothing
-  /// and fails with an [ArgumentError] for an entry with no id, with a
+  /// and fails with a [StateError] after [dispose], with an
+  /// [ArgumentError] for an entry with no id, with a
   /// [CalendarHoursException] when [hoursRefusalOf] refuses it, and with
   /// a [CalendarWritePendingException] on a pending entry. An answer under
-  /// another id fails with a [StateError]. An answer that arrives within
-  /// the call, as a [SynchronousFuture]'s does, is stored within it.
+  /// another id fails with a [StateError], and an answer the store fails
+  /// to store, as where a payload's `==` throws, with that error, the
+  /// entry showing as stored again. An answer that arrives within the
+  /// call, as a [SynchronousFuture]'s does, is stored within it.
   @override
   Future<CalendarEntry<T>> update(CalendarEntry<T> entry) {
     final id = entry.id;
+    if (_disposed) {
+      return _refuse(_disposedError());
+    }
     if (id == null) {
-      return Future<CalendarEntry<T>>.error(
+      return _refuse(
         ArgumentError.value(entry, "entry", "An update needs an id."),
       );
     }
     final refusal = hoursRefusalOf(entry);
     if (refusal != null) {
-      return Future<CalendarEntry<T>>.error(refusal);
+      return _refuse(refusal);
     }
-    return _batch(() {
-      if (!_lock(id, null)) {
-        return Future<CalendarEntry<T>>.error(
-          CalendarWritePendingException(id),
-        );
-      }
-      return Future<CalendarEntry<T>>.sync(() {
+    return _write<CalendarEntry<T>, CalendarEntry<T>>(
+      lock: id,
+      send: () {
         return _dataSource.replace(entry);
-      }).then<CalendarEntry<T>>(
-        (updated) {
-          if (updated.id != id) {
-            return _failWrite<CalendarEntry<T>>(
-              id,
-              StateError(
-                "The data source replaced $id with an entry under "
-                "${updated.id}.",
-              ),
-              StackTrace.current,
-            );
-          }
-          if (!_disposed) {
-            _batch(() {
-              _applyConfirmed(updated);
-              _notify();
-            });
-          }
-          return updated;
-        },
-        onError: (Object error, StackTrace stackTrace) {
-          return _failWrite<CalendarEntry<T>>(id, error, stackTrace);
-        },
-      );
-    });
+      },
+      store: (updated, sentAt) {
+        return _storeReplaced(id, updated, sentAt);
+      },
+    );
   }
 
   /// Writes a grid move or resize: [requested] shows, pending, until the
   /// data source answers. Completes with the stored entry, or fails with
   /// the source's error, the stored entry showing again. It sends nothing
-  /// and fails with an [ArgumentError] for an entry with no id, with a
+  /// and fails with a [StateError] after [dispose], with an
+  /// [ArgumentError] for an entry with no id, with a
   /// [CalendarHoursException] when [hoursRefusalOf] refuses it, and with
   /// a [CalendarWritePendingException] on a pending entry; a move onto
   /// another entry's time is sent. An answer under another id fails with
-  /// a [StateError]. An answer that arrives within the call, as a
-  /// [SynchronousFuture]'s does, is stored within it.
+  /// a [StateError], and an answer the store fails to store, as where a
+  /// payload's `==` throws, with that error. An answer that arrives within
+  /// the call, as a [SynchronousFuture]'s does, is stored within it.
   @override
   Future<CalendarEntry<T>> requestMove(CalendarEntry<T> requested) {
     final id = requested.id;
+    if (_disposed) {
+      return _refuse(_disposedError());
+    }
     if (id == null) {
-      return Future<CalendarEntry<T>>.error(
+      return _refuse(
         ArgumentError.value(requested, "requested", "A move needs an id."),
       );
     }
     final refusal = hoursRefusalOf(requested);
     if (refusal != null) {
-      return Future<CalendarEntry<T>>.error(refusal);
+      return _refuse(refusal);
     }
-    return _batch(() {
-      if (!_lock(id, requested)) {
-        return Future<CalendarEntry<T>>.error(
-          CalendarWritePendingException(id),
-        );
-      }
-      return Future<CalendarEntry<T>>.sync(() {
+    return _write<CalendarEntry<T>, CalendarEntry<T>>(
+      lock: id,
+      shown: requested,
+      send: () {
         return _dataSource.replace(requested);
-      }).then<CalendarEntry<T>>(
-        (moved) {
-          if (moved.id != id) {
-            return _failWrite<CalendarEntry<T>>(
-              id,
-              StateError(
-                "The data source replaced $id with an entry under "
-                "${moved.id}.",
-              ),
-              StackTrace.current,
-            );
-          }
-          if (!_disposed) {
-            _batch(() {
-              _applyConfirmed(moved);
-              _notify();
-            });
-          }
-          return moved;
-        },
-        onError: (Object error, StackTrace stackTrace) {
-          return _failWrite<CalendarEntry<T>>(id, error, stackTrace);
-        },
-      );
-    });
+      },
+      store: (moved, sentAt) {
+        return _storeReplaced(id, moved, sentAt);
+      },
+    );
   }
 
   /// Deletes [id]: the stored entry shows pending until the data source
   /// answers, and leaves once it confirms. Completes then, or fails with
   /// the source's error, the entry showing as stored again. It sends
-  /// nothing and fails with a [CalendarWritePendingException] on a
-  /// pending entry.
+  /// nothing and fails with a [StateError] after [dispose], and with a
+  /// [CalendarWritePendingException] on a pending entry. An answer that
+  /// arrives within the call, as a [SynchronousFuture]'s does, is stored
+  /// within it.
   @override
   Future<void> requestDelete(String id) {
-    return _batch(() {
-      if (!_lock(id, null)) {
-        return Future<void>.error(CalendarWritePendingException(id));
-      }
-      return Future<void>.sync(() {
+    if (_disposed) {
+      return _refuse(_disposedError());
+    }
+    return _write<void, void>(
+      lock: id,
+      send: () {
         return _dataSource.delete(id);
-      }).then<void>(
-        (_) {
-          if (!_disposed) {
-            _batch(() {
-              _storeAnswer(id, null, _writesSentAt[id]!);
-              _release(id);
-              _notify();
-            });
+      },
+      store: (_, sentAt) {
+        if (!_disposed) {
+          _storeAnswer(id, null, sentAt);
+        }
+      },
+    );
+  }
+
+  /// Runs a write in one call into the store ([_batch]), and returns a
+  /// [Completer]'s future, never the data source's own, whose callbacks
+  /// run in a later microtask than the call that ends the write.
+  ///
+  /// The write marks [lock] pending, showing [shown] ([_lock]), or
+  /// counts toward [_creating] for a create, which locks nothing. [send]
+  /// then calls the data source, and [store] takes its answer and the
+  /// clock the write was sent at, stores the answer unless the store is
+  /// disposed, and gives what the future completes with. [send]'s future
+  /// is listened to within the call, so an answer that arrives within it,
+  /// as a [SynchronousFuture]'s does, is stored within it. Where [send]
+  /// throws, its future fails or [store] throws, the write ends and the
+  /// future fails with that error, a throw within the call ending the
+  /// write within it. A write ends, releasing [lock] and notifying,
+  /// before its future's callbacks run. A write on a pending [lock] sends
+  /// nothing and fails with a [CalendarWritePendingException].
+  Future<R> _write<A, R>({
+    String? lock,
+    CalendarEntry<T>? shown,
+    required Future<A> Function() send,
+    required R Function(A answer, int sentAt) store,
+  }) {
+    final done = Completer<R>();
+    _batch(() {
+      final int sentAt;
+      if (lock == null) {
+        sentAt = ++_clock;
+        _creating++;
+      } else if (_lock(lock, shown)) {
+        sentAt = _writesSentAt[lock]!;
+      } else {
+        done.completeError(
+          CalendarWritePendingException(lock),
+          StackTrace.current,
+        );
+        return;
+      }
+
+      void fail(Object error, StackTrace stackTrace) {
+        _endWrite(lock);
+        done.completeError(error, stackTrace);
+      }
+
+      // Only the first answer or failure of [send]'s future is heard, so
+      // the write ends once, whatever that future does, even where it
+      // answers again from within [store].
+      var heard = false;
+
+      void answered(A answer) {
+        if (heard) {
+          return;
+        }
+        heard = true;
+        _batch(() {
+          final R value;
+          try {
+            value = store(answer, sentAt);
+          } on Object catch (error, stackTrace) {
+            fail(error, stackTrace);
+            return;
           }
-        },
-        onError: (Object error, StackTrace stackTrace) {
-          return _failWrite<void>(id, error, stackTrace);
-        },
-      );
+          _endWrite(lock);
+          done.complete(value);
+        });
+      }
+
+      void failed(Object error, StackTrace stackTrace) {
+        if (heard) {
+          return;
+        }
+        heard = true;
+        _batch(() {
+          fail(error, stackTrace);
+        });
+      }
+
+      try {
+        send().then<void>(answered, onError: failed);
+      } on Object catch (error, stackTrace) {
+        failed(error, stackTrace);
+      }
     });
+    return done.future;
+  }
+
+  /// Ends the write on [lock], showing the stored entry again and
+  /// notifying, or for a null [lock], a create's, ends its count in
+  /// [_creating].
+  void _endWrite(String? lock) {
+    if (lock == null) {
+      _creating--;
+      _pruneEntryTimes();
+    } else {
+      _release(lock);
+      _notify();
+    }
+  }
+
+  /// A future failing with [error], a refused write's, with the stack
+  /// trace of the call that refused it.
+  Future<R> _refuse<R>(Object error) {
+    return Future<R>.error(error, StackTrace.current);
+  }
+
+  /// The error of a write after [dispose].
+  StateError _disposedError() {
+    return StateError("A disposed store sends no write.");
   }
 
   /// Marks [id] pending, showing [shown] or, when null, the stored entry.
   /// False, changing nothing, when [id] is pending already: every update,
-  /// move and delete passes here, so an id has one write in flight at
-  /// most.
+  /// move and delete passes here ([_write]), so an id has one write in
+  /// flight at most.
   bool _lock(String id, CalendarEntry<T>? shown) {
     if (!_index.lock(id, shown)) {
       return false;
@@ -1114,22 +1194,24 @@ class CachingCalendarStore<T> extends CalendarStore<T> {
     _pruneEntryTimes();
   }
 
-  /// Ends the pending write on [id], which failed with [error], showing the
-  /// stored entry again; returns a future that fails with [error].
-  Future<R> _failWrite<R>(String id, Object error, StackTrace stackTrace) {
-    if (!_disposed) {
-      _release(id);
-      _notify();
+  /// Stores [answer], what the data source replaced [id] with for a write
+  /// sent at the clock [sentAt] ([_storeAnswer]), unless the store is
+  /// disposed, and returns it; throws a [StateError] for an answer under
+  /// another id.
+  CalendarEntry<T> _storeReplaced(
+    String id,
+    CalendarEntry<T> answer,
+    int sentAt,
+  ) {
+    if (answer.id != id) {
+      throw StateError(
+        "The data source replaced $id with an entry under ${answer.id}.",
+      );
     }
-    return Future<R>.error(error, stackTrace);
-  }
-
-  /// Ends the pending write on [entry]'s id and stores [entry], its
-  /// answer ([_storeAnswer]).
-  void _applyConfirmed(CalendarEntry<T> entry) {
-    final id = entry.id!;
-    _storeAnswer(id, entry, _writesSentAt[id]!);
-    _release(id);
+    if (!_disposed) {
+      _storeAnswer(id, answer, sentAt);
+    }
+    return answer;
   }
 
   /// Stores [answer], what a write sent at the clock [sentAt] left under

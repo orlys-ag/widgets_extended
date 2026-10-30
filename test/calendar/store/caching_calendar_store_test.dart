@@ -367,6 +367,121 @@ class ScriptedSource implements CalendarDataSource<String> {
   }
 }
 
+/// A data source whose reads answer [entries] within the call, through
+/// a [SynchronousFuture], and whose writes answer the entry written, a
+/// create's under [createdId] or else a new id: within the call, through
+/// a [SynchronousFuture] or, while [thenThrows] is set, a [ThenThrows];
+/// or through an ordinary future while [later] is set. Each write counts
+/// toward [writes], then runs [onWrite], if set, before it answers.
+class WriteNowSource<P> implements CalendarDataSource<P> {
+  List<CalendarEntry<P>> entries = <CalendarEntry<P>>[];
+
+  bool later = false;
+
+  bool thenThrows = false;
+
+  void Function()? onWrite;
+
+  String? createdId;
+
+  int writes = 0;
+
+  Future<R> _answer<R>(R value) {
+    writes++;
+    onWrite?.call();
+    if (later) {
+      return Future<R>.value(value);
+    }
+    return thenThrows ? ThenThrows<R>(value) : SynchronousFuture<R>(value);
+  }
+
+  @override
+  Future<List<CalendarEntry<P>>> read(DateTime first, DateTime last) {
+    return SynchronousFuture<List<CalendarEntry<P>>>(
+      List<CalendarEntry<P>>.of(entries),
+    );
+  }
+
+  @override
+  Future<CalendarEntry<P>> create(CalendarEntry<P> draft) {
+    return _answer(draft.copyWith(id: createdId ?? "created-${writes + 1}"));
+  }
+
+  @override
+  Future<CalendarEntry<P>> replace(CalendarEntry<P> entry) {
+    return _answer(entry);
+  }
+
+  @override
+  Future<void> delete(String id) {
+    return _answer<void>(null);
+  }
+}
+
+/// A [SynchronousFuture] that, against the [Future] contract, throws
+/// from [then] once it has answered.
+class ThenThrows<T> extends SynchronousFuture<T> {
+  ThenThrows(super.value);
+
+  @override
+  Future<R> then<R>(
+    FutureOr<R> Function(T value) onValue, {
+    Function? onError,
+  }) {
+    super.then(onValue, onError: onError);
+    throw const SourceFailure("Then.");
+  }
+}
+
+/// What a [Brittle] payload's `==` throws.
+class BrittleFailure implements Exception {
+  const BrittleFailure();
+}
+
+/// A payload whose `==` throws a [BrittleFailure] where [brittle], as a
+/// host's payload's `==` can.
+class Brittle {
+  const Brittle({this.brittle = false});
+
+  final bool brittle;
+
+  @override
+  bool operator ==(Object other) {
+    if (brittle) {
+      throw const BrittleFailure();
+    }
+    return other is Brittle && !other.brittle;
+  }
+
+  @override
+  int get hashCode {
+    return brittle.hashCode;
+  }
+}
+
+/// The four writes on [store] by name, each sending a new write when
+/// called: an update and a move of [item], a delete of it, and a create
+/// on its day.
+Map<String, Future<Object?> Function()> writesOf(
+  CalendarStore<String> store,
+  CalendarEntry<String> item,
+) {
+  return <String, Future<Object?> Function()>{
+    "update": () {
+      return store.update(retimed(item, 720, 780));
+    },
+    "move": () {
+      return store.requestMove(retimed(item, 800, 860));
+    },
+    "delete": () {
+      return store.requestDelete(item.id!);
+    },
+    "create": () {
+      return store.create(draft(item.start, 900, 960));
+    },
+  };
+}
+
 void main() {
   test("M1 a read range sends nothing", () async {
     final harness = Harness();
@@ -893,6 +1008,344 @@ void main() {
         CalendarShownEntry<String>(item, pending: false),
       ]);
       expect(store.storedEntry("item-9"), isNull);
+    });
+
+    test("a write answered within the call is stored within it, and its "
+        "future completes after the call, as a future does", () async {
+      final source = WriteNowSource<String>();
+      final item = task("item-1", day, 600, 660);
+      source.entries = <CalendarEntry<String>>[item];
+      final store = CachingCalendarStore<String>(dataSource: source);
+      store.show(weekFirst, weekLast);
+      const host = SourceFailure("Host.");
+      final outcomes = <String, Object? Function()>{};
+      for (final MapEntry(key: write, value: send) in writesOf(
+        store,
+        item,
+      ).entries) {
+        var called = false;
+        send().then((value) {
+          called = true;
+        });
+        final calledBack = called;
+        final recovered = completedOf(
+          send().catchError((Object error) {
+            return error;
+          }),
+        );
+        Object? thrown;
+        Object? Function()? failure;
+        try {
+          failure = errorOf(
+            send().then((value) {
+              throw host;
+            }),
+          );
+        } on Object catch (error) {
+          thrown = error;
+        }
+        outcomes[write] = () {
+          return (
+            calledBack: calledBack,
+            recovered: recovered(),
+            thrown: thrown,
+            failure: failure?.call(),
+          );
+        };
+      }
+      expect(idsOn(store, day), <String>[
+        "created-10",
+        "created-11",
+        "created-12",
+      ]);
+      await settle();
+      // Each write's callback runs after the call, its catchError passes
+      // its value on, and a callback's throw fails the callback's future.
+      const settled = (
+        calledBack: false,
+        recovered: true,
+        thrown: null,
+        failure: host,
+      );
+      expect(
+        <String, Object?>{
+          for (final MapEntry(key: write, value: outcome) in outcomes.entries)
+            write: outcome(),
+        },
+        <String, Object?>{
+          "update": settled,
+          "move": settled,
+          "delete": settled,
+          "create": settled,
+        },
+      );
+    });
+
+    test("a write whose answer the store fails to store fails with that "
+        "error, and the entry shows as stored", () async {
+      final thrown = <String, Type>{};
+      final failures = <String, Type>{};
+      final pending = <String, bool>{};
+      final counts = <String, int>{};
+      for (final write in <String>["update", "move", "create"]) {
+        for (final later in <bool>[false, true]) {
+          final name = later ? "$write later" : write;
+          final source = WriteNowSource<Brittle>()..later = later;
+          final item = CalendarEntry<Brittle>(
+            id: "item-1",
+            start: at(day, 600),
+            end: at(day, 660),
+            title: "Task",
+            color: taskColor,
+            payload: const Brittle(),
+          );
+          source.entries = <CalendarEntry<Brittle>>[item];
+          final store = CachingCalendarStore<Brittle>(dataSource: source);
+          store.show(weekFirst, weekLast);
+          var notifications = 0;
+          store.addListener(() {
+            notifications++;
+          });
+          // Storing the answer compares it with the held entry, through
+          // the answer's payload's ==, which throws.
+          final written = item.copyWith(payload: const Brittle(brittle: true));
+          source.createdId = "item-1";
+          Object? Function()? failure;
+          try {
+            failure = errorOf(switch (write) {
+              "update" => store.update(written),
+              "move" => store.requestMove(written),
+              _ => store.create(
+                CalendarEntry<Brittle>(
+                  start: written.start,
+                  end: written.end,
+                  title: written.title,
+                  color: written.color,
+                  payload: written.payload,
+                ),
+              ),
+            });
+          } on Object catch (error) {
+            thrown[name] = error.runtimeType;
+          }
+          await settle();
+          failures[name] = failure?.call().runtimeType ?? Null;
+          if (write != "create") {
+            pending[name] = store.isPending("item-1");
+          }
+          counts[name] = notifications;
+          store.dispose();
+        }
+      }
+      expect(thrown, isEmpty);
+      expect(failures, <String, Type>{
+        "update": BrittleFailure,
+        "update later": BrittleFailure,
+        "move": BrittleFailure,
+        "move later": BrittleFailure,
+        "create": BrittleFailure,
+        "create later": BrittleFailure,
+      });
+      expect(pending, <String, bool>{
+        "update": false,
+        "update later": false,
+        "move": false,
+        "move later": false,
+      });
+      expect(counts, <String, int>{
+        "update": 1,
+        "update later": 2,
+        "move": 1,
+        "move later": 2,
+        "create": 0,
+        "create later": 0,
+      });
+    });
+
+    test("a write whose data source call throws ends the pending write "
+        "within the call", () async {
+      final source = WriteNowSource<String>();
+      final item = task("item-1", day, 600, 660);
+      source.entries = <CalendarEntry<String>>[item];
+      final store = CachingCalendarStore<String>(dataSource: source);
+      store.show(weekFirst, weekLast);
+      const thrown = SourceFailure("Thrown.");
+      source.onWrite = () {
+        throw thrown;
+      };
+      final pending = <String, bool>{};
+      final failures = <String, Object? Function()>{};
+      final writes = writesOf(store, item)..remove("create");
+      for (final MapEntry(key: write, value: send) in writes.entries) {
+        failures[write] = errorOf(send());
+        pending[write] = store.isPending("item-1");
+      }
+      expect(pending, <String, bool>{
+        "update": false,
+        "move": false,
+        "delete": false,
+      });
+      await settle();
+      expect(
+        <String, Object?>{
+          for (final MapEntry(key: write, value: failure) in failures.entries)
+            write: failure(),
+        },
+        <String, Object?>{"update": thrown, "move": thrown, "delete": thrown},
+      );
+    });
+
+    test("a data source future that throws from then once it answered "
+        "leaves the write completed", () async {
+      final source = WriteNowSource<String>()..thenThrows = true;
+      final item = task("item-1", day, 600, 660);
+      source.entries = <CalendarEntry<String>>[item];
+      final store = CachingCalendarStore<String>(dataSource: source);
+      store.show(weekFirst, weekLast);
+      final thrown = <String, Type>{};
+      final completed = <String, bool Function()>{};
+      for (final MapEntry(key: write, value: send) in writesOf(
+        store,
+        item,
+      ).entries) {
+        try {
+          completed[write] = completedOf(send());
+        } on Object catch (error) {
+          thrown[write] = error.runtimeType;
+        }
+      }
+      expect(thrown, isEmpty);
+      await settle();
+      expect(
+        <String, bool>{
+          for (final MapEntry(key: write, value: done) in completed.entries)
+            write: done(),
+        },
+        <String, bool>{
+          "update": true,
+          "move": true,
+          "delete": true,
+          "create": true,
+        },
+      );
+    });
+
+    test("a store disposed within a write's data source call throws "
+        "nothing, and the write completes", () async {
+      final thrown = <String, Type>{};
+      final completed = <String, bool Function()>{};
+      for (final write in <String>["update", "move", "delete", "create"]) {
+        final source = WriteNowSource<String>();
+        final item = task("item-1", day, 600, 660);
+        source.entries = <CalendarEntry<String>>[item];
+        final store = CachingCalendarStore<String>(dataSource: source);
+        store.show(weekFirst, weekLast);
+        source.onWrite = store.dispose;
+        try {
+          completed[write] = completedOf(writesOf(store, item)[write]!());
+        } on Object catch (error) {
+          thrown[write] = error.runtimeType;
+        }
+      }
+      expect(thrown, isEmpty);
+      await settle();
+      expect(
+        <String, bool>{
+          for (final MapEntry(key: write, value: done) in completed.entries)
+            write: done(),
+        },
+        <String, bool>{
+          "update": true,
+          "move": true,
+          "delete": true,
+          "create": true,
+        },
+      );
+    });
+
+    test("a write after dispose sends nothing and fails with a "
+        "StateError", () async {
+      final source = WriteNowSource<String>();
+      final item = task("item-1", day, 600, 660);
+      source.entries = <CalendarEntry<String>>[item];
+      final store = CachingCalendarStore<String>(dataSource: source);
+      store.show(weekFirst, weekLast);
+      store.dispose();
+      final thrown = <String, Type>{};
+      final failures = <String, Object? Function()>{};
+      for (final MapEntry(key: write, value: send) in writesOf(
+        store,
+        item,
+      ).entries) {
+        try {
+          failures[write] = errorOf(send());
+        } on Object catch (error) {
+          thrown[write] = error.runtimeType;
+        }
+      }
+      expect(source.writes, 0);
+      expect(thrown, isEmpty);
+      await settle();
+      expect(
+        <String, Type>{
+          for (final MapEntry(key: write, value: failure) in failures.entries)
+            write: failure().runtimeType,
+        },
+        <String, Type>{
+          "update": StateError,
+          "move": StateError,
+          "delete": StateError,
+          "create": StateError,
+        },
+      );
+    });
+
+    test("a refused write fails with a stack trace in a zone that gives "
+        "it none", () async {
+      final traced = <String, bool>{};
+      final testZone = Zone.current;
+      // A zone forked from the root gives an error no stack trace, unlike
+      // the test's zone; it hands the test any error left uncaught in it.
+      final zone = Zone.root.fork(
+        specification: ZoneSpecification(
+          handleUncaughtError: (self, parent, zone, error, stackTrace) {
+            testZone.handleUncaughtError(error, stackTrace);
+          },
+        ),
+      );
+      zone.run(() {
+        void trace(String refusal, Future<Object?> write) {
+          write.then(
+            (value) {},
+            onError: (Object error, StackTrace stackTrace) {
+              traced[refusal] = stackTrace.toString().isNotEmpty;
+            },
+          );
+        }
+
+        final source = WriteNowSource<String>()..later = true;
+        final item = task("item-1", day, 600, 660);
+        source.entries = <CalendarEntry<String>>[item];
+        final store = CachingCalendarStore<String>(
+          dataSource: source,
+          hours: const DayHours(480, 1080),
+        );
+        store.show(weekFirst, weekLast);
+        trace("no id", store.update(draft(day, 600, 660)));
+        trace("hours", store.requestMove(retimed(item, 1100, 1160)));
+        store.requestDelete("item-1");
+        trace("pending", store.requestDelete("item-1"));
+        final disposed = CachingCalendarStore<String>(dataSource: source);
+        disposed.dispose();
+        trace("disposed", disposed.create(draft(day, 720, 780)));
+      });
+      await settle();
+      expect(traced, <String, bool>{
+        "no id": true,
+        "hours": true,
+        "pending": true,
+        "disposed": true,
+      });
     });
 
     test("an update or a move of an entry with no id fails and sends "
