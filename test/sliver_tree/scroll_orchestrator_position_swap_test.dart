@@ -83,7 +83,14 @@ void main() {
           duration: const Duration(milliseconds: 300),
           ancestorExpansion: AncestorExpansionMode.animated,
         )
-        .then((value) => result = value, onError: (Object e) => error = e);
+        .then(
+          (value) {
+            result = value;
+          },
+          onError: (Object e) {
+            error = e;
+          },
+        );
 
     await tester.pump(const Duration(milliseconds: 50));
     expect(result, isNull, reason: "setup: the scroll is still in flight");
@@ -145,7 +152,14 @@ void main() {
           duration: const Duration(milliseconds: 300),
           ancestorExpansion: AncestorExpansionMode.animated,
         )
-        .then((value) => result = value, onError: (Object e) => error = e);
+        .then(
+          (value) {
+            result = value;
+          },
+          onError: (Object e) {
+            error = e;
+          },
+        );
 
     await tester.pump(const Duration(milliseconds: 50));
     expect(result, isNull);

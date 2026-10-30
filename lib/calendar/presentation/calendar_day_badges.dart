@@ -63,7 +63,7 @@ final class CalendarDayBadges<T> {
   /// The kinds, in the order their dots run.
   final List<CalendarBadgeKind> kinds;
 
-  /// The kind of [entry], one of [kinds], or null for the primary dot. A
+  /// An entry's kind, one of [kinds], or null for the primary dot. A
   /// kind [kinds] does not hold fails an assertion in a debug build, and
   /// is taken for null in a release one.
   final CalendarBadgeKind? Function(CalendarEntry<T> entry) kindOf;

@@ -461,7 +461,7 @@ class ScrollOrchestrator<TKey, TData> {
     // Future until the tree is quiescent so the final snap lands on
     // settled geometry.
     if (duration != Duration.zero && _controller.hasActiveAnimations) {
-      return _animatedConcurrentScroll(
+      return await _animatedConcurrentScroll(
         key: key,
         ancestors: const [],
         scrollController: scrollController,
