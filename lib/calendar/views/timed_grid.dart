@@ -4045,7 +4045,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// Reports [range] through [TimedGrid.onCreate], marking until the
   /// create flow closes the range from the slot of [anchor] to that of
   /// [focus], or for a range across the strip, [strip], the strip cells of
-  /// their columns and those between.
+  /// their columns and those between. A throw within the call ends the
+  /// mark as a failure of the future does, and is left uncaught in the
+  /// zone as that failure is.
   void _create(
     ({int row, int col}) anchor,
     ({int row, int col}) focus,
@@ -4066,7 +4068,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
     });
     _updateStripMark();
-    widget.onCreate(range).whenComplete(() {
+    Future<void>.sync(() {
+      return widget.onCreate(range);
+    }).whenComplete(() {
       if (mounted && create == _creates) {
         setState(() {
           _creating = null;

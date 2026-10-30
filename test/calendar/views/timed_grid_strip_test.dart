@@ -420,8 +420,9 @@ class HeldSource implements CalendarDataSource<String> {
 /// What a test pumps: the grid of [shown] over [store], in a view of
 /// [size], 800 wide and 2000 tall by default, where every slot of the day
 /// shows at the default [minSlotHeight] and every day column at the
-/// default [minDayWidth]; [creates] records each create range it reports
-/// and [opened] each entry it opens, [onMoveRequest] takes each move and
+/// default [minDayWidth]; [creates] records each create range it reports,
+/// unless [onCreate] takes them, and [opened] each entry it opens,
+/// [onMoveRequest] takes each move and
 /// resize it lands, and [onZoom] each zoom a pinch reports, which the grid
 /// does not show. The grid writes times in [hourLabelFormat]. [editable],
 /// [first], [hours] and [slotMinutes] start as given, and [rebuild]
@@ -443,6 +444,7 @@ class Harness {
     this.minDayWidth = minDayWidthLow,
     this.size = const Size(800.0, 2000.0),
     this.onMoveRequest,
+    this.onCreate,
     this.onZoom,
     this.blockBuilder,
     this.hourLabelFormat = HourLabelFormat.twentyFourHour,
@@ -467,6 +469,7 @@ class Harness {
   final DateTime today;
   final Future<void> Function(CalendarMoveRequest<String> request)?
   onMoveRequest;
+  final Future<void> Function(CreateRange range)? onCreate;
   final void Function(double minSlotHeight, double minDayWidth)? onZoom;
   final CalendarBlockBuilder<String>? blockBuilder;
   final HourLabelFormat hourLabelFormat;
@@ -513,9 +516,11 @@ class Harness {
       now: now,
       onSelectDay: (day) {},
       onOpenEntry: opened.add,
-      onCreate: (range) async {
-        creates.add(range);
-      },
+      onCreate:
+          onCreate ??
+          (range) async {
+            creates.add(range);
+          },
       onMoveRequest: onMoveRequest,
       onZoom: onZoom,
       editable: editable,
@@ -1005,6 +1010,9 @@ class ThrowingMoveStore extends MoveRecordingStore {
     throw thrown;
   }
 }
+
+/// What [TimedGrid.onCreate] throws within the call in CR1.
+class CreateFailure implements Exception {}
 
 /// What [MemoryCalendarStore.onChanged] throws in MR6.
 class HostFailure implements Exception {
@@ -4355,6 +4363,49 @@ void main() {
         (at(monday, 22), at(wednesday, 12, 15), CalendarMoveKind.resize),
       ],
     );
+  });
+
+  testWidgets("CR1 a create whose onCreate throws within the call clears "
+      "its marked range, and the throw is left uncaught in the zone, as a "
+      "failure of its future is", (tester) async {
+    for (final shown in bothGrids()) {
+      final created = <CreateRange>[];
+      final failure = CreateFailure();
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[]),
+        shown,
+        onCreate: (range) {
+          created.add(range);
+          throw failure;
+        },
+      );
+      await harness.pump(tester);
+      final from = slotRect(tester, shown, tuesday, 10 * 60).center;
+      final to = slotRect(tester, shown, tuesday, 12 * 60).center;
+      final gesture = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+      await tester.pump();
+      await gesture.moveTo(to);
+      await tester.pump();
+      // The release runs in a zone of its own, as in [dropMeetInZone].
+      final uncaught = <Object>[];
+      await runZonedGuarded(
+        () async {
+          await gesture.up();
+        },
+        (error, stackTrace) {
+          uncaught.add(error);
+        },
+      );
+      await tester.pumpAndSettle();
+      expect(created, hasLength(1), reason: shown.name);
+      expect(strokedRects(tester), isEmpty, reason: shown.name);
+      expect(tester.takeException(), isNull, reason: shown.name);
+      expect(uncaught, <Matcher>[same(failure)], reason: shown.name);
+    }
   });
 
   testWidgets("GM1 while a block is lifted nothing creates: no drag or tap "
