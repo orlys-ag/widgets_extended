@@ -1070,6 +1070,7 @@ void main() {
       store.show(weekFirst, weekLast);
       const host = SourceFailure("Host.");
       final outcomes = <String, Object? Function()>{};
+      final within = <String, CalendarEntry<String>?>{};
       for (final MapEntry(key: write, value: send) in writesOf(
         store,
         item,
@@ -1079,6 +1080,9 @@ void main() {
           called = true;
         });
         final calledBack = called;
+        if (write == "update" || write == "move") {
+          within[write] = store.storedEntry("item-1");
+        }
         final recovered = completedOf(
           send().catchError((Object error) {
             return error;
@@ -1104,6 +1108,10 @@ void main() {
           );
         };
       }
+      expect(within, <String, CalendarEntry<String>?>{
+        "update": retimed(item, 720, 780),
+        "move": retimed(item, 800, 860),
+      });
       expect(idsOn(store, day), <String>[
         "created-10",
         "created-11",
@@ -2457,7 +2465,8 @@ void main() {
 
   test("FR35 a read the shown range did not ask for leaves it failed, "
       "notifying nothing, while it reads the day whose read failed", () async {
-    final seen = <String, (CalendarLoadStatus, int, bool)>{};
+    final seen = <String, (CalendarLoadStatus, int, bool, bool)>{};
+    final failedDay = DateTime(2026, 4, 23);
     for (final trigger in <String>["prefetch", "invalidate", "announce"]) {
       final changes = StreamController<CalendarSourceChange<String>>();
       final harness = Harness(changes: changes.stream);
@@ -2471,6 +2480,7 @@ void main() {
       harness.lastCall.succeed(<CalendarEntry<String>>[]);
       await settle();
       final notifications = harness.notifications;
+      final calls = harness.source.calls.length;
 
       if (trigger == "prefetch") {
         store.prefetch(weekFirst, weekLast);
@@ -2483,14 +2493,18 @@ void main() {
       seen[trigger] = (
         store.status,
         harness.notifications - notifications,
-        store.readFailed(DateTime(2026, 4, 23)),
+        store.readFailed(failedDay),
+        harness.source.calls.skip(calls).any((call) {
+          return !call.first!.isAfter(failedDay) &&
+              !call.last!.isBefore(failedDay);
+        }),
       );
       await changes.close();
     }
-    expect(seen, <String, (CalendarLoadStatus, int, bool)>{
-      "prefetch": (CalendarLoadStatus.failed, 0, true),
-      "invalidate": (CalendarLoadStatus.failed, 0, true),
-      "announce": (CalendarLoadStatus.failed, 0, true),
+    expect(seen, <String, (CalendarLoadStatus, int, bool, bool)>{
+      "prefetch": (CalendarLoadStatus.failed, 0, true, true),
+      "invalidate": (CalendarLoadStatus.failed, 0, true, true),
+      "announce": (CalendarLoadStatus.failed, 0, true, true),
     });
   });
 
@@ -2668,6 +2682,7 @@ void main() {
     final settled = <String, int>{};
     final reads = <String, List<(DateTime, DateTime)>>{};
     final written = <String, (CalendarEntry<String>?, bool)>{};
+    final writes = <String, Future<Object?>>{};
     var harness = Harness();
 
     Future<List<(DateTime, DateTime)>> count(
@@ -2703,15 +2718,17 @@ void main() {
       harness.store.show(mayFirst, mayLast);
     });
     await count("requestMove", () {
-      harness.store.requestMove(moved);
+      writes["requestMove"] = outcomeOf(harness.store.requestMove(moved));
       noteWrite("requestMove");
     });
     await count("update", () {
-      harness.store.update(updated);
+      writes["update"] = outcomeOf(harness.store.update(updated));
       noteWrite("update");
     });
     await count("requestDelete", () {
-      harness.store.requestDelete("item-1");
+      writes["requestDelete"] = outcomeOf(
+        harness.store.requestDelete("item-1"),
+      );
       noteWrite("requestDelete");
     });
 
@@ -2746,6 +2763,17 @@ void main() {
       "update": (updated, false),
       "requestDelete": (null, false),
     });
+    expect(
+      <String, Object?>{
+        for (final MapEntry(key: write, value: outcome) in writes.entries)
+          write: await outcome,
+      },
+      <String, Object?>{
+        "requestMove": moved,
+        "update": updated,
+        "requestDelete": null,
+      },
+    );
     expect(counts, <String, int>{
       "retry": 1,
       "show": 1,
@@ -2942,6 +2970,19 @@ void main() {
       (weekFirst, weekLast),
     );
     expect(store.status, CalendarLoadStatus.loading);
+
+    // A retry of days a read in the background covers takes that read
+    // over, so a read sent before it that fails marks none of them.
+    final other = Harness();
+    other.store.prefetch(weekFirst, weekFirst);
+    final older = other.lastCall;
+    other.store.prefetch(weekFirst, weekLast);
+    final sent = other.source.calls.length;
+    other.store.retry(weekFirst, weekLast);
+    expect(other.source.calls, hasLength(sent));
+    older.fail();
+    await settle();
+    expect(other.store.readFailed(weekFirst), isFalse);
   });
 
   test("FR47 a retry whose two reads answer within the call notifies "
@@ -3726,6 +3767,97 @@ void main() {
       "refresh": renamed,
       "invalidate": renamed,
     });
+  });
+
+  test("FR69 a show over days a read in the background failed to read "
+      "ends their marks, and reads them with a read of its own", () async {
+    final harness = Harness();
+    final store = harness.store;
+    store.prefetch(weekFirst, weekLast);
+    harness.lastCall.fail();
+    await settle();
+    expect(store.readFailed(weekFirst), isTrue);
+    final calls = harness.source.calls.length;
+
+    store.show(weekFirst, weekLast);
+    expect(
+      (
+        store.readFailed(weekFirst),
+        store.status,
+        harness.source.calls.length - calls,
+        (harness.lastCall.first, harness.lastCall.last),
+      ),
+      (false, CalendarLoadStatus.loading, 1, (weekFirst, weekLast)),
+    );
+  });
+
+  test("FR70 a retry reads the changed days of the range it is "
+      "given", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final mayWeekFirst = DateTime(2026, 5, 4);
+    final mayWeekLast = DateTime(2026, 5, 10);
+    store.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    store.prefetch(mayWeekFirst, mayWeekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    final changed = DateTime(2026, 5, 6);
+    store.invalidate(changed, changed);
+    final calls = harness.source.calls.length;
+
+    store.retry(mayWeekFirst, mayWeekLast);
+    expect(
+      <(DateTime?, DateTime?)>[
+        for (final call in harness.source.calls.skip(calls))
+          (call.first, call.last),
+      ],
+      <(DateTime?, DateTime?)>[(changed, changed)],
+    );
+  });
+
+  test("FR71 a shown range is failed while one of its unread days is "
+      "readFailed, though an unread day before it is not and a read of it "
+      "is in flight", () async {
+    final harness = Harness();
+    final store = harness.store;
+    store.show(weekFirst, weekLast);
+    // A read sent after the show's, over the range's last days and the
+    // next one.
+    store.prefetch(DateTime(2026, 4, 25), DateTime(2026, 4, 27));
+    final failure = harness.lastCall.fail();
+    await settle();
+
+    expect(
+      (store.status, store.loadError),
+      (CalendarLoadStatus.failed, failure),
+    );
+  });
+
+  test("FR72 a retry reads the days marked readFailed and the longer span "
+      "of the range's other unread and changed days around them as one "
+      "read", () async {
+    final harness = Harness();
+    final store = harness.store;
+    store.prefetch(weekFirst, DateTime(2026, 4, 22));
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    store.prefetch(DateTime(2026, 4, 24), weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    final marked = DateTime(2026, 4, 23);
+    store.prefetch(marked, marked);
+    harness.lastCall.fail();
+    await settle();
+    store.invalidate(weekFirst, weekLast);
+    expect((store.readFailed(marked), harness.source.calls.length), (true, 3));
+
+    store.retry(weekFirst, weekLast);
+    expect(
+      <(DateTime?, DateTime?)>[
+        for (final call in harness.source.calls.skip(3))
+          (call.first, call.last),
+      ],
+      <(DateTime?, DateTime?)>[(weekFirst, weekLast)],
+    );
   });
 
   group("CF the changes the source announces", () {
