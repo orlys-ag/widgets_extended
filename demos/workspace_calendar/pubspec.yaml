@@ -1,5 +1,5 @@
 name: workspace_calendar
-description: "Demo: a workspace calendar with month, week and day modes on the widgets_extended board and synced sliver tree."
+description: "Demo: a workspace calendar app on the widgets_extended CalendarView, in Agenda, Day, Week and Month."
 publish_to: 'none'
 version: 0.1.0
 

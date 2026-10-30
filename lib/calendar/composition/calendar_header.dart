@@ -11,7 +11,7 @@ import '../presentation/calendar_theme.dart';
 /// Day's timed grid of one day under the week strip, Week's timed grid of
 /// a week, and Month's weeks of chips.
 enum CalendarViewKind {
-  /// Agenda: the calendar card's month over a list of its days.
+  /// Agenda: the calendar card's month over a list of days.
   agenda,
 
   /// Day: the timed grid of one day under the week strip.

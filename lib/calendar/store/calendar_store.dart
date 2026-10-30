@@ -16,7 +16,7 @@ import '../entries/calendar_entry.dart';
 /// loading otherwise.
 enum CalendarLoadStatus {
   /// No unread day of the range is marked failed, and one or more is
-  /// unread.
+  /// unread; or no range is shown yet.
   loading,
 
   /// An unread day of the range is marked [CalendarStore.readFailed].

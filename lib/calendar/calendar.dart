@@ -1,10 +1,10 @@
 /// A calendar of a host's entries in Agenda, Day, Week and Month views:
-/// [CalendarView] over a [CalendarStore], either a [MemoryCalendarStore]
+/// [CalendarView] over a [CalendarStore], such as a [MemoryCalendarStore]
 /// of the host's entries or a [CachingCalendarStore] reading and writing
 /// through the host's [CalendarDataSource].
 ///
-/// Experimental: the calendar's API may change in a minor release until it
-/// is declared stable.
+/// Experimental: the calendar's API may change in any release, a patch
+/// release included, until it is declared stable.
 library;
 
 export 'composition/calendar_header.dart'

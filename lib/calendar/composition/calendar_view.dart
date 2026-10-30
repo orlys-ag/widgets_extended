@@ -89,8 +89,9 @@ final class CalendarEntryTapDetails<T> {
 ///   another, each day's entries beside their times and lengths. The month
 ///   is a `MonthStrip` under the weekdays' abbreviations, one month at
 ///   a time, each day a cell with its number on a circle and badges when
-///   it has entries, one for each kind [dayBadges] gives them. A tap selects a day, and the arrow keys move the
-///   selection once a tap has given the month focus. A horizontal drag
+///   it has entries, one for each kind [dayBadges] gives them. A tap
+///   selects a day, and the arrow keys move the selection once a tap has
+///   given the month focus. A horizontal drag
 ///   slides the next or the previous month in, the card's height
 ///   following, a fling carrying it past several months; the chevrons
 ///   slide it a month at a time. None of them selects: the header names
@@ -159,9 +160,9 @@ final class CalendarEntryTapDetails<T> {
 ///
 /// The header's chevrons step a day in Day, a week in Week and in folded
 /// Agenda, and a month in unfolded Agenda and in Month. A tap on the
-/// title opens the month picker, a [MonthPicker], until the title is
-/// tapped again: in Agenda's and Day's card it fades in over the days, the
-/// card's height moving from theirs to its; in Week and Month it fades in
+/// title opens the month picker until the title is tapped again: in
+/// Agenda's and Day's card it fades in over the days, the card's height
+/// moving from theirs to its; in Week and Month it fades in
 /// under the header as the header's card grows to hold it. While it shows,
 /// the title names its year, and the chevrons or a swipe across it step a
 /// year; a month picked selects its day of the selected day's day of the

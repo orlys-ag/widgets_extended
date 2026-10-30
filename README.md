@@ -377,13 +377,14 @@ fades an item in and out as the board grows and shrinks it.
 
 `CalendarView` shows your entries in Agenda, Day, Week and Month views,
 under a header that names the month and switches between them. It is
-experimental: its API may change in a minor release until it is declared
-stable.
+experimental: its API may change in any release, a patch release
+included, until it is declared stable.
 
-An entry is a `CalendarEntry<T>`: an id, a start and an exclusive end in
-local time on whole minutes, a title, a colour, and a payload of your own
-type. One from a midnight to a midnight is all-day. The calendar reads its
-entries from a store, which you create and dispose:
+An entry is a `CalendarEntry<T>`: an id, null for a draft no store holds
+yet, a start and an exclusive end in local time on whole minutes, a title,
+a colour, and a payload of your own type. One from a day's start to a
+day's start is all-day. The calendar reads its entries from a store, which
+you create and dispose:
 
 ```dart
 final store = MemoryCalendarStore<String>(
@@ -409,7 +410,9 @@ your `CalendarDataSource` (`read`, `create`, `replace` and `delete`), keeps
 showing what it holds while it reads changed days again, and applies the
 changes a stream of `CalendarSourceChange`s announces, if you give one;
 `invalidate` and `refresh` tell it that entries changed at the source, so
-it reads those days again.
+it reads those days again. `CalendarDates` holds the civil-date helpers
+the calendar counts days and minutes with, such as `addDays` and
+`dayNumber`.
 
 **Editing.** With `editable: true`, Week's and Day's blocks move and
 resize, and a create gesture reports its range through `onCreateRange`. A
@@ -419,18 +422,22 @@ reports through `onEntryTap`, and a card builder of yours that calls
 `CalendarCardDetails.onEdit` or `onDelete` through `onEditRequest` or
 `onDeleteRequest`. The calendar opens no form, and writes nothing but a
 move or a resize that no `onMoveRequest` takes. An `editPolicy` limits the
-gestures:
-`HistoryLockPolicy` keeps the past as it is, `NoOverlapsPolicy` forbids
-shared time, `DayLimitPolicy` caps the days a range covers, and
-`CalendarEditPolicy.all` combines them.
+gestures: `HistoryLockPolicy` keeps the past as it is, `NoOverlapsPolicy`
+keeps Week's and Day's moves, resizes and creates off other timed entries'
+times, `DayLimitPolicy` caps the days a range covers, and
+`CalendarEditPolicy.all` combines them. A policy of your own extends
+`CalendarEditPolicy`, in a class you declare `final` or `base`.
 
 **Look and words.** A `CalendarThemeData` holds every colour, text style,
 motion and icon the views draw. Give it through a `CalendarTheme`, or in a
 Material app through a `CalendarThemeExtension`. A Material app with
 neither gets one derived from its `ColorScheme`, and an app with no
-Material theme the built-in one. The block, chip, card,
-add-button, loading and failure builders replace what the views draw, and
-`CalendarLocalizations` writes every word, in US English by default.
+Material theme the built-in one. The built-in header's view menu needs
+`MaterialLocalizations` above the calendar, as a `MaterialApp` gives;
+without them, pass `showsHeader: false` or a `headerBuilder`. The block,
+chip, card, add-button, loading and failure builders replace what the
+views draw, and `CalendarLocalizations` writes every word, in US English
+by default.
 
 `demos/workspace_calendar/` is a complete calendar app on the public API.
 
