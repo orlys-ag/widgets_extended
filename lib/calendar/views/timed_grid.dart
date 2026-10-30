@@ -360,7 +360,8 @@ const ValueKey<String> liftedBlockKey = ValueKey<String>("grid-lifted-block");
 /// The time a create gesture picked: one continuous range from [start] to
 /// [end], an exclusive end, both local times.
 @immutable
-class CreateRange {
+final class CreateRange {
+  /// The range from [start] to [end].
   const CreateRange({required this.start, required this.end});
 
   /// Where the range starts.

@@ -12,7 +12,8 @@ import '../presentation/calendar_theme.dart';
 /// [ThemeData.lerp] interpolates it as [CalendarThemeData.lerp] does, so
 /// an animated theme change animates the calendar too.
 @immutable
-class CalendarThemeExtension extends ThemeExtension<CalendarThemeExtension> {
+final class CalendarThemeExtension
+    extends ThemeExtension<CalendarThemeExtension> {
   /// The extension of [data], the built-in theme unless given.
   const CalendarThemeExtension({this.data = const CalendarThemeData()});
 

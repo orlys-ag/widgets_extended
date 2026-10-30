@@ -12,7 +12,7 @@ import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
@@ -875,8 +875,8 @@ void main() {
     expect(find.text("Slot length"), findsOneWidget);
     expect(<int>[
       for (final segment in slotLengthButtons(tester).segments) segment.value,
-    ], slotMinuteChoices);
-    expect(slotMinuteChoices, <int>[5, 10, 15, 20, 30, 60]);
+    ], CalendarDates.slotMinuteChoices);
+    expect(CalendarDates.slotMinuteChoices, <int>[5, 10, 15, 20, 30, 60]);
     expect(slotLengthButtons(tester).selected, <int>{15});
   });
 

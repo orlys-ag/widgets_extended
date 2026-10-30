@@ -28,7 +28,7 @@ import 'package:flutter/widgets.dart';
 /// [CalendarTheme] hands a theme down the tree, and [CalendarTheme.of]
 /// reads it.
 @immutable
-class CalendarThemeData with Diagnosticable {
+final class CalendarThemeData with Diagnosticable {
   /// Creates a theme; each parameter left out takes its built-in value.
   ///
   /// [todayRingWidth] must be zero or more, and [draggedBlockOpacity],

@@ -16,7 +16,7 @@ import '../dates/calendar_dates.dart';
 /// immutable, and two entries are equal when every field is, the payload
 /// compared by its own `==`.
 @immutable
-class CalendarEntry<T> {
+final class CalendarEntry<T> {
   /// An entry from [start] to [end].
   ///
   /// In a debug build each of these is asserted on its own: [start] and
@@ -53,16 +53,20 @@ class CalendarEntry<T> {
   /// time up to it, not the minute it names.
   final DateTime end;
 
+  /// The entry's name, which the default builders draw and Month's chips
+  /// give a screen reader; a store orders entries of the same start and
+  /// end by it.
   final String title;
 
+  /// The entry's colour, which the default builders fill its box with a
+  /// tint of and draw its edge in.
   final Color color;
 
   /// The host's value, compared by its own `==`.
   final T payload;
 
   /// Whether the entry covers whole days: [start] and [end] are each the
-  /// start of a day ([isDayStart]), so a day of 23 or 25 hours is one
-  /// whole day.
+  /// start of a day, so a day of 23 or 25 hours is one whole day.
   bool get isAllDay {
     return isDayStart(start) && isDayStart(end);
   }

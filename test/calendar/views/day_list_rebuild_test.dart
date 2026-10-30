@@ -56,7 +56,7 @@ List<CalendarEntry<String>> threeADay(DateTime first, int days) {
 /// A memory store, disposed at the test's end, whose days [unread] holds
 /// are not read yet and those [failed] holds failed to read, with [error]
 /// as its load error; [changed] notifies.
-class ReadsStore extends MemoryCalendarStore<String> {
+final class ReadsStore extends MemoryCalendarStore<String> {
   ReadsStore({super.entries}) {
     addTearDown(dispose);
   }
@@ -87,7 +87,7 @@ class ReadsStore extends MemoryCalendarStore<String> {
 
 /// A policy that forwards every answer to the unrestricted one's but
 /// refuses an edit of the entries [uneditable] holds.
-class UneditablePolicy extends CalendarEditPolicy<String> {
+final class UneditablePolicy extends CalendarEditPolicy<String> {
   const UneditablePolicy(this.uneditable);
 
   final Set<String> uneditable;

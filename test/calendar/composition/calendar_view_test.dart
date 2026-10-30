@@ -943,6 +943,95 @@ void main() {
     expectNoBuiltInHeader();
   });
 
+  /// [home] in a [WidgetsApp] with a navigator and [delegates], and no
+  /// [Theme] or [Material] above it.
+  Widget widgetsApp(
+    Widget home, {
+    List<LocalizationsDelegate<dynamic>> delegates =
+        const <LocalizationsDelegate<dynamic>>[],
+  }) {
+    return WidgetsApp(
+      color: const Color(0xFF000000),
+      localizationsDelegates: <LocalizationsDelegate<dynamic>>[
+        ...delegates,
+        DefaultWidgetsLocalizations.delegate,
+      ],
+      pageRouteBuilder: <T>(settings, builder) {
+        return PageRouteBuilder<T>(
+          settings: settings,
+          pageBuilder: (context, animation, secondaryAnimation) {
+            return builder(context);
+          },
+        );
+      },
+      home: home,
+    );
+  }
+
+  testWidgets("CV52 in an app with no Material, the built-in header puts a "
+      "transparent Material of the ambient text style above itself and "
+      "none above the views, and with one view needs no "
+      "MaterialLocalizations", (tester) async {
+    const ambient = TextStyle(fontFamily: "Ambient", fontSize: 13.0);
+    await tester.pumpWidget(
+      widgetsApp(
+        DefaultTextStyle(
+          style: ambient,
+          child: CalendarView<String>(
+            store: store,
+            clock: fixedClock,
+            views: const <CalendarViewKind>[CalendarViewKind.week],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    final aboveTitle = find.ancestor(
+      of: find.text("Apr 2026"),
+      matching: find.byType(Material),
+    );
+    expect(tester.widget<Material>(aboveTitle).textStyle, ambient);
+    expect(
+      find.ancestor(
+        of: find.byType(TimedGrid<String>),
+        matching: find.byType(Material),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets("CV53 in an app with no Material and the default Material "
+      "localizations, the built-in header's menu switches the view", (
+    tester,
+  ) async {
+    final controller = CalendarController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      widgetsApp(
+        CalendarView<String>(
+          store: store,
+          controller: controller,
+          clock: fixedClock,
+          views: const <CalendarViewKind>[
+            CalendarViewKind.week,
+            CalendarViewKind.month,
+          ],
+        ),
+        delegates: const <LocalizationsDelegate<dynamic>>[
+          DefaultMaterialLocalizations.delegate,
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byTooltip("Calendar view"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text("Month").last);
+    await tester.pumpAndSettle();
+    expect(controller.view, CalendarViewKind.month);
+  });
+
   testWidgets("CV11 taps, creates, edits and deletes reach the host's "
       "callbacks and open no route, and with no callbacks raise nothing and "
       "leave no slot marked", (tester) async {

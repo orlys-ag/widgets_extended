@@ -28,7 +28,7 @@ enum _Hold { free, started, locked }
 /// Two compare equal where their runtime types and [lockEarlierToday]
 /// are the same. Each answer compares instants and reads [CalendarNow]'s
 /// fields, so none allocates.
-class HistoryLockPolicy<T> extends CalendarEditPolicy<T> {
+final class HistoryLockPolicy<T> extends CalendarEditPolicy<T> {
   /// The lock at the start of today, or with [lockEarlierToday] at the
   /// current minute of it.
   const HistoryLockPolicy({this.lockEarlierToday = false});

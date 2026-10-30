@@ -167,7 +167,7 @@ class ReadSource implements CalendarDataSource<String> {
 }
 
 /// A caching store over a [ReadSource] that counts its [isRead] calls.
-class CountingStore extends CachingCalendarStore<String> {
+final class CountingStore extends CachingCalendarStore<String> {
   CountingStore(this.source) : super(dataSource: source);
 
   final ReadSource source;

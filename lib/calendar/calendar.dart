@@ -1,3 +1,12 @@
+/// A calendar of a host's entries in Agenda, Day, Week and Month views:
+/// [CalendarView] over a [CalendarStore], such as a [MemoryCalendarStore]
+/// of the host's entries or a [CachingCalendarStore] reading and writing
+/// through the host's [CalendarDataSource].
+///
+/// Experimental: the calendar's API may change in any release, a patch
+/// release included, until it is declared stable.
+library;
+
 export 'composition/calendar_header.dart'
     show
         CalendarHeaderBuilder,
@@ -8,14 +17,8 @@ export 'composition/calendar_header.dart'
 export 'composition/calendar_theme_extension.dart' show CalendarThemeExtension;
 export 'composition/calendar_view.dart'
     show CalendarController, CalendarEntryTapDetails, CalendarView;
-export 'dates/calendar_dates.dart'
-    show
-        DayHours,
-        WeekdaySet,
-        dateOfDayNumber,
-        dayNumber,
-        defaultSlotMinutes,
-        slotMinuteChoices;
+export 'dates/calendar_date_helpers.dart' show CalendarDates;
+export 'dates/calendar_dates.dart' show DayHours, WeekdaySet;
 export 'entries/calendar_data_source.dart'
     show
         CalendarAllChanged,
@@ -74,17 +77,10 @@ export 'store/calendar_store.dart'
         CalendarShownEntry,
         CalendarStore,
         CalendarStoreException,
-        CalendarWritePendingException;
+        CalendarWritePendingException,
+        compareCalendarEntries;
 export 'store/memory_calendar_store.dart'
     show CalendarEntryChanged, MemoryCalendarStore;
 export 'views/month_board.dart' show MonthLayout;
 export 'views/move_request.dart' show CalendarMoveKind, CalendarMoveRequest;
-export 'views/pinch_zoom.dart'
-    show
-        defaultMinSlotHeight,
-        maxMonthWeekScale,
-        minDayWidthHigh,
-        minDayWidthLow,
-        minSlotHeightHigh,
-        minSlotHeightLow;
 export 'views/timed_grid.dart' show CreateRange;

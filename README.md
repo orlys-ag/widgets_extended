@@ -9,7 +9,9 @@ no imperative mutation calls, no manual keys bookkeeping. Drag-and-drop
 reorder is one parameter.
 
 The package also ships **`Board`**, a two-axis lattice for calendars,
-timelines and grids; see [Board](#board).
+timelines and grids; see [Board](#board). On both of them it builds
+**`CalendarView`**, an Agenda, Day, Week and Month calendar, which is
+experimental; see [Calendar](#calendar).
 
 ## Install
 
@@ -370,6 +372,89 @@ fades an item in and out as the board grows and shrinks it.
 
 `examples/lib/week_view_example.dart` and
 `examples/lib/month_calendar_example.dart` are complete boards.
+
+## Calendar
+
+`CalendarView` shows your entries in Agenda, Day, Week and Month views,
+under a header that names the month and switches between them. It is
+experimental: its API may change in any release, a patch release
+included, until it is declared stable. Its API is what
+`package:widgets_extended/widgets_extended.dart` shows; any other name its
+files declare is internal.
+
+An entry is a `CalendarEntry<T>`: an id, null for a draft no store holds
+yet, a start and an exclusive end in local time on whole minutes, a title,
+a colour, and a payload of your own type. One from a day's start to a
+day's start is all-day. The calendar reads its entries from a store, which
+you create and dispose:
+
+```dart
+final store = MemoryCalendarStore<String>(
+  entries: <CalendarEntry<String>>[
+    CalendarEntry<String>(
+      id: "standup",
+      start: DateTime(2026, 4, 21, 9),
+      end: DateTime(2026, 4, 21, 10),
+      title: "Standup",
+      color: const Color(0xFF3366CC),
+      payload: "team",
+    ),
+  ],
+);
+
+// In a build method:
+CalendarView<String>(store: store);
+```
+
+**Stores.** `MemoryCalendarStore` holds the entries you give it and applies
+each write within the call. `CachingCalendarStore` reads by days through
+your `CalendarDataSource` (`read`, `create`, `replace` and `delete`), keeps
+showing what it holds while it reads changed days again, and applies the
+changes a stream of `CalendarSourceChange`s announces, if you give one;
+`invalidate` and `refresh` tell it that entries changed at the source, so
+it reads those days again. A store of your own extends `CalendarStore`
+and answers entries in the order `compareCalendarEntries` gives.
+`CalendarDates` holds the civil-date helpers the calendar counts days and
+minutes with, such as `addDays` and `dayNumber`.
+
+**Editing.** With `editable: true`, Week's and Day's blocks move and
+resize, and a create gesture reports its range through `onCreateRange`. A
+move or a resize goes to `onMoveRequest`, or, where that is null, straight
+to the store's `requestMove`. A tap on an entry in Week, Day or Month
+reports through `onEntryTap`, and a card builder of yours that calls
+`CalendarCardDetails.onEdit` or `onDelete` reports through
+`onEditRequest` or `onDeleteRequest`. The calendar opens no form, and
+writes nothing but a move or a resize that no `onMoveRequest` takes. An
+`editPolicy` limits the gestures: `HistoryLockPolicy` keeps the past as
+it is, `NoOverlapsPolicy` keeps Week's and Day's moves, resizes and
+creates off other timed entries' times, `DayLimitPolicy` caps the days a
+range covers, and `CalendarEditPolicy.all` combines them. A policy of
+your own extends `CalendarEditPolicy`, in a class you declare `final` or
+`base`.
+
+**Look and words.** A `CalendarThemeData` holds every colour, text style,
+motion and icon the views draw. Give it through a `CalendarTheme`, or in a
+Material app through a `CalendarThemeExtension`. A Material app with
+neither gets one derived from its `ColorScheme`, and an app with no
+Material theme the built-in one. In an app with no `Material` above the
+calendar, the built-in header puts a transparent one above itself; its
+view menu, shown where the calendar lists more than one view, needs
+`MaterialLocalizations`, which a `MaterialApp` gives and another app adds
+with `DefaultMaterialLocalizations.delegate`. With a `headerBuilder` of
+yours, or `showsHeader: false`, the calendar needs neither. The block,
+chip, card, add-button, loading and failure builders replace what the
+views draw, and `CalendarLocalizations` writes every word, in US English
+by default.
+
+**Testing.** A test drives a real `CalendarController` and fills a
+`MemoryCalendarStore` with the entries it needs; a `CachingCalendarStore`
+over a fake or mock `CalendarDataSource` tests reads, writes and
+failures. `CalendarController`, the stores, `CalendarEditPolicy` and the
+localizations are `base` classes, which no class outside the package
+implements, so a mock that implements one does not compile; a spy
+extends one in a `final` class and overrides what it records.
+
+`demos/workspace_calendar/` is a complete calendar app on the public API.
 
 ## Also in the box
 

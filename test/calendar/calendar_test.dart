@@ -113,10 +113,20 @@ void main() {
     <Object>[
       DayHours,
       WeekdaySet,
-      dayNumber,
-      dateOfDayNumber,
-      defaultSlotMinutes,
-      slotMinuteChoices,
+      CalendarDates.dayNumber,
+      CalendarDates.dateOfDayNumber,
+      CalendarDates.defaultSlotMinutes,
+      CalendarDates.slotMinuteChoices,
+      CalendarDates.addDays,
+      CalendarDates.dateOnly,
+      CalendarDates.endMinuteOfDay,
+      CalendarDates.isLaterOccurrence,
+      CalendarDates.lastDayNumberOf,
+      CalendarDates.minuteOfDay,
+      CalendarDates.minutesPerDay,
+      CalendarDates.timeAtWallMinute,
+      CalendarDates.wallMinuteOf,
+      CalendarDates.weekdayColumn,
       CalendarEntry,
       CalendarDataSource,
       CalendarEditPolicy,
@@ -128,7 +138,9 @@ void main() {
       CalendarEditRules,
       CalendarEarliestStart,
       HistoryLockPolicy,
+      NoOverlapsPolicy.entriesShareTime,
       CalendarStore,
+      compareCalendarEntries,
       CachingCalendarStore,
       MemoryCalendarStore,
       CalendarShownEntry,
@@ -178,28 +190,41 @@ void main() {
       CalendarMoveKind,
       HourLabelFormat,
       MonthLayout,
-      minDayWidthLow,
-      minDayWidthHigh,
-      minSlotHeightLow,
-      minSlotHeightHigh,
-      defaultMinSlotHeight,
-      maxMonthWeekScale,
+      CalendarController.minDayWidthLow,
+      CalendarController.minDayWidthHigh,
+      CalendarController.minSlotHeightLow,
+      CalendarController.minSlotHeightHigh,
+      CalendarController.defaultMinSlotHeight,
+      CalendarController.maxMonthWeekScale,
     ];
   });
 
-  test("B2 the barrel shows by name; of the views only the types and the "
-      "range constants the calendar's signatures use, and no view; of the "
-      "localizations file the localizations, their English default and "
-      "HourLabelFormat; and of the policy layer exactly the two edit policy files, "
-      "with the policies and the types their signatures name, and the edit "
-      "rules", () {
+  test("B2 the barrel shows by name; of the views only the types the "
+      "calendar's signatures use, and no view; of the localizations file "
+      "the localizations, their English default and HourLabelFormat; of the "
+      "policy layer exactly the policies, the types their signatures name "
+      "and the edit rules; and of the dates layer exactly the day hours, "
+      "the weekday sets and CalendarDates", () {
     final source = File(barrelPath).readAsStringSync();
     final exports = exportsOf(source);
     // Every directive the barrel holds was read.
     expect(exports, hasLength(directiveUris(source).length));
-    expect(<String>[
-      for (final export in exports) export.path,
-    ], contains("lib/calendar/dates/calendar_dates.dart"));
+    expect(
+      <String, Set<String>>{
+        for (final export in exports)
+          if (export.path.startsWith("lib/calendar/dates/"))
+            export.path: export.shown!.toSet(),
+      },
+      <String, Set<String>>{
+        "lib/calendar/dates/calendar_dates.dart": <String>{
+          "DayHours",
+          "WeekdaySet",
+        },
+        "lib/calendar/dates/calendar_date_helpers.dart": <String>{
+          "CalendarDates",
+        },
+      },
+    );
     for (final export in exports) {
       expect(export.shown, isNotNull, reason: export.path);
     }
@@ -213,14 +238,6 @@ void main() {
       "lib/calendar/views/move_request.dart": <String>{
         "CalendarMoveKind",
         "CalendarMoveRequest",
-      },
-      "lib/calendar/views/pinch_zoom.dart": <String>{
-        "defaultMinSlotHeight",
-        "maxMonthWeekScale",
-        "minDayWidthHigh",
-        "minDayWidthLow",
-        "minSlotHeightHigh",
-        "minSlotHeightLow",
       },
       "lib/calendar/views/timed_grid.dart": <String>{"CreateRange"},
     });
@@ -298,6 +315,109 @@ void main() {
         reason: export.path,
       );
     }
+  });
+
+  test("B4 each class the barrel shows says how a host builds on it: a "
+      "class a host extends is base, the data source an interface, the "
+      "widgets neither, and every other class final or sealed; and each "
+      "function or constant it shows names the calendar", () {
+    const widgets = <String>{
+      "CalendarView",
+      "CalendarActivityIndicator",
+      "CalendarTheme",
+    };
+    const bases = <String>{
+      "CalendarController",
+      "CalendarStore",
+      "MemoryCalendarStore",
+      "CachingCalendarStore",
+      "CalendarEditPolicy",
+      "CalendarLocalizations",
+      "DefaultCalendarLocalizations",
+    };
+    const interfaces = <String>{"CalendarDataSource"};
+    final shown = <String>{
+      for (final export in exportsOf(File(barrelPath).readAsStringSync()))
+        ...export.shown!,
+    };
+    final classDeclaration = RegExp(
+      r"^((?:(?:abstract|base|final|interface|sealed)\s+)*)class\s+(\w+)",
+      multiLine: true,
+    );
+    final otherDeclaration = RegExp(
+      r"^(?:enum|typedef|mixin|extension\s+type)\s+(\w+)"
+      r"|^(?:const|final)\s+(?:[\w<>?, ]+\s+)?(\w+)\s*="
+      r"|^[A-Za-z][\w<>?, ]*\s+(\w+)(?:<[^>(]*>)?\(",
+      multiLine: true,
+    );
+    // A file the barrel exports may export the file that declares a name,
+    // so every file of the module is read.
+    final declared = <String>{};
+    final kindOf = <String, String>{};
+    final functionsAndConstants = <String>{};
+    for (final file in moduleFiles()) {
+      final source = File(file).readAsStringSync();
+      for (final match in classDeclaration.allMatches(source)) {
+        final name = match.group(2)!;
+        declared.add(name);
+        final modifiers = match.group(1)!.split(RegExp(r"\s+")).toSet();
+        kindOf[name] =
+            modifiers.contains("final") || modifiers.contains("sealed")
+            ? "closed"
+            : modifiers.contains("base")
+            ? "base"
+            : modifiers.contains("interface")
+            ? "interface"
+            : "open";
+      }
+      for (final match in otherDeclaration.allMatches(source)) {
+        final name = (match.group(1) ?? match.group(2) ?? match.group(3))!;
+        declared.add(name);
+        if (match.group(1) == null) {
+          functionsAndConstants.add(name);
+        }
+      }
+    }
+    // Every name the barrel shows has a declaration the scan reads, and
+    // the scan reads a class of each kind.
+    expect(shown.difference(declared), isEmpty);
+    expect(
+      kindOf.keys,
+      containsAll(<String>{
+        ...widgets,
+        ...bases,
+        ...interfaces,
+        "CalendarEntry",
+        "CalendarStoreException",
+      }),
+    );
+    expect(<String, String>{
+      for (final name in shown)
+        if (kindOf.containsKey(name) &&
+            kindOf[name] !=
+                (widgets.contains(name)
+                    ? "open"
+                    : bases.contains(name)
+                    ? "base"
+                    : interfaces.contains(name)
+                    ? "interface"
+                    : "closed"))
+          name: kindOf[name]!,
+    }, isEmpty);
+    // The scan reads a function and a constant the barrel shows.
+    expect(
+      functionsAndConstants,
+      containsAll(<String>{
+        "defaultCalendarHeaderBuilder",
+        "calendarCardStripExtent",
+      }),
+    );
+    expect(<String>{
+      for (final name in shown)
+        if (functionsAndConstants.contains(name) &&
+            !name.toLowerCase().contains("calendar"))
+          name,
+    }, isEmpty);
   });
 
   test("LY1 each file imports the package's files by relative paths, up "

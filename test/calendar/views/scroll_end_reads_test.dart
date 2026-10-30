@@ -19,7 +19,7 @@ final DateTime tuesday = DateTime(2026, 4, 21);
 
 /// A store with no entries that records the scheduler's phase at each
 /// prefetch, and the days it reads.
-class PhaseStore extends MemoryCalendarStore<String> {
+final class PhaseStore extends MemoryCalendarStore<String> {
   final List<SchedulerPhase> prefetches = <SchedulerPhase>[];
   final List<(DateTime, DateTime)> reads = <(DateTime, DateTime)>[];
 

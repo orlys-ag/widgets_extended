@@ -2,7 +2,7 @@
 /// calendar opens on.
 library;
 
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_schema.dart';
 
@@ -251,12 +251,12 @@ const List<_WeekEntry> _weekEntries = <_WeekEntry>[
 /// the first Monday at least 19 days after [today], from that Monday's
 /// start to the start of the day five days on.
 List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
-  final day = dateOnly(today);
-  final weekStart = weekStartOf(day);
+  final day = CalendarDates.dateOnly(today);
+  final weekStart = WeekdaySet.all.weekStartOf(day);
   final seed = <Map<String, Object?>>[];
   final keptDays = <DateTime>{};
   for (final task in _keptTasks) {
-    final taskDay = addDays(day, task.day);
+    final taskDay = CalendarDates.addDays(day, task.day);
     keptDays.add(taskDay);
     seed.add(
       _envelope(
@@ -273,15 +273,18 @@ List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
       _envelope(
         type: entry.type,
         title: entry.title,
-        start: _at(addDays(weekStart, entry.weekday), entry.start),
-        end: _at(addDays(weekStart, entry.weekday), entry.end),
+        start: _at(
+          CalendarDates.addDays(weekStart, entry.weekday),
+          entry.start,
+        ),
+        end: _at(CalendarDates.addDays(weekStart, entry.weekday), entry.end),
         fields: entry.fields,
       ),
     );
   }
   DateTime? dayOff;
   for (var weekday = 0; weekday < 7 && dayOff == null; weekday++) {
-    final candidate = addDays(weekStart, weekday);
+    final candidate = CalendarDates.addDays(weekStart, weekday);
     if (!keptDays.contains(candidate)) {
       dayOff = candidate;
     }
@@ -298,14 +301,17 @@ List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
       fields: const <String, Object?>{"reason": "vacation"},
     ),
   );
-  final earliest = addDays(day, 19);
-  final tripStart = addDays(earliest, (7 - weekdayColumn(earliest)) % 7);
+  final earliest = CalendarDates.addDays(day, 19);
+  final tripStart = CalendarDates.addDays(
+    earliest,
+    (7 - CalendarDates.weekdayColumn(earliest)) % 7,
+  );
   seed.add(
     _envelope(
       type: CalendarItemType.outOfOffice,
       title: "Conference trip",
       start: tripStart,
-      end: addDays(tripStart, 5),
+      end: CalendarDates.addDays(tripStart, 5),
       fields: const <String, Object?>{"reason": "travel"},
     ),
   );

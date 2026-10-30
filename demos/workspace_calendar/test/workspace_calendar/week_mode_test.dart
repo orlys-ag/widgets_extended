@@ -4,7 +4,9 @@
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/widgets_extended.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart'
+    show daysBetween;
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
@@ -14,12 +16,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
-import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_harness.dart';
 
@@ -193,7 +193,12 @@ void main() {
       "end": "2026-04-22T09:00",
       "fields": <String, Object?>{"location": "Lab"},
     });
-    final week = await listAll(tester, api, monday, addDays(monday, 6));
+    final week = await listAll(
+      tester,
+      api,
+      monday,
+      CalendarDates.addDays(monday, 6),
+    );
     await pumpCalendar(tester, api: api);
     final requests = api.requests.length;
 
@@ -209,8 +214,8 @@ void main() {
     final viewport = gridViewport(tester);
     var checked = 0;
     for (final item in week) {
-      final first = rowOf(minuteOfDay(startOfJson(item)));
-      final last = rowOf(endMinuteOfDay(endOfJson(item))) - 1;
+      final first = rowOf(CalendarDates.minuteOfDay(startOfJson(item)));
+      final last = rowOf(CalendarDates.endMinuteOfDay(endOfJson(item))) - 1;
       if (last < viewport.firstVisibleRow || first > viewport.lastVisibleRow) {
         continue;
       }
@@ -254,7 +259,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(headerFinder(monday), findsOneWidget);
     for (var day = 0; day < 7; day++) {
-      expect(headerFinder(addDays(monday, day)), findsOneWidget);
+      expect(headerFinder(CalendarDates.addDays(monday, day)), findsOneWidget);
     }
     expect(
       find.descendant(of: headerFinder(monday), matching: find.text("Mo")),
@@ -273,11 +278,15 @@ void main() {
       }
       placed++;
       final start = startOfJson(item);
-      final col = colOf(daysBetween(monday, dateOnly(start)));
-      final first = cellRect(tester, rowOf(minuteOfDay(start)), col);
+      final col = colOf(daysBetween(monday, CalendarDates.dateOnly(start)));
+      final first = cellRect(
+        tester,
+        rowOf(CalendarDates.minuteOfDay(start)),
+        col,
+      );
       final last = cellRect(
         tester,
-        rowOf(endMinuteOfDay(endOfJson(item))) - 1,
+        rowOf(CalendarDates.endMinuteOfDay(endOfJson(item))) - 1,
         col,
       );
       final rect = tester.getRect(blockFinder(id));
@@ -314,7 +323,7 @@ void main() {
     await tester.tap(find.byTooltip("Next week"));
     await tester.pumpAndSettle();
     for (var day = 0; day < 7; day++) {
-      final date = addDays(monday, 7 + day);
+      final date = CalendarDates.addDays(monday, 7 + day);
       expect(
         find.descendant(
           of: headerFinder(date),
@@ -1058,7 +1067,7 @@ void main() {
     // the next day's.
     bool cardIn(DateTime day) {
       final top = tester.getRect(card).top;
-      final next = find.byKey(dayListHeaderKey(addDays(day, 1)));
+      final next = find.byKey(dayListHeaderKey(CalendarDates.addDays(day, 1)));
       return top > tester.getRect(find.byKey(dayListHeaderKey(day))).top &&
           (next.evaluate().isEmpty || top < tester.getRect(next).top);
     }
@@ -1172,8 +1181,8 @@ void main() {
     final nextWeek = await listAll(
       tester,
       api,
-      addDays(monday, 7),
-      addDays(monday, 13),
+      CalendarDates.addDays(monday, 7),
+      CalendarDates.addDays(monday, 13),
     );
     await tester.tap(find.byTooltip("Next week"));
     await tester.pump();

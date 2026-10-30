@@ -4,8 +4,7 @@ library;
 
 import 'dart:async';
 
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/policy/overlap.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_api.dart';
 import 'calendar_item.dart';
@@ -96,12 +95,16 @@ class MockCalendarApi implements CalendarApi {
     return _call(
       CalendarRequest(
         method: CalendarMethod.list,
-        first: dateOnly(first),
-        last: dateOnly(last),
+        first: CalendarDates.dateOnly(first),
+        last: CalendarDates.dateOnly(last),
       ),
       () {
         final ids = <String>{};
-        for (var day = dayNumber(first); day <= dayNumber(last); day++) {
+        for (
+          var day = CalendarDates.dayNumber(first);
+          day <= CalendarDates.dayNumber(last);
+          day++
+        ) {
           ids.addAll(_idsByDay[day] ?? const <String>{});
         }
         final items = <Map<String, Object?>>[for (final id in ids) _items[id]!];
@@ -249,19 +252,22 @@ class MockCalendarApi implements CalendarApi {
   }
 
   /// The stored ids, other than [ownId], that the valid [body] may not
-  /// share time with ([entriesShareTime]), read from the index of the days
-  /// it covers.
+  /// share time with ([NoOverlapsPolicy.entriesShareTime]), read from the
+  /// index of the days it covers.
   List<String> _conflictsOf(Map<String, Object?> body, String? ownId) {
     final item = itemFromJson(body);
     final seen = <String>{};
     final conflicts = <String>[];
-    final last = lastDayNumberOf(item.start, item.end);
-    for (var day = dayNumber(item.start); day <= last; day++) {
+    final last = CalendarDates.lastDayNumberOf(item.start, item.end);
+    for (var day = CalendarDates.dayNumber(item.start); day <= last; day++) {
       for (final id in _idsByDay[day] ?? const <String>{}) {
         if (id == ownId || !seen.add(id)) {
           continue;
         }
-        if (entriesShareTime(item, itemFromJson(_items[id]!))) {
+        if (NoOverlapsPolicy.entriesShareTime(
+          item,
+          itemFromJson(_items[id]!),
+        )) {
           conflicts.add(id);
         }
       }
@@ -313,8 +319,8 @@ class MockCalendarApi implements CalendarApi {
 /// in, from its start's day to [lastDayNumberOf].
 Iterable<int> _coveredDaysOf(Map<String, Object?> stored) sync* {
   final item = itemFromJson(stored);
-  final last = lastDayNumberOf(item.start, item.end);
-  for (var day = dayNumber(item.start); day <= last; day++) {
+  final last = CalendarDates.lastDayNumberOf(item.start, item.end);
+  for (var day = CalendarDates.dayNumber(item.start); day <= last; day++) {
     yield day;
   }
 }

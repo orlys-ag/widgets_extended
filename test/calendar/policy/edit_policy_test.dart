@@ -33,13 +33,13 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
 }
 
 /// A policy that overrides nothing.
-class _Plain extends CalendarEditPolicy<String> {
+final class _Plain extends CalendarEditPolicy<String> {
   const _Plain();
 }
 
 /// A policy giving the answers it is made with, recording each ask in
 /// [log] as its [name] and the member's. Compared by identity.
-class _Answering extends CalendarEditPolicy<String> {
+final class _Answering extends CalendarEditPolicy<String> {
   const _Answering(
     this.name,
     this.log, {
@@ -129,7 +129,7 @@ class _Answering extends CalendarEditPolicy<String> {
 }
 
 /// A policy whose move answer throws a [StateError].
-class _Throwing extends CalendarEditPolicy<String> {
+final class _Throwing extends CalendarEditPolicy<String> {
   const _Throwing();
 
   @override
@@ -533,6 +533,25 @@ void main() {
       const unrestricted = UnrestrictedEditPolicy<String>();
       expect(unrestricted, isNot(policy));
       expect(policy, isNot(unrestricted));
+    });
+
+    test("EP17 its test of two entries, of any payload types: two timed "
+        "entries whose instants meet share time, two that only touch do "
+        "not, nor does an all-day entry with a timed one", () {
+      final nine = entryOf("nine", at(tuesday, 9), at(tuesday, 10));
+      final half = entryOf("half", at(tuesday, 9, 30), at(tuesday, 10, 30));
+      final ten = entryOf("ten", at(tuesday, 10), at(tuesday, 11));
+      final allDay = CalendarEntry<int>(
+        id: "day",
+        start: tuesday,
+        end: wednesday,
+        title: "day",
+        color: const Color(0xFF336699),
+        payload: 1,
+      );
+      expect(NoOverlapsPolicy.entriesShareTime(nine, half), isTrue);
+      expect(NoOverlapsPolicy.entriesShareTime(nine, ten), isFalse);
+      expect(NoOverlapsPolicy.entriesShareTime(allDay, nine), isFalse);
     });
   });
 }

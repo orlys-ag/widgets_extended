@@ -7,8 +7,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
@@ -177,7 +176,7 @@ void main() {
     expect(first.dy, moreOrLessEquals(grid.top));
     expect(
       (first.dx - grid.left) / (grid.width / 7),
-      moreOrLessEquals(weekdayColumn(shown).toDouble()),
+      moreOrLessEquals(CalendarDates.weekdayColumn(shown).toDouble()),
     );
     expect(find.text("Today, April 21"), findsOneWidget);
   });

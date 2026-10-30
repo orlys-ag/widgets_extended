@@ -51,9 +51,10 @@ Color _tintOf(Color color, CalendarThemeData theme) {
 }
 
 /// The default block of Week's and Day's timed grid: the entry's tint with
-/// a 4 px edge of its colour, its title, and on a [detailed] block its
-/// times beside the title, an arrow at each end the grid's hours cut, all
-/// dimmed and beside an activity indicator while the entry is pending.
+/// a 4 px edge of its colour, its title, and on a detailed block
+/// ([CalendarBlockDetails.detailed]) its times beside the title, an arrow
+/// at each end the grid's hours cut, all dimmed and beside an activity
+/// indicator while the entry is pending.
 ///
 /// The text is laid out at its own height and clipped to the block, so a
 /// block the board lays out at a new extent each frame neither overflows

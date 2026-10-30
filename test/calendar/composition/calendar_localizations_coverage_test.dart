@@ -38,7 +38,7 @@ String bracketed(String text) {
 /// English, with every string [bracketed], so a string the calendar
 /// writes some other way, or a word it adds to one, reads outside the
 /// brackets.
-class _Marked extends DefaultCalendarLocalizations {
+final class _Marked extends DefaultCalendarLocalizations {
   const _Marked();
 
   @override

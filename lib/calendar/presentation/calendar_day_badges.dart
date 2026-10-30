@@ -10,7 +10,8 @@ import '../entries/calendar_entry.dart';
 /// name in what a screen reader hears for the day. Two kinds are equal
 /// when their [color] and [label] are.
 @immutable
-class CalendarBadgeKind {
+final class CalendarBadgeKind {
+  /// The kind whose dot is [color], named [label].
   const CalendarBadgeKind({required this.color, required this.label});
 
   /// The fill of the kind's dot.
@@ -40,7 +41,8 @@ class CalendarBadgeKind {
 
 /// The badges on the days of Agenda's and Day's calendar card: a dot for
 /// each kind of entry a day shows, where without them a day with entries
-/// carries one dot in the [CalendarThemeData.primary] colour.
+/// carries one dot in the theme's primary colour
+/// (`CalendarThemeData.primary`).
 ///
 /// A day carries a dot for each of [kinds] that [kindOf] answers for one
 /// of its shown entries, in the order of [kinds], and after them one in
@@ -54,7 +56,8 @@ class CalendarBadgeKind {
 /// are given badges not identical to the last, so a host keeps one
 /// instance rather than making one in each build.
 @immutable
-class CalendarDayBadges<T> {
+final class CalendarDayBadges<T> {
+  /// The badges of [kinds], each entry's kind as [kindOf] answers it.
   const CalendarDayBadges({required this.kinds, required this.kindOf});
 
   /// The kinds, in the order their dots run.

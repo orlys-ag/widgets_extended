@@ -7,7 +7,7 @@ library;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 
@@ -95,7 +95,7 @@ void main() {
     );
     // Setup sanity: the drop was written, two slots later.
     final item = await storedJson(tester, api, brainstormId);
-    expect(minuteOfDay(endOfJson(item)), 15 * 60 + 30);
+    expect(CalendarDates.minuteOfDay(endOfJson(item)), 15 * 60 + 30);
   });
 
   testWidgets("L2 a strip bar's trailing day edge sets the days as it "
@@ -105,7 +105,7 @@ void main() {
     await createBeforePump(
       tester,
       api,
-      taskJson("Focus", wednesday, 0, minutesPerDay),
+      taskJson("Focus", wednesday, 0, CalendarDates.minutesPerDay),
     );
     final focus =
         (await listAll(
@@ -175,6 +175,6 @@ void main() {
     );
     // Setup sanity: the drop was written, two slots later.
     final item = await storedJson(tester, api, brainstormId);
-    expect(minuteOfDay(endOfJson(item)), 15 * 60 + 30);
+    expect(CalendarDates.minuteOfDay(endOfJson(item)), 15 * 60 + 30);
   });
 }

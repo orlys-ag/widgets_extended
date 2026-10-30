@@ -6,6 +6,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../dates/calendar_date_helpers.dart';
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
 
@@ -13,11 +14,21 @@ import '../entries/calendar_entry.dart';
 /// of its unread days is marked [CalendarStore.readFailed], its last read
 /// having failed, though another read of it may be on the way (failed);
 /// loading otherwise.
-enum CalendarLoadStatus { loading, failed, ready }
+enum CalendarLoadStatus {
+  /// No unread day of the range is marked failed, and one or more is
+  /// unread; or no range is shown yet.
+  loading,
+
+  /// An unread day of the range is marked [CalendarStore.readFailed].
+  failed,
+
+  /// Every day of the range is read.
+  ready,
+}
 
 /// An entry as a view shows it: [pending] while a write on it runs.
 @immutable
-class CalendarShownEntry<T> {
+final class CalendarShownEntry<T> {
   /// The [entry] a view shows, and whether a write on it runs.
   const CalendarShownEntry(this.entry, {required this.pending});
 
@@ -82,7 +93,7 @@ final class CalendarHoursException extends CalendarStoreException {
   }
 
   /// Whether [hours] do not hold [end]'s minute of its last day as an end
-  /// ([DayHours.holdsEnd], [endMinuteOfDay]).
+  /// ([DayHours.holdsEnd], [CalendarDates.endMinuteOfDay]).
   bool get endOutside {
     return !hours.holdsEnd(endMinuteOfDay(end));
   }
@@ -117,8 +128,9 @@ final class CalendarWritePendingException extends CalendarStoreException {
 /// that completes once the store's source, a data source it writes
 /// through or the store itself, has stored the write, with what the
 /// source stored, or fails to its caller with the error that kept it from
-/// being stored.
-abstract class CalendarStore<T> extends ChangeNotifier {
+/// being stored. A host's own store extends this class, in a class it
+/// declares `final` or `base`.
+abstract base class CalendarStore<T> extends ChangeNotifier {
   /// A store holding writes to [hours].
   CalendarStore({DayHours hours = DayHours.allDay}) : _hours = hours;
 
@@ -741,7 +753,8 @@ class CalendarEntryIndex<T> {
 }
 
 /// The order a store answers entries in: by start, end, title and id, a
-/// total order over entries with distinct ids.
+/// total order over entries with distinct ids. [a] and [b] have ids. A
+/// host's own [CalendarStore] sorts the entries it answers with it.
 int compareCalendarEntries<T>(CalendarEntry<T> a, CalendarEntry<T> b) {
   final byStart = a.start.compareTo(b.start);
   if (byStart != 0) {

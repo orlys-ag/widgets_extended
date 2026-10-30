@@ -998,7 +998,7 @@ Future<void> dropMeetInZone(
 
 /// A [MoveRecordingStore] whose [requestMove] records the move and throws
 /// [thrown] within the call.
-class ThrowingMoveStore extends MoveRecordingStore {
+final class ThrowingMoveStore extends MoveRecordingStore {
   ThrowingMoveStore(List<CalendarEntry<String>> entries, this.thrown)
     : super(entries: entries);
 

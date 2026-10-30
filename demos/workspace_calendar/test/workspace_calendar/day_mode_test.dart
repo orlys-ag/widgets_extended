@@ -6,7 +6,9 @@ import 'dart:ui' as ui;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/widgets_extended.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart'
+    show daysBetween;
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api_source.dart';
@@ -19,13 +21,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
-import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_harness.dart';
 
@@ -185,7 +185,7 @@ Future<int> pixelAt(WidgetTester tester, Offset point) async {
 Future<void> pumpGrid(
   WidgetTester tester,
   CalendarSettings settings, {
-  double minSlotHeight = defaultMinSlotHeight,
+  double minSlotHeight = CalendarController.defaultMinSlotHeight,
   Size size = const Size(390.0, 844.0),
   CalendarStore<ItemPayload>? store,
 }) async {
@@ -222,7 +222,7 @@ Future<void> pumpGrid(
             weekdays: settings.weekdays,
             hours: settings.hours,
             hourLabelFormat: settings.hourLabelFormat,
-            minDayWidth: minDayWidthLow,
+            minDayWidth: CalendarController.minDayWidthLow,
             minSlotHeight: minSlotHeight,
             showsDayHeader: false,
           ),
@@ -414,9 +414,9 @@ void main() {
     await tester.pump();
     expect(listCalls(api), lists + 1);
     final read = api.requests.last;
-    final monday = addDays(readTo, 1);
+    final monday = CalendarDates.addDays(readTo, 1);
     expect(read.first, monday);
-    expect(read.last, addDays(monday, 6));
+    expect(read.last, CalendarDates.addDays(monday, 6));
     final overlay = find.descendant(
       of: find.byType(TimedGrid<ItemPayload>),
       matching: find.byType(CircularProgressIndicator),
@@ -430,8 +430,12 @@ void main() {
     for (var day = 1; day <= 6; day++) {
       await tester.tap(find.byTooltip("Next day"));
       await tester.pump();
-      expect(gridDay(tester), addDays(monday, day));
-      expect(overlay, findsNothing, reason: "${addDays(monday, day)}");
+      expect(gridDay(tester), CalendarDates.addDays(monday, day));
+      expect(
+        overlay,
+        findsNothing,
+        reason: "${CalendarDates.addDays(monday, day)}",
+      );
     }
     expect(listCalls(api), lists + 1);
     await tester.pumpAndSettle();

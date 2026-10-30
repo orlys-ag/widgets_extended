@@ -11,7 +11,7 @@ typedef DayRange = ({DateTime first, DateTime last});
 /// the scheduler's phase at the ask, and notifies within each call, as a
 /// caching store does for a range other than the one it shows; a calendar
 /// asks again only for a range that moved.
-class RecordingStore extends MemoryCalendarStore<String> {
+final class RecordingStore extends MemoryCalendarStore<String> {
   RecordingStore({super.entries, super.hours});
 
   final List<DayRange> shows = <DayRange>[];

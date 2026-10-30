@@ -7,7 +7,9 @@ library;
 import 'dart:ui' show Tristate;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/widgets_extended.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart'
+    show daysBetween;
 import 'package:workspace_calendar/workspace_calendar/calendar_api_source.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
@@ -16,7 +18,6 @@ import 'package:widgets_extended/calendar/composition/calendar_card.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
@@ -46,7 +47,9 @@ Finder stripDay(DateTime day) {
 
 /// [count] days from [first], one after another.
 List<DateTime> run(DateTime first, int count) {
-  return <DateTime>[for (var i = 0; i < count; i++) addDays(first, i)];
+  return <DateTime>[
+    for (var i = 0; i < count; i++) CalendarDates.addDays(first, i),
+  ];
 }
 
 /// The days whose cells' middles the strip shows, left to right. The strip

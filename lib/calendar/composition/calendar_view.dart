@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../dates/calendar_date_helpers.dart';
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
 import '../policy/edit_policy.dart';
@@ -23,7 +24,7 @@ import '../views/day_list.dart';
 import '../views/month_board.dart';
 import '../views/month_picker.dart';
 import '../views/move_request.dart';
-import '../views/pinch_zoom.dart';
+import '../views/pinch_zoom.dart' as pinch;
 import '../views/timed_grid.dart';
 import 'calendar_card.dart';
 import 'calendar_header.dart';
@@ -66,7 +67,8 @@ CalendarViewKind calendarOpeningView(
 /// [editable], in edit mode with [CalendarView.editPolicy] letting it be
 /// edited ([CalendarEditPolicy.mayEdit]).
 @immutable
-class CalendarEntryTapDetails<T> {
+final class CalendarEntryTapDetails<T> {
+  /// A tap on [entry], [editable] or not.
   const CalendarEntryTapDetails({required this.entry, required this.editable});
 
   /// The stored entry, without a pending move's requested time.
@@ -87,8 +89,9 @@ class CalendarEntryTapDetails<T> {
 ///   another, each day's entries beside their times and lengths. The month
 ///   is a `MonthStrip` under the weekdays' abbreviations, one month at
 ///   a time, each day a cell with its number on a circle and badges when
-///   it has entries, one for each kind [dayBadges] gives them. A tap selects a day, and the arrow keys move the
-///   selection once a tap has given the month focus. A horizontal drag
+///   it has entries, one for each kind [dayBadges] gives them. A tap
+///   selects a day, and the arrow keys move the selection once a tap has
+///   given the month focus. A horizontal drag
 ///   slides the next or the previous month in, the card's height
 ///   following, a fling carrying it past several months; the chevrons
 ///   slide it a month at a time. None of them selects: the header names
@@ -157,16 +160,17 @@ class CalendarEntryTapDetails<T> {
 ///
 /// The header's chevrons step a day in Day, a week in Week and in folded
 /// Agenda, and a month in unfolded Agenda and in Month. A tap on the
-/// title opens the month picker, a [MonthPicker], until the title is
-/// tapped again: in Agenda's and Day's card it fades in over the days, the
-/// card's height moving from theirs to its; in Week and Month it fades in
+/// title opens the month picker until the title is tapped again: in
+/// Agenda's and Day's card it fades in over the days, the card's height
+/// moving from theirs to its; in Week and Month it fades in
 /// under the header as the header's card grows to hold it. While it shows,
 /// the title names its year, and the chevrons or a swipe across it step a
 /// year; a month picked selects its day of the selected day's day of the
 /// month, as a month step does. [headerBuilder] builds the header in
 /// place of the built-in one, and [showsHeader] false builds none, nor in
-/// Week and Month the header's card. The built-in header's view menu needs
-/// [MaterialLocalizations] above the calendar.
+/// Week and Month the header's card. The built-in header puts a
+/// transparent [Material] above itself where none is above, and its view
+/// menu needs [MaterialLocalizations] above the calendar.
 ///
 /// [controller] holds the view and the selected day, which the host sets
 /// and listens to, the range of days the calendar asks [store] to show,
@@ -197,13 +201,15 @@ class CalendarEntryTapDetails<T> {
 /// step their gestures snap to, the length of the slot Agenda's add button
 /// and Month's long press create, and the grid those round the earliest
 /// start [editPolicy] gives a day up to
-/// ([CalendarEditPolicy.earliestStartOn]). A value [slotMinuteChoices] does not hold
-/// throws an [ArgumentError] from the build, in a release build as in a
-/// debug one, and the store's hours off its grid ([DayHours.isOnSlotsOf])
-/// fail an assertion in a debug build; the views show and schedule in the
-/// store's hours rounded out to it ([DayHours.roundedOutTo]), which are
-/// the hours themselves on the grid.
+/// ([CalendarEditPolicy.earliestStartOn]). A value
+/// [CalendarDates.slotMinuteChoices] does not hold throws an
+/// [ArgumentError] from the build, in a release build as in a debug one,
+/// and the store's hours off its grid ([DayHours.isOnSlotsOf]) fail an
+/// assertion in a debug build; the views show and schedule in the store's
+/// hours rounded out to it ([DayHours.roundedOutTo]), which are the hours
+/// themselves on the grid.
 class CalendarView<T> extends StatefulWidget {
+  /// A calendar of [store]'s entries in the views [views] lists.
   const CalendarView({
     super.key,
     required this.store,
@@ -296,9 +302,10 @@ class CalendarView<T> extends StatefulWidget {
   /// change moves a selected day it hides to the nearest shown one.
   final WeekdaySet weekdays;
 
-  /// The length of one slot, in minutes: one of [slotMinuteChoices], or the
-  /// build throws an [ArgumentError]. The store's hours start and end on
-  /// its grid, which a debug build asserts.
+  /// The length of one slot, in minutes: one of
+  /// [CalendarDates.slotMinuteChoices], or the build throws an
+  /// [ArgumentError]. The store's hours start and end on its grid, which a
+  /// debug build asserts.
   final int slotMinutes;
 
   /// The format the calendar writes times of day in: Week's and Day's
@@ -427,7 +434,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   ArgumentError? _viewsError;
 
   /// The error the build throws for a [CalendarView.slotMinutes] that
-  /// [slotMinuteChoices] does not hold, or null.
+  /// [CalendarDates.slotMinuteChoices] does not hold, or null.
   ArgumentError? get _slotMinutesError {
     final slotMinutes = widget.slotMinutes;
     if (slotMinuteChoices.contains(slotMinutes)) {

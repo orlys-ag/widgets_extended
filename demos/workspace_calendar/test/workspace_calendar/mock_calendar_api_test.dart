@@ -4,7 +4,7 @@
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -66,7 +66,7 @@ Map<String, Object?> envelope({
   Map<String, Object?>? fields,
 }) {
   final first = day ?? wednesday;
-  final last = addDays(first, dayCount - 1);
+  final last = CalendarDates.addDays(first, dayCount - 1);
   return <String, Object?>{
     "type": type.id,
     "title": title,
@@ -102,8 +102,12 @@ Map<String, Object?> timed(
 /// 23 hours, as [isoDateTime] would write its half hour; null where the
 /// zone has no such day.
 String? _skippedHalfHour() {
-  for (var day = DateTime(2026); day.year == 2026; day = addDays(day, 1)) {
-    if (addDays(day, 1).difference(day).inHours != 23) {
+  for (
+    var day = DateTime(2026);
+    day.year == 2026;
+    day = CalendarDates.addDays(day, 1)
+  ) {
+    if (CalendarDates.addDays(day, 1).difference(day).inHours != 23) {
       continue;
     }
     for (var hour = 0; hour < 24; hour++) {

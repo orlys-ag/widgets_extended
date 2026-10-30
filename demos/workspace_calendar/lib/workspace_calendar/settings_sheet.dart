@@ -5,7 +5,7 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
@@ -193,7 +193,7 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
               expandedInsets: EdgeInsets.zero,
               showSelectedIcon: false,
               segments: <ButtonSegment<int>>[
-                for (final minutes in slotMinuteChoices)
+                for (final minutes in CalendarDates.slotMinuteChoices)
                   ButtonSegment<int>(value: minutes, label: Text("$minutes")),
               ],
               selected: <int>{_settings.slotMinutes},
@@ -222,10 +222,13 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
                     Slider(
                       key: dayWidthSliderKey,
                       value: controller.minDayWidth,
-                      min: minDayWidthLow,
-                      max: minDayWidthHigh,
-                      divisions: ((minDayWidthHigh - minDayWidthLow) / 4.0)
-                          .round(),
+                      min: CalendarController.minDayWidthLow,
+                      max: CalendarController.minDayWidthHigh,
+                      divisions:
+                          ((CalendarController.minDayWidthHigh -
+                                      CalendarController.minDayWidthLow) /
+                                  4.0)
+                              .round(),
                       onChanged: (value) {
                         controller.minDayWidth = value.roundToDouble();
                       },
@@ -239,10 +242,13 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
                     Slider(
                       key: slotHeightSliderKey,
                       value: controller.minSlotHeight,
-                      min: minSlotHeightLow,
-                      max: minSlotHeightHigh,
-                      divisions: ((minSlotHeightHigh - minSlotHeightLow) / 2.0)
-                          .round(),
+                      min: CalendarController.minSlotHeightLow,
+                      max: CalendarController.minSlotHeightHigh,
+                      divisions:
+                          ((CalendarController.minSlotHeightHigh -
+                                      CalendarController.minSlotHeightLow) /
+                                  2.0)
+                              .round(),
                       onChanged: (value) {
                         controller.minSlotHeight = value.roundToDouble();
                       },

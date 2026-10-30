@@ -10,8 +10,7 @@
 library;
 
 import 'package:flutter/foundation.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_item.dart';
 import 'calendar_schema.dart';
@@ -31,11 +30,11 @@ Map<String, String> hoursErrorsOf(
     return const <String, String>{};
   }
   return <String, String>{
-    if (!hours.holdsStart(minuteOfDay(start)))
+    if (!hours.holdsStart(CalendarDates.minuteOfDay(start)))
       "start":
           "The start is from ${isoTime(hours.start)} to before "
           "${isoTime(hours.end)}, inside the calendar's hours.",
-    if (!hours.holdsEnd(endMinuteOfDay(end)))
+    if (!hours.holdsEnd(CalendarDates.endMinuteOfDay(end)))
       "end":
           "The end is from after ${isoTime(hours.start)} to "
           "${isoTime(hours.end)}, inside the calendar's hours.",
@@ -71,7 +70,7 @@ class CalendarSettings {
     this.allowsOverlaps = false,
     this.weekdays = WeekdaySet.all,
     this.hours = DayHours.allDay,
-    this.slotMinutes = defaultSlotMinutes,
+    this.slotMinutes = CalendarDates.defaultSlotMinutes,
     this.hourLabelFormat = HourLabelFormat.twentyFourHour,
     this.monthLayout = MonthLayout.fitScreen,
   });

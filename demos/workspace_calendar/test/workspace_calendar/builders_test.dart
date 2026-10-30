@@ -9,8 +9,9 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/widgets_extended.dart';
+import 'package:widgets_extended/calendar/dates/calendar_dates.dart'
+    show daysBetween;
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
@@ -734,7 +735,7 @@ void main() {
     final readTo = lastDayListed(api);
     await stepDayTo(tester, readTo);
     expect(gridDay(tester), readTo);
-    final unread = addDays(readTo, 1);
+    final unread = CalendarDates.addDays(readTo, 1);
     await tester.tap(find.byTooltip("Next day"));
     await tester.pump();
     await tester.pump(oneFrame);
@@ -755,7 +756,7 @@ void main() {
     };
     final weekEnd = lastDayListed(api);
     await stepDayTo(tester, weekEnd);
-    final failedDay = addDays(weekEnd, 1);
+    final failedDay = CalendarDates.addDays(weekEnd, 1);
     await tester.tap(find.byTooltip("Next day"));
     await tester.pump();
     await tester.pump(second);

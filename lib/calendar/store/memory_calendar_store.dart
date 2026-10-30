@@ -31,7 +31,7 @@ typedef CalendarEntryChanged<T> =
 /// [retry] and [prefetch] do nothing. The store is its entries' source,
 /// changed through its writes and [entries], so [invalidate] and [refresh]
 /// do nothing either.
-class MemoryCalendarStore<T> extends CalendarStore<T> {
+base class MemoryCalendarStore<T> extends CalendarStore<T> {
   /// A store holding [entries], each with an id no other has. Throws an
   /// [ArgumentError] for an entry with no id or with a repeated one.
   MemoryCalendarStore({

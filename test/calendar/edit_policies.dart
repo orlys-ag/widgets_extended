@@ -18,7 +18,7 @@ typedef PolicyAsk = ({String name, SchedulerPhase phase, int gate});
 
 /// Forwards each answer to [inner], recording each ask in [asked]. Compared
 /// by identity.
-class CountingEditPolicy<T> extends CalendarEditPolicy<T> {
+final class CountingEditPolicy<T> extends CalendarEditPolicy<T> {
   CountingEditPolicy(this.inner);
 
   final CalendarEditPolicy<T> inner;
@@ -106,7 +106,7 @@ class ScriptedThrow implements Exception {
 /// a [ScriptedThrow] for the day [throwsOn], and at a [CalendarNow.time]
 /// of [throwsFrom] or later; its move answer throws one at a
 /// [CalendarNow.time] of [movesThrowFrom] or later. Compared by identity.
-class ScriptedEditPolicy<T> extends CalendarEditPolicy<T> {
+final class ScriptedEditPolicy<T> extends CalendarEditPolicy<T> {
   const ScriptedEditPolicy({
     this.unmovable = const <String>{},
     this.edges = const <String, CalendarResizeEdges>{},
@@ -186,7 +186,7 @@ class ScriptedEditPolicy<T> extends CalendarEditPolicy<T> {
 /// range of days, as [dayNumber]s, of each [entriesBetween] it is asked
 /// while no move of its own runs: the reads of its own overlap refusal
 /// and of the split its write's notify runs within the call are left out.
-class MoveRecordingStore extends MemoryCalendarStore<String> {
+base class MoveRecordingStore extends MemoryCalendarStore<String> {
   MoveRecordingStore({super.entries, super.hours}) : super();
 
   final List<CalendarEntry<String>> moves = <CalendarEntry<String>>[];

@@ -51,8 +51,7 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 
 import 'workspace_calendar/calendar_api.dart';
 import 'workspace_calendar/calendar_api_source.dart';
@@ -217,7 +216,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   /// The day the calendar marks as today when called.
   DateTime _today() {
-    return dateOnly(widget.today ?? widget.clock());
+    return CalendarDates.dateOnly(widget.today ?? widget.clock());
   }
 
   /// The time the calendar's edit policy answers at when called, which a

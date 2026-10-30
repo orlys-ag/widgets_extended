@@ -221,7 +221,8 @@ CalendarEntry<String> retimed(CalendarEntry<String> entry, int start, int end) {
 /// [entry] moved to start on [day], keeping its times of day and the days
 /// it covers.
 CalendarEntry<String> onDay(CalendarEntry<String> entry, DateTime day) {
-  final shift = dayNumber(day) - dayNumber(entry.start);
+  final shift =
+      CalendarDates.dayNumber(day) - CalendarDates.dayNumber(entry.start);
   DateTime shifted(DateTime time) {
     return DateTime(
       time.year,

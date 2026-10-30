@@ -9,7 +9,7 @@
 /// exclusive, and `fields`, the type's payload.
 library;
 
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 
 enum CalendarItemType {
   task("task", "Task"),
@@ -250,6 +250,22 @@ String isoDateTime(DateTime time) {
   return time.toUtc().toIso8601String();
 }
 
+/// [date]'s day as an envelope's local date-time starts it, "2026-04-21".
+String isoDate(DateTime date) {
+  final year = date.year.toString().padLeft(4, "0");
+  final month = date.month.toString().padLeft(2, "0");
+  final day = date.day.toString().padLeft(2, "0");
+  return "$year-$month-$day";
+}
+
+/// The time [minute] minutes after midnight as an envelope's local
+/// date-time ends it, "09:30", and "24:00" for 1440.
+String isoTime(int minute) {
+  final hours = (minute ~/ 60).toString().padLeft(2, "0");
+  final minutes = (minute % 60).toString().padLeft(2, "0");
+  return "$hours:$minutes";
+}
+
 final RegExp _utcDateTimePattern = RegExp(
   r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?Z$",
 );
@@ -366,7 +382,9 @@ Map<String, String> validateItemJson(Map<String, Object?> json) {
     if (!end.isAfter(start)) {
       errors["end"] = "The end must be after the start.";
     } else if (!isAllowedDayCount(
-      lastDayNumberOf(start, end) - dayNumber(start) + 1,
+      CalendarDates.lastDayNumberOf(start, end) -
+          CalendarDates.dayNumber(start) +
+          1,
     )) {
       errors["end"] = "The item covers 1 to $maxDayCount days.";
     }

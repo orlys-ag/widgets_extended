@@ -1,5 +1,39 @@
 ## 0.0.36
 
+- Added `calendar`, experimental: its API may change in any release, a patch
+release included, until it is declared stable. `CalendarView` shows a
+host's entries in Agenda, Day, Week and Month views under a header that
+names the month and switches between them, and `CalendarController` holds
+the view, the selected day, the visible range and the zoom. An entry is a
+`CalendarEntry<T>`: an id (null for a draft), a local start and an
+exclusive end on whole minutes, a title, a colour and the host's payload.
+The calendar reads a `CalendarStore`, such as a `MemoryCalendarStore` of
+the host's entries or a `CachingCalendarStore` that reads by days and
+writes through the host's `CalendarDataSource`, applies a stream of
+`CalendarSourceChange`s, and reads changed days again on `invalidate` and
+`refresh`. In edit mode (`editable`) Week's and Day's blocks move and
+resize and the views' gestures pick ranges to create, reported through
+`onCreateRange` and `onMoveRequest` (or, where that is null, written
+through the store's `requestMove`), as an `editPolicy` allows
+(`HistoryLockPolicy`, `NoOverlapsPolicy`, `DayLimitPolicy`, combined by
+`CalendarEditPolicy.all`); a host's card builder requests edits and
+deletes through `onEditRequest` and `onDeleteRequest`. A
+`CalendarThemeData`, given through a `CalendarTheme` or a
+`CalendarThemeExtension`, holds every colour, text style, motion and icon
+the views draw; builders replace the blocks, chips, cards, add buttons and
+the loading and failure states; and `CalendarLocalizations` writes every
+word. `CalendarDates` holds the civil-date helpers the calendar counts
+days and minutes with, `CalendarController` the limits a pinch zooms
+within, and `NoOverlapsPolicy.entriesShareTime` the policy's test of
+whether two entries share time; `compareCalendarEntries` is the order a
+store answers entries in. A host extends `CalendarController`, the
+stores, `CalendarEditPolicy` and the localizations in classes it declares
+`final` or `base`.
+- `package:widgets_extended/widgets_extended.dart` exports the calendar,
+so an app that also imports a library declaring one of its names, as
+`syncfusion_flutter_calendar` declares `CalendarController`,
+`CalendarDataSource` and `CalendarView`, imports one of the two with
+`hide` or a prefix.
 - Added `board`: a two-axis scrolling lattice. `Board` is the widget and
 `BoardController` owns the model (`addItem`, `moveItem`, `resizeItem`,
 `removeItem`, `setItems`); a `BoardCellBuilder` fills every `(row, col)` cell

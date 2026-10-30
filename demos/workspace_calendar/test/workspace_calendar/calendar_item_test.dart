@@ -3,7 +3,7 @@
 /// UTC times with a Z, or local times with no offset as before.
 library;
 
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
@@ -43,7 +43,7 @@ DateTime? _laterHalfPast() {
     }
     for (var minutes = 30; minutes < 25 * 60; minutes += 60) {
       final time = day.add(Duration(minutes: minutes));
-      if (isLaterOccurrence(time)) {
+      if (CalendarDates.isLaterOccurrence(time)) {
         return time;
       }
     }
@@ -157,7 +157,9 @@ void main() {
       final again = itemFromJson(item.toJson());
       expect(again.start, second);
       expect(again.end, second.add(const Duration(minutes: 30)));
-      final first = timeAtWallMinute(wallMinuteOf(second))!;
+      final first = CalendarDates.timeAtWallMinute(
+        CalendarDates.wallMinuteOf(second),
+      )!;
       final across = calendarItem(
         type: CalendarItemType.task,
         title: "Across",

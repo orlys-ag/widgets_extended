@@ -1663,7 +1663,7 @@ void main() {
 
 /// Allows everything, recording the [CalendarNow] each answer is asked
 /// at in [nows] and the name of each answer asked in [askers].
-class _NowRecordingPolicy extends CalendarEditPolicy<String> {
+final class _NowRecordingPolicy extends CalendarEditPolicy<String> {
   final List<CalendarNow> nows = <CalendarNow>[];
   final Set<String> askers = <String>{};
 

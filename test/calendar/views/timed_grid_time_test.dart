@@ -193,7 +193,7 @@ Finder blocksOf(String id) {
 
 /// An in-memory store that counts its [entriesBetween] calls and the
 /// changes it applies.
-class CountingStore extends MemoryCalendarStore<String> {
+final class CountingStore extends MemoryCalendarStore<String> {
   CountingStore({super.entries, super.hours}) : super();
 
   int betweenCalls = 0;
