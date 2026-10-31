@@ -5,8 +5,8 @@ library;
 import 'calendar_dates.dart' as dates;
 
 /// The calendar's civil-date helpers and constants, on the local wall
-/// clock: the day steps, day numbers and minutes that `DayHours`,
-/// `WeekdaySet`, a `CalendarDataSource`'s reads by days and a
+/// clock: the day steps, day numbers and minutes that `CalendarDayHours`,
+/// `CalendarWeekdaySet`, a `CalendarDataSource`'s reads by days and a
 /// `CalendarEntry`'s times are counted in.
 ///
 /// Its members are static, under this class's name, so they share no name

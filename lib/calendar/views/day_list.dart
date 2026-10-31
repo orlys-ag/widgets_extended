@@ -25,7 +25,7 @@ import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 import 'answer_builder.dart';
-import 'timed_grid.dart' show CreateRange;
+import 'timed_grid.dart' show CalendarCreateRange;
 
 /// The style the day list animates its rows with under [theme]: every
 /// family over its [CalendarThemeData.motionDuration] on its
@@ -486,7 +486,7 @@ final class DayListFailed extends DayListRow {
 List<DayListRow> dayListRowsOf<T>(
   DateTime day,
   List<CalendarShownEntry<T>> entries,
-  DayHours hours, {
+  CalendarDayHours hours, {
   required bool editable,
 }) {
   final allDay = <DayListRow>[];
@@ -619,15 +619,15 @@ class DayList<T> extends StatefulWidget {
   final CalendarStore<T> store;
 
   /// The days the list shows.
-  final WeekdaySet weekdays;
+  final CalendarWeekdaySet weekdays;
 
   /// How the times beside the cards and on the gap rows read, as
   /// [CalendarLocalizations.formatTime] writes them.
-  final HourLabelFormat format;
+  final CalendarHourLabelFormat format;
 
   /// The calendar's hours, which the gap rows cover; an item wholly
   /// outside them shows only in a banner's count.
-  final DayHours hours;
+  final CalendarDayHours hours;
 
   /// The length of the slot a gap row's add button creates, in minutes,
   /// one of [slotMinuteChoices], which the list's state asserts; an
@@ -666,7 +666,7 @@ class DayList<T> extends StatefulWidget {
   /// where the day's clock repeats its time, so it starts at the earliest
   /// start or after. On a day whose clock repeats a stretch, an entry can
   /// hold time in a gap it is not listed beside.
-  final void Function(CreateRange range) onCreateRange;
+  final void Function(CalendarCreateRange range) onCreateRange;
 
   final void Function(String id) onEdit;
   final void Function(String id) onDelete;
@@ -1553,7 +1553,9 @@ class _DayListState<T> extends State<DayList<T>> {
       onAdd: add == null
           ? null
           : () {
-              widget.onCreateRange(CreateRange(start: add.start, end: add.end));
+              widget.onCreateRange(
+                CalendarCreateRange(start: add.start, end: add.end),
+              );
             },
     );
   }
@@ -2224,7 +2226,10 @@ class _NowSpan {
   /// end of the day. A banner of the pieces before the hours starts before
   /// any minute, and one of those after them after every minute. Only rows
   /// with a start take part, which an all-day row has not.
-  static Map<String, _NowSpan> spansOf(List<DayListRow> rows, DayHours hours) {
+  static Map<String, _NowSpan> spansOf(
+    List<DayListRow> rows,
+    CalendarDayHours hours,
+  ) {
     final starts = <(DayListRow, int)>[];
     for (final row in rows) {
       final start = switch (row) {
@@ -2309,8 +2314,8 @@ class _NowMarker extends StatelessWidget {
 
   final ValueListenable<CalendarNow> now;
   final _NowSpan span;
-  final DayHours hours;
-  final HourLabelFormat format;
+  final CalendarDayHours hours;
+  final CalendarHourLabelFormat format;
 
   @override
   Widget build(BuildContext context) {

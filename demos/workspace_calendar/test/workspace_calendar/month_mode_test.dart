@@ -1626,7 +1626,10 @@ void main() {
       // The week of March 1 shows no day of March, so the grid opens on
       // Monday, March 2.
       expect(
-        filledDays(tester, MonthGrid(2026, 3, weekdays: WeekdaySet.workweek)),
+        filledDays(
+          tester,
+          MonthGrid(2026, 3, weekdays: CalendarWeekdaySet.workweek),
+        ),
         <DateTime>[april(1), april(2), april(3)],
       );
       expect(fillCount(tester), 3);

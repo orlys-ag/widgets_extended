@@ -82,17 +82,21 @@ final class _Marked extends DefaultCalendarLocalizations {
   }
 
   @override
-  String formatTime(int minute, HourLabelFormat format) {
+  String formatTime(int minute, CalendarHourLabelFormat format) {
     return bracketed(super.formatTime(minute, format));
   }
 
   @override
-  String formatTimeRange(int start, int end, HourLabelFormat format) {
+  String formatTimeRange(int start, int end, CalendarHourLabelFormat format) {
     return bracketed(super.formatTimeRange(start, end, format));
   }
 
   @override
-  String entryTimes(DateTime start, DateTime end, HourLabelFormat format) {
+  String entryTimes(
+    DateTime start,
+    DateTime end,
+    CalendarHourLabelFormat format,
+  ) {
     return bracketed(super.entryTimes(start, end, format));
   }
 
@@ -181,7 +185,7 @@ final class _Marked extends DefaultCalendarLocalizations {
     DateTime start,
     DateTime end,
     DateTime today,
-    HourLabelFormat format,
+    CalendarHourLabelFormat format,
   ) {
     return bracketed(super.landing(start, end, today, format));
   }
@@ -192,7 +196,7 @@ final class _Marked extends DefaultCalendarLocalizations {
     required String? kind,
     required DateTime start,
     required DateTime end,
-    required HourLabelFormat format,
+    required CalendarHourLabelFormat format,
     required bool pending,
   }) {
     final label = super.entryLabel(
@@ -371,7 +375,7 @@ DateTime fixedClock() {
 }
 
 /// The calendar's hours, 08:00 to 18:00.
-const DayHours office = DayHours(8 * 60, 18 * 60);
+const CalendarDayHours office = CalendarDayHours(8 * 60, 18 * 60);
 
 /// [hour]:[minute] on [day].
 DateTime at(DateTime day, int hour, [int minute = 0]) {
@@ -448,7 +452,7 @@ Future<void> pumpCalendar(
         store: store,
         controller: controller,
         editable: true,
-        weekdays: WeekdaySet.workweek,
+        weekdays: CalendarWeekdaySet.workweek,
         clock: fixedClock,
         entryKindOf: (entry) {
           return entry.title == "Standup" ? work.label : null;
@@ -620,7 +624,10 @@ void main() {
     expect(
       find.text(
         marked.startsAt(
-          marked.formatTime(7 * 60 + 30, HourLabelFormat.twentyFourHour),
+          marked.formatTime(
+            7 * 60 + 30,
+            CalendarHourLabelFormat.twentyFourHour,
+          ),
         ),
       ),
       findsOneWidget,

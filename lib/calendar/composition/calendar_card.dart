@@ -131,7 +131,7 @@ class CalendarCard<T> extends StatefulWidget {
 
   final DateTime selectedDay;
   final DateTime today;
-  final WeekdaySet weekdays;
+  final CalendarWeekdaySet weekdays;
 
   /// [WeekStrip.recalls].
   final int stripRecalls;
@@ -226,7 +226,7 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
   /// build a new strip.
   Widget _buildStrip() {
     return WeekStrip<T>(
-      key: ValueKey<WeekdaySet>(widget.weekdays),
+      key: ValueKey<CalendarWeekdaySet>(widget.weekdays),
       store: widget.store,
       selectedDay: widget.selectedDay,
       today: widget.today,
@@ -295,7 +295,7 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
     // the fold itself. Its weekdays are fixed for its life, so new ones
     // build a new strip.
     final months = MonthStrip<T>(
-      key: ValueKey<WeekdaySet>(widget.weekdays),
+      key: ValueKey<CalendarWeekdaySet>(widget.weekdays),
       store: widget.store,
       month: widget.month,
       selectedDay: widget.selectedDay,

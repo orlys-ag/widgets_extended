@@ -1,5 +1,5 @@
 /// The calendar's text: [CalendarLocalizations], its English default
-/// [DefaultCalendarLocalizations], and [HourLabelFormat].
+/// [DefaultCalendarLocalizations], and [CalendarHourLabelFormat].
 library;
 
 import 'package:flutter/foundation.dart';
@@ -8,7 +8,7 @@ import 'package:flutter/widgets.dart';
 import '../dates/calendar_dates.dart';
 
 /// How the calendar names a time of day ([CalendarLocalizations.formatTime]).
-enum HourLabelFormat {
+enum CalendarHourLabelFormat {
   /// The 24-hour clock: "13:00" in English.
   twentyFourHour,
 
@@ -80,17 +80,21 @@ abstract base class CalendarLocalizations {
   String shortMonthYear(DateTime month);
 
   /// [minute] in [format].
-  String formatTime(int minute, HourLabelFormat format);
+  String formatTime(int minute, CalendarHourLabelFormat format);
 
   /// The times from [start] to [end], minutes after midnight, in [format].
-  String formatTimeRange(int start, int end, HourLabelFormat format);
+  String formatTimeRange(int start, int end, CalendarHourLabelFormat format);
 
   /// The times of an entry from [start] to [end], as the default block and
   /// chip builders show them: [allDay] for a range from a day's start to a
   /// day's start, and otherwise the times of day of [start] and [end] in
   /// [format], where an end at the start of the day after [start]'s is
   /// the midnight that ends that day.
-  String entryTimes(DateTime start, DateTime end, HourLabelFormat format);
+  String entryTimes(
+    DateTime start,
+    DateTime end,
+    CalendarHourLabelFormat format,
+  );
 
   /// The times of an all-day entry.
   String get allDay;
@@ -153,7 +157,7 @@ abstract base class CalendarLocalizations {
     DateTime start,
     DateTime end,
     DateTime today,
-    HourLabelFormat format,
+    CalendarHourLabelFormat format,
   );
 
   /// What a screen reader hears for a Month chip: the entry's [title], its
@@ -164,7 +168,7 @@ abstract base class CalendarLocalizations {
     required String? kind,
     required DateTime start,
     required DateTime end,
-    required HourLabelFormat format,
+    required CalendarHourLabelFormat format,
     required bool pending,
   });
 
@@ -382,8 +386,8 @@ base class DefaultCalendarLocalizations extends CalendarLocalizations {
   /// of the day, as "1 PM" or "8:15 AM", where midnight, 1440 included,
   /// reads "12 AM" and noon "12 PM".
   @override
-  String formatTime(int minute, HourLabelFormat format) {
-    if (format == HourLabelFormat.twentyFourHour) {
+  String formatTime(int minute, CalendarHourLabelFormat format) {
+    if (format == CalendarHourLabelFormat.twentyFourHour) {
       final hours = (minute ~/ 60).toString().padLeft(2, "0");
       final minutes = (minute % 60).toString().padLeft(2, "0");
       return "$hours:$minutes";
@@ -401,14 +405,18 @@ base class DefaultCalendarLocalizations extends CalendarLocalizations {
 
   /// "09:00-10:00".
   @override
-  String formatTimeRange(int start, int end, HourLabelFormat format) {
+  String formatTimeRange(int start, int end, CalendarHourLabelFormat format) {
     return "${formatTime(start, format)}-${formatTime(end, format)}";
   }
 
   /// "09:10-09:50", "9:10 AM-9:50 AM" on the 12-hour clock, or "All
   /// day".
   @override
-  String entryTimes(DateTime start, DateTime end, HourLabelFormat format) {
+  String entryTimes(
+    DateTime start,
+    DateTime end,
+    CalendarHourLabelFormat format,
+  ) {
     if (isDayStart(start) && isDayStart(end)) {
       return allDay;
     }
@@ -540,7 +548,7 @@ base class DefaultCalendarLocalizations extends CalendarLocalizations {
     DateTime start,
     DateTime end,
     DateTime today,
-    HourLabelFormat format,
+    CalendarHourLabelFormat format,
   ) {
     final first = dayNumber(start);
     final last = lastDayNumberOf(start, end);
@@ -568,7 +576,7 @@ base class DefaultCalendarLocalizations extends CalendarLocalizations {
     required String? kind,
     required DateTime start,
     required DateTime end,
-    required HourLabelFormat format,
+    required CalendarHourLabelFormat format,
     required bool pending,
   }) {
     final first = dateOfDayNumber(dayNumber(start));

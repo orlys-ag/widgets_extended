@@ -204,7 +204,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: materialTheme(extensions: <ThemeExtension<dynamic>>[extension]),
-        home: const WeekdayHeader(weekdays: WeekdaySet.all),
+        home: const WeekdayHeader(weekdays: CalendarWeekdaySet.all),
       ),
     );
     expect(

@@ -86,19 +86,19 @@ CalendarEntry<String> allDayOf(
 class Shown {
   const Shown.week(
     this.first, {
-    this.hours = DayHours.allDay,
+    this.hours = CalendarDayHours.allDay,
     this.slotMinutes = 15,
   }) : week = true;
 
   const Shown.day(
     this.first, {
-    this.hours = DayHours.allDay,
+    this.hours = CalendarDayHours.allDay,
     this.slotMinutes = 15,
   }) : week = false;
 
   final DateTime first;
   final bool week;
-  final DayHours hours;
+  final CalendarDayHours hours;
   final int slotMinutes;
 
   /// The row of the all-day strip's first row: under the day header in
@@ -344,7 +344,7 @@ class _NearRect extends Matcher {
 /// A store holding [entries], disposed at the test's end.
 MoveRecordingStore storeOf(
   List<CalendarEntry<String>> entries, {
-  DayHours hours = DayHours.allDay,
+  CalendarDayHours hours = CalendarDayHours.allDay,
 }) {
   final store = MoveRecordingStore(entries: entries, hours: hours);
   addTearDown(store.dispose);
@@ -448,7 +448,7 @@ class Harness {
     this.onCreate,
     this.onZoom,
     this.blockBuilder,
-    this.hourLabelFormat = HourLabelFormat.twentyFourHour,
+    this.hourLabelFormat = CalendarHourLabelFormat.twentyFourHour,
     DateTime? today,
     int nowHour = 9,
   }) : today = today ?? DateTime(2026, 1, 5),
@@ -470,17 +470,17 @@ class Harness {
   final DateTime today;
   final Future<void> Function(CalendarMoveRequest<String> request)?
   onMoveRequest;
-  final Future<void> Function(CreateRange range)? onCreate;
+  final Future<void> Function(CalendarCreateRange range)? onCreate;
   final void Function(double minSlotHeight, double minDayWidth)? onZoom;
   final CalendarBlockBuilder<String>? blockBuilder;
-  final HourLabelFormat hourLabelFormat;
+  final CalendarHourLabelFormat hourLabelFormat;
 
   bool editable;
   DateTime first;
-  DayHours hours;
+  CalendarDayHours hours;
   int slotMinutes;
 
-  final List<CreateRange> creates = <CreateRange>[];
+  final List<CalendarCreateRange> creates = <CalendarCreateRange>[];
   final List<String> opened = <String>[];
   final int _nowHour;
   late final ValueNotifier<CalendarNow> now = ValueNotifier<CalendarNow>(
@@ -554,7 +554,7 @@ class Harness {
 
 /// The two grids most tests run in: Week from Monday, and Day over
 /// Tuesday.
-List<Shown> bothGrids({DayHours hours = DayHours.allDay}) {
+List<Shown> bothGrids({CalendarDayHours hours = CalendarDayHours.allDay}) {
   return <Shown>[
     Shown.week(monday, hours: hours),
     Shown.day(tuesday, hours: hours),
@@ -655,7 +655,7 @@ void expectTimes(
 /// TX1's gesture: in Week, Monday's one-day bar moved two columns.
 Future<MoveRecordingStore> moveBarTwoColumns(
   WidgetTester tester, {
-  DayHours hours = DayHours.allDay,
+  CalendarDayHours hours = CalendarDayHours.allDay,
   Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
 }) async {
   final shown = Shown.week(monday, hours: hours);
@@ -1889,7 +1889,7 @@ void main() {
           monday,
           thursday,
           DateTime(2026, 1, 5),
-          HourLabelFormat.twentyFourHour,
+          CalendarHourLabelFormat.twentyFourHour,
         ),
       );
       await gesture.up();
@@ -1982,7 +1982,7 @@ void main() {
       "and, in Week, a bar moved two columns writes days two later", (
     tester,
   ) async {
-    const late = DayHours(8 * 60, minutesPerDay);
+    const late = CalendarDayHours(8 * 60, minutesPerDay);
     for (final shown in bothGrids(hours: late)) {
       final store = storeOf(<CalendarEntry<String>>[
         allDayOf("off", tuesday),
@@ -2002,7 +2002,7 @@ void main() {
         reason: shown.name,
       );
     }
-    const office = DayHours(8 * 60, 18 * 60);
+    const office = CalendarDayHours(8 * 60, 18 * 60);
     for (final shown in bothGrids(hours: office)) {
       final store = storeOf(<CalendarEntry<String>>[
         allDayOf("off", tuesday),
@@ -2555,7 +2555,7 @@ void main() {
           at(monday, 5),
           at(monday, 6),
           DateTime(2026, 1, 5),
-          HourLabelFormat.twentyFourHour,
+          CalendarHourLabelFormat.twentyFourHour,
         ),
       );
       debugDropGateCount = 0;
@@ -2649,7 +2649,7 @@ void main() {
           at(tuesday, 10),
           at(tuesday, 11),
           today,
-          HourLabelFormat.twentyFourHour,
+          CalendarHourLabelFormat.twentyFourHour,
         ),
         reason: shown.name,
       );
@@ -2666,7 +2666,7 @@ void main() {
           at(tuesday, 14),
           at(tuesday, 15),
           today,
-          HourLabelFormat.twentyFourHour,
+          CalendarHourLabelFormat.twentyFourHour,
         ),
         reason: shown.name,
       );
@@ -2751,7 +2751,7 @@ void main() {
               under.start,
               under.end,
               harness.today,
-              HourLabelFormat.twentyFourHour,
+              CalendarHourLabelFormat.twentyFourHour,
             ),
             reason: shown.name,
           );
@@ -2775,7 +2775,7 @@ void main() {
                 under.start,
                 under.end,
                 harness.today,
-                HourLabelFormat.twentyFourHour,
+                CalendarHourLabelFormat.twentyFourHour,
               ),
               reason: shown.name,
             );
@@ -2793,7 +2793,7 @@ void main() {
       "released over the frozen after-hours notice writes nothing", (
     tester,
   ) async {
-    const hours = DayHours(0, 18 * 60);
+    const hours = CalendarDayHours(0, 18 * 60);
     for (final shown in bothGrids(hours: hours)) {
       final store = storeOf(<CalendarEntry<String>>[
         allDayOf("off", tuesday),
@@ -2832,8 +2832,8 @@ void main() {
                 "its release writes";
       testWidgets(name, (tester) async {
         final hours = notice
-            ? const DayHours(8 * 60, minutesPerDay)
-            : DayHours.allDay;
+            ? const CalendarDayHours(8 * 60, minutesPerDay)
+            : CalendarDayHours.allDay;
         for (final shown in bothGrids(hours: hours)) {
           final day = shown.week ? monday : tuesday;
           final store = storeOf(<CalendarEntry<String>>[allDayOf("a", day)]);
@@ -2880,7 +2880,7 @@ void main() {
               under.start,
               under.end,
               harness.today,
-              HourLabelFormat.twentyFourHour,
+              CalendarHourLabelFormat.twentyFourHour,
             ),
             reason: shown.name,
           );
@@ -2929,7 +2929,7 @@ void main() {
           at(tuesday, 10),
           at(tuesday, 11),
           harness.today,
-          HourLabelFormat.twentyFourHour,
+          CalendarHourLabelFormat.twentyFourHour,
         ),
         reason: shown.name,
       );
@@ -3158,7 +3158,7 @@ void main() {
               written.start,
               written.end,
               DateTime(2026, 1, 5),
-              HourLabelFormat.twentyFourHour,
+              CalendarHourLabelFormat.twentyFourHour,
             ),
             lastLabel,
             reason: reason,
@@ -3178,8 +3178,8 @@ void main() {
       stripRect(tester, shown, monday).center,
       stripRect(tester, shown, wednesday).center,
     );
-    expect(harness.creates, <CreateRange>[
-      CreateRange(start: monday, end: thursday),
+    expect(harness.creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: monday, end: thursday),
     ]);
   });
 
@@ -3204,8 +3204,8 @@ void main() {
         stripRect(tester, shown, monday).center,
         stripRect(tester, shown, day).center,
       );
-      expect(harness.creates, <CreateRange>[
-        CreateRange(start: monday, end: end),
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: monday, end: end),
       ], reason: "$limit over $day");
     }
   });
@@ -3242,8 +3242,8 @@ void main() {
       await tester.pump();
       await gesture.up();
       await tester.pumpAndSettle();
-      expect(harness.creates, <CreateRange>[
-        CreateRange(start: at(monday, 10), end: at(monday, 12, 15)),
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: at(monday, 10), end: at(monday, 12, 15)),
       ]);
     });
 
@@ -3309,8 +3309,11 @@ void main() {
       final high = math.max(focus, 10 * 60);
       await gesture.up();
       await tester.pumpAndSettle();
-      expect(harness.creates, <CreateRange>[
-        CreateRange(start: at(monday, 0, low), end: at(monday, 0, high + 15)),
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(
+          start: at(monday, 0, low),
+          end: at(monday, 0, high + 15),
+        ),
       ]);
     });
   });
@@ -3394,7 +3397,7 @@ void main() {
         at(monday, 22),
         at(wednesday, 12, 15),
         harness.today,
-        HourLabelFormat.twentyFourHour,
+        CalendarHourLabelFormat.twentyFourHour,
       ),
     );
     expect(strokedRects(tester), <Matcher>[
@@ -3482,7 +3485,10 @@ void main() {
       "sharing time with Monday 23:00 to 23:30, which the hours hide", (
     tester,
   ) async {
-    final shown = Shown.week(monday, hours: const DayHours(6 * 60, 22 * 60));
+    final shown = Shown.week(
+      monday,
+      hours: const CalendarDayHours(6 * 60, 22 * 60),
+    );
     final hidden = entryOf("H", at(monday, 23), at(monday, 23, 30));
     final overnight = entryOf("O", at(tuesday, 21), at(wednesday, 7));
     for (final withHidden in const <bool>[false, true]) {
@@ -3615,7 +3621,7 @@ void main() {
         at(sunday, 23, 30),
         at(nextMonday, 0, 30),
         DateTime(2026, 1, 5),
-        HourLabelFormat.twentyFourHour,
+        CalendarHourLabelFormat.twentyFourHour,
       ),
     );
     await crossed.up();
@@ -3769,8 +3775,8 @@ void main() {
         slotRect(tester, shown, monday, 10 * 60).center,
         slotRect(tester, shown, thursday, 12 * 60).center,
       );
-      expect(harness.creates, <CreateRange>[
-        CreateRange(
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(
           start: at(monday, 10),
           end: limit == null ? at(thursday, 12, 15) : wednesday,
         ),
@@ -4370,7 +4376,7 @@ void main() {
       "its marked range, and the throw is left uncaught in the zone, as a "
       "failure of its future is", (tester) async {
     for (final shown in bothGrids()) {
-      final created = <CreateRange>[];
+      final created = <CalendarCreateRange>[];
       final failure = CreateFailure();
       final harness = Harness(
         storeOf(<CalendarEntry<String>>[]),
@@ -4462,9 +4468,9 @@ void main() {
     await createDrag(tester, from, to);
     await tester.tapAt(from);
     await tester.pumpAndSettle();
-    expect(harness.creates, <CreateRange>[
-      CreateRange(start: at(thursday, 14), end: at(thursday, 16, 15)),
-      CreateRange(start: at(thursday, 14), end: at(thursday, 14, 15)),
+    expect(harness.creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: at(thursday, 14), end: at(thursday, 16, 15)),
+      CalendarCreateRange(start: at(thursday, 14), end: at(thursday, 14, 15)),
     ]);
   });
 
@@ -4883,7 +4889,7 @@ void main() {
     await Harness(
       store,
       shown,
-      hourLabelFormat: HourLabelFormat.twelveHour,
+      hourLabelFormat: CalendarHourLabelFormat.twelveHour,
     ).pump(tester);
     final slot = slotRect(tester, shown, wednesday, 9 * 60).height;
     final block = await lift(

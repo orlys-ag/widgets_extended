@@ -35,7 +35,7 @@ DateTime monthFoldDay(
   DateTime month, {
   required DateTime selectedDay,
   required DateTime today,
-  required WeekdaySet weekdays,
+  required CalendarWeekdaySet weekdays,
 }) {
   bool holds(DateTime day) {
     return day.year == month.year && day.month == month.month;
@@ -112,7 +112,7 @@ class MonthStrip<T> extends StatefulWidget {
   /// The day the strip marks as today.
   final DateTime today;
 
-  final WeekdaySet weekdays;
+  final CalendarWeekdaySet weekdays;
 
   /// The height of a week's row.
   final double rowHeight;

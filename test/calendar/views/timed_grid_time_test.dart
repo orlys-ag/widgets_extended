@@ -55,19 +55,19 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
 class Shown {
   const Shown.week(
     this.first, {
-    this.hours = DayHours.allDay,
+    this.hours = CalendarDayHours.allDay,
     this.slotMinutes = 15,
   }) : week = true;
 
   const Shown.day(
     this.first, {
-    this.hours = DayHours.allDay,
+    this.hours = CalendarDayHours.allDay,
     this.slotMinutes = 15,
   }) : week = false;
 
   final DateTime first;
   final bool week;
-  final DayHours hours;
+  final CalendarDayHours hours;
   final int slotMinutes;
 
   /// The row of the first slot of the grid shown now, under the day header
@@ -291,10 +291,10 @@ class Harness {
     ]);
   }
 
-  DayHours hours;
+  CalendarDayHours hours;
   int slotMinutes;
 
-  final List<CreateRange> creates = <CreateRange>[];
+  final List<CalendarCreateRange> creates = <CalendarCreateRange>[];
   final ValueNotifier<CalendarNow> now = ValueNotifier<CalendarNow>(
     CalendarNow(time: DateTime(2026, 1, 5, 9), today: DateTime(2026, 1, 5)),
   );
@@ -339,7 +339,7 @@ class Harness {
 /// A store holding [entries], disposed at the test's end.
 CountingStore storeOf(
   List<CalendarEntry<String>> entries, {
-  DayHours hours = DayHours.allDay,
+  CalendarDayHours hours = CalendarDayHours.allDay,
 }) {
   final store = CountingStore(entries: entries, hours: hours);
   addTearDown(store.dispose);
@@ -931,8 +931,8 @@ void main() {
     await harness.pump(tester);
     await tester.tapAt(slotRect(tester, shown, tuesday, 10 * 60).center);
     await tester.pumpAndSettle();
-    expect(harness.creates, <CreateRange>[
-      CreateRange(start: at(tuesday, 10), end: at(tuesday, 10, 15)),
+    expect(harness.creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 10, 15)),
     ]);
   });
 
@@ -946,8 +946,8 @@ void main() {
       slotRect(tester, shown, monday, 10 * 60).center,
       slotRect(tester, shown, wednesday, 12 * 60).center,
     );
-    expect(harness.creates, <CreateRange>[
-      CreateRange(start: at(monday, 10), end: at(wednesday, 12, 15)),
+    expect(harness.creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: at(monday, 10), end: at(wednesday, 12, 15)),
     ]);
   });
 
@@ -972,8 +972,8 @@ void main() {
         slotRect(tester, shown, monday, 10 * 60).center,
         slotRect(tester, shown, day, 12 * 60).center,
       );
-      expect(harness.creates, <CreateRange>[
-        CreateRange(start: at(monday, 10), end: end),
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: at(monday, 10), end: end),
       ], reason: "$limit over $day");
     }
   });
@@ -981,7 +981,7 @@ void main() {
   testWidgets("TR3b under hours 08:00-18:00 with maxDayCount 3, a create "
       "drag from Monday 10:00 released over Thursday 12:00 reports Monday "
       "10:00 to Wednesday 18:00", (tester) async {
-    const office = DayHours(8 * 60, 18 * 60);
+    const office = CalendarDayHours(8 * 60, 18 * 60);
     final shown = Shown.week(monday, hours: office);
     final harness = Harness(
       storeOf(const <CalendarEntry<String>>[], hours: office),
@@ -994,16 +994,16 @@ void main() {
       slotRect(tester, shown, monday, 10 * 60).center,
       slotRect(tester, shown, thursday, 12 * 60).center,
     );
-    expect(harness.creates, <CreateRange>[
-      CreateRange(start: at(monday, 10), end: at(wednesday, 18)),
+    expect(harness.creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: at(monday, 10), end: at(wednesday, 18)),
     ]);
   });
 
-  test("TR5 the CreateRange class declares no member of the day, minute and "
-      "day-count time", () {
+  test("TR5 the CalendarCreateRange class declares no member of the day, "
+      "minute and day-count time", () {
     final body = classBody(
       File("lib/calendar/views/timed_grid.dart").readAsStringSync(),
-      "CreateRange",
+      "CalendarCreateRange",
     );
     bool declares(String name) {
       return RegExp(
@@ -1044,8 +1044,8 @@ void main() {
     // A slot that shares no time takes the tap.
     await tester.tapAt(slotRect(tester, shown, tuesday, 8 * 60 + 45).center);
     await tester.pumpAndSettle();
-    expect(harness.creates, <CreateRange>[
-      CreateRange(start: at(tuesday, 8, 45), end: at(tuesday, 9)),
+    expect(harness.creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: at(tuesday, 8, 45), end: at(tuesday, 9)),
     ]);
   });
 
@@ -1070,8 +1070,8 @@ void main() {
     }
     await gesture.up();
     await tester.pumpAndSettle();
-    expect(harness.creates, <CreateRange>[
-      CreateRange(start: at(tuesday, 10), end: at(tuesday, 12, 45)),
+    expect(harness.creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 12, 45)),
     ]);
     expect(store.betweenCalls - calls, 1);
   });
@@ -1099,9 +1099,9 @@ void main() {
       slotRect(tester, shown, tuesday, 10 * 60).center,
       slotRect(tester, shown, tuesday, 13 * 60).center,
     );
-    expect(harness.creates, <CreateRange>[
-      CreateRange(start: at(tuesday, 9), end: at(tuesday, 10, 15)),
-      CreateRange(start: at(tuesday, 10), end: at(tuesday, 11)),
+    expect(harness.creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: at(tuesday, 9), end: at(tuesday, 10, 15)),
+      CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 11)),
     ]);
   });
 
@@ -1121,8 +1121,8 @@ void main() {
       );
       await tester.tapAt(slotRect(tester, shown, tuesday, 10 * 60).center);
       await tester.pumpAndSettle();
-      expect(harness.creates, <CreateRange>[
-        CreateRange(start: at(tuesday, 10), end: at(tuesday, 10, 30)),
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 10, 30)),
       ], reason: shown.name);
     }
   });
@@ -1186,7 +1186,7 @@ void main() {
       harness.slotMinutes = 30;
     },
     "hours": (harness) {
-      harness.hours = const DayHours(0, 23 * 60);
+      harness.hours = const CalendarDayHours(0, 23 * 60);
     },
   };
 
@@ -1236,7 +1236,7 @@ void main() {
       "hours that leave it outside": (
         entryOf("task", at(tuesday, 20), at(tuesday, 21)),
         (harness) {
-          harness.hours = const DayHours(8 * 60, 18 * 60);
+          harness.hours = const CalendarDayHours(8 * 60, 18 * 60);
         },
       ),
     };
@@ -1545,8 +1545,11 @@ void main() {
       await tester.tapAt(slotRect(tester, shown, day, 90).center);
       await tester.pumpAndSettle();
       final first = day.add(const Duration(minutes: 90));
-      expect(harness.creates, <CreateRange>[
-        CreateRange(start: first, end: first.add(const Duration(minutes: 15))),
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(
+          start: first,
+          end: first.add(const Duration(minutes: 15)),
+        ),
       ]);
     });
 
@@ -1608,7 +1611,7 @@ void main() {
     final edgeViews = <Shown>[
       Shown.week(monday),
       Shown.day(monday),
-      Shown.day(monday, hours: const DayHours(8 * 60, 18 * 60)),
+      Shown.day(monday, hours: const CalendarDayHours(8 * 60, 18 * 60)),
     ];
 
     /// Monday at [minute] past its midnight, the next midnight for 1440.

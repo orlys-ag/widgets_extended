@@ -28,7 +28,7 @@ Future<List<DateTime>> pumpStrip(
             month: DateTime(2026, 4),
             selectedDay: DateTime(2026, 4, 21),
             today: DateTime(2026, 4, 21),
-            weekdays: WeekdaySet.all,
+            weekdays: CalendarWeekdaySet.all,
             rowHeight: 48.0,
             collapse: kAlwaysDismissedAnimation,
             onSelectDay: (day) {},
@@ -52,7 +52,7 @@ void main() {
           DateTime(2026, 4),
           selectedDay: DateTime(2026, 4, 9),
           today: today,
-          weekdays: WeekdaySet.all,
+          weekdays: CalendarWeekdaySet.all,
         ),
         DateTime(2026, 4, 9),
       );
@@ -65,7 +65,7 @@ void main() {
           DateTime(2026, 4),
           selectedDay: DateTime(2026, 5, 7),
           today: today,
-          weekdays: WeekdaySet.all,
+          weekdays: CalendarWeekdaySet.all,
         ),
         today,
       );
@@ -75,7 +75,7 @@ void main() {
           DateTime(2026, 4),
           selectedDay: DateTime(2026, 5, 7),
           today: DateTime(2026, 4, 25),
-          weekdays: WeekdaySet.workweek,
+          weekdays: CalendarWeekdaySet.workweek,
         ),
         DateTime(2026, 4, 27),
       );
@@ -87,7 +87,7 @@ void main() {
           DateTime(2026, 5),
           selectedDay: today,
           today: today,
-          weekdays: WeekdaySet.all,
+          weekdays: CalendarWeekdaySet.all,
         ),
         DateTime(2026, 5, 1),
       );
@@ -97,7 +97,7 @@ void main() {
           DateTime(2026, 3),
           selectedDay: today,
           today: today,
-          weekdays: WeekdaySet.workweek,
+          weekdays: CalendarWeekdaySet.workweek,
         ),
         DateTime(2026, 3, 2),
       );

@@ -111,8 +111,8 @@ void main() {
     // Compile-time only: a name the barrel stops showing stops this file
     // compiling.
     <Object>[
-      DayHours,
-      WeekdaySet,
+      CalendarDayHours,
+      CalendarWeekdaySet,
       CalendarDates.dayNumber,
       CalendarDates.dateOfDayNumber,
       CalendarDates.defaultSlotMinutes,
@@ -185,11 +185,11 @@ void main() {
       defaultCalendarHeaderBuilder,
       CalendarEntryTapDetails,
       CalendarThemeExtension,
-      CreateRange,
+      CalendarCreateRange,
       CalendarMoveRequest,
       CalendarMoveKind,
-      HourLabelFormat,
-      MonthLayout,
+      CalendarHourLabelFormat,
+      CalendarMonthLayout,
       CalendarController.minDayWidthLow,
       CalendarController.minDayWidthHigh,
       CalendarController.minSlotHeightLow,
@@ -201,8 +201,9 @@ void main() {
 
   test("B2 the barrel shows by name; of the views only the types the "
       "calendar's signatures use, and no view; of the localizations file "
-      "the localizations, their English default and HourLabelFormat; of the "
-      "policy layer exactly the policies, the types their signatures name "
+      "the localizations, their English default and "
+      "CalendarHourLabelFormat; of the policy layer exactly the policies, "
+      "the types their signatures name "
       "and the edit rules; and of the dates layer exactly the day hours, "
       "the weekday sets and CalendarDates", () {
     final source = File(barrelPath).readAsStringSync();
@@ -217,8 +218,8 @@ void main() {
       },
       <String, Set<String>>{
         "lib/calendar/dates/calendar_dates.dart": <String>{
-          "DayHours",
-          "WeekdaySet",
+          "CalendarDayHours",
+          "CalendarWeekdaySet",
         },
         "lib/calendar/dates/calendar_date_helpers.dart": <String>{
           "CalendarDates",
@@ -234,12 +235,12 @@ void main() {
           export.path: export.shown!.toSet(),
     };
     expect(views, <String, Set<String>>{
-      "lib/calendar/views/month_board.dart": <String>{"MonthLayout"},
+      "lib/calendar/views/month_board.dart": <String>{"CalendarMonthLayout"},
       "lib/calendar/views/move_request.dart": <String>{
         "CalendarMoveKind",
         "CalendarMoveRequest",
       },
-      "lib/calendar/views/timed_grid.dart": <String>{"CreateRange"},
+      "lib/calendar/views/timed_grid.dart": <String>{"CalendarCreateRange"},
     });
     expect(
       <List<String>?>[
@@ -252,7 +253,7 @@ void main() {
         <String>[
           "CalendarLocalizations",
           "DefaultCalendarLocalizations",
-          "HourLabelFormat",
+          "CalendarHourLabelFormat",
         ],
       ],
     );

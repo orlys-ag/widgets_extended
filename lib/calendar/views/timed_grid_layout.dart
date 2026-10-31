@@ -34,8 +34,8 @@ class GridTracks {
   GridTracks({
     required this.firstDay,
     required this.dayCount,
-    this.weekdays = WeekdaySet.all,
-    this.hours = DayHours.allDay,
+    this.weekdays = CalendarWeekdaySet.all,
+    this.hours = CalendarDayHours.allDay,
     this.firstSlotRow = 1,
     this.slotMinutes = defaultSlotMinutes,
   }) : assert(dayCount >= 1),
@@ -52,14 +52,14 @@ class GridTracks {
   /// The days in the range, shown or not.
   final int dayCount;
 
-  final WeekdaySet weekdays;
-  final DayHours hours;
+  final CalendarWeekdaySet weekdays;
+  final CalendarDayHours hours;
 
   /// The row of the first slot.
   final int firstSlotRow;
 
   /// The length of one slot, one row, in minutes; [hours] start and end on
-  /// its grid ([DayHours.isOnSlotsOf]).
+  /// its grid ([CalendarDayHours.isOnSlotsOf]).
   final int slotMinutes;
 
   /// The [dayNumber]s of the shown days, ascending: column `c` shows
@@ -603,8 +603,8 @@ class TimedGridLayout<T> {
     List<CalendarShownEntry<T>> shown,
     int firstDay,
     int dayCount,
-    WeekdaySet weekdays,
-    DayHours hours,
+    CalendarWeekdaySet weekdays,
+    CalendarDayHours hours,
   })?
   _read;
 

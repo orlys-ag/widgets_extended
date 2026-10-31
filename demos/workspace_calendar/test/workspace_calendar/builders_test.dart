@@ -932,7 +932,7 @@ void main() {
           english.formatTimeRange(
             14 * 60,
             15 * 60,
-            HourLabelFormat.twentyFourHour,
+            CalendarHourLabelFormat.twentyFourHour,
           ),
         ),
       ),
@@ -1601,7 +1601,7 @@ void main() {
           english.formatTimeRange(
             14 * 60,
             15 * 60,
-            HourLabelFormat.twentyFourHour,
+            CalendarHourLabelFormat.twentyFourHour,
           ),
         ),
       ),

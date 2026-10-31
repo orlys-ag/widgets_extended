@@ -252,7 +252,7 @@ const List<_WeekEntry> _weekEntries = <_WeekEntry>[
 /// start to the start of the day five days on.
 List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
   final day = CalendarDates.dateOnly(today);
-  final weekStart = WeekdaySet.all.weekStartOf(day);
+  final weekStart = CalendarWeekdaySet.all.weekStartOf(day);
   final seed = <Map<String, Object?>>[];
   final keptDays = <DateTime>{};
   for (final task in _keptTasks) {

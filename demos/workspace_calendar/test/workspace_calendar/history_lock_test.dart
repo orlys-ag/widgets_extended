@@ -236,7 +236,9 @@ void main() {
       expect(settings.lockPast, isFalse);
       expect(settings.lockEarlierToday, isFalse);
       final locked = settings.copyWith(lockPast: true, lockEarlierToday: true);
-      final kept = locked.copyWith(hours: const DayHours(8 * 60, 18 * 60));
+      final kept = locked.copyWith(
+        hours: const CalendarDayHours(8 * 60, 18 * 60),
+      );
       expect(kept.lockPast, isTrue);
       expect(kept.lockEarlierToday, isTrue);
       final pastOnly = settings.copyWith(lockPast: true);

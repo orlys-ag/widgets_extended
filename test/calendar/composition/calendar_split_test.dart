@@ -140,7 +140,7 @@ void main() {
     WidgetTester tester,
     CalendarViewKind view,
     ValueNotifier<bool> editable, {
-    MonthLayout monthLayout = MonthLayout.fitScreen,
+    CalendarMonthLayout monthLayout = CalendarMonthLayout.fitScreen,
   }) async {
     tester.view.devicePixelRatio = 1.0;
     tester.view.physicalSize = const Size(800.0, 600.0);
@@ -304,7 +304,7 @@ void main() {
       tester,
       CalendarViewKind.month,
       editable,
-      monthLayout: MonthLayout.showAll,
+      monthLayout: CalendarMonthLayout.showAll,
     );
     // Setup sanity: Month split the store's entries.
     expect(debugEntrySplitCount, greaterThan(0));

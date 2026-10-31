@@ -360,9 +360,9 @@ const ValueKey<String> liftedBlockKey = ValueKey<String>("grid-lifted-block");
 /// The time a create gesture picked: one continuous range from [start] to
 /// [end], an exclusive end, both local times.
 @immutable
-final class CreateRange {
+final class CalendarCreateRange {
   /// The range from [start] to [end].
-  const CreateRange({required this.start, required this.end});
+  const CalendarCreateRange({required this.start, required this.end});
 
   /// Where the range starts.
   final DateTime start;
@@ -378,7 +378,9 @@ final class CreateRange {
 
   @override
   bool operator ==(Object other) {
-    return other is CreateRange && other.start == start && other.end == end;
+    return other is CalendarCreateRange &&
+        other.start == start &&
+        other.end == end;
   }
 
   @override
@@ -388,7 +390,8 @@ final class CreateRange {
 
   @override
   String toString() {
-    return "CreateRange(${isoDate(start)} ${isoTime(minuteOfDay(start))} "
+    return "CalendarCreateRange("
+        "${isoDate(start)} ${isoTime(minuteOfDay(start))} "
         "to ${isoDate(end)} ${isoTime(minuteOfDay(end))})";
   }
 }
@@ -470,7 +473,7 @@ int slotWallMinuteOf(GridTracks tracks, ({int row, int col}) cell) {
 /// later where [occurrence] is a later instant on that day
 /// ([timeAtWallMinute]), as an earliest start in the stretch's second pass
 /// is ([CalendarEditPolicy.earliestStartOn]).
-CreateRange? createRangeAt(
+CalendarCreateRange? createRangeAt(
   GridTracks tracks,
   ({int row, int col}) cell, {
   DateTime? occurrence,
@@ -487,7 +490,7 @@ CreateRange? createRangeAt(
 /// a day whose clock repeats a stretch, each end is the earlier instant of
 /// its time, or the later where [occurrence] is a later instant on that
 /// day, as [createRangeAt] takes it.
-CreateRange? createRangeOver(
+CalendarCreateRange? createRangeOver(
   GridTracks tracks,
   ({int row, int col}) anchor,
   ({int row, int col}) focus, {
@@ -502,13 +505,17 @@ CreateRange? createRangeOver(
   );
 }
 
-CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
+CalendarCreateRange? _createRangeOf(
+  int startWall,
+  int endWall,
+  DateTime? occurrence,
+) {
   final start = timeAtWallMinute(startWall, from: occurrence);
   final end = timeAtWallMinute(endWall, from: occurrence);
   if (start == null || end == null || !end.isAfter(start)) {
     return null;
   }
-  return CreateRange(start: start, end: end);
+  return CalendarCreateRange(start: start, end: end);
 }
 
 /// The days of the [dayCount] from [firstDay] whose weekday [weekdays]
@@ -599,21 +606,21 @@ CreateRange? _createRangeOf(int startWall, int endWall, DateTime? occurrence) {
 /// slot and below the last, or the gutter beside a row counting entries outside
 /// the hours, keeps whole. A piece reaching past the hours shows its part
 /// inside them, and an entry whose start or end the hours do not hold
-/// ([DayHours.holdsTimes]) takes no move or resize: only an edit outside the
-/// grid changes it. A piece wholly outside them has no block. While some are
-/// before the hours, a yellow row frozen against the first slot, in place of
-/// the room above it, says [CalendarLocalizations.moreCount] in the column of
-/// each day with N of them, and while some are after them, a row frozen against
-/// the last slot does; the hour gutter runs on beside both. An entry on no
-/// shown day has no block either, and a pill in the day header's corner counts
-/// it. In edit mode empty body cells take a create gesture, reported through
-/// [onCreate]: a drag picks one continuous range from the earlier of its two
-/// slots to the later, across days too, at once with a mouse or a stylus and
-/// after a press and hold on touch, so a touch drag without one scrolls the
-/// grid, and a tap, or a hold let go where it began, picks its one slot. Where
-/// [editPolicy] forbids overlaps, a slot that shares time with an entry takes
-/// no create gesture. The range picked stays marked, as a range being dragged
-/// is, until the create flow [onCreate] opens closes.
+/// ([CalendarDayHours.holdsTimes]) takes no move or resize: only an edit
+/// outside the grid changes it. A piece wholly outside them has no block. While
+/// some are before the hours, a yellow row frozen against the first slot, in
+/// place of the room above it, says [CalendarLocalizations.moreCount] in the
+/// column of each day with N of them, and while some are after them, a row
+/// frozen against the last slot does; the hour gutter runs on beside both. An
+/// entry on no shown day has no block either, and a pill in the day header's
+/// corner counts it. In edit mode empty body cells take a create gesture,
+/// reported through [onCreate]: a drag picks one continuous range from the
+/// earlier of its two slots to the later, across days too, at once with a mouse
+/// or a stylus and after a press and hold on touch, so a touch drag without one
+/// scrolls the grid, and a tap, or a hold let go where it began, picks its one
+/// slot. Where [editPolicy] forbids overlaps, a slot that shares time with an
+/// entry takes no create gesture. The range picked stays marked, as a range
+/// being dragged is, until the create flow [onCreate] opens closes.
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than [minDayWidth] and [minSlotHeight]; past those, it scrolls.
@@ -672,10 +679,10 @@ class TimedGrid<T> extends StatefulWidget {
     this.onMoveRequest,
     this.editable = false,
     this.editPolicy,
-    this.weekdays = WeekdaySet.all,
-    this.hours = DayHours.allDay,
+    this.weekdays = CalendarWeekdaySet.all,
+    this.hours = CalendarDayHours.allDay,
     this.slotMinutes = defaultSlotMinutes,
-    this.hourLabelFormat = HourLabelFormat.twentyFourHour,
+    this.hourLabelFormat = CalendarHourLabelFormat.twentyFourHour,
     this.minDayWidth = minDayWidthLow,
     this.minSlotHeight = defaultMinSlotHeight,
     this.onZoom,
@@ -728,7 +735,7 @@ class TimedGrid<T> extends StatefulWidget {
   /// picked, and completes when it closes. A failure of the function,
   /// whether it throws within the call or its future fails, is not caught:
   /// a host that handles one passes a function that does.
-  final Future<void> Function(CreateRange range) onCreate;
+  final Future<void> Function(CalendarCreateRange range) onCreate;
 
   /// Takes each move or resize a gesture lands, and completes once the
   /// host has written it or let it go. Until then the grid shows the
@@ -778,12 +785,12 @@ class TimedGrid<T> extends StatefulWidget {
   /// must fall on a shown weekday. With [dayCount] it decides whether the
   /// grid shows one day column or more than one, which is fixed for the
   /// grid's life: give a grid that changes between them its own key.
-  final WeekdaySet weekdays;
+  final CalendarWeekdaySet weekdays;
 
   /// The hours the grid shows and its gestures schedule in, one row per
   /// slot; they start and end on the grid of [slotMinutes]
-  /// ([DayHours.isOnSlotsOf]).
-  final DayHours hours;
+  /// ([CalendarDayHours.isOnSlotsOf]).
+  final CalendarDayHours hours;
 
   /// The length of one slot, one row, in minutes: the step the rows, a
   /// move's landing, a resize's edge and a create range snap to. One of
@@ -794,7 +801,7 @@ class TimedGrid<T> extends StatefulWidget {
   /// labels, the landing label, and the times its block and chip builders
   /// write ([CalendarBlockDetails.hourLabelFormat],
   /// [CalendarChipDetails.hourLabelFormat]).
-  final HourLabelFormat hourLabelFormat;
+  final CalendarHourLabelFormat hourLabelFormat;
 
   /// The least width of a day column, in logical pixels, positive and
   /// finite; the columns stretch past it to fill the grid. A pinch across
@@ -1360,12 +1367,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   late double _dayWidth = widget.minDayWidth;
   late double _slotHeight = widget.minSlotHeight;
   late int _columnCount = _tracks.columnCount;
-  late DayHours _rowHours = _tracks.hours;
+  late CalendarDayHours _rowHours = _tracks.hours;
   late int _rowSlotMinutes = _tracks.slotMinutes;
   double _rowRoom = _initialLabelRoom;
   late _Notices _rowNotices = _notices;
   late int _rowStripRows = _stripRows;
-  late HourLabelFormat _rowFormat = widget.hourLabelFormat;
+  late CalendarHourLabelFormat _rowFormat = widget.hourLabelFormat;
 
   /// The room above the first slot and below the last: half the tallest
   /// hour label and the gap beside it, so the labels centred on the first
@@ -2491,8 +2498,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Whether the board may lift [key]: not while its entry is pending
   /// ([_isPending]), and not when the hours do not hold the entry's start
-  /// or end ([DayHours.holdsTimes]), as for an entry an hours change left
-  /// outside them, whose cut-off minutes a drop would lose.
+  /// or end ([CalendarDayHours.holdsTimes]), as for an entry an hours change
+  /// left outside them, whose cut-off minutes a drop would lose.
   bool _canDrag(GridKey key) {
     if (_isPending(key.id)) {
       return false;
@@ -3254,7 +3261,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ([CalendarEditRules.heldToLimit]); null where that end is a time the
   /// clock skips, where [_policy] does not let the entry's end resize or
   /// refuses the range from the entry's start to it, or its answer throws
-  /// ([_reportPolicyThrow]), where the hours ([DayHours.holdsTimes])
+  /// ([_reportPolicyThrow]), where the hours ([CalendarDayHours.holdsTimes])
   /// refuse that range, or where the policy forbids overlaps and it shares
   /// time with another timed entry the store shows ([_meetsOtherEntry]).
   DateTime? _laterDayEndOf(GridKey key, int column, int row) {
@@ -3773,7 +3780,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// clock reads a stretch twice, no entry the store shows does, whose
   /// block may lie on other rows ([_sharesShownTime]). A press and a
   /// create range's anchor placement ([_placeRangeAnchor]) both test it.
-  bool _slotIsFree(({int row, int col}) cell, CreateRange slot) {
+  bool _slotIsFree(({int row, int col}) cell, CalendarCreateRange slot) {
     if (_allowsOverlaps) {
       return true;
     }
@@ -3787,7 +3794,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Whether a board piece in [cell]'s row and column shares time with
   /// [slot], the cell's slot.
-  bool _slotMeetsEntry(({int row, int col}) cell, CreateRange slot) {
+  bool _slotMeetsEntry(({int row, int col}) cell, CalendarCreateRange slot) {
     final keys = _board.itemsIn(cell.row, cell.row + 1, cell.col, cell.col + 1);
     for (final key in keys) {
       final shape = _board.itemOf(key);
@@ -4061,7 +4068,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   void _create(
     ({int row, int col}) anchor,
     ({int row, int col}) focus,
-    CreateRange range, {
+    CalendarCreateRange range, {
     bool strip = false,
   }) {
     final create = ++_creates;
@@ -4094,8 +4101,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// The all-day range a create across the strip from the column [anchor]
   /// to [focus] picks: the earlier column's day start to the start of the
   /// day after the later one's, over every day between, shown or not.
-  CreateRange _stripRangeOver(int anchor, int focus) {
-    return CreateRange(
+  CalendarCreateRange _stripRangeOver(int anchor, int focus) {
+    return CalendarCreateRange(
       start: _tracks.dateAt(math.min(anchor, focus)),
       end: dateOfDayNumber(_tracks.dayAt(math.max(anchor, focus)) + 1),
     );
@@ -4376,7 +4383,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     final anchor = range.anchor;
     final focus = range.focus;
-    final CreateRange? created;
+    final CalendarCreateRange? created;
     if (range.refused) {
       created = null;
     } else if (range.strip) {
@@ -5468,7 +5475,7 @@ class _GutterLabel extends StatelessWidget {
   const _GutterLabel({required this.minutes, required this.format});
 
   final List<int> minutes;
-  final HourLabelFormat format;
+  final CalendarHourLabelFormat format;
 
   @override
   Widget build(BuildContext context) {
@@ -5548,7 +5555,7 @@ class _NoticeCell extends StatelessWidget {
   final bool above;
 
   /// The format the cell names the hours in to a screen reader.
-  final HourLabelFormat format;
+  final CalendarHourLabelFormat format;
 
   @override
   Widget build(BuildContext context) {
@@ -6158,7 +6165,7 @@ class _GridForegroundPainter extends BoardForegroundPainter {
 
 /// The hour labels a [_GridForegroundPainter] paints and the width of the
 /// hour gutter they fit, laid out once for one style, text scale,
-/// [HourLabelFormat], [CalendarLocalizations], hours, slot length and
+/// [CalendarHourLabelFormat], [CalendarLocalizations], hours, slot length and
 /// least slot height.
 ///
 /// The labels take the first of these that fits them: one line each in a
@@ -6189,9 +6196,9 @@ class _HourLabels {
 
   TextStyle _style = const TextStyle();
   TextScaler _scaler = TextScaler.noScaling;
-  HourLabelFormat _format = HourLabelFormat.twentyFourHour;
+  CalendarHourLabelFormat _format = CalendarHourLabelFormat.twentyFourHour;
   CalendarLocalizations _strings = const DefaultCalendarLocalizations();
-  DayHours? _hours;
+  CalendarDayHours? _hours;
   int _slotMinutes = defaultSlotMinutes;
   double _leastSlot = 0.0;
 
@@ -6223,7 +6230,7 @@ class _HourLabels {
   void update(
     TextStyle style,
     TextScaler scaler,
-    HourLabelFormat format,
+    CalendarHourLabelFormat format,
     CalendarLocalizations strings,
     GridTracks tracks,
     double leastSlot,

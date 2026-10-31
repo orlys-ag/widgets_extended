@@ -342,7 +342,7 @@ List<BoardPlacement<MonthChip<T>>> monthPlacementsOf<T>(
 splitMonthHours<T>(
   Iterable<CalendarShownEntry<T>> shown,
   MonthGrid grid,
-  DayHours hours,
+  CalendarDayHours hours,
 ) {
   final columns = grid.columnCount;
   final inside = <CalendarShownEntry<T>>[];
@@ -582,7 +582,7 @@ Int32List monthDayLanesOf<T>(
 
 /// How Month lays out a week whose chips need more lanes than its share
 /// of the board's height holds.
-enum MonthLayout {
+enum CalendarMonthLayout {
   /// The week grows to hold every chip, and the month scrolls.
   showAll,
 
@@ -601,31 +601,30 @@ enum MonthLayout {
 /// opens scrolled to show the selected day, and does again for a new
 /// month, a new [minDayWidth] and a new [weekScale].
 ///
-/// Under [MonthLayout.showAll] the weeks grow past their resting height to
-/// hold their chips, and the board then scrolls; under
-/// [MonthLayout.fitScreen] each holds the lanes that fit at its resting
-/// height ([monthLanesThatFit]), [fitMonthPlacements] chooses the chips it
-/// shows, and a day that hides some says "+N more" on a soft yellow banner
-/// in its last lane. An item with no minute inside [hours] has no chip
-/// ([splitMonthHours]): each day it covers counts it on a soft yellow
-/// banner, "+N earlier" under the day's number strip for those before the
-/// hours and "+N later" for those after them in the lane under the day's
-/// last chip, or under its "+N more", naming the hours in
-/// [hourLabelFormat] to a screen reader. While any day of the grid counts
-/// one before the hours, every week's lanes start under that banner's
-/// band; a week grows to hold each day's banner after the hours, and
-/// while any day counts one, under [MonthLayout.fitScreen] a week holds
-/// the lanes that fit beside both bands. Each day shows its number in a strip across its top,
-/// today's in the primary colour inside the today ring and the selected
-/// day's on the primary pill, in the [CalendarTheme] above the board. Each
-/// item shows as one bar per calendar week it covers, whose content is what
-/// [chipBuilder] draws, told whether the item continues into the week
-/// before or after: a chip one lane tall, or, in days large enough
-/// ([monthShowsCards]), a card two chips tall, the builder told it draws a
-/// card. A pending item's bar takes no tap, and the board names each bar to
-/// a screen reader, its kind as [entryKindOf] answers it. Lines part the
-/// weeks and the days, and each day of another month lies on the
-/// background colour.
+/// Under [CalendarMonthLayout.showAll] the weeks grow past their resting
+/// height to hold their chips, and the board then scrolls; under
+/// [CalendarMonthLayout.fitScreen] each holds the lanes that fit at its
+/// resting height ([monthLanesThatFit]), [fitMonthPlacements] chooses the
+/// chips it shows, and a day that hides some says "+N more" on a soft
+/// yellow banner in its last lane. An item with no minute inside [hours] has no
+/// chip ([splitMonthHours]): each day it covers counts it on a soft yellow
+/// banner, "+N earlier" under the day's number strip for those before the hours
+/// and "+N later" for those after them in the lane under the day's last chip,
+/// or under its "+N more", naming the hours in [hourLabelFormat] to a screen
+/// reader. While any day of the grid counts one before the hours, every week's
+/// lanes start under that banner's band; a week grows to hold each day's banner
+/// after the hours, and while any day counts one, under
+/// [CalendarMonthLayout.fitScreen] a week holds the lanes that fit beside both
+/// bands. Each day shows its number in a strip across its top, today's in the
+/// primary colour inside the today ring and the selected day's on the primary
+/// pill, in the [CalendarTheme] above the board. Each item shows as one bar per
+/// calendar week it covers, whose content is what [chipBuilder] draws, told
+/// whether the item continues into the week before or after: a chip one lane
+/// tall, or, in days large enough ([monthShowsCards]), a card two chips tall,
+/// the builder told it draws a card. A pending item's bar takes no tap, and the
+/// board names each bar to a screen reader, its kind as [entryKindOf] answers
+/// it. Lines part the weeks and the days, and each day of another month lies on
+/// the background colour.
 ///
 /// A tap on a chip reports [onOpenEntry], a tap anywhere else on a day
 /// [onOpenDay], and a long press on a day outside its chips
@@ -644,9 +643,9 @@ enum MonthLayout {
 /// settles at once whatever chip was still growing in or shrinking out. A
 /// new size alone refits the weeks at once and leaves the chips' motion
 /// running, unless it turns chips into cards or back, or under
-/// [MonthLayout.fitScreen] changes the lanes a week holds, which settles
-/// them as a new month does. New [hours] settle the chips as a new month
-/// does.
+/// [CalendarMonthLayout.fitScreen] changes the lanes a week holds, which
+/// settles them as a new month does. New [hours] settle the chips as a new
+/// month does.
 ///
 /// A pinch of two fingers zooms the board around the point between them,
 /// reporting through [onZoom] the week scale and the least day width it
@@ -664,11 +663,11 @@ class MonthBoard<T> extends StatefulWidget {
     super.key,
     required this.store,
     required this.grid,
-    this.layout = MonthLayout.showAll,
+    this.layout = CalendarMonthLayout.showAll,
     this.minDayWidth = minDayWidthLow,
     this.weekScale = 1.0,
-    this.hours = DayHours.allDay,
-    this.hourLabelFormat = HourLabelFormat.twentyFourHour,
+    this.hours = CalendarDayHours.allDay,
+    this.hourLabelFormat = CalendarHourLabelFormat.twentyFourHour,
     required this.selectedDay,
     required this.now,
     required this.onSelectDay,
@@ -689,7 +688,7 @@ class MonthBoard<T> extends StatefulWidget {
 
   /// Whether a week grows to hold its chips or keeps its share of the
   /// height and hides the chips that do not fit.
-  final MonthLayout layout;
+  final CalendarMonthLayout layout;
 
   /// The least width of a day, in logical pixels.
   final double minDayWidth;
@@ -700,12 +699,12 @@ class MonthBoard<T> extends StatefulWidget {
 
   /// The hours the calendar shows: an item with no minute inside them has
   /// no chip, and its days count it on their banners.
-  final DayHours hours;
+  final CalendarDayHours hours;
 
   /// The format the days' banners name [hours] in to a screen reader, and
   /// the chips write their entries' times in: to a screen reader, and
   /// through [chipBuilder] ([CalendarChipDetails.hourLabelFormat]).
-  final HourLabelFormat hourLabelFormat;
+  final CalendarHourLabelFormat hourLabelFormat;
 
   /// A shown day of [grid]'s month.
   final DateTime selectedDay;
@@ -795,7 +794,10 @@ const _Hidden _noneHidden = (
 );
 
 /// The hours the days' banners name to a screen reader, and their format.
-typedef _BannerHours = ({DayHours hours, HourLabelFormat format});
+typedef _BannerHours = ({
+  CalendarDayHours hours,
+  CalendarHourLabelFormat format,
+});
 
 /// A split of the entries the store shows on a month's days: the entries
 /// it [read], for [grid] and [hours]; those [inside] the hours, and on each
@@ -804,7 +806,7 @@ typedef _BannerHours = ({DayHours hours, HourLabelFormat format});
 typedef _MonthSplit<T> = ({
   List<CalendarShownEntry<T>> read,
   MonthGrid grid,
-  DayHours hours,
+  CalendarDayHours hours,
   List<CalendarShownEntry<T>> inside,
   Int32List earlier,
   Int32List later,
@@ -911,8 +913,8 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// lanes and the column width the axes were last given; null and zero
   /// before the first layout.
   MonthGrid? _fittedGrid;
-  MonthLayout? _fittedLayout;
-  DayHours? _fittedHours;
+  CalendarMonthLayout? _fittedLayout;
+  CalendarDayHours? _fittedHours;
   double _fitted = 0.0;
   double _fittedPadding = 0.0;
   double _columnWidth = 0.0;
@@ -928,8 +930,8 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   bool _cards = false;
 
   /// The lanes a week held at the last sync, under
-  /// [MonthLayout.fitScreen]; null under [MonthLayout.showAll], where the
-  /// weeks grow.
+  /// [CalendarMonthLayout.fitScreen]; null under [CalendarMonthLayout.showAll],
+  /// where the weeks grow.
   int? _syncedLanes;
 
   /// Whether the next layout sets the board's items: set at the start, by
@@ -1345,16 +1347,16 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// width and the week scale ask for, with card lanes where the days are
   /// large enough for cards ([monthShowsCards]) and,
   /// when a sync is pending, the days turned from chips to cards or back,
-  /// or the lanes a week holds under [MonthLayout.fitScreen] changed, the
-  /// bars of the items the store shows on the grid's days inside the hours
-  /// ([splitMonthHours]), none while they are not ready, all in one batch
-  /// and so one structural notification; the sync also tells each day what
-  /// it hides ([_writeHidden]). A sync the store, the grid or the hours owe
-  /// reads the store before the axes, since the banners it counts decide
-  /// the room above and below the lanes, and splits only what the store
-  /// answers anew ([_splitOf]); one the lanes or the cards alone owe fits
-  /// the kept split's bars again ([_split]). Called from the layout
-  /// callback, so the first frame lays the board out at its size.
+  /// or the lanes a week holds under [CalendarMonthLayout.fitScreen] changed,
+  /// the bars of the items the store shows on the grid's days inside the hours
+  /// ([splitMonthHours]), none while they are not ready, all in one batch and
+  /// so one structural notification; the sync also tells each day what it hides
+  /// ([_writeHidden]). A sync the store, the grid or the hours owe reads the
+  /// store before the axes, since the banners it counts decide the room above
+  /// and below the lanes, and splits only what the store answers anew
+  /// ([_splitOf]); one the lanes or the cards alone owe fits the kept split's
+  /// bars again ([_split]). Called from the layout callback, so the first frame
+  /// lays the board out at its size.
   ///
   /// A sync animates only when it follows the store alone, its days are
   /// ready and the last sync's were. Any other sync runs under
@@ -1392,7 +1394,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     final split = _split!;
     final padding =
         monthStripHeight + (_earlierBand ? monthHoursBannerExtent : 0.0);
-    final lanes = layout == MonthLayout.fitScreen
+    final lanes = layout == CalendarMonthLayout.fitScreen
         ? monthLanesThatFit(
             fitted,
             laneExtent: laneExtent,
@@ -1527,7 +1529,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// answers the entries the last split read, the identical instances with
   /// the same pending flags in the same order, for the same grid and hours,
   /// the split is that one, [_split], and runs nothing.
-  _MonthSplit<T> _splitOf(MonthGrid grid, DayHours hours, bool ready) {
+  _MonthSplit<T> _splitOf(MonthGrid grid, CalendarDayHours hours, bool ready) {
     final read = ready
         ? widget.store.entriesBetween(grid.firstDay, grid.lastDay)
         : <CalendarShownEntry<T>>[];
@@ -2169,7 +2171,7 @@ class _MonthChipBox<T> extends StatelessWidget {
   final bool card;
   final CalendarChipBuilder<T> builder;
   final String? Function(CalendarEntry<T> entry)? kindOf;
-  final HourLabelFormat format;
+  final CalendarHourLabelFormat format;
   final ValueChanged<String> onOpen;
 
   @override

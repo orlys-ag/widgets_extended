@@ -55,7 +55,7 @@ void main() {
   });
 
   test("AS2 an hours refusal reads as the API's validation words it", () {
-    const hours = DayHours(480, 1080);
+    const hours = CalendarDayHours(480, 1080);
     const startError =
         "The start is from 08:00 to before 18:00, inside the calendar's "
         "hours.";

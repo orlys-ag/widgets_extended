@@ -164,18 +164,18 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
             const SizedBox(height: 16.0),
             const _Heading(label: "Month layout"),
             const SizedBox(height: 8.0),
-            SegmentedButton<MonthLayout>(
+            SegmentedButton<CalendarMonthLayout>(
               key: monthLayoutKey,
               expandedInsets: EdgeInsets.zero,
               showSelectedIcon: false,
-              segments: <ButtonSegment<MonthLayout>>[
-                for (final layout in MonthLayout.values)
-                  ButtonSegment<MonthLayout>(
+              segments: <ButtonSegment<CalendarMonthLayout>>[
+                for (final layout in CalendarMonthLayout.values)
+                  ButtonSegment<CalendarMonthLayout>(
                     value: layout,
                     label: Text(layout.label),
                   ),
               ],
-              selected: <MonthLayout>{_settings.monthLayout},
+              selected: <CalendarMonthLayout>{_settings.monthLayout},
               onSelectionChanged: (selected) {
                 _set(_settings.copyWith(monthLayout: selected.single));
               },

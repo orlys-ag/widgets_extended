@@ -165,13 +165,13 @@ void main() {
     expect(block.tall, isFalse);
     expect(block.cutAtStart, isTrue);
     expect(block.cutAtEnd, isFalse);
-    expect(block.hourLabelFormat, HourLabelFormat.twentyFourHour);
+    expect(block.hourLabelFormat, CalendarHourLabelFormat.twentyFourHour);
     CalendarBlockDetails blockOf({
       bool? detailed,
       bool? tall,
       bool? cutAtStart,
       bool? cutAtEnd,
-      HourLabelFormat? hourLabelFormat,
+      CalendarHourLabelFormat? hourLabelFormat,
     }) {
       return CalendarBlockDetails(
         detailed: detailed ?? block.detailed,
@@ -191,7 +191,9 @@ void main() {
       "tall": blockOf(tall: true),
       "cutAtStart": blockOf(cutAtStart: false),
       "cutAtEnd": blockOf(cutAtEnd: true),
-      "hourLabelFormat": blockOf(hourLabelFormat: HourLabelFormat.twelveHour),
+      "hourLabelFormat": blockOf(
+        hourLabelFormat: CalendarHourLabelFormat.twelveHour,
+      ),
     }.entries) {
       expect(other.value, isNot(block), reason: other.key);
       expect(other.value.hashCode, isNot(block.hashCode), reason: other.key);
@@ -205,12 +207,12 @@ void main() {
     expect(chip.card, isTrue);
     expect(chip.continuesBefore, isFalse);
     expect(chip.continuesAfter, isTrue);
-    expect(chip.hourLabelFormat, HourLabelFormat.twentyFourHour);
+    expect(chip.hourLabelFormat, CalendarHourLabelFormat.twentyFourHour);
     CalendarChipDetails chipOf({
       bool? card,
       bool? continuesBefore,
       bool? continuesAfter,
-      HourLabelFormat? hourLabelFormat,
+      CalendarHourLabelFormat? hourLabelFormat,
     }) {
       return CalendarChipDetails(
         card: card ?? chip.card,
@@ -228,7 +230,9 @@ void main() {
       "card": chipOf(card: false),
       "continuesBefore": chipOf(continuesBefore: true),
       "continuesAfter": chipOf(continuesAfter: false),
-      "hourLabelFormat": chipOf(hourLabelFormat: HourLabelFormat.twelveHour),
+      "hourLabelFormat": chipOf(
+        hourLabelFormat: CalendarHourLabelFormat.twelveHour,
+      ),
     }.entries) {
       expect(other.value, isNot(chip), reason: other.key);
       expect(other.value.hashCode, isNot(chip.hashCode), reason: other.key);
@@ -355,7 +359,11 @@ void main() {
       textsUnder(tester),
       unorderedEquals(<String>[
         "Standup",
-        english.formatTimeRange(540, 600, HourLabelFormat.twentyFourHour),
+        english.formatTimeRange(
+          540,
+          600,
+          CalendarHourLabelFormat.twentyFourHour,
+        ),
       ]),
     );
     expectText(
@@ -366,7 +374,7 @@ void main() {
     );
     expectText(
       tester,
-      english.formatTimeRange(540, 600, HourLabelFormat.twentyFourHour),
+      english.formatTimeRange(540, 600, CalendarHourLabelFormat.twentyFourHour),
       distinct.detailedBlockDetailStyle,
       distinct.textSecondary,
     );
@@ -552,13 +560,17 @@ void main() {
       textsUnder(tester),
       unorderedEquals(<String>[
         "Standup",
-        english.formatTimeRange(540, 600, HourLabelFormat.twentyFourHour),
+        english.formatTimeRange(
+          540,
+          600,
+          CalendarHourLabelFormat.twentyFourHour,
+        ),
       ]),
     );
     expectText(tester, "Standup", distinct.monthCardTitleStyle, distinct.text);
     expectText(
       tester,
-      english.formatTimeRange(540, 600, HourLabelFormat.twentyFourHour),
+      english.formatTimeRange(540, 600, CalendarHourLabelFormat.twentyFourHour),
       distinct.monthCardTimeStyle,
       distinct.textSecondary,
     );
@@ -1023,7 +1035,7 @@ void main() {
             tall: true,
             cutAtStart: false,
             cutAtEnd: false,
-            hourLabelFormat: HourLabelFormat.twelveHour,
+            hourLabelFormat: CalendarHourLabelFormat.twelveHour,
           ),
         );
       }),
@@ -1042,7 +1054,7 @@ void main() {
             card: true,
             continuesBefore: false,
             continuesAfter: false,
-            hourLabelFormat: HourLabelFormat.twelveHour,
+            hourLabelFormat: CalendarHourLabelFormat.twelveHour,
           ),
         );
       }),

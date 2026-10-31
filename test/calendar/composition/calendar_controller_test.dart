@@ -40,7 +40,10 @@ Widget app(Widget home) {
 }
 
 /// The month grid's days of [day]'s month under [weekdays].
-DayRange gridRange(DateTime day, {WeekdaySet weekdays = WeekdaySet.all}) {
+DayRange gridRange(
+  DateTime day, {
+  CalendarWeekdaySet weekdays = CalendarWeekdaySet.all,
+}) {
   final grid = MonthGrid.of(day, weekdays: weekdays);
   return (first: grid.firstDay, last: grid.lastDay);
 }
@@ -118,7 +121,7 @@ void main() {
   Future<void> pumpCalendar(
     WidgetTester tester,
     CalendarController? controller, {
-    WeekdaySet weekdays = WeekdaySet.all,
+    CalendarWeekdaySet weekdays = CalendarWeekdaySet.all,
   }) async {
     await tester.pumpWidget(
       app(
@@ -242,9 +245,13 @@ void main() {
     expect(grid().dayCount, 7);
     expect(grid().firstDay, monday);
 
-    await pumpCalendar(tester, controller, weekdays: WeekdaySet.workweek);
+    await pumpCalendar(
+      tester,
+      controller,
+      weekdays: CalendarWeekdaySet.workweek,
+    );
     notifies.clear();
-    final shown = shownDayNear(saturday, WeekdaySet.workweek);
+    final shown = shownDayNear(saturday, CalendarWeekdaySet.workweek);
     expect(shown, DateTime(2026, 4, 27));
     controller.selectedDay = saturday;
     expect(controller.selectedDay, shown);
@@ -344,7 +351,11 @@ void main() {
     controller.view = CalendarViewKind.day;
     await tester.pumpAndSettle();
     expectRange((first: monday, last: sunday));
-    await pumpCalendar(tester, controller, weekdays: WeekdaySet.workweek);
+    await pumpCalendar(
+      tester,
+      controller,
+      weekdays: CalendarWeekdaySet.workweek,
+    );
     expectRange((first: monday, last: DateTime(2026, 4, 24)));
 
     await tester.pumpWidget(const SizedBox());
@@ -782,7 +793,7 @@ void main() {
           CalendarView<String>(
             store: store,
             clock: fixedClock,
-            weekdays: WeekdaySet.all,
+            weekdays: CalendarWeekdaySet.all,
           ),
         ),
       );
@@ -793,7 +804,7 @@ void main() {
             store: store,
             controller: host,
             clock: fixedClock,
-            weekdays: WeekdaySet.workweek,
+            weekdays: CalendarWeekdaySet.workweek,
           ),
         ),
       );

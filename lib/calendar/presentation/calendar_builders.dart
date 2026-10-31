@@ -114,7 +114,7 @@ final class CalendarBlockDetails {
     required this.cutAtEnd,
     this.continuesBefore = false,
     this.continuesAfter = false,
-    this.hourLabelFormat = HourLabelFormat.twentyFourHour,
+    this.hourLabelFormat = CalendarHourLabelFormat.twentyFourHour,
   });
 
   /// Whether the grid shows one day column, with room for the times and
@@ -148,7 +148,7 @@ final class CalendarBlockDetails {
   /// The grid's `TimedGrid.hourLabelFormat`, in which the block writes
   /// its entry's times, as the default builder does through
   /// [CalendarLocalizations.entryTimes].
-  final HourLabelFormat hourLabelFormat;
+  final CalendarHourLabelFormat hourLabelFormat;
 
   @override
   bool operator ==(Object other) {
@@ -193,7 +193,7 @@ final class CalendarChipDetails {
     required this.card,
     required this.continuesBefore,
     required this.continuesAfter,
-    this.hourLabelFormat = HourLabelFormat.twentyFourHour,
+    this.hourLabelFormat = CalendarHourLabelFormat.twentyFourHour,
   });
 
   /// Whether the days are large enough for the card form: a bar one card
@@ -214,7 +214,7 @@ final class CalendarChipDetails {
   /// `TimedGrid.hourLabelFormat`), in which the bar writes its entry's
   /// times, as the default builder's card form does through
   /// [CalendarLocalizations.entryTimes].
-  final HourLabelFormat hourLabelFormat;
+  final CalendarHourLabelFormat hourLabelFormat;
 
   @override
   bool operator ==(Object other) {

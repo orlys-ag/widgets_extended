@@ -78,7 +78,7 @@ List<String> timeChoices(WidgetTester tester, String label) {
   );
   return <String>[
     for (final item in dropdown.items!)
-      english.formatTime(item.value!, HourLabelFormat.twentyFourHour),
+      english.formatTime(item.value!, CalendarHourLabelFormat.twentyFourHour),
   ];
 }
 

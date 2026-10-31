@@ -203,21 +203,23 @@ void main() {
       "in force", (tester) async {
     await pumpCalendar(tester);
     await openSettings(tester);
-    Set<MonthLayout> chosen() {
+    Set<CalendarMonthLayout> chosen() {
       return tester
-          .widget<SegmentedButton<MonthLayout>>(find.byKey(monthLayoutKey))
+          .widget<SegmentedButton<CalendarMonthLayout>>(
+            find.byKey(monthLayoutKey),
+          )
           .selected;
     }
 
-    expect(chosen(), <MonthLayout>{MonthLayout.fitScreen});
+    expect(chosen(), <CalendarMonthLayout>{CalendarMonthLayout.fitScreen});
     expect(find.text("Show all items"), findsOneWidget);
     expect(find.text("Fit to screen"), findsOneWidget);
     await tester.tap(find.text("Show all items"));
     await tester.pumpAndSettle();
-    expect(chosen(), <MonthLayout>{MonthLayout.showAll});
+    expect(chosen(), <CalendarMonthLayout>{CalendarMonthLayout.showAll});
     await closeSettings(tester);
     await openSettings(tester);
-    expect(chosen(), <MonthLayout>{MonthLayout.showAll});
+    expect(chosen(), <CalendarMonthLayout>{CalendarMonthLayout.showAll});
   });
 
   testWidgets("H2 the hours trim the week grid to their slots", (tester) async {
@@ -906,8 +908,8 @@ void main() {
 
   testWidgets("SL3 from 08:10-17:50 at slot 10, choosing 30 minutes gives "
       "08:00-18:00", (tester) async {
-    const off = DayHours(8 * 60 + 10, 17 * 60 + 50);
-    const office = DayHours(8 * 60, 18 * 60);
+    const off = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
+    const office = CalendarDayHours(8 * 60, 18 * 60);
     final start = const CalendarSettings(hours: off, slotMinutes: 10);
     expect(
       start.withSlotMinutes(30),

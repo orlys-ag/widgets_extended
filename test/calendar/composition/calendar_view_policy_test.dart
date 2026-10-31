@@ -50,7 +50,7 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
 /// A store holding [entries] over [hours], disposed at the test's end.
 MoveRecordingStore storeOf(
   List<CalendarEntry<String>> entries, {
-  DayHours hours = DayHours.allDay,
+  CalendarDayHours hours = CalendarDayHours.allDay,
 }) {
   final store = MoveRecordingStore(entries: entries, hours: hours);
   addTearDown(store.dispose);
@@ -95,7 +95,7 @@ class Host {
   /// rebuild does, whenever its value changes.
   final ValueNotifier<int> rebuilds = ValueNotifier<int>(0);
 
-  final List<CreateRange> creates = <CreateRange>[];
+  final List<CalendarCreateRange> creates = <CalendarCreateRange>[];
   final List<CalendarEntryTapDetails<String>> taps =
       <CalendarEntryTapDetails<String>>[];
   final Map<String, CalendarCardDetails> cards =
@@ -545,8 +545,8 @@ void main() {
     expect(host.creates, isEmpty);
     await hold(tester, slotCenter(tester, thursday, 10 * 60));
     // Setup sanity: a hold on a slot the policy admits creates.
-    expect(host.creates, <CreateRange>[
-      CreateRange(start: at(thursday, 10), end: at(thursday, 10, 15)),
+    expect(host.creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: at(thursday, 10), end: at(thursday, 10, 15)),
     ]);
 
     // Month.
@@ -668,8 +668,8 @@ void main() {
       );
       await gesture.up();
       await tester.pumpAndSettle();
-      expect(host.creates, <CreateRange>[
-        CreateRange(start: at(thursday, 9), end: at(thursday, 12)),
+      expect(host.creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: at(thursday, 9), end: at(thursday, 12)),
       ]);
     });
 
@@ -682,8 +682,8 @@ void main() {
       expect(free.dy, lessThan(tester.getRect(blockFinder("U")).top));
       await tester.tapAt(free);
       await tester.pumpAndSettle();
-      expect(host.creates, <CreateRange>[
-        CreateRange(start: at(friday, 9), end: at(friday, 9, 15)),
+      expect(host.creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: at(friday, 9), end: at(friday, 9, 15)),
       ]);
     });
   });
@@ -877,8 +877,11 @@ void main() {
         await midGesture(host);
         await range.up();
         await tester.pumpAndSettle();
-        expect(host.creates, <CreateRange>[
-          CreateRange(start: at(thursday, 9), end: at(thursday, 11, 15)),
+        expect(host.creates, <CalendarCreateRange>[
+          CalendarCreateRange(
+            start: at(thursday, 9),
+            end: at(thursday, 11, 15),
+          ),
         ], reason: reason);
       }
     });
@@ -929,7 +932,7 @@ void main() {
       WidgetTester tester, {
       required DateTime time,
       CalendarEditPolicy<String> policy = lock,
-      DayHours hours = DayHours.allDay,
+      CalendarDayHours hours = CalendarDayHours.allDay,
       List<CalendarEntry<String>> entries = const <CalendarEntry<String>>[],
     }) async {
       final host = Host(
@@ -964,8 +967,8 @@ void main() {
         }
         await gesture.up();
         await tester.pumpAndSettle();
-        expect(host.creates, <CreateRange>[
-          CreateRange(
+        expect(host.creates, <CalendarCreateRange>[
+          CalendarCreateRange(
             start: minutePasses ? at(tuesday, 14, 15) : at(tuesday, 14),
             end: at(tuesday, 15, 15),
           ),
@@ -984,8 +987,8 @@ void main() {
         }
         await gesture.up();
         await tester.pumpAndSettle();
-        expect(host.creates, <CreateRange>[
-          CreateRange(
+        expect(host.creates, <CalendarCreateRange>[
+          CalendarCreateRange(
             start: minutePasses ? at(tuesday, 14, 15) : at(tuesday, 14),
             end: at(tuesday, 15, 15),
           ),
@@ -996,7 +999,7 @@ void main() {
     testWidgets("with hours to 15:00 a range held at the 14:45 slot is "
         "refused once the boundary passes the hours' last slot, marking no "
         "range and creating nothing", (tester) async {
-      const hours = DayHours(8 * 60, 15 * 60);
+      const hours = CalendarDayHours(8 * 60, 15 * 60);
       for (final minutePasses in const <bool>[false, true]) {
         final host = await pumpDay(
           tester,
@@ -1023,8 +1026,11 @@ void main() {
           host.creates,
           minutePasses
               ? isEmpty
-              : <CreateRange>[
-                  CreateRange(start: at(tuesday, 14, 45), end: at(tuesday, 15)),
+              : <CalendarCreateRange>[
+                  CalendarCreateRange(
+                    start: at(tuesday, 14, 45),
+                    end: at(tuesday, 15),
+                  ),
                 ],
           reason: "minute passes: $minutePasses",
         );
@@ -1060,13 +1066,16 @@ void main() {
         }
         await gesture.up();
         await tester.pumpAndSettle();
-        expect(host.creates, <CreateRange>[
+        expect(host.creates, <CalendarCreateRange>[
           minutePasses
-              ? CreateRange(
+              ? CalendarCreateRange(
                   start: at(tuesday, 14, 30),
                   end: at(tuesday, 15, 30),
                 )
-              : CreateRange(start: at(tuesday, 14), end: at(tuesday, 14, 15)),
+              : CalendarCreateRange(
+                  start: at(tuesday, 14),
+                  end: at(tuesday, 14, 15),
+                ),
         ], reason: "minute passes: $minutePasses");
       }
     });
@@ -1076,7 +1085,7 @@ void main() {
         "clock on Monday, Day's range at 14:45 stops being marked", (
       tester,
     ) async {
-      const hours = DayHours(8 * 60, 15 * 60);
+      const hours = CalendarDayHours(8 * 60, 15 * 60);
       final host = Host(
         storeOf(const <CalendarEntry<String>>[], hours: hours),
         view: CalendarViewKind.day,
@@ -1139,7 +1148,7 @@ void main() {
 
     testWidgets("a range a refill refused for the entries its column holds "
         "is admitted again once a store write frees a slot", (tester) async {
-      const hours = DayHours(8 * 60, 15 * 60);
+      const hours = CalendarDayHours(8 * 60, 15 * 60);
       for (final frees in const <bool>[false, true]) {
         final host = await pumpDay(
           tester,
@@ -1176,8 +1185,8 @@ void main() {
         expect(
           host.creates,
           frees
-              ? <CreateRange>[
-                  CreateRange(
+              ? <CalendarCreateRange>[
+                  CalendarCreateRange(
                     start: at(tuesday, 14, 15),
                     end: at(tuesday, 14, 30),
                   ),
@@ -1259,8 +1268,11 @@ void main() {
           await tester.pumpAndSettle();
           if (throwsOn == null) {
             // Setup sanity: with no throw the range creates.
-            expect(host.creates, <CreateRange>[
-              CreateRange(start: at(tuesday, 10), end: at(tuesday, 11, 15)),
+            expect(host.creates, <CalendarCreateRange>[
+              CalendarCreateRange(
+                start: at(tuesday, 10),
+                end: at(tuesday, 11, 15),
+              ),
             ]);
             expect(errors, isEmpty);
             return;
@@ -1302,8 +1314,11 @@ void main() {
           await tester.pumpAndSettle();
           if (!minutePasses) {
             // Setup sanity: released before the minute the range creates.
-            expect(host.creates, <CreateRange>[
-              CreateRange(start: at(tuesday, 15), end: at(tuesday, 15, 15)),
+            expect(host.creates, <CalendarCreateRange>[
+              CalendarCreateRange(
+                start: at(tuesday, 15),
+                end: at(tuesday, 15, 15),
+              ),
             ]);
             expect(errors, isEmpty);
             return;
@@ -1342,8 +1357,8 @@ void main() {
       );
       await gesture.up();
       await tester.pumpAndSettle();
-      expect(host.creates, <CreateRange>[
-        CreateRange(start: start, end: at(friday, 11, 15)),
+      expect(host.creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: start, end: at(friday, 11, 15)),
       ], reason: "back to $back");
     }
   });

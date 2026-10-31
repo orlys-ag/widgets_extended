@@ -44,7 +44,7 @@ class Recorder {
 
   MemoryCalendarStore<String> store({
     List<CalendarEntry<String>> entries = const <CalendarEntry<String>>[],
-    DayHours hours = DayHours.allDay,
+    CalendarDayHours hours = CalendarDayHours.allDay,
   }) {
     final store = MemoryCalendarStore<String>(
       entries: entries,
@@ -220,7 +220,7 @@ void main() {
     final early = task("item-3", day, 420, 450);
     final store = recorder.store(
       entries: <CalendarEntry<String>>[item, other, early],
-      hours: const DayHours(480, 1080),
+      hours: const CalendarDayHours(480, 1080),
     );
 
     final moved = errorOf(

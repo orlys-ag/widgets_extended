@@ -25,7 +25,7 @@ import 'harbor_theme.dart';
 Future<void> showCreateFlow(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
-  required CreateRange range,
+  required CalendarCreateRange range,
   required CalendarEditPolicy<ItemPayload> policy,
   required ValueGetter<CalendarNow> now,
   int slotMinutes = CalendarDates.defaultSlotMinutes,
@@ -582,7 +582,7 @@ class _ItemFormState extends State<_ItemForm> {
             child: Text(
               CalendarLocalizations.of(
                 context,
-              ).formatTime(minute, HourLabelFormat.twentyFourHour),
+              ).formatTime(minute, CalendarHourLabelFormat.twentyFourHour),
             ),
           ),
       ],

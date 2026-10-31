@@ -17,7 +17,7 @@ import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart'
-    show CreateRange;
+    show CalendarCreateRange;
 
 import '../dst_days.dart';
 
@@ -49,7 +49,7 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
 List<Object> rowsOf(
   CalendarStore<String> store,
   DateTime day, {
-  DayHours hours = DayHours.allDay,
+  CalendarDayHours hours = CalendarDayHours.allDay,
   bool editable = false,
 }) {
   return <Object>[
@@ -95,7 +95,7 @@ Future<void> pumpList(
   bool editable = true,
   int slotMinutes = 15,
   Map<String, List<CalendarCardDetails>>? cards,
-  List<CreateRange>? creates,
+  List<CalendarCreateRange>? creates,
 }) async {
   final now = ValueNotifier<CalendarNow>(
     CalendarNow(time: at(day, 9), today: day),
@@ -109,9 +109,9 @@ Future<void> pumpList(
       home: DayList<String>(
         key: UniqueKey(),
         store: store,
-        weekdays: WeekdaySet.all,
-        format: HourLabelFormat.twentyFourHour,
-        hours: DayHours.allDay,
+        weekdays: CalendarWeekdaySet.all,
+        format: CalendarHourLabelFormat.twentyFourHour,
+        hours: CalendarDayHours.allDay,
         slotMinutes: slotMinutes,
         editable: editable,
         editPolicy: editPolicy,
@@ -239,15 +239,15 @@ void main() {
       entryOf("first", at(tuesday, 9), at(tuesday, 9, 40)),
       entryOf("second", at(tuesday, 10), at(tuesday, 11)),
     ]);
-    final creates = <CreateRange>[];
+    final creates = <CalendarCreateRange>[];
     await pumpList(tester, store, tuesday, slotMinutes: 30, creates: creates);
     // The 20 minutes from 09:40 hold no 30-minute slot.
     expect(find.byKey(dayListGapKey(tuesday, 580)), findsOneWidget);
     expect(find.text("add 580"), findsNothing);
     await tester.tap(find.text("add 660"));
     await tester.pumpAndSettle();
-    expect(creates, <CreateRange>[
-      CreateRange(start: at(tuesday, 11), end: at(tuesday, 11, 30)),
+    expect(creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: at(tuesday, 11), end: at(tuesday, 11, 30)),
     ]);
   });
 

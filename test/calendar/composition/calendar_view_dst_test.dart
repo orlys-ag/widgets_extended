@@ -52,7 +52,7 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
 /// create. Each day a create is
 /// refused on goes to [refusals]. Agenda's add buttons read "add" and
 /// their minute.
-Future<List<CreateRange>> pumpCalendar(
+Future<List<CalendarCreateRange>> pumpCalendar(
   WidgetTester tester, {
   required CalendarViewKind view,
   required DateTime day,
@@ -60,7 +60,7 @@ Future<List<CreateRange>> pumpCalendar(
   List<CalendarEntry<String>> entries = const <CalendarEntry<String>>[],
   bool lock = true,
   bool allowsOverlaps = true,
-  DayHours hours = DayHours.allDay,
+  CalendarDayHours hours = CalendarDayHours.allDay,
   int slotMinutes = defaultSlotMinutes,
   List<DateTime>? refusals,
 }) async {
@@ -71,7 +71,7 @@ Future<List<CreateRange>> pumpCalendar(
   addTearDown(store.dispose);
   final controller = CalendarController(view: view, selectedDay: day);
   addTearDown(controller.dispose);
-  final creates = <CreateRange>[];
+  final creates = <CalendarCreateRange>[];
   await tester.pumpWidget(
     MaterialApp(
       home: CalendarView<String>(
@@ -153,8 +153,8 @@ Future<void> dragSlots(WidgetTester tester, int from, int to) async {
 
 void main() {
   group("on the 25-hour day", skip: longDaySkip, () {
-    CreateRange secondSlot() {
-      return CreateRange(
+    CalendarCreateRange secondSlot() {
+      return CalendarCreateRange(
         start: secondHalfPastOne,
         end: secondHalfPastOne.add(const Duration(minutes: 15)),
       );
@@ -171,7 +171,7 @@ void main() {
       );
       await tester.tap(addIn(day, 0));
       await tester.pumpAndSettle();
-      expect(creates, <CreateRange>[secondSlot()]);
+      expect(creates, <CalendarCreateRange>[secondSlot()]);
     });
 
     testWidgets("CV31 under the lock at the second 01:30, Month's long press "
@@ -185,7 +185,7 @@ void main() {
       );
       await tester.longPress(find.byKey(monthStripKey(day)));
       await tester.pumpAndSettle();
-      expect(creates, <CreateRange>[secondSlot()]);
+      expect(creates, <CalendarCreateRange>[secondSlot()]);
     });
 
     testWidgets("CV49 under the lock at the second 01:10, in hours from 01:30 "
@@ -197,7 +197,7 @@ void main() {
         view: CalendarViewKind.month,
         day: day,
         now: secondHalfPastOne.subtract(const Duration(minutes: 20)),
-        hours: const DayHours(90, 10 * 60),
+        hours: const CalendarDayHours(90, 10 * 60),
         entries: <CalendarEntry<String>>[
           entryOf("busy", secondHalfPastOne, at(day, 10)),
         ],
@@ -206,7 +206,7 @@ void main() {
       await tester.pumpAndSettle();
       // No slot of the hours from the lock is free, so the create takes the
       // first of them, over the entry.
-      expect(creates, <CreateRange>[secondSlot()]);
+      expect(creates, <CalendarCreateRange>[secondSlot()]);
     });
 
     testWidgets("CV32 under the lock at the second 01:30, a tap on Day's "
@@ -220,7 +220,7 @@ void main() {
       );
       await tester.tapAt(slotRect(tester, 90).center);
       await tester.pumpAndSettle();
-      expect(creates, <CreateRange>[secondSlot()]);
+      expect(creates, <CalendarCreateRange>[secondSlot()]);
     });
 
     /// An entry from the first 01:45 to 02:00, 75 minutes, drawn on the
@@ -265,8 +265,8 @@ void main() {
       expect(addIn(day, 0), findsNothing);
       await tester.tap(addIn(day, 120));
       await tester.pumpAndSettle();
-      expect(creates, <CreateRange>[
-        CreateRange(
+      expect(creates, <CalendarCreateRange>[
+        CalendarCreateRange(
           start: day.add(const Duration(minutes: 180)),
           end: day.add(const Duration(minutes: 195)),
         ),
@@ -313,8 +313,8 @@ void main() {
       expect(find.text("add 75"), findsNothing);
       await tester.tap(addIn(day, 75));
       await tester.pumpAndSettle();
-      expect(creates, <CreateRange>[
-        CreateRange(
+      expect(creates, <CalendarCreateRange>[
+        CalendarCreateRange(
           start: day.add(const Duration(minutes: 180)),
           end: day.add(const Duration(minutes: 195)),
         ),
@@ -336,8 +336,8 @@ void main() {
         allowsOverlaps: false,
       );
       await dragSlots(tester, 120, 75);
-      expect(creates, <CreateRange>[
-        CreateRange(
+      expect(creates, <CalendarCreateRange>[
+        CalendarCreateRange(
           start: day.add(const Duration(minutes: 180)),
           end: day.add(const Duration(minutes: 195)),
         ),
@@ -364,8 +364,8 @@ void main() {
         allowsOverlaps: false,
       );
       await dragSlots(tester, 45, 105);
-      expect(creates, <CreateRange>[
-        CreateRange(
+      expect(creates, <CalendarCreateRange>[
+        CalendarCreateRange(
           start: day.add(const Duration(minutes: 45)),
           end: day.add(const Duration(minutes: 105)),
         ),
@@ -390,8 +390,8 @@ void main() {
         ],
       );
       await dragSlots(tester, 90, 60);
-      expect(creates, <CreateRange>[
-        CreateRange(
+      expect(creates, <CalendarCreateRange>[
+        CalendarCreateRange(
           start: day.add(const Duration(minutes: 120)),
           end: day.add(const Duration(minutes: 165)),
         ),
@@ -431,7 +431,7 @@ void main() {
               controller: controller,
               // The 25-hour day is the week's first column, which
               // [slotRect] reads, and the next day its second.
-              weekdays: WeekdaySet.all.startingOn(weekdayColumn(day)),
+              weekdays: CalendarWeekdaySet.all.startingOn(weekdayColumn(day)),
               clock: () {
                 return secondHalfPastOne;
               },
@@ -486,8 +486,8 @@ void main() {
       expect(find.text("add 180"), findsOneWidget);
       await tester.tap(addIn(day, 105));
       await tester.pumpAndSettle();
-      expect(creates, <CreateRange>[
-        CreateRange(start: at(day, 3), end: at(day, 3, 15)),
+      expect(creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: at(day, 3), end: at(day, 3, 15)),
       ]);
     });
 
@@ -501,7 +501,7 @@ void main() {
         day: day,
         now: at(day, 0, 10),
         lock: false,
-        hours: const DayHours(
+        hours: const CalendarDayHours(
           easternSkippedHour * 60,
           (easternSkippedHour + 1) * 60,
         ),
@@ -526,7 +526,7 @@ void main() {
         day: day,
         now: at(dayBefore, 0, 10),
         lock: false,
-        hours: const DayHours(
+        hours: const CalendarDayHours(
           (easternSkippedHour - 1) * 60,
           (easternSkippedHour + 1) * 60,
         ),
@@ -536,8 +536,8 @@ void main() {
       await tester.longPress(find.byKey(monthStripKey(dayBefore)));
       await tester.pumpAndSettle();
       // Setup sanity: the long press creates in these hours on a 24-hour day.
-      expect(creates, <CreateRange>[
-        CreateRange(start: at(dayBefore, 1), end: at(dayBefore, 2)),
+      expect(creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: at(dayBefore, 1), end: at(dayBefore, 2)),
       ]);
       creates.clear();
       await tester.longPress(find.byKey(monthStripKey(day)));

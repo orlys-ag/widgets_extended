@@ -18,7 +18,7 @@ import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart'
-    show CreateRange;
+    show CalendarCreateRange;
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart'
     show SyncedSliverTree, TreeAnimationStyle;
 
@@ -120,15 +120,15 @@ class ListHost {
   ValueNotifier<CalendarNow> now;
   DateTime selectedDay;
   CalendarEditPolicy<String>? policy;
-  WeekdaySet weekdays = WeekdaySet.all;
-  HourLabelFormat format = HourLabelFormat.twentyFourHour;
-  DayHours hours = DayHours.allDay;
+  CalendarWeekdaySet weekdays = CalendarWeekdaySet.all;
+  CalendarHourLabelFormat format = CalendarHourLabelFormat.twentyFourHour;
+  CalendarDayHours hours = CalendarDayHours.allDay;
   int slotMinutes = 15;
   bool editable = true;
   CalendarThemeData theme = const CalendarThemeData();
 
   final List<DateTime> topDays = <DateTime>[];
-  final List<CreateRange> creates = <CreateRange>[];
+  final List<CalendarCreateRange> creates = <CalendarCreateRange>[];
   final Map<String, CalendarCardDetails> cards =
       <String, CalendarCardDetails>{};
   final List<CalendarAddButtonDetails> adds = <CalendarAddButtonDetails>[];
@@ -391,12 +391,15 @@ void main() {
     }
 
     testWidgets("the hour format", (tester) async {
-      final nine = english.formatTime(9 * 60, HourLabelFormat.twelveHour);
+      final nine = english.formatTime(
+        9 * 60,
+        CalendarHourLabelFormat.twelveHour,
+      );
       final time = dayListTimeKey(idOn(tuesday, 0));
       await changed(tester, (host) {
         // Setup sanity: the time column reads the other format first.
         expect(textUnder(time, nine), findsNothing);
-        host.format = HourLabelFormat.twelveHour;
+        host.format = CalendarHourLabelFormat.twelveHour;
       });
       expect(textUnder(time, nine), findsOneWidget);
     });
@@ -406,7 +409,7 @@ void main() {
       await changed(tester, (host) {
         // Setup sanity: all day long, no banner.
         expect(find.byKey(banner, skipOffstage: false), findsNothing);
-        host.hours = const DayHours(10 * 60, 18 * 60);
+        host.hours = const CalendarDayHours(10 * 60, 18 * 60);
       });
       expect(find.byKey(banner, skipOffstage: false), findsOneWidget);
     });
@@ -449,8 +452,8 @@ void main() {
       });
       await tester.tap(textUnder(dayListGapKey(tuesday, 10 * 60), "add 600"));
       await tester.pumpAndSettle();
-      expect(host.creates, <CreateRange>[
-        CreateRange(start: at(tuesday, 10), end: at(tuesday, 10, 30)),
+      expect(host.creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 10, 30)),
       ]);
     });
 
@@ -552,7 +555,7 @@ void main() {
       await changed(tester, (host) {
         // Setup sanity: Wednesday shows first.
         expect(find.byKey(header, skipOffstage: false), findsOneWidget);
-        host.weekdays = WeekdaySet.of(<int>[0, 1, 3, 4, 5, 6]);
+        host.weekdays = CalendarWeekdaySet.of(<int>[0, 1, 3, 4, 5, 6]);
       });
       expect(find.byKey(header, skipOffstage: false), findsNothing);
     });

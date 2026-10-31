@@ -17,7 +17,7 @@ The contract of the calendar's theme, text and builder signatures. The conventio
 - **`CalendarLocalizations`** writes every word the calendar shows or a
   screen reader hears, each member a whole label, sentence or hint, so a
   translation orders the words and forms the plurals; a member that
-  writes a time of day takes the view's `HourLabelFormat`.
+  writes a time of day takes the view's `CalendarHourLabelFormat`.
   `CalendarLocalizations.of` reads the instance the nearest
   `Localizations` loaded, and `DefaultCalendarLocalizations`, US English,
   where it loaded none.

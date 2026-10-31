@@ -22,8 +22,8 @@ const int defaultSlotMinutes = 15;
 const List<int> slotMinuteChoices = <int>[5, 10, 15, 20, 30, 60];
 
 /// {@template widgets_extended.calendar.minutesPerDay}
-/// The minutes of a day on the wall clock, which [DayHours] and the wall
-/// minutes ([wallMinuteOf]) count in whatever the day's length.
+/// The minutes of a day on the wall clock, which [CalendarDayHours] and the
+/// wall minutes ([wallMinuteOf]) count in whatever the day's length.
 /// {@endtemplate}
 const int minutesPerDay = 1440;
 
@@ -98,8 +98,8 @@ int weekdayColumnOfDay(int day) {
 /// weekday a week starts on, [firstColumn]: the shown weekdays and their
 /// order, in every view of the calendar.
 @immutable
-final class WeekdaySet {
-  const WeekdaySet._(this._bits, [this.firstColumn = 0]);
+final class CalendarWeekdaySet {
+  const CalendarWeekdaySet._(this._bits, [this.firstColumn = 0]);
 
   /// The columns' names in [toString], which is for developers and so is
   /// not localized.
@@ -115,7 +115,7 @@ final class WeekdaySet {
 
   /// The weekdays [columns] names, each 0 to 6, in weeks that start on
   /// the weekday [firstColumn] names.
-  factory WeekdaySet.of(Iterable<int> columns, {int firstColumn = 0}) {
+  factory CalendarWeekdaySet.of(Iterable<int> columns, {int firstColumn = 0}) {
     assert(
       firstColumn >= 0 && firstColumn < DateTime.daysPerWeek,
       "A weekday column is 0 to 6, not $firstColumn.",
@@ -128,14 +128,14 @@ final class WeekdaySet {
       );
       bits |= 1 << column;
     }
-    return WeekdaySet._(bits, firstColumn);
+    return CalendarWeekdaySet._(bits, firstColumn);
   }
 
   /// Every day of the week, from Monday.
-  static const WeekdaySet all = WeekdaySet._(0x7F);
+  static const CalendarWeekdaySet all = CalendarWeekdaySet._(0x7F);
 
   /// Monday to Friday, from Monday.
-  static const WeekdaySet workweek = WeekdaySet._(0x1F);
+  static const CalendarWeekdaySet workweek = CalendarWeekdaySet._(0x1F);
 
   /// Bit `n` is set when the set holds the column `n`.
   final int _bits;
@@ -150,8 +150,8 @@ final class WeekdaySet {
   }
 
   /// These weekdays in weeks that start on the weekday [column] names.
-  WeekdaySet startingOn(int column) {
-    return WeekdaySet.of(columns, firstColumn: column);
+  CalendarWeekdaySet startingOn(int column) {
+    return CalendarWeekdaySet.of(columns, firstColumn: column);
   }
 
   /// The weekday columns the set holds, in week order: from [firstColumn]
@@ -202,7 +202,7 @@ final class WeekdaySet {
 
   @override
   bool operator ==(Object other) {
-    return other is WeekdaySet &&
+    return other is CalendarWeekdaySet &&
         other._bits == _bits &&
         other.firstColumn == firstColumn;
   }
@@ -215,7 +215,7 @@ final class WeekdaySet {
   @override
   String toString() {
     final names = <String>[for (final column in columns) _columnNames[column]];
-    return "WeekdaySet(${names.join(", ")}; "
+    return "CalendarWeekdaySet(${names.join(", ")}; "
         "from ${_columnNames[firstColumn]})";
   }
 }
@@ -223,7 +223,7 @@ final class WeekdaySet {
 /// [day] when [weekdays] holds its weekday; otherwise the first later day
 /// of [day]'s month it holds, or, when the month has none, the last
 /// earlier one. Every month holds each weekday, so one of them is found.
-DateTime shownDayNear(DateTime day, WeekdaySet weekdays) {
+DateTime shownDayNear(DateTime day, CalendarWeekdaySet weekdays) {
   assert(!weekdays.isEmpty);
   if (weekdays.containsDate(day)) {
     return day;
@@ -246,7 +246,11 @@ DateTime shownDayNear(DateTime day, WeekdaySet weekdays) {
 
 /// The first day after [day], or before it for a negative [direction],
 /// whose weekday [weekdays] holds.
-DateTime nextShownDay(DateTime day, int direction, WeekdaySet weekdays) {
+DateTime nextShownDay(
+  DateTime day,
+  int direction,
+  CalendarWeekdaySet weekdays,
+) {
   assert(direction != 0 && !weekdays.isEmpty);
   var next = addDays(day, direction.sign);
   while (!weekdays.containsDate(next)) {
@@ -257,7 +261,7 @@ DateTime nextShownDay(DateTime day, int direction, WeekdaySet weekdays) {
 
 /// The days of [day]'s week, which starts on [weekdays]' first weekday,
 /// whose weekday [weekdays] holds, in order.
-List<DateTime> shownDaysOfWeek(DateTime day, WeekdaySet weekdays) {
+List<DateTime> shownDaysOfWeek(DateTime day, CalendarWeekdaySet weekdays) {
   assert(!weekdays.isEmpty);
   final start = weekdays.weekStartOf(day);
   return <DateTime>[
@@ -534,7 +538,7 @@ class MonthGrid {
   factory MonthGrid(
     int year,
     int month, {
-    WeekdaySet weekdays = WeekdaySet.all,
+    CalendarWeekdaySet weekdays = CalendarWeekdaySet.all,
   }) {
     assert(!weekdays.isEmpty, "A month grid shows at least one weekday.");
     final leading = weekdays.offsetOf(weekdayColumn(DateTime(year, month)));
@@ -578,13 +582,16 @@ class MonthGrid {
     this.weekCount,
   );
 
-  factory MonthGrid.of(DateTime date, {WeekdaySet weekdays = WeekdaySet.all}) {
+  factory MonthGrid.of(
+    DateTime date, {
+    CalendarWeekdaySet weekdays = CalendarWeekdaySet.all,
+  }) {
     return MonthGrid(date.year, date.month, weekdays: weekdays);
   }
 
   final int year;
   final int month;
-  final WeekdaySet weekdays;
+  final CalendarWeekdaySet weekdays;
 
   /// Cells of the month's first week, from its first weekday, before its
   /// first day.
@@ -642,16 +649,16 @@ class MonthGrid {
 /// The part of each day a calendar shows and schedules in: from [start]
 /// to [end] minutes after midnight.
 @immutable
-final class DayHours {
+final class CalendarDayHours {
   /// The hours from [start] to [end] minutes after midnight, with [start]
   /// before [end], inside one day.
-  const DayHours(this.start, this.end)
+  const CalendarDayHours(this.start, this.end)
     : assert(start >= 0),
       assert(end <= minutesPerDay),
       assert(start < end);
 
   /// The whole day, 00:00 to 24:00.
-  static const DayHours allDay = DayHours(0, minutesPerDay);
+  static const CalendarDayHours allDay = CalendarDayHours(0, minutesPerDay);
 
   /// Minutes after midnight.
   final int start;
@@ -681,11 +688,11 @@ final class DayHours {
   /// themselves where they lie on it. [slotMinutes] divides a day, as each
   /// of `CalendarDates.slotMinuteChoices` does, so the end stays inside
   /// the day.
-  DayHours roundedOutTo(int slotMinutes) {
+  CalendarDayHours roundedOutTo(int slotMinutes) {
     if (isOnSlotsOf(slotMinutes)) {
       return this;
     }
-    return DayHours(
+    return CalendarDayHours(
       start - start % slotMinutes,
       (end + slotMinutes - 1) ~/ slotMinutes * slotMinutes,
     );
@@ -723,7 +730,9 @@ final class DayHours {
 
   @override
   bool operator ==(Object other) {
-    return other is DayHours && other.start == start && other.end == end;
+    return other is CalendarDayHours &&
+        other.start == start &&
+        other.end == end;
   }
 
   @override
@@ -733,6 +742,6 @@ final class DayHours {
 
   @override
   String toString() {
-    return "DayHours(${isoTime(start)}-${isoTime(end)})";
+    return "CalendarDayHours(${isoTime(start)}-${isoTime(end)})";
   }
 }

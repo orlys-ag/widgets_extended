@@ -204,10 +204,10 @@ final class CalendarEntryTapDetails<T> {
 /// ([CalendarEditPolicy.earliestStartOn]). A value
 /// [CalendarDates.slotMinuteChoices] does not hold throws an
 /// [ArgumentError] from the build, in a release build as in a debug one,
-/// and the store's hours off its grid ([DayHours.isOnSlotsOf]) fail an
-/// assertion in a debug build; the views show and schedule in the store's
-/// hours rounded out to it ([DayHours.roundedOutTo]), which are the hours
-/// themselves on the grid.
+/// and the store's hours off its grid ([CalendarDayHours.isOnSlotsOf]) fail
+/// an assertion in a debug build; the views show and schedule in the store's
+/// hours rounded out to it ([CalendarDayHours.roundedOutTo]), which are the
+/// hours themselves on the grid.
 class CalendarView<T> extends StatefulWidget {
   /// A calendar of [store]'s entries in the views [views] lists.
   const CalendarView({
@@ -217,10 +217,10 @@ class CalendarView<T> extends StatefulWidget {
     this.views = CalendarViewKind.values,
     this.editable = false,
     this.editPolicy,
-    this.weekdays = WeekdaySet.all,
+    this.weekdays = CalendarWeekdaySet.all,
     this.slotMinutes = defaultSlotMinutes,
-    this.hourLabelFormat = HourLabelFormat.twentyFourHour,
-    this.monthLayout = MonthLayout.fitScreen,
+    this.hourLabelFormat = CalendarHourLabelFormat.twentyFourHour,
+    this.monthLayout = CalendarMonthLayout.fitScreen,
     this.clock,
     this.today,
     this.blockBuilder,
@@ -300,7 +300,7 @@ class CalendarView<T> extends StatefulWidget {
 
   /// The weekdays the calendar shows, and the one its weeks start on. A
   /// change moves a selected day it hides to the nearest shown one.
-  final WeekdaySet weekdays;
+  final CalendarWeekdaySet weekdays;
 
   /// The length of one slot, in minutes: one of
   /// [CalendarDates.slotMinuteChoices], or the build throws an
@@ -313,11 +313,11 @@ class CalendarView<T> extends StatefulWidget {
   /// chips, and the times the entry builders write
   /// ([CalendarBlockDetails.hourLabelFormat],
   /// [CalendarChipDetails.hourLabelFormat]).
-  final HourLabelFormat hourLabelFormat;
+  final CalendarHourLabelFormat hourLabelFormat;
 
   /// How Month lays out a week whose chips its share of the height does
   /// not hold.
-  final MonthLayout monthLayout;
+  final CalendarMonthLayout monthLayout;
 
   /// Reads the current time, which the calendar reads when first built and
   /// again at the start of each minute; null reads [DateTime.now].
@@ -378,7 +378,7 @@ class CalendarView<T> extends StatefulWidget {
   /// and the marked range clears at once. A failure of the function,
   /// whether it throws within the call or its future fails, is not caught:
   /// a host that handles one passes a function that does.
-  final Future<void> Function(CreateRange range)? onCreateRange;
+  final Future<void> Function(CalendarCreateRange range)? onCreateRange;
 
   /// A move or a resize the gestures landed in Week or Day, in edit mode,
   /// whose entry shows at the requested times, pending, until the future
@@ -457,13 +457,13 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// The hours the views show and schedule in: the store's
   /// ([CalendarStore.hours]) rounded out to the grid of
   /// [CalendarView.slotMinutes].
-  DayHours get _hours {
+  CalendarDayHours get _hours {
     return widget.store.hours.roundedOutTo(widget.slotMinutes);
   }
 
   /// The store's hours as this state last took them, which
   /// [_handleStoreChange] compares a notify's hours with.
-  late DayHours _storeHours;
+  late CalendarDayHours _storeHours;
 
   /// The calendar's one clock: the time read at the start of each minute
   /// and the day marked as today, which the views follow and the policy
@@ -1261,7 +1261,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     );
   }
 
-  Future<void> _createRange(CreateRange range) {
+  Future<void> _createRange(CalendarCreateRange range) {
     final onCreateRange = widget.onCreateRange;
     if (onCreateRange == null) {
       return Future<void>.value();
@@ -1315,7 +1315,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       widget.onCreateRefused?.call(day);
       return;
     }
-    _createRange(CreateRange(start: slot.start, end: slot.end));
+    _createRange(CalendarCreateRange(start: slot.start, end: slot.end));
   }
 
   CalendarHeaderDetails _headerDetails() {
