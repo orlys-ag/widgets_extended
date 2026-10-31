@@ -81,8 +81,8 @@ CalendarShownEntry<String> allDayOf(
 GridTracks workweek({
   int slotMinutes = defaultSlotMinutes,
   int firstSlotRow = 1,
-  DayHours hours = const DayHours(8 * 60, 18 * 60),
-  WeekdaySet weekdays = WeekdaySet.workweek,
+  CalendarDayHours hours = const CalendarDayHours(8 * 60, 18 * 60),
+  CalendarWeekdaySet weekdays = CalendarWeekdaySet.workweek,
   int firstOffset = 0,
   int dayCount = 7,
 }) {
@@ -252,8 +252,11 @@ void main() {
       ),
       "another order": (<CalendarShownEntry<String>>[b, a], workweek()),
       "fewer entries": (<CalendarShownEntry<String>>[a], workweek()),
-      "other hours": (shown, workweek(hours: const DayHours(9 * 60, 18 * 60))),
-      "other weekdays": (shown, workweek(weekdays: WeekdaySet.all)),
+      "other hours": (
+        shown,
+        workweek(hours: const CalendarDayHours(9 * 60, 18 * 60)),
+      ),
+      "other weekdays": (shown, workweek(weekdays: CalendarWeekdaySet.all)),
       "another first day": (shown, workweek(firstOffset: -7)),
       "another day count": (shown, workweek(dayCount: 5)),
     };

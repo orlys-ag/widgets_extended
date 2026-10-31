@@ -63,7 +63,7 @@ class WeekStrip<T> extends StatefulWidget {
   /// The day the strip marks as today.
   final DateTime today;
 
-  final WeekdaySet weekdays;
+  final CalendarWeekdaySet weekdays;
   final ValueChanged<DateTime> onSelectDay;
 
   /// Reports the day that has come to the middle of the strip, which for an

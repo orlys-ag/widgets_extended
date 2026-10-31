@@ -308,7 +308,7 @@ void main() {
   group("S2 createRangeOver", () {
     test("a drag over days is one range from the earlier slot's start to "
         "the later slot's end", () {
-      final range = CreateRange(
+      final range = CalendarCreateRange(
         start: DateTime(2026, 4, 20, 10),
         end: DateTime(2026, 4, 22, 12, 15),
       );
@@ -325,7 +325,7 @@ void main() {
     test("a drag within a day picks the slots between its ends", () {
       expect(
         createRangeOver(week, (row: 44, col: 2), (row: 41, col: 2)),
-        CreateRange(
+        CalendarCreateRange(
           start: DateTime(2026, 4, 21, 10),
           end: DateTime(2026, 4, 21, 11),
         ),
@@ -343,7 +343,7 @@ void main() {
     final noWednesday = GridTracks(
       firstDay: weekStartDay,
       dayCount: 7,
-      weekdays: WeekdaySet.of(const <int>[0, 1, 3, 4, 5, 6]),
+      weekdays: CalendarWeekdaySet.of(const <int>[0, 1, 3, 4, 5, 6]),
     );
 
     test("lays the held days out in order, the others with no column", () {
@@ -375,7 +375,7 @@ void main() {
       final workweek = GridTracks(
         firstDay: weekStartDay,
         dayCount: 7,
-        weekdays: WeekdaySet.workweek,
+        weekdays: CalendarWeekdaySet.workweek,
       );
       expect(workweek.columnCount, 5);
       expect(workweek.dateAt(5), DateTime(2026, 4, 24));
@@ -394,11 +394,11 @@ void main() {
     test("a create range over the hidden day covers it", () {
       expect(
         createRangeOver(noWednesday, (row: 44, col: 3), (row: 41, col: 2)),
-        CreateRange(start: at(tuesday, 600), end: at(thursday, 660)),
+        CalendarCreateRange(start: at(tuesday, 600), end: at(thursday, 660)),
       );
       expect(
         createRangeAt(noWednesday, (row: 41, col: 3)),
-        CreateRange(start: at(thursday, 600), end: at(thursday, 615)),
+        CalendarCreateRange(start: at(thursday, 600), end: at(thursday, 615)),
       );
     });
   });
@@ -410,7 +410,7 @@ void main() {
     final office = GridTracks(
       firstDay: weekStartDay,
       dayCount: 7,
-      hours: const DayHours(8 * 60, 18 * 60),
+      hours: const CalendarDayHours(8 * 60, 18 * 60),
     );
 
     test("rows count from the first hour", () {
@@ -440,18 +440,24 @@ void main() {
     test("create ranges start at the hours and stop at their end", () {
       expect(
         createRangeAt(office, (row: 1, col: 2)),
-        CreateRange(start: at(tuesday, 8 * 60), end: at(tuesday, 8 * 60 + 15)),
+        CalendarCreateRange(
+          start: at(tuesday, 8 * 60),
+          end: at(tuesday, 8 * 60 + 15),
+        ),
       );
       expect(
         createRangeAt(office, (row: 40, col: 2)),
-        CreateRange(
+        CalendarCreateRange(
           start: at(tuesday, 17 * 60 + 45),
           end: at(tuesday, 18 * 60),
         ),
       );
       expect(
         createRangeOver(office, (row: 1, col: 2), (row: 4, col: 2)),
-        CreateRange(start: at(tuesday, 8 * 60), end: at(tuesday, 9 * 60)),
+        CalendarCreateRange(
+          start: at(tuesday, 8 * 60),
+          end: at(tuesday, 9 * 60),
+        ),
       );
     });
   });
@@ -527,7 +533,7 @@ void main() {
     );
     addTearDown(now.dispose);
     TimedGrid<String> grid({
-      required HourLabelFormat format,
+      required CalendarHourLabelFormat format,
       required double minSlotHeight,
     }) {
       return TimedGrid<String>(
@@ -539,8 +545,8 @@ void main() {
         onSelectDay: (day) {},
         onOpenEntry: (id) {},
         onCreate: (range) async {},
-        weekdays: WeekdaySet.workweek,
-        hours: const DayHours(8 * 60, 18 * 60),
+        weekdays: CalendarWeekdaySet.workweek,
+        hours: const CalendarDayHours(8 * 60, 18 * 60),
         hourLabelFormat: format,
         minDayWidth: 100.0,
         minSlotHeight: minSlotHeight,
@@ -550,7 +556,7 @@ void main() {
     await pumpBoxed(
       tester,
       size,
-      grid(format: HourLabelFormat.twelveHour, minSlotHeight: 20.0),
+      grid(format: CalendarHourLabelFormat.twelveHour, minSlotHeight: 20.0),
     );
     await tester.pumpAndSettle();
     final viewport = viewportOf(tester);
@@ -570,7 +576,10 @@ void main() {
     await tester.pumpWidget(
       boxed(
         size,
-        grid(format: HourLabelFormat.twentyFourHour, minSlotHeight: 20.0),
+        grid(
+          format: CalendarHourLabelFormat.twentyFourHour,
+          minSlotHeight: 20.0,
+        ),
       ),
     );
     expect(find.bySemanticsLabel("08:00"), findsOneWidget);
@@ -580,7 +589,10 @@ void main() {
     await tester.pumpWidget(
       boxed(
         size,
-        grid(format: HourLabelFormat.twentyFourHour, minSlotHeight: 24.0),
+        grid(
+          format: CalendarHourLabelFormat.twentyFourHour,
+          minSlotHeight: 24.0,
+        ),
       ),
     );
     expect(viewport.rectOfCell(2, 1)!.size, const Size(100.0, 24.0));
@@ -632,7 +644,7 @@ void main() {
         editPolicy: lockPast
             ? HistoryLockPolicy<String>(lockEarlierToday: lockEarlierToday)
             : null,
-        hours: const DayHours(8 * 60, 16 * 60),
+        hours: const CalendarDayHours(8 * 60, 16 * 60),
       );
     }
 
@@ -1265,7 +1277,7 @@ void main() {
         onCreate: (range) async {},
         editable: true,
         editPolicy: const HistoryLockPolicy<String>(lockEarlierToday: true),
-        hours: const DayHours(0, 16 * 60),
+        hours: const CalendarDayHours(0, 16 * 60),
         minDayWidth: 60.0,
         minSlotHeight: 8.0,
       ),
@@ -1358,8 +1370,8 @@ void main() {
       CalendarNow(time: nineOClock(), today: tuesday),
     );
     addTearDown(now.dispose);
-    final blocks = <HourLabelFormat>[];
-    final bars = <HourLabelFormat>[];
+    final blocks = <CalendarHourLabelFormat>[];
+    final bars = <CalendarHourLabelFormat>[];
     // The same two builders in both builds, so only the format changes.
     Widget recordBlock(
       BuildContext context,
@@ -1379,7 +1391,7 @@ void main() {
       return const SizedBox.expand();
     }
 
-    Widget grid(HourLabelFormat format) {
+    Widget grid(CalendarHourLabelFormat format) {
       return MaterialApp(
         home: TimedGrid<String>(
           store: store,
@@ -1390,7 +1402,7 @@ void main() {
           onSelectDay: (day) {},
           onOpenEntry: (id) {},
           onCreate: (range) async {},
-          hours: const DayHours(8 * 60, 18 * 60),
+          hours: const CalendarDayHours(8 * 60, 18 * 60),
           hourLabelFormat: format,
           blockBuilder: recordBlock,
           chipBuilder: recordBar,
@@ -1398,17 +1410,25 @@ void main() {
       );
     }
 
-    await tester.pumpWidget(grid(HourLabelFormat.twelveHour));
+    await tester.pumpWidget(grid(CalendarHourLabelFormat.twelveHour));
     await tester.pumpAndSettle();
-    expect(blocks.toSet(), <HourLabelFormat>{HourLabelFormat.twelveHour});
-    expect(bars.toSet(), <HourLabelFormat>{HourLabelFormat.twelveHour});
+    expect(blocks.toSet(), <CalendarHourLabelFormat>{
+      CalendarHourLabelFormat.twelveHour,
+    });
+    expect(bars.toSet(), <CalendarHourLabelFormat>{
+      CalendarHourLabelFormat.twelveHour,
+    });
 
     blocks.clear();
     bars.clear();
-    await tester.pumpWidget(grid(HourLabelFormat.twentyFourHour));
+    await tester.pumpWidget(grid(CalendarHourLabelFormat.twentyFourHour));
     await tester.pumpAndSettle();
-    expect(blocks.toSet(), <HourLabelFormat>{HourLabelFormat.twentyFourHour});
-    expect(bars.toSet(), <HourLabelFormat>{HourLabelFormat.twentyFourHour});
+    expect(blocks.toSet(), <CalendarHourLabelFormat>{
+      CalendarHourLabelFormat.twentyFourHour,
+    });
+    expect(bars.toSet(), <CalendarHourLabelFormat>{
+      CalendarHourLabelFormat.twentyFourHour,
+    });
   });
 
   testWidgets("TG10 a grid of one day whose owner asks the store for its "

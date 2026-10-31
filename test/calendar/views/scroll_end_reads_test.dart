@@ -138,9 +138,9 @@ void main() {
     addTearDown(now.dispose);
     final view = DayList<String>(
       store: store,
-      weekdays: WeekdaySet.all,
-      format: HourLabelFormat.twentyFourHour,
-      hours: DayHours.allDay,
+      weekdays: CalendarWeekdaySet.all,
+      format: CalendarHourLabelFormat.twentyFourHour,
+      hours: CalendarDayHours.allDay,
       editable: false,
       selectedDay: tuesday,
       now: now,
@@ -174,7 +174,7 @@ void main() {
       store: store,
       selectedDay: tuesday,
       today: tuesday,
-      weekdays: WeekdaySet.all,
+      weekdays: CalendarWeekdaySet.all,
       onSelectDay: (day) {},
       onBrowse: (day) {},
     );
@@ -208,7 +208,7 @@ void main() {
       month: DateTime(2026, 4),
       selectedDay: tuesday,
       today: tuesday,
-      weekdays: WeekdaySet.all,
+      weekdays: CalendarWeekdaySet.all,
       rowHeight: 48.0,
       collapse: kAlwaysDismissedAnimation,
       onSelectDay: (day) {},

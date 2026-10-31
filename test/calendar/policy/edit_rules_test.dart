@@ -22,7 +22,7 @@ final DateTime wednesday = DateTime(2026, 4, 22);
 final DateTime thursday = DateTime(2026, 4, 23);
 
 /// 08:00 to 18:00.
-const DayHours office = DayHours(8 * 60, 18 * 60);
+const CalendarDayHours office = CalendarDayHours(8 * 60, 18 * 60);
 
 /// [day] at [hour], [minute] and [second] by the wall clock.
 DateTime at(DateTime day, int hour, [int minute = 0, int second = 0]) {
@@ -85,7 +85,7 @@ final class _Asking extends CalendarEditPolicy<String> {
 
 /// Unrestricted rules in [hours] and slots of [slotMinutes].
 CalendarEditRules<String> rulesOf({
-  DayHours hours = DayHours.allDay,
+  CalendarDayHours hours = CalendarDayHours.allDay,
   int slotMinutes = 15,
 }) {
   return CalendarEditRules<String>(
@@ -164,7 +164,7 @@ void main() {
   });
 
   test("ER3 a day free only in the hours' last slot gets that slot", () {
-    final rules = rulesOf(hours: const DayHours(540, 720));
+    final rules = rulesOf(hours: const CalendarDayHours(540, 720));
     expect(
       rules.firstSlot(
         CalendarEarliestStart(tuesday, tuesday),
@@ -179,7 +179,7 @@ void main() {
   test("ER4 the first slot from an earliest start starts there, rounded up "
       "to the slots and no earlier than the hours, steps by the slot "
       "length, and keeps inside the minutes it is given", () {
-    final rules = rulesOf(hours: const DayHours(480, 1200));
+    final rules = rulesOf(hours: const CalendarDayHours(480, 1200));
     final entries = <CalendarEntry<String>>[
       entryOf("one", at(tuesday, 8), at(tuesday, 9)),
       entryOf("two", at(tuesday, 15), at(tuesday, 16)),
@@ -292,12 +292,12 @@ void main() {
     );
     final moved = rules.updated(
       policy: policy,
-      hours: DayHours.allDay,
+      hours: CalendarDayHours.allDay,
       slotMinutes: 30,
     );
     expect(policy.asks, <String, int>{"dayLimit": 1, "allowsOverlaps": 1});
     expect(identical(moved.policy, policy), isTrue);
-    expect(moved.hours, DayHours.allDay);
+    expect(moved.hours, CalendarDayHours.allDay);
     expect(moved.slotMinutes, 30);
     expect(moved.dayLimit, 2);
     expect(moved.allowsOverlaps, isFalse);
@@ -345,7 +345,7 @@ void main() {
     expect(
       CalendarEditRules<String>(
         policy: equal,
-        hours: DayHours.allDay,
+        hours: CalendarDayHours.allDay,
         slotMinutes: 15,
       ),
       isNot(unrestricted),
@@ -417,7 +417,7 @@ void main() {
     test("ER8 hours wholly inside the skipped hour hold no slot", () {
       final day = shortDayStart;
       final rules = rulesOf(
-        hours: const DayHours(
+        hours: const CalendarDayHours(
           easternSkippedHour * 60,
           (easternSkippedHour + 1) * 60,
         ),

@@ -34,7 +34,7 @@ final class _Times extends DefaultCalendarLocalizations {
   final String Function(int minute) write;
 
   @override
-  String formatTime(int minute, HourLabelFormat format) {
+  String formatTime(int minute, CalendarHourLabelFormat format) {
     return write(minute);
   }
 }
@@ -115,8 +115,8 @@ class Harness {
     CalendarNow(time: DateTime(2026, 4, 19, 9), today: DateTime(2026, 4, 19)),
   );
 
-  HourLabelFormat format = HourLabelFormat.twentyFourHour;
-  DayHours hours = const DayHours(8 * 60, 12 * 60);
+  CalendarHourLabelFormat format = CalendarHourLabelFormat.twentyFourHour;
+  CalendarDayHours hours = const CalendarDayHours(8 * 60, 12 * 60);
   int slotMinutes = 15;
   double minSlotHeight = defaultMinSlotHeight;
   double minDayWidth = 44.0;
@@ -260,7 +260,7 @@ void main() {
   testWidgets("GF1 labels wider than the least gutter's room with no break "
       "in them widen the gutter to the widest and 6 px on each side, and "
       "the days share the rest", (tester) async {
-    final harness = Harness()..hours = const DayHours(8 * 60, 18 * 60);
+    final harness = Harness()..hours = const CalendarDayHours(8 * 60, 18 * 60);
     await harness.pump(tester);
     // "08:00" and the rest are 55 px, 5 px past the least gutter's 50.
     expect(gutterOf(tester), 67.0);
@@ -305,7 +305,7 @@ void main() {
     // 8 px slots of 15 minutes make 32 px hours, which hold the 22 px of
     // two lines.
     final harness = Harness()
-      ..format = HourLabelFormat.twelveHour
+      ..format = CalendarHourLabelFormat.twelveHour
       ..zooms = true;
     await harness.pump(tester);
     expect(gutterOf(tester), 56.0);
@@ -335,7 +335,7 @@ void main() {
     testWidgets("at the least slot height a pinch reaches", (tester) async {
       // 8 px slots of 30 minutes make 16 px hours.
       final harness = Harness()
-        ..format = HourLabelFormat.twelveHour
+        ..format = CalendarHourLabelFormat.twelveHour
         ..slotMinutes = 30
         ..zooms = true;
       await harness.pump(tester);
@@ -353,7 +353,7 @@ void main() {
     ) async {
       // 4 px slots of 15 minutes make 16 px hours.
       final harness = Harness()
-        ..format = HourLabelFormat.twelveHour
+        ..format = CalendarHourLabelFormat.twelveHour
         ..minSlotHeight = 4.0;
       await harness.pump(tester);
       expect(gutterOf(tester), 67.0);
@@ -373,7 +373,7 @@ void main() {
       await harness.pump(tester);
       expect(gutterOf(tester), 56.0);
       // 07:30 to 08:00 is two 8 px slots.
-      harness.hours = const DayHours(7 * 60 + 30, 12 * 60);
+      harness.hours = const CalendarDayHours(7 * 60 + 30, 12 * 60);
       await harness.rebuild(tester);
       expect(gutterOf(tester), 67.0);
     });
@@ -426,11 +426,12 @@ void main() {
     });
 
     testWidgets("hour format", (tester) async {
-      final harness = Harness()..hours = const DayHours(13 * 60, 18 * 60);
+      final harness = Harness()
+        ..hours = const CalendarDayHours(13 * 60, 18 * 60);
       await harness.pump(tester);
       expect(gutterOf(tester), 67.0);
       // "1 PM" to "6 PM" are 44 px.
-      harness.format = HourLabelFormat.twelveHour;
+      harness.format = CalendarHourLabelFormat.twelveHour;
       await harness.rebuild(tester);
       expect(gutterOf(tester), 56.0);
     });
@@ -461,13 +462,13 @@ void main() {
     testWidgets("hours", (tester) async {
       // 4 px slots make 16 px hours, too short for two lines.
       final harness = Harness()
-        ..format = HourLabelFormat.twelveHour
+        ..format = CalendarHourLabelFormat.twelveHour
         ..minSlotHeight = 4.0
-        ..hours = const DayHours(13 * 60, 18 * 60);
+        ..hours = const CalendarDayHours(13 * 60, 18 * 60);
       await harness.pump(tester);
       expect(gutterOf(tester), 56.0);
       // 10 AM is 55 px.
-      harness.hours = const DayHours(8 * 60, 18 * 60);
+      harness.hours = const CalendarDayHours(8 * 60, 18 * 60);
       await harness.rebuild(tester);
       expect(gutterOf(tester), 67.0);
     });
@@ -475,7 +476,7 @@ void main() {
     testWidgets("slot length", (tester) async {
       // 4 px slots of 15 minutes make 16 px hours, and of 5 minutes 48 px.
       final harness = Harness()
-        ..format = HourLabelFormat.twelveHour
+        ..format = CalendarHourLabelFormat.twelveHour
         ..minSlotHeight = 4.0;
       await harness.pump(tester);
       expect(gutterOf(tester), 67.0);
@@ -492,8 +493,8 @@ void main() {
     // opens at, and not at the 8 px the pinch reaches. All day, the slots
     // are taller than the view and do not stretch.
     final harness = Harness()
-      ..format = HourLabelFormat.twelveHour
-      ..hours = DayHours.allDay
+      ..format = CalendarHourLabelFormat.twelveHour
+      ..hours = CalendarDayHours.allDay
       ..slotMinutes = 30
       ..zooms = true;
     await harness.pump(tester);
@@ -563,7 +564,7 @@ void main() {
               ),
             ],
           )
-          ..format = HourLabelFormat.twelveHour
+          ..format = CalendarHourLabelFormat.twelveHour
           ..zooms = true;
     await harness.pump(tester);
     final labels = labelsOf(tester);

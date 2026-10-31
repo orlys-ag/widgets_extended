@@ -16,15 +16,16 @@ import 'calendar_item.dart';
 import 'calendar_schema.dart';
 
 /// The field errors of an item from [start] to [end] that [hours] do not
-/// hold ([DayHours.holdsTimes]), keyed as `validateItemJson` keys them: the
-/// start when the hours do not hold its time of day as a start, the end
-/// when they do not hold its minute on its last day as an end, each naming
-/// the bounds [DayHours.holdsStart] and [DayHours.holdsEnd] take any minute
-/// between. An all-day item has none.
+/// hold ([CalendarDayHours.holdsTimes]), keyed as `validateItemJson` keys
+/// them: the start when the hours do not hold its time of day as a start,
+/// the end when they do not hold its minute on its last day as an end, each
+/// naming the bounds [CalendarDayHours.holdsStart] and
+/// [CalendarDayHours.holdsEnd] take any minute between. An all-day item has
+/// none.
 Map<String, String> hoursErrorsOf(
   DateTime start,
   DateTime end,
-  DayHours hours,
+  CalendarDayHours hours,
 ) {
   if (hours.holdsTimes(start, end)) {
     return const <String, String>{};
@@ -42,13 +43,13 @@ Map<String, String> hoursErrorsOf(
 }
 
 /// The names of Month's layouts in the settings sheet.
-extension MonthLayoutLabel on MonthLayout {
+extension MonthLayoutLabel on CalendarMonthLayout {
   /// The layout's name in the settings sheet.
   String get label {
     switch (this) {
-      case MonthLayout.showAll:
+      case CalendarMonthLayout.showAll:
         return "Show all items";
-      case MonthLayout.fitScreen:
+      case CalendarMonthLayout.fitScreen:
         return "Fit to screen";
     }
   }
@@ -68,11 +69,11 @@ class CalendarSettings {
     this.lockPast = false,
     this.lockEarlierToday = false,
     this.allowsOverlaps = false,
-    this.weekdays = WeekdaySet.all,
-    this.hours = DayHours.allDay,
+    this.weekdays = CalendarWeekdaySet.all,
+    this.hours = CalendarDayHours.allDay,
     this.slotMinutes = CalendarDates.defaultSlotMinutes,
-    this.hourLabelFormat = HourLabelFormat.twentyFourHour,
-    this.monthLayout = MonthLayout.fitScreen,
+    this.hourLabelFormat = CalendarHourLabelFormat.twentyFourHour,
+    this.monthLayout = CalendarMonthLayout.fitScreen,
   });
 
   /// Whether the calendar's items can be moved, resized, created, edited
@@ -101,11 +102,11 @@ class CalendarSettings {
   /// The weekdays the calendar shows, at least one, which the month grid
   /// and the timed grid assert, and the weekday its weeks start on, which
   /// orders them in every view.
-  final WeekdaySet weekdays;
+  final CalendarWeekdaySet weekdays;
 
   /// The hours, which start and end on the grid of [slotMinutes] where
   /// [withSlotMinutes] set it.
-  final DayHours hours;
+  final CalendarDayHours hours;
 
   /// The length of the calendar's slots, in minutes, one of
   /// [slotMinuteChoices]: Week's and Day's rows, the step of their
@@ -113,9 +114,9 @@ class CalendarSettings {
   /// Agenda or Month takes.
   final int slotMinutes;
 
-  final HourLabelFormat hourLabelFormat;
+  final CalendarHourLabelFormat hourLabelFormat;
 
-  final MonthLayout monthLayout;
+  final CalendarMonthLayout monthLayout;
 
   /// The edit policy the calendar and the item form both read: the history
   /// lock, of earlier today too under [lockEarlierToday], under
@@ -140,11 +141,11 @@ class CalendarSettings {
     bool? lockPast,
     bool? lockEarlierToday,
     bool? allowsOverlaps,
-    WeekdaySet? weekdays,
-    DayHours? hours,
+    CalendarWeekdaySet? weekdays,
+    CalendarDayHours? hours,
     int? slotMinutes,
-    HourLabelFormat? hourLabelFormat,
-    MonthLayout? monthLayout,
+    CalendarHourLabelFormat? hourLabelFormat,
+    CalendarMonthLayout? monthLayout,
   }) {
     return CalendarSettings(
       editing: editing ?? this.editing,
@@ -160,8 +161,8 @@ class CalendarSettings {
   }
 
   /// These settings with slots of [slotMinutes], and the [hours] rounded out
-  /// to their grid ([DayHours.roundedOutTo]), so the calendar never shows
-  /// hours off it.
+  /// to their grid ([CalendarDayHours.roundedOutTo]), so the calendar never
+  /// shows hours off it.
   CalendarSettings withSlotMinutes(int slotMinutes) {
     return copyWith(
       slotMinutes: slotMinutes,

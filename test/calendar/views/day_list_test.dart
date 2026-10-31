@@ -46,7 +46,7 @@ ShownItem entryAt(String id, int start, int end) {
 /// end, and each banner as "before" or "after" and its count.
 List<Object> rowsOf(
   List<ShownItem> entries, {
-  DayHours hours = DayHours.allDay,
+  CalendarDayHours hours = CalendarDayHours.allDay,
   bool editable = true,
 }) {
   return <Object>[
@@ -165,7 +165,7 @@ void main() {
     );
     // Only the calendar's hours have gaps, so an item reaching past them
     // makes none past them, and one wholly outside them none at all.
-    const office = DayHours(8 * 60, 18 * 60);
+    const office = CalendarDayHours(8 * 60, 18 * 60);
     expect(
       rowsOf(<ShownItem>[
         entryAt("a", 7 * 60, 9 * 60),
@@ -186,7 +186,7 @@ void main() {
       "counts those before them and one last those after them, in edit "
       "mode and out of it, and in edit mode a day with no item inside the "
       "hours has one gap row across them", () {
-    const office = DayHours(8 * 60, 18 * 60);
+    const office = CalendarDayHours(8 * 60, 18 * 60);
     final entries = <ShownItem>[
       entryAt("a", 6 * 60, 7 * 60),
       entryAt("b", 7 * 60, 8 * 60),
@@ -238,9 +238,9 @@ void main() {
       MaterialApp(
         home: DayList<String>(
           store: store,
-          weekdays: WeekdaySet.all,
-          format: HourLabelFormat.twentyFourHour,
-          hours: DayHours.allDay,
+          weekdays: CalendarWeekdaySet.all,
+          format: CalendarHourLabelFormat.twentyFourHour,
+          hours: CalendarDayHours.allDay,
           editable: false,
           selectedDay: day,
           now: now,
@@ -290,9 +290,9 @@ void main() {
       MaterialApp(
         home: DayList<String>(
           store: store,
-          weekdays: WeekdaySet.all,
-          format: HourLabelFormat.twentyFourHour,
-          hours: DayHours.allDay,
+          weekdays: CalendarWeekdaySet.all,
+          format: CalendarHourLabelFormat.twentyFourHour,
+          hours: CalendarDayHours.allDay,
           editable: false,
           selectedDay: day,
           now: now,
@@ -333,8 +333,8 @@ void main() {
     expect(
       (source.held.last.first, source.held.last.last),
       (
-        WeekdaySet.all.weekStartOf(failed.first),
-        addDays(WeekdaySet.all.weekStartOf(failed.last), 6),
+        CalendarWeekdaySet.all.weekStartOf(failed.first),
+        addDays(CalendarWeekdaySet.all.weekStartOf(failed.last), 6),
       ),
     );
     await tester.pump();
@@ -349,7 +349,7 @@ void main() {
       "of both in one read, so the status and every failed row show "
       "loading", (tester) async {
     final day = DateTime(2026, 5, 5);
-    final weekStart = WeekdaySet.all.weekStartOf(day);
+    final weekStart = CalendarWeekdaySet.all.weekStartOf(day);
     final shownFirst = addDays(weekStart, -7);
     final shownLast = addDays(weekStart, -1);
     final source = HeldReads();
@@ -365,9 +365,9 @@ void main() {
       MaterialApp(
         home: DayList<String>(
           store: store,
-          weekdays: WeekdaySet.all,
-          format: HourLabelFormat.twentyFourHour,
-          hours: DayHours.allDay,
+          weekdays: CalendarWeekdaySet.all,
+          format: CalendarHourLabelFormat.twentyFourHour,
+          hours: CalendarDayHours.allDay,
           editable: false,
           selectedDay: day,
           now: now,
@@ -409,7 +409,7 @@ void main() {
     expect(source.held, hasLength(reads + 1));
     expect(
       (source.held.last.first, source.held.last.last),
-      (shownFirst, addDays(WeekdaySet.all.weekStartOf(failed.last), 6)),
+      (shownFirst, addDays(CalendarWeekdaySet.all.weekStartOf(failed.last), 6)),
     );
     await tester.pump();
     expect(<DateTime>[

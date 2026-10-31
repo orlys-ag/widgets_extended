@@ -325,7 +325,7 @@ void main() {
     final fromSunday = MonthGrid(
       2026,
       4,
-      weekdays: WeekdaySet.all.startingOn(6),
+      weekdays: CalendarWeekdaySet.all.startingOn(6),
     );
     final placements = monthPlacementsOf(<ShownItem>[
       task("x", april(25), 9, dayCount: 2),
@@ -422,7 +422,7 @@ void main() {
       CalendarNow(time: april(21), today: april(21)),
     );
     addTearDown(now.dispose);
-    final workweek = MonthGrid(2026, 4, weekdays: WeekdaySet.workweek);
+    final workweek = MonthGrid(2026, 4, weekdays: CalendarWeekdaySet.workweek);
     final june = MonthGrid(2026, 6);
     // The board's grid is not the one the store shows.
     expect(workweek.lastDay, isNot(grid.lastDay));
@@ -585,7 +585,7 @@ void main() {
     addTearDown(store.dispose);
     final now = ValueNotifier<CalendarNow>(CalendarNow(time: day, today: day));
     addTearDown(now.dispose);
-    final formats = <HourLabelFormat>[];
+    final formats = <CalendarHourLabelFormat>[];
     // The same builder in both builds, so only the format changes.
     Widget recordChip(
       BuildContext context,
@@ -596,7 +596,7 @@ void main() {
       return Text(entry.entry.title);
     }
 
-    Widget board(HourLabelFormat format) {
+    Widget board(CalendarHourLabelFormat format) {
       return MaterialApp(
         home: MonthBoard<String>(
           store: store,
@@ -613,18 +613,22 @@ void main() {
       );
     }
 
-    await tester.pumpWidget(board(HourLabelFormat.twelveHour));
+    await tester.pumpWidget(board(CalendarHourLabelFormat.twelveHour));
     await tester.pumpAndSettle();
-    expect(formats.toSet(), <HourLabelFormat>{HourLabelFormat.twelveHour});
+    expect(formats.toSet(), <CalendarHourLabelFormat>{
+      CalendarHourLabelFormat.twelveHour,
+    });
     expect(
       find.bySemanticsLabel("Note, Tuesday, April 21, 10 AM to 11 AM"),
       findsOneWidget,
     );
 
     formats.clear();
-    await tester.pumpWidget(board(HourLabelFormat.twentyFourHour));
+    await tester.pumpWidget(board(CalendarHourLabelFormat.twentyFourHour));
     await tester.pumpAndSettle();
-    expect(formats.toSet(), <HourLabelFormat>{HourLabelFormat.twentyFourHour});
+    expect(formats.toSet(), <CalendarHourLabelFormat>{
+      CalendarHourLabelFormat.twentyFourHour,
+    });
     expect(
       find.bySemanticsLabel("Note, Tuesday, April 21, 10:00 to 11:00"),
       findsOneWidget,

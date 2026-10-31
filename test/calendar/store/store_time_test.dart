@@ -93,7 +93,7 @@ List<(String, CalendarStore<String>)> storesOf(
   List<CalendarEntry<String>> entries, {
   required DateTime first,
   required DateTime last,
-  DayHours hours = DayHours.allDay,
+  CalendarDayHours hours = CalendarDayHours.allDay,
 }) {
   final memory = MemoryCalendarStore<String>(entries: entries, hours: hours);
   final caching = CachingCalendarStore<String>(
@@ -171,7 +171,7 @@ void main() {
       "the hours is accepted, one ending after them is refused, an all-day "
       "entry is accepted, and a write keeping the stored start and end "
       "skips the rule", () async {
-    const office = DayHours(8 * 60, 18 * 60);
+    const office = CalendarDayHours(8 * 60, 18 * 60);
     final outside = entryOf("outside", at(monday, 6), at(monday, 7));
     final task = entryOf("task", at(monday, 9), at(monday, 10));
     for (final (name, store) in storesOf(
@@ -260,7 +260,7 @@ void main() {
 
   test("SM8 a set of other hours notifies once, and a set of equal hours "
       "notifies nothing", () {
-    const office = DayHours(8 * 60, 18 * 60);
+    const office = CalendarDayHours(8 * 60, 18 * 60);
     for (final (name, store) in storesOf(
       const <CalendarEntry<String>>[],
       first: monday,
@@ -274,7 +274,7 @@ void main() {
       expect(store.hours, office, reason: name);
       expect(notifications, 1, reason: name);
       // Equal hours in another instance.
-      store.hours = DayHours(office.start, office.end);
+      store.hours = CalendarDayHours(office.start, office.end);
       expect(notifications, 1, reason: name);
     }
   });

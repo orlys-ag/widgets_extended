@@ -68,7 +68,7 @@ sealed class CalendarStoreException implements Exception {
 }
 
 /// The write changes an entry's start or end, or creates one, outside the
-/// store's [CalendarStore.hours] ([DayHours.holdsTimes]).
+/// store's [CalendarStore.hours] ([CalendarDayHours.holdsTimes]).
 final class CalendarHoursException extends CalendarStoreException {
   /// The refusal of an entry from [start] to [end] under [hours].
   const CalendarHoursException({
@@ -78,7 +78,7 @@ final class CalendarHoursException extends CalendarStoreException {
   });
 
   /// The store's hours when it refused the write.
-  final DayHours hours;
+  final CalendarDayHours hours;
 
   /// The refused entry's start.
   final DateTime start;
@@ -87,13 +87,13 @@ final class CalendarHoursException extends CalendarStoreException {
   final DateTime end;
 
   /// Whether [hours] do not hold [start]'s minute of its day as a start
-  /// ([DayHours.holdsStart]).
+  /// ([CalendarDayHours.holdsStart]).
   bool get startOutside {
     return !hours.holdsStart(minuteOfDay(start));
   }
 
   /// Whether [hours] do not hold [end]'s minute of its last day as an end
-  /// ([DayHours.holdsEnd], [CalendarDates.endMinuteOfDay]).
+  /// ([CalendarDayHours.holdsEnd], [CalendarDates.endMinuteOfDay]).
   bool get endOutside {
     return !hours.holdsEnd(endMinuteOfDay(end));
   }
@@ -132,12 +132,13 @@ final class CalendarWritePendingException extends CalendarStoreException {
 /// declares `final` or `base`.
 abstract base class CalendarStore<T> extends ChangeNotifier {
   /// A store holding writes to [hours].
-  CalendarStore({DayHours hours = DayHours.allDay}) : _hours = hours;
+  CalendarStore({CalendarDayHours hours = CalendarDayHours.allDay})
+    : _hours = hours;
 
-  DayHours _hours;
+  CalendarDayHours _hours;
 
   /// The hours a new entry, and a write that changes an entry's start or
-  /// end, must lie in ([DayHours.holdsTimes]), which hold every all-day
+  /// end, must lie in ([CalendarDayHours.holdsTimes]), which hold every all-day
   /// entry. A write that keeps the stored start and end is not held to
   /// them, so an entry that lay outside them when they changed can still
   /// be edited. A calendar shows and schedules in its store's hours.
@@ -145,11 +146,11 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
   /// Setting hours not `==` to these notifies the listeners once, and
   /// setting equal ones notifies nothing. A calendar listening builds again
   /// at a notify, so a host sets the hours outside a build.
-  DayHours get hours {
+  CalendarDayHours get hours {
     return _hours;
   }
 
-  set hours(DayHours value) {
+  set hours(CalendarDayHours value) {
     if (value == _hours) {
       return;
     }
@@ -254,8 +255,8 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
   Future<void> requestDelete(String id);
 
   /// The refusal of [entry] for [hours], or null when the hours hold its
-  /// start and its end ([DayHours.holdsTimes]), or when it keeps the start
-  /// and end of the stored entry its id names.
+  /// start and its end ([CalendarDayHours.holdsTimes]), or when it keeps the
+  /// start and end of the stored entry its id names.
   @protected
   CalendarHoursException? hoursRefusalOf(CalendarEntry<T> entry) {
     final id = entry.id;

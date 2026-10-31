@@ -522,7 +522,7 @@ class WeekdayHeader extends StatelessWidget {
     this.horizontal,
   });
 
-  final WeekdaySet weekdays;
+  final CalendarWeekdaySet weekdays;
 
   /// Whether each column shows its weekday's abbreviation
   /// ([CalendarLocalizations.weekdayAbbreviation]) rather than its letter

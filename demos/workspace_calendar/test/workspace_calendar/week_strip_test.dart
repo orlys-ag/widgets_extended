@@ -258,7 +258,7 @@ void main() {
                   store: store,
                   selectedDay: selected,
                   today: today,
-                  weekdays: WeekdaySet.all,
+                  weekdays: CalendarWeekdaySet.all,
                   onSelectDay: (day) {
                     reported.add(day);
                     setState(() {
@@ -570,7 +570,7 @@ void main() {
                   store: store,
                   selectedDay: april(21),
                   today: april(21),
-                  weekdays: WeekdaySet.all,
+                  weekdays: CalendarWeekdaySet.all,
                   onSelectDay: (day) {},
                   onBrowse: (day) {},
                 ),

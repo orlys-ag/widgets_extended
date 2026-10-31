@@ -120,7 +120,7 @@ final class CalendarEarliestStart {
 ///
 /// A `CalendarView` and its views make their rules of its `editPolicy`,
 /// or an [UnrestrictedEditPolicy] where that is null, its store's hours
-/// rounded out to its slots ([DayHours.roundedOutTo]) and its
+/// rounded out to its slots ([CalendarDayHours.roundedOutTo]) and its
 /// `slotMinutes`; a host that makes rules of the same three gets the
 /// answers the calendar gives.
 ///
@@ -133,7 +133,7 @@ final class CalendarEditRules<T> {
   /// under 1 fails an assertion in a debug build.
   CalendarEditRules({
     required CalendarEditPolicy<T> policy,
-    required DayHours hours,
+    required CalendarDayHours hours,
     required int slotMinutes,
   }) : this._(
          policy,
@@ -158,8 +158,8 @@ final class CalendarEditRules<T> {
   /// The policy these rules ask.
   final CalendarEditPolicy<T> policy;
 
-  /// The hours a timed change must lie in ([DayHours.holdsTimes]).
-  final DayHours hours;
+  /// The hours a timed change must lie in ([CalendarDayHours.holdsTimes]).
+  final CalendarDayHours hours;
 
   /// The length of one slot, in minutes, which a create's search steps by.
   final int slotMinutes;
@@ -179,7 +179,7 @@ final class CalendarEditRules<T> {
   /// new rules, which read them of [policy].
   CalendarEditRules<T> updated({
     required CalendarEditPolicy<T> policy,
-    required DayHours hours,
+    required CalendarDayHours hours,
     required int slotMinutes,
   }) {
     if (policy != this.policy) {
@@ -202,7 +202,7 @@ final class CalendarEditRules<T> {
   }
 
   /// Whether [entry] may take the times [start] to [end] at [now]: the
-  /// [hours] hold them ([DayHours.holdsTimes]), as they hold every
+  /// [hours] hold them ([CalendarDayHours.holdsTimes]), as they hold every
   /// all-day range, and [policy] admits the change
   /// ([CalendarEditPolicy.admitsChange]). Asks the policy once at most,
   /// and not where the hours refuse. It tests neither the day limit

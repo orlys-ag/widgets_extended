@@ -99,7 +99,10 @@ DateTime at(DateTime day, int hour, [int minute = 0]) {
 }
 
 /// The month grid's days of [day]'s month under [weekdays].
-DayRange gridRange(DateTime day, {WeekdaySet weekdays = WeekdaySet.all}) {
+DayRange gridRange(
+  DateTime day, {
+  CalendarWeekdaySet weekdays = CalendarWeekdaySet.all,
+}) {
   final grid = MonthGrid.of(day, weekdays: weekdays);
   return (first: grid.firstDay, last: grid.lastDay);
 }
@@ -1047,7 +1050,7 @@ void main() {
     addTearDown(controller.dispose);
     final observer = PushRecorder();
     final taps = <CalendarEntryTapDetails<String>>[];
-    final creates = <CreateRange>[];
+    final creates = <CalendarCreateRange>[];
     final pending = <Completer<void>>[];
     final edits = <CalendarEntry<String>>[];
     final deletes = <CalendarEntry<String>>[];
@@ -1132,7 +1135,7 @@ void main() {
     await tester.pump();
     expect(
       creates.last,
-      CreateRange(start: at(thursday, 14), end: at(thursday, 14, 15)),
+      CalendarCreateRange(start: at(thursday, 14), end: at(thursday, 14, 15)),
     );
     // The slot stays marked while the host's future runs.
     expect(marksRange(tester), isTrue);
@@ -1151,7 +1154,7 @@ void main() {
     await tester.pump();
     expect(
       creates.last,
-      CreateRange(start: at(wednesday, 14), end: at(wednesday, 14, 15)),
+      CalendarCreateRange(start: at(wednesday, 14), end: at(wednesday, 14, 15)),
     );
     pending.last.complete();
     await tester.pumpAndSettle();
@@ -1176,7 +1179,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       creates.last,
-      CreateRange(start: at(thursday, 0), end: at(thursday, 0, 15)),
+      CalendarCreateRange(start: at(thursday, 0), end: at(thursday, 0, 15)),
     );
     pending.last.complete();
 
@@ -1188,7 +1191,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       creates.last,
-      CreateRange(start: at(wednesday, 0), end: at(wednesday, 0, 15)),
+      CalendarCreateRange(start: at(wednesday, 0), end: at(wednesday, 0, 15)),
     );
     pending.last.complete();
     await tester.tap(find.text("edit later"));
@@ -1238,7 +1241,7 @@ void main() {
     addTearDown(memory.dispose);
     final controller = CalendarController(view: CalendarViewKind.month);
     addTearDown(controller.dispose);
-    final creates = <CreateRange>[];
+    final creates = <CalendarCreateRange>[];
     final refused = <DateTime>[];
     await tester.pumpWidget(
       app(
@@ -1258,8 +1261,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.longPress(find.byKey(monthStripKey(tuesday)));
     await tester.pumpAndSettle();
-    expect(creates, <CreateRange>[
-      CreateRange(start: at(tuesday, 11, 45), end: at(tuesday, 12)),
+    expect(creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: at(tuesday, 11, 45), end: at(tuesday, 12)),
     ]);
     expect(refused, isEmpty);
     await tester.longPress(find.byKey(monthStripKey(monday)));
@@ -1482,7 +1485,7 @@ void main() {
     final controller = CalendarController(selectedDay: saturday);
     addTearDown(controller.dispose);
     final readInBuild = <DateTime>[];
-    Widget calendar(WeekdaySet weekdays) {
+    Widget calendar(CalendarWeekdaySet weekdays) {
       return app(
         Column(
           children: <Widget>[
@@ -1505,7 +1508,7 @@ void main() {
       );
     }
 
-    await tester.pumpWidget(calendar(WeekdaySet.all));
+    await tester.pumpWidget(calendar(CalendarWeekdaySet.all));
     await tester.pumpAndSettle();
     expect(controller.selectedDay, saturday);
     final calls = <({SchedulerPhase phase, DayRange? range, DayRange shown})>[];
@@ -1516,12 +1519,12 @@ void main() {
         shown: store.shows.last,
       ));
     });
-    final moved = shownDayNear(saturday, WeekdaySet.workweek);
+    final moved = shownDayNear(saturday, CalendarWeekdaySet.workweek);
     expect(moved, isNot(saturday));
-    final range = gridRange(moved, weekdays: WeekdaySet.workweek);
+    final range = gridRange(moved, weekdays: CalendarWeekdaySet.workweek);
     expect(range, isNot(gridRange(saturday)));
 
-    await tester.pumpWidget(calendar(WeekdaySet.workweek));
+    await tester.pumpWidget(calendar(CalendarWeekdaySet.workweek));
     expect(tester.takeException(), isNull);
     expect(readInBuild.last, moved);
     expect(calls, hasLength(1));
@@ -1661,7 +1664,7 @@ void main() {
     store.addListener(() {
       heard.add(SchedulerBinding.instance.schedulerPhase);
     });
-    Widget calendar(WeekdaySet weekdays) {
+    Widget calendar(CalendarWeekdaySet weekdays) {
       return app(
         Column(
           children: <Widget>[
@@ -1688,15 +1691,15 @@ void main() {
       );
     }
 
-    await tester.pumpWidget(calendar(WeekdaySet.all));
+    await tester.pumpWidget(calendar(CalendarWeekdaySet.all));
     expect(tester.takeException(), isNull);
     expect(store.shows, <DayRange>[gridRange(tuesday)]);
     await tester.pumpAndSettle();
-    await tester.pumpWidget(calendar(WeekdaySet.workweek));
+    await tester.pumpWidget(calendar(CalendarWeekdaySet.workweek));
     expect(tester.takeException(), isNull);
     expect(store.shows, <DayRange>[
       gridRange(tuesday),
-      gridRange(tuesday, weekdays: WeekdaySet.workweek),
+      gridRange(tuesday, weekdays: CalendarWeekdaySet.workweek),
     ]);
     expect(store.phases, <SchedulerPhase>[
       SchedulerPhase.postFrameCallbacks,
@@ -1812,7 +1815,7 @@ void main() {
       "range the store is shown", (tester) async {
     final controller = CalendarController(view: CalendarViewKind.week);
     addTearDown(controller.dispose);
-    Widget calendar(WeekdaySet weekdays) {
+    Widget calendar(CalendarWeekdaySet weekdays) {
       return app(
         CalendarView<String>(
           store: store,
@@ -1832,7 +1835,7 @@ void main() {
       expect(controller.visibleRange, range);
     }
 
-    await tester.pumpWidget(calendar(WeekdaySet.all));
+    await tester.pumpWidget(calendar(CalendarWeekdaySet.all));
     await tester.pumpAndSettle();
     expectRange((first: monday, last: sunday));
     await tester.tap(find.byTooltip("Next week"));
@@ -1841,7 +1844,7 @@ void main() {
     controller.view = CalendarViewKind.day;
     await tester.pumpAndSettle();
     expectRange((first: DateTime(2026, 4, 27), last: DateTime(2026, 5, 3)));
-    await tester.pumpWidget(calendar(WeekdaySet.workweek));
+    await tester.pumpWidget(calendar(CalendarWeekdaySet.workweek));
     await tester.pumpAndSettle();
     expectRange((first: DateTime(2026, 4, 27), last: DateTime(2026, 5, 1)));
   });
@@ -1858,7 +1861,7 @@ void main() {
     addTearDown(controller.dispose);
     final shownInBuild = <bool>[];
     late DayRange asked;
-    Widget calendar(WeekdaySet weekdays) {
+    Widget calendar(CalendarWeekdaySet weekdays) {
       return app(
         Column(
           children: <Widget>[
@@ -1886,13 +1889,13 @@ void main() {
 
     // Day under the workweek: the weekend is not read.
     asked = (first: monday, last: DateTime(2026, 4, 24));
-    await tester.pumpWidget(calendar(WeekdaySet.workweek));
+    await tester.pumpWidget(calendar(CalendarWeekdaySet.workweek));
     await tester.pumpAndSettle();
     expect(blockFinder("talk"), findsOneWidget);
     expect(caching.isRead(saturday), isFalse);
     source.holds = true;
     asked = (first: monday, last: sunday);
-    await tester.pumpWidget(calendar(WeekdaySet.all));
+    await tester.pumpWidget(calendar(CalendarWeekdaySet.all));
     expect(shownInBuild.last, isFalse);
     expect(find.text("loading"), findsOneWidget);
     expect(blockFinder("talk"), findsNothing);
@@ -1911,9 +1914,9 @@ void main() {
     final chip = find.byKey(monthChipKey(monthSegmentKey("talk", monday)));
     expect(chip, findsOneWidget);
     source.holds = true;
-    asked = gridRange(tuesday, weekdays: WeekdaySet.workweek);
+    asked = gridRange(tuesday, weekdays: CalendarWeekdaySet.workweek);
     expect(asked, isNot(gridRange(tuesday)));
-    await tester.pumpWidget(calendar(WeekdaySet.workweek));
+    await tester.pumpWidget(calendar(CalendarWeekdaySet.workweek));
     expect(shownInBuild.last, isFalse);
     expect(chip, findsOneWidget);
     expect(find.text("loading"), findsNothing);
@@ -1927,7 +1930,7 @@ void main() {
     useTallView(tester);
     final controller = CalendarController(view: CalendarViewKind.week);
     addTearDown(controller.dispose);
-    final creates = <CreateRange>[];
+    final creates = <CalendarCreateRange>[];
     await tester.pumpWidget(
       app(
         CalendarView<String>(
@@ -2028,7 +2031,7 @@ void main() {
 
   testWidgets("CV28 hours off the grid of the slot length fail an "
       "assertion, and on it build", (tester) async {
-    const hours = DayHours(8 * 60 + 10, 17 * 60 + 50);
+    const hours = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
     final office = MemoryCalendarStore<String>(hours: hours);
     addTearDown(office.dispose);
     await tester.pumpWidget(
@@ -2049,8 +2052,8 @@ void main() {
 
   testWidgets("CV45 every view shows the store's hours, and a set of them "
       "reaches the view shown", (tester) async {
-    const office = DayHours(8 * 60, 18 * 60);
-    const late = DayHours(10 * 60, 20 * 60);
+    const office = CalendarDayHours(8 * 60, 18 * 60);
+    const late = CalendarDayHours(10 * 60, 20 * 60);
     final memory = MemoryCalendarStore<String>(hours: office);
     addTearDown(memory.dispose);
     final controller = CalendarController(view: CalendarViewKind.week);
@@ -2066,7 +2069,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    DayHours gridHours() {
+    CalendarDayHours gridHours() {
       return tester
           .widget<TimedGrid<String>>(find.byType(TimedGrid<String>))
           .hours;
@@ -2114,7 +2117,7 @@ void main() {
     // Setup sanity: the create's notify reached Agenda's list.
     expect(find.text("talk"), findsOneWidget);
     expect(headers, built);
-    memory.hours = const DayHours(8 * 60, 18 * 60);
+    memory.hours = const CalendarDayHours(8 * 60, 18 * 60);
     await tester.pump();
     expect(headers, built + 1);
   });
@@ -2122,8 +2125,8 @@ void main() {
   testWidgets("CV47 a new store's hours show and its sets reach the "
       "calendar, and once the calendar leaves, a set of either store's "
       "hours reaches it no more", (tester) async {
-    const office = DayHours(8 * 60, 18 * 60);
-    const late = DayHours(10 * 60, 20 * 60);
+    const office = CalendarDayHours(8 * 60, 18 * 60);
+    const late = CalendarDayHours(10 * 60, 20 * 60);
     final first = MemoryCalendarStore<String>();
     addTearDown(first.dispose);
     final second = MemoryCalendarStore<String>(hours: office);
@@ -2132,13 +2135,13 @@ void main() {
       return app(CalendarView<String>(store: store, clock: fixedClock));
     }
 
-    DayHours listHours() {
+    CalendarDayHours listHours() {
       return tester.widget<DayList<String>>(find.byType(DayList<String>)).hours;
     }
 
     await tester.pumpWidget(calendar(first));
     await tester.pumpAndSettle();
-    expect(listHours(), DayHours.allDay);
+    expect(listHours(), CalendarDayHours.allDay);
     await tester.pumpWidget(calendar(second));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
@@ -2161,7 +2164,7 @@ void main() {
     final first = MemoryCalendarStore<String>();
     addTearDown(first.dispose);
     final second = MemoryCalendarStore<String>(
-      hours: const DayHours(8 * 60, 18 * 60),
+      hours: const CalendarDayHours(8 * 60, 18 * 60),
     );
     addTearDown(second.dispose);
     var headers = 0;
@@ -2200,7 +2203,7 @@ void main() {
     addTearDown(memory.dispose);
     final controller = CalendarController(view: CalendarViewKind.month);
     addTearDown(controller.dispose);
-    final creates = <CreateRange>[];
+    final creates = <CalendarCreateRange>[];
     await tester.pumpWidget(
       app(
         CalendarView<String>(
@@ -2221,14 +2224,14 @@ void main() {
     await tester.pumpAndSettle();
     // The lock's earliest 30-minute start is 11:30, which the standup's
     // 11:15 to 11:45 overlaps, so the first free slot starts at 12:00.
-    expect(creates, <CreateRange>[
-      CreateRange(start: at(tuesday, 12), end: at(tuesday, 12, 30)),
+    expect(creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: at(tuesday, 12), end: at(tuesday, 12, 30)),
     ]);
     await tester.longPress(find.byKey(monthStripKey(wednesday)));
     await tester.pumpAndSettle();
     expect(
       creates.last,
-      CreateRange(start: wednesday, end: at(wednesday, 0, 30)),
+      CalendarCreateRange(start: wednesday, end: at(wednesday, 0, 30)),
     );
   });
 

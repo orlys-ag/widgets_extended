@@ -297,7 +297,11 @@ Matcher pendingRefusal(String id) {
 /// the end, outside them.
 Matcher hoursRefusal({required bool startOutside}) {
   return isA<CalendarHoursException>()
-      .having((error) => error.hours, "hours", const DayHours(480, 1080))
+      .having(
+        (error) => error.hours,
+        "hours",
+        const CalendarDayHours(480, 1080),
+      )
       .having((error) => error.startOutside, "startOutside", startOutside)
       .having((error) => error.endOutside, "endOutside", !startOutside);
 }
@@ -837,7 +841,7 @@ void main() {
     store.show(weekFirst, weekLast);
     harness.lastCall.succeed(<CalendarEntry<String>>[early]);
     await settle();
-    store.hours = const DayHours(480, 1080);
+    store.hours = const CalendarDayHours(480, 1080);
     final calls = harness.source.calls.length;
 
     final created = errorOf(
@@ -1509,7 +1513,7 @@ void main() {
         source.entries = <CalendarEntry<String>>[item];
         final store = CachingCalendarStore<String>(
           dataSource: source,
-          hours: const DayHours(480, 1080),
+          hours: const CalendarDayHours(480, 1080),
         );
         store.show(weekFirst, weekLast);
         trace("no id", store.update(draft(day, 600, 660)));

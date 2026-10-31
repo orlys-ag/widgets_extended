@@ -311,7 +311,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     }
   }
 
-  Future<void> _openCreateFlow(CreateRange range) {
+  Future<void> _openCreateFlow(CalendarCreateRange range) {
     return showCreateFlow(
       context,
       store: _store,

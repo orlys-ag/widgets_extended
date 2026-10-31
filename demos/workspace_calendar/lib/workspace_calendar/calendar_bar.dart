@@ -30,8 +30,8 @@ const ValueKey<String> hourLabelFormatKey = ValueKey<String>(
 /// "08:00 - 18:00", or "8 AM - 6 PM", for [hours] in [format], as
 /// [strings] write times.
 String hoursLabel(
-  DayHours hours,
-  HourLabelFormat format,
+  CalendarDayHours hours,
+  CalendarHourLabelFormat format,
   CalendarLocalizations strings,
 ) {
   final start = strings.formatTime(hours.start, format);
@@ -96,7 +96,7 @@ class CalendarBar extends StatelessWidget {
     if (end - start < 60) {
       return;
     }
-    _set(settings.copyWith(hours: DayHours(start, end)));
+    _set(settings.copyWith(hours: CalendarDayHours(start, end)));
   }
 
   @override
@@ -213,7 +213,7 @@ class CalendarBar extends StatelessWidget {
                 onSelectionChanged: (selected) {
                   _set(
                     settings.copyWith(
-                      weekdays: WeekdaySet.of(
+                      weekdays: CalendarWeekdaySet.of(
                         selected,
                         firstColumn: weekdays.firstColumn,
                       ),
@@ -233,13 +233,13 @@ class CalendarBar extends StatelessWidget {
               trailing: _LabeledSwitch(
                 switchKey: hourLabelFormatKey,
                 label: "AM/PM",
-                value: format == HourLabelFormat.twelveHour,
+                value: format == CalendarHourLabelFormat.twelveHour,
                 onChanged: (twelveHour) {
                   _set(
                     settings.copyWith(
                       hourLabelFormat: twelveHour
-                          ? HourLabelFormat.twelveHour
-                          : HourLabelFormat.twentyFourHour,
+                          ? CalendarHourLabelFormat.twelveHour
+                          : CalendarHourLabelFormat.twentyFourHour,
                     ),
                   );
                 },

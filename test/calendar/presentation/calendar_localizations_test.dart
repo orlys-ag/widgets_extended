@@ -67,8 +67,14 @@ void main() {
   group("L1 the labels", () {
     test("formatTime writes hours and minutes on the 24-hour clock, 1440 as "
         "24:00", () {
-      expect(english.formatTime(570, HourLabelFormat.twentyFourHour), "09:30");
-      expect(english.formatTime(1440, HourLabelFormat.twentyFourHour), "24:00");
+      expect(
+        english.formatTime(570, CalendarHourLabelFormat.twentyFourHour),
+        "09:30",
+      );
+      expect(
+        english.formatTime(1440, CalendarHourLabelFormat.twentyFourHour),
+        "24:00",
+      );
     });
 
     test("LB2 moreEntries and entryCount count in words", () {
@@ -114,7 +120,7 @@ void main() {
     expect(english.startsAt("07:30"), "Starts at 07:30");
     expect(english.endsAt("19:30"), "Ends at 19:30");
     expect(
-      english.formatTimeRange(540, 600, HourLabelFormat.twentyFourHour),
+      english.formatTimeRange(540, 600, CalendarHourLabelFormat.twentyFourHour),
       "09:00-10:00",
     );
   });
@@ -125,7 +131,7 @@ void main() {
       english.entryTimes(
         DateTime(2026, 4, 21, 9, 10),
         DateTime(2026, 4, 21, 9, 50),
-        HourLabelFormat.twentyFourHour,
+        CalendarHourLabelFormat.twentyFourHour,
       ),
       "09:10-09:50",
     );
@@ -133,7 +139,7 @@ void main() {
       english.entryTimes(
         DateTime(2026, 4, 20, 22),
         DateTime(2026, 4, 21, 2),
-        HourLabelFormat.twentyFourHour,
+        CalendarHourLabelFormat.twentyFourHour,
       ),
       "22:00-02:00",
     );
@@ -141,7 +147,7 @@ void main() {
       english.entryTimes(
         DateTime(2026, 4, 20, 22),
         DateTime(2026, 4, 21),
-        HourLabelFormat.twentyFourHour,
+        CalendarHourLabelFormat.twentyFourHour,
       ),
       "22:00-24:00",
     );
@@ -149,7 +155,7 @@ void main() {
       english.entryTimes(
         DateTime(2026, 4, 20),
         DateTime(2026, 4, 21),
-        HourLabelFormat.twentyFourHour,
+        CalendarHourLabelFormat.twentyFourHour,
       ),
       "All day",
     );
@@ -157,7 +163,7 @@ void main() {
       english.entryTimes(
         DateTime(2026, 4, 20),
         DateTime(2026, 4, 23),
-        HourLabelFormat.twentyFourHour,
+        CalendarHourLabelFormat.twentyFourHour,
       ),
       "All day",
     );
@@ -166,7 +172,7 @@ void main() {
 
   test("HF1 entryTimes, landing and entryLabel write their times in the "
       "format they take", () {
-    const twelve = HourLabelFormat.twelveHour;
+    const twelve = CalendarHourLabelFormat.twelveHour;
     final today = DateTime(2026, 4, 15);
     expect(
       english.entryTimes(
@@ -209,7 +215,7 @@ void main() {
 
   group("C7 formatTime", () {
     test("names a minute as hours and minutes on the 24-hour clock", () {
-      const format = HourLabelFormat.twentyFourHour;
+      const format = CalendarHourLabelFormat.twentyFourHour;
       expect(english.formatTime(0, format), "00:00");
       expect(english.formatTime(13 * 60, format), "13:00");
       expect(english.formatTime(8 * 60 + 15, format), "08:15");
@@ -218,7 +224,7 @@ void main() {
 
     test("names the hour and the half of the day on the 12-hour clock, with "
         "minutes where there are some", () {
-      const format = HourLabelFormat.twelveHour;
+      const format = CalendarHourLabelFormat.twelveHour;
       expect(english.formatTime(0, format), "12 AM");
       expect(english.formatTime(60, format), "1 AM");
       expect(english.formatTime(9 * 60, format), "9 AM");
@@ -246,7 +252,7 @@ void main() {
       expect(english.monthYear(DateTime(2026, 4)), "April 2026");
       expect(english.shortMonthYear(DateTime(2026, 4, 21)), "Apr 2026");
       expect(
-        english.formatTimeRange(540, 600, HourLabelFormat.twelveHour),
+        english.formatTimeRange(540, 600, CalendarHourLabelFormat.twelveHour),
         "9 AM-10 AM",
       );
     });
@@ -285,7 +291,7 @@ void main() {
           DateTime(2026, 4, 15, 14),
           DateTime(2026, 4, 15, 15),
           today,
-          HourLabelFormat.twentyFourHour,
+          CalendarHourLabelFormat.twentyFourHour,
         ),
         "Today, April 15, 14:00-15:00",
       );
@@ -294,7 +300,7 @@ void main() {
           DateTime(2026, 4, 20, 22),
           DateTime(2026, 4, 21, 2),
           today,
-          HourLabelFormat.twentyFourHour,
+          CalendarHourLabelFormat.twentyFourHour,
         ),
         "Monday, April 20, 22:00 to Tuesday, April 21, 02:00",
       );
@@ -303,7 +309,7 @@ void main() {
           DateTime(2026, 4, 20),
           DateTime(2026, 4, 21),
           today,
-          HourLabelFormat.twentyFourHour,
+          CalendarHourLabelFormat.twentyFourHour,
         ),
         "Monday, April 20, all day",
       );
@@ -312,7 +318,7 @@ void main() {
           DateTime(2026, 4, 20),
           DateTime(2026, 4, 23),
           today,
-          HourLabelFormat.twentyFourHour,
+          CalendarHourLabelFormat.twentyFourHour,
         ),
         "Monday, April 20 to Wednesday, April 22, all day",
       );
@@ -326,7 +332,7 @@ void main() {
           kind: "Health",
           start: DateTime(2026, 4, 20),
           end: DateTime(2026, 4, 21),
-          format: HourLabelFormat.twentyFourHour,
+          format: CalendarHourLabelFormat.twentyFourHour,
           pending: true,
         ),
         "Gym, Health, Monday, April 20, all day, pending",
@@ -337,7 +343,7 @@ void main() {
           kind: null,
           start: DateTime(2026, 4, 20),
           end: DateTime(2026, 4, 23),
-          format: HourLabelFormat.twentyFourHour,
+          format: CalendarHourLabelFormat.twentyFourHour,
           pending: false,
         ),
         "Gym, Monday, April 20 to Wednesday, April 22, all day",
@@ -348,7 +354,7 @@ void main() {
           kind: null,
           start: DateTime(2026, 4, 20, 9, 10),
           end: DateTime(2026, 4, 20, 9, 50),
-          format: HourLabelFormat.twentyFourHour,
+          format: CalendarHourLabelFormat.twentyFourHour,
           pending: false,
         ),
         "Gym, Monday, April 20, 09:10 to 09:50",
@@ -359,7 +365,7 @@ void main() {
           kind: null,
           start: DateTime(2026, 4, 20, 22),
           end: DateTime(2026, 4, 21),
-          format: HourLabelFormat.twentyFourHour,
+          format: CalendarHourLabelFormat.twentyFourHour,
           pending: false,
         ),
         "Gym, Monday, April 20, 22:00 to 24:00",
@@ -370,7 +376,7 @@ void main() {
           kind: null,
           start: DateTime(2026, 4, 20, 22),
           end: DateTime(2026, 4, 21, 2),
-          format: HourLabelFormat.twentyFourHour,
+          format: CalendarHourLabelFormat.twentyFourHour,
           pending: false,
         ),
         "Gym, Monday, April 20, 22:00 to Tuesday, April 21, 02:00",
