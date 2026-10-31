@@ -59,9 +59,10 @@ MoveRecordingStore storeOf(
 
 /// An editable calendar on [view] over [day] and [store], in a view 800
 /// wide and 2000 tall, where Week's and Day's grids show every slot of the
-/// day, marking [today] as today, or with none the clock's day. Its clock
-/// reads [time], its policy is [policy]'s and edit mode
-/// [editable]'s, each of which builds it again when set. It records each
+/// day, marking [today] as today, or with none the clock's day. Its clock,
+/// a function made anew in each build, reads [time]; its policy is
+/// [policy]'s and edit mode [editable]'s, each of which builds it again
+/// when set, as a change of [rebuilds] does. It records each
 /// create it reports in [creates], each tap in [taps], the last details
 /// each card is built with in [cards], the id of each card it builds in
 /// [cardsBuilt], and each add button's details in [adds]; it hands each
@@ -90,6 +91,10 @@ class Host {
   final ValueNotifier<CalendarEditPolicy<String>?> policy;
   final ValueNotifier<bool> editable = ValueNotifier<bool>(true);
 
+  /// Builds the calendar again with nothing else changed, as a host's own
+  /// rebuild does, whenever its value changes.
+  final ValueNotifier<int> rebuilds = ValueNotifier<int>(0);
+
   final List<CreateRange> creates = <CreateRange>[];
   final List<CalendarEntryTapDetails<String>> taps =
       <CalendarEntryTapDetails<String>>[];
@@ -110,11 +115,16 @@ class Host {
     addTearDown(controller.dispose);
     addTearDown(policy.dispose);
     addTearDown(editable.dispose);
+    addTearDown(rebuilds.dispose);
     await tester.pumpWidget(
       MaterialApp(
         theme: ThemeData(splashFactory: NoSplash.splashFactory),
         home: ListenableBuilder(
-          listenable: Listenable.merge(<Listenable>[policy, editable]),
+          listenable: Listenable.merge(<Listenable>[
+            policy,
+            editable,
+            rebuilds,
+          ]),
           builder: (context, child) {
             return CalendarView<String>(
               key: ObjectKey(this),
@@ -1645,6 +1655,70 @@ void main() {
     expect(second, hasLength(1));
     expect(second.single.time, at(tuesday, 9, 1, 30));
   });
+
+  testWidgets("PV12 a build that hands the calendar a new clock function "
+      "reading the minute it holds asks the policy nothing, and the views "
+      "go on asking at the time it holds; one reading another minute is "
+      "taken at once", (tester) async {
+    final policy = _NowRecordingPolicy();
+    final host = Host(
+      storeOf(<CalendarEntry<String>>[
+        entryOf("B", at(tuesday, 10), at(tuesday, 11)),
+      ]),
+      view: CalendarViewKind.week,
+      day: tuesday,
+      time: at(tuesday, 9, 0, 5),
+      policy: policy,
+    );
+    await host.pump(tester);
+    policy.nows.clear();
+
+    host.time = at(tuesday, 9, 0, 10);
+    host.rebuilds.value++;
+    await tester.pump();
+    expect(policy.nows, isEmpty);
+
+    host.controller.view = CalendarViewKind.agenda;
+    await tester.pumpAndSettle();
+    expect(timesOf(policy.nows), <DateTime>{at(tuesday, 9, 0, 5)});
+
+    policy.nows.clear();
+    host.time = at(tuesday, 9, 5, 10);
+    host.rebuilds.value++;
+    await tester.pump();
+    expect(timesOf(policy.nows), <DateTime>{at(tuesday, 9, 5, 10)});
+  });
+
+  testWidgets("PV13 a new clock function reading the minute the calendar "
+      "holds at another second times the next minute from its reading", (
+    tester,
+  ) async {
+    final policy = _NowRecordingPolicy();
+    final host = Host(
+      storeOf(<CalendarEntry<String>>[
+        entryOf("B", at(tuesday, 10), at(tuesday, 11)),
+      ]),
+      view: CalendarViewKind.week,
+      day: tuesday,
+      time: at(tuesday, 9, 0, 10),
+      policy: policy,
+    );
+    await host.pump(tester);
+    host.time = at(tuesday, 9, 0, 40);
+    host.rebuilds.value++;
+    await tester.pump();
+
+    policy.nows.clear();
+    host.time = at(tuesday, 9, 1);
+    await tester.pump(const Duration(seconds: 21));
+    await tester.pump();
+    expect(timesOf(policy.nows), <DateTime>{at(tuesday, 9, 1)});
+  });
+}
+
+/// The clock readings of [nows], each once.
+Set<DateTime> timesOf(Iterable<CalendarNow> nows) {
+  return <DateTime>{for (final now in nows) now.time};
 }
 
 /// Allows everything, recording the [CalendarNow] each answer is asked

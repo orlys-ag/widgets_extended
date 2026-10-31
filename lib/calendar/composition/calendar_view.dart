@@ -321,6 +321,13 @@ class CalendarView<T> extends StatefulWidget {
 
   /// Reads the current time, which the calendar reads when first built and
   /// again at the start of each minute; null reads [DateTime.now].
+  ///
+  /// A new function is read at once, and the next minute is timed from
+  /// its reading. The reading replaces the time the calendar holds where
+  /// it marks another today, lies in another minute or gives another
+  /// [CalendarNow.timeOnToday], so a closure written in the host's build,
+  /// a new function at each build, does not give the views a new time at
+  /// each build.
   final DateTime Function()? clock;
 
   /// The day the calendar marks as today and opens on; null marks the day
@@ -600,8 +607,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     super.didUpdateWidget(oldWidget);
     if (widget.clock != oldWidget.clock) {
       _minuteTimer?.cancel();
-      _now.value = _nowAt(_clock());
-      _scheduleMinute(_now.value.time);
+      final next = _nowAt(_clock());
+      if (!_readsAlike(next, _now.value)) {
+        _now.value = next;
+      }
+      _scheduleMinute(next.time);
     } else if (widget.today != oldWidget.today) {
       _now.value = _nowAt(_now.value.time);
     }
@@ -826,6 +836,31 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// [CalendarView.today], or with none [time]'s day.
   CalendarNow _nowAt(DateTime time) {
     return CalendarNow(time: time, today: widget.today ?? time);
+  }
+
+  /// Whether [next], a reading of a new [CalendarView.clock], leaves
+  /// [held], the time the calendar holds, current: it marks the same
+  /// today, lies in the same minute and gives the same
+  /// [CalendarNow.timeOnToday], which is all the views and the built-in
+  /// policies read of a [CalendarNow]. A closure written in the host's
+  /// build is a new function at each build; keeping [held] for its reading
+  /// gives the views no new [CalendarNow] to ask the policy at.
+  static bool _readsAlike(CalendarNow next, CalendarNow held) {
+    return next.today == held.today &&
+        next.timeOnToday == held.timeOnToday &&
+        _minuteStartOf(next.time) == _minuteStartOf(held.time);
+  }
+
+  /// The instant [time]'s minute starts at: [time] less its seconds and
+  /// their fractions.
+  static DateTime _minuteStartOf(DateTime time) {
+    return time.subtract(
+      Duration(
+        seconds: time.second,
+        milliseconds: time.millisecond,
+        microseconds: time.microsecond,
+      ),
+    );
   }
 
   /// Reads the clock again at the start of the minute after [now], and
