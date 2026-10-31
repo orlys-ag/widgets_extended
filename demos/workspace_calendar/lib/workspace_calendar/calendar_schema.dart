@@ -3,10 +3,12 @@
 /// and the form both read these.
 ///
 /// An item is a JSON envelope: `id`, `type`, `title`, `start` and `end`,
-/// instants in UTC as [isoDateTime] writes them
-/// (`YYYY-MM-DDTHH:MM:SS.sssZ`), or local date-times with no offset
-/// (`YYYY-MM-DDTHH:MM`), which [parseIsoDateTime] reads too, the end
-/// exclusive, and `fields`, the type's payload.
+/// the end exclusive, and `fields`, the type's payload. An all-day item's
+/// `start` and `end` are local dates (`YYYY-MM-DD`), its end the day after
+/// its last; a timed item's are instants in UTC as [isoDateTime] writes
+/// them (`YYYY-MM-DDTHH:MM:SS.sssZ`), or local date-times with no offset
+/// (`YYYY-MM-DDTHH:MM`), which [parseIsoDateTime] reads too. Both are of
+/// one form; [itemTimeText] writes them and [parseItemTime] reads them.
 library;
 
 import 'package:widgets_extended/widgets_extended.dart';
@@ -250,7 +252,9 @@ String isoDateTime(DateTime time) {
   return time.toUtc().toIso8601String();
 }
 
-/// [date]'s day as an envelope's local date-time starts it, "2026-04-21".
+/// [date]'s day, "2026-04-21", from its local year, month and day: an
+/// all-day item's start or end, and the start of an envelope's local
+/// date-time.
 String isoDate(DateTime date) {
   final year = date.year.toString().padLeft(4, "0");
   final month = date.month.toString().padLeft(2, "0");
@@ -341,6 +345,48 @@ DateTime? _utcTimeOf(RegExpMatch match) {
   return local;
 }
 
+/// [time] as an envelope writes an item's start or end: where [allDay],
+/// for an all-day item, whose times are day starts, its date as [isoDate]
+/// writes it from its local fields, never through UTC; otherwise its
+/// instant in UTC as [isoDateTime] writes it. The one writer of an item's
+/// times; [parseItemTime] reads what it writes.
+String itemTimeText(DateTime time, {required bool allDay}) {
+  if (allDay) {
+    return isoDate(time);
+  }
+  return isoDateTime(time);
+}
+
+final RegExp _datePattern = RegExp(r"^(\d{4})-(\d{2})-(\d{2})$");
+
+/// The time [text] names as an item's start or end, and whether it names
+/// it as a date, as an all-day item's times are written. A `YYYY-MM-DD`
+/// text reads as the start of that local day, the instant
+/// `DateTime(year, month, day)` gives, where those fields read back
+/// unchanged, with `date` true; any other text reads as [parseIsoDateTime]
+/// reads it, with `date` false. Null where neither reads it. The one
+/// reader of an item's times, which reads what [itemTimeText] writes.
+({DateTime time, bool date})? parseItemTime(String text) {
+  final match = _datePattern.firstMatch(text);
+  if (match != null) {
+    final year = int.parse(match.group(1)!);
+    final month = int.parse(match.group(2)!);
+    final day = int.parse(match.group(3)!);
+    final date = DateTime(year, month, day);
+    // `DateTime` rolls a month or a day out of range into the next field,
+    // so a date that does not exist reads back other fields.
+    if (date.year != year || date.month != month || date.day != day) {
+      return null;
+    }
+    return (time: date, date: true);
+  }
+  final time = parseIsoDateTime(text);
+  if (time == null) {
+    return null;
+  }
+  return (time: time, date: false);
+}
+
 const Set<String> _envelopeKeys = <String>{
   "id",
   "type",
@@ -351,8 +397,10 @@ const Set<String> _envelopeKeys = <String>{
 };
 
 /// Every rule [json] breaks, keyed by the envelope key or by
-/// [fieldErrorKey] of the payload key it concerns. Empty when [json] is a
-/// valid item. A payload is checked only when the type is known.
+/// [fieldErrorKey] of the payload key it concerns; a start and an end that
+/// [parseItemTime] reads in two forms, a date and a date-time, key `end`.
+/// Empty when [json] is a valid item. A payload is checked only when the
+/// type is known.
 Map<String, String> validateItemJson(Map<String, Object?> json) {
   final errors = <String, String>{};
   for (final key in json.keys) {
@@ -370,20 +418,22 @@ Map<String, String> validateItemJson(Map<String, Object?> json) {
     errors["type"] = "Unknown type.";
   }
   final startText = json["start"];
-  final start = startText is String ? parseIsoDateTime(startText) : null;
+  final start = startText is String ? parseItemTime(startText) : null;
   if (start == null) {
     errors["start"] = _timeError;
   }
   final endText = json["end"];
-  final end = endText is String ? parseIsoDateTime(endText) : null;
+  final end = endText is String ? parseItemTime(endText) : null;
   if (end == null) {
     errors["end"] = _timeError;
   } else if (start != null) {
-    if (!end.isAfter(start)) {
+    if (end.date != start.date) {
+      errors["end"] = _mixedTimeError;
+    } else if (!end.time.isAfter(start.time)) {
       errors["end"] = "The end must be after the start.";
     } else if (!isAllowedDayCount(
-      CalendarDates.lastDayNumberOf(start, end) -
-          CalendarDates.dayNumber(start) +
+      CalendarDates.lastDayNumberOf(start.time, end.time) -
+          CalendarDates.dayNumber(start.time) +
           1,
     )) {
       errors["end"] = "The item covers 1 to $maxDayCount days.";
@@ -399,11 +449,17 @@ Map<String, String> validateItemJson(Map<String, Object?> json) {
 }
 
 /// What [validateItemJson] reports for a start or an end that
-/// [parseIsoDateTime] does not read.
+/// [parseItemTime] does not read.
 const String _timeError =
-    "Enter a date and time in UTC as YYYY-MM-DDTHH:MM:SSZ on a whole "
-    "minute of local time, or as a local YYYY-MM-DDTHH:MM at a time the "
-    "clock reads.";
+    "Enter a date as YYYY-MM-DD for an all-day item, or a date and time in "
+    "UTC as YYYY-MM-DDTHH:MM:SSZ on a whole minute of local time, or as a "
+    "local YYYY-MM-DDTHH:MM at a time the clock reads.";
+
+/// What [validateItemJson] reports, keyed `end`, for a start and an end
+/// that [parseItemTime] reads in two forms, a date and a date-time.
+const String _mixedTimeError =
+    "The start and end are both dates, for an all-day item, or both dates "
+    "and times.";
 
 void _validateFields(
   TypeSchema schema,

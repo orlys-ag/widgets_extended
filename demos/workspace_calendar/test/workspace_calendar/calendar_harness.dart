@@ -44,6 +44,7 @@ const String releasePlanningId = "item-21";
 const String designSystemSyncId = "item-22";
 const String designCritiqueId = "item-25";
 const String dayOffId = "item-28";
+const String conferenceTripId = "item-29";
 
 /// The Monday of [today]'s week.
 final DateTime monday = DateTime(2026, 4, 20);
@@ -220,15 +221,33 @@ Map<String, Object?> taskJson(
   };
 }
 
-/// The start of the stored envelope [item], read as the envelope writes
-/// it.
-DateTime startOfJson(Map<String, Object?> item) {
-  return parseIsoDateTime(item["start"]! as String)!;
+/// An all-day Task envelope with status to do over the [dayCount] days
+/// from [first]: from [first]'s date to the date of the day after its
+/// last.
+Map<String, Object?> allDayTaskJson(
+  String title,
+  DateTime first, {
+  int dayCount = 1,
+}) {
+  return <String, Object?>{
+    "type": "task",
+    "title": title,
+    "start": isoDate(first),
+    "end": isoDate(CalendarDates.addDays(first, dayCount)),
+    "fields": <String, Object?>{"status": "toDo"},
+  };
 }
 
-/// The end of the stored envelope [item], read as the envelope writes it.
+/// The start of the stored envelope [item], read as the envelope writes
+/// it ([parseItemTime]).
+DateTime startOfJson(Map<String, Object?> item) {
+  return parseItemTime(item["start"]! as String)!.time;
+}
+
+/// The end of the stored envelope [item], read as the envelope writes it
+/// ([parseItemTime]).
 DateTime endOfJson(Map<String, Object?> item) {
-  return parseIsoDateTime(item["end"]! as String)!;
+  return parseItemTime(item["end"]! as String)!.time;
 }
 
 /// The app [pumpCalendar] pumps: the calendar over [api], given [today]

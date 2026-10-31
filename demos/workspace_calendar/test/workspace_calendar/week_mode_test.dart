@@ -2910,4 +2910,23 @@ void main() {
     expect(find.widgetWithText(SnackBar, "Deleting failed."), findsOneWidget);
     expect(blockFinder(moved), findsOneWidget);
   });
+
+  testWidgets("W45 the seed's Conference trip shows as one all-day bar and "
+      "no block in its week", (tester) async {
+    final api = await pumpCalendar(tester);
+    await pickMode(tester, "Week");
+    // Setup sanity: the id names the trip.
+    expect(
+      (await stored(tester, api, conferenceTripId)).title,
+      "Conference trip",
+    );
+    for (var week = 0; week < 3; week++) {
+      await tester.tap(find.byTooltip("Next week"));
+      await tester.pump(api.latency);
+      await tester.pumpAndSettle();
+    }
+    expect(headerFinder(DateTime(2026, 5, 11)), findsOneWidget);
+    expect(find.byKey(allDayBarKey(conferenceTripId)), findsOneWidget);
+    expect(blockFinder(conferenceTripId), findsNothing);
+  });
 }

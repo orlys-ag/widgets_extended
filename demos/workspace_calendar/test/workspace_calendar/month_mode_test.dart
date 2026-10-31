@@ -506,7 +506,7 @@ void main() {
         tester,
         seed: <Map<String, Object?>>[
           // All day from April 24 to 28, sharing no time with W.
-          taskJson("X", april(24), 0, 24 * 60, dayCount: 5),
+          allDayTaskJson("X", april(24), dayCount: 5),
           taskJson("W", april(25), 11 * 60, 12 * 60, dayCount: 2),
         ],
       );
@@ -584,7 +584,7 @@ void main() {
       tester,
       seed: <Map<String, Object?>>[
         // All day on April 19 and 20, sharing no time with Q.
-        taskJson("P", april(19), 0, 24 * 60, dayCount: 2),
+        allDayTaskJson("P", april(19), dayCount: 2),
         taskAt("Q", april(20), 9, 10),
       ],
     );
@@ -605,7 +605,7 @@ void main() {
         editing: true,
         seed: <Map<String, Object?>>[
           // All day from April 20 to 22, sharing no time with B to D.
-          taskJson("A", april(20), 0, 24 * 60, dayCount: 3),
+          allDayTaskJson("A", april(20), dayCount: 3),
           taskAt("B", april(20), 10, 11),
           taskAt("C", april(20), 11, 12),
           taskAt("D", april(22), 12, 13),

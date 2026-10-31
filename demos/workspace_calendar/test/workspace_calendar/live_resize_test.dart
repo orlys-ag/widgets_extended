@@ -105,7 +105,7 @@ void main() {
     await createBeforePump(
       tester,
       api,
-      taskJson("Focus", wednesday, 0, CalendarDates.minutesPerDay),
+      allDayTaskJson("Focus", wednesday),
     );
     final focus =
         (await listAll(

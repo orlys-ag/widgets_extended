@@ -381,10 +381,10 @@ class _ItemFormState extends State<_ItemForm> {
     super.dispose();
   }
 
-  /// The item the form holds, as an envelope: with All day on, from the
-  /// start of [_startDate] to the start of the day after [_endDate], and
-  /// otherwise from [_startMinute] of [_startDate] to [_endMinute] of
-  /// [_endDate].
+  /// The item the form holds, as an envelope: with All day on, an all-day
+  /// item from [_startDate] to the day after [_endDate], written as dates
+  /// ([itemTimeText]), and otherwise a timed one from [_startMinute] of
+  /// [_startDate] to [_endMinute] of [_endDate].
   Map<String, Object?> _envelope() {
     final fields = <String, Object?>{};
     for (final field in _schema.fields) {
@@ -417,19 +417,19 @@ class _ItemFormState extends State<_ItemForm> {
       "type": widget.item.type.id,
       "title": _title.text,
       "start": _allDay
-          ? isoDateTime(_startDate)
+          ? itemTimeText(_startDate, allDay: true)
           : _timeText(_startDate, _startMinute),
       "end": _allDay
-          ? isoDateTime(CalendarDates.addDays(_endDate, 1))
+          ? itemTimeText(CalendarDates.addDays(_endDate, 1), allDay: true)
           : _timeText(_endDate, _endMinute),
       "fields": fields,
     };
   }
 
-  /// [minute] of [day] as the envelope writes it: the time
-  /// [timeAtWallMinute] gives, the earlier of a time the clock repeats, so
-  /// 24:00 is the next day's start; and a time the clock skips as its own
-  /// text, which the validator then reports.
+  /// [minute] of [day] as the envelope writes a timed item's time
+  /// ([itemTimeText]): the time [timeAtWallMinute] gives, the earlier of a
+  /// time the clock repeats, so 24:00 is the next day's start; and a time
+  /// the clock skips as its own text, which the validator then reports.
   static String _timeText(DateTime day, int minute) {
     final time = CalendarDates.timeAtWallMinute(
       CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay + minute,
@@ -437,7 +437,7 @@ class _ItemFormState extends State<_ItemForm> {
     if (time == null) {
       return "${isoDate(day)}T${isoTime(minute)}";
     }
-    return isoDateTime(time);
+    return itemTimeText(time, allDay: false);
   }
 
   /// Validates and sends. Nothing is sent while a field breaks a rule, or

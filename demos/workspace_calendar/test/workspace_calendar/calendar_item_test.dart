@@ -1,6 +1,7 @@
 /// The calendar's item: an entry whose payload is its type and fields,
 /// read from and written to the API's envelope, whose start and end are
-/// UTC times with a Z, or local times with no offset as before.
+/// dates for an all-day item, and UTC times with a Z or local times with
+/// no offset for a timed one.
 library;
 
 import 'package:widgets_extended/widgets_extended.dart';
@@ -30,6 +31,22 @@ Map<String, Object?> envelope({List<String> attendees = const ["Ana", "Bo"]}) {
 String utcText(String local) {
   return DateTime.parse(local).toUtc().toIso8601String();
 }
+
+/// [envelope] with its `start` and `end` replaced by [start] and [end].
+Map<String, Object?> envelopeAt(String start, String end) {
+  return <String, Object?>{...envelope(), "start": start, "end": end};
+}
+
+/// What `validateItemJson` reports for a start or an end it cannot read.
+const String timeError =
+    "Enter a date as YYYY-MM-DD for an all-day item, or a date and time in "
+    "UTC as YYYY-MM-DDTHH:MM:SSZ on a whole minute of local time, or as a "
+    "local YYYY-MM-DDTHH:MM at a time the clock reads.";
+
+/// What `validateItemJson` reports for a start and an end of two forms.
+const String mixedTimeError =
+    "The start and end are both dates, for an all-day item, or both dates "
+    "and times.";
 
 /// The first instant of 2026 at half past an hour that is the later of the
 /// two at which the local clock reads that time, on the zone's first day
@@ -174,4 +191,72 @@ void main() {
               "daylight-saving change"
         : null,
   );
+
+  test("CI6 an all-day item writes its start and end as dates, and "
+      "itemTimeText writes a date for an all-day time and its instant in UTC "
+      "for a timed one", () {
+    final away = calendarItem(
+      type: CalendarItemType.outOfOffice,
+      title: "Away",
+      start: DateTime(2026, 4, 21),
+      end: DateTime(2026, 4, 22),
+      fields: const <String, Object?>{"reason": "travel"},
+      isAllDay: true,
+    );
+    final json = away.toJson();
+    expect(json["start"], "2026-04-21");
+    expect(json["end"], "2026-04-22");
+    expect(itemTimeText(DateTime(2026, 4, 21), allDay: true), "2026-04-21");
+    expect(
+      itemTimeText(DateTime(2026, 4, 21, 10), allDay: false),
+      utcText("2026-04-21T10:00"),
+    );
+  });
+
+  test("CI7 an envelope of dates reads as an all-day item and writes the "
+      "same dates, and one of date-times from a day's start to the next "
+      "day's reads, writes and reads back timed", () {
+    final allDay = itemFromJson(envelopeAt("2026-04-21", "2026-04-22"));
+    expect(allDay.isAllDay, isTrue);
+    expect(allDay.start, DateTime(2026, 4, 21));
+    expect(allDay.end, DateTime(2026, 4, 22));
+    expect(allDay.toJson()["start"], "2026-04-21");
+    expect(allDay.toJson()["end"], "2026-04-22");
+
+    final whole = itemFromJson(
+      envelopeAt("2026-04-21T00:00", "2026-04-22T00:00"),
+    );
+    expect(whole.isAllDay, isFalse);
+    expect(whole.start, DateTime(2026, 4, 21));
+    expect(whole.end, DateTime(2026, 4, 22));
+    final written = whole.toJson();
+    expect(written["start"], utcText("2026-04-21T00:00"));
+    expect(written["end"], utcText("2026-04-22T00:00"));
+    expect(itemFromJson(written).isAllDay, isFalse);
+  });
+
+  test("CI8 a date and a date-time in one envelope key the end with the "
+      "mixed-form message and do not read, and a date that does not exist "
+      "keys the start", () {
+    for (final mixed in <Map<String, Object?>>[
+      envelopeAt("2026-04-21", "2026-04-22T11:10"),
+      envelopeAt("2026-04-21T10:00", "2026-04-22"),
+    ]) {
+      final errors = validateItemJson(mixed);
+      expect(errors["end"], mixedTimeError, reason: "$mixed");
+      expect(errors.containsKey("start"), isFalse, reason: "$mixed");
+      expect(() => itemFromJson(mixed), throwsFormatException);
+    }
+    expect(
+      validateItemJson(envelopeAt("2026-02-30", "2026-03-02")).keys,
+      contains("start"),
+    );
+  });
+
+  test("CI9 a start and an end the validator cannot read are each keyed "
+      "with the message naming both forms", () {
+    final errors = validateItemJson(envelopeAt("2026-04-21 10:00", "May 1"));
+    expect(errors["start"], timeError);
+    expect(errors["end"], timeError);
+  });
 }
