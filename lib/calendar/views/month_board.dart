@@ -1289,6 +1289,16 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     _pinchFrom = null;
   }
 
+  /// Hands [event] to the pinch while the board is mounted.
+  /// `GestureBinding` sends a pointer's moves, lift and cancel along the
+  /// path its down hit, which still holds the board's listener once the
+  /// board has left the tree.
+  void _handlePointer(PointerEvent event) {
+    if (mounted) {
+      _pinch.handleEvent(event);
+    }
+  }
+
   /// Holds the board's scrolling while two fingers are down, and lets it
   /// go after.
   void _handleHolding() {
@@ -1845,10 +1855,10 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
                   Positioned.fill(
                     child: Listener(
                       key: _boardAreaKey,
-                      onPointerDown: _pinch.handleEvent,
-                      onPointerMove: _pinch.handleEvent,
-                      onPointerUp: _pinch.handleEvent,
-                      onPointerCancel: _pinch.handleEvent,
+                      onPointerDown: _handlePointer,
+                      onPointerMove: _handlePointer,
+                      onPointerUp: _handlePointer,
+                      onPointerCancel: _handlePointer,
                       child: Board<String, MonthChip<T>>(
                         controller: _board,
                         cellBuilder: _cellBuilder,

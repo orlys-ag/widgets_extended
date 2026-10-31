@@ -3870,6 +3870,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// does: a render object handles a pointer event before the gesture
   /// binding routes it to the recognizers.
   void _handlePointerMove(PointerMoveEvent event) {
+    if (!mounted) {
+      return;
+    }
     _pinch.handleEvent(event);
     final drag = _drag;
     if (drag == null ||
@@ -3886,6 +3889,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// selected entry's blocks, which a press lifting another block, and so
   /// selecting it, is not.
   void _handlePointerUp(PointerUpEvent event) {
+    if (!mounted) {
+      return;
+    }
     _pinch.handleEvent(event);
     _pressKeys.remove(event.pointer);
     if (event.pointer == _drag?.pointer) {
@@ -3907,6 +3913,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   void _handlePointerCancel(PointerCancelEvent event) {
+    if (!mounted) {
+      return;
+    }
     _pinch.handleEvent(event);
     _pressesOff.remove(event.pointer);
     _pressKeys.remove(event.pointer);
@@ -4797,6 +4806,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final rangeAnchor = slotRange?.anchor ?? _creating?.anchor;
     final rangeFocus = slotRange?.focus ?? _creating?.focus;
     final landing = _landingTimes();
+    // `GestureBinding` sends a pointer's moves, lift and cancel along the
+    // path its down hit, which still holds this listener once the grid has
+    // left the tree; their handlers ignore them once the grid is disposed.
     final listener = Listener(
       onPointerDown: _handlePointerDown,
       onPointerMove: _handlePointerMove,
