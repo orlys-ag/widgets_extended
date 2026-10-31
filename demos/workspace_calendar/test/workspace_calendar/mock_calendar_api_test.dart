@@ -1075,15 +1075,17 @@ void main() {
         isoDateTime(DateTime(2026, 4, 21)).compareTo("2026-04-21") > 0;
     final first = await stored(tester, api, timedFirst ? early : allDay);
     final second = await stored(tester, api, timedFirst ? allDay : early);
-    final listing = await listed(tester, api, tuesday, tuesday);
-    // Setup sanity: the listed start texts sort in the other order.
+    // Setup sanity: the start texts the mock holds sort in the other order.
     expect(
-      (listing[0]["start"]! as String).compareTo(
-        listing[1]["start"]! as String,
+      ((await fetched(tester, api, first))["start"]! as String).compareTo(
+        (await fetched(tester, api, second))["start"]! as String,
       ),
       greaterThan(0),
     );
-    expect(idsOf(listing), <String>[first, second]);
+    expect(
+      idsOf(await listed(tester, api, tuesday, tuesday)),
+      <String>[first, second],
+    );
   });
 
   test("A9 the schemas' summary keys", () {
