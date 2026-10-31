@@ -2928,5 +2928,14 @@ void main() {
     expect(headerFinder(DateTime(2026, 5, 11)), findsOneWidget);
     expect(find.byKey(allDayBarKey(conferenceTripId)), findsOneWidget);
     expect(blockFinder(conferenceTripId), findsNothing);
+    final bar = tester.getRect(find.byKey(allDayBarKey(conferenceTripId)));
+    expect(
+      bar.left,
+      near(tester.getRect(headerFinder(DateTime(2026, 5, 11))).left),
+    );
+    expect(
+      bar.right,
+      near(tester.getRect(headerFinder(DateTime(2026, 5, 15))).right),
+    );
   });
 }

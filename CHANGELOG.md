@@ -6,10 +6,10 @@ host's entries in Agenda, Day, Week and Month views under a header that
 names the month and switches between them, and `CalendarController` holds
 the view, the selected day, the visible range and the zoom. An entry is a
 `CalendarEntry<T>`: an id (null for a draft), a local start and an
-exclusive end on whole minutes, whether it is all-day (`isAllDay`, its
-start and end then local midnights), a title, a colour and the host's
-payload, and its constructor throws an `ArgumentError` for a time it does
-not take. The calendar reads a `CalendarStore`, such as a `MemoryCalendarStore` of
+exclusive end on whole minutes, whether it is all-day (`isAllDay`, its start
+and end then local midnights), a title, a colour and the host's payload, and
+its constructor throws an `ArgumentError` for a time it does not take. The
+calendar reads a `CalendarStore`, such as a `MemoryCalendarStore` of
 the host's entries or a `CachingCalendarStore` that reads by days and
 writes through the host's `CalendarDataSource`, applies a stream of
 `CalendarSourceChange`s, and reads changed days again on `invalidate` and

@@ -1082,10 +1082,10 @@ void main() {
       ),
       greaterThan(0),
     );
-    expect(
-      idsOf(await listed(tester, api, tuesday, tuesday)),
-      <String>[first, second],
-    );
+    expect(idsOf(await listed(tester, api, tuesday, tuesday)), <String>[
+      first,
+      second,
+    ]);
   });
 
   test("A9 the schemas' summary keys", () {

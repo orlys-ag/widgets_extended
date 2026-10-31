@@ -102,11 +102,7 @@ void main() {
       "drags", (tester) async {
     final api = MockCalendarApi.seeded(today, latency: harnessLatency);
     final wednesday = DateTime(2026, 4, 22);
-    await createBeforePump(
-      tester,
-      api,
-      allDayTaskJson("Focus", wednesday),
-    );
+    await createBeforePump(tester, api, allDayTaskJson("Focus", wednesday));
     final focus =
         (await listAll(
               tester,

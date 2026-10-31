@@ -319,11 +319,8 @@ void main() {
       throwsA(isArgumentError.having((error) => error.name, "name", "start")),
     );
     expect(
-      () => entry(
-        start: tuesday,
-        end: DateTime(2026, 4, 22, 9),
-        isAllDay: true,
-      ),
+      () =>
+          entry(start: tuesday, end: DateTime(2026, 4, 22, 9), isAllDay: true),
       throwsA(isArgumentError.having((error) => error.name, "name", "end")),
     );
     expect(() => entry().copyWith(isAllDay: true), throwsArgumentError);
@@ -358,7 +355,10 @@ void main() {
       "\"Review\", ${const Note("agenda")})",
     );
     expect(allDay.toString(), contains(", all day,"));
-    final timed = entry(start: DateTime(2026, 4, 21), end: DateTime(2026, 4, 23));
+    final timed = entry(
+      start: DateTime(2026, 4, 21),
+      end: DateTime(2026, 4, 23),
+    );
     expect(timed.toString(), isNot(contains(", all day,")));
     expect(timed.toString(), contains("2026-04-21 00:00 to 2026-04-23 00:00"));
   });
