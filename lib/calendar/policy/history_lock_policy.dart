@@ -26,8 +26,8 @@ enum _Hold { free, started, locked }
 /// [NoOverlapsPolicy] ([CalendarEditPolicy.all]), it limits those too.
 ///
 /// Two compare equal where their runtime types and [lockEarlierToday]
-/// are the same. Each answer compares instants and reads [CalendarNow]'s
-/// fields, so none allocates.
+/// are the same. Each answer compares instants and kinds and reads
+/// [CalendarNow]'s fields, so none allocates.
 final class HistoryLockPolicy<T> extends CalendarEditPolicy<T> {
   /// The lock at the start of today, or with [lockEarlierToday] at the
   /// current minute of it.
@@ -81,25 +81,30 @@ final class HistoryLockPolicy<T> extends CalendarEditPolicy<T> {
     return _holdOf(entry, now) == _Hold.free;
   }
 
-  /// For an entry starting at the boundary or after it, whether [start]
-  /// is not before the boundary; for one in progress, whether it keeps its
-  /// start and [end] is after the boundary; and for one that has ended,
-  /// whether it keeps both its times.
+  /// For an entry starting at the boundary or after it, whether [start] is
+  /// not before the boundary; for one in progress, whether it keeps its
+  /// start and its kind ([isAllDay]) and [end] is after the boundary; and
+  /// for one that has ended, whether it keeps both its times and its kind.
   @override
   bool admitsChange(
     CalendarEntry<T> entry,
     DateTime start,
     DateTime end,
-    CalendarNow now,
-  ) {
+    CalendarNow now, {
+    required bool isAllDay,
+  }) {
     final boundary = _boundaryOf(now);
     switch (_holdOf(entry, now)) {
       case _Hold.free:
         return !start.isBefore(boundary);
       case _Hold.started:
-        return start == entry.start && end.isAfter(boundary);
+        return start == entry.start &&
+            isAllDay == entry.isAllDay &&
+            end.isAfter(boundary);
       case _Hold.locked:
-        return start == entry.start && end == entry.end;
+        return start == entry.start &&
+            end == entry.end &&
+            isAllDay == entry.isAllDay;
     }
   }
 

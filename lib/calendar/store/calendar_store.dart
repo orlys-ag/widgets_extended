@@ -67,8 +67,8 @@ sealed class CalendarStoreException implements Exception {
   const CalendarStoreException();
 }
 
-/// The write changes an entry's start or end, or creates one, outside the
-/// store's [CalendarStore.hours] ([CalendarDayHours.holdsTimes]).
+/// The write creates an entry, or changes an entry's start, end or kind,
+/// outside the store's [CalendarStore.hours] ([CalendarDayHours.holdsTimes]).
 final class CalendarHoursException extends CalendarStoreException {
   /// The refusal of an entry from [start] to [end] under [hours].
   const CalendarHoursException({
@@ -137,11 +137,12 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
 
   CalendarDayHours _hours;
 
-  /// The hours a new entry, and a write that changes an entry's start or
-  /// end, must lie in ([CalendarDayHours.holdsTimes]), which hold every all-day
-  /// entry. A write that keeps the stored start and end is not held to
-  /// them, so an entry that lay outside them when they changed can still
-  /// be edited. A calendar shows and schedules in its store's hours.
+  /// The hours a new entry, and a write that changes an entry's start, end
+  /// or kind, must lie in ([CalendarDayHours.holdsTimes]), which hold every
+  /// all-day entry. A write that keeps the stored start, end and kind is
+  /// not held to them, so an entry that lay outside them when they changed
+  /// can still be edited. A calendar shows and schedules in its store's
+  /// hours.
   ///
   /// Setting hours not `==` to these notifies the listeners once, and
   /// setting equal ones notifies nothing. A calendar listening builds again
@@ -255,18 +256,20 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
   Future<void> requestDelete(String id);
 
   /// The refusal of [entry] for [hours], or null when the hours hold its
-  /// start and its end ([CalendarDayHours.holdsTimes]), or when it keeps the
-  /// start and end of the stored entry its id names.
+  /// start and its end as [entry]'s kind ([CalendarDayHours.holdsTimes]),
+  /// or when it keeps the start, the end and the kind of the stored entry
+  /// its id names.
   @protected
   CalendarHoursException? hoursRefusalOf(CalendarEntry<T> entry) {
     final id = entry.id;
     final stored = id == null ? null : storedEntry(id);
     if (stored != null &&
         stored.start == entry.start &&
-        stored.end == entry.end) {
+        stored.end == entry.end &&
+        stored.isAllDay == entry.isAllDay) {
       return null;
     }
-    if (hours.holdsTimes(entry.start, entry.end)) {
+    if (hours.holdsTimes(entry.start, entry.end, isAllDay: entry.isAllDay)) {
       return null;
     }
     return CalendarHoursException(

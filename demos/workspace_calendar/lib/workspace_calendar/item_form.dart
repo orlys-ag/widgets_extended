@@ -149,22 +149,26 @@ Future<bool> confirmDelete(BuildContext context) async {
 
 /// The item form's errors for [to], a change of the stored [from] or,
 /// where [from] is null, a new item, which [policy] refuses at [now],
-/// keyed as `validateItemJson` keys them; empty where it admits it.
+/// keyed as `validateItemJson` keys them; empty where it admits it. [to]
+/// is a change to an all-day item where [isAllDay] and to a timed one
+/// otherwise.
 ///
 /// A change [CalendarEditPolicy.admitsChange] admits has none. Of a
 /// refused one, an item the policy does not let be edited is locked; of
-/// one it lets neither move nor resize its start, a moved start and an end
-/// it refuses with the start kept are each an error. Any other change, as
-/// a new item, starts on a day the policy gives no earliest start on, or
-/// before the earliest start it gives.
+/// one it lets neither move nor resize its start, a moved start, else a
+/// changed kind, and an end it refuses with the start and the kind kept
+/// are each an error. Any other change, as a new item, starts on a day the
+/// policy gives no earliest start on, or before the earliest start it
+/// gives.
 Map<String, String> lockErrorsOf<T>(
   CalendarEditPolicy<T> policy,
   CalendarNow now,
   CalendarEntry<T>? from,
-  ({DateTime start, DateTime end}) to,
-) {
+  ({DateTime start, DateTime end}) to, {
+  required bool isAllDay,
+}) {
   if (from != null) {
-    if (policy.admitsChange(from, to.start, to.end, now)) {
+    if (policy.admitsChange(from, to.start, to.end, now, isAllDay: isAllDay)) {
       return const <String, String>{};
     }
     if (!policy.mayEdit(from, now)) {
@@ -174,8 +178,16 @@ Map<String, String> lockErrorsOf<T>(
         !policy.resizableEdges(from, now).hasStart) {
       return <String, String>{
         if (to.start != from.start)
-          "start": "An item in progress keeps its start.",
-        if (!policy.admitsChange(from, from.start, to.end, now))
+          "start": "An item in progress keeps its start."
+        else if (isAllDay != from.isAllDay)
+          "start": "An item in progress keeps its All day setting.",
+        if (!policy.admitsChange(
+          from,
+          from.start,
+          to.end,
+          now,
+          isAllDay: from.isAllDay,
+        ))
           "end": "The end can't be in the past.",
       };
     }
@@ -444,6 +456,7 @@ class _ItemFormState extends State<_ItemForm> {
         widget.now(),
         _isDraft ? null : widget.item,
         (start: to.start, end: to.end),
+        isAllDay: to.isAllDay,
       );
     }
     if (errors.isNotEmpty) {

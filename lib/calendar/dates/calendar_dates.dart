@@ -715,14 +715,16 @@ final class CalendarDayHours {
     return start < minute && minute <= end;
   }
 
-  /// Whether these hours hold the range from [from] to [to]: every range
-  /// from a day start to a day start, an all-day range, which no hours
-  /// limit; and any other whose start's minute of its day
-  /// (`CalendarDates.minuteOfDay`) they hold as a start and whose end's
-  /// minute on its last day (`CalendarDates.endMinuteOfDay`) they hold as
-  /// an end, so an overnight range may cross the hours' end and start.
-  bool holdsTimes(DateTime from, DateTime to) {
-    if (isDayStart(from) && isDayStart(to)) {
+  /// Whether these hours hold the range from [from] to [to], all-day where
+  /// [isAllDay] and timed otherwise, as the caller tells it: every all-day
+  /// range, which no hours limit; and a timed one whose start's minute of
+  /// its day (`CalendarDates.minuteOfDay`) they hold as a start and whose
+  /// end's minute on its last day (`CalendarDates.endMinuteOfDay`) they
+  /// hold as an end, so an overnight range may cross the hours' end and
+  /// start, and a timed range from a day start to a day start lies inside
+  /// them only where they run from 00:00 to 24:00.
+  bool holdsTimes(DateTime from, DateTime to, {required bool isAllDay}) {
+    if (isAllDay) {
       return true;
     }
     return holdsStart(minuteOfDay(from)) && holdsEnd(endMinuteOfDay(to));

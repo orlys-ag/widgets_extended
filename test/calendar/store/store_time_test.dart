@@ -289,6 +289,42 @@ void main() {
     }
   });
 
+  test("SM9 under 08:00-18:00 an update or a move of an all-day entry to a "
+      "timed one at the same times is refused, and under hours of the "
+      "whole day stored", () async {
+    const office = CalendarDayHours(8 * 60, 18 * 60);
+    final off = entryOf("off", tuesday, wednesday, isAllDay: true);
+    final timed = off.copyWith(isAllDay: false);
+    for (final (name, store) in storesOf(
+      <CalendarEntry<String>>[off],
+      first: monday,
+      last: wednesday,
+      hours: office,
+    )) {
+      await expectLater(
+        store.update(timed),
+        throwsA(isA<CalendarHoursException>()),
+        reason: name,
+      );
+      expect(store.storedEntry("off"), off, reason: name);
+      await expectLater(
+        store.requestMove(timed),
+        throwsA(isA<CalendarHoursException>()),
+        reason: name,
+      );
+      expect(store.storedEntry("off"), off, reason: name);
+    }
+    // Setup sanity: the hours alone refuse it.
+    for (final (name, store) in storesOf(
+      <CalendarEntry<String>>[off],
+      first: monday,
+      last: wednesday,
+    )) {
+      expect(await store.update(timed), timed, reason: name);
+      expect(store.storedEntry("off")!.isAllDay, isFalse, reason: name);
+    }
+  });
+
   group("on the 23-hour day", skip: shortDaySkip, () {
     test("SM6 the day's entries are answered for that day once", () {
       final day = shortDayStart;

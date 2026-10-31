@@ -44,7 +44,9 @@ final class _Plain extends CalendarEditPolicy<String> {
 }
 
 /// A policy giving the answers it is made with, recording each ask in
-/// [log] as its [name] and the member's. Compared by identity.
+/// [log] as its [name] and the member's, and the kind of each
+/// [admitsChange] ask in [kinds], where given, as its [name] and "all-day"
+/// or "timed". Compared by identity.
 final class _Answering extends CalendarEditPolicy<String> {
   const _Answering(
     this.name,
@@ -57,6 +59,7 @@ final class _Answering extends CalendarEditPolicy<String> {
     this.earliest = _dayItself,
     this.limit,
     this.overlaps = true,
+    this.kinds,
   });
 
   final String name;
@@ -72,6 +75,7 @@ final class _Answering extends CalendarEditPolicy<String> {
 
   final int? limit;
   final bool overlaps;
+  final List<String>? kinds;
 
   static DateTime? _dayItself(DateTime day) {
     return day;
@@ -109,9 +113,11 @@ final class _Answering extends CalendarEditPolicy<String> {
     CalendarEntry<String> entry,
     DateTime start,
     DateTime end,
-    CalendarNow now,
-  ) {
+    CalendarNow now, {
+    required bool isAllDay,
+  }) {
     log.add("$name.admitsChange");
+    kinds?.add("$name ${isAllDay ? "all-day" : "timed"}");
     return admits;
   }
 
@@ -159,11 +165,23 @@ void main() {
     expect((edges.hasStart, edges.hasEnd), (true, true));
     // A move into the past, and a resize of the start.
     expect(
-      policy.admitsChange(past, at(monday, 7), at(monday, 8), now),
+      policy.admitsChange(
+        past,
+        at(monday, 7),
+        at(monday, 8),
+        now,
+        isAllDay: false,
+      ),
       isTrue,
     );
     expect(
-      policy.admitsChange(past, at(monday, 8), at(monday, 10), now),
+      policy.admitsChange(
+        past,
+        at(monday, 8),
+        at(monday, 10),
+        now,
+        isAllDay: false,
+      ),
       isTrue,
     );
     expect(policy.earliestStartOn(monday, now), monday);
@@ -234,7 +252,13 @@ void main() {
       expect(both.mayEdit(entry, now), isTrue);
       expect(both.mayDelete(entry, now), isTrue);
       expect(
-        both.admitsChange(entry, at(tuesday, 11), at(tuesday, 12), now),
+        both.admitsChange(
+          entry,
+          at(tuesday, 11),
+          at(tuesday, 12),
+          now,
+          isAllDay: false,
+        ),
         isTrue,
       );
       expect(both.allowsOverlaps, isTrue);
@@ -252,7 +276,13 @@ void main() {
         expect(policy.mayEdit(entry, now), isFalse, reason: reason);
         expect(policy.mayDelete(entry, now), isFalse, reason: reason);
         expect(
-          policy.admitsChange(entry, at(tuesday, 11), at(tuesday, 12), now),
+          policy.admitsChange(
+            entry,
+            at(tuesday, 11),
+            at(tuesday, 12),
+            now,
+            isAllDay: false,
+          ),
           isFalse,
           reason: reason,
         );
@@ -331,7 +361,13 @@ void main() {
       expect(refusing.mayEdit(entry, now), isFalse);
       expect(refusing.mayDelete(entry, now), isFalse);
       expect(
-        refusing.admitsChange(entry, at(tuesday, 11), at(tuesday, 12), now),
+        refusing.admitsChange(
+          entry,
+          at(tuesday, 11),
+          at(tuesday, 12),
+          now,
+          isAllDay: false,
+        ),
         isFalse,
       );
       expect(refusing.allowsOverlaps, isFalse);
@@ -389,7 +425,13 @@ void main() {
       expect(nothing.mayEdit(entry, now), isTrue);
       expect(nothing.mayDelete(entry, now), isTrue);
       expect(
-        nothing.admitsChange(entry, at(monday, 7), at(monday, 8), now),
+        nothing.admitsChange(
+          entry,
+          at(monday, 7),
+          at(monday, 8),
+          now,
+          isAllDay: false,
+        ),
         isTrue,
       );
       expect(nothing.earliestStartOn(tuesday, now), tuesday);
@@ -452,6 +494,24 @@ void main() {
       expect(ofObjects, isNot(ofStrings));
       expect(ofStrings, isNot(ofObjects));
     });
+
+    test("EP18 passes the kind of each change to each of its policies in "
+        "turn", () {
+      final kinds = <String>[];
+      final both = CalendarEditPolicy<String>.all(<_Answering>[
+        _Answering("a", log, kinds: kinds),
+        _Answering("b", log, kinds: kinds),
+      ]);
+      expect(
+        both.admitsChange(entry, tuesday, wednesday, now, isAllDay: true),
+        isTrue,
+      );
+      expect(
+        both.admitsChange(entry, tuesday, wednesday, now, isAllDay: false),
+        isTrue,
+      );
+      expect(kinds, <String>["a all-day", "b all-day", "a timed", "b timed"]);
+    });
   });
 
   group("the day limit policy", () {
@@ -467,7 +527,13 @@ void main() {
       expect(policy.mayDelete(past, now), isTrue);
       expect(policy.resizableEdges(past, now), CalendarResizeEdges.both);
       expect(
-        policy.admitsChange(past, at(monday, 7), at(monday, 8), now),
+        policy.admitsChange(
+          past,
+          at(monday, 7),
+          at(monday, 8),
+          now,
+          isAllDay: false,
+        ),
         isTrue,
       );
       expect(policy.earliestStartOn(monday, now), monday);
@@ -518,7 +584,13 @@ void main() {
       expect(policy.mayDelete(past, now), isTrue);
       expect(policy.resizableEdges(past, now), CalendarResizeEdges.both);
       expect(
-        policy.admitsChange(past, at(monday, 7), at(monday, 8), now),
+        policy.admitsChange(
+          past,
+          at(monday, 7),
+          at(monday, 8),
+          now,
+          isAllDay: false,
+        ),
         isTrue,
       );
       expect(policy.earliestStartOn(monday, now), monday);

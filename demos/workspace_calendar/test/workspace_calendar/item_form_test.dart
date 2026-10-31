@@ -24,11 +24,14 @@ CalendarItem task(DateTime start, DateTime end) {
 }
 
 /// Pumps a host over [store] whose one button opens the form of the item
-/// "item-1", its times stepping by [slotMinutes], and opens it.
+/// "item-1", its times stepping by [slotMinutes] and its Save checked by
+/// [policy], and opens it.
 Future<void> openForm(
   WidgetTester tester,
   CalendarStore<ItemPayload> store, {
   int slotMinutes = CalendarDates.defaultSlotMinutes,
+  CalendarEditPolicy<ItemPayload> policy =
+      const UnrestrictedEditPolicy<ItemPayload>(),
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -42,7 +45,7 @@ Future<void> openForm(
                   context,
                   store: store,
                   id: "item-1",
-                  policy: const UnrestrictedEditPolicy<ItemPayload>(),
+                  policy: policy,
                   now: () {
                     return CalendarNow(time: wednesday, today: wednesday);
                   },
@@ -83,6 +86,28 @@ List<String> timeChoices(WidgetTester tester, String label) {
 }
 
 const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
+
+/// A policy that admits only a change to a timed item, and gives no day an
+/// earliest start, so the form keys every change it refuses.
+final class _TimedChangesOnly extends CalendarEditPolicy<ItemPayload> {
+  const _TimedChangesOnly();
+
+  @override
+  bool admitsChange(
+    CalendarEntry<ItemPayload> entry,
+    DateTime start,
+    DateTime end,
+    CalendarNow now, {
+    required bool isAllDay,
+  }) {
+    return !isAllDay;
+  }
+
+  @override
+  DateTime? earliestStartOn(DateTime day, CalendarNow now) {
+    return null;
+  }
+}
 
 void main() {
   testWidgets("IF1 the form shows Start date, Start time, End date, End "
@@ -187,5 +212,35 @@ void main() {
     expect(writes.single!.start, DateTime(2026, 4, 22, 9, 10));
     expect(writes.single!.end, DateTime(2026, 4, 22, 9, 50));
     store.dispose();
+  });
+
+  testWidgets("IF5 Save asks the policy with the kind of the item it saves: "
+      "a timed item saved unchanged is written, and one switched to All day "
+      "is refused", (tester) async {
+    final writes = <CalendarItem?>[];
+    final store = MemoryCalendarStore<ItemPayload>(
+      entries: <CalendarItem>[
+        task(DateTime(2026, 4, 22, 9), DateTime(2026, 4, 22, 10)),
+      ],
+      onChanged: (old, entry) {
+        writes.add(entry);
+      },
+    );
+    addTearDown(store.dispose);
+    const policy = _TimedChangesOnly();
+    await openForm(tester, store, policy: policy);
+    await tester.tap(find.widgetWithText(FilledButton, "Save"));
+    await tester.pumpAndSettle();
+    expect(writes, hasLength(1));
+    expect(writes.single!.isAllDay, isFalse);
+
+    await tester.pumpWidget(const SizedBox());
+    await openForm(tester, store, policy: policy);
+    await tester.tap(find.text("All day"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, "Save"));
+    await tester.pumpAndSettle();
+    expect(writes, hasLength(1));
+    expect(find.byType(SwitchListTile), findsOneWidget);
   });
 }

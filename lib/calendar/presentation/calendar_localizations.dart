@@ -85,16 +85,17 @@ abstract base class CalendarLocalizations {
   /// The times from [start] to [end], minutes after midnight, in [format].
   String formatTimeRange(int start, int end, CalendarHourLabelFormat format);
 
-  /// The times of an entry from [start] to [end], as the default block and
-  /// chip builders show them: [allDay] for a range from a day's start to a
-  /// day's start, and otherwise the times of day of [start] and [end] in
-  /// [format], where an end at the start of the day after [start]'s is
-  /// the midnight that ends that day.
+  /// The times of an entry from [start] to [end], all-day where [isAllDay]
+  /// and timed otherwise, as the caller tells it, as the default block and
+  /// chip builders show them: [allDay] for an all-day range, and otherwise
+  /// the times of day of [start] and [end] in [format], where an end at a
+  /// day's start is the midnight that ends the day before.
   String entryTimes(
     DateTime start,
     DateTime end,
-    CalendarHourLabelFormat format,
-  );
+    CalendarHourLabelFormat format, {
+    required bool isAllDay,
+  });
 
   /// The times of an all-day entry.
   String get allDay;
@@ -150,19 +151,22 @@ abstract base class CalendarLocalizations {
   String get noLanding;
 
   /// The landing label for a drag that would give an entry the times
-  /// [start] to [end]: its days as [dayTitle] names them against [today],
+  /// [start] to [end], all-day where [isAllDay] and timed otherwise, as the
+  /// caller tells it: its days as [dayTitle] names them against [today],
   /// and its times in [format], or for an all-day range that it is all
   /// day.
   String landing(
     DateTime start,
     DateTime end,
     DateTime today,
-    CalendarHourLabelFormat format,
-  );
+    CalendarHourLabelFormat format, {
+    required bool isAllDay,
+  });
 
   /// What a screen reader hears for a Month chip: the entry's [title], its
   /// [kind] where it has one, its days and its times from [start] to [end]
-  /// in [format], and whether it is [pending].
+  /// in [format], or that it is all day where [isAllDay], as the caller
+  /// tells it, and whether it is [pending].
   String entryLabel({
     required String title,
     required String? kind,
@@ -170,6 +174,7 @@ abstract base class CalendarLocalizations {
     required DateTime end,
     required CalendarHourLabelFormat format,
     required bool pending,
+    required bool isAllDay,
   });
 
   /// What a screen reader hears for the day that is today, after its
@@ -410,20 +415,20 @@ base class DefaultCalendarLocalizations extends CalendarLocalizations {
   }
 
   /// "09:10-09:50", "9:10 AM-9:50 AM" on the 12-hour clock, or "All
-  /// day".
+  /// day" for an all-day range; an end at a day's start reads "24:00", or
+  /// "12 AM" on the 12-hour clock, so a timed range over a whole day reads
+  /// "00:00-24:00".
   @override
   String entryTimes(
     DateTime start,
     DateTime end,
-    CalendarHourLabelFormat format,
-  ) {
-    if (isDayStart(start) && isDayStart(end)) {
+    CalendarHourLabelFormat format, {
+    required bool isAllDay,
+  }) {
+    if (isAllDay) {
       return allDay;
     }
-    final last = isDayStart(end) && dayNumber(end) == dayNumber(start) + 1
-        ? minutesPerDay
-        : minuteOfDay(end);
-    return formatTimeRange(minuteOfDay(start), last, format);
+    return formatTimeRange(minuteOfDay(start), endMinuteOfDay(end), format);
   }
 
   @override
@@ -548,17 +553,18 @@ base class DefaultCalendarLocalizations extends CalendarLocalizations {
     DateTime start,
     DateTime end,
     DateTime today,
-    CalendarHourLabelFormat format,
-  ) {
+    CalendarHourLabelFormat format, {
+    required bool isAllDay,
+  }) {
     final first = dayNumber(start);
     final last = lastDayNumberOf(start, end);
     final from = dayTitle(dateOfDayNumber(first), today);
     final to = dayTitle(dateOfDayNumber(last), today);
-    if (isDayStart(start) && isDayStart(end)) {
+    if (isAllDay) {
       return first == last ? "$from, all day" : "$from to $to, all day";
     }
     if (first == last) {
-      return "$from, ${entryTimes(start, end, format)}";
+      return "$from, ${entryTimes(start, end, format, isAllDay: false)}";
     }
     final startTime = formatTime(minuteOfDay(start), format);
     final endTime = formatTime(endMinuteOfDay(end), format);
@@ -578,13 +584,14 @@ base class DefaultCalendarLocalizations extends CalendarLocalizations {
     required DateTime end,
     required CalendarHourLabelFormat format,
     required bool pending,
+    required bool isAllDay,
   }) {
     final first = dateOfDayNumber(dayNumber(start));
     final last = dateOfDayNumber(lastDayNumberOf(start, end));
     final startTime = formatTime(minuteOfDay(start), format);
     final endTime = formatTime(endMinuteOfDay(end), format);
     final String when;
-    if (isDayStart(start) && isDayStart(end)) {
+    if (isAllDay) {
       when = first == last
           ? "${dayLabel(first)}, all day"
           : "${dayLabel(first)} to ${dayLabel(last)}, all day";

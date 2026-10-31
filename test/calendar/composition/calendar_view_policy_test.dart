@@ -1209,8 +1209,8 @@ void main() {
         "slots is reported and refuses the landing", (tester) async {
       final bar = entryOf("G", tuesday, wednesday, isAllDay: true);
       final throwing = ScriptedEditPolicy<String>(
-        admits: (entry, start, end) {
-          if (entry.id == "G" && !(isDayStart(start) && isDayStart(end))) {
+        admits: (entry, start, end, isAllDay) {
+          if (entry.id == "G" && !isAllDay) {
             throw const ScriptedThrow("admitsChange");
           }
           return true;

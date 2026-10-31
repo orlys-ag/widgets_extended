@@ -159,14 +159,17 @@ abstract base class CalendarEditPolicy<T> {
     return true;
   }
 
-  /// Whether [entry] may take the times [start] to [end], which a move or
-  /// a resize of it gives. True here.
+  /// Whether [entry] may take the times [start] to [end], all-day where
+  /// [isAllDay] and timed otherwise, which a move or a resize of it gives;
+  /// a move between the all-day strip and the slots changes the kind,
+  /// possibly with the times unchanged. True here.
   bool admitsChange(
     CalendarEntry<T> entry,
     DateTime start,
     DateTime end,
-    CalendarNow now,
-  ) {
+    CalendarNow now, {
+    required bool isAllDay,
+  }) {
     return true;
   }
 
@@ -361,10 +364,11 @@ final class _AllEditPolicies<T> extends CalendarEditPolicy<T> {
     CalendarEntry<T> entry,
     DateTime start,
     DateTime end,
-    CalendarNow now,
-  ) {
+    CalendarNow now, {
+    required bool isAllDay,
+  }) {
     for (final policy in policies) {
-      if (!policy.admitsChange(entry, start, end, now)) {
+      if (!policy.admitsChange(entry, start, end, now, isAllDay: isAllDay)) {
         return false;
       }
     }

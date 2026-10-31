@@ -472,6 +472,24 @@ void main() {
     },
   );
 
+  test("MS13 under hours of 08:00 to 18:00 a create of a timed entry from "
+      "Tuesday's start to Wednesday's is refused for both its times", () async {
+    final recorder = Recorder();
+    final store = recorder.store(hours: const CalendarDayHours(480, 1080));
+    final tuesday = DateTime(2026, 4, 21);
+    final created = errorOf(
+      store.create(task(null, tuesday, 0, 0, dayCount: 2)),
+    );
+    await pumpEventQueue();
+    expect(
+      created(),
+      isA<CalendarHoursException>()
+          .having((error) => error.startOutside, "startOutside", isTrue)
+          .having((error) => error.endOutside, "endOutside", isTrue),
+    );
+    expect(store.entriesOn(tuesday), isEmpty);
+  });
+
   test("MS14 under hours of 08:00 to 18:00 a create of an all-day entry "
       "over Tuesday is stored and answered all-day", () async {
     final recorder = Recorder();

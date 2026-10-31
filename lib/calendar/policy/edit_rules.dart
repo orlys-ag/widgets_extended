@@ -201,21 +201,23 @@ final class CalendarEditRules<T> {
     );
   }
 
-  /// Whether [entry] may take the times [start] to [end] at [now]: the
+  /// Whether [entry] may take the times [start] to [end] at [now], all-day
+  /// where [isAllDay] and timed otherwise, as the caller tells it: the
   /// [hours] hold them ([CalendarDayHours.holdsTimes]), as they hold every
-  /// all-day range, and [policy] admits the change
-  /// ([CalendarEditPolicy.admitsChange]). Asks the policy once at most,
-  /// and not where the hours refuse. It tests neither the day limit
-  /// ([coversAtMost]) nor whether the times share time with another entry
-  /// ([allowsOverlaps]).
+  /// all-day range and a timed one only within them, and [policy] admits
+  /// the change of that kind ([CalendarEditPolicy.admitsChange]). Asks the
+  /// policy once at most, and not where the hours refuse. It tests neither
+  /// the day limit ([coversAtMost]) nor whether the times share time with
+  /// another entry ([allowsOverlaps]).
   bool admitsTimes(
     CalendarEntry<T> entry,
     DateTime start,
     DateTime end,
-    CalendarNow now,
-  ) {
-    return hours.holdsTimes(start, end) &&
-        policy.admitsChange(entry, start, end, now);
+    CalendarNow now, {
+    required bool isAllDay,
+  }) {
+    return hours.holdsTimes(start, end, isAllDay: isAllDay) &&
+        policy.admitsChange(entry, start, end, now, isAllDay: isAllDay);
   }
 
   /// Whether the range from [start] to [end] covers at most [dayLimit]
@@ -227,10 +229,11 @@ final class CalendarEditRules<T> {
         lastDayNumberOf(start, end) - dayNumber(start) + 1 <= limit;
   }
 
-  /// The range from [start] to [end] held at [dayLimit]'s days: with
+  /// The range from [start] to [end], all-day where [isAllDay] and timed
+  /// otherwise, as the caller tells it, held at [dayLimit]'s days: with
   /// [atEnd] its end moved, and otherwise its start. An all-day range ends
   /// at the start of the day after the limit's last day, or starts at the
-  /// start of its first; any other ends at the hours' end on the limit's
+  /// start of its first; a timed one ends at the hours' end on the limit's
   /// last day, or starts at the hours' start on its first, so a held slot
   /// range ends or starts on a slot the hours hold. Null where that is a
   /// time the clock skips; the range itself with no limit.
@@ -238,21 +241,21 @@ final class CalendarEditRules<T> {
     DateTime start,
     DateTime end, {
     required bool atEnd,
+    required bool isAllDay,
   }) {
     final limit = dayLimit;
     if (limit == null) {
       return (start: start, end: end);
     }
-    final allDay = isDayStart(start) && isDayStart(end);
     if (atEnd) {
       final lastDay = dayNumber(start) + limit - 1;
-      final held = allDay
+      final held = isAllDay
           ? dateOfDayNumber(lastDay + 1)
           : timeAtWallMinute(lastDay * minutesPerDay + hours.end);
       return held == null ? null : (start: start, end: held);
     }
     final firstDay = lastDayNumberOf(start, end) - limit + 1;
-    final held = allDay
+    final held = isAllDay
         ? dateOfDayNumber(firstDay)
         : timeAtWallMinute(firstDay * minutesPerDay + hours.start);
     return held == null ? null : (start: held, end: end);

@@ -92,15 +92,40 @@ void main() {
 
     // An overnight entry starting and ending inside the hours, and one
     // ending after them on its own day.
-    expect(office.holdsTimes(at(monday, 17), at(tuesday, 9)), isTrue);
-    expect(office.holdsTimes(at(monday, 17), at(monday, 19)), isFalse);
-    expect(office.holdsTimes(at(monday, 7), at(monday, 9)), isFalse);
-    expect(office.holdsTimes(at(monday, 9, 10), at(monday, 9, 50)), isTrue);
+    expect(
+      office.holdsTimes(at(monday, 17), at(tuesday, 9), isAllDay: false),
+      isTrue,
+    );
+    expect(
+      office.holdsTimes(at(monday, 17), at(monday, 19), isAllDay: false),
+      isFalse,
+    );
+    expect(
+      office.holdsTimes(at(monday, 7), at(monday, 9), isAllDay: false),
+      isFalse,
+    );
+    expect(
+      office.holdsTimes(at(monday, 9, 10), at(monday, 9, 50), isAllDay: false),
+      isTrue,
+    );
     // An end at a day start reads as minute 1440 of the day before.
-    expect(office.holdsTimes(at(monday, 17), tuesday), isFalse);
-    expect(CalendarDayHours.allDay.holdsTimes(at(monday, 17), tuesday), isTrue);
-    expect(office.holdsTimes(monday, tuesday), isTrue);
-    expect(office.holdsTimes(monday, addDays(monday, 3)), isTrue);
+    expect(
+      office.holdsTimes(at(monday, 17), tuesday, isAllDay: false),
+      isFalse,
+    );
+    expect(
+      CalendarDayHours.allDay.holdsTimes(
+        at(monday, 17),
+        tuesday,
+        isAllDay: false,
+      ),
+      isTrue,
+    );
+    expect(office.holdsTimes(monday, tuesday, isAllDay: true), isTrue);
+    expect(
+      office.holdsTimes(monday, addDays(monday, 3), isAllDay: true),
+      isTrue,
+    );
   });
 
   test("DT6 roundedOutTo(30) of 08:10-17:50 is 08:00-18:00, and "

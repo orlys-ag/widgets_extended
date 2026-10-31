@@ -246,6 +246,20 @@ void main() {
     expect(countsByDay(split.later, april), <DateTime, int>{gridLast: 1});
   });
 
+  testWidgets("MT7 a timed entry from Tuesday's start to Wednesday's is "
+      "named to a screen reader by its times, not as all day", (tester) async {
+    final semantics = tester.ensureSemantics();
+    await pumpMonth(tester, april, tuesday, <CalendarEntry<String>>[
+      entryOf("whole", tuesday, wednesday),
+    ]);
+    expect(
+      find.bySemanticsLabel("whole, Tuesday, April 21, 00:00 to 24:00"),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel(RegExp("all day")), findsNothing);
+    semantics.dispose();
+  });
+
   group("on the 23-hour day", skip: shortDaySkip, () {
     test("MT2 the day shows once with its entries", () {
       final day = shortDayStart;

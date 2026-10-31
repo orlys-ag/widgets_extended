@@ -41,8 +41,9 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
 }
 
 /// A policy with the day limit [dayLimit] and the answer on overlaps
-/// [allowsOverlaps], admitting a change where [admits] does, that counts
-/// each ask by the member's name in [asks]. Compared by identity.
+/// [allowsOverlaps], admitting a change where [admits] does, told whether
+/// the change is all-day, that counts each ask by the member's name in
+/// [asks]. Compared by identity.
 final class _Asking extends CalendarEditPolicy<String> {
   _Asking({int? dayLimit, bool allowsOverlaps = true, this.admits})
     : _dayLimit = dayLimit,
@@ -50,7 +51,7 @@ final class _Asking extends CalendarEditPolicy<String> {
 
   final int? _dayLimit;
   final bool _allowsOverlaps;
-  final bool Function(DateTime start, DateTime end)? admits;
+  final bool Function(DateTime start, DateTime end, bool isAllDay)? admits;
 
   final Map<String, int> asks = <String, int>{};
 
@@ -63,11 +64,12 @@ final class _Asking extends CalendarEditPolicy<String> {
     CalendarEntry<String> entry,
     DateTime start,
     DateTime end,
-    CalendarNow now,
-  ) {
+    CalendarNow now, {
+    required bool isAllDay,
+  }) {
     _note("admitsChange");
     final admits = this.admits;
-    return admits == null || admits(start, end);
+    return admits == null || admits(start, end, isAllDay);
   }
 
   @override
@@ -242,7 +244,7 @@ void main() {
       "policy; any other, and every all-day range, takes the policy's "
       "answer, asked once", () {
     final policy = _Asking(
-      admits: (start, end) {
+      admits: (start, end, isAllDay) {
         return start != at(tuesday, 10);
       },
     );
@@ -253,21 +255,42 @@ void main() {
     );
     final entry = entryOf("entry", at(tuesday, 9), at(tuesday, 10));
     expect(
-      rules.admitsTimes(entry, at(tuesday, 7), at(tuesday, 8), now),
+      rules.admitsTimes(
+        entry,
+        at(tuesday, 7),
+        at(tuesday, 8),
+        now,
+        isAllDay: false,
+      ),
       isFalse,
     );
     expect(policy.asks["admitsChange"], isNull);
     expect(
-      rules.admitsTimes(entry, at(tuesday, 9), at(tuesday, 10), now),
+      rules.admitsTimes(
+        entry,
+        at(tuesday, 9),
+        at(tuesday, 10),
+        now,
+        isAllDay: false,
+      ),
       isTrue,
     );
     expect(policy.asks["admitsChange"], 1);
     expect(
-      rules.admitsTimes(entry, at(tuesday, 10), at(tuesday, 11), now),
+      rules.admitsTimes(
+        entry,
+        at(tuesday, 10),
+        at(tuesday, 11),
+        now,
+        isAllDay: false,
+      ),
       isFalse,
     );
     expect(policy.asks["admitsChange"], 2);
-    expect(rules.admitsTimes(entry, tuesday, wednesday, now), isTrue);
+    expect(
+      rules.admitsTimes(entry, tuesday, wednesday, now, isAllDay: true),
+      isTrue,
+    );
     expect(policy.asks["admitsChange"], 3);
   });
 
@@ -365,26 +388,41 @@ void main() {
     expect(rules.coversAtMost(monday, wednesday), isTrue);
     expect(rules.coversAtMost(monday, thursday), isFalse);
     expect(
-      rules.heldToLimit(at(tuesday, 9), at(thursday, 10), atEnd: true),
+      rules.heldToLimit(
+        at(tuesday, 9),
+        at(thursday, 10),
+        atEnd: true,
+        isAllDay: false,
+      ),
       slot(at(tuesday, 9), at(wednesday, 18)),
     );
     expect(
-      rules.heldToLimit(at(tuesday, 9), at(thursday, 10), atEnd: false),
+      rules.heldToLimit(
+        at(tuesday, 9),
+        at(thursday, 10),
+        atEnd: false,
+        isAllDay: false,
+      ),
       slot(at(wednesday, 8), at(thursday, 10)),
     );
     expect(
-      rules.heldToLimit(monday, thursday, atEnd: true),
+      rules.heldToLimit(monday, thursday, atEnd: true, isAllDay: true),
       slot(monday, wednesday),
     );
     expect(
-      rules.heldToLimit(monday, thursday, atEnd: false),
+      rules.heldToLimit(monday, thursday, atEnd: false, isAllDay: true),
       slot(tuesday, thursday),
     );
 
     final unlimited = rulesOf(hours: office);
     expect(unlimited.coversAtMost(monday, thursday), isTrue);
     expect(
-      unlimited.heldToLimit(at(tuesday, 9), at(thursday, 10), atEnd: true),
+      unlimited.heldToLimit(
+        at(tuesday, 9),
+        at(thursday, 10),
+        atEnd: true,
+        isAllDay: false,
+      ),
       slot(at(tuesday, 9), at(thursday, 10)),
     );
   });
@@ -441,5 +479,58 @@ void main() {
         ),
       );
     });
+  });
+
+  test("ER12 the hold, the hours and the policy read the kind each ask is "
+      "told", () {
+    final limited = CalendarEditRules<String>(
+      policy: _Asking(dayLimit: 1),
+      hours: const CalendarDayHours(0, 18 * 60),
+      slotMinutes: 15,
+    );
+    expect(
+      limited.heldToLimit(tuesday, thursday, atEnd: true, isAllDay: false),
+      slot(tuesday, at(tuesday, 18)),
+    );
+    expect(
+      limited.heldToLimit(tuesday, thursday, atEnd: true, isAllDay: true),
+      slot(tuesday, wednesday),
+    );
+
+    final entry = entryOf("entry", at(tuesday, 9), at(tuesday, 10));
+    final policy = _Asking();
+    final inOffice = CalendarEditRules<String>(
+      policy: policy,
+      hours: office,
+      slotMinutes: 15,
+    );
+    expect(
+      inOffice.admitsTimes(entry, tuesday, wednesday, now, isAllDay: false),
+      isFalse,
+    );
+    expect(policy.asks["admitsChange"], isNull);
+    expect(
+      inOffice.admitsTimes(entry, tuesday, wednesday, now, isAllDay: true),
+      isTrue,
+    );
+    expect(policy.asks["admitsChange"], 1);
+
+    final timedOnly = CalendarEditRules<String>(
+      policy: _Asking(
+        admits: (start, end, isAllDay) {
+          return !isAllDay;
+        },
+      ),
+      hours: CalendarDayHours.allDay,
+      slotMinutes: 15,
+    );
+    expect(
+      timedOnly.admitsTimes(entry, tuesday, wednesday, now, isAllDay: true),
+      isFalse,
+    );
+    expect(
+      timedOnly.admitsTimes(entry, tuesday, wednesday, now, isAllDay: false),
+      isTrue,
+    );
   });
 }

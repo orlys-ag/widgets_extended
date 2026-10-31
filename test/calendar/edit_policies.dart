@@ -62,10 +62,11 @@ final class CountingEditPolicy<T> extends CalendarEditPolicy<T> {
     CalendarEntry<T> entry,
     DateTime start,
     DateTime end,
-    CalendarNow now,
-  ) {
+    CalendarNow now, {
+    required bool isAllDay,
+  }) {
     _note("admitsChange");
-    return inner.admitsChange(entry, start, end, now);
+    return inner.admitsChange(entry, start, end, now, isAllDay: isAllDay);
   }
 
   @override
@@ -132,9 +133,14 @@ final class ScriptedEditPolicy<T> extends CalendarEditPolicy<T> {
   final DateTime? throwsFrom;
   final DateTime? movesThrowFrom;
 
-  /// Whether an entry may take the times a change gives it; null admits
-  /// every change. It may throw.
-  final bool Function(CalendarEntry<T> entry, DateTime start, DateTime end)?
+  /// Whether an entry may take the times a change gives it, all-day where
+  /// `isAllDay`; null admits every change. It may throw.
+  final bool Function(
+    CalendarEntry<T> entry,
+    DateTime start,
+    DateTime end,
+    bool isAllDay,
+  )?
   admits;
 
   @override
@@ -166,10 +172,11 @@ final class ScriptedEditPolicy<T> extends CalendarEditPolicy<T> {
     CalendarEntry<T> entry,
     DateTime start,
     DateTime end,
-    CalendarNow now,
-  ) {
+    CalendarNow now, {
+    required bool isAllDay,
+  }) {
     final admits = this.admits;
-    return admits == null || admits(entry, start, end);
+    return admits == null || admits(entry, start, end, isAllDay);
   }
 
   @override

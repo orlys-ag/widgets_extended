@@ -93,7 +93,16 @@ void main() {
       false,
       false,
     ));
-    expect(policy.admitsChange(ended, ended.start, at(today, 1), now), isFalse);
+    expect(
+      policy.admitsChange(
+        ended,
+        ended.start,
+        at(today, 1),
+        now,
+        isAllDay: false,
+      ),
+      isFalse,
+    );
 
     final running = entryOf("running", at(monday, 22), at(today, 2));
     expect(answersOf(policy, running, now), (
@@ -103,12 +112,27 @@ void main() {
       false,
     ));
     expect(
-      policy.admitsChange(running, running.start, at(today, 3), now),
+      policy.admitsChange(
+        running,
+        running.start,
+        at(today, 3),
+        now,
+        isAllDay: false,
+      ),
       isTrue,
     );
-    expect(policy.admitsChange(running, running.start, today, now), isFalse);
     expect(
-      policy.admitsChange(running, at(monday, 22, 15), running.end, now),
+      policy.admitsChange(running, running.start, today, now, isAllDay: false),
+      isFalse,
+    );
+    expect(
+      policy.admitsChange(
+        running,
+        at(monday, 22, 15),
+        running.end,
+        now,
+        isAllDay: false,
+      ),
       isFalse,
     );
 
@@ -119,8 +143,20 @@ void main() {
       true,
       true,
     ));
-    expect(policy.admitsChange(free, at(monday, 23), today, now), isFalse);
-    expect(policy.admitsChange(free, at(today, 3), at(today, 4), now), isTrue);
+    expect(
+      policy.admitsChange(free, at(monday, 23), today, now, isAllDay: false),
+      isFalse,
+    );
+    expect(
+      policy.admitsChange(
+        free,
+        at(today, 3),
+        at(today, 4),
+        now,
+        isAllDay: false,
+      ),
+      isTrue,
+    );
 
     const earlier = HistoryLockPolicy<String>(lockEarlierToday: true);
     final halfPast = CalendarNow(time: at(today, 11, 7, 30), today: today);
@@ -160,26 +196,53 @@ void main() {
       final ended = entryOf("ended", at(monday, 9), at(monday, 10));
       expect(unrestricted.earliestStartOn(monday, now), monday);
       expect(
-        unrestricted.admitsChange(ended, at(monday, 8), at(monday, 9), now),
+        unrestricted.admitsChange(
+          ended,
+          at(monday, 8),
+          at(monday, 9),
+          now,
+          isAllDay: false,
+        ),
         isTrue,
       );
 
       final free = entryOf("free", at(today, 14), at(today, 15));
       expect(past.earliestStartOn(today, now), today);
       expect(past.earliestStartOn(monday, now), isNull);
-      expect(past.admitsChange(free, today, at(today, 1), now), isTrue);
       expect(
-        past.admitsChange(free, at(monday, 23), at(today, 1), now),
+        past.admitsChange(free, today, at(today, 1), now, isAllDay: false),
+        isTrue,
+      );
+      expect(
+        past.admitsChange(
+          free,
+          at(monday, 23),
+          at(today, 1),
+          now,
+          isAllDay: false,
+        ),
         isFalse,
       );
 
       expect(earlier.earliestStartOn(today, now), midMorning);
       expect(
-        earlier.admitsChange(free, midMorning, at(today, 12), now),
+        earlier.admitsChange(
+          free,
+          midMorning,
+          at(today, 12),
+          now,
+          isAllDay: false,
+        ),
         isTrue,
       );
       expect(
-        earlier.admitsChange(free, at(today, 11, 6), at(today, 12), now),
+        earlier.admitsChange(
+          free,
+          at(today, 11, 6),
+          at(today, 12),
+          now,
+          isAllDay: false,
+        ),
         isFalse,
       );
       // A minute part of which has passed is past.
@@ -253,28 +316,73 @@ void main() {
       final running = entryOf("running", at(today, 10), at(today, 12));
       final ended = entryOf("ended", at(today, 8), at(today, 9));
       expect(
-        earlier.admitsChange(later, at(today, 11, 15), at(today, 12), now),
+        earlier.admitsChange(
+          later,
+          at(today, 11, 15),
+          at(today, 12),
+          now,
+          isAllDay: false,
+        ),
         isTrue,
       );
       expect(
-        earlier.admitsChange(later, at(today, 11), at(today, 12), now),
+        earlier.admitsChange(
+          later,
+          at(today, 11),
+          at(today, 12),
+          now,
+          isAllDay: false,
+        ),
         isFalse,
       );
       expect(
-        earlier.admitsChange(running, running.start, at(today, 11, 15), now),
+        earlier.admitsChange(
+          running,
+          running.start,
+          at(today, 11, 15),
+          now,
+          isAllDay: false,
+        ),
         isTrue,
       );
       expect(
-        earlier.admitsChange(running, running.start, at(today, 11), now),
+        earlier.admitsChange(
+          running,
+          running.start,
+          at(today, 11),
+          now,
+          isAllDay: false,
+        ),
         isFalse,
       );
       expect(
-        earlier.admitsChange(running, at(today, 10, 15), running.end, now),
+        earlier.admitsChange(
+          running,
+          at(today, 10, 15),
+          running.end,
+          now,
+          isAllDay: false,
+        ),
         isFalse,
       );
-      expect(earlier.admitsChange(ended, ended.start, ended.end, now), isTrue);
       expect(
-        earlier.admitsChange(ended, ended.start, at(today, 9, 15), now),
+        earlier.admitsChange(
+          ended,
+          ended.start,
+          ended.end,
+          now,
+          isAllDay: false,
+        ),
+        isTrue,
+      );
+      expect(
+        earlier.admitsChange(
+          ended,
+          ended.start,
+          at(today, 9, 15),
+          now,
+          isAllDay: false,
+        ),
         isFalse,
       );
     });
@@ -303,18 +411,48 @@ void main() {
       final entry = entryOf("entry", at(monday, 22), at(today, 2));
       expect(past.mayMove(entry, now), isFalse);
       expect(past.resizableEdges(entry, now), CalendarResizeEdges.end);
-      expect(past.admitsChange(entry, entry.start, at(today, 3), now), isTrue);
-      expect(past.admitsChange(entry, entry.start, today, now), isFalse);
       expect(
-        past.admitsChange(entry, entry.start, at(monday, 23), now),
+        past.admitsChange(
+          entry,
+          entry.start,
+          at(today, 3),
+          now,
+          isAllDay: false,
+        ),
+        isTrue,
+      );
+      expect(
+        past.admitsChange(entry, entry.start, today, now, isAllDay: false),
         isFalse,
       );
       expect(
-        past.admitsChange(entry, at(monday, 22, 15), entry.end, now),
+        past.admitsChange(
+          entry,
+          entry.start,
+          at(monday, 23),
+          now,
+          isAllDay: false,
+        ),
         isFalse,
       );
       expect(
-        past.admitsChange(entry, at(today, 9), at(today, 10), now),
+        past.admitsChange(
+          entry,
+          at(monday, 22, 15),
+          entry.end,
+          now,
+          isAllDay: false,
+        ),
+        isFalse,
+      );
+      expect(
+        past.admitsChange(
+          entry,
+          at(today, 9),
+          at(today, 10),
+          now,
+          isAllDay: false,
+        ),
         isFalse,
       );
     });
@@ -327,11 +465,23 @@ void main() {
       expect(earlier.resizableEdges(entry, tenOClock), CalendarResizeEdges.end);
       // Its end may move to a later day start, and its start not at all.
       expect(
-        earlier.admitsChange(entry, today, addDays(today, 2), tenOClock),
+        earlier.admitsChange(
+          entry,
+          today,
+          addDays(today, 2),
+          tenOClock,
+          isAllDay: true,
+        ),
         isTrue,
       );
       expect(
-        earlier.admitsChange(entry, wednesday, addDays(today, 2), tenOClock),
+        earlier.admitsChange(
+          entry,
+          wednesday,
+          addDays(today, 2),
+          tenOClock,
+          isAllDay: true,
+        ),
         isFalse,
       );
       // Under the lock at today's start the day is free.
@@ -365,6 +515,68 @@ void main() {
       );
       expect(slotMinuteOn(wednesday, pinned), 11 * 60 + 15);
       expect(slotMinuteOn(today, pinned), minutesPerDay);
+    });
+
+    test("HL4 an ended entry and one in progress keep their kind, and a free "
+        "one may change it", () {
+      bool admitsOwn(
+        HistoryLockPolicy<String> policy,
+        CalendarEntry<String> entry,
+        CalendarNow at, {
+        required bool isAllDay,
+      }) {
+        return policy.admitsChange(
+          entry,
+          entry.start,
+          entry.end,
+          at,
+          isAllDay: isAllDay,
+        );
+      }
+
+      // Under the lock at today's start, Monday has ended.
+      final mondayAllDay = entryOf("monday", monday, today, isAllDay: true);
+      expect(admitsOwn(past, mondayAllDay, now, isAllDay: true), isTrue);
+      expect(admitsOwn(past, mondayAllDay, now, isAllDay: false), isFalse);
+      final mondayTimed = entryOf("monday", monday, today);
+      expect(admitsOwn(past, mondayTimed, now, isAllDay: false), isTrue);
+      expect(admitsOwn(past, mondayTimed, now, isAllDay: true), isFalse);
+
+      // Under lockEarlierToday at 10:00, today is in progress.
+      final tenOClock = CalendarNow(time: at(today, 10), today: today);
+      final todayAllDay = entryOf("today", today, wednesday, isAllDay: true);
+      final todayTimed = entryOf("today", today, wednesday);
+      expect(
+        admitsOwn(earlier, todayAllDay, tenOClock, isAllDay: true),
+        isTrue,
+      );
+      expect(
+        earlier.admitsChange(
+          todayAllDay,
+          today,
+          addDays(today, 2),
+          tenOClock,
+          isAllDay: true,
+        ),
+        isTrue,
+      );
+      expect(
+        admitsOwn(earlier, todayAllDay, tenOClock, isAllDay: false),
+        isFalse,
+      );
+      expect(
+        admitsOwn(earlier, todayTimed, tenOClock, isAllDay: false),
+        isTrue,
+      );
+      expect(
+        admitsOwn(earlier, todayTimed, tenOClock, isAllDay: true),
+        isFalse,
+      );
+
+      // Under the lock at today's start, an entry from today's start is
+      // free.
+      expect(admitsOwn(past, todayAllDay, now, isAllDay: false), isTrue);
+      expect(admitsOwn(past, todayTimed, now, isAllDay: true), isTrue);
     });
   });
 }

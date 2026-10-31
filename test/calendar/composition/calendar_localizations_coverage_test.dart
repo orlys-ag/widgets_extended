@@ -95,9 +95,10 @@ final class _Marked extends DefaultCalendarLocalizations {
   String entryTimes(
     DateTime start,
     DateTime end,
-    CalendarHourLabelFormat format,
-  ) {
-    return bracketed(super.entryTimes(start, end, format));
+    CalendarHourLabelFormat format, {
+    required bool isAllDay,
+  }) {
+    return bracketed(super.entryTimes(start, end, format, isAllDay: isAllDay));
   }
 
   @override
@@ -185,9 +186,12 @@ final class _Marked extends DefaultCalendarLocalizations {
     DateTime start,
     DateTime end,
     DateTime today,
-    CalendarHourLabelFormat format,
-  ) {
-    return bracketed(super.landing(start, end, today, format));
+    CalendarHourLabelFormat format, {
+    required bool isAllDay,
+  }) {
+    return bracketed(
+      super.landing(start, end, today, format, isAllDay: isAllDay),
+    );
   }
 
   @override
@@ -198,6 +202,7 @@ final class _Marked extends DefaultCalendarLocalizations {
     required DateTime end,
     required CalendarHourLabelFormat format,
     required bool pending,
+    required bool isAllDay,
   }) {
     final label = super.entryLabel(
       title: title,
@@ -206,6 +211,7 @@ final class _Marked extends DefaultCalendarLocalizations {
       end: end,
       format: format,
       pending: pending,
+      isAllDay: isAllDay,
     );
     return bracketed(label);
   }

@@ -2509,7 +2509,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return false;
     }
     final entry = shape.shown.entry;
-    return _tracks.hours.holdsTimes(entry.start, entry.end);
+    return _tracks.hours.holdsTimes(
+      entry.start,
+      entry.end,
+      isAllDay: entry.isAllDay,
+    );
   }
 
   /// The rows a drag stays inside: the slot rows of [_tracks]. They bind a
@@ -2571,7 +2575,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (times == null ||
         (edges != null &&
             !_edgesChange(edges, entry, times.start, times.end)) ||
-        !_rules.admitsTimes(entry, times.start, times.end, now)) {
+        !_rules.admitsTimes(
+          entry,
+          times.start,
+          times.end,
+          now,
+          isAllDay: false,
+        )) {
       return false;
     }
     return _allowsOverlaps ||
@@ -2648,11 +2658,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
           times.start,
           times.end,
           atEnd: edge == BoardResizeEdges.trailing,
+          isAllDay: true,
         );
         _holdBar(
           held != null &&
                   (held.start != entry.start || held.end != entry.end) &&
-                  _rules.admitsTimes(entry, held.start, held.end, now)
+                  _rules.admitsTimes(
+                    entry,
+                    held.start,
+                    held.end,
+                    now,
+                    isAllDay: true,
+                  )
               ? held
               : null,
         );
@@ -2666,7 +2683,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return false;
     }
     return times != null &&
-        _rules.admitsTimes(entry, times.start, times.end, now);
+        _rules.admitsTimes(entry, times.start, times.end, now, isAllDay: true);
   }
 
   /// The edge a running day-edge resize of the bar [key] drags, where
@@ -2956,7 +2973,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (from == null ||
         shape == null ||
         stored == null ||
-        !_tracks.hours.holdsTimes(stored.start, stored.end)) {
+        !_tracks.hours.holdsTimes(
+          stored.start,
+          stored.end,
+          isAllDay: stored.isAllDay,
+        )) {
       return;
     }
     final times = switch (shape) {
@@ -3181,7 +3202,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final now = _calendarNow;
     try {
       if (!_policy.mayMove(entry, now) ||
-          !_rules.admitsTimes(entry, start, end, now)) {
+          !_rules.admitsTimes(entry, start, end, now, isAllDay: true)) {
         return null;
       }
     } catch (exception, stack) {
@@ -3237,7 +3258,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return null;
     }
     try {
-      if (!_rules.admitsTimes(entry, start, end, now)) {
+      if (!_rules.admitsTimes(entry, start, end, now, isAllDay: false)) {
         return null;
       }
     } catch (exception, stack) {
@@ -3272,19 +3293,19 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final entry = shape.shown.entry;
     final start = entry.start;
     if (!_rules.coversAtMost(start, end)) {
-      final held = _rules.heldToLimit(start, end, atEnd: true);
+      final held = _rules.heldToLimit(start, end, atEnd: true, isAllDay: false);
       if (held == null) {
         return null;
       }
       end = held.end;
     }
-    if (!_tracks.hours.holdsTimes(start, end)) {
+    if (!_tracks.hours.holdsTimes(start, end, isAllDay: false)) {
       return null;
     }
     final now = _calendarNow;
     try {
       if (!_policy.resizableEdges(entry, now).hasEnd ||
-          !_policy.admitsChange(entry, start, end, now)) {
+          !_policy.admitsChange(entry, start, end, now, isAllDay: false)) {
         return null;
       }
     } catch (exception, stack) {
@@ -3590,7 +3611,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (drag == null) {
       return null;
     }
-    if (drag.crosses || drag.heldBar != null) {
+    final crossing = drag.crosses;
+    if (crossing || drag.heldBar != null) {
       return times == null
           ? strings.noLanding
           : strings.landing(
@@ -3598,6 +3620,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
               times.end,
               _calendarNow.today,
               widget.hourLabelFormat,
+              isAllDay: _landsAllDay(drag, crossing: crossing),
             );
     }
     if (!drag.resolved) {
@@ -3614,6 +3637,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       times.end,
       _calendarNow.today,
       widget.hourLabelFormat,
+      isAllDay: _landsAllDay(drag, crossing: crossing),
     );
   }
 
@@ -4249,6 +4273,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         picked.start,
         picked.end,
         atEnd: col >= anchor.col,
+        isAllDay: true,
       );
       if (held != null) {
         col = col >= anchor.col
@@ -4290,7 +4315,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       );
       final start = timeAtWallMinute(anchorWall, from: occurrence);
       if (start != null && end != null && !_rules.coversAtMost(start, end)) {
-        final held = _rules.heldToLimit(start, end, atEnd: true);
+        final held = _rules.heldToLimit(
+          start,
+          end,
+          atEnd: true,
+          isAllDay: false,
+        );
         if (held != null) {
           focus = _lastCellEndingBy(wallMinuteOf(held.end), anchor);
         }
@@ -4313,7 +4343,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       from: occurrence,
     );
     if (start != null && end != null && !_rules.coversAtMost(start, end)) {
-      final held = _rules.heldToLimit(start, end, atEnd: false);
+      final held = _rules.heldToLimit(
+        start,
+        end,
+        atEnd: false,
+        isAllDay: false,
+      );
       if (held != null) {
         focus = _firstCellStartingFrom(wallMinuteOf(held.start), anchor);
       }
