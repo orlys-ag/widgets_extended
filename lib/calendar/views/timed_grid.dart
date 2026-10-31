@@ -358,11 +358,16 @@ const ValueKey<String> landingLabelKey = ValueKey<String>("grid-landing-label");
 const ValueKey<String> liftedBlockKey = ValueKey<String>("grid-lifted-block");
 
 /// The time a create gesture picked: one continuous range from [start] to
-/// [end], an exclusive end, both local times.
+/// [end], an exclusive end, both local times, all-day where [isAllDay].
 @immutable
 final class CalendarCreateRange {
-  /// The range from [start] to [end].
-  const CalendarCreateRange({required this.start, required this.end});
+  /// The range from [start] to [end], all-day where [isAllDay], as the
+  /// gesture that picked it tells it.
+  const CalendarCreateRange({
+    required this.start,
+    required this.end,
+    this.isAllDay = false,
+  });
 
   /// Where the range starts.
   final DateTime start;
@@ -370,29 +375,31 @@ final class CalendarCreateRange {
   /// Where the range ends, after [start].
   final DateTime end;
 
-  /// Whether the range runs from a day start to a day start
-  /// ([isDayStart]), covering whole days.
-  bool get isAllDay {
-    return isDayStart(start) && isDayStart(end);
-  }
+  /// Whether the range is all-day, stored as constructed: true for a range
+  /// a create across the all-day strip picks, whose [start] and [end] are
+  /// day starts, and false for every other, a range of slots from a day
+  /// start to a day start included.
+  final bool isAllDay;
 
   @override
   bool operator ==(Object other) {
     return other is CalendarCreateRange &&
         other.start == start &&
-        other.end == end;
+        other.end == end &&
+        other.isAllDay == isAllDay;
   }
 
   @override
   int get hashCode {
-    return Object.hash(start, end);
+    return Object.hash(start, end, isAllDay);
   }
 
   @override
   String toString() {
     return "CalendarCreateRange("
         "${isoDate(start)} ${isoTime(minuteOfDay(start))} "
-        "to ${isoDate(end)} ${isoTime(minuteOfDay(end))})";
+        "to ${isoDate(end)} ${isoTime(minuteOfDay(end))}"
+        "${isAllDay ? ", all day" : ""})";
   }
 }
 
@@ -2509,7 +2516,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return false;
     }
     final entry = shape.shown.entry;
-    return _tracks.hours.holdsTimes(entry.start, entry.end);
+    return _tracks.hours.holdsTimes(
+      entry.start,
+      entry.end,
+      isAllDay: entry.isAllDay,
+    );
   }
 
   /// The rows a drag stays inside: the slot rows of [_tracks]. They bind a
@@ -2571,7 +2582,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (times == null ||
         (edges != null &&
             !_edgesChange(edges, entry, times.start, times.end)) ||
-        !_rules.admitsTimes(entry, times.start, times.end, now)) {
+        !_rules.admitsTimes(
+          entry,
+          times.start,
+          times.end,
+          now,
+          isAllDay: false,
+        )) {
       return false;
     }
     return _allowsOverlaps ||
@@ -2648,11 +2665,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
           times.start,
           times.end,
           atEnd: edge == BoardResizeEdges.trailing,
+          isAllDay: true,
         );
         _holdBar(
           held != null &&
                   (held.start != entry.start || held.end != entry.end) &&
-                  _rules.admitsTimes(entry, held.start, held.end, now)
+                  _rules.admitsTimes(
+                    entry,
+                    held.start,
+                    held.end,
+                    now,
+                    isAllDay: true,
+                  )
               ? held
               : null,
         );
@@ -2666,7 +2690,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return false;
     }
     return times != null &&
-        _rules.admitsTimes(entry, times.start, times.end, now);
+        _rules.admitsTimes(entry, times.start, times.end, now, isAllDay: true);
   }
 
   /// The edge a running day-edge resize of the bar [key] drags, where
@@ -2747,14 +2771,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return (start: start, end: end);
   }
 
-  /// Whether a range from [start] to [end] shares time with a timed entry
-  /// other than [id], whose entry is [own], that the store shows on the
-  /// days the range covers, shown or not ([rangeSharesTime]): a board
+  /// Whether a timed range from [start] to [end] shares time with a timed
+  /// entry other than [id], whose entry is [own], that the store shows on
+  /// the days the range covers, shown or not ([rangeSharesTime]): a board
   /// piece in the rows the range covers on the shown columns, one of the
   /// entries those rows can miss that the split indexes
   /// ([TimedGridLayout.loose]), and, for a range with a day outside the
-  /// tracks' range, one the store shows there ([_offRangeOver]). An
-  /// all-day range shares time with none ([entriesShareTime]). The walk,
+  /// tracks' range, one the store shows there ([_offRangeOver]). The walk,
   /// as many columns as the range covers, and at most two O(log n)
   /// searches; a store read only for days outside the range no check
   /// since the last clearing of [_offRange] covered.
@@ -2764,9 +2787,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     DateTime start,
     DateTime end,
   ) {
-    if (isDayStart(start) && isDayStart(end)) {
-      return false;
-    }
     final firstDay = dayNumber(start);
     final lastDay = lastDayNumberOf(start, end);
     final tracks = _tracks;
@@ -2960,7 +2980,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (from == null ||
         shape == null ||
         stored == null ||
-        !_tracks.hours.holdsTimes(stored.start, stored.end)) {
+        !_tracks.hours.holdsTimes(
+          stored.start,
+          stored.end,
+          isAllDay: stored.isAllDay,
+        )) {
       return;
     }
     final times = switch (shape) {
@@ -3185,7 +3209,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final now = _calendarNow;
     try {
       if (!_policy.mayMove(entry, now) ||
-          !_rules.admitsTimes(entry, start, end, now)) {
+          !_rules.admitsTimes(entry, start, end, now, isAllDay: true)) {
         return null;
       }
     } catch (exception, stack) {
@@ -3241,7 +3265,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return null;
     }
     try {
-      if (!_rules.admitsTimes(entry, start, end, now)) {
+      if (!_rules.admitsTimes(entry, start, end, now, isAllDay: false)) {
         return null;
       }
     } catch (exception, stack) {
@@ -3276,19 +3300,19 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final entry = shape.shown.entry;
     final start = entry.start;
     if (!_rules.coversAtMost(start, end)) {
-      final held = _rules.heldToLimit(start, end, atEnd: true);
+      final held = _rules.heldToLimit(start, end, atEnd: true, isAllDay: false);
       if (held == null) {
         return null;
       }
       end = held.end;
     }
-    if (!_tracks.hours.holdsTimes(start, end)) {
+    if (!_tracks.hours.holdsTimes(start, end, isAllDay: false)) {
       return null;
     }
     final now = _calendarNow;
     try {
       if (!_policy.resizableEdges(entry, now).hasEnd ||
-          !_policy.admitsChange(entry, start, end, now)) {
+          !_policy.admitsChange(entry, start, end, now, isAllDay: false)) {
         return null;
       }
     } catch (exception, stack) {
@@ -3569,6 +3593,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     };
   }
 
+  /// Whether the times a release of [drag] gives are all-day: where
+  /// [crossing], a block's move into the strip gives all-day times and a
+  /// bar's move into the slots timed ones; any other drag keeps the kind of
+  /// what it drags, a bar's all-day and a piece's timed.
+  bool _landsAllDay(_Dragging drag, {required bool crossing}) {
+    if (crossing && drag.kind == BoardDragKind.move) {
+      return !drag.key.isBar;
+    }
+    return drag.key.isBar;
+  }
+
   /// What the landing label says for [_drag] in [strings]: the days and
   /// times a release would give, the times in [TimedGrid.hourLabelFormat]
   /// ([CalendarLocalizations.landing]), or [CalendarLocalizations.noLanding]
@@ -3583,7 +3618,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (drag == null) {
       return null;
     }
-    if (drag.crosses || drag.heldBar != null) {
+    final crossing = drag.crosses;
+    if (crossing || drag.heldBar != null) {
       return times == null
           ? strings.noLanding
           : strings.landing(
@@ -3591,6 +3627,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
               times.end,
               _calendarNow.today,
               widget.hourLabelFormat,
+              isAllDay: _landsAllDay(drag, crossing: crossing),
             );
     }
     if (!drag.resolved) {
@@ -3607,6 +3644,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       times.end,
       _calendarNow.today,
       widget.hourLabelFormat,
+      isAllDay: _landsAllDay(drag, crossing: crossing),
     );
   }
 
@@ -3939,18 +3977,21 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// above the slots an hour from that slot ([_barLandingOf]), and an end
   /// handle over a later day's slot ends there ([_laterDayEndOf]), each
   /// through one request ([_requestMove]), or none where the landing is
-  /// refused or keeps the entry's times, compared alone as in [_commit];
-  /// either way [_Dragging.spent] then refuses the board's own report. A
-  /// bar's day-edge resize held at [CalendarEditRules.dayLimit] requests
-  /// the range it is held at. The request's hold syncs within the call
-  /// ([_requestMove]).
+  /// refused or keeps the entry's times and kind; either way
+  /// [_Dragging.spent] then refuses the board's own report. A request
+  /// carries the kind the release gives ([_landsAllDay]), so a block let go
+  /// on its own day's strip cell requests the entry all-day at the same
+  /// times. A bar's day-edge resize held at [CalendarEditRules.dayLimit]
+  /// requests the range it is held at. The request's hold syncs within the
+  /// call ([_requestMove]).
   void _releaseCross(Offset local) {
     final drag = _drag;
     if (drag == null) {
       return;
     }
     ({DateTime start, DateTime end})? write;
-    if (_isCrossingDrag(drag)) {
+    final crossing = _isCrossingDrag(drag);
+    if (crossing) {
       noteCellRead();
       final row = _rowAt(local.dy);
       final col = _columnAt(local.dx);
@@ -3989,15 +4030,22 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     final id = drag.key.id;
     final stored = widget.store.storedEntry(id);
+    final allDay = _landsAllDay(drag, crossing: crossing);
     if (stored == null ||
         _isPending(id) ||
-        (write.start == stored.start && write.end == stored.end)) {
+        (write.start == stored.start &&
+            write.end == stored.end &&
+            allDay == stored.isAllDay)) {
       return;
     }
     _requestMove(
       CalendarMoveRequest<T>(
         entry: stored,
-        requested: stored.copyWith(start: write.start, end: write.end),
+        requested: stored.copyWith(
+          start: write.start,
+          end: write.end,
+          isAllDay: allDay,
+        ),
         kind: drag.kind == BoardDragKind.move
             ? CalendarMoveKind.move
             : CalendarMoveKind.resize,
@@ -4105,6 +4153,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return CalendarCreateRange(
       start: _tracks.dateAt(math.min(anchor, focus)),
       end: dateOfDayNumber(_tracks.dayAt(math.max(anchor, focus)) + 1),
+      isAllDay: true,
     );
   }
 
@@ -4232,6 +4281,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         picked.start,
         picked.end,
         atEnd: col >= anchor.col,
+        isAllDay: true,
       );
       if (held != null) {
         col = col >= anchor.col
@@ -4273,7 +4323,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       );
       final start = timeAtWallMinute(anchorWall, from: occurrence);
       if (start != null && end != null && !_rules.coversAtMost(start, end)) {
-        final held = _rules.heldToLimit(start, end, atEnd: true);
+        final held = _rules.heldToLimit(
+          start,
+          end,
+          atEnd: true,
+          isAllDay: false,
+        );
         if (held != null) {
           focus = _lastCellEndingBy(wallMinuteOf(held.end), anchor);
         }
@@ -4296,7 +4351,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       from: occurrence,
     );
     if (start != null && end != null && !_rules.coversAtMost(start, end)) {
-      final held = _rules.heldToLimit(start, end, atEnd: false);
+      final held = _rules.heldToLimit(
+        start,
+        end,
+        atEnd: false,
+        isAllDay: false,
+      );
       if (held != null) {
         focus = _firstCellStartingFrom(wallMinuteOf(held.start), anchor);
       }

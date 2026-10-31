@@ -67,10 +67,10 @@ class MockCalendarApi implements CalendarApi {
 
   /// Whether items may share time. Where false, a create whose item shares
   /// time with a stored one fails with a [CalendarOverlapException], and
-  /// so does an update that changes the item's start or end to times
-  /// sharing time with another; an update that keeps them saves, so items
-  /// that already share time stay. Read on every call, as [failurePolicy]
-  /// is, so the app may set it between calls.
+  /// so does an update that changes the item's start, end or kind, all-day
+  /// or timed, to times sharing time with another; an update that keeps
+  /// them saves, so items that already share time stay. Read on every
+  /// call, as [failurePolicy] is, so the app may set it between calls.
   bool allowsOverlaps;
 
   final List<CalendarRequest> _requests = <CalendarRequest>[];
@@ -107,9 +107,24 @@ class MockCalendarApi implements CalendarApi {
         ) {
           ids.addAll(_idsByDay[day] ?? const <String>{});
         }
-        final items = <Map<String, Object?>>[for (final id in ids) _items[id]!];
-        items.sort(_compareStored);
-        return <Map<String, Object?>>[for (final item in items) _copyMap(item)];
+        // By start instant, then creation order, each start read once.
+        final items = <({DateTime start, String id})>[
+          for (final id in ids)
+            (
+              start: parseItemTime(_items[id]!["start"]! as String)!.time,
+              id: id,
+            ),
+        ];
+        items.sort((a, b) {
+          final byStart = a.start.compareTo(b.start);
+          if (byStart != 0) {
+            return byStart;
+          }
+          return _compareIds(a.id, b.id);
+        });
+        return <Map<String, Object?>>[
+          for (final item in items) _copyMap(_items[item.id]!),
+        ];
       },
     );
   }
@@ -240,7 +255,9 @@ class MockCalendarApi implements CalendarApi {
   }
 
   /// Whether the valid [body] gives the stored envelope [stored] another
-  /// start or end instant.
+  /// start or end instant, or another kind, all-day or timed, as
+  /// [itemFromJson] reads them: an all-day item made timed at the same
+  /// instants shares time it did not.
   static bool _timesChange(
     Map<String, Object?> stored,
     Map<String, Object?> body,
@@ -248,7 +265,8 @@ class MockCalendarApi implements CalendarApi {
     final before = itemFromJson(stored);
     final after = itemFromJson(body);
     return !before.start.isAtSameMomentAs(after.start) ||
-        !before.end.isAtSameMomentAs(after.end);
+        !before.end.isAtSameMomentAs(after.end) ||
+        before.isAllDay != after.isAllDay;
   }
 
   /// The stored ids, other than [ownId], that the valid [body] may not
@@ -277,14 +295,16 @@ class MockCalendarApi implements CalendarApi {
   }
 
   /// Stores the valid [body] as [id], its start and end written as
-  /// [isoDateTime] writes them, whichever form they came in, so the stored
-  /// texts sort as their instants do ([_compareStored]).
+  /// [itemTimeText] writes them: an all-day item's as dates, and a timed
+  /// one's in UTC, whichever form they came in.
   Map<String, Object?> _store(String id, Map<String, Object?> body) {
+    final start = parseItemTime(body["start"]! as String)!;
+    final end = parseItemTime(body["end"]! as String)!;
     final stored = <String, Object?>{
       ...body,
       "id": id,
-      "start": isoDateTime(parseIsoDateTime(body["start"]! as String)!),
-      "end": isoDateTime(parseIsoDateTime(body["end"]! as String)!),
+      "start": itemTimeText(start.time, allDay: start.date),
+      "end": itemTimeText(end.time, allDay: end.date),
     };
     _items[id] = stored;
     for (final day in _coveredDaysOf(stored)) {
@@ -323,18 +343,6 @@ Iterable<int> _coveredDaysOf(Map<String, Object?> stored) sync* {
   for (var day = CalendarDates.dayNumber(item.start); day <= last; day++) {
     yield day;
   }
-}
-
-/// By start, then creation order. A stored start text sorts as its
-/// instant does: [MockCalendarApi._store] keeps it in UTC as
-/// [isoDateTime] writes it, its fields in order, each zero-padded, on a
-/// whole minute.
-int _compareStored(Map<String, Object?> a, Map<String, Object?> b) {
-  final byStart = (a["start"] as String).compareTo(b["start"] as String);
-  if (byStart != 0) {
-    return byStart;
-  }
-  return _compareIds(a["id"] as String, b["id"] as String);
 }
 
 /// Creation order: the number after `item-`.

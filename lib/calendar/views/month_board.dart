@@ -2193,6 +2193,7 @@ class _MonthChipBox<T> extends StatelessWidget {
         end: entry.entry.end,
         format: format,
         pending: pending,
+        isAllDay: entry.entry.isAllDay,
       ),
       onTap: pending ? null : open,
       excludeSemantics: true,

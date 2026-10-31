@@ -59,6 +59,7 @@ CalendarEntry<String> entryOf(
   DateTime start,
   DateTime end, {
   String? title,
+  bool isAllDay = false,
 }) {
   return CalendarEntry<String>(
     id: id,
@@ -67,6 +68,7 @@ CalendarEntry<String> entryOf(
     title: title ?? id,
     color: const Color(0xFF336699),
     payload: id,
+    isAllDay: isAllDay,
   );
 }
 
@@ -77,7 +79,7 @@ CalendarEntry<String> allDayOf(
   int days = 1,
   String? title,
 }) {
-  return entryOf(id, first, addDays(first, days), title: title);
+  return entryOf(id, first, addDays(first, days), title: title, isAllDay: true);
 }
 
 /// A grid the tests pump: Week over the seven days from [first], under a
@@ -652,17 +654,24 @@ void expectTimes(
   expect((entry.start, entry.end), (start, end), reason: reason);
 }
 
-/// TX1's gesture: in Week, Monday's one-day bar moved two columns.
+/// TX1's gesture: in Week, Monday's one-day bar moved two columns, under
+/// [editPolicy] where it is given.
 Future<MoveRecordingStore> moveBarTwoColumns(
   WidgetTester tester, {
   CalendarDayHours hours = CalendarDayHours.allDay,
   Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
+  CalendarEditPolicy<String>? editPolicy,
 }) async {
   final shown = Shown.week(monday, hours: hours);
   final store = storeOf(<CalendarEntry<String>>[
     allDayOf("off", monday),
   ], hours: hours);
-  await Harness(store, shown, onMoveRequest: onMoveRequest).pump(tester);
+  await Harness(
+    store,
+    shown,
+    onMoveRequest: onMoveRequest,
+    editPolicy: editPolicy,
+  ).pump(tester);
   final gesture = await liftTo(
     tester,
     tester.getCenter(barFinder("off")),
@@ -727,14 +736,21 @@ Future<MoveRecordingStore> resizeBarEnd(
   return store;
 }
 
-/// TX4's first gesture: Tuesday's bar let go on Tuesday's 10:00 slot.
+/// TX4's first gesture: Tuesday's bar let go on Tuesday's 10:00 slot,
+/// under [editPolicy] where it is given.
 Future<MoveRecordingStore> dropBarOnSlot(
   WidgetTester tester,
   Shown shown, {
   Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
+  CalendarEditPolicy<String>? editPolicy,
 }) async {
   final store = storeOf(<CalendarEntry<String>>[allDayOf("off", tuesday)]);
-  await Harness(store, shown, onMoveRequest: onMoveRequest).pump(tester);
+  await Harness(
+    store,
+    shown,
+    onMoveRequest: onMoveRequest,
+    editPolicy: editPolicy,
+  ).pump(tester);
   await dragTo(
     tester,
     tester.getCenter(barFinder("off")),
@@ -800,10 +816,10 @@ Future<MoveRecordingStore> dropBlockOnEmptyRow(
   return store;
 }
 
-/// TX8's gesture: in Week, under [limit], the selected one-day bar of [id]
-/// on [day] has its edge on [side] dragged so the pointer lies over
-/// [over], with [others] in the strip too; returns the gesture still held
-/// and the store.
+/// TX8's gesture: in Week over [hours], under [limit], the selected
+/// one-day bar of [id] on [day] has its edge on [side] dragged so the
+/// pointer lies over [over], with [others] in the strip too; returns the
+/// gesture still held and the store.
 Future<(TestGesture, MoveRecordingStore)> holdBarEdge(
   WidgetTester tester, {
   required int? limit,
@@ -813,9 +829,13 @@ Future<(TestGesture, MoveRecordingStore)> holdBarEdge(
   required DateTime over,
   List<CalendarEntry<String>> others = const <CalendarEntry<String>>[],
   Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
+  CalendarDayHours hours = CalendarDayHours.allDay,
 }) async {
-  final shown = Shown.week(monday);
-  final store = storeOf(<CalendarEntry<String>>[allDayOf(id, day), ...others]);
+  final shown = Shown.week(monday, hours: hours);
+  final store = storeOf(<CalendarEntry<String>>[
+    allDayOf(id, day),
+    ...others,
+  ], hours: hours);
   await Harness(
     store,
     shown,
@@ -858,6 +878,7 @@ Future<MoveRecordingStore> releaseBarEdge(
   required DateTime over,
   List<CalendarEntry<String>> others = const <CalendarEntry<String>>[],
   Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
+  CalendarDayHours hours = CalendarDayHours.allDay,
 }) async {
   final (gesture, store) = await holdBarEdge(
     tester,
@@ -868,6 +889,7 @@ Future<MoveRecordingStore> releaseBarEdge(
     over: over,
     others: others,
     onMoveRequest: onMoveRequest,
+    hours: hours,
   );
   await gesture.up();
   await tester.pumpAndSettle();
@@ -879,13 +901,13 @@ CalendarEntry<String> nightEntry() {
   return entryOf("night", at(monday, 22), at(tuesday, 2));
 }
 
-/// The LD tests' gesture: in Week, under [limit], the entry [id] of
-/// [entries] selected and the end grip of its last piece, on [day],
-/// pressed 2 px above that block's bottom, on the grip's half inside the
-/// block, or with [outside] 2 px below it, on the half outside; then
-/// dragged so the pointer lies over the slot starting at [minute] in
-/// [over]'s column. Returns the gesture still held, the store and the
-/// harness.
+/// The LD tests' gesture: in Week over [hours], under [limit], or under
+/// [editPolicy] where it is given, the entry [id] of [entries] selected
+/// and the end grip of its last piece, on [day], pressed 2 px above that
+/// block's bottom, on the grip's half inside the block, or with [outside]
+/// 2 px below it, on the half outside; then dragged so the pointer lies
+/// over the slot starting at [minute] in [over]'s column. Returns the
+/// gesture still held, the store and the harness.
 Future<(TestGesture, MoveRecordingStore, Harness)> holdEndOver(
   WidgetTester tester, {
   required List<CalendarEntry<String>> entries,
@@ -896,14 +918,17 @@ Future<(TestGesture, MoveRecordingStore, Harness)> holdEndOver(
   int? limit,
   bool outside = false,
   Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
+  CalendarEditPolicy<String>? editPolicy,
+  CalendarDayHours hours = CalendarDayHours.allDay,
 }) async {
-  final shown = Shown.week(monday);
-  final store = storeOf(entries);
+  final shown = Shown.week(monday, hours: hours);
+  final store = storeOf(entries, hours: hours);
   final harness = Harness(
     store,
     shown,
     maxDayCount: limit,
     onMoveRequest: onMoveRequest,
+    editPolicy: editPolicy,
   );
   await harness.pump(tester);
   final selecting = await lift(tester, tester.getCenter(blocksOf(id).first));
@@ -947,6 +972,8 @@ Future<MoveRecordingStore> releaseEndOver(
   int? limit,
   bool outside = false,
   Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
+  CalendarEditPolicy<String>? editPolicy,
+  CalendarDayHours hours = CalendarDayHours.allDay,
 }) async {
   final (gesture, store, _) = await holdEndOver(
     tester,
@@ -958,6 +985,8 @@ Future<MoveRecordingStore> releaseEndOver(
     limit: limit,
     outside: outside,
     onMoveRequest: onMoveRequest,
+    editPolicy: editPolicy,
+    hours: hours,
   );
   await gesture.up();
   await tester.pumpAndSettle();
@@ -1890,6 +1919,7 @@ void main() {
           thursday,
           DateTime(2026, 1, 5),
           CalendarHourLabelFormat.twentyFourHour,
+          isAllDay: true,
         ),
       );
       await gesture.up();
@@ -2054,6 +2084,262 @@ void main() {
       final store = await dropBlockOnEmptyRow(tester, shown);
       expectTimes(store, "meet", tuesday, wednesday, reason: shown.name);
     }
+  });
+
+  testWidgets("TX23 a block dropped on the strip stores an all-day entry and "
+      "a bar dropped on a slot a timed one, and the block of a timed entry "
+      "from Tuesday's start to Wednesday's let go on Tuesday's empty strip "
+      "cell requests the same times all-day", (tester) async {
+    for (final shown in bothGrids()) {
+      var store = await dropBlockOnStrip(tester, shown);
+      expect(storedOf(store, "meet").isAllDay, isTrue, reason: shown.name);
+      store = await dropBarOnSlot(tester, shown);
+      expect(storedOf(store, "off").isAllDay, isFalse, reason: shown.name);
+
+      store = storeOf(<CalendarEntry<String>>[
+        entryOf("whole", tuesday, wednesday),
+      ]);
+      await Harness(store, shown).pump(tester);
+      await dragTo(
+        tester,
+        tester.getCenter(blockFinder("whole", tuesday)),
+        tester.getCenter(find.byKey(allDayCellKey(tuesday))),
+      );
+      expect(store.moves, hasLength(1), reason: shown.name);
+      final moved = store.moves.single;
+      expect(
+        (moved.start, moved.end, moved.isAllDay),
+        (tuesday, wednesday, true),
+        reason: shown.name,
+      );
+      expect(barFinder("whole"), findsOneWidget, reason: shown.name);
+      expect(blocksOf("whole"), findsNothing, reason: shown.name);
+    }
+  });
+
+  testWidgets("TX24 in Week the landing label names the kind the release "
+      "gives: a timed entry's block over another day's column, timed; a "
+      "block over a strip cell, all-day; and a bar over a slot, timed", (
+    tester,
+  ) async {
+    final shown = Shown.week(monday);
+    const format = CalendarHourLabelFormat.twentyFourHour;
+
+    final whole = entryOf("whole", tuesday, wednesday);
+    var harness = Harness(storeOf(<CalendarEntry<String>>[whole]), shown);
+    await harness.pump(tester);
+    final from = tester.getCenter(blockFinder("whole", tuesday));
+    var gesture = await liftTo(
+      tester,
+      from,
+      from + Offset(stripRect(tester, shown, tuesday).width, 0.0),
+    );
+    final timed = english.landing(
+      wednesday,
+      thursday,
+      harness.today,
+      format,
+      isAllDay: false,
+    );
+    // Setup sanity: the kind changes the text.
+    expect(
+      timed,
+      isNot(
+        english.landing(
+          wednesday,
+          thursday,
+          harness.today,
+          format,
+          isAllDay: true,
+        ),
+      ),
+    );
+    expect(landingText(tester), timed);
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    harness = Harness(
+      storeOf(<CalendarEntry<String>>[
+        entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
+        allDayOf("other", tuesday),
+      ]),
+      shown,
+    );
+    await harness.pump(tester);
+    gesture = await liftTo(
+      tester,
+      tester.getCenter(blockFinder("meet", tuesday)),
+      stripRect(tester, shown, tuesday).center,
+    );
+    expect(
+      landingText(tester),
+      english.landing(
+        tuesday,
+        wednesday,
+        harness.today,
+        format,
+        isAllDay: true,
+      ),
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    harness = Harness(
+      storeOf(<CalendarEntry<String>>[allDayOf("off", tuesday)]),
+      shown,
+    );
+    await harness.pump(tester);
+    gesture = await liftTo(
+      tester,
+      tester.getCenter(barFinder("off")),
+      slotRect(tester, shown, tuesday, 10 * 60).center,
+    );
+    expect(
+      landingText(tester),
+      english.landing(
+        at(tuesday, 10),
+        at(tuesday, 11),
+        harness.today,
+        format,
+        isAllDay: false,
+      ),
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("TX25 in Week a policy refusing every all-day change keeps a "
+      "timed entry's block off the strip, and lets it move to another day's "
+      "slots", (tester) async {
+    final shown = Shown.week(monday);
+    final whole = entryOf("whole", tuesday, wednesday);
+    final timedOnly = ScriptedEditPolicy<String>(
+      admits: (entry, start, end, isAllDay) {
+        return !isAllDay;
+      },
+    );
+
+    Future<MoveRecordingStore> releaseOnStrip(
+      CalendarEditPolicy<String> policy,
+    ) async {
+      final store = storeOf(<CalendarEntry<String>>[whole]);
+      await Harness(store, shown, editPolicy: policy).pump(tester);
+      await dragTo(
+        tester,
+        tester.getCenter(blockFinder("whole", tuesday)),
+        tester.getCenter(find.byKey(allDayCellKey(tuesday))),
+      );
+      return store;
+    }
+
+    // Setup sanity: a policy admitting every change lets the release write
+    // the entry all-day.
+    final admitted = await releaseOnStrip(const ScriptedEditPolicy<String>());
+    expect(admitted.moves, hasLength(1));
+    expect(admitted.moves.single.isAllDay, isTrue);
+
+    final store = await releaseOnStrip(timedOnly);
+    expect(store.moves, isEmpty);
+    expect(blockFinder("whole", tuesday), findsOneWidget);
+
+    final block = tester.getRect(blockFinder("whole", tuesday));
+    await dragTo(
+      tester,
+      block.center,
+      block.center +
+          (slotRect(tester, shown, wednesday, 0).topLeft - block.topLeft) +
+          const Offset(0.0, 2.0),
+    );
+    expect(store.moves, hasLength(1));
+    final moved = store.moves.single;
+    expect(
+      (moved.start, moved.end, moved.isAllDay),
+      (wednesday, thursday, false),
+    );
+  });
+
+  testWidgets("TX26 in Week each gate of a bar's landing on a slot, an end "
+      "handle's on a later day and a bar's move or held day-edge resize asks "
+      "with the kind of what it lands", (tester) async {
+    final timedOnly = ScriptedEditPolicy<String>(
+      admits: (entry, start, end, isAllDay) {
+        return !isAllDay;
+      },
+    );
+    final allDayOnly = ScriptedEditPolicy<String>(
+      admits: (entry, start, end, isAllDay) {
+        return isAllDay;
+      },
+    );
+    final shown = Shown.week(monday);
+
+    Future<MoveRecordingStore> laterDayEnd(CalendarEditPolicy<String> policy) {
+      return releaseEndOver(
+        tester,
+        entries: <CalendarEntry<String>>[nightEntry()],
+        id: "night",
+        day: tuesday,
+        over: wednesday,
+        minute: 12 * 60,
+        editPolicy: policy,
+      );
+    }
+
+    // Under a policy refusing every all-day change: the bar's landing on a
+    // slot and the end on a later day are timed and written, and the bar's
+    // move within the strip is refused.
+    var store = await dropBarOnSlot(tester, shown, editPolicy: timedOnly);
+    expect(store.moves, hasLength(1));
+    expect(
+      (storedOf(store, "off").start, storedOf(store, "off").isAllDay),
+      (at(tuesday, 10), false),
+    );
+    store = await laterDayEnd(timedOnly);
+    expect(store.moves, hasLength(1));
+    expect(storedOf(store, "night").end, at(wednesday, 12, 15));
+    store = await moveBarTwoColumns(tester, editPolicy: timedOnly);
+    expect(store.moves, isEmpty);
+
+    // Under one refusing every timed change, the other way round.
+    store = await dropBarOnSlot(tester, shown, editPolicy: allDayOnly);
+    expect(store.moves, isEmpty);
+    store = await laterDayEnd(allDayOnly);
+    expect(store.moves, isEmpty);
+    store = await moveBarTwoColumns(tester, editPolicy: allDayOnly);
+    expect(store.moves, hasLength(1));
+    expectTimes(store, "off", wednesday, thursday);
+    expect(storedOf(store, "off").isAllDay, isTrue);
+
+    // Under hours to 18:00, an end handle let go on a later day past the
+    // day limit is held at the hours' end, timed.
+    const toSix = CalendarDayHours(0, 18 * 60);
+    store = await releaseEndOver(
+      tester,
+      entries: <CalendarEntry<String>>[
+        entryOf("ten", at(tuesday, 10), at(tuesday, 11)),
+      ],
+      id: "ten",
+      day: tuesday,
+      over: wednesday,
+      minute: 12 * 60,
+      limit: 1,
+      hours: toSix,
+    );
+    expectTimes(store, "ten", at(tuesday, 10), at(tuesday, 18));
+
+    // And a bar's day edge let go past the day limit is held at a day's
+    // start, all-day.
+    store = await releaseBarEdge(
+      tester,
+      limit: 3,
+      id: "m",
+      day: monday,
+      side: AxisDirection.right,
+      over: thursday,
+      hours: toSix,
+    );
+    expectTimes(store, "m", monday, thursday);
+    expect(storedOf(store, "m").isAllDay, isTrue);
   });
 
   testWidgets("TX12 a bar in the last strip row offers no \"Move down\" "
@@ -2556,6 +2842,7 @@ void main() {
           at(monday, 6),
           DateTime(2026, 1, 5),
           CalendarHourLabelFormat.twentyFourHour,
+          isAllDay: false,
         ),
       );
       debugDropGateCount = 0;
@@ -2650,6 +2937,7 @@ void main() {
           at(tuesday, 11),
           today,
           CalendarHourLabelFormat.twentyFourHour,
+          isAllDay: false,
         ),
         reason: shown.name,
       );
@@ -2667,6 +2955,7 @@ void main() {
           at(tuesday, 15),
           today,
           CalendarHourLabelFormat.twentyFourHour,
+          isAllDay: false,
         ),
         reason: shown.name,
       );
@@ -2752,6 +3041,7 @@ void main() {
               under.end,
               harness.today,
               CalendarHourLabelFormat.twentyFourHour,
+              isAllDay: false,
             ),
             reason: shown.name,
           );
@@ -2776,6 +3066,7 @@ void main() {
                 under.end,
                 harness.today,
                 CalendarHourLabelFormat.twentyFourHour,
+                isAllDay: false,
               ),
               reason: shown.name,
             );
@@ -2881,6 +3172,7 @@ void main() {
               under.end,
               harness.today,
               CalendarHourLabelFormat.twentyFourHour,
+              isAllDay: false,
             ),
             reason: shown.name,
           );
@@ -2930,6 +3222,7 @@ void main() {
           at(tuesday, 11),
           harness.today,
           CalendarHourLabelFormat.twentyFourHour,
+          isAllDay: false,
         ),
         reason: shown.name,
       );
@@ -3159,6 +3452,7 @@ void main() {
               written.end,
               DateTime(2026, 1, 5),
               CalendarHourLabelFormat.twentyFourHour,
+              isAllDay: false,
             ),
             lastLabel,
             reason: reason,
@@ -3179,7 +3473,7 @@ void main() {
       stripRect(tester, shown, wednesday).center,
     );
     expect(harness.creates, <CalendarCreateRange>[
-      CalendarCreateRange(start: monday, end: thursday),
+      CalendarCreateRange(start: monday, end: thursday, isAllDay: true),
     ]);
   });
 
@@ -3205,9 +3499,25 @@ void main() {
         stripRect(tester, shown, day).center,
       );
       expect(harness.creates, <CalendarCreateRange>[
-        CalendarCreateRange(start: monday, end: end),
+        CalendarCreateRange(start: monday, end: end, isAllDay: true),
       ], reason: "$limit over $day");
     }
+  });
+
+  test("TR11 a create range stores its kind: false by default, compared by "
+      "equality and named by toString", () {
+    final timed = CalendarCreateRange(start: monday, end: tuesday);
+    final allDay = CalendarCreateRange(
+      start: monday,
+      end: tuesday,
+      isAllDay: true,
+    );
+    expect(timed.isAllDay, isFalse);
+    expect(allDay.isAllDay, isTrue);
+    expect(timed, isNot(allDay));
+    expect(timed, CalendarCreateRange(start: monday, end: tuesday));
+    expect(allDay.toString(), contains(", all day"));
+    expect(timed.toString(), isNot(contains("all day")));
   });
 
   group("TR9", () {
@@ -3398,6 +3708,7 @@ void main() {
         at(wednesday, 12, 15),
         harness.today,
         CalendarHourLabelFormat.twentyFourHour,
+        isAllDay: false,
       ),
     );
     expect(strokedRects(tester), <Matcher>[
@@ -3467,7 +3778,11 @@ void main() {
           ),
         ]);
         expect(barStore.moves, <CalendarEntry<String>>[
-          bar.copyWith(start: at(sunday, 23, 30), end: at(nextMonday, 0, 30)),
+          bar.copyWith(
+            start: at(sunday, 23, 30),
+            end: at(nextMonday, 0, 30),
+            isAllDay: false,
+          ),
         ]);
         continue;
       }
@@ -3622,12 +3937,17 @@ void main() {
         at(nextMonday, 0, 30),
         DateTime(2026, 1, 5),
         CalendarHourLabelFormat.twentyFourHour,
+        isAllDay: false,
       ),
     );
     await crossed.up();
     await tester.pumpAndSettle();
     expect(store.moves, <CalendarEntry<String>>[
-      bar.copyWith(start: at(sunday, 23, 30), end: at(nextMonday, 0, 30)),
+      bar.copyWith(
+        start: at(sunday, 23, 30),
+        end: at(nextMonday, 0, 30),
+        isAllDay: false,
+      ),
     ]);
     expect(store.reads, everyElement(ownOrAfter));
   });
@@ -3696,7 +4016,7 @@ void main() {
     final shown = Shown.week(monday);
     final f = entryOf("F", at(tuesday, 10), at(tuesday, 11));
     final refusing = ScriptedEditPolicy<String>(
-      admits: (entry, start, end) {
+      admits: (entry, start, end, isAllDay) {
         return entry.id != "F" || !end.isAfter(at(tuesday, 12));
       },
     );
@@ -4017,11 +4337,12 @@ void main() {
       CalendarEntry<String> entry,
       DateTime start,
       DateTime end,
-      CalendarMoveKind kind,
-    ) {
+      CalendarMoveKind kind, {
+      bool? isAllDay,
+    }) {
       return CalendarMoveRequest<String>(
         entry: entry,
-        requested: entry.copyWith(start: start, end: end),
+        requested: entry.copyWith(start: start, end: end, isAllDay: isAllDay),
         kind: kind,
       );
     }
@@ -4046,10 +4367,11 @@ void main() {
           at(tuesday, 10),
           at(tuesday, 11),
           move,
+          isAllDay: false,
         ),
       ],
       "block on strip": <CalendarMoveRequest<String>>[
-        request(meet, tuesday, wednesday, move),
+        request(meet, tuesday, wednesday, move, isAllDay: true),
       ],
       "end on a later day": <CalendarMoveRequest<String>>[
         request(night, night.start, at(wednesday, 12, 15), resize),

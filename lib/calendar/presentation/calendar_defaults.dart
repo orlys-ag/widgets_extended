@@ -85,6 +85,7 @@ Widget defaultCalendarBlockBuilder<T>(
               calendarEntry.start,
               calendarEntry.end,
               details.hourLabelFormat,
+              isAllDay: calendarEntry.isAllDay,
             ),
             maxLines: 1,
             style: theme.detailedBlockDetailStyle.copyWith(
@@ -195,6 +196,7 @@ Widget defaultCalendarChipBuilder<T>(
             calendarEntry.start,
             calendarEntry.end,
             details.hourLabelFormat,
+            isAllDay: calendarEntry.isAllDay,
           ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,

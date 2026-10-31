@@ -38,6 +38,7 @@ CalendarEntry<String> entryOf(
   DateTime start,
   DateTime end, {
   String? title,
+  bool isAllDay = false,
 }) {
   return CalendarEntry<String>(
     id: id,
@@ -46,6 +47,7 @@ CalendarEntry<String> entryOf(
     title: title ?? id,
     color: const Color(0xFF336699),
     payload: id,
+    isAllDay: isAllDay,
   );
 }
 
@@ -55,9 +57,10 @@ CalendarShownEntry<String> shownOf(
   DateTime end, {
   String? title,
   bool pending = false,
+  bool isAllDay = false,
 }) {
   return CalendarShownEntry<String>(
-    entryOf(id, start, end, title: title),
+    entryOf(id, start, end, title: title, isAllDay: isAllDay),
     pending: pending,
   );
 }
@@ -74,6 +77,7 @@ CalendarShownEntry<String> allDayOf(
     first,
     DateTime(first.year, first.month, first.day + days),
     title: title,
+    isAllDay: true,
   );
 }
 

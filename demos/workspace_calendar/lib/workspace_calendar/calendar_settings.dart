@@ -20,14 +20,15 @@ import 'calendar_schema.dart';
 /// them: the start when the hours do not hold its time of day as a start,
 /// the end when they do not hold its minute on its last day as an end, each
 /// naming the bounds [CalendarDayHours.holdsStart] and
-/// [CalendarDayHours.holdsEnd] take any minute between. An all-day item has
-/// none.
+/// [CalendarDayHours.holdsEnd] take any minute between. It reads the range
+/// as timed: the hours hold every all-day range, so a store's hours
+/// refusal names only a timed one.
 Map<String, String> hoursErrorsOf(
   DateTime start,
   DateTime end,
   CalendarDayHours hours,
 ) {
-  if (hours.holdsTimes(start, end)) {
+  if (hours.holdsTimes(start, end, isAllDay: false)) {
     return const <String, String>{};
   }
   return <String, String>{

@@ -124,4 +124,40 @@ void main() {
     expect(readFailureMessage(null), "This day could not be read.");
     expect(unreadDayMessage, "This day could not be read.");
   });
+
+  test("AS5 the source writes an all-day item as dates and reads it back "
+      "all-day, and reads the seed's Conference trip all-day", () async {
+    final api = MockCalendarApi(latency: Duration.zero);
+    final source = CalendarApiSource(api);
+    final day = DateTime(2026, 4, 21);
+    final draft = calendarItem(
+      type: CalendarItemType.task,
+      title: "Offsite",
+      start: day,
+      end: DateTime(2026, 4, 22),
+      fields: const <String, Object?>{"status": "toDo"},
+      isAllDay: true,
+    );
+
+    final created = await source.create(draft);
+    expect(created.isAllDay, isTrue);
+    expect(created.start, day);
+    final held = await api.get(created.id!);
+    expect(held["start"], "2026-04-21");
+    expect(held["end"], "2026-04-22");
+    final read = await source.read(day, day);
+    expect(read, <CalendarItem>[created]);
+    expect(read.single.isAllDay, isTrue);
+
+    final seeded = CalendarApiSource(
+      MockCalendarApi.seeded(day, latency: Duration.zero),
+    );
+    final trip = (await seeded.read(
+      DateTime(2026, 5, 11),
+      DateTime(2026, 5, 15),
+    )).singleWhere((item) => item.title == "Conference trip");
+    expect(trip.isAllDay, isTrue);
+    expect(trip.start, DateTime(2026, 5, 11));
+    expect(trip.end, DateTime(2026, 5, 16));
+  });
 }

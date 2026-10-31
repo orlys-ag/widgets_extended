@@ -248,8 +248,8 @@ const List<_WeekEntry> _weekEntries = <_WeekEntry>[
 /// holding [today]; "Day off", an Out of office from 09:00 to 17:00 on the
 /// first day of that week, Monday first, that holds no kept task; and
 /// "Conference trip", an all-day Out of office over the five days from
-/// the first Monday at least 19 days after [today], from that Monday's
-/// start to the start of the day five days on.
+/// the first Monday at least 19 days after [today], its start and end the
+/// dates of that Monday and of the day five days on.
 List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
   final day = CalendarDates.dateOnly(today);
   final weekStart = CalendarWeekdaySet.all.weekStartOf(day);
@@ -313,23 +313,27 @@ List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
       start: tripStart,
       end: CalendarDates.addDays(tripStart, 5),
       fields: const <String, Object?>{"reason": "travel"},
+      allDay: true,
     ),
   );
   return seed;
 }
 
+/// The envelope of an item from [start] to [end], all-day where [allDay],
+/// its times written as [itemTimeText] writes them.
 Map<String, Object?> _envelope({
   required CalendarItemType type,
   required String title,
   required DateTime start,
   required DateTime end,
   required Map<String, Object?> fields,
+  bool allDay = false,
 }) {
   return <String, Object?>{
     "type": type.id,
     "title": title,
-    "start": isoDateTime(start),
-    "end": isoDateTime(end),
+    "start": itemTimeText(start, allDay: allDay),
+    "end": itemTimeText(end, allDay: allDay),
     "fields": <String, Object?>{
       for (final entry in fields.entries)
         entry.key: entry.value is List

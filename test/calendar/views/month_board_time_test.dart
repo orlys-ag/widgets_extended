@@ -32,7 +32,12 @@ DateTime at(DateTime day, int hour, [int minute = 0]) {
   return DateTime(day.year, day.month, day.day, hour, minute);
 }
 
-CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
+CalendarEntry<String> entryOf(
+  String id,
+  DateTime start,
+  DateTime end, {
+  bool isAllDay = false,
+}) {
   return CalendarEntry<String>(
     id: id,
     start: start,
@@ -40,11 +45,17 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
     title: id,
     color: const Color(0xFF336699),
     payload: id,
+    isAllDay: isAllDay,
   );
 }
 
-Shown shownOf(String id, DateTime start, DateTime end) {
-  return Shown(entryOf(id, start, end), pending: false);
+Shown shownOf(
+  String id,
+  DateTime start,
+  DateTime end, {
+  bool isAllDay = false,
+}) {
+  return Shown(entryOf(id, start, end, isAllDay: isAllDay), pending: false);
 }
 
 /// The placements of [shown] on [grid], by id: each one's week row, first
@@ -129,7 +140,7 @@ void main() {
     expect(
       spansOf(<Shown>[
         shownOf("timed", at(monday, 10), at(wednesday, 12)),
-        shownOf("all-day", monday, thursday),
+        shownOf("all-day", monday, thursday, isAllDay: true),
         shownOf("night", at(monday, 22), at(tuesday, 2)),
         shownOf("to-midnight", at(monday, 22), wednesday),
         shownOf("chip", at(tuesday, 9), at(tuesday, 10)),
@@ -204,7 +215,7 @@ void main() {
       <Shown>[
         shownOf("night", at(monday, 22), at(tuesday, 2)),
         shownOf("inside", at(monday, 22), at(tuesday, 9)),
-        shownOf("all-day", monday, wednesday),
+        shownOf("all-day", monday, wednesday, isAllDay: true),
       ],
       april,
       office,
@@ -235,13 +246,27 @@ void main() {
     expect(countsByDay(split.later, april), <DateTime, int>{gridLast: 1});
   });
 
+  testWidgets("MT7 a timed entry from Tuesday's start to Wednesday's is "
+      "named to a screen reader by its times, not as all day", (tester) async {
+    final semantics = tester.ensureSemantics();
+    await pumpMonth(tester, april, tuesday, <CalendarEntry<String>>[
+      entryOf("whole", tuesday, wednesday),
+    ]);
+    expect(
+      find.bySemanticsLabel("whole, Tuesday, April 21, 00:00 to 24:00"),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel(RegExp("all day")), findsNothing);
+    semantics.dispose();
+  });
+
   group("on the 23-hour day", skip: shortDaySkip, () {
     test("MT2 the day shows once with its entries", () {
       final day = shortDayStart;
       final grid = MonthGrid.of(day);
       final cell = grid.cellOf(day);
       final spans = spansOf(<Shown>[
-        shownOf("all-day", day, addDays(day, 1)),
+        shownOf("all-day", day, addDays(day, 1), isAllDay: true),
         shownOf("early", at(day, 1, 30), at(day, 3, 30)),
       ], grid);
       expect(spans, <String, List<(int, int, int)>>{
@@ -266,7 +291,7 @@ void main() {
       final next = DateTime(day.year, day.month, day.day + 1);
       final grid = MonthGrid.of(day);
       await pumpMonth(tester, grid, day, <CalendarEntry<String>>[
-        entryOf("all-day", day, next),
+        entryOf("all-day", day, next, isAllDay: true),
         entryOf("early", at(day, 1, 30), at(day, 3, 30)),
         entryOf("next", at(next, 0, 30), at(next, 1)),
       ]);
@@ -287,7 +312,7 @@ void main() {
       final grid = MonthGrid.of(day);
       final cell = grid.cellOf(day);
       final spans = spansOf(<Shown>[
-        shownOf("all-day", day, addDays(day, 1)),
+        shownOf("all-day", day, addDays(day, 1), isAllDay: true),
         shownOf(
           "repeated",
           secondHalfPastOne,
@@ -305,7 +330,12 @@ void main() {
       final day = longDayStart;
       final grid = MonthGrid.of(day);
       await pumpMonth(tester, grid, day, <CalendarEntry<String>>[
-        entryOf("all-day", day, DateTime(day.year, day.month, day.day + 1)),
+        entryOf(
+          "all-day",
+          day,
+          DateTime(day.year, day.month, day.day + 1),
+          isAllDay: true,
+        ),
         entryOf("early", at(day, 0, 30), at(day, 1)),
         entryOf(
           "repeated",

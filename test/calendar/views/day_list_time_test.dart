@@ -32,7 +32,12 @@ DateTime at(DateTime day, int hour, [int minute = 0]) {
   return DateTime(day.year, day.month, day.day, hour, minute);
 }
 
-CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
+CalendarEntry<String> entryOf(
+  String id,
+  DateTime start,
+  DateTime end, {
+  bool isAllDay = false,
+}) {
   return CalendarEntry<String>(
     id: id,
     start: start,
@@ -40,6 +45,7 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
     title: id,
     color: const Color(0xFF336699),
     payload: id,
+    isAllDay: isAllDay,
   );
 }
 
@@ -172,8 +178,8 @@ void main() {
   test("AG2 all-day entries are listed above the day's timed entries", () {
     final store = storeOf(<CalendarEntry<String>>[
       entryOf("late", at(sunday, 23), at(monday, 1)),
-      entryOf("all-day", monday, tuesday),
-      entryOf("trip", sunday, at(tuesday, 0)),
+      entryOf("all-day", monday, tuesday, isAllDay: true),
+      entryOf("trip", sunday, at(tuesday, 0), isAllDay: true),
       entryOf("talk", at(monday, 9), at(monday, 10)),
     ]);
     expect(rowsOf(store, monday), <Object>[
@@ -251,11 +257,41 @@ void main() {
     ]);
   });
 
+  testWidgets("AG8 a timed entry from Tuesday's start to Wednesday's is "
+      "listed as a timed row at 00:00, with its length on the chip", (
+    tester,
+  ) async {
+    final store = storeOf(<CalendarEntry<String>>[
+      entryOf("whole", tuesday, DateTime(2026, 4, 22)),
+    ]);
+    expect(rowsOf(store, tuesday), <Object>[("whole", 0, 1440, false)]);
+
+    await pumpList(tester, store, tuesday);
+    final time = find.byKey(dayListTimeKey("whole"));
+    expect(
+      find.descendant(of: time, matching: find.text("00:00")),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: time, matching: find.text("All day")),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(dayListDurationKey("whole")),
+        matching: find.text(
+          const DefaultCalendarLocalizations().duration(1440),
+        ),
+      ),
+      findsOneWidget,
+    );
+  });
+
   group("on the 23-hour day", skip: shortDaySkip, () {
     testWidgets("AG3 the day is listed once with its entries", (tester) async {
       final day = shortDayStart;
       final store = storeOf(<CalendarEntry<String>>[
-        entryOf("all-day", day, addDays(day, 1)),
+        entryOf("all-day", day, addDays(day, 1), isAllDay: true),
         entryOf("early", at(day, 1, 30), at(day, 3, 30)),
       ]);
       expect(rowsOf(store, day), <Object>[
@@ -274,7 +310,7 @@ void main() {
     testWidgets("AG3 the day is listed once with its entries", (tester) async {
       final day = longDayStart;
       final store = storeOf(<CalendarEntry<String>>[
-        entryOf("all-day", day, addDays(day, 1)),
+        entryOf("all-day", day, addDays(day, 1), isAllDay: true),
         entryOf(
           "repeated",
           secondHalfPastOne,

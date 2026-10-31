@@ -259,6 +259,25 @@ void main() {
     });
   });
 
+  group("DH2 CalendarDayHours.holdsTimes is told the kind", () {
+    test("holds Tuesday's start to Wednesday's as an all-day range under any "
+        "hours, and as a timed one only under hours of the whole day", () {
+      const office = CalendarDayHours(480, 1080);
+      final tuesday = DateTime(2026, 4, 21);
+      final wednesday = DateTime(2026, 4, 22);
+      expect(office.holdsTimes(tuesday, wednesday, isAllDay: true), isTrue);
+      expect(office.holdsTimes(tuesday, wednesday, isAllDay: false), isFalse);
+      expect(
+        CalendarDayHours.allDay.holdsTimes(tuesday, wednesday, isAllDay: true),
+        isTrue,
+      );
+      expect(
+        CalendarDayHours.allDay.holdsTimes(tuesday, wednesday, isAllDay: false),
+        isTrue,
+      );
+    });
+  });
+
   group("DI1 the developers' text", () {
     test("isoTime writes hours and minutes, 1440 as 24:00, and the weekday "
         "sets and day hours write themselves with it", () {

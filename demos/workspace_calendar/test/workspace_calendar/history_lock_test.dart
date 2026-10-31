@@ -199,11 +199,23 @@ void main() {
       final now = CalendarNow(time: midMorning, today: today);
       final running = stored(shape(today, 10 * 60, 12 * 60));
       expect(
-        lockErrorsOf(lock, now, null, shape(monday, 9 * 60, 10 * 60)).keys,
+        lockErrorsOf(
+          lock,
+          now,
+          null,
+          shape(monday, 9 * 60, 10 * 60),
+          isAllDay: false,
+        ).keys,
         <String>["start"],
       );
       expect(
-        lockErrorsOf(lock, now, null, shape(today, 9 * 60, 10 * 60)).keys,
+        lockErrorsOf(
+          lock,
+          now,
+          null,
+          shape(today, 9 * 60, 10 * 60),
+          isAllDay: false,
+        ).keys,
         <String>["start"],
       );
       expect(
@@ -212,11 +224,18 @@ void main() {
           now,
           running,
           shape(today, 10 * 60 + 15, 11 * 60),
+          isAllDay: false,
         ).keys,
         <String>["start", "end"],
       );
       expect(
-        lockErrorsOf(lock, now, running, shape(today, 10 * 60, 13 * 60)),
+        lockErrorsOf(
+          lock,
+          now,
+          running,
+          shape(today, 10 * 60, 13 * 60),
+          isAllDay: false,
+        ),
         isEmpty,
       );
       expect(
@@ -225,6 +244,7 @@ void main() {
           now,
           stored(shape(today, 8 * 60, 9 * 60)),
           shape(today, 8 * 60, 9 * 60 + 15),
+          isAllDay: false,
         ).keys,
         <String>["start"],
       );

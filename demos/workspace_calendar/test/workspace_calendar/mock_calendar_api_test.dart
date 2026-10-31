@@ -98,6 +98,17 @@ Map<String, Object?> timed(
   };
 }
 
+/// An all-day envelope of [type] from the date [start] to the date [end],
+/// the day after its last, as [timed] builds it.
+Map<String, Object?> allDayItem(
+  String start,
+  String end, {
+  CalendarItemType type = CalendarItemType.task,
+  String title = "Item",
+}) {
+  return timed(start, end, type: type, title: title);
+}
+
 /// The first hour of 2026 that the local clock skips, on its first day of
 /// 23 hours, as [isoDateTime] would write its half hour; null where the
 /// zone has no such day.
@@ -653,9 +664,9 @@ void main() {
     final allDay = await answer(
       tester,
       api.create(
-        timed(
-          "2026-04-23T00:00",
-          "2026-04-24T00:00",
+        allDayItem(
+          "2026-04-23",
+          "2026-04-24",
           type: CalendarItemType.outOfOffice,
         ),
       ),
@@ -664,9 +675,9 @@ void main() {
     final trip = await answer(
       tester,
       api.create(
-        timed(
-          "2026-04-27T00:00",
-          "2026-04-29T00:00",
+        allDayItem(
+          "2026-04-27",
+          "2026-04-29",
           type: CalendarItemType.outOfOffice,
         ),
       ),
@@ -738,7 +749,7 @@ void main() {
     final allMonday = await stored(
       tester,
       api,
-      timed("2026-04-20T00:00", "2026-04-21T00:00"),
+      allDayItem("2026-04-20", "2026-04-21"),
     );
     final tuesday = await listed(
       tester,
@@ -929,8 +940,8 @@ void main() {
     );
     final trip = may.singleWhere((item) => item["title"] == "Conference trip");
     expect(trip["type"], CalendarItemType.outOfOffice.id);
-    expect(trip["start"], utcText("2026-05-11T00:00"));
-    expect(trip["end"], utcText("2026-05-16T00:00"));
+    expect(trip["start"], "2026-05-11");
+    expect(trip["end"], "2026-05-16");
     final id = trip["id"]! as String;
     for (var day = 11; day <= 15; day++) {
       final listing = await listed(
@@ -987,6 +998,94 @@ void main() {
     );
     expect(renamed.error, isNull);
     expect((await fetched(tester, api, shared))["title"], "Renamed");
+  });
+
+  testWidgets("A13 an all-day item is stored, got and listed with its "
+      "dates, on its one day, and a timed item from a day's start to the "
+      "next day's is stored in UTC", (tester) async {
+    final api = MockCalendarApi(latency: latency);
+    final tuesday = DateTime(2026, 4, 21);
+    final created = await answer(
+      tester,
+      api.create(allDayItem("2026-04-21", "2026-04-22")),
+    );
+    expect(created.error, isNull);
+    final answered = created.value! as Map<String, Object?>;
+    expect(answered["start"], "2026-04-21");
+    expect(answered["end"], "2026-04-22");
+    final id = answered["id"]! as String;
+    final got = await fetched(tester, api, id);
+    expect(got["start"], "2026-04-21");
+    expect(got["end"], "2026-04-22");
+    final listing = await listed(tester, api, tuesday, tuesday);
+    expect(idsOf(listing), <String>[id]);
+    expect(listing.single["start"], "2026-04-21");
+    expect(listing.single["end"], "2026-04-22");
+    expect(
+      idsOf(await listed(tester, api, wednesday, wednesday)),
+      isNot(contains(id)),
+    );
+
+    final whole = await stored(
+      tester,
+      api,
+      timed("2026-04-21T00:00", "2026-04-22T00:00"),
+    );
+    final wholeJson = await fetched(tester, api, whole);
+    expect(wholeJson["start"], utcText("2026-04-21T00:00"));
+    expect(wholeJson["end"], utcText("2026-04-22T00:00"));
+  });
+
+  testWidgets("A14 where overlaps are refused, an all-day item updated to a "
+      "timed one at the same instants is refused over a timed item it then "
+      "shares time with, and keeps its dates", (tester) async {
+    final api = MockCalendarApi(latency: latency);
+    final allDay = await stored(
+      tester,
+      api,
+      allDayItem("2026-04-21", "2026-04-22"),
+    );
+    final meeting = await stored(
+      tester,
+      api,
+      timed("2026-04-21T10:00", "2026-04-21T11:00"),
+    );
+    expect(
+      await errorOf(
+        tester,
+        api.update(allDay, timed("2026-04-21T00:00", "2026-04-22T00:00")),
+      ),
+      overlapWith(<String>[meeting]),
+    );
+    final kept = await fetched(tester, api, allDay);
+    expect(kept["start"], "2026-04-21");
+    expect(kept["end"], "2026-04-22");
+  });
+
+  testWidgets("A15 a list orders items by start instant, then creation "
+      "order, whatever their stored texts' order", (tester) async {
+    final api = MockCalendarApi(latency: latency);
+    final tuesday = DateTime(2026, 4, 21);
+    final allDay = allDayItem("2026-04-21", "2026-04-22", title: "All day");
+    final early = timed("2026-04-21T00:00", "2026-04-21T01:00", title: "Early");
+    // The item whose stored start text sorts after the other's is created
+    // first: behind UTC and at UTC the timed one's, ahead of it the
+    // all-day one's.
+    final timedFirst =
+        isoDateTime(DateTime(2026, 4, 21)).compareTo("2026-04-21") > 0;
+    final first = await stored(tester, api, timedFirst ? early : allDay);
+    final second = await stored(tester, api, timedFirst ? allDay : early);
+    // Setup sanity: the start texts the mock holds sort in the other order.
+    expect(
+      ((await fetched(tester, api, first))["start"]! as String).compareTo(
+        (await fetched(tester, api, second))["start"]! as String,
+      ),
+      greaterThan(0),
+    );
+    expect(idsOf(await listed(tester, api, tuesday, tuesday)), <String>[
+      first,
+      second,
+    ]);
   });
 
   test("A9 the schemas' summary keys", () {

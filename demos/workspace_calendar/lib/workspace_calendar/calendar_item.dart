@@ -64,14 +64,15 @@ extension CalendarItemFields on CalendarEntry<ItemPayload> {
   }
 
   /// The envelope, a new map each call. A draft carries no `id` key. Its
-  /// `start` and `end` are the item's times as [isoDateTime] writes them.
+  /// `start` and `end` are the item's times as [itemTimeText] writes them:
+  /// dates for an all-day item and instants in UTC for a timed one.
   Map<String, Object?> toJson() {
     return <String, Object?>{
       if (id != null) "id": id,
       "type": type.id,
       "title": title,
-      "start": isoDateTime(start),
-      "end": isoDateTime(end),
+      "start": itemTimeText(start, allDay: isAllDay),
+      "end": itemTimeText(end, allDay: isAllDay),
       "fields": _modifiableCopy(fields),
     };
   }
@@ -79,7 +80,8 @@ extension CalendarItemFields on CalendarEntry<ItemPayload> {
 
 /// An item of [type] with [fields], coloured by its type's Harbor edge;
 /// [id] null for a draft the API has not stored. It runs from [start] to
-/// [end], an exclusive end.
+/// [end], an exclusive end, and is all-day where [isAllDay], its [start]
+/// and [end] then local midnights.
 CalendarItem calendarItem({
   String? id,
   required CalendarItemType type,
@@ -87,6 +89,7 @@ CalendarItem calendarItem({
   required DateTime start,
   required DateTime end,
   Map<String, Object?> fields = const <String, Object?>{},
+  bool isAllDay = false,
 }) {
   return CalendarItem(
     id: id,
@@ -95,26 +98,31 @@ CalendarItem calendarItem({
     title: title,
     color: harborTypeStyleOf(type).edge,
     payload: ItemPayload(type, fields),
+    isAllDay: isAllDay,
   );
 }
 
-/// Reads a valid envelope. Throws a [FormatException] when a key is
-/// missing or of the wrong kind, or the end is not after the start.
+/// Reads a valid envelope, its start and end as [parseItemTime] reads
+/// them: an all-day item where they are dates, and a timed one where they
+/// are date-times, whatever their times. Throws a [FormatException] when a
+/// key is missing or of the wrong kind, the start and the end are of two
+/// forms, or the end is not after the start.
 CalendarItem itemFromJson(Map<String, Object?> json) {
   final typeId = json["type"];
   final type = typeId is String ? CalendarItemType.fromId(typeId) : null;
   final title = json["title"];
   final startText = json["start"];
-  final start = startText is String ? parseIsoDateTime(startText) : null;
+  final start = startText is String ? parseItemTime(startText) : null;
   final endText = json["end"];
-  final end = endText is String ? parseIsoDateTime(endText) : null;
+  final end = endText is String ? parseItemTime(endText) : null;
   final fields = json["fields"];
   final id = json["id"];
   if (type == null ||
       title is! String ||
       start == null ||
       end == null ||
-      !end.isAfter(start) ||
+      end.date != start.date ||
+      !end.time.isAfter(start.time) ||
       fields is! Map<String, Object?> ||
       (id != null && id is! String)) {
     throw FormatException("Not a calendar item envelope: $json");
@@ -123,9 +131,10 @@ CalendarItem itemFromJson(Map<String, Object?> json) {
     id: id as String?,
     type: type,
     title: title,
-    start: start,
-    end: end,
+    start: start.time,
+    end: end.time,
     fields: fields,
+    isAllDay: start.date,
   );
 }
 

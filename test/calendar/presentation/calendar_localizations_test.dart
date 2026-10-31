@@ -125,13 +125,14 @@ void main() {
     );
   });
 
-  test("LB1 entryTimes writes a range's clock times, 24:00 for an end at the "
-      "next day's start, and All day from a day start to one", () {
+  test("LB1 entryTimes writes a timed range's clock times, 24:00 for an end "
+      "at a day start, and All day for an all-day range", () {
     expect(
       english.entryTimes(
         DateTime(2026, 4, 21, 9, 10),
         DateTime(2026, 4, 21, 9, 50),
         CalendarHourLabelFormat.twentyFourHour,
+        isAllDay: false,
       ),
       "09:10-09:50",
     );
@@ -140,6 +141,7 @@ void main() {
         DateTime(2026, 4, 20, 22),
         DateTime(2026, 4, 21, 2),
         CalendarHourLabelFormat.twentyFourHour,
+        isAllDay: false,
       ),
       "22:00-02:00",
     );
@@ -148,6 +150,7 @@ void main() {
         DateTime(2026, 4, 20, 22),
         DateTime(2026, 4, 21),
         CalendarHourLabelFormat.twentyFourHour,
+        isAllDay: false,
       ),
       "22:00-24:00",
     );
@@ -156,6 +159,7 @@ void main() {
         DateTime(2026, 4, 20),
         DateTime(2026, 4, 21),
         CalendarHourLabelFormat.twentyFourHour,
+        isAllDay: true,
       ),
       "All day",
     );
@@ -164,6 +168,7 @@ void main() {
         DateTime(2026, 4, 20),
         DateTime(2026, 4, 23),
         CalendarHourLabelFormat.twentyFourHour,
+        isAllDay: true,
       ),
       "All day",
     );
@@ -179,6 +184,7 @@ void main() {
         DateTime(2026, 4, 21, 9, 10),
         DateTime(2026, 4, 21, 9, 50),
         twelve,
+        isAllDay: false,
       ),
       "9:10 AM-9:50 AM",
     );
@@ -188,6 +194,7 @@ void main() {
         DateTime(2026, 4, 15, 15),
         today,
         twelve,
+        isAllDay: false,
       ),
       "Today, April 15, 2 PM-3 PM",
     );
@@ -197,6 +204,7 @@ void main() {
         DateTime(2026, 4, 21, 2),
         today,
         twelve,
+        isAllDay: false,
       ),
       "Monday, April 20, 10 PM to Tuesday, April 21, 2 AM",
     );
@@ -208,6 +216,7 @@ void main() {
         end: DateTime(2026, 4, 20, 9, 50),
         format: twelve,
         pending: false,
+        isAllDay: false,
       ),
       "Gym, Monday, April 20, 9:10 AM to 9:50 AM",
     );
@@ -292,6 +301,7 @@ void main() {
           DateTime(2026, 4, 15, 15),
           today,
           CalendarHourLabelFormat.twentyFourHour,
+          isAllDay: false,
         ),
         "Today, April 15, 14:00-15:00",
       );
@@ -301,6 +311,7 @@ void main() {
           DateTime(2026, 4, 21, 2),
           today,
           CalendarHourLabelFormat.twentyFourHour,
+          isAllDay: false,
         ),
         "Monday, April 20, 22:00 to Tuesday, April 21, 02:00",
       );
@@ -310,6 +321,7 @@ void main() {
           DateTime(2026, 4, 21),
           today,
           CalendarHourLabelFormat.twentyFourHour,
+          isAllDay: true,
         ),
         "Monday, April 20, all day",
       );
@@ -319,6 +331,7 @@ void main() {
           DateTime(2026, 4, 23),
           today,
           CalendarHourLabelFormat.twentyFourHour,
+          isAllDay: true,
         ),
         "Monday, April 20 to Wednesday, April 22, all day",
       );
@@ -334,6 +347,7 @@ void main() {
           end: DateTime(2026, 4, 21),
           format: CalendarHourLabelFormat.twentyFourHour,
           pending: true,
+          isAllDay: true,
         ),
         "Gym, Health, Monday, April 20, all day, pending",
       );
@@ -345,6 +359,7 @@ void main() {
           end: DateTime(2026, 4, 23),
           format: CalendarHourLabelFormat.twentyFourHour,
           pending: false,
+          isAllDay: true,
         ),
         "Gym, Monday, April 20 to Wednesday, April 22, all day",
       );
@@ -356,6 +371,7 @@ void main() {
           end: DateTime(2026, 4, 20, 9, 50),
           format: CalendarHourLabelFormat.twentyFourHour,
           pending: false,
+          isAllDay: false,
         ),
         "Gym, Monday, April 20, 09:10 to 09:50",
       );
@@ -367,6 +383,7 @@ void main() {
           end: DateTime(2026, 4, 21),
           format: CalendarHourLabelFormat.twentyFourHour,
           pending: false,
+          isAllDay: false,
         ),
         "Gym, Monday, April 20, 22:00 to 24:00",
       );
@@ -378,6 +395,7 @@ void main() {
           end: DateTime(2026, 4, 21, 2),
           format: CalendarHourLabelFormat.twentyFourHour,
           pending: false,
+          isAllDay: false,
         ),
         "Gym, Monday, April 20, 22:00 to Tuesday, April 21, 02:00",
       );
@@ -425,6 +443,73 @@ void main() {
       expect(english.showMonthLabel, "Show the month");
       expect(english.showWeekLabel, "Show the week");
     });
+  });
+
+  test("LC3 a timed range ending at a day start reads 24:00, or 12 AM, and "
+      "an all-day one all day, through entryTimes, landing and entryLabel", () {
+    const twentyFour = CalendarHourLabelFormat.twentyFourHour;
+    const twelve = CalendarHourLabelFormat.twelveHour;
+    final tuesday = DateTime(2026, 4, 21);
+    final wednesday = DateTime(2026, 4, 22);
+    final today = DateTime(2026, 4, 15);
+    String labelOf(CalendarHourLabelFormat format, {required bool isAllDay}) {
+      return english.entryLabel(
+        title: "Trip",
+        kind: null,
+        start: tuesday,
+        end: wednesday,
+        format: format,
+        pending: false,
+        isAllDay: isAllDay,
+      );
+    }
+
+    expect(
+      english.entryTimes(tuesday, wednesday, twentyFour, isAllDay: false),
+      "00:00-24:00",
+    );
+    expect(
+      english.entryTimes(tuesday, wednesday, twentyFour, isAllDay: true),
+      "All day",
+    );
+    expect(
+      english.landing(tuesday, wednesday, today, twentyFour, isAllDay: false),
+      "Tuesday, April 21, 00:00-24:00",
+    );
+    expect(
+      english.landing(tuesday, wednesday, today, twentyFour, isAllDay: true),
+      "Tuesday, April 21, all day",
+    );
+    expect(
+      labelOf(twentyFour, isAllDay: false),
+      "Trip, Tuesday, April 21, 00:00 to 24:00",
+    );
+    expect(
+      labelOf(twentyFour, isAllDay: true),
+      "Trip, Tuesday, April 21, all day",
+    );
+    expect(
+      english.entryTimes(
+        DateTime(2026, 4, 21, 10),
+        DateTime(2026, 4, 23),
+        twentyFour,
+        isAllDay: false,
+      ),
+      "10:00-24:00",
+    );
+
+    expect(
+      english.entryTimes(tuesday, wednesday, twelve, isAllDay: false),
+      "12 AM-12 AM",
+    );
+    expect(
+      english.landing(tuesday, wednesday, today, twelve, isAllDay: false),
+      "Tuesday, April 21, 12 AM-12 AM",
+    );
+    expect(
+      labelOf(twelve, isAllDay: false),
+      "Trip, Tuesday, April 21, 12 AM to 12 AM",
+    );
   });
 
   group("LC2 the lookup", () {

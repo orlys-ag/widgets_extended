@@ -65,6 +65,7 @@ Future<void> showCreateFlow(
     start: range.start,
     end: range.end,
     fields: withFieldDefaults(type, const <String, Object?>{}),
+    isAllDay: range.isAllDay,
   );
   await _showForm(
     context,
@@ -148,22 +149,26 @@ Future<bool> confirmDelete(BuildContext context) async {
 
 /// The item form's errors for [to], a change of the stored [from] or,
 /// where [from] is null, a new item, which [policy] refuses at [now],
-/// keyed as `validateItemJson` keys them; empty where it admits it.
+/// keyed as `validateItemJson` keys them; empty where it admits it. [to]
+/// is a change to an all-day item where [isAllDay] and to a timed one
+/// otherwise.
 ///
 /// A change [CalendarEditPolicy.admitsChange] admits has none. Of a
 /// refused one, an item the policy does not let be edited is locked; of
-/// one it lets neither move nor resize its start, a moved start and an end
-/// it refuses with the start kept are each an error. Any other change, as
-/// a new item, starts on a day the policy gives no earliest start on, or
-/// before the earliest start it gives.
+/// one it lets neither move nor resize its start, a moved start, else a
+/// changed kind, and an end it refuses with the start and the kind kept
+/// are each an error. Any other change, as a new item, starts on a day the
+/// policy gives no earliest start on, or before the earliest start it
+/// gives.
 Map<String, String> lockErrorsOf<T>(
   CalendarEditPolicy<T> policy,
   CalendarNow now,
   CalendarEntry<T>? from,
-  ({DateTime start, DateTime end}) to,
-) {
+  ({DateTime start, DateTime end}) to, {
+  required bool isAllDay,
+}) {
   if (from != null) {
-    if (policy.admitsChange(from, to.start, to.end, now)) {
+    if (policy.admitsChange(from, to.start, to.end, now, isAllDay: isAllDay)) {
       return const <String, String>{};
     }
     if (!policy.mayEdit(from, now)) {
@@ -173,8 +178,16 @@ Map<String, String> lockErrorsOf<T>(
         !policy.resizableEdges(from, now).hasStart) {
       return <String, String>{
         if (to.start != from.start)
-          "start": "An item in progress keeps its start.",
-        if (!policy.admitsChange(from, from.start, to.end, now))
+          "start": "An item in progress keeps its start."
+        else if (isAllDay != from.isAllDay)
+          "start": "An item in progress keeps its All day setting.",
+        if (!policy.admitsChange(
+          from,
+          from.start,
+          to.end,
+          now,
+          isAllDay: from.isAllDay,
+        ))
           "end": "The end can't be in the past.",
       };
     }
@@ -368,10 +381,10 @@ class _ItemFormState extends State<_ItemForm> {
     super.dispose();
   }
 
-  /// The item the form holds, as an envelope: with All day on, from the
-  /// start of [_startDate] to the start of the day after [_endDate], and
-  /// otherwise from [_startMinute] of [_startDate] to [_endMinute] of
-  /// [_endDate].
+  /// The item the form holds, as an envelope: with All day on, an all-day
+  /// item from [_startDate] to the day after [_endDate], written as dates
+  /// ([itemTimeText]), and otherwise a timed one from [_startMinute] of
+  /// [_startDate] to [_endMinute] of [_endDate].
   Map<String, Object?> _envelope() {
     final fields = <String, Object?>{};
     for (final field in _schema.fields) {
@@ -404,19 +417,19 @@ class _ItemFormState extends State<_ItemForm> {
       "type": widget.item.type.id,
       "title": _title.text,
       "start": _allDay
-          ? isoDateTime(_startDate)
+          ? itemTimeText(_startDate, allDay: true)
           : _timeText(_startDate, _startMinute),
       "end": _allDay
-          ? isoDateTime(CalendarDates.addDays(_endDate, 1))
+          ? itemTimeText(CalendarDates.addDays(_endDate, 1), allDay: true)
           : _timeText(_endDate, _endMinute),
       "fields": fields,
     };
   }
 
-  /// [minute] of [day] as the envelope writes it: the time
-  /// [timeAtWallMinute] gives, the earlier of a time the clock repeats, so
-  /// 24:00 is the next day's start; and a time the clock skips as its own
-  /// text, which the validator then reports.
+  /// [minute] of [day] as the envelope writes a timed item's time
+  /// ([itemTimeText]): the time [timeAtWallMinute] gives, the earlier of a
+  /// time the clock repeats, so 24:00 is the next day's start; and a time
+  /// the clock skips as its own text, which the validator then reports.
   static String _timeText(DateTime day, int minute) {
     final time = CalendarDates.timeAtWallMinute(
       CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay + minute,
@@ -424,7 +437,7 @@ class _ItemFormState extends State<_ItemForm> {
     if (time == null) {
       return "${isoDate(day)}T${isoTime(minute)}";
     }
-    return isoDateTime(time);
+    return itemTimeText(time, allDay: false);
   }
 
   /// Validates and sends. Nothing is sent while a field breaks a rule, or
@@ -443,6 +456,7 @@ class _ItemFormState extends State<_ItemForm> {
         widget.now(),
         _isDraft ? null : widget.item,
         (start: to.start, end: to.end),
+        isAllDay: to.isAllDay,
       );
     }
     if (errors.isNotEmpty) {

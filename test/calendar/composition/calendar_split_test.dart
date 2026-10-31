@@ -40,7 +40,12 @@ DateTime at(DateTime day, int hour, [int minute = 0]) {
   return DateTime(day.year, day.month, day.day, hour, minute);
 }
 
-CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
+CalendarEntry<String> entryOf(
+  String id,
+  DateTime start,
+  DateTime end, {
+  bool isAllDay = false,
+}) {
   return CalendarEntry<String>(
     id: id,
     start: start,
@@ -48,6 +53,7 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
     title: id,
     color: const Color(0xFF336699),
     payload: id,
+    isAllDay: isAllDay,
   );
 }
 
@@ -63,8 +69,9 @@ List<CalendarEntry<String>> monthOfEntries() {
   final entries = <CalendarEntry<String>>[
     for (var i = 0; i < 200; i++)
       entryOf("t$i", at(tuesday, 13, i * 2), at(tuesday, 13, i * 2 + 30)),
-    for (var i = 0; i < 5; i++) entryOf("w$i", wednesday, thursday),
-    entryOf("free", friday, saturday),
+    for (var i = 0; i < 5; i++)
+      entryOf("w$i", wednesday, thursday, isAllDay: true),
+    entryOf("free", friday, saturday, isAllDay: true),
     entryOf("solo", at(thursday, 10), at(thursday, 10, 45)),
   ];
   var k = 0;

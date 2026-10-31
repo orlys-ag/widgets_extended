@@ -31,6 +31,36 @@ CalendarEntry<String> stored(({DateTime start, DateTime end}) shape) {
   );
 }
 
+/// A policy that holds every item as one in progress, its start fixed and
+/// its end resizable, and admits only a change to a timed item.
+final class _HeldTimedOnly extends CalendarEditPolicy<String> {
+  const _HeldTimedOnly();
+
+  @override
+  bool mayMove(CalendarEntry<String> entry, CalendarNow now) {
+    return false;
+  }
+
+  @override
+  CalendarResizeEdges resizableEdges(
+    CalendarEntry<String> entry,
+    CalendarNow now,
+  ) {
+    return CalendarResizeEdges.end;
+  }
+
+  @override
+  bool admitsChange(
+    CalendarEntry<String> entry,
+    DateTime start,
+    DateTime end,
+    CalendarNow now, {
+    required bool isAllDay,
+  }) {
+    return !isAllDay;
+  }
+}
+
 void main() {
   test("LE1 lockErrorsOf answers each refusal with the form's message, "
       "keyed start and end as the form's fields and the envelope are, and "
@@ -41,11 +71,23 @@ void main() {
     final now = CalendarNow(time: DateTime(2026, 4, 21, 11, 7), today: tuesday);
     final running = stored(shape(tuesday, 10 * 60, 12 * 60));
     expect(
-      lockErrorsOf(lock, now, null, shape(monday, 9 * 60, 10 * 60)),
+      lockErrorsOf(
+        lock,
+        now,
+        null,
+        shape(monday, 9 * 60, 10 * 60),
+        isAllDay: false,
+      ),
       <String, String>{"start": "Past days are locked."},
     );
     expect(
-      lockErrorsOf(lock, now, null, shape(tuesday, 9 * 60, 10 * 60)),
+      lockErrorsOf(
+        lock,
+        now,
+        null,
+        shape(tuesday, 9 * 60, 10 * 60),
+        isAllDay: false,
+      ),
       <String, String>{"start": "The start can't be in the past."},
     );
     expect(
@@ -54,18 +96,31 @@ void main() {
         now,
         stored(shape(tuesday, 8 * 60, 9 * 60)),
         shape(tuesday, 8 * 60, 9 * 60 + 15),
+        isAllDay: false,
       ),
       <String, String>{"start": "Past items are locked."},
     );
     expect(
-      lockErrorsOf(lock, now, running, shape(tuesday, 10 * 60 + 15, 11 * 60)),
+      lockErrorsOf(
+        lock,
+        now,
+        running,
+        shape(tuesday, 10 * 60 + 15, 11 * 60),
+        isAllDay: false,
+      ),
       <String, String>{
         "start": "An item in progress keeps its start.",
         "end": "The end can't be in the past.",
       },
     );
     expect(
-      lockErrorsOf(lock, now, running, shape(tuesday, 10 * 60, 13 * 60)),
+      lockErrorsOf(
+        lock,
+        now,
+        running,
+        shape(tuesday, 10 * 60, 13 * 60),
+        isAllDay: false,
+      ),
       isEmpty,
     );
     expect(
@@ -74,6 +129,7 @@ void main() {
         now,
         null,
         shape(monday, 9 * 60, 10 * 60),
+        isAllDay: false,
       ),
       isEmpty,
     );
@@ -93,8 +149,49 @@ void main() {
         now,
         null,
         shape(tuesday, 22 * 60, 23 * 60),
+        isAllDay: false,
       ),
       <String, String>{"start": "Past days are locked."},
+    );
+  });
+
+  test("LE3 of an item in progress, a change of kind is keyed start with its "
+      "own message, and the end is asked with the stored kind", () {
+    const policy = _HeldTimedOnly();
+    final now = CalendarNow(time: DateTime(2026, 4, 21, 11, 7), today: tuesday);
+    final from = stored(shape(tuesday, 0, 24 * 60));
+    expect(
+      lockErrorsOf(
+        policy,
+        now,
+        from,
+        shape(tuesday, 0, 24 * 60),
+        isAllDay: false,
+      ),
+      isEmpty,
+    );
+    const keepsKind = <String, String>{
+      "start": "An item in progress keeps its All day setting.",
+    };
+    expect(
+      lockErrorsOf(
+        policy,
+        now,
+        from,
+        shape(tuesday, 0, 24 * 60),
+        isAllDay: true,
+      ),
+      keepsKind,
+    );
+    expect(
+      lockErrorsOf(
+        policy,
+        now,
+        from,
+        shape(tuesday, 0, 48 * 60),
+        isAllDay: true,
+      ),
+      keepsKind,
     );
   });
 }
