@@ -3473,7 +3473,7 @@ void main() {
       stripRect(tester, shown, wednesday).center,
     );
     expect(harness.creates, <CalendarCreateRange>[
-      CalendarCreateRange(start: monday, end: thursday),
+      CalendarCreateRange(start: monday, end: thursday, isAllDay: true),
     ]);
   });
 
@@ -3499,9 +3499,25 @@ void main() {
         stripRect(tester, shown, day).center,
       );
       expect(harness.creates, <CalendarCreateRange>[
-        CalendarCreateRange(start: monday, end: end),
+        CalendarCreateRange(start: monday, end: end, isAllDay: true),
       ], reason: "$limit over $day");
     }
+  });
+
+  test("TR11 a create range stores its kind: false by default, compared by "
+      "equality and named by toString", () {
+    final timed = CalendarCreateRange(start: monday, end: tuesday);
+    final allDay = CalendarCreateRange(
+      start: monday,
+      end: tuesday,
+      isAllDay: true,
+    );
+    expect(timed.isAllDay, isFalse);
+    expect(allDay.isAllDay, isTrue);
+    expect(timed, isNot(allDay));
+    expect(timed, CalendarCreateRange(start: monday, end: tuesday));
+    expect(allDay.toString(), contains(", all day"));
+    expect(timed.toString(), isNot(contains("all day")));
   });
 
   group("TR9", () {

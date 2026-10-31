@@ -358,11 +358,16 @@ const ValueKey<String> landingLabelKey = ValueKey<String>("grid-landing-label");
 const ValueKey<String> liftedBlockKey = ValueKey<String>("grid-lifted-block");
 
 /// The time a create gesture picked: one continuous range from [start] to
-/// [end], an exclusive end, both local times.
+/// [end], an exclusive end, both local times, all-day where [isAllDay].
 @immutable
 final class CalendarCreateRange {
-  /// The range from [start] to [end].
-  const CalendarCreateRange({required this.start, required this.end});
+  /// The range from [start] to [end], all-day where [isAllDay], as the
+  /// gesture that picked it tells it.
+  const CalendarCreateRange({
+    required this.start,
+    required this.end,
+    this.isAllDay = false,
+  });
 
   /// Where the range starts.
   final DateTime start;
@@ -370,29 +375,31 @@ final class CalendarCreateRange {
   /// Where the range ends, after [start].
   final DateTime end;
 
-  /// Whether the range runs from a day start to a day start
-  /// ([isDayStart]), covering whole days.
-  bool get isAllDay {
-    return isDayStart(start) && isDayStart(end);
-  }
+  /// Whether the range is all-day, stored as constructed: true for a range
+  /// a create across the all-day strip picks, whose [start] and [end] are
+  /// day starts, and false for every other, a range of slots from a day
+  /// start to a day start included.
+  final bool isAllDay;
 
   @override
   bool operator ==(Object other) {
     return other is CalendarCreateRange &&
         other.start == start &&
-        other.end == end;
+        other.end == end &&
+        other.isAllDay == isAllDay;
   }
 
   @override
   int get hashCode {
-    return Object.hash(start, end);
+    return Object.hash(start, end, isAllDay);
   }
 
   @override
   String toString() {
     return "CalendarCreateRange("
         "${isoDate(start)} ${isoTime(minuteOfDay(start))} "
-        "to ${isoDate(end)} ${isoTime(minuteOfDay(end))})";
+        "to ${isoDate(end)} ${isoTime(minuteOfDay(end))}"
+        "${isAllDay ? ", all day" : ""})";
   }
 }
 
@@ -4146,6 +4153,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return CalendarCreateRange(
       start: _tracks.dateAt(math.min(anchor, focus)),
       end: dateOfDayNumber(_tracks.dayAt(math.max(anchor, focus)) + 1),
+      isAllDay: true,
     );
   }
 

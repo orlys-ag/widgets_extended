@@ -999,6 +999,23 @@ void main() {
     ]);
   });
 
+  testWidgets("TR10 in Day over Tuesday, a create drag from the 00:00 slot "
+      "to the 23:45 slot reports Tuesday's start to Wednesday's, a timed "
+      "range", (tester) async {
+    final shown = Shown.day(tuesday);
+    final harness = Harness(storeOf(const <CalendarEntry<String>>[]), shown);
+    await harness.pump(tester);
+    await createDrag(
+      tester,
+      slotRect(tester, shown, tuesday, 0).center,
+      slotRect(tester, shown, tuesday, minutesPerDay - 15).center,
+    );
+    expect(harness.creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: tuesday, end: wednesday),
+    ]);
+    expect(harness.creates.single.isAllDay, isFalse);
+  });
+
   test("TR5 the CalendarCreateRange class declares no member of the day, "
       "minute and day-count time", () {
     final body = classBody(
