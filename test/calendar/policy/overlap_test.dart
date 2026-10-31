@@ -7,10 +7,12 @@ import 'dart:ui' show Color;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/policy/overlap.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
+final DateTime wednesday = DateTime(2026, 4, 22);
 
 CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
   return CalendarEntry<String>(
@@ -98,5 +100,17 @@ void main() {
     expect(entriesShareTime(other, allDay), isFalse);
     expect(rangeSharesTime(timed.start, timed.end, allDay), isFalse);
     expect(rangeSharesTime(allDay.start, allDay.end, timed), isTrue);
+  });
+
+  test("OV4 a timed entry from Tuesday's start to Wednesday's shares time "
+      "with Tuesday 10:00 to 11:00, in both argument orders", () {
+    final whole = entryOf("whole", tuesday, wednesday);
+    final ten = entryOf(
+      "ten",
+      DateTime(2026, 4, 21, 10),
+      DateTime(2026, 4, 21, 11),
+    );
+    expect(NoOverlapsPolicy.entriesShareTime(whole, ten), isTrue);
+    expect(NoOverlapsPolicy.entriesShareTime(ten, whole), isTrue);
   });
 }

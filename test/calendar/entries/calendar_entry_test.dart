@@ -172,7 +172,7 @@ void main() {
     );
   });
 
-  group("the constructor asserts", () {
+  group("the constructor throws", () {
     final start = DateTime(2026, 4, 21, 10);
     final end = DateTime(2026, 4, 21, 11);
 
@@ -183,72 +183,73 @@ void main() {
     test("ET4 a UTC start", () {
       expect(
         () => entry(start: DateTime.utc(2026, 4, 21, 10)),
-        throwsAssertionError,
+        throwsArgumentError,
       );
     });
 
     test("ET5 a UTC end", () {
       expect(
         () => entry(end: DateTime.utc(2026, 4, 21, 23)),
-        throwsAssertionError,
+        throwsArgumentError,
       );
     });
 
     test("ET6 a second on the start", () {
       expect(
         () => entry(start: start.add(const Duration(seconds: 1))),
-        throwsAssertionError,
+        throwsArgumentError,
       );
     });
 
     test("ET7 a second on the end", () {
       expect(
         () => entry(end: end.add(const Duration(seconds: 1))),
-        throwsAssertionError,
+        throwsArgumentError,
       );
     });
 
     test("ET8 a millisecond on the start", () {
       expect(
         () => entry(start: start.add(const Duration(milliseconds: 1))),
-        throwsAssertionError,
+        throwsArgumentError,
       );
     });
 
     test("ET9 a millisecond on the end", () {
       expect(
         () => entry(end: end.add(const Duration(milliseconds: 1))),
-        throwsAssertionError,
+        throwsArgumentError,
       );
     });
 
     test("ET10 a microsecond on the start", () {
       expect(
         () => entry(start: start.add(const Duration(microseconds: 1))),
-        throwsAssertionError,
+        throwsArgumentError,
       );
     });
 
     test("ET11 a microsecond on the end", () {
       expect(
         () => entry(end: end.add(const Duration(microseconds: 1))),
-        throwsAssertionError,
+        throwsArgumentError,
       );
     });
 
     test("ET12 an end equal to the start", () {
-      expect(() => entry(start: start, end: start), throwsAssertionError);
+      expect(() => entry(start: start, end: start), throwsArgumentError);
     });
 
     test("ET13 an end before the start", () {
-      expect(() => entry(start: end, end: start), throwsAssertionError);
+      expect(() => entry(start: end, end: start), throwsArgumentError);
     });
   });
 
-  test("ET14 isAllDay holds from a day start to a day start only", () {
+  test("ET14 an entry built without isAllDay is timed, from a day start to "
+      "a day start too", () {
     final day = DateTime(2026, 4, 21);
-    expect(entry(start: day, end: DateTime(2026, 4, 22)).isAllDay, isTrue);
-    expect(entry(start: day, end: DateTime(2026, 4, 24)).isAllDay, isTrue);
+    expect(entry(start: day, end: DateTime(2026, 4, 22)).isAllDay, isFalse);
+    expect(entry(start: day, end: DateTime(2026, 4, 24)).isAllDay, isFalse);
     expect(
       entry(
         start: DateTime(2026, 4, 21, 9),
@@ -263,18 +264,20 @@ void main() {
   });
 
   group("on the 23-hour day", skip: shortDaySkip, () {
-    test("ET15 its start to the next day's start is all-day", () {
+    test("ET15 its start to the next day's start, built without isAllDay, "
+        "is timed", () {
       final day = shortDayStart;
       expect(addDays(day, 1).difference(day), const Duration(hours: 23));
-      expect(entry(start: day, end: addDays(day, 1)).isAllDay, isTrue);
+      expect(entry(start: day, end: addDays(day, 1)).isAllDay, isFalse);
     });
   });
 
   group("on the 25-hour day", skip: longDaySkip, () {
-    test("ET15 its start to the next day's start is all-day", () {
+    test("ET15 its start to the next day's start, built without isAllDay, "
+        "is timed", () {
       final day = longDayStart;
       expect(addDays(day, 1).difference(day), const Duration(hours: 25));
-      expect(entry(start: day, end: addDays(day, 1)).isAllDay, isTrue);
+      expect(entry(start: day, end: addDays(day, 1)).isAllDay, isFalse);
     });
   });
 

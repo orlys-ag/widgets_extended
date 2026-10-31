@@ -2056,6 +2056,37 @@ void main() {
     }
   });
 
+  testWidgets("TX23 a block dropped on the strip stores an all-day entry and "
+      "a bar dropped on a slot a timed one, and the block of a timed entry "
+      "from Tuesday's start to Wednesday's let go on Tuesday's empty strip "
+      "cell requests the same times all-day", (tester) async {
+    for (final shown in bothGrids()) {
+      var store = await dropBlockOnStrip(tester, shown);
+      expect(storedOf(store, "meet").isAllDay, isTrue, reason: shown.name);
+      store = await dropBarOnSlot(tester, shown);
+      expect(storedOf(store, "off").isAllDay, isFalse, reason: shown.name);
+
+      store = storeOf(<CalendarEntry<String>>[
+        entryOf("whole", tuesday, wednesday),
+      ]);
+      await Harness(store, shown).pump(tester);
+      await dragTo(
+        tester,
+        tester.getCenter(blockFinder("whole", tuesday)),
+        tester.getCenter(find.byKey(allDayCellKey(tuesday))),
+      );
+      expect(store.moves, hasLength(1), reason: shown.name);
+      final moved = store.moves.single;
+      expect(
+        (moved.start, moved.end, moved.isAllDay),
+        (tuesday, wednesday, true),
+        reason: shown.name,
+      );
+      expect(barFinder("whole"), findsOneWidget, reason: shown.name);
+      expect(blocksOf("whole"), findsNothing, reason: shown.name);
+    }
+  });
+
   testWidgets("TX12 a bar in the last strip row offers no \"Move down\" "
       "semantics action and a block in the first slot row no \"Move up\"", (
     tester,

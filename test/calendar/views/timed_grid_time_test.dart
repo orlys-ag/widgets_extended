@@ -1303,6 +1303,119 @@ void main() {
     }
   });
 
+  testWidgets("TP31 in Week and in Day, a timed entry from Tuesday's start "
+      "to Wednesday's draws one block on Tuesday from the 00:00 row's top to "
+      "the 23:45 row's bottom, and no bar", (tester) async {
+    final whole = entryOf("whole", tuesday, wednesday);
+    for (final view in views) {
+      final shown = view(tuesday);
+      await Harness(
+        storeOf(<CalendarEntry<String>>[whole]),
+        shown,
+      ).pump(tester);
+      expect(
+        find.byKey(allDayBarKey("whole")),
+        findsNothing,
+        reason: shown.name,
+      );
+      expect(blocksOf("whole"), findsOneWidget, reason: shown.name);
+      final col = shown.colOf(tuesday);
+      final rect = tester.getRect(blockFinder("whole", tuesday));
+      expect(
+        rect.top,
+        moreOrLessEquals(cellRect(tester, shown.rowOf(0), col).top),
+        reason: shown.name,
+      );
+      expect(
+        rect.bottom,
+        moreOrLessEquals(
+          cellRect(tester, shown.rowOf(minutesPerDay - 15), col).bottom,
+        ),
+        reason: shown.name,
+      );
+    }
+  });
+
+  testWidgets("TP34 in Week where overlaps are forbidden, Tuesday 10:00 to "
+      "11:00 dropped on Tuesday's 14:00 row writes nothing over a timed "
+      "entry from Tuesday's start to Wednesday's, with the days beside it "
+      "full", (tester) async {
+    final shown = Shown.week(monday);
+    final ten = entryOf("ten", at(tuesday, 10), at(tuesday, 11));
+    final full = <CalendarEntry<String>>[
+      entryOf("mon", monday, tuesday),
+      entryOf("wed", wednesday, thursday),
+    ];
+
+    /// Pumps the grid over [entries], drops "ten" with its top on Tuesday's
+    /// 14:00 row, and returns the store and its change count before the
+    /// drop.
+    Future<(CountingStore, int)> dropTen(
+      List<CalendarEntry<String>> entries,
+    ) async {
+      final store = storeOf(entries);
+      await Harness(store, shown, allowsOverlaps: false).pump(tester);
+      final block = tester.getRect(blockFinder("ten", tuesday));
+      final slot = slotRect(tester, shown, tuesday, 14 * 60);
+      final changes = store.changes;
+      await moveBlock(
+        tester,
+        blockFinder("ten", tuesday),
+        Offset(0.0, slot.top - block.top + 2.0),
+      );
+      return (store, changes);
+    }
+
+    // Setup sanity: with Tuesday free but for "ten", the drop writes it.
+    final (free, _) = await dropTen(<CalendarEntry<String>>[ten, ...full]);
+    expect(free.storedEntry("ten")!.start, at(tuesday, 14));
+    expect(free.storedEntry("ten")!.end, at(tuesday, 15));
+
+    final (store, changes) = await dropTen(<CalendarEntry<String>>[
+      entryOf("whole", tuesday, wednesday),
+      ten,
+      ...full,
+    ]);
+    expect(store.changes, changes);
+    expect(store.storedEntry("ten"), ten);
+  });
+
+  testWidgets("TP35 in Week where overlaps are forbidden, a timed entry from "
+      "Tuesday's start to Wednesday's dropped on Wednesday's 00:00 row is "
+      "not stored over Wednesday 10:00 to 11:00", (tester) async {
+    final shown = Shown.week(monday);
+    final whole = entryOf("whole", tuesday, wednesday);
+    final wedTen = entryOf("wedTen", at(wednesday, 10), at(wednesday, 11));
+
+    /// Pumps the grid over [entries] and drops "whole"'s Tuesday block
+    /// with its top on Wednesday's 00:00 row.
+    Future<CountingStore> dropWhole(List<CalendarEntry<String>> entries) async {
+      final store = storeOf(entries);
+      await Harness(store, shown, allowsOverlaps: false).pump(tester);
+      final block = tester.getRect(blockFinder("whole", tuesday));
+      final slot = slotRect(tester, shown, wednesday, 0);
+      await moveBlock(
+        tester,
+        blockFinder("whole", tuesday),
+        slot.topLeft - block.topLeft + const Offset(0.0, 2.0),
+      );
+      return store;
+    }
+
+    // Setup sanity: with Wednesday free, the drop writes the whole of it.
+    var store = await dropWhole(<CalendarEntry<String>>[whole]);
+    expect(store.storedEntry("whole")!.start, wednesday);
+    expect(store.storedEntry("whole")!.end, thursday);
+
+    store = await dropWhole(<CalendarEntry<String>>[whole, wedTen]);
+    final stored = store.storedEntry("whole")!;
+    expect(
+      !stored.end.isAfter(wedTen.start) || !stored.start.isBefore(wedTen.end),
+      isTrue,
+      reason: "$stored",
+    );
+  });
+
   group("on the 23-hour day", skip: shortDaySkip, () {
     testWidgets("TP12 in Week and in Day, the day's column shows 24 hours of "
         "rows, the same as the day beside it, and 01:30 to 03:30 draws from "
@@ -1419,6 +1532,31 @@ void main() {
       expect(moved.start, at(day, 1, 30));
       expect(moved.end, at(day, 3, 30));
       expect(moved.end.difference(moved.start), const Duration(minutes: 60));
+    });
+
+    testWidgets("TP32 in Week, 00:00 to 23:00 of the day before, dropped "
+        "with its top on the day's 00:00 row, is stored timed from the day's "
+        "start to the next day's and draws as a block", (tester) async {
+      final day = shortDayStart;
+      final before = addDays(day, -1);
+      expect(addDays(day, 1).difference(day), const Duration(hours: 23));
+      final shown = Shown.week(addDays(day, -6));
+      final store = storeOf(<CalendarEntry<String>>[
+        entryOf("long", before, at(before, 23)),
+      ]);
+      await Harness(store, shown).pump(tester);
+      final from = tester.getRect(blockFinder("long", before)).topLeft;
+      await moveBlock(
+        tester,
+        blockFinder("long", before),
+        slotRect(tester, shown, day, 0).topLeft - from + const Offset(0.0, 2.0),
+      );
+      final moved = store.storedEntry("long")!;
+      expect(moved.start, day);
+      expect(moved.end, addDays(day, 1));
+      expect(moved.isAllDay, isFalse);
+      expect(blockFinder("long", day), findsOneWidget);
+      expect(find.byKey(allDayBarKey("long")), findsNothing);
     });
   });
 
@@ -1604,6 +1742,36 @@ void main() {
           reason: shown.name,
         );
       }
+    });
+
+    testWidgets("TP33 in Week, an entry from 00:00 of the day before lasting "
+        "25 hours, lifted by the day before's block and dropped with its top "
+        "on the day's 00:00 row, is stored timed from the day's start to the "
+        "next day's and draws as a block", (tester) async {
+      final day = longDayStart;
+      final before = addDays(day, -1);
+      expect(addDays(day, 1).difference(day), const Duration(hours: 25));
+      final shown = Shown.week(addDays(day, -6));
+      final store = storeOf(<CalendarEntry<String>>[
+        entryOf("long", before, before.add(const Duration(hours: 25))),
+      ]);
+      await Harness(store, shown).pump(tester);
+      // Setup sanity: the week draws it as two blocks, and the day before's
+      // holds its start.
+      expect(blocksOf("long"), findsNWidgets(2));
+      expect(blockFinder("long", before), findsOneWidget);
+      final from = tester.getRect(blockFinder("long", before)).topLeft;
+      await moveBlock(
+        tester,
+        blockFinder("long", before),
+        slotRect(tester, shown, day, 0).topLeft - from + const Offset(0.0, 2.0),
+      );
+      final moved = store.storedEntry("long")!;
+      expect(moved.start, day);
+      expect(moved.end, addDays(day, 1));
+      expect(moved.isAllDay, isFalse);
+      expect(blockFinder("long", day), findsOneWidget);
+      expect(find.byKey(allDayBarKey("long")), findsNothing);
     });
   });
 

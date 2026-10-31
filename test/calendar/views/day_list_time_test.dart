@@ -251,6 +251,36 @@ void main() {
     ]);
   });
 
+  testWidgets("AG8 a timed entry from Tuesday's start to Wednesday's is "
+      "listed as a timed row at 00:00, with its length on the chip", (
+    tester,
+  ) async {
+    final store = storeOf(<CalendarEntry<String>>[
+      entryOf("whole", tuesday, DateTime(2026, 4, 22)),
+    ]);
+    expect(rowsOf(store, tuesday), <Object>[("whole", 0, 1440, false)]);
+
+    await pumpList(tester, store, tuesday);
+    final time = find.byKey(dayListTimeKey("whole"));
+    expect(
+      find.descendant(of: time, matching: find.text("00:00")),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: time, matching: find.text("All day")),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(dayListDurationKey("whole")),
+        matching: find.text(
+          const DefaultCalendarLocalizations().duration(1440),
+        ),
+      ),
+      findsOneWidget,
+    );
+  });
+
   group("on the 23-hour day", skip: shortDaySkip, () {
     testWidgets("AG3 the day is listed once with its entries", (tester) async {
       final day = shortDayStart;
