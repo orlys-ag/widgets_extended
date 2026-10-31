@@ -79,7 +79,8 @@ extension CalendarItemFields on CalendarEntry<ItemPayload> {
 
 /// An item of [type] with [fields], coloured by its type's Harbor edge;
 /// [id] null for a draft the API has not stored. It runs from [start] to
-/// [end], an exclusive end.
+/// [end], an exclusive end, and is all-day where [isAllDay], its [start]
+/// and [end] then local midnights.
 CalendarItem calendarItem({
   String? id,
   required CalendarItemType type,
@@ -87,6 +88,7 @@ CalendarItem calendarItem({
   required DateTime start,
   required DateTime end,
   Map<String, Object?> fields = const <String, Object?>{},
+  bool isAllDay = false,
 }) {
   return CalendarItem(
     id: id,
@@ -95,11 +97,13 @@ CalendarItem calendarItem({
     title: title,
     color: harborTypeStyleOf(type).edge,
     payload: ItemPayload(type, fields),
+    isAllDay: isAllDay,
   );
 }
 
-/// Reads a valid envelope. Throws a [FormatException] when a key is
-/// missing or of the wrong kind, or the end is not after the start.
+/// Reads a valid envelope, an all-day item where its start and end are
+/// both day starts. Throws a [FormatException] when a key is missing or of
+/// the wrong kind, or the end is not after the start.
 CalendarItem itemFromJson(Map<String, Object?> json) {
   final typeId = json["type"];
   final type = typeId is String ? CalendarItemType.fromId(typeId) : null;
@@ -126,6 +130,9 @@ CalendarItem itemFromJson(Map<String, Object?> json) {
     start: start,
     end: end,
     fields: fields,
+    isAllDay:
+        start == CalendarDates.dateOnly(start) &&
+        end == CalendarDates.dateOnly(end),
   );
 }
 

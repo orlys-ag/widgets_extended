@@ -16,14 +16,19 @@ enum CalendarMoveKind {
 }
 
 /// A move or a resize a gesture landed on an entry: the [entry] as stored
-/// when it landed, and the [requested] entry, [entry] at the times the
-/// gesture gave it.
+/// when it landed, and the [requested] entry, [entry] with the times the
+/// gesture gave it and whether it is all-day ([CalendarEntry.isAllDay]): a
+/// move or a resize within the slots or within the all-day strip keeps
+/// whether the entry is all-day, and a move from one into the other
+/// changes it, possibly with the times unchanged.
 ///
 /// `CalendarStore.requestMove` of [requested] writes it, and one of
 /// [entry] writes the entry back as it was.
 @immutable
 final class CalendarMoveRequest<T> {
-  /// The [kind] of gesture that gives [entry] the times of [requested].
+  /// The [kind] of gesture, a move or a resize, that gives [entry] the
+  /// times of [requested] and makes it all-day or timed
+  /// ([CalendarEntry.isAllDay]).
   const CalendarMoveRequest({
     required this.entry,
     required this.requested,
@@ -33,7 +38,8 @@ final class CalendarMoveRequest<T> {
   /// The entry as stored when the gesture landed.
   final CalendarEntry<T> entry;
 
-  /// [entry] with the start and end the gesture gave it.
+  /// [entry] with the start, the end and whether it is all-day
+  /// ([CalendarEntry.isAllDay]) as the gesture gave them.
   final CalendarEntry<T> requested;
 
   /// Whether a move or a resize landed it.

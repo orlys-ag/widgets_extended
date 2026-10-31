@@ -1,6 +1,6 @@
-/// CalendarEntry's fields, value semantics, copy, asserts and all-day
-/// rule, the members it does not declare, and the data-source contract's
-/// signatures.
+/// CalendarEntry's fields, value semantics, copy, construction checks and
+/// stored all-day kind, the members it does not declare, and the
+/// data-source contract's signatures.
 library;
 
 import 'dart:io';
@@ -36,7 +36,7 @@ const Color blue = Color(0xFF2050A0);
 const Color red = Color(0xFFA02020);
 
 /// An entry whose fields default to one set of values, its payload built
-/// anew on each call: Tuesday April 21 2026, 10:00 to 11:00.
+/// anew on each call: Tuesday April 21 2026, 10:00 to 11:00, timed.
 CalendarEntry<Note> entry({
   String? id = "entry-1",
   DateTime? start,
@@ -44,6 +44,7 @@ CalendarEntry<Note> entry({
   String title = "Review",
   Color color = blue,
   String note = "agenda",
+  bool isAllDay = false,
 }) {
   return CalendarEntry<Note>(
     id: id,
@@ -52,6 +53,7 @@ CalendarEntry<Note> entry({
     title: title,
     color: color,
     payload: Note(note),
+    isAllDay: isAllDay,
   );
 }
 
@@ -265,20 +267,100 @@ void main() {
 
   group("on the 23-hour day", skip: shortDaySkip, () {
     test("ET15 its start to the next day's start, built without isAllDay, "
-        "is timed", () {
+        "is timed, and with isAllDay true constructs all-day", () {
       final day = shortDayStart;
       expect(addDays(day, 1).difference(day), const Duration(hours: 23));
       expect(entry(start: day, end: addDays(day, 1)).isAllDay, isFalse);
+      expect(
+        entry(start: day, end: addDays(day, 1), isAllDay: true).isAllDay,
+        isTrue,
+      );
     });
   });
 
   group("on the 25-hour day", skip: longDaySkip, () {
     test("ET15 its start to the next day's start, built without isAllDay, "
-        "is timed", () {
+        "is timed, and with isAllDay true constructs all-day", () {
       final day = longDayStart;
       expect(addDays(day, 1).difference(day), const Duration(hours: 25));
       expect(entry(start: day, end: addDays(day, 1)).isAllDay, isFalse);
+      expect(
+        entry(start: day, end: addDays(day, 1), isAllDay: true).isAllDay,
+        isTrue,
+      );
     });
+  });
+
+  test("ET17 the kind is stored: it is compared and hashed, and copyWith "
+      "sets or keeps it", () {
+    final tuesday = DateTime(2026, 4, 21);
+    final wednesday = DateTime(2026, 4, 22);
+    final whole = entry(start: tuesday, end: wednesday);
+    final allDay = entry(start: tuesday, end: wednesday, isAllDay: true);
+    expect(whole.isAllDay, isFalse);
+    expect(allDay.isAllDay, isTrue);
+    expect(whole == allDay, isFalse);
+    expect(whole.copyWith(isAllDay: true), allDay);
+    expect(whole.copyWith(isAllDay: true).hashCode, allDay.hashCode);
+    expect(allDay.copyWith(isAllDay: false), whole);
+    expect(allDay.copyWith(title: "x").isAllDay, isTrue);
+    expect(whole.copyWith(title: "x").isAllDay, isFalse);
+  });
+
+  test("ET18 an all-day entry's start and end are local day starts", () {
+    final tuesday = DateTime(2026, 4, 21);
+    final wednesday = DateTime(2026, 4, 22);
+    expect(
+      () => entry(
+        start: DateTime(2026, 4, 21, 9),
+        end: wednesday,
+        isAllDay: true,
+      ),
+      throwsA(isArgumentError.having((error) => error.name, "name", "start")),
+    );
+    expect(
+      () => entry(
+        start: tuesday,
+        end: DateTime(2026, 4, 22, 9),
+        isAllDay: true,
+      ),
+      throwsA(isArgumentError.having((error) => error.name, "name", "end")),
+    );
+    expect(() => entry().copyWith(isAllDay: true), throwsArgumentError);
+    expect(
+      entry(start: tuesday, end: wednesday, isAllDay: true).isAllDay,
+      isTrue,
+    );
+  });
+
+  test("ET19 the CalendarEntry class checks its times with no assert and no "
+      "debug-only branch", () {
+    final body = classBody(
+      File("lib/calendar/entries/calendar_entry.dart").readAsStringSync(),
+      "CalendarEntry",
+    );
+    // The search finds the checks the class does make.
+    expect(body, contains("throw ArgumentError"));
+    expect(body, isNot(contains("assert(")));
+    expect(body, isNot(contains("kDebugMode")));
+  });
+
+  test("ET20 an all-day entry's toString names its dates and the kind, and "
+      "a timed one's its times", () {
+    final allDay = entry(
+      start: DateTime(2026, 4, 21),
+      end: DateTime(2026, 4, 23),
+      isAllDay: true,
+    );
+    expect(
+      allDay.toString(),
+      "CalendarEntry(entry-1, 2026-04-21 to 2026-04-23, all day, "
+      "\"Review\", ${const Note("agenda")})",
+    );
+    expect(allDay.toString(), contains(", all day,"));
+    final timed = entry(start: DateTime(2026, 4, 21), end: DateTime(2026, 4, 23));
+    expect(timed.toString(), isNot(contains(", all day,")));
+    expect(timed.toString(), contains("2026-04-21 00:00 to 2026-04-23 00:00"));
   });
 
   test("ET16 the CalendarEntry class declares no member of the day, minute "

@@ -21,7 +21,12 @@ DateTime at(DateTime day, int hour, [int minute = 0, int second = 0]) {
   return DateTime(day.year, day.month, day.day, hour, minute, second);
 }
 
-CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
+CalendarEntry<String> entryOf(
+  String id,
+  DateTime start,
+  DateTime end, {
+  bool isAllDay = false,
+}) {
   return CalendarEntry<String>(
     id: id,
     start: start,
@@ -29,6 +34,7 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
     title: id,
     color: const Color(0xFF336699),
     payload: id,
+    isAllDay: isAllDay,
   );
 }
 
@@ -548,6 +554,7 @@ void main() {
         title: "day",
         color: const Color(0xFF336699),
         payload: 1,
+        isAllDay: true,
       );
       expect(NoOverlapsPolicy.entriesShareTime(nine, half), isTrue);
       expect(NoOverlapsPolicy.entriesShareTime(nine, ten), isFalse);

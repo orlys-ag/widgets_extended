@@ -28,7 +28,12 @@ DateTime at(DateTime day, int hour, [int minute = 0]) {
   return DateTime(day.year, day.month, day.day, hour, minute);
 }
 
-CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
+CalendarEntry<String> entryOf(
+  String id,
+  DateTime start,
+  DateTime end, {
+  bool isAllDay = false,
+}) {
   return CalendarEntry<String>(
     id: id,
     start: start,
@@ -36,6 +41,7 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
     title: id,
     color: const Color(0xFF336699),
     payload: id,
+    isAllDay: isAllDay,
   );
 }
 
@@ -204,7 +210,9 @@ void main() {
       expect(store.storedEntry("task")!.end, at(tuesday, 9), reason: name);
 
       final allDay = outcomeOf(
-        store.requestMove(task.copyWith(start: tuesday, end: wednesday)),
+        store.requestMove(
+          task.copyWith(start: tuesday, end: wednesday, isAllDay: true),
+        ),
       );
       expect(store.storedEntry("task")!.isAllDay, isTrue, reason: name);
       expect(await allDay, store.storedEntry("task"), reason: name);
@@ -236,7 +244,9 @@ void main() {
       expect(await moving, onto, reason: name);
 
       final allDay = outcomeOf(
-        store.requestMove(task.copyWith(start: tuesday, end: wednesday)),
+        store.requestMove(
+          task.copyWith(start: tuesday, end: wednesday, isAllDay: true),
+        ),
       );
       expect(store.storedEntry("task")!.start, tuesday, reason: name);
       expect(await allDay, store.storedEntry("task"), reason: name);
@@ -283,7 +293,7 @@ void main() {
     test("SM6 the day's entries are answered for that day once", () {
       final day = shortDayStart;
       final next = addDays(day, 1);
-      final allDay = entryOf("all-day", day, next);
+      final allDay = entryOf("all-day", day, next, isAllDay: true);
       final early = entryOf("early", at(day, 1, 30), at(day, 3, 30));
       for (final (name, store) in storesOf(
         <CalendarEntry<String>>[allDay, early],
@@ -308,7 +318,7 @@ void main() {
     test("SM6 the day's entries are answered for that day once", () {
       final day = longDayStart;
       final next = addDays(day, 1);
-      final allDay = entryOf("all-day", day, next);
+      final allDay = entryOf("all-day", day, next, isAllDay: true);
       final repeated = entryOf(
         "repeated",
         secondHalfPastOne,

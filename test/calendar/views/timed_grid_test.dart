@@ -231,13 +231,15 @@ class HeldSource implements CalendarDataSource<String> {
 }
 
 /// An entry with the id and title [id] from [start] minutes after [day]'s
-/// midnight to [end] minutes after the midnight of its [dayCount]th day.
+/// midnight to [end] minutes after the midnight of its [dayCount]th day,
+/// all-day where [isAllDay].
 CalendarEntry<String> entryOf(
   String id,
   DateTime day,
   int start,
   int end, {
   int dayCount = 1,
+  bool isAllDay = false,
 }) {
   return CalendarEntry<String>(
     id: id,
@@ -246,6 +248,7 @@ CalendarEntry<String> entryOf(
     title: id,
     color: const Color(0xFF336699),
     payload: id,
+    isAllDay: isAllDay,
   );
 }
 
@@ -1362,7 +1365,7 @@ void main() {
     final store = MemoryCalendarStore<String>(
       entries: <CalendarEntry<String>>[
         entryOf("standup", tuesday, 9 * 60, 10 * 60),
-        entryOf("off", tuesday, 0, 0, dayCount: 2),
+        entryOf("off", tuesday, 0, 0, dayCount: 2, isAllDay: true),
       ],
     );
     addTearDown(store.dispose);

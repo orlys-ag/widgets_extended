@@ -384,9 +384,15 @@ files declare is internal.
 
 An entry is a `CalendarEntry<T>`: an id, null for a draft no store holds
 yet, a start and an exclusive end in local time on whole minutes, a title,
-a colour, and a payload of your own type. One from a day's start to a
-day's start is all-day. The calendar reads its entries from a store, which
-you create and dispose:
+a colour, and a payload of your own type. An entry is timed unless you
+construct it with `isAllDay: true`. An all-day entry's start and end are
+local midnights, its end the midnight after its last day, so one over
+April 21 runs from `DateTime(2026, 4, 21)` to `DateTime(2026, 4, 22)`; a
+timed entry from a midnight to a midnight stays timed and draws in the
+grid. The constructor throws an `ArgumentError`, in a release build as in a
+debug one, for a UTC or part-minute time, an end not after its start, or
+an all-day time that is not a local midnight. The calendar reads its
+entries from a store, which you create and dispose:
 
 ```dart
 final store = MemoryCalendarStore<String>(
@@ -405,6 +411,22 @@ final store = MemoryCalendarStore<String>(
 // In a build method:
 CalendarView<String>(store: store);
 ```
+
+**All-day entries from other calendars.** Google Calendar gives an all-day
+event `start.date` and `end.date` and a timed one `start.dateTime` and
+`end.dateTime`; iCalendar (RFC 5545) gives an all-day event DTSTART and
+DTEND of value type DATE and a timed one DATE-TIME; Apple EventKit marks an
+all-day event with `EKEvent.isAllDay`. The date forms and an
+`EKEvent.isAllDay` of true map to `isAllDay: true`, the others to `false`.
+An all-day entry ends at the local midnight after its last day: Google's
+`end.date` and iCalendar's DATE DTEND are exclusive ends, that day already,
+and map as they are; for an all-day `EKEvent`, whose reference states no
+such rule for `endDate`, end the entry at the midnight after the event's
+last day. Build an all-day entry's start and end from the dates' year,
+month and day, `DateTime(year, month, day)`: an all-day date is a local
+date, never converted through UTC, and EventKit returns an all-day event's
+dates in the default time zone. A timed value is an instant, converted to
+local time.
 
 **Stores.** `MemoryCalendarStore` holds the entries you give it and applies
 each write within the call. `CachingCalendarStore` reads by days through

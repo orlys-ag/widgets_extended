@@ -26,7 +26,12 @@ DateTime at(DateTime day, int hour, [int minute = 0, int second = 0]) {
   return DateTime(day.year, day.month, day.day, hour, minute, second);
 }
 
-CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
+CalendarEntry<String> entryOf(
+  String id,
+  DateTime start,
+  DateTime end, {
+  bool isAllDay = false,
+}) {
   return CalendarEntry<String>(
     id: id,
     start: start,
@@ -34,6 +39,7 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
     title: id,
     color: const Color(0xFF336699),
     payload: id,
+    isAllDay: isAllDay,
   );
 }
 
@@ -316,7 +322,7 @@ void main() {
     test("HL2 under lockEarlierToday at 10:00, today's all-day entry is "
         "started", () {
       final tenOClock = CalendarNow(time: at(today, 10), today: today);
-      final entry = entryOf("all day", today, wednesday);
+      final entry = entryOf("all day", today, wednesday, isAllDay: true);
       expect(earlier.mayMove(entry, tenOClock), isFalse);
       expect(earlier.resizableEdges(entry, tenOClock), CalendarResizeEdges.end);
       // Its end may move to a later day start, and its start not at all.

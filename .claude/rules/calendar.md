@@ -68,8 +68,9 @@ Normative for `lib/calendar/`, the calendar module: `CalendarView`, a calendar o
 ## Vocabulary
 
 - **Entry**: one `CalendarEntry<T>`, carrying the host's payload `T`.
-- **All-day entry**: an entry that covers whole local days, from a midnight
-  to a midnight; any other entry is timed.
+- **All-day entry**: an entry whose `isAllDay` is true, which covers whole
+  local days from the local midnight of its start to that of its end, an
+  exclusive end; any other entry is timed, whatever its times.
 - **Piece**: the part of a timed entry on one day, which Week and Day draw
   as one block.
 - **Slot**: the step the timed grid's rows and the gestures snap to.

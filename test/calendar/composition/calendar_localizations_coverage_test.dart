@@ -383,7 +383,12 @@ DateTime at(DateTime day, int hour, [int minute = 0]) {
 }
 
 /// An entry titled [id] from [start] to [end].
-CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
+CalendarEntry<String> entryOf(
+  String id,
+  DateTime start,
+  DateTime end, {
+  bool isAllDay = false,
+}) {
   return CalendarEntry<String>(
     id: id,
     start: start,
@@ -391,6 +396,7 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
     title: id,
     color: const Color(0xFF336699),
     payload: id,
+    isAllDay: isAllDay,
   );
 }
 
@@ -406,8 +412,9 @@ List<CalendarEntry<String>> weekEntries() {
     entryOf("Late", at(tuesday, 19), at(tuesday, 20)),
     entryOf("Straddle", at(tuesday, 7, 30), at(tuesday, 10)),
     entryOf("Overnight", at(wednesday, 17), at(thursday, 10)),
-    entryOf("Trip", thursday, saturday),
-    for (var i = 1; i <= 4; i++) entryOf("Errand $i", thursday, friday),
+    entryOf("Trip", thursday, saturday, isAllDay: true),
+    for (var i = 1; i <= 4; i++)
+      entryOf("Errand $i", thursday, friday, isAllDay: true),
     entryOf("Review", at(friday, 16), at(friday, 19)),
     entryOf("Weekend", at(saturday, 10), at(saturday, 11)),
   ];

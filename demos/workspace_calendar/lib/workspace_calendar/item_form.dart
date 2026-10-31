@@ -65,6 +65,7 @@ Future<void> showCreateFlow(
     start: range.start,
     end: range.end,
     fields: withFieldDefaults(type, const <String, Object?>{}),
+    isAllDay: range.isAllDay,
   );
   await _showForm(
     context,

@@ -172,7 +172,7 @@ DateTime at(DateTime day, int minute) {
 }
 
 /// An entry from [start] minutes after [day]'s midnight to [end] minutes
-/// after the midnight of its [dayCount]th day.
+/// after the midnight of its [dayCount]th day, all-day where [isAllDay].
 CalendarEntry<String> task(
   String id,
   DateTime day,
@@ -180,6 +180,7 @@ CalendarEntry<String> task(
   int end, {
   int dayCount = 1,
   String title = "Task",
+  bool isAllDay = false,
 }) {
   return CalendarEntry<String>(
     id: id,
@@ -188,6 +189,7 @@ CalendarEntry<String> task(
     title: title,
     color: taskColor,
     payload: "task",
+    isAllDay: isAllDay,
   );
 }
 
@@ -1632,6 +1634,7 @@ void main() {
       0,
       dayCount: 4,
       title: "Three",
+      isAllDay: true,
     );
     final ten = task("ten", DateTime(2026, 5, 6), 600, 660, title: "Ten");
     final nine = task("nine", DateTime(2026, 5, 7), 540, 570, title: "Nine");

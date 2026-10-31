@@ -11,7 +11,7 @@ import 'package:widgets_extended/calendar/calendar.dart';
 const Color taskColor = Color(0xFF3060C0);
 
 /// An entry from [start] minutes after [day]'s midnight to [end] minutes
-/// after the midnight of its [dayCount]th day.
+/// after the midnight of its [dayCount]th day, all-day where [isAllDay].
 CalendarEntry<String> task(
   String? id,
   DateTime day,
@@ -19,6 +19,7 @@ CalendarEntry<String> task(
   int end, {
   int dayCount = 1,
   String title = "Task",
+  bool isAllDay = false,
 }) {
   return CalendarEntry<String>(
     id: id,
@@ -27,6 +28,7 @@ CalendarEntry<String> task(
     title: title,
     color: taskColor,
     payload: "task",
+    isAllDay: isAllDay,
   );
 }
 
@@ -469,4 +471,18 @@ void main() {
       }
     },
   );
+
+  test("MS14 under hours of 08:00 to 18:00 a create of an all-day entry "
+      "over Tuesday is stored and answered all-day", () async {
+    final recorder = Recorder();
+    final store = recorder.store(hours: const CalendarDayHours(480, 1080));
+    final tuesday = DateTime(2026, 4, 21);
+    final created = await store.create(
+      task(null, tuesday, 0, 0, dayCount: 2, isAllDay: true),
+    );
+    expect(created.isAllDay, isTrue);
+    expect(created.start, tuesday);
+    expect(created.end, DateTime(2026, 4, 22));
+    expect(store.storedEntry(created.id!), created);
+  });
 }

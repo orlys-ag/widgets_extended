@@ -59,6 +59,7 @@ CalendarEntry<String> entryOf(
   DateTime start,
   DateTime end, {
   String? title,
+  bool isAllDay = false,
 }) {
   return CalendarEntry<String>(
     id: id,
@@ -67,6 +68,7 @@ CalendarEntry<String> entryOf(
     title: title ?? id,
     color: const Color(0xFF336699),
     payload: id,
+    isAllDay: isAllDay,
   );
 }
 
@@ -77,7 +79,13 @@ CalendarEntry<String> allDayOf(
   int days = 1,
   String? title,
 }) {
-  return entryOf(id, first, addDays(first, days), title: title);
+  return entryOf(
+    id,
+    first,
+    addDays(first, days),
+    title: title,
+    isAllDay: true,
+  );
 }
 
 /// A grid the tests pump: Week over the seven days from [first], under a
@@ -3498,7 +3506,11 @@ void main() {
           ),
         ]);
         expect(barStore.moves, <CalendarEntry<String>>[
-          bar.copyWith(start: at(sunday, 23, 30), end: at(nextMonday, 0, 30)),
+          bar.copyWith(
+            start: at(sunday, 23, 30),
+            end: at(nextMonday, 0, 30),
+            isAllDay: false,
+          ),
         ]);
         continue;
       }
@@ -3658,7 +3670,11 @@ void main() {
     await crossed.up();
     await tester.pumpAndSettle();
     expect(store.moves, <CalendarEntry<String>>[
-      bar.copyWith(start: at(sunday, 23, 30), end: at(nextMonday, 0, 30)),
+      bar.copyWith(
+        start: at(sunday, 23, 30),
+        end: at(nextMonday, 0, 30),
+        isAllDay: false,
+      ),
     ]);
     expect(store.reads, everyElement(ownOrAfter));
   });
@@ -4048,11 +4064,12 @@ void main() {
       CalendarEntry<String> entry,
       DateTime start,
       DateTime end,
-      CalendarMoveKind kind,
-    ) {
+      CalendarMoveKind kind, {
+      bool? isAllDay,
+    }) {
       return CalendarMoveRequest<String>(
         entry: entry,
-        requested: entry.copyWith(start: start, end: end),
+        requested: entry.copyWith(start: start, end: end, isAllDay: isAllDay),
         kind: kind,
       );
     }
@@ -4077,10 +4094,11 @@ void main() {
           at(tuesday, 10),
           at(tuesday, 11),
           move,
+          isAllDay: false,
         ),
       ],
       "block on strip": <CalendarMoveRequest<String>>[
-        request(meet, tuesday, wednesday, move),
+        request(meet, tuesday, wednesday, move, isAllDay: true),
       ],
       "end on a later day": <CalendarMoveRequest<String>>[
         request(night, night.start, at(wednesday, 12, 15), resize),

@@ -143,9 +143,10 @@ final class CalendarEntryTapDetails<T> {
 /// day's part of it. In Week and Day a tap on a block or a bar, and in
 /// Month on a chip, reports the stored entry through [onEntryTap]. In edit
 /// mode, which [editable] turns on, Week's and Day's blocks move, keeping
-/// the entry's length, and resize, a bar dropped on a slot makes its entry
-/// an hour long there, and a block dropped on a day of the strip makes its
-/// entry all-day on that day; in Week bars move and resize by days. Each
+/// the entry's length and its kind, and resize, a bar dropped on a slot
+/// makes its entry a timed one, an hour long there, and a block dropped on
+/// a day of the strip makes its entry all-day on that day; in Week bars
+/// move and resize by days. Each
 /// move and resize lands as a [CalendarMoveRequest], which [onMoveRequest]
 /// receives, or with none [store] writes ([CalendarStore.requestMove]). A
 /// drag over empty slots reports one continuous range through

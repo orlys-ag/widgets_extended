@@ -14,7 +14,12 @@ final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
 final DateTime wednesday = DateTime(2026, 4, 22);
 
-CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
+CalendarEntry<String> entryOf(
+  String id,
+  DateTime start,
+  DateTime end, {
+  bool isAllDay = false,
+}) {
   return CalendarEntry<String>(
     id: id,
     start: start,
@@ -22,6 +27,7 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
     title: id,
     color: const Color(0xFF336699),
     payload: id,
+    isAllDay: isAllDay,
   );
 }
 
@@ -82,8 +88,18 @@ void main() {
 
   test("OV3 an all-day entry shares time with neither a timed nor an "
       "all-day entry, in both argument orders", () {
-    final allDay = entryOf("all-day", tuesday, DateTime(2026, 4, 22));
-    final other = entryOf("other", monday, DateTime(2026, 4, 23));
+    final allDay = entryOf(
+      "all-day",
+      tuesday,
+      DateTime(2026, 4, 22),
+      isAllDay: true,
+    );
+    final other = entryOf(
+      "other",
+      monday,
+      DateTime(2026, 4, 23),
+      isAllDay: true,
+    );
     final timed = entryOf(
       "timed",
       DateTime(2026, 4, 21, 9),
@@ -112,5 +128,35 @@ void main() {
     );
     expect(NoOverlapsPolicy.entriesShareTime(whole, ten), isTrue);
     expect(NoOverlapsPolicy.entriesShareTime(ten, whole), isTrue);
+  });
+
+  test("OV5 an all-day entry over Tuesday shares no time with a timed entry "
+      "over the same day or with Tuesday 10:00 to 11:00, in both argument "
+      "orders", () {
+    final allDay = entryOf("all-day", tuesday, wednesday, isAllDay: true);
+    final whole = entryOf("whole", tuesday, wednesday);
+    final ten = entryOf(
+      "ten",
+      DateTime(2026, 4, 21, 10),
+      DateTime(2026, 4, 21, 11),
+    );
+    for (final timed in <CalendarEntry<String>>[whole, ten]) {
+      // Their instants do meet.
+      expect(
+        timesOverlap(allDay.start, allDay.end, timed.start, timed.end),
+        isTrue,
+        reason: timed.id,
+      );
+      expect(
+        NoOverlapsPolicy.entriesShareTime(allDay, timed),
+        isFalse,
+        reason: timed.id,
+      );
+      expect(
+        NoOverlapsPolicy.entriesShareTime(timed, allDay),
+        isFalse,
+        reason: timed.id,
+      );
+    }
   });
 }

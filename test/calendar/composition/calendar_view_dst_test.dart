@@ -33,7 +33,12 @@ DateTime at(DateTime day, int hour, [int minute = 0]) {
   return DateTime(day.year, day.month, day.day, hour, minute);
 }
 
-CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
+CalendarEntry<String> entryOf(
+  String id,
+  DateTime start,
+  DateTime end, {
+  bool isAllDay = false,
+}) {
   return CalendarEntry<String>(
     id: id,
     start: start,
@@ -41,6 +46,7 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
     title: id,
     color: const Color(0xFF336699),
     payload: id,
+    isAllDay: isAllDay,
   );
 }
 
@@ -413,7 +419,12 @@ void main() {
         (true, 90),
         (true, 105),
       ]) {
-        final bar = entryOf("bar", next, dateOfDayNumber(dayNumber(next) + 1));
+        final bar = entryOf(
+          "bar",
+          next,
+          dateOfDayNumber(dayNumber(next) + 1),
+          isAllDay: true,
+        );
         final store = MemoryCalendarStore<String>(
           entries: <CalendarEntry<String>>[bar],
         );
@@ -460,7 +471,11 @@ void main() {
             : day.add(Duration(minutes: minute));
         expect(
           store.storedEntry("bar"),
-          bar.copyWith(start: start, end: start.add(const Duration(hours: 1))),
+          bar.copyWith(
+            start: start,
+            end: start.add(const Duration(hours: 1)),
+            isAllDay: false,
+          ),
           reason: "locked: $locked, row $minute",
         );
       }

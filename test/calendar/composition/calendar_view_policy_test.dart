@@ -36,7 +36,12 @@ DateTime at(DateTime day, int hour, [int minute = 0, int second = 0]) {
   return DateTime(day.year, day.month, day.day, hour, minute, second);
 }
 
-CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
+CalendarEntry<String> entryOf(
+  String id,
+  DateTime start,
+  DateTime end, {
+  bool isAllDay = false,
+}) {
   return CalendarEntry<String>(
     id: id,
     start: start,
@@ -44,6 +49,7 @@ CalendarEntry<String> entryOf(String id, DateTime start, DateTime end) {
     title: id,
     color: const Color(0xFF336699),
     payload: id,
+    isAllDay: isAllDay,
   );
 }
 
@@ -471,7 +477,7 @@ void main() {
       "Agenda, and out of edit mode nothing moves", (tester) async {
     final store = storeOf(<CalendarEntry<String>>[
       entryOf("A", at(wednesday, 14), at(wednesday, 15)),
-      entryOf("A2", wednesday, thursday),
+      entryOf("A2", wednesday, thursday, isAllDay: true),
       entryOf("B", at(tuesday, 10), at(tuesday, 11)),
       entryOf("C", at(tuesday, 13), at(tuesday, 14)),
       entryOf("D", at(tuesday, 16), at(tuesday, 17)),
@@ -1201,7 +1207,7 @@ void main() {
   group("PV7", () {
     testWidgets("a change predicate that throws in a bar's landing on the "
         "slots is reported and refuses the landing", (tester) async {
-      final bar = entryOf("G", tuesday, wednesday);
+      final bar = entryOf("G", tuesday, wednesday, isAllDay: true);
       final throwing = ScriptedEditPolicy<String>(
         admits: (entry, start, end) {
           if (entry.id == "G" && !(isDayStart(start) && isDayStart(end))) {
@@ -1231,7 +1237,11 @@ void main() {
           if (policy == null) {
             // Setup sanity: the unrestricted policy lets the bar land.
             expect(host.store.moves, <CalendarEntry<String>>[
-              bar.copyWith(start: at(tuesday, 10), end: at(tuesday, 11)),
+              bar.copyWith(
+                start: at(tuesday, 10),
+                end: at(tuesday, 11),
+                isAllDay: false,
+              ),
             ]);
             expect(errors, isEmpty);
             return;
@@ -1373,7 +1383,7 @@ void main() {
         storeOf(<CalendarEntry<String>>[
           entryOf("A", at(tuesday, 9), at(tuesday, 10)),
           entryOf("B", at(wednesday, 11), at(wednesday, 12)),
-          entryOf("C", monday, tuesday),
+          entryOf("C", monday, tuesday, isAllDay: true),
         ]),
         view: CalendarViewKind.week,
         day: tuesday,

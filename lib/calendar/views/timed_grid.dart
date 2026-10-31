@@ -2747,14 +2747,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return (start: start, end: end);
   }
 
-  /// Whether a range from [start] to [end] shares time with a timed entry
-  /// other than [id], whose entry is [own], that the store shows on the
-  /// days the range covers, shown or not ([rangeSharesTime]): a board
+  /// Whether a timed range from [start] to [end] shares time with a timed
+  /// entry other than [id], whose entry is [own], that the store shows on
+  /// the days the range covers, shown or not ([rangeSharesTime]): a board
   /// piece in the rows the range covers on the shown columns, one of the
   /// entries those rows can miss that the split indexes
   /// ([TimedGridLayout.loose]), and, for a range with a day outside the
-  /// tracks' range, one the store shows there ([_offRangeOver]). An
-  /// all-day range shares time with none ([entriesShareTime]). The walk,
+  /// tracks' range, one the store shows there ([_offRangeOver]). The walk,
   /// as many columns as the range covers, and at most two O(log n)
   /// searches; a store read only for days outside the range no check
   /// since the last clearing of [_offRange] covered.
@@ -2764,9 +2763,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     DateTime start,
     DateTime end,
   ) {
-    if (isDayStart(start) && isDayStart(end)) {
-      return false;
-    }
     final firstDay = dayNumber(start);
     final lastDay = lastDayNumberOf(start, end);
     final tracks = _tracks;
@@ -3569,6 +3565,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     };
   }
 
+  /// Whether the times a release of [drag] gives are all-day: where
+  /// [crossing], a block's move into the strip gives all-day times and a
+  /// bar's move into the slots timed ones; any other drag keeps the kind of
+  /// what it drags, a bar's all-day and a piece's timed.
+  bool _landsAllDay(_Dragging drag, {required bool crossing}) {
+    if (crossing && drag.kind == BoardDragKind.move) {
+      return !drag.key.isBar;
+    }
+    return drag.key.isBar;
+  }
+
   /// What the landing label says for [_drag] in [strings]: the days and
   /// times a release would give, the times in [TimedGrid.hourLabelFormat]
   /// ([CalendarLocalizations.landing]), or [CalendarLocalizations.noLanding]
@@ -3939,18 +3946,21 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// above the slots an hour from that slot ([_barLandingOf]), and an end
   /// handle over a later day's slot ends there ([_laterDayEndOf]), each
   /// through one request ([_requestMove]), or none where the landing is
-  /// refused or keeps the entry's times, compared alone as in [_commit];
-  /// either way [_Dragging.spent] then refuses the board's own report. A
-  /// bar's day-edge resize held at [CalendarEditRules.dayLimit] requests
-  /// the range it is held at. The request's hold syncs within the call
-  /// ([_requestMove]).
+  /// refused or keeps the entry's times and kind; either way
+  /// [_Dragging.spent] then refuses the board's own report. A request
+  /// carries the kind the release gives ([_landsAllDay]), so a block let go
+  /// on its own day's strip cell requests the entry all-day at the same
+  /// times. A bar's day-edge resize held at [CalendarEditRules.dayLimit]
+  /// requests the range it is held at. The request's hold syncs within the
+  /// call ([_requestMove]).
   void _releaseCross(Offset local) {
     final drag = _drag;
     if (drag == null) {
       return;
     }
     ({DateTime start, DateTime end})? write;
-    if (_isCrossingDrag(drag)) {
+    final crossing = _isCrossingDrag(drag);
+    if (crossing) {
       noteCellRead();
       final row = _rowAt(local.dy);
       final col = _columnAt(local.dx);
@@ -3989,15 +3999,22 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     final id = drag.key.id;
     final stored = widget.store.storedEntry(id);
+    final allDay = _landsAllDay(drag, crossing: crossing);
     if (stored == null ||
         _isPending(id) ||
-        (write.start == stored.start && write.end == stored.end)) {
+        (write.start == stored.start &&
+            write.end == stored.end &&
+            allDay == stored.isAllDay)) {
       return;
     }
     _requestMove(
       CalendarMoveRequest<T>(
         entry: stored,
-        requested: stored.copyWith(start: write.start, end: write.end),
+        requested: stored.copyWith(
+          start: write.start,
+          end: write.end,
+          isAllDay: allDay,
+        ),
         kind: drag.kind == BoardDragKind.move
             ? CalendarMoveKind.move
             : CalendarMoveKind.resize,
