@@ -23,6 +23,8 @@ import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 
+import '../recording_errors.dart';
+
 typedef ShownItem = CalendarShownEntry<String>;
 
 /// April 2026, whose weeks start on March 30 and April 6, 13, 20 and 27.
@@ -628,5 +630,61 @@ void main() {
       findsOneWidget,
     );
     semantics.dispose();
+  });
+
+  testWidgets("MB3 a month board taken out of the tree while two fingers "
+      "pinch it takes no more of their events: their lift and their cancel "
+      "report no error", (tester) async {
+    for (final cancel in <bool>[false, true]) {
+      final reason = cancel ? "cancel" : "lift";
+      final store = MemoryCalendarStore<String>();
+      addTearDown(store.dispose);
+      final now = ValueNotifier<CalendarNow>(
+        CalendarNow(time: DateTime(2026, 4, 21, 9), today: april(21)),
+      );
+      addTearDown(now.dispose);
+      final zooms = <double>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MonthBoard<String>(
+            store: store,
+            grid: grid,
+            selectedDay: april(21),
+            now: now,
+            onSelectDay: (day) {},
+            onOpenDay: (day) {},
+            onCreateOnDay: null,
+            onOpenEntry: (id) {},
+            onZoom: (weekScale, minDayWidth) {
+              zooms.add(weekScale);
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final focal = tester.getCenter(find.byKey(monthDayKey(april(15))));
+      final first = await tester.startGesture(focal - const Offset(0.0, 30.0));
+      final second = await tester.startGesture(focal + const Offset(0.0, 30.0));
+      for (var i = 0; i < 3; i++) {
+        await first.moveBy(const Offset(0.0, -6.0));
+        await second.moveBy(const Offset(0.0, 6.0));
+        await tester.pump();
+      }
+      // Setup sanity: the pinch zooms.
+      expect(zooms, isNotEmpty, reason: reason);
+
+      await tester.pumpWidget(const SizedBox());
+      await recordingErrors((errors) async {
+        if (cancel) {
+          await first.cancel();
+          await second.cancel();
+        } else {
+          await first.up();
+          await second.up();
+        }
+        await tester.pump();
+        expect(errors, isEmpty, reason: reason);
+      });
+    }
   });
 }

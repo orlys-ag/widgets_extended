@@ -23,6 +23,7 @@ import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
 import '../edit_policies.dart';
+import '../recording_errors.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -417,21 +418,6 @@ ScriptedEditPolicy<String> pv1Policy() {
     undeletable: const <String>{"D"},
     earliestStarts: <DateTime, DateTime?>{thursday: at(thursday, 10)},
   );
-}
-
-/// Runs [body] with [FlutterError.onError] recording each reported error
-/// in the list it is given, and restores it after.
-Future<void> recordingErrors(
-  Future<void> Function(List<FlutterErrorDetails> errors) body,
-) async {
-  final errors = <FlutterErrorDetails>[];
-  final previous = FlutterError.onError;
-  FlutterError.onError = errors.add;
-  try {
-    await body(errors);
-  } finally {
-    FlutterError.onError = previous;
-  }
 }
 
 /// The key of each block or bar that builds again during [body], once per

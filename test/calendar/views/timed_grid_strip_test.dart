@@ -38,6 +38,7 @@ import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
 import '../dst_days.dart';
 import '../edit_policies.dart';
+import '../recording_errors.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -4787,6 +4788,87 @@ void main() {
         );
       }
       await tester.pumpAndSettle();
+    }
+  });
+
+  testWidgets("GM6 a grid taken out of the tree while two fingers pinch it "
+      "takes no more of their events: their lift and their cancel report no "
+      "error", (tester) async {
+    for (final cancel in <bool>[false, true]) {
+      final reason = cancel ? "cancel" : "lift";
+      final shown = Shown.week(monday);
+      final zooms = <double>[];
+      await Harness(
+        storeOf(<CalendarEntry<String>>[]),
+        shown,
+        onZoom: (minSlotHeight, minDayWidth) {
+          zooms.add(minSlotHeight);
+        },
+      ).pump(tester);
+      final focal = slotRect(tester, shown, thursday, 15 * 60).center;
+      final first = await tester.startGesture(focal - const Offset(0.0, 30.0));
+      final second = await tester.startGesture(focal + const Offset(0.0, 30.0));
+      for (var i = 0; i < 3; i++) {
+        await first.moveBy(const Offset(0.0, -6.0));
+        await second.moveBy(const Offset(0.0, 6.0));
+        await tester.pump();
+      }
+      // Setup sanity: the pinch zooms.
+      expect(zooms, isNotEmpty, reason: reason);
+
+      await tester.pumpWidget(const SizedBox());
+      await recordingErrors((errors) async {
+        if (cancel) {
+          await first.cancel();
+          await second.cancel();
+        } else {
+          await first.up();
+          await second.up();
+        }
+        await tester.pump();
+        expect(errors, isEmpty, reason: reason);
+      });
+    }
+  });
+
+  testWidgets("GM7 a grid taken out of the tree while a bar's day-edge "
+      "resize is held at the day limit takes no more of the drag's events: "
+      "its lift writes nothing, and its lift and its cancel report no "
+      "error", (tester) async {
+    for (final cancel in <bool>[false, true]) {
+      final reason = cancel ? "cancel" : "lift";
+      final (gesture, store) = await holdBarEdge(
+        tester,
+        limit: 3,
+        id: "m",
+        day: monday,
+        side: AxisDirection.right,
+        over: thursday,
+      );
+      await tester.pumpAndSettle();
+      // Setup sanity: the limit holds the bar at Monday to Wednesday, which
+      // a release on the grid writes (TX8).
+      expect(
+        markedOf(tester, <DateTime>[
+          for (var i = 0; i < 7; i++) addDays(monday, i),
+        ]),
+        <DateTime>[monday, tuesday, wednesday],
+        reason: reason,
+      );
+
+      await tester.pumpWidget(const SizedBox());
+      await recordingErrors((errors) async {
+        if (cancel) {
+          await gesture.cancel();
+        } else {
+          await gesture.up();
+        }
+        await tester.pump();
+        expect(errors, isEmpty, reason: reason);
+      });
+      if (!cancel) {
+        expect(store.moves, isEmpty);
+      }
     }
   });
 
