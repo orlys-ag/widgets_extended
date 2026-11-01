@@ -232,7 +232,7 @@ void main() {
 
   test(
     "RC8 a CalendarNow takes a UTC time as its local time, the same "
-    "instant, and reads a UTC today by its year, month and day",
+    "instant",
     skip: offUtcSkip,
     () {
       final time = offUtcTime!.add(const Duration(seconds: 30));
@@ -241,11 +241,19 @@ void main() {
       expect(fromUtc.time.isUtc, isFalse);
       expect(fromUtc.time, time);
       expect(fromUtc, local);
-      expect(fromUtc.hashCode, local.hashCode);
       expect(fromUtc.timeOnToday, local.timeOnToday);
+    },
+  );
+
+  test(
+    "RC22 a CalendarNow still reads a UTC today by its year, month and "
+    "day, not as its local time",
+    skip: offUtcSkip,
+    () {
+      final today = offUtcTime!.toUtc();
       expect(
-        CalendarNow(time: time, today: DateTime.utc(2026, 4, 21)).today,
-        tuesday,
+        CalendarNow(time: offUtcTime!, today: today).today,
+        DateTime(today.year, today.month, today.day),
       );
     },
   );

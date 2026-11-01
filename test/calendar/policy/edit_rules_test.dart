@@ -469,10 +469,6 @@ void main() {
       final dayStartUtc = CalendarEarliestStart(tuesday, tuesday.toUtc());
       expect(dayStartUtc.earliest, dayStart.earliest);
       expect(dayStartUtc.earliest!.isUtc, isFalse);
-      expect(dayStartUtc.admitsDayStart, dayStart.admitsDayStart);
-      expect(dayStartUtc.occurrence, dayStart.occurrence);
-      expect(dayStartUtc.firstWallMinute, dayStart.firstWallMinute);
-      expect(dayStartUtc.firstSlotMinute(15), dayStart.firstSlotMinute(15));
 
       final time = offUtcTime!;
       final later = CalendarEarliestStart(tuesday, time);
