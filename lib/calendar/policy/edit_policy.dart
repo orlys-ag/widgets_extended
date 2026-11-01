@@ -29,13 +29,34 @@ final class CalendarNow {
     var onToday = dateOnly(local) == day
         ? local.subtract(into)
         : DateTime(day.year, day.month, day.day, local.hour, local.minute);
-    if (into > Duration.zero) {
+    if (onToday.hour != local.hour || onToday.minute != local.minute) {
+      // The constructor rolls a time today's clock skips past the skip by
+      // the clock's change. The first minute after the skip is the time
+      // of day's first reading, rounded up or not.
+      onToday = _firstReadingFrom(
+        dayNumber(day) * minutesPerDay + minuteOfDay(local),
+      );
+    } else if (into > Duration.zero) {
       onToday = onToday.add(const Duration(minutes: 1));
     }
     return CalendarNow._(local, day, onToday);
   }
 
   const CalendarNow._(this.time, this.today, this.timeOnToday);
+
+  /// The instant of the first wall minute from [wall] ([wallMinuteOf]) that
+  /// the clock reads ([timeAtWallMinute]): [wall]'s own, or past a stretch
+  /// the clock skips, the first minute after it. Ends by the next day's
+  /// start, which every day's clock reads.
+  static DateTime _firstReadingFrom(int wall) {
+    var minute = wall;
+    var reading = timeAtWallMinute(minute);
+    while (reading == null) {
+      minute++;
+      reading = timeAtWallMinute(minute);
+    }
+    return reading;
+  }
 
   /// The clock reading, a local time: one given in UTC is kept as its
   /// local time, the same instant.
@@ -48,9 +69,10 @@ final class CalendarNow {
 
   /// [time]'s time of day on [today], rounded up to a whole minute, since
   /// a minute any part of which has passed is past: the next day's start
-  /// for a time past 23:59. Where [today] is [time]'s date it is [time]
-  /// itself, rounded, so on a day whose clock repeats a stretch it keeps
-  /// [time]'s occurrence.
+  /// for a time past 23:59, and where [today]'s clock skips that time of
+  /// day, the first minute after the skip. Where [today] is [time]'s date
+  /// it is [time] itself, rounded, so on a day whose clock repeats a
+  /// stretch it keeps [time]'s occurrence.
   final DateTime timeOnToday;
 
   @override

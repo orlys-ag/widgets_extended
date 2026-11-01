@@ -278,6 +278,23 @@ void main() {
         time,
       );
     });
+
+    test("EP19 a today pinned to the day, whose clock skips the time of day "
+        "of the reading, takes for timeOnToday the first minute after the "
+        "skip, whatever the reading's seconds", () {
+      final three = shortDayStart.add(const Duration(hours: 2));
+      expect(
+        CalendarNow(time: at(tuesday, 2, 30), today: shortDayStart).timeOnToday,
+        three,
+      );
+      expect(
+        CalendarNow(
+          time: at(tuesday, 2, 59, 30),
+          today: shortDayStart,
+        ).timeOnToday,
+        three,
+      );
+    });
   });
 
   group("the policy of all of several", () {
