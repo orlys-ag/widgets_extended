@@ -4,8 +4,9 @@
 /// hours, hour format and least sizes it lays out from, the edit mode and
 /// lock choices its drags follow, what each of those defaults to, a
 /// block drawn again for a new payload, the theme's shadows, when its days
-/// are ready on the range its owner asks, and its selection as the store
-/// moves off that range.
+/// are ready on the range its owner asks, its selection as the store
+/// moves off that range, and the times a create range and the ids a move
+/// request take.
 library;
 
 import 'dart:async';
@@ -28,6 +29,7 @@ import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
+import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
@@ -334,6 +336,180 @@ void main() {
         ),
       );
     });
+  });
+
+  test("RC11 a create range throws CalendarEntry's ArgumentError for the "
+      "first rule its times break, in CalendarEntry's order, its message "
+      "naming a range", () {
+    final wednesday = DateTime(2026, 4, 22);
+    final start = at(tuesday, 600);
+    final end = at(tuesday, 660);
+    const second = Duration(seconds: 1);
+    const millisecond = Duration(milliseconds: 1);
+    const microsecond = Duration(microseconds: 1);
+    final cases =
+        <({DateTime start, DateTime end, bool isAllDay, String? breaks})>[
+          (start: start.toUtc(), end: end, isAllDay: false, breaks: "start"),
+          (start: start, end: end.toUtc(), isAllDay: false, breaks: "end"),
+          (
+            start: start.add(second),
+            end: end,
+            isAllDay: false,
+            breaks: "start",
+          ),
+          (start: start, end: end.add(second), isAllDay: false, breaks: "end"),
+          (
+            start: start.add(millisecond),
+            end: end,
+            isAllDay: false,
+            breaks: "start",
+          ),
+          (
+            start: start,
+            end: end.add(millisecond),
+            isAllDay: false,
+            breaks: "end",
+          ),
+          (
+            start: start.add(microsecond),
+            end: end,
+            isAllDay: false,
+            breaks: "start",
+          ),
+          (
+            start: start,
+            end: end.add(microsecond),
+            isAllDay: false,
+            breaks: "end",
+          ),
+          (start: start, end: start, isAllDay: false, breaks: "end"),
+          (start: end, end: start, isAllDay: false, breaks: "end"),
+          (
+            start: at(tuesday, 60),
+            end: wednesday,
+            isAllDay: true,
+            breaks: "start",
+          ),
+          (
+            start: tuesday,
+            end: at(wednesday, 60),
+            isAllDay: true,
+            breaks: "end",
+          ),
+          // Two rules broken, of different names: the earlier rule names it.
+          (
+            start: start.add(second),
+            end: end.toUtc(),
+            isAllDay: false,
+            breaks: "end",
+          ),
+          (
+            start: start.toUtc(),
+            end: end.add(second),
+            isAllDay: false,
+            breaks: "start",
+          ),
+          (
+            start: at(wednesday, 60),
+            end: tuesday,
+            isAllDay: true,
+            breaks: "end",
+          ),
+          (start: start, end: end, isAllDay: false, breaks: null),
+          (start: tuesday, end: wednesday, isAllDay: true, breaks: null),
+        ];
+    ArgumentError? errorOf(void Function() make) {
+      try {
+        make();
+        return null;
+      } on ArgumentError catch (error) {
+        return error;
+      }
+    }
+
+    for (final times in cases) {
+      final reason = "$times";
+      final rangeError = errorOf(() {
+        CalendarCreateRange(
+          start: times.start,
+          end: times.end,
+          isAllDay: times.isAllDay,
+        );
+      });
+      final entryError = errorOf(() {
+        CalendarEntry<String>(
+          start: times.start,
+          end: times.end,
+          isAllDay: times.isAllDay,
+          title: "range",
+          color: const Color(0xFF336699),
+          payload: "range",
+        );
+      });
+      // The case breaks the rule it names for an entry.
+      expect(entryError?.name, times.breaks, reason: reason);
+      expect(rangeError?.name, times.breaks, reason: reason);
+      expect(
+        rangeError?.invalidValue,
+        entryError?.invalidValue,
+        reason: reason,
+      );
+      expect(
+        rangeError?.message,
+        (entryError?.message as String?)
+            ?.replaceFirst("An entry", "A range")
+            .replaceFirst("all-day entry", "all-day range"),
+        reason: reason,
+      );
+    }
+  });
+
+  test("RC12 a move request throws an ArgumentError for an entry with no "
+      "id and for a requested entry of another id", () {
+    CalendarEntry<String> entryWith(String? id, {String title = "Review"}) {
+      return CalendarEntry<String>(
+        id: id,
+        start: at(tuesday, 600),
+        end: at(tuesday, 660),
+        title: title,
+        color: const Color(0xFF336699),
+        payload: "review",
+      );
+    }
+
+    Matcher throwsNamed(String name) {
+      return throwsA(
+        isArgumentError.having((error) => error.name, "name", name),
+      );
+    }
+
+    expect(() {
+      return CalendarMoveRequest<String>(
+        entry: entryWith(null),
+        requested: entryWith(null),
+        kind: CalendarMoveKind.move,
+      );
+    }, throwsNamed("entry"));
+    expect(() {
+      return CalendarMoveRequest<String>(
+        entry: entryWith("review"),
+        requested: entryWith("other"),
+        kind: CalendarMoveKind.move,
+      );
+    }, throwsNamed("requested"));
+    expect(() {
+      return CalendarMoveRequest<String>(
+        entry: entryWith("review"),
+        requested: entryWith(null),
+        kind: CalendarMoveKind.resize,
+      );
+    }, throwsNamed("requested"));
+    final retitled = CalendarMoveRequest<String>(
+      entry: entryWith("review"),
+      requested: entryWith("review", title: "Renamed"),
+      kind: CalendarMoveKind.move,
+    );
+    expect(retitled.requested.title, "Renamed");
   });
 
   group("S3 a grid over some of the weekdays", () {

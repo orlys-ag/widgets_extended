@@ -30,6 +30,11 @@ DateTime fixedClock() {
   return DateTime(2026, 4, 21, 11, 7);
 }
 
+/// Throws an [ArgumentError] whose name is [name].
+Matcher throwsArgumentNamed(String name) {
+  return throwsA(isArgumentError.having((error) => error.name, "name", name));
+}
+
 /// [home] under a MaterialApp with no Scaffold and no ink splash, whose
 /// shader a widget test cannot load.
 Widget app(Widget home) {
@@ -183,8 +188,9 @@ void main() {
   });
 
   test("CO3 setZoom notifies once for both sizes and takes one of the slot "
-      "height and the week scale; the sizes assert positive and finite "
-      "values; an unbound controller given no view or day throws", () {
+      "height and the week scale; the sizes throw for values that are not "
+      "positive and finite; an unbound controller given no view or day "
+      "throws", () {
     final controller = CalendarController();
     addTearDown(controller.dispose);
     var notifies = 0;
@@ -197,20 +203,20 @@ void main() {
     expect(controller.minSlotHeight, 24.0);
     expect(() {
       controller.setZoom(minSlotHeight: 20.0, monthWeekScale: 2.0);
-    }, throwsAssertionError);
-    for (final size in <double>[0.0, -1.0, double.infinity]) {
+    }, throwsArgumentNamed("monthWeekScale"));
+    for (final size in <double>[0.0, -1.0, double.infinity, double.nan]) {
       expect(() {
         CalendarController(minDayWidth: size);
-      }, throwsAssertionError);
+      }, throwsArgumentNamed("minDayWidth"));
       expect(() {
         CalendarController(minSlotHeight: size);
-      }, throwsAssertionError);
+      }, throwsArgumentNamed("minSlotHeight"));
       expect(() {
         controller.minDayWidth = size;
-      }, throwsAssertionError);
+      }, throwsArgumentNamed("minDayWidth"));
       expect(() {
         controller.minSlotHeight = size;
-      }, throwsAssertionError);
+      }, throwsArgumentNamed("minSlotHeight"));
     }
     expect(controller.minDayWidth, 60.0);
     expect(controller.minSlotHeight, 24.0);
@@ -227,6 +233,28 @@ void main() {
     addTearDown(named.dispose);
     expect(named.view, CalendarViewKind.week);
     expect(named.selectedDay, tuesday);
+  });
+
+  test("RC16 the week scale throws for a scale under 1, one that is not "
+      "finite and one whose slot height is not, and a setZoom that throws "
+      "changes no size and notifies nothing", () {
+    final controller = CalendarController();
+    addTearDown(controller.dispose);
+    var notifies = 0;
+    controller.addListener(() {
+      notifies++;
+    });
+    for (final scale in <double>[0.5, double.infinity, double.nan, 1e308]) {
+      expect(() {
+        controller.monthWeekScale = scale;
+      }, throwsArgumentNamed("monthWeekScale"));
+    }
+    expect(controller.minSlotHeight, defaultMinSlotHeight);
+    expect(() {
+      controller.setZoom(minDayWidth: 60.0, minSlotHeight: -1.0);
+    }, throwsArgumentNamed("minSlotHeight"));
+    expect(controller.minDayWidth, minDayWidthLow);
+    expect(notifies, 0);
   });
 
   testWidgets("CO4 a host's sets reach the bound calendar before the "

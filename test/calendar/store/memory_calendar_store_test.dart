@@ -351,6 +351,23 @@ void main() {
     expect(a == CalendarShownEntry<String>(item, pending: false), isFalse);
   });
 
+  test("RC18 a shown entry throws an ArgumentError for an entry with no "
+      "id", () {
+    expect(() {
+      return CalendarShownEntry<String>(
+        task(null, day, 600, 660),
+        pending: false,
+      );
+    }, throwsA(isArgumentError.having((error) => error.name, "name", "entry")));
+    expect(
+      CalendarShownEntry<String>(
+        task("item-1", day, 600, 660),
+        pending: false,
+      ).id,
+      "item-1",
+    );
+  });
+
   test(
     "MS10 invalidate and refresh change nothing and notify nothing",
     () async {

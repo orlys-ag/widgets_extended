@@ -97,6 +97,11 @@ CalendarEditRules<String> rulesOf({
   );
 }
 
+/// Throws an [ArgumentError] whose name is [name].
+Matcher throwsArgumentNamed(String name) {
+  return throwsA(isArgumentError.having((error) => error.name, "name", name));
+}
+
 /// The slot from [start] to [end] as a record.
 ({DateTime start, DateTime end}) slot(DateTime start, DateTime end) {
   return (start: start, end: end);
@@ -444,11 +449,129 @@ void main() {
     expect(ofStrings, isNot(ofObjects));
   });
 
-  test("ER11 an earliest start's day is a day's start", () {
+  test("ER11 an earliest start's day is a local day's start, or it throws "
+      "an ArgumentError", () {
     expect(() {
       return CalendarEarliestStart(at(tuesday, 12), at(tuesday, 9));
-    }, throwsAssertionError);
+    }, throwsArgumentNamed("day"));
+    expect(() {
+      return CalendarEarliestStart(DateTime.utc(2026, 4, 21), at(tuesday, 9));
+    }, throwsArgumentNamed("day"));
     expect(CalendarEarliestStart(tuesday, at(tuesday, 9)).day, tuesday);
+  });
+
+  test(
+    "RC7 an earliest start takes a UTC earliest as its local time, the "
+    "same instant, and answers for it as for the local one",
+    skip: offUtcSkip,
+    () {
+      final dayStart = CalendarEarliestStart(tuesday, tuesday);
+      final dayStartUtc = CalendarEarliestStart(tuesday, tuesday.toUtc());
+      expect(dayStartUtc.earliest, dayStart.earliest);
+      expect(dayStartUtc.earliest!.isUtc, isFalse);
+      expect(dayStartUtc.admitsDayStart, dayStart.admitsDayStart);
+      expect(dayStartUtc.occurrence, dayStart.occurrence);
+      expect(dayStartUtc.firstWallMinute, dayStart.firstWallMinute);
+      expect(dayStartUtc.firstSlotMinute(15), dayStart.firstSlotMinute(15));
+
+      final time = offUtcTime!;
+      final later = CalendarEarliestStart(tuesday, time);
+      final laterUtc = CalendarEarliestStart(tuesday, time.toUtc());
+      expect(laterUtc.earliest, later.earliest);
+      expect(laterUtc.earliest!.isUtc, isFalse);
+      expect(laterUtc.closesDay, later.closesDay);
+      expect(laterUtc.occurrence, later.occurrence);
+      expect(laterUtc.occurrence!.isUtc, isFalse);
+      expect(laterUtc.firstWallMinute, later.firstWallMinute);
+      expect(laterUtc.firstSlotMinute(15), later.firstSlotMinute(15));
+    },
+  );
+
+  test("RC4 rules throw an ArgumentError for a policy whose day limit is "
+      "under 1, a combined one included", () {
+    expect(() {
+      return CalendarEditRules<String>(
+        policy: _Asking(dayLimit: 0),
+        hours: office,
+        slotMinutes: 15,
+      );
+    }, throwsArgumentNamed("policy"));
+    expect(() {
+      return CalendarEditRules<String>(
+        policy: _Asking(dayLimit: -1),
+        hours: office,
+        slotMinutes: 15,
+      );
+    }, throwsArgumentNamed("policy"));
+    final combined = CalendarEditPolicy<String>.all(
+      <CalendarEditPolicy<String>>[
+        DayLimitPolicy<String>(2),
+        _Asking(dayLimit: 0),
+      ],
+    );
+    expect(combined.dayLimit, 0);
+    expect(() {
+      return CalendarEditRules<String>(
+        policy: combined,
+        hours: office,
+        slotMinutes: 15,
+      );
+    }, throwsArgumentNamed("policy"));
+    expect(
+      CalendarEditRules<String>(
+        policy: _Asking(dayLimit: 1),
+        hours: office,
+        slotMinutes: 15,
+      ).dayLimit,
+      1,
+    );
+  });
+
+  test("RC6 rules throw an ArgumentError for a slot length that is not a "
+      "choice and for hours off its grid, the slot length first, as do "
+      "updates to them", () {
+    final offGrid = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
+    for (final slotMinutes in <int>[7, 0]) {
+      expect(() {
+        return rulesOf(hours: office, slotMinutes: slotMinutes);
+      }, throwsArgumentNamed("slotMinutes"));
+    }
+    expect(() {
+      return rulesOf(hours: offGrid);
+    }, throwsArgumentNamed("hours"));
+    expect(() {
+      return CalendarEditRules<String>(
+        policy: _Asking(dayLimit: 0),
+        hours: offGrid,
+        slotMinutes: 15,
+      );
+    }, throwsArgumentNamed("hours"));
+    expect(rulesOf(hours: offGrid, slotMinutes: 10).hours, offGrid);
+
+    final rules = rulesOf(hours: office);
+    expect(() {
+      return rules.updated(
+        policy: rules.policy,
+        hours: offGrid,
+        slotMinutes: 15,
+      );
+    }, throwsArgumentNamed("hours"));
+    expect(() {
+      return rules.updated(
+        policy: rules.policy,
+        hours: office,
+        slotMinutes: 45,
+      );
+    }, throwsArgumentNamed("slotMinutes"));
+    expect(() {
+      return rules.updated(policy: _Asking(), hours: offGrid, slotMinutes: 15);
+    }, throwsArgumentNamed("hours"));
+    expect(
+      rules
+          .updated(policy: rules.policy, hours: office, slotMinutes: 30)
+          .slotMinutes,
+      30,
+    );
   });
 
   group("on the 23-hour day", skip: shortDaySkip, () {

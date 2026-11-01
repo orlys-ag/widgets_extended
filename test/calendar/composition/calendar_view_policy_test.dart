@@ -1,6 +1,8 @@
 /// The calendar's edit policy: what each answer limits in Week, Day, Month
 /// and Agenda, a policy change and a new minute during a gesture, a create
-/// range's earliest start as the minute moves, and an answer that throws.
+/// range's earliest start as the minute moves, an answer that throws, a
+/// day limit under 1, and Month's long press under store hours off the
+/// slot grid.
 library;
 
 import 'package:flutter/gestures.dart';
@@ -16,7 +18,7 @@ import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart'
-    show dayListGapKey;
+    show DayList, dayListGapKey;
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
@@ -1739,11 +1741,93 @@ void main() {
     await tester.pump();
     expect(timesOf(policy.nows), <DateTime>{at(tuesday, 9, 1)});
   });
+
+  group("RC5 a policy whose day limit is under 1 throws an ArgumentError "
+      "from the build, and a valid one builds the view", () {
+    final viewTypes = <CalendarViewKind, Type>{
+      CalendarViewKind.agenda: DayList<String>,
+      CalendarViewKind.day: TimedGrid<String>,
+      CalendarViewKind.week: TimedGrid<String>,
+      CalendarViewKind.month: MonthBoard<String>,
+    };
+    for (final view in CalendarViewKind.values) {
+      for (final editable in <bool>[true, false]) {
+        testWidgets("in ${view.name} ${editable ? "in" : "out of"} edit "
+            "mode", (tester) async {
+          final host = Host(
+            storeOf(const <CalendarEntry<String>>[]),
+            view: view,
+            day: tuesday,
+            time: at(tuesday, 11, 7),
+            policy: const _ZeroDayLimit(),
+          );
+          host.editable.value = editable;
+          await host.pump(tester);
+          expect(
+            tester.takeException(),
+            isArgumentError.having((error) => error.name, "name", "policy"),
+          );
+
+          host.policy.value = null;
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          expect(find.byType(viewTypes[view]!), findsOneWidget);
+        });
+      }
+    }
+  });
+
+  testWidgets("RC17 Month's long press after a set of store hours off the "
+      "grid and before the next build creates nothing and reports the "
+      "rules' ArgumentError, and the build throws the store hours'", (
+    tester,
+  ) async {
+    final store = storeOf(
+      const <CalendarEntry<String>>[],
+      hours: CalendarDayHours(8 * 60, 18 * 60),
+    );
+    final host = Host(
+      store,
+      view: CalendarViewKind.month,
+      day: tuesday,
+      time: at(tuesday, 11, 7),
+    );
+    await host.pump(tester);
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(monthStripKey(thursday))),
+    );
+    store.hours = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
+    await recordingErrors((errors) async {
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      expect(host.creates, isEmpty);
+      expect(errors, isNotEmpty);
+      expect(
+        errors.first.exception,
+        isArgumentError.having((error) => error.name, "name", "hours"),
+      );
+      expect(
+        errors.last.exception,
+        isArgumentError.having((error) => error.name, "name", "store.hours"),
+      );
+    });
+    await gesture.up();
+  });
 }
 
 /// The clock readings of [nows], each once.
 Set<DateTime> timesOf(Iterable<CalendarNow> nows) {
   return <DateTime>{for (final now in nows) now.time};
+}
+
+/// Allows everything, and answers a day limit of 0, under the least a
+/// policy may give.
+final class _ZeroDayLimit extends CalendarEditPolicy<String> {
+  const _ZeroDayLimit();
+
+  @override
+  int? get dayLimit {
+    return 0;
+  }
 }
 
 /// Allows everything, recording the [CalendarNow] each answer is asked

@@ -1,11 +1,14 @@
-/// The names the module barrel shows, and the imports and names of the
-/// module's files.
+/// The names the module barrel shows, the imports and names of the
+/// module's files, and the classes and docs of the checks a release build
+/// runs.
 library;
 
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
+
+import 'class_source.dart';
 
 /// The module barrel, from the package root, where `flutter test` runs.
 const String barrelPath = "lib/calendar/calendar.dart";
@@ -500,5 +503,112 @@ void main() {
         reason: path,
       );
     }
+  });
+
+  test("RC19 each class whose values a host gives checks them with a throw "
+      "of an ArgumentError, and with no assert and no debug-only "
+      "branch", () {
+    const classes = <({String path, String name})>[
+      (
+        path: "lib/calendar/dates/calendar_dates.dart",
+        name: "CalendarWeekdaySet",
+      ),
+      (
+        path: "lib/calendar/dates/calendar_dates.dart",
+        name: "CalendarDayHours",
+      ),
+      (path: "lib/calendar/policy/edit_policy.dart", name: "DayLimitPolicy"),
+      (
+        path: "lib/calendar/policy/edit_rules.dart",
+        name: "CalendarEarliestStart",
+      ),
+      (path: "lib/calendar/policy/edit_rules.dart", name: "CalendarEditRules"),
+      (
+        path: "lib/calendar/entries/calendar_data_source.dart",
+        name: "CalendarDaysChanged",
+      ),
+      (
+        path: "lib/calendar/store/calendar_store.dart",
+        name: "CalendarShownEntry",
+      ),
+      (
+        path: "lib/calendar/presentation/calendar_theme.dart",
+        name: "CalendarThemeData",
+      ),
+      (path: "lib/calendar/views/timed_grid.dart", name: "CalendarCreateRange"),
+      (
+        path: "lib/calendar/views/move_request.dart",
+        name: "CalendarMoveRequest",
+      ),
+      (
+        path: "lib/calendar/composition/calendar_controller.dart",
+        name: "CalendarController",
+      ),
+    ];
+    final asserts = RegExp(r"\bassert\(");
+    for (final (:path, :name) in classes) {
+      final body = classBody(File(path).readAsStringSync(), name);
+      expect(body, contains("throw ArgumentError"), reason: name);
+      expect(body, isNot(contains("kDebugMode")), reason: name);
+      // CalendarDayHours keeps slotCountOf's assert, of a method's
+      // argument.
+      expect(
+        asserts.allMatches(body),
+        hasLength(name == "CalendarDayHours" ? 1 : 0),
+        reason: name,
+      );
+    }
+  });
+
+  test("RC20 the doc of each check says it throws an [ArgumentError] in "
+      "every build, and none says it asserts or runs in a debug build", () {
+    const declarations = <String, List<String>>{
+      "dates/calendar_dates.dart": <String>[
+        "factory CalendarWeekdaySet.of(",
+        "CalendarWeekdaySet startingOn(",
+        "CalendarDayHours(",
+      ],
+      "entries/calendar_data_source.dart": <String>["CalendarDaysChanged("],
+      "policy/edit_policy.dart": <String>["DayLimitPolicy("],
+      "policy/edit_rules.dart": <String>[
+        "CalendarEarliestStart(",
+        "CalendarEditRules({",
+        "CalendarEditRules<T> updated(",
+      ],
+      "store/calendar_store.dart": <String>["CalendarShownEntry("],
+      "presentation/calendar_theme.dart": <String>[
+        "CalendarThemeData({",
+        "CalendarThemeData copyWith(",
+      ],
+      "views/timed_grid.dart": <String>["CalendarCreateRange({"],
+      "views/move_request.dart": <String>["CalendarMoveRequest({"],
+      "composition/calendar_controller.dart": <String>[
+        "CalendarController({",
+        "double get minDayWidth",
+        "double get minSlotHeight",
+        "double get monthWeekScale",
+        "void setZoom(",
+      ],
+      "composition/calendar_view.dart": <String>[
+        "class CalendarView<T> ",
+        "final int slotMinutes;",
+        "final CalendarEditPolicy<T>? editPolicy;",
+      ],
+    };
+    final collected = <String>[];
+    for (final MapEntry(key: file, value: names) in declarations.entries) {
+      final source = File("lib/calendar/$file").readAsStringSync();
+      for (final declaration in names) {
+        final doc = docOf(source, declaration);
+        final lower = doc.toLowerCase();
+        if (!doc.contains("[ArgumentError]") ||
+            !doc.contains("in every build") ||
+            lower.contains("assert") ||
+            lower.contains("debug build")) {
+          collected.add("$file: $declaration");
+        }
+      }
+    }
+    expect(collected, isEmpty);
   });
 }

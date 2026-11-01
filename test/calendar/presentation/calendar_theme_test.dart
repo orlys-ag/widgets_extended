@@ -603,6 +603,11 @@ double contrast(Color a, Color b) {
   return (ratio * 10).round() / 10;
 }
 
+/// Throws an [ArgumentError] whose name is [name].
+Matcher throwsArgumentNamed(String name) {
+  return throwsA(isArgumentError.having((error) => error.name, "name", name));
+}
+
 /// Pumps [child] under [data], or under no theme where [data] is null.
 Widget themed(CalendarThemeData? data, Widget child) {
   final host = Directionality(textDirection: TextDirection.ltr, child: child);
@@ -913,54 +918,51 @@ void main() {
     }
   });
 
-  testWidgets("CT9 the value domains are asserted, and lerp clamps into "
-      "them", (tester) async {
+  test("CT9 the value domains throw an ArgumentError from the "
+      "construction, and lerp clamps into them", () {
     expect(() {
       return CalendarThemeData(draggedBlockOpacity: 1.5);
-    }, throwsAssertionError);
+    }, throwsArgumentNamed("draggedBlockOpacity"));
     expect(() {
       return CalendarThemeData(draggedBlockOpacity: -0.1);
-    }, throwsAssertionError);
+    }, throwsArgumentNamed("draggedBlockOpacity"));
     expect(() {
       return CalendarThemeData(todayRingWidth: -1.0);
-    }, throwsAssertionError);
+    }, throwsArgumentNamed("todayRingWidth"));
     expect(() {
       return CalendarThemeData(entryTintOpacity: 1.5);
-    }, throwsAssertionError);
+    }, throwsArgumentNamed("entryTintOpacity"));
     expect(() {
       return CalendarThemeData(entryTintOpacity: -0.1);
-    }, throwsAssertionError);
+    }, throwsArgumentNamed("entryTintOpacity"));
     expect(() {
       return CalendarThemeData(pendingEntryOpacity: 1.5);
-    }, throwsAssertionError);
+    }, throwsArgumentNamed("pendingEntryOpacity"));
     expect(() {
       return CalendarThemeData(pendingEntryOpacity: -0.1);
-    }, throwsAssertionError);
-
-    final reader = Builder(
-      builder: (context) {
-        CalendarTheme.of(context);
-        return const SizedBox();
-      },
-    );
-    await tester.pumpWidget(
-      themed(
-        const CalendarThemeData(motionDuration: Duration(milliseconds: -1)),
-        reader,
-      ),
-    );
-    expect(tester.takeException(), isA<AssertionError>());
-    await tester.pumpWidget(
-      themed(
-        const CalendarThemeData(
-          noticeStyle: TextStyle(inherit: false, fontSize: 12.0),
-        ),
-        reader,
-      ),
-    );
-    expect(tester.takeException(), isA<AssertionError>());
-    await tester.pumpWidget(themed(builtIn, reader));
-    expect(tester.takeException(), isNull);
+    }, throwsArgumentNamed("pendingEntryOpacity"));
+    expect(() {
+      return CalendarThemeData(todayRingWidth: double.nan);
+    }, throwsArgumentNamed("todayRingWidth"));
+    expect(() {
+      return CalendarThemeData(draggedBlockOpacity: double.nan);
+    }, throwsArgumentNamed("draggedBlockOpacity"));
+    expect(() {
+      return CalendarThemeData(entryTintOpacity: double.nan);
+    }, throwsArgumentNamed("entryTintOpacity"));
+    expect(() {
+      return CalendarThemeData(pendingEntryOpacity: double.nan);
+    }, throwsArgumentNamed("pendingEntryOpacity"));
+    expect(() {
+      return CalendarThemeData(
+        motionDuration: const Duration(milliseconds: -1),
+      );
+    }, throwsArgumentNamed("motionDuration"));
+    expect(() {
+      return CalendarThemeData(
+        noticeStyle: const TextStyle(inherit: false, fontSize: 12.0),
+      );
+    }, throwsArgumentNamed("noticeStyle"));
 
     const low = CalendarThemeData(
       motionDuration: Duration(milliseconds: 100),
@@ -988,6 +990,146 @@ void main() {
     expect(over.pendingEntryOpacity, 1.0);
     expect(over.motionDuration, const Duration(milliseconds: 1700));
     expect(over.todayRingWidth, moreOrLessEquals(5.0));
+  });
+
+  test("RC14 copyWith throws as the constructor does, and a text style with "
+      "inherit false throws named by its field", () {
+    final outside = <({String name, Object value})>[
+      (name: "todayRingWidth", value: -1.0),
+      (name: "todayRingWidth", value: double.nan),
+      for (final name in <String>[
+        "draggedBlockOpacity",
+        "entryTintOpacity",
+        "pendingEntryOpacity",
+      ]) ...<({String name, Object value})>[
+        (name: name, value: 1.5),
+        (name: name, value: -0.1),
+        (name: name, value: double.nan),
+      ],
+      (name: "motionDuration", value: const Duration(milliseconds: -1)),
+      (
+        name: "noticeStyle",
+        value: const TextStyle(inherit: false, fontSize: 12.0),
+      ),
+    ];
+    for (final (:name, :value) in outside) {
+      expect(
+        () {
+          return withValue(builtIn, name, value);
+        },
+        throwsArgumentNamed(name),
+        reason: "$name: $value",
+      );
+    }
+
+    final themeOf = <String, CalendarThemeData Function(TextStyle style)>{
+      "hourLabelStyle": (style) {
+        return CalendarThemeData(hourLabelStyle: style);
+      },
+      "dayHeaderWeekdayStyle": (style) {
+        return CalendarThemeData(dayHeaderWeekdayStyle: style);
+      },
+      "dayHeaderNumberStyle": (style) {
+        return CalendarThemeData(dayHeaderNumberStyle: style);
+      },
+      "blockTitleStyle": (style) {
+        return CalendarThemeData(blockTitleStyle: style);
+      },
+      "blockSummaryStyle": (style) {
+        return CalendarThemeData(blockSummaryStyle: style);
+      },
+      "detailedBlockTitleStyle": (style) {
+        return CalendarThemeData(detailedBlockTitleStyle: style);
+      },
+      "detailedBlockDetailStyle": (style) {
+        return CalendarThemeData(detailedBlockDetailStyle: style);
+      },
+      "landingLabelStyle": (style) {
+        return CalendarThemeData(landingLabelStyle: style);
+      },
+      "badgeStyle": (style) {
+        return CalendarThemeData(badgeStyle: style);
+      },
+      "noticeStyle": (style) {
+        return CalendarThemeData(noticeStyle: style);
+      },
+      "messageStyle": (style) {
+        return CalendarThemeData(messageStyle: style);
+      },
+      "monthDayNumberStyle": (style) {
+        return CalendarThemeData(monthDayNumberStyle: style);
+      },
+      "monthDayNumberMarkedStyle": (style) {
+        return CalendarThemeData(monthDayNumberMarkedStyle: style);
+      },
+      "monthMoreStyle": (style) {
+        return CalendarThemeData(monthMoreStyle: style);
+      },
+      "chipTitleStyle": (style) {
+        return CalendarThemeData(chipTitleStyle: style);
+      },
+      "monthCardTitleStyle": (style) {
+        return CalendarThemeData(monthCardTitleStyle: style);
+      },
+      "monthCardTimeStyle": (style) {
+        return CalendarThemeData(monthCardTimeStyle: style);
+      },
+      "agendaHeaderTitleStyle": (style) {
+        return CalendarThemeData(agendaHeaderTitleStyle: style);
+      },
+      "agendaHeaderEmptyTitleStyle": (style) {
+        return CalendarThemeData(agendaHeaderEmptyTitleStyle: style);
+      },
+      "agendaHeaderCountStyle": (style) {
+        return CalendarThemeData(agendaHeaderCountStyle: style);
+      },
+      "agendaHeaderEmptyCountStyle": (style) {
+        return CalendarThemeData(agendaHeaderEmptyCountStyle: style);
+      },
+      "agendaTimeStyle": (style) {
+        return CalendarThemeData(agendaTimeStyle: style);
+      },
+      "entryCardTitleStyle": (style) {
+        return CalendarThemeData(entryCardTitleStyle: style);
+      },
+      "entryCardSummaryStyle": (style) {
+        return CalendarThemeData(entryCardSummaryStyle: style);
+      },
+      "dayNumberStyle": (style) {
+        return CalendarThemeData(dayNumberStyle: style);
+      },
+      "dayNumberMarkedStyle": (style) {
+        return CalendarThemeData(dayNumberMarkedStyle: style);
+      },
+      "stripWeekdayStyle": (style) {
+        return CalendarThemeData(stripWeekdayStyle: style);
+      },
+      "weekdayHeaderStyle": (style) {
+        return CalendarThemeData(weekdayHeaderStyle: style);
+      },
+      "weekdayLetterStyle": (style) {
+        return CalendarThemeData(weekdayLetterStyle: style);
+      },
+      "monthNameStyle": (style) {
+        return CalendarThemeData(monthNameStyle: style);
+      },
+      "monthNameMarkedStyle": (style) {
+        return CalendarThemeData(monthNameMarkedStyle: style);
+      },
+      "actionLabelStyle": (style) {
+        return CalendarThemeData(actionLabelStyle: style);
+      },
+    };
+    expect(themeOf.keys.toList(), styleNames);
+    for (final MapEntry(key: name, value: build) in themeOf.entries) {
+      expect(
+        () {
+          return build(const TextStyle(inherit: false));
+        },
+        throwsArgumentNamed(name),
+        reason: name,
+      );
+    }
   });
 
   test("CT10 the diagnostics list every field, filtered at its built-in "
