@@ -1729,14 +1729,22 @@ async function buildPhase() {
     const verifiedBefore = [...build.verified]
     const settledBefore = settled()
     mergeBuild(r)
-    const stop = stopReason('The builder', r)
+    const progressed = settled() > settledBefore
+    // A builder stopped at its clean-tree check changes nothing, so a report
+    // of work (a step or pin settled, a blocking finding, the final gates)
+    // was not stopped there, whatever its stopped flag says.
+    const worked = progressed || r.complete || r.blocking_findings.length > 0
+    if (r.stopped && worked) {
+      log('The builder reported stopped beside work that its clean-tree check would have prevented; the report is read without the stop.')
+    }
+    const stop = worked ? null : stopReason('The builder', r)
     if (stop) {
       failed('build', stop)
     }
     if (r.blocking_findings.length > 0) {
       return r.blocking_findings.map((f, i) => ({ ...f, id: `build-r${revisions}-${i + 1}`, lens: 'build' }))
     }
-    if (!r.complete && settled() > settledBefore) {
+    if (!r.complete && progressed) {
       metrics.handovers += 1
       problems = []
       log(`The builder handed over after step ${r.last_step}; a fresh builder continues.`)

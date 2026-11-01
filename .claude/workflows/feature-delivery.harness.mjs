@@ -1255,6 +1255,22 @@ const T2 = [
     const none = await run({ args: withProfile({ lenses: { ...FIXTURE.lenses, runtime: {} } }), respond })
     expect(['build', 'fix', 'accept'].every(l => !/runtime rules|On a hot path/.test(none.prompt(l))), 'a profile with no runtime addendum was told rules')
   }],
+
+  ['T2zh', 'a builder report that sets stopped while reporting work was not stopped by its clean-tree check: a handover continues and a blocking finding revises the plan', async ({ expect }) => {
+    const builds = r => r.labels.filter(l => /^build/.test(l)).join(' ')
+    const note = 'The clean-tree check printed nothing. My context was compacted, so I stopped after step 1.'
+    const firstStep = (k, p, ctx) => { const b = buildResult(ctx); return { ...b, stopped: true, precondition: note, complete: false, last_step: 1, steps: b.steps.slice(0, 1), mutations: [], final_gates: [] } }
+    const handover = await run({ respond: respondWith({ build: firstStep }) })
+    expect(builds(handover) === 'build build-2' && handover.result?.status === 'accepted', `a handover that set stopped: ${builds(handover)}, ${handover.result?.status}, ${handover.result?.reason}`)
+    expect(handover.result?.state?.metrics?.handovers === 1, `handovers ${handover.result?.state?.metrics?.handovers}`)
+    const finding = (k, p, ctx) => buildResult(ctx, { stopped: true, precondition: note, complete: false, last_step: 0, steps: [], mutations: [], final_gates: [], blocking_findings: [BASE_ITEM] })
+    const blocked = await run({ respond: respondWith({ build: finding }) })
+    expect(blocked.labels.includes('plan:revise-1') && blocked.result?.status === 'accepted', `a blocking finding that set stopped: ${blocked.labels.join(' ')}, ${blocked.result?.status}, ${blocked.result?.reason}`)
+    const allButFinal = (k, p, ctx) => ({ ...buildResult(ctx), complete: false, final_gates: [] })
+    const complete = await run({ respond: respondWith({ build: allButFinal, 'build-2': (k, p, ctx) => buildResult(ctx, { stopped: true, precondition: note }) }) })
+    expect(builds(complete) === 'build build-2' && complete.result?.status === 'accepted', `a final-gates report that set stopped and settled nothing new: ${builds(complete)}, ${complete.result?.status}, ${complete.result?.reason}`)
+    expect(/stopped false/.test(read(ROOT, agentFile('delivery-builder')).replace(/\s+/g, ' ')), 'the builder file, which compaction keeps, does not say which stops report stopped false')
+  }],
 ]
 
 // ---- T3 document checks ----------------------------------------------------
