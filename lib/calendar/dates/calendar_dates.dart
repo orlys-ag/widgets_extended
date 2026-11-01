@@ -400,10 +400,20 @@ Duration repeatedStretchOf(DateTime day) {
 
 /// {@template widgets_extended.calendar.isLaterOccurrence}
 /// Whether [time] is the later instant of a wall time its day's clock
-/// reads twice.
+/// reads twice, told as of its whole minute, so the seconds past it play
+/// no part.
 /// {@endtemplate}
 bool isLaterOccurrence(DateTime time) {
-  return time != timeAtWallMinute(wallMinuteOf(time));
+  // The minute's own instant in time's occurrence: [timeAtWallMinute]
+  // answers whole minutes.
+  final minute = time.subtract(
+    Duration(
+      seconds: time.second,
+      milliseconds: time.millisecond,
+      microseconds: time.microsecond,
+    ),
+  );
+  return minute != timeAtWallMinute(wallMinuteOf(time));
 }
 
 /// The first wall minute the clock reads whose instant in [from]'s

@@ -47,6 +47,20 @@ void main() {
     expect(lastWallMinuteNotAfter(past), wall);
   });
 
+  test("DT13 isLaterOccurrence of a time past its minute, on a day whose "
+      "clock reads each time once, is false", () {
+    final nine = at(tuesday, 9);
+    expect(isLaterOccurrence(nine.add(const Duration(seconds: 30))), isFalse);
+    expect(
+      isLaterOccurrence(nine.add(const Duration(milliseconds: 1))),
+      isFalse,
+    );
+    expect(
+      isLaterOccurrence(nine.add(const Duration(microseconds: 1))),
+      isFalse,
+    );
+  });
+
   test("DT3 lastDayNumberOf is the day before an end at a day start, and "
       "the end's own day otherwise", () {
     expect(lastDayNumberOf(at(monday, 22), wednesday), dayNumber(tuesday));
@@ -237,6 +251,21 @@ void main() {
       expect(isLaterOccurrence(second), isTrue);
       expect(isLaterOccurrence(first), isFalse);
       expect(isLaterOccurrence(at(monday, 1, 30)), isFalse);
+    });
+
+    test("DT14 isLaterOccurrence of a time past its minute in the repeated "
+        "hour tells the occurrences apart as its minute does, and "
+        "timeAtWallMinute keeps the first occurrence of from: there", () {
+      final day = dayNumber(longDayStart) * minutesPerDay;
+      const past = Duration(seconds: 30);
+      final first = longDayStart.add(const Duration(minutes: 90)).add(past);
+      final second = secondHalfPastOne.add(past);
+      expect(isLaterOccurrence(first), isFalse);
+      expect(isLaterOccurrence(second), isTrue);
+      expect(
+        timeAtWallMinute(day + 105, from: first),
+        longDayStart.add(const Duration(minutes: 105)),
+      );
     });
 
     test("DT10 firstWallMinuteNotBefore and lastWallMinuteNotAfter of a time "
