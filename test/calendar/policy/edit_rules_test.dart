@@ -22,7 +22,7 @@ final DateTime wednesday = DateTime(2026, 4, 22);
 final DateTime thursday = DateTime(2026, 4, 23);
 
 /// 08:00 to 18:00.
-const CalendarDayHours office = CalendarDayHours(8 * 60, 18 * 60);
+final CalendarDayHours office = CalendarDayHours(8 * 60, 18 * 60);
 
 /// [day] at [hour], [minute] and [second] by the wall clock.
 DateTime at(DateTime day, int hour, [int minute = 0, int second = 0]) {
@@ -171,7 +171,7 @@ void main() {
   });
 
   test("ER3 a day free only in the hours' last slot gets that slot", () {
-    final rules = rulesOf(hours: const CalendarDayHours(540, 720));
+    final rules = rulesOf(hours: CalendarDayHours(540, 720));
     expect(
       rules.firstSlot(
         CalendarEarliestStart(tuesday, tuesday),
@@ -186,7 +186,7 @@ void main() {
   test("ER4 the first slot from an earliest start starts there, rounded up "
       "to the slots and no earlier than the hours, steps by the slot "
       "length, and keeps inside the minutes it is given", () {
-    final rules = rulesOf(hours: const CalendarDayHours(480, 1200));
+    final rules = rulesOf(hours: CalendarDayHours(480, 1200));
     final entries = <CalendarEntry<String>>[
       entryOf("one", at(tuesday, 8), at(tuesday, 9)),
       entryOf("two", at(tuesday, 15), at(tuesday, 16)),
@@ -578,7 +578,7 @@ void main() {
     test("ER8 hours wholly inside the skipped hour hold no slot", () {
       final day = shortDayStart;
       final rules = rulesOf(
-        hours: const CalendarDayHours(
+        hours: CalendarDayHours(
           easternSkippedHour * 60,
           (easternSkippedHour + 1) * 60,
         ),
@@ -608,7 +608,7 @@ void main() {
       "told", () {
     final limited = CalendarEditRules<String>(
       policy: _Asking(dayLimit: 1),
-      hours: const CalendarDayHours(0, 18 * 60),
+      hours: CalendarDayHours(0, 18 * 60),
       slotMinutes: 15,
     );
     expect(

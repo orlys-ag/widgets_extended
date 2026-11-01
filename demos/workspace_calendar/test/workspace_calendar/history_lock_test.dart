@@ -1,6 +1,6 @@
 /// The history lock in the app: its switches in the settings sheet, the
-/// item form's errors, and what it keeps as it is in Week, Agenda and Month
-/// and in the item form.
+/// item form's errors, what it keeps as it is in Week, Agenda and Month
+/// and in the item form, and the day it locks under a clock reading UTC.
 library;
 
 import 'package:flutter/gestures.dart';
@@ -100,6 +100,24 @@ Future<MockCalendarApi> pumpLocked(
   await tester.tapAt(const Offset(195.0, 20.0));
   await tester.pumpAndSettle();
   return api;
+}
+
+/// 23:30 on [today], whose UTC date is the next day in a zone west of UTC;
+/// null in any other zone.
+final DateTime? westReading = _westReading();
+
+DateTime? _westReading() {
+  final reading = DateTime(2026, 4, 21, 23, 30);
+  return reading.toUtc().day == 22 ? reading : null;
+}
+
+/// Why the tests of a UTC clock skip: null where [westReading] is found.
+String? get westReadingSkip {
+  if (westReading != null) {
+    return null;
+  }
+  return "23:30 on 2026-04-21 has its UTC date on that day here; run with "
+      "TZ=America/New_York";
 }
 
 Offset centerOf(WidgetTester tester, int minute, int weekday) {
@@ -256,9 +274,7 @@ void main() {
       expect(settings.lockPast, isFalse);
       expect(settings.lockEarlierToday, isFalse);
       final locked = settings.copyWith(lockPast: true, lockEarlierToday: true);
-      final kept = locked.copyWith(
-        hours: const CalendarDayHours(8 * 60, 18 * 60),
-      );
+      final kept = locked.copyWith(hours: CalendarDayHours(8 * 60, 18 * 60));
       expect(kept.lockPast, isTrue);
       expect(kept.lockEarlierToday, isTrue);
       final pastOnly = settings.copyWith(lockPast: true);
@@ -564,6 +580,53 @@ void main() {
     expect(find.text("New item"), findsNothing);
     await longPress(wednesday);
     expect(find.text("New item"), findsOneWidget);
+  });
+
+  group("under a clock reading UTC", skip: westReadingSkip, () {
+    testWidgets("K18 Today selects the local day the calendar marks as "
+        "today, and the item form answers at that day", (tester) async {
+      final reading = westReading!;
+      final api = MockCalendarApi(
+        seed: <Map<String, Object?>>[
+          taskJson("Tomorrow", wednesday, 10 * 60, 11 * 60),
+        ],
+        latency: harnessLatency,
+      );
+      await pumpCalendar(
+        tester,
+        api: api,
+        size: tall,
+        editing: true,
+        pinsToday: false,
+        clock: () {
+          return reading.toUtc();
+        },
+      );
+      await openSettings(tester);
+      await tester.tap(find.byKey(lockPastKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(lockEarlierTodayKey));
+      await tester.pumpAndSettle();
+      await tester.tapAt(const Offset(195.0, 20.0));
+      await tester.pumpAndSettle();
+      bool isSelected(DateTime day) {
+        return tester.widget<DayCell>(find.byKey(dayCellKey(day))).isSelected;
+      }
+
+      // Setup sanity: the calendar opened on the local day of the reading.
+      expect(isSelected(today), isTrue);
+      await tapToday(tester);
+      await tester.pumpAndSettle();
+      expect(isSelected(today), isTrue);
+
+      await pickMode(tester, "Week");
+      await tester.tap(blockFinder("item-1"));
+      await tester.pumpAndSettle();
+      // The calendar's own today makes the form editable; the form's
+      // answers at its own now offer a delete.
+      expect(find.byType(FilledButton), findsOneWidget);
+      expect(formButton("Delete"), findsOneWidget);
+    });
   });
 
   testWidgets("K17 without Lock earlier today, today's ended item stays "

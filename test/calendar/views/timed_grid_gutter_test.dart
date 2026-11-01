@@ -116,7 +116,7 @@ class Harness {
   );
 
   CalendarHourLabelFormat format = CalendarHourLabelFormat.twentyFourHour;
-  CalendarDayHours hours = const CalendarDayHours(8 * 60, 12 * 60);
+  CalendarDayHours hours = CalendarDayHours(8 * 60, 12 * 60);
   int slotMinutes = 15;
   double minSlotHeight = defaultMinSlotHeight;
   double minDayWidth = 44.0;
@@ -174,7 +174,7 @@ class Harness {
             minDayWidth: minDayWidth,
           );
           // Always under a theme, so a new style keeps the grid's state.
-          const theme = CalendarThemeData();
+          final theme = CalendarThemeData();
           return CalendarTheme(
             data: theme.copyWith(hourLabelStyle: labelStyle),
             child: grid,
@@ -260,7 +260,7 @@ void main() {
   testWidgets("GF1 labels wider than the least gutter's room with no break "
       "in them widen the gutter to the widest and 6 px on each side, and "
       "the days share the rest", (tester) async {
-    final harness = Harness()..hours = const CalendarDayHours(8 * 60, 18 * 60);
+    final harness = Harness()..hours = CalendarDayHours(8 * 60, 18 * 60);
     await harness.pump(tester);
     // "08:00" and the rest are 55 px, 5 px past the least gutter's 50.
     expect(gutterOf(tester), 67.0);
@@ -373,7 +373,7 @@ void main() {
       await harness.pump(tester);
       expect(gutterOf(tester), 56.0);
       // 07:30 to 08:00 is two 8 px slots.
-      harness.hours = const CalendarDayHours(7 * 60 + 30, 12 * 60);
+      harness.hours = CalendarDayHours(7 * 60 + 30, 12 * 60);
       await harness.rebuild(tester);
       expect(gutterOf(tester), 67.0);
     });
@@ -426,8 +426,7 @@ void main() {
     });
 
     testWidgets("hour format", (tester) async {
-      final harness = Harness()
-        ..hours = const CalendarDayHours(13 * 60, 18 * 60);
+      final harness = Harness()..hours = CalendarDayHours(13 * 60, 18 * 60);
       await harness.pump(tester);
       expect(gutterOf(tester), 67.0);
       // "1 PM" to "6 PM" are 44 px.
@@ -464,11 +463,11 @@ void main() {
       final harness = Harness()
         ..format = CalendarHourLabelFormat.twelveHour
         ..minSlotHeight = 4.0
-        ..hours = const CalendarDayHours(13 * 60, 18 * 60);
+        ..hours = CalendarDayHours(13 * 60, 18 * 60);
       await harness.pump(tester);
       expect(gutterOf(tester), 56.0);
       // 10 AM is 55 px.
-      harness.hours = const CalendarDayHours(8 * 60, 18 * 60);
+      harness.hours = CalendarDayHours(8 * 60, 18 * 60);
       await harness.rebuild(tester);
       expect(gutterOf(tester), 67.0);
     });

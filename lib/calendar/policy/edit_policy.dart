@@ -16,29 +16,34 @@ import 'overlap.dart' as overlap;
 /// once, when the value is made.
 @immutable
 final class CalendarNow {
-  /// The time [time], with [today] taken to its local midnight.
+  /// The time [time], a UTC time taken as its local time, the same
+  /// instant, with [today] taken to its local midnight.
   factory CalendarNow({required DateTime time, required DateTime today}) {
+    final local = time.toLocal();
     final day = DateTime(today.year, today.month, today.day);
     final into = Duration(
-      seconds: time.second,
-      milliseconds: time.millisecond,
-      microseconds: time.microsecond,
+      seconds: local.second,
+      milliseconds: local.millisecond,
+      microseconds: local.microsecond,
     );
-    var onToday = dateOnly(time) == day
-        ? time.subtract(into)
-        : DateTime(day.year, day.month, day.day, time.hour, time.minute);
+    var onToday = dateOnly(local) == day
+        ? local.subtract(into)
+        : DateTime(day.year, day.month, day.day, local.hour, local.minute);
     if (into > Duration.zero) {
       onToday = onToday.add(const Duration(minutes: 1));
     }
-    return CalendarNow._(time, day, onToday);
+    return CalendarNow._(local, day, onToday);
   }
 
   const CalendarNow._(this.time, this.today, this.timeOnToday);
 
-  /// The clock reading.
+  /// The clock reading, a local time: one given in UTC is kept as its
+  /// local time, the same instant.
   final DateTime time;
 
-  /// The local midnight of the day the calendar marks as today.
+  /// The local midnight of the day the calendar marks as today, read from
+  /// the given today's year, month and day, so a UTC today names the same
+  /// date.
   final DateTime today;
 
   /// [time]'s time of day on [today], rounded up to a whole minute, since
@@ -234,13 +239,19 @@ final class UnrestrictedEditPolicy<T> extends CalendarEditPolicy<T> {
 /// Two compare equal where their runtime types and [dayLimit] are the
 /// same.
 final class DayLimitPolicy<T> extends CalendarEditPolicy<T> {
-  /// Limits a range to [dayLimit] days; a [dayLimit] under 1 fails an
-  /// assertion in a debug build.
-  const DayLimitPolicy(this.dayLimit)
-    : assert(
-        dayLimit >= 1,
-        "A DayLimitPolicy's dayLimit, $dayLimit, is under 1.",
+  /// Limits a range to [dayLimit] days.
+  ///
+  /// Throws an [ArgumentError], in every build, naming `dayLimit` for a
+  /// [dayLimit] under 1.
+  DayLimitPolicy(this.dayLimit) {
+    if (dayLimit < 1) {
+      throw ArgumentError.value(
+        dayLimit,
+        "dayLimit",
+        "A day limit is at least 1",
       );
+    }
+  }
 
   @override
   final int dayLimit;

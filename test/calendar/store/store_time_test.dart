@@ -177,7 +177,7 @@ void main() {
       "the hours is accepted, one ending after them is refused, an all-day "
       "entry is accepted, and a write keeping the stored start and end "
       "skips the rule", () async {
-    const office = CalendarDayHours(8 * 60, 18 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
     final outside = entryOf("outside", at(monday, 6), at(monday, 7));
     final task = entryOf("task", at(monday, 9), at(monday, 10));
     for (final (name, store) in storesOf(
@@ -270,7 +270,7 @@ void main() {
 
   test("SM8 a set of other hours notifies once, and a set of equal hours "
       "notifies nothing", () {
-    const office = CalendarDayHours(8 * 60, 18 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
     for (final (name, store) in storesOf(
       const <CalendarEntry<String>>[],
       first: monday,
@@ -292,7 +292,7 @@ void main() {
   test("SM9 under 08:00-18:00 an update or a move of an all-day entry to a "
       "timed one at the same times is refused, and under hours of the "
       "whole day stored", () async {
-    const office = CalendarDayHours(8 * 60, 18 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
     final off = entryOf("off", tuesday, wednesday, isAllDay: true);
     final timed = off.copyWith(isAllDay: false);
     for (final (name, store) in storesOf(

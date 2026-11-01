@@ -210,7 +210,7 @@ void main() {
 
   test("MT3 under 08:00-18:00, Monday 22:00 to Tuesday 02:00 has no bar, and "
       "counts later on Monday and earlier on Tuesday", () {
-    const office = CalendarDayHours(8 * 60, 18 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
     final split = splitMonthHours(
       <Shown>[
         shownOf("night", at(monday, 22), at(tuesday, 2)),
@@ -231,7 +231,7 @@ void main() {
   test("MT6 under 08:00-18:00, an entry from a year before the grid to its "
       "first day at 07:00 counts earlier on that day, and one from its last "
       "day at 19:00 to a year after counts later on that day", () {
-    const office = CalendarDayHours(8 * 60, 18 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
     final gridFirst = april.dateAt(0, 0);
     final gridLast = april.dateAt(april.weekCount - 1, april.columnCount - 1);
     final split = splitMonthHours(
@@ -366,7 +366,7 @@ void main() {
           day.add(const Duration(minutes: 90)),
           secondHalfPastOne.subtract(const Duration(minutes: 15)),
         ),
-      ], hours: const CalendarDayHours(150, minutesPerDay));
+      ], hours: CalendarDayHours(150, minutesPerDay));
       expect(
         find.descendant(
           of: find.byKey(monthEarlierKey(day)),

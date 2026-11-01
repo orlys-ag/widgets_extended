@@ -562,7 +562,7 @@ void main() {
     test("EP12 limits a range to its days and nothing else: it moves, "
         "resizes both edges, edits, deletes and admits every change, lets a "
         "new entry start from a day's start and allows overlaps", () {
-      const policy = DayLimitPolicy<String>(3);
+      final policy = DayLimitPolicy<String>(3);
       final now = CalendarNow(time: at(tuesday, 11, 7), today: tuesday);
       final past = entryOf("past", at(monday, 9), at(monday, 10));
       expect(policy.dayLimit, 3);
@@ -612,7 +612,7 @@ void main() {
       final policy = CalendarEditPolicy<String>.all(
         <CalendarEditPolicy<String>>[
           const NoOverlapsPolicy<String>(),
-          const DayLimitPolicy<String>(2),
+          DayLimitPolicy<String>(2),
         ],
       );
       expect(policy.dayLimit, 2);

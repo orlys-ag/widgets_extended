@@ -154,6 +154,7 @@ void main() {
       CalendarWritePendingException,
       CalendarTheme,
       CalendarThemeData,
+      CalendarThemeData.builtIn,
       CalendarLocalizations,
       DefaultCalendarLocalizations,
       CalendarBlockBuilder,
@@ -557,6 +558,79 @@ void main() {
         hasLength(name == "CalendarDayHours" ? 1 : 0),
         reason: name,
       );
+    }
+  });
+
+  test("RC21 a check builds nothing on a valid value but the DateTime "
+      "isDayStart builds: CalendarThemeData's constructor builds no list "
+      "of its styles, and the day checks build no DateTime of their own", () {
+    String constructorBody(String path, String declaration) {
+      final source = File(path).readAsStringSync();
+      final start = source.indexOf(declaration);
+      expect(start, isNot(-1), reason: declaration);
+      var at = source.indexOf("(", start) + 1;
+      var depth = 1;
+      while (depth > 0) {
+        final char = source[at];
+        if (char == "(") {
+          depth++;
+        } else if (char == ")") {
+          depth--;
+        }
+        at++;
+      }
+      final open = source.indexOf("{", at);
+      // The body starts at the brace after the parameters and any
+      // initializers, which hold no brace.
+      expect(
+        source.substring(at, open),
+        isNot(contains(";")),
+        reason: declaration,
+      );
+      depth = 1;
+      at = open + 1;
+      while (depth > 0) {
+        final char = source[at];
+        if (char == "{") {
+          depth++;
+        } else if (char == "}") {
+          depth--;
+        }
+        at++;
+      }
+      return source.substring(open + 1, at - 1);
+    }
+
+    final theme = constructorBody(
+      "lib/calendar/presentation/calendar_theme.dart",
+      "  CalendarThemeData({",
+    );
+    // Setup sanity: the body read is the one that checks the styles.
+    expect(theme, contains("hourLabelStyle"));
+    expect(theme, isNot(contains("_textStyles")));
+    expect(theme, isNot(contains("[")));
+    final dayChecks = <({String path, String declaration, bool dayStarts})>[
+      (
+        path: "lib/calendar/policy/edit_rules.dart",
+        declaration: "  CalendarEarliestStart(",
+        dayStarts: true,
+      ),
+      (
+        path: "lib/calendar/views/timed_grid.dart",
+        declaration: "  CalendarCreateRange({",
+        dayStarts: true,
+      ),
+      (
+        path: "lib/calendar/entries/calendar_data_source.dart",
+        declaration: "  CalendarDaysChanged(",
+        dayStarts: false,
+      ),
+    ];
+    for (final (:path, :declaration, :dayStarts) in dayChecks) {
+      final body = constructorBody(path, declaration);
+      expect(body, contains("throw ArgumentError"), reason: declaration);
+      expect(body.contains("isDayStart("), dayStarts, reason: declaration);
+      expect(body, isNot(contains("DateTime(")), reason: declaration);
     }
   });
 

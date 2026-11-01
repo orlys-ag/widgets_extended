@@ -222,7 +222,7 @@ void main() {
     final early = task("item-3", day, 420, 450);
     final store = recorder.store(
       entries: <CalendarEntry<String>>[item, other, early],
-      hours: const CalendarDayHours(480, 1080),
+      hours: CalendarDayHours(480, 1080),
     );
 
     final moved = errorOf(
@@ -492,7 +492,7 @@ void main() {
   test("MS13 under hours of 08:00 to 18:00 a create of a timed entry from "
       "Tuesday's start to Wednesday's is refused for both its times", () async {
     final recorder = Recorder();
-    final store = recorder.store(hours: const CalendarDayHours(480, 1080));
+    final store = recorder.store(hours: CalendarDayHours(480, 1080));
     final tuesday = DateTime(2026, 4, 21);
     final created = errorOf(
       store.create(task(null, tuesday, 0, 0, dayCount: 2)),
@@ -510,7 +510,7 @@ void main() {
   test("MS14 under hours of 08:00 to 18:00 a create of an all-day entry "
       "over Tuesday is stored and answered all-day", () async {
     final recorder = Recorder();
-    final store = recorder.store(hours: const CalendarDayHours(480, 1080));
+    final store = recorder.store(hours: CalendarDayHours(480, 1080));
     final tuesday = DateTime(2026, 4, 21);
     final created = await store.create(
       task(null, tuesday, 0, 0, dayCount: 2, isAllDay: true),

@@ -255,7 +255,7 @@ void main() {
 
   group("C2 CalendarDayHours", () {
     test("counts its slots and holds the minutes inside it", () {
-      const office = CalendarDayHours(8 * 60, 18 * 60);
+      final office = CalendarDayHours(8 * 60, 18 * 60);
       expect(CalendarDayHours.allDay.slotCountOf(15), 96);
       expect(office.slotCountOf(15), 40);
       expect(office.contains(8 * 60, 18 * 60), isTrue);
@@ -297,7 +297,7 @@ void main() {
   group("DH1 CalendarDayHours' starts and ends", () {
     test("holds a start from its start to before its end, and an end from "
         "after its start to its end", () {
-      const office = CalendarDayHours(480, 1080);
+      final office = CalendarDayHours(480, 1080);
       expect(office.holdsStart(480), isTrue);
       expect(office.holdsStart(1065), isTrue);
       expect(office.holdsStart(465), isFalse);
@@ -314,7 +314,7 @@ void main() {
   group("DH2 CalendarDayHours.holdsTimes is told the kind", () {
     test("holds Tuesday's start to Wednesday's as an all-day range under any "
         "hours, and as a timed one only under hours of the whole day", () {
-      const office = CalendarDayHours(480, 1080);
+      final office = CalendarDayHours(480, 1080);
       final tuesday = DateTime(2026, 4, 21);
       final wednesday = DateTime(2026, 4, 22);
       expect(office.holdsTimes(tuesday, wednesday, isAllDay: true), isTrue);
@@ -341,7 +341,7 @@ void main() {
         "CalendarWeekdaySet(We, Th, Fr, Mo, Tu; from We)",
       );
       expect(
-        const CalendarDayHours(480, 1080).toString(),
+        CalendarDayHours(480, 1080).toString(),
         "CalendarDayHours(08:00-18:00)",
       );
     });

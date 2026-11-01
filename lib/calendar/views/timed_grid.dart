@@ -363,11 +363,60 @@ const ValueKey<String> liftedBlockKey = ValueKey<String>("grid-lifted-block");
 final class CalendarCreateRange {
   /// The range from [start] to [end], all-day where [isAllDay], as the
   /// gesture that picked it tells it.
-  const CalendarCreateRange({
+  ///
+  /// Throws an [ArgumentError], in every build, naming the first of
+  /// [CalendarEntry]'s rules its times break, in [CalendarEntry]'s order,
+  /// so an entry of its times constructs: [start] and then [end] is a local
+  /// time, not UTC; [start] and then [end] has no second, millisecond or
+  /// microsecond; [end] is after [start]; and for an all-day range, [start]
+  /// and then [end] is a local day start ([isDayStart]).
+  CalendarCreateRange({
     required this.start,
     required this.end,
     this.isAllDay = false,
-  });
+  }) {
+    if (start.isUtc) {
+      throw ArgumentError.value(
+        start,
+        "start",
+        "A range starts at a local time",
+      );
+    }
+    if (end.isUtc) {
+      throw ArgumentError.value(end, "end", "A range ends at a local time");
+    }
+    if (start.second != 0 || start.millisecond != 0 || start.microsecond != 0) {
+      throw ArgumentError.value(
+        start,
+        "start",
+        "A range starts on a whole minute",
+      );
+    }
+    if (end.second != 0 || end.millisecond != 0 || end.microsecond != 0) {
+      throw ArgumentError.value(end, "end", "A range ends on a whole minute");
+    }
+    if (!end.isAfter(start)) {
+      throw ArgumentError.value(
+        end,
+        "end",
+        "A range ends after its start, $start",
+      );
+    }
+    if (isAllDay && !isDayStart(start)) {
+      throw ArgumentError.value(
+        start,
+        "start",
+        "An all-day range starts at a local day start",
+      );
+    }
+    if (isAllDay && !isDayStart(end)) {
+      throw ArgumentError.value(
+        end,
+        "end",
+        "An all-day range ends at a local day start",
+      );
+    }
+  }
 
   /// Where the range starts.
   final DateTime start;

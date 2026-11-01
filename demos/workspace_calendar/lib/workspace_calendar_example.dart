@@ -75,7 +75,7 @@ class WorkspaceCalendarExample extends StatelessWidget {
     this.api,
     this.clock,
     this.editing = false,
-    this.calendarTheme = harborCalendarTheme,
+    this.calendarTheme,
     this.builders = harborItemBuilders,
   });
 
@@ -98,9 +98,9 @@ class WorkspaceCalendarExample extends StatelessWidget {
   /// edit mode switch then turns on and off.
   final bool editing;
 
-  /// The theme the calendar's views draw with, [harborCalendarTheme] unless
-  /// given. It shadows any [CalendarTheme] of the host's.
-  final CalendarThemeData calendarTheme;
+  /// The theme the calendar's views draw with; null gives
+  /// [harborCalendarTheme]. It shadows any [CalendarTheme] of the host's.
+  final CalendarThemeData? calendarTheme;
 
   /// What the views draw their items and states with, [harborItemBuilders]
   /// unless given; a null field gives the view's default.
@@ -115,7 +115,7 @@ class WorkspaceCalendarExample extends StatelessWidget {
     return Theme(
       data: _theme,
       child: CalendarTheme(
-        data: calendarTheme,
+        data: calendarTheme ?? harborCalendarTheme,
         child: _WorkspaceCalendar(
           today: today,
           api: api,
@@ -214,16 +214,18 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     super.dispose();
   }
 
-  /// The day the calendar marks as today when called.
+  /// The day the calendar marks as today when called: the widget's today,
+  /// or the local day of the clock's reading, as [CalendarView] takes a
+  /// UTC one.
   DateTime _today() {
-    return CalendarDates.dateOnly(widget.today ?? widget.clock());
+    return CalendarDates.dateOnly(widget.today ?? widget.clock().toLocal());
   }
 
   /// The time the calendar's edit policy answers at when called, which a
   /// form reads when it opens and at Save: the clock's, with the day the
-  /// calendar marks as today.
+  /// calendar marks as today, the local day of a UTC reading.
   CalendarNow _currentNow() {
-    final now = widget.clock();
+    final now = widget.clock().toLocal();
     return CalendarNow(time: now, today: widget.today ?? now);
   }
 

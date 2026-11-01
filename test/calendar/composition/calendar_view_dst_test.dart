@@ -203,7 +203,7 @@ void main() {
         view: CalendarViewKind.month,
         day: day,
         now: secondHalfPastOne.subtract(const Duration(minutes: 20)),
-        hours: const CalendarDayHours(90, 10 * 60),
+        hours: CalendarDayHours(90, 10 * 60),
         entries: <CalendarEntry<String>>[
           entryOf("busy", secondHalfPastOne, at(day, 10)),
         ],
@@ -516,7 +516,7 @@ void main() {
         day: day,
         now: at(day, 0, 10),
         lock: false,
-        hours: const CalendarDayHours(
+        hours: CalendarDayHours(
           easternSkippedHour * 60,
           (easternSkippedHour + 1) * 60,
         ),
@@ -541,7 +541,7 @@ void main() {
         day: day,
         now: at(dayBefore, 0, 10),
         lock: false,
-        hours: const CalendarDayHours(
+        hours: CalendarDayHours(
           (easternSkippedHour - 1) * 60,
           (easternSkippedHour + 1) * 60,
         ),

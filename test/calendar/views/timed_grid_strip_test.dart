@@ -230,7 +230,7 @@ Finder allBars() {
 bool isMarked(WidgetTester tester, DateTime day) {
   final box = tester.widget<DecoratedBox>(find.byKey(allDayCellKey(day)));
   return (box.decoration as BoxDecoration).color ==
-      const CalendarThemeData().primaryTint;
+      CalendarThemeData().primaryTint;
 }
 
 /// The days of [days] whose strip cell in the first row is marked.
@@ -2012,7 +2012,7 @@ void main() {
       "and, in Week, a bar moved two columns writes days two later", (
     tester,
   ) async {
-    const late = CalendarDayHours(8 * 60, minutesPerDay);
+    final late = CalendarDayHours(8 * 60, minutesPerDay);
     for (final shown in bothGrids(hours: late)) {
       final store = storeOf(<CalendarEntry<String>>[
         allDayOf("off", tuesday),
@@ -2032,7 +2032,7 @@ void main() {
         reason: shown.name,
       );
     }
-    const office = CalendarDayHours(8 * 60, 18 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
     for (final shown in bothGrids(hours: office)) {
       final store = storeOf(<CalendarEntry<String>>[
         allDayOf("off", tuesday),
@@ -2312,7 +2312,7 @@ void main() {
 
     // Under hours to 18:00, an end handle let go on a later day past the
     // day limit is held at the hours' end, timed.
-    const toSix = CalendarDayHours(0, 18 * 60);
+    final toSix = CalendarDayHours(0, 18 * 60);
     store = await releaseEndOver(
       tester,
       entries: <CalendarEntry<String>>[
@@ -3084,7 +3084,7 @@ void main() {
       "released over the frozen after-hours notice writes nothing", (
     tester,
   ) async {
-    const hours = CalendarDayHours(0, 18 * 60);
+    final hours = CalendarDayHours(0, 18 * 60);
     for (final shown in bothGrids(hours: hours)) {
       final store = storeOf(<CalendarEntry<String>>[
         allDayOf("off", tuesday),
@@ -3123,7 +3123,7 @@ void main() {
                 "its release writes";
       testWidgets(name, (tester) async {
         final hours = notice
-            ? const CalendarDayHours(8 * 60, minutesPerDay)
+            ? CalendarDayHours(8 * 60, minutesPerDay)
             : CalendarDayHours.allDay;
         for (final shown in bothGrids(hours: hours)) {
           final day = shown.week ? monday : tuesday;
@@ -3800,10 +3800,7 @@ void main() {
       "sharing time with Monday 23:00 to 23:30, which the hours hide", (
     tester,
   ) async {
-    final shown = Shown.week(
-      monday,
-      hours: const CalendarDayHours(6 * 60, 22 * 60),
-    );
+    final shown = Shown.week(monday, hours: CalendarDayHours(6 * 60, 22 * 60));
     final hidden = entryOf("H", at(monday, 23), at(monday, 23, 30));
     final overnight = entryOf("O", at(tuesday, 21), at(wednesday, 7));
     for (final withHidden in const <bool>[false, true]) {

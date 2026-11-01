@@ -440,7 +440,7 @@ builtInTypography =
 /// none, its style made italic, so a lerp from it to the built-in style
 /// lands on the built-in style at 1.
 Object fullValueOf(String name, int index) {
-  const builtIn = CalendarThemeData();
+  final builtIn = CalendarThemeData();
   final colour = colourNames.indexOf(name);
   if (colour >= 0) {
     return Color(0xFF103050 + colour);
@@ -618,7 +618,7 @@ Widget themed(CalendarThemeData? data, Widget child) {
 }
 
 void main() {
-  const builtIn = CalendarThemeData();
+  final builtIn = CalendarThemeData();
 
   test("the field lists name 59 distinct fields, 32 of them text styles", () {
     expect(fieldNames.toSet(), hasLength(59));
@@ -696,7 +696,7 @@ void main() {
   test("CT4 lerp interpolates colours, styles, shadows, the duration and "
       "the doubles, and switches the icons and the curve at 0.5", () {
     final a = fullTheme();
-    const b = builtIn;
+    final b = builtIn;
     expect(CalendarThemeData.lerp(a, b, 0.0), a);
     expect(CalendarThemeData.lerp(a, b, 1.0), b);
     expect(identical(CalendarThemeData.lerp(a, a, 0.3), a), isTrue);
@@ -964,14 +964,14 @@ void main() {
       );
     }, throwsArgumentNamed("noticeStyle"));
 
-    const low = CalendarThemeData(
+    final low = CalendarThemeData(
       motionDuration: Duration(milliseconds: 100),
       draggedBlockOpacity: 0.2,
       entryTintOpacity: 0.2,
       pendingEntryOpacity: 0.2,
       todayRingWidth: 1.0,
     );
-    const high = CalendarThemeData(
+    final high = CalendarThemeData(
       motionDuration: Duration(milliseconds: 900),
       draggedBlockOpacity: 0.9,
       entryTintOpacity: 0.9,
@@ -990,6 +990,35 @@ void main() {
     expect(over.pendingEntryOpacity, 1.0);
     expect(over.motionDuration, const Duration(milliseconds: 1700));
     expect(over.todayRingWidth, moreOrLessEquals(5.0));
+  });
+
+  testWidgets("RC15 the built-in theme is the const "
+      "CalendarThemeData.builtIn: CalendarThemeData() equals it, and "
+      "CalendarTheme.of under no theme and lerp of it with itself answer "
+      "it", (tester) async {
+    expect(CalendarThemeData(), CalendarThemeData.builtIn);
+    expect(CalendarThemeData().hashCode, CalendarThemeData.builtIn.hashCode);
+    CalendarThemeData? read;
+    await tester.pumpWidget(
+      themed(
+        null,
+        Builder(
+          builder: (context) {
+            read = CalendarTheme.of(context);
+            return const SizedBox();
+          },
+        ),
+      ),
+    );
+    expect(read, same(CalendarThemeData.builtIn));
+    expect(
+      CalendarThemeData.lerp(
+        CalendarThemeData.builtIn,
+        CalendarThemeData.builtIn,
+        0.5,
+      ),
+      same(CalendarThemeData.builtIn),
+    );
   });
 
   test("RC14 copyWith throws as the constructor does, and a text style with "

@@ -165,7 +165,7 @@ void main() {
     );
     // Only the calendar's hours have gaps, so an item reaching past them
     // makes none past them, and one wholly outside them none at all.
-    const office = CalendarDayHours(8 * 60, 18 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
     expect(
       rowsOf(<ShownItem>[
         entryAt("a", 7 * 60, 9 * 60),
@@ -186,7 +186,7 @@ void main() {
       "counts those before them and one last those after them, in edit "
       "mode and out of it, and in edit mode a day with no item inside the "
       "hours has one gap row across them", () {
-    const office = CalendarDayHours(8 * 60, 18 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
     final entries = <ShownItem>[
       entryAt("a", 6 * 60, 7 * 60),
       entryAt("b", 7 * 60, 8 * 60),

@@ -29,11 +29,27 @@ final class CalendarMoveRequest<T> {
   /// The [kind] of gesture, a move or a resize, that gives [entry] the
   /// times of [requested] and makes it all-day or timed
   /// ([CalendarEntry.isAllDay]).
-  const CalendarMoveRequest({
+  ///
+  /// Throws an [ArgumentError], in every build, naming `entry` for an
+  /// [entry] with no id, and `requested` for a [requested] whose id is not
+  /// [entry]'s. Their other fields are not compared.
+  CalendarMoveRequest({
     required this.entry,
     required this.requested,
     required this.kind,
-  });
+  }) {
+    final id = entry.id;
+    if (id == null) {
+      throw ArgumentError.value(entry, "entry", "A moved entry has an id");
+    }
+    if (requested.id != id) {
+      throw ArgumentError.value(
+        requested,
+        "requested",
+        "A requested entry has its entry's id, $id",
+      );
+    }
+  }
 
   /// The entry as stored when the gesture landed.
   final CalendarEntry<T> entry;

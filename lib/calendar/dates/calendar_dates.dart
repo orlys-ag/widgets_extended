@@ -115,18 +115,36 @@ final class CalendarWeekdaySet {
 
   /// The weekdays [columns] names, each 0 to 6, in weeks that start on
   /// the weekday [firstColumn] names.
+  ///
+  /// Throws an [ArgumentError], in every build, naming `firstColumn` for a
+  /// [firstColumn] outside 0 to 6, and then `columns` for a column outside
+  /// 0 to 6 and for [columns] that name no weekday, so every set holds a
+  /// weekday.
   factory CalendarWeekdaySet.of(Iterable<int> columns, {int firstColumn = 0}) {
-    assert(
-      firstColumn >= 0 && firstColumn < DateTime.daysPerWeek,
-      "A weekday column is 0 to 6, not $firstColumn.",
-    );
+    if (firstColumn < 0 || firstColumn >= DateTime.daysPerWeek) {
+      throw ArgumentError.value(
+        firstColumn,
+        "firstColumn",
+        "A weekday column is 0 to 6",
+      );
+    }
     var bits = 0;
     for (final column in columns) {
-      assert(
-        column >= 0 && column < DateTime.daysPerWeek,
-        "A weekday column is 0 to 6, not $column.",
-      );
+      if (column < 0 || column >= DateTime.daysPerWeek) {
+        throw ArgumentError.value(
+          columns,
+          "columns",
+          "A weekday column is 0 to 6, not $column",
+        );
+      }
       bits |= 1 << column;
+    }
+    if (bits == 0) {
+      throw ArgumentError.value(
+        columns,
+        "columns",
+        "A weekday set holds a weekday",
+      );
     }
     return CalendarWeekdaySet._(bits, firstColumn);
   }
@@ -144,14 +162,15 @@ final class CalendarWeekdaySet {
   /// week starts on.
   final int firstColumn;
 
-  /// Whether the set holds no weekday.
-  bool get isEmpty {
-    return _bits == 0;
-  }
-
   /// These weekdays in weeks that start on the weekday [column] names.
+  ///
+  /// Throws an [ArgumentError], in every build, naming `column` for a
+  /// [column] outside 0 to 6.
   CalendarWeekdaySet startingOn(int column) {
-    return CalendarWeekdaySet.of(columns, firstColumn: column);
+    if (column < 0 || column >= DateTime.daysPerWeek) {
+      throw ArgumentError.value(column, "column", "A weekday column is 0 to 6");
+    }
+    return CalendarWeekdaySet._(_bits, column);
   }
 
   /// The weekday columns the set holds, in week order: from [firstColumn]
@@ -222,9 +241,9 @@ final class CalendarWeekdaySet {
 
 /// [day] when [weekdays] holds its weekday; otherwise the first later day
 /// of [day]'s month it holds, or, when the month has none, the last
-/// earlier one. Every month holds each weekday, so one of them is found.
+/// earlier one. A weekday set holds a weekday and every month holds each
+/// weekday, so one of them is found.
 DateTime shownDayNear(DateTime day, CalendarWeekdaySet weekdays) {
-  assert(!weekdays.isEmpty);
   if (weekdays.containsDate(day)) {
     return day;
   }
@@ -251,7 +270,7 @@ DateTime nextShownDay(
   int direction,
   CalendarWeekdaySet weekdays,
 ) {
-  assert(direction != 0 && !weekdays.isEmpty);
+  assert(direction != 0);
   var next = addDays(day, direction.sign);
   while (!weekdays.containsDate(next)) {
     next = addDays(next, direction.sign);
@@ -262,7 +281,6 @@ DateTime nextShownDay(
 /// The days of [day]'s week, which starts on [weekdays]' first weekday,
 /// whose weekday [weekdays] holds, in order.
 List<DateTime> shownDaysOfWeek(DateTime day, CalendarWeekdaySet weekdays) {
-  assert(!weekdays.isEmpty);
   final start = weekdays.weekStartOf(day);
   return <DateTime>[
     for (final column in weekdays.columns)
@@ -540,7 +558,6 @@ class MonthGrid {
     int month, {
     CalendarWeekdaySet weekdays = CalendarWeekdaySet.all,
   }) {
-    assert(!weekdays.isEmpty, "A month grid shows at least one weekday.");
     final leading = weekdays.offsetOf(weekdayColumn(DateTime(year, month)));
     final days = daysInMonth(year, month);
     final columns = <int>[
@@ -652,13 +669,38 @@ class MonthGrid {
 final class CalendarDayHours {
   /// The hours from [start] to [end] minutes after midnight, with [start]
   /// before [end], inside one day.
-  const CalendarDayHours(this.start, this.end)
-    : assert(start >= 0),
-      assert(end <= minutesPerDay),
-      assert(start < end);
+  ///
+  /// Throws an [ArgumentError], in every build, naming `start` for a
+  /// [start] under 0, and `end` for an [end] past
+  /// `CalendarDates.minutesPerDay` or not after [start].
+  CalendarDayHours(this.start, this.end) {
+    if (start < 0) {
+      throw ArgumentError.value(
+        start,
+        "start",
+        "Day hours start at 00:00 or later",
+      );
+    }
+    if (end > minutesPerDay) {
+      throw ArgumentError.value(
+        end,
+        "end",
+        "Day hours end at 24:00 or earlier",
+      );
+    }
+    if (end <= start) {
+      throw ArgumentError.value(
+        end,
+        "end",
+        "Day hours end after their start, $start",
+      );
+    }
+  }
+
+  const CalendarDayHours._(this.start, this.end);
 
   /// The whole day, 00:00 to 24:00.
-  static const CalendarDayHours allDay = CalendarDayHours(0, minutesPerDay);
+  static const CalendarDayHours allDay = CalendarDayHours._(0, minutesPerDay);
 
   /// Minutes after midnight.
   final int start;
@@ -687,7 +729,9 @@ final class CalendarDayHours {
   /// midnight: [start] rounded down and [end] up to it, so the hours
   /// themselves where they lie on it. [slotMinutes] divides a day, as each
   /// of `CalendarDates.slotMinuteChoices` does, so the end stays inside
-  /// the day.
+  /// the day. It constructs the hours it answers, so for a slot length
+  /// that takes the end past 24:00 it throws the constructor's
+  /// [ArgumentError].
   CalendarDayHours roundedOutTo(int slotMinutes) {
     if (isOnSlotsOf(slotMinutes)) {
       return this;

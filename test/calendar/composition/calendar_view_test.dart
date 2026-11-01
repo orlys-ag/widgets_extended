@@ -1113,7 +1113,7 @@ void main() {
     Finder addButton(DateTime day, int start) {
       return find.descendant(
         of: find.byKey(dayListGapKey(day, start)),
-        matching: find.byIcon(const CalendarThemeData().addEntryIcon),
+        matching: find.byIcon(CalendarThemeData().addEntryIcon),
       );
     }
 
@@ -1539,7 +1539,7 @@ void main() {
 
   group("CV18 the fold and the month picker move over the theme's motion", () {
     testWidgets("its duration and curve", (tester) async {
-      const slow = CalendarThemeData(
+      final slow = CalendarThemeData(
         motionDuration: Duration(seconds: 1),
         motionCurve: Curves.easeIn,
       );
@@ -1586,7 +1586,7 @@ void main() {
     });
 
     testWidgets("a zero duration moving each in one frame", (tester) async {
-      const instant = CalendarThemeData(motionDuration: Duration.zero);
+      final instant = CalendarThemeData(motionDuration: Duration.zero);
       await tester.pumpWidget(
         app(
           CalendarTheme(
@@ -1621,7 +1621,7 @@ void main() {
     final controller = CalendarController(view: CalendarViewKind.day);
     addTearDown(controller.dispose);
     final large = CalendarThemeExtension(
-      data: const CalendarThemeData().copyWith(
+      data: CalendarThemeData().copyWith(
         stripWeekdayStyle: const TextStyle(fontSize: 30.0),
       ),
     );
@@ -1740,7 +1740,7 @@ void main() {
                   children: <Widget>[
                     Expanded(
                       child: CalendarTheme(
-                        data: const CalendarThemeData(),
+                        data: CalendarThemeData.builtIn,
                         child: calendar,
                       ),
                     ),
@@ -1771,7 +1771,7 @@ void main() {
     expect(tester.state(find.byType(TimedGrid<String>)), same(grid));
     expect(
       CalendarTheme.of(tester.element(find.byType(TimedGrid<String>))),
-      same(const CalendarThemeData()),
+      same(CalendarThemeData.builtIn),
     );
   });
 
@@ -2035,7 +2035,7 @@ void main() {
 
   testWidgets("CV28 hours off the grid of the slot length throw an "
       "ArgumentError from the build, and on it build", (tester) async {
-    const hours = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
+    final hours = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
     final office = MemoryCalendarStore<String>(hours: hours);
     addTearDown(office.dispose);
     await tester.pumpWidget(
@@ -2123,8 +2123,8 @@ void main() {
 
   testWidgets("CV45 every view shows the store's hours, and a set of them "
       "reaches the view shown", (tester) async {
-    const office = CalendarDayHours(8 * 60, 18 * 60);
-    const late = CalendarDayHours(10 * 60, 20 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
+    final late = CalendarDayHours(10 * 60, 20 * 60);
     final memory = MemoryCalendarStore<String>(hours: office);
     addTearDown(memory.dispose);
     final controller = CalendarController(view: CalendarViewKind.week);
@@ -2188,7 +2188,7 @@ void main() {
     // Setup sanity: the create's notify reached Agenda's list.
     expect(find.text("talk"), findsOneWidget);
     expect(headers, built);
-    memory.hours = const CalendarDayHours(8 * 60, 18 * 60);
+    memory.hours = CalendarDayHours(8 * 60, 18 * 60);
     await tester.pump();
     expect(headers, built + 1);
   });
@@ -2196,8 +2196,8 @@ void main() {
   testWidgets("CV47 a new store's hours show and its sets reach the "
       "calendar, and once the calendar leaves, a set of either store's "
       "hours reaches it no more", (tester) async {
-    const office = CalendarDayHours(8 * 60, 18 * 60);
-    const late = CalendarDayHours(10 * 60, 20 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
+    final late = CalendarDayHours(10 * 60, 20 * 60);
     final first = MemoryCalendarStore<String>();
     addTearDown(first.dispose);
     final second = MemoryCalendarStore<String>(hours: office);
@@ -2235,7 +2235,7 @@ void main() {
     final first = MemoryCalendarStore<String>();
     addTearDown(first.dispose);
     final second = MemoryCalendarStore<String>(
-      hours: const CalendarDayHours(8 * 60, 18 * 60),
+      hours: CalendarDayHours(8 * 60, 18 * 60),
     );
     addTearDown(second.dispose);
     var headers = 0;

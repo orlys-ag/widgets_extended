@@ -15,7 +15,7 @@ DateTime onTuesday(int minute) {
 
 void main() {
   group("C3 hoursErrorsOf", () {
-    const office = CalendarDayHours(8 * 60, 18 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
     const startError =
         "The start is from 08:00 to before 18:00, inside the calendar's "
         "hours.";
@@ -68,7 +68,7 @@ void main() {
 
     test("copyWith replaces the hours it is given", () {
       const settings = CalendarSettings();
-      const office = CalendarDayHours(8 * 60, 18 * 60);
+      final office = CalendarDayHours(8 * 60, 18 * 60);
       final copy = settings.copyWith(hours: office);
       expect(copy.hours, office);
     });
@@ -92,9 +92,7 @@ void main() {
       final workweek = settings.copyWith(weekdays: CalendarWeekdaySet.workweek);
       expect(workweek.weekdays, CalendarWeekdaySet.workweek);
       expect(
-        workweek
-            .copyWith(hours: const CalendarDayHours(8 * 60, 18 * 60))
-            .weekdays,
+        workweek.copyWith(hours: CalendarDayHours(8 * 60, 18 * 60)).weekdays,
         CalendarWeekdaySet.workweek,
       );
       expect(workweek == settings, isFalse);
@@ -111,9 +109,7 @@ void main() {
       final all = settings.copyWith(monthLayout: CalendarMonthLayout.showAll);
       expect(all.monthLayout, CalendarMonthLayout.showAll);
       expect(
-        all
-            .copyWith(hours: const CalendarDayHours(8 * 60, 18 * 60))
-            .monthLayout,
+        all.copyWith(hours: CalendarDayHours(8 * 60, 18 * 60)).monthLayout,
         CalendarMonthLayout.showAll,
       );
       expect(all == settings, isFalse);
@@ -138,7 +134,7 @@ void main() {
       expect(twelve.hourLabelFormat, CalendarHourLabelFormat.twelveHour);
       expect(
         twelve
-            .copyWith(hours: const CalendarDayHours(8 * 60, 18 * 60))
+            .copyWith(hours: CalendarDayHours(8 * 60, 18 * 60))
             .hourLabelFormat,
         CalendarHourLabelFormat.twelveHour,
       );
@@ -158,9 +154,7 @@ void main() {
       final editing = settings.copyWith(editing: true);
       expect(editing.editing, isTrue);
       expect(
-        editing
-            .copyWith(hours: const CalendarDayHours(8 * 60, 18 * 60))
-            .editing,
+        editing.copyWith(hours: CalendarDayHours(8 * 60, 18 * 60)).editing,
         isTrue,
       );
       expect(editing == settings, isFalse);
@@ -178,7 +172,7 @@ void main() {
       expect(allowing.allowsOverlaps, isTrue);
       expect(
         allowing
-            .copyWith(hours: const CalendarDayHours(8 * 60, 18 * 60))
+            .copyWith(hours: CalendarDayHours(8 * 60, 18 * 60))
             .allowsOverlaps,
         isTrue,
       );
@@ -218,7 +212,7 @@ void main() {
                     HistoryLockPolicy<ItemPayload>(
                       lockEarlierToday: lockEarlierToday,
                     ),
-                  const DayLimitPolicy<ItemPayload>(maxDayCount),
+                  DayLimitPolicy<ItemPayload>(maxDayCount),
                   if (!allowsOverlaps) const NoOverlapsPolicy<ItemPayload>(),
                 ],
               ),

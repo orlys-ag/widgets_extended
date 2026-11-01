@@ -65,7 +65,24 @@ final class CalendarEntryRemoved<T> extends CalendarSourceChange<T> {
 /// inclusive, may have changed.
 final class CalendarDaysChanged<T> extends CalendarSourceChange<T> {
   /// The change of the days from [first] to [last].
-  const CalendarDaysChanged(this.first, this.last);
+  ///
+  /// Throws an [ArgumentError], in every build, naming `last` for a [last]
+  /// whose day comes before [first]'s. The days compare by their year,
+  /// month and day, so a [last] earlier on [first]'s day is taken.
+  CalendarDaysChanged(this.first, this.last) {
+    final before = last.year != first.year
+        ? last.year < first.year
+        : last.month != first.month
+        ? last.month < first.month
+        : last.day < first.day;
+    if (before) {
+      throw ArgumentError.value(
+        last,
+        "last",
+        "A change of days ends on its first day or a later one, $first",
+      );
+    }
+  }
 
   /// The first changed day.
   final DateTime first;

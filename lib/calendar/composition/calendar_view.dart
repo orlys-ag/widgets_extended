@@ -202,13 +202,15 @@ final class CalendarEntryTapDetails<T> {
 /// step their gestures snap to, the length of the slot Agenda's add button
 /// and Month's long press create, and the grid those round the earliest
 /// start [editPolicy] gives a day up to
-/// ([CalendarEditPolicy.earliestStartOn]). A value
-/// [CalendarDates.slotMinuteChoices] does not hold throws an
-/// [ArgumentError] from the build, in a release build as in a debug one,
-/// and the store's hours off its grid ([CalendarDayHours.isOnSlotsOf]) fail
-/// an assertion in a debug build; the views show and schedule in the store's
-/// hours rounded out to it ([CalendarDayHours.roundedOutTo]), which are the
-/// hours themselves on the grid.
+/// ([CalendarEditPolicy.earliestStartOn]). The views show and schedule in
+/// the store's hours as they are, which a host puts on that grid
+/// ([CalendarDayHours.roundedOutTo]). The build throws an [ArgumentError],
+/// in every build, after the one for [views]: for a [slotMinutes] that
+/// [CalendarDates.slotMinuteChoices] does not hold; then for store hours
+/// off its grid ([CalendarDayHours.isOnSlotsOf]), named `store.hours`, in
+/// the build after a set of them too; and then for an [editPolicy] whose
+/// [CalendarEditPolicy.dayLimit] is under 1, named `policy`. The next
+/// build that throws none of them builds the views anew.
 class CalendarView<T> extends StatefulWidget {
   /// A calendar of [store]'s entries in the views [views] lists.
   const CalendarView({
@@ -263,7 +265,9 @@ class CalendarView<T> extends StatefulWidget {
   /// Whether the calendar is in edit mode: Week's and Day's blocks move
   /// and resize, a create gesture reports through [onCreateRange], and
   /// Agenda's card builder receives the edit and delete requests, as
-  /// [editPolicy] allows. Out of it the calendar asks [editPolicy] nothing.
+  /// [editPolicy] allows. Out of it the calendar reads [editPolicy]'s
+  /// [CalendarEditPolicy.dayLimit] and [CalendarEditPolicy.allowsOverlaps]
+  /// when it takes a policy, and asks it nothing else.
   final bool editable;
 
   /// What may change in edit mode, and where a new entry may start
@@ -279,7 +283,9 @@ class CalendarView<T> extends StatefulWidget {
   /// Week's end handle dragged into a later day may give a range: one
   /// dragged past them is held at the latest range they admit, which a
   /// release requests or reports. A move keeps the days an entry covers,
-  /// except where it crosses a midnight, and no limit applies to it.
+  /// except where it crosses a midnight, and no limit applies to it. A
+  /// policy whose limit is under 1 throws an [ArgumentError] from the
+  /// build, in every build, in every view and out of edit mode too.
   ///
   /// Its [CalendarEditPolicy.allowsOverlaps] decides whether Week's and
   /// Day's moves, resizes and creates may give an entry times another
@@ -305,8 +311,9 @@ class CalendarView<T> extends StatefulWidget {
 
   /// The length of one slot, in minutes: one of
   /// [CalendarDates.slotMinuteChoices], or the build throws an
-  /// [ArgumentError]. The store's hours start and end on its grid, which a
-  /// debug build asserts.
+  /// [ArgumentError], in every build. The store's hours start and end on
+  /// its grid, or the build throws an [ArgumentError] naming
+  /// `store.hours`.
   final int slotMinutes;
 
   /// The format the calendar writes times of day in: Week's and Day's
@@ -321,7 +328,9 @@ class CalendarView<T> extends StatefulWidget {
   final CalendarMonthLayout monthLayout;
 
   /// Reads the current time, which the calendar reads when first built and
-  /// again at the start of each minute; null reads [DateTime.now].
+  /// again at the start of each minute; null reads [DateTime.now]. A UTC
+  /// reading is taken as its local time, the same instant, so the day it
+  /// marks is the local one.
   ///
   /// A new function is read at once, and the next minute is timed from
   /// its reading. The reading replaces the time the calendar holds where
@@ -331,8 +340,9 @@ class CalendarView<T> extends StatefulWidget {
   /// each build.
   final DateTime Function()? clock;
 
-  /// The day the calendar marks as today and opens on; null marks the day
-  /// [clock] reads, moving at midnight.
+  /// The day the calendar marks as today and opens on, read by its year,
+  /// month and day, so a UTC today names the same date; null marks the
+  /// local day [clock] reads, moving at midnight.
   final DateTime? today;
 
   /// Draws Week's and Day's blocks; null for the module's default.
@@ -455,11 +465,26 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     );
   }
 
+  /// The error the build throws for store hours ([CalendarStore.hours])
+  /// off the grid of [CalendarView.slotMinutes], or null.
+  ArgumentError? get _storeHoursError {
+    final hours = widget.store.hours;
+    if (hours.isOnSlotsOf(widget.slotMinutes)) {
+      return null;
+    }
+    return ArgumentError.value(
+      hours,
+      "store.hours",
+      "do not start and end on the grid of ${widget.slotMinutes}-minute "
+          "slots",
+    );
+  }
+
   /// The hours the views show and schedule in: the store's
-  /// ([CalendarStore.hours]) rounded out to the grid of
-  /// [CalendarView.slotMinutes].
+  /// ([CalendarStore.hours]), which a build past [_storeHoursError] has on
+  /// the grid of [CalendarView.slotMinutes].
   CalendarDayHours get _hours {
-    return widget.store.hours.roundedOutTo(widget.slotMinutes);
+    return widget.store.hours;
   }
 
   /// The store's hours as this state last took them, which
@@ -482,13 +507,16 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     return widget.editPolicy ?? _unrestricted;
   }
 
-  /// The rules [_rules] last gave, made at its first ask.
+  /// The rules [_takeRules] last gave, made at its first call and at its
+  /// first after a reassemble; a call that throws leaves them.
   CalendarEditRules<T>? _madeRules;
 
-  /// The rules a create asks: [_policy] in [_hours] and slots of
-  /// [CalendarView.slotMinutes], made again only for a policy not `==` to
-  /// the last ([CalendarEditRules.updated]).
-  CalendarEditRules<T> get _rules {
+  /// Takes the rules the build checks and a create asks: [_policy] in
+  /// [_hours] and slots of [CalendarView.slotMinutes], made again only for
+  /// a policy not `==` to the last ([CalendarEditRules.updated]). Throws
+  /// their [ArgumentError] for a policy whose day limit is under 1, or for
+  /// hours off the grid between a set of them and the next build.
+  CalendarEditRules<T> _takeRules() {
     final made = _madeRules;
     return _madeRules = made == null
         ? CalendarEditRules<T>(
@@ -540,7 +568,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// The theme [_resolveTheme] resolved, which the state draws and
   /// animates its own parts with, and the one it puts above the views,
   /// null where it puts none.
-  CalendarThemeData _theme = const CalendarThemeData();
+  CalendarThemeData _theme = CalendarThemeData.builtIn;
   CalendarThemeData? _insertedTheme;
 
   /// The last [ColorScheme] a theme was derived from, and that theme.
@@ -599,6 +627,10 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   void reassemble() {
     _derivedScheme = null;
     _derivedTheme = null;
+    // A reload can change what a getter of the policy answers while the
+    // policy stays `==` to itself, which [CalendarEditRules.updated] would
+    // not read again.
+    _madeRules = null;
     super.reassemble();
     _resolveTheme();
   }
@@ -834,9 +866,9 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   }
 
   /// The clock reading [time] on the day the calendar marks as today:
-  /// [CalendarView.today], or with none [time]'s day.
+  /// [CalendarView.today], or with none [time]'s local day.
   CalendarNow _nowAt(DateTime time) {
-    return CalendarNow(time: time, today: widget.today ?? time);
+    return CalendarNow(time: time, today: widget.today ?? time.toLocal());
   }
 
   /// Whether [next], a reading of a new [CalendarView.clock], leaves
@@ -901,7 +933,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       _theme = ambient.data;
       _insertedTheme = null;
     } else if (!hasTheme) {
-      _theme = const CalendarThemeData();
+      _theme = CalendarThemeData.builtIn;
       _insertedTheme = null;
     } else {
       final themeData = Theme.of(context);
@@ -1305,7 +1337,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// none starts before it. Where it leaves no such slot in the hours,
   /// reports [CalendarView.onCreateRefused] instead.
   void _openCreateFlow(DateTime day) {
-    final rules = _rules;
+    final rules = _takeRules();
     final start = rules.earliestStartOn(day, _now.value);
     final shown = widget.store.entriesOn(day).map((shown) {
       return shown.entry;
@@ -1578,11 +1610,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     if (slotError != null) {
       throw slotError;
     }
-    assert(
-      widget.store.hours.isOnSlotsOf(widget.slotMinutes),
-      "A CalendarView's store's hours, ${widget.store.hours}, must start and "
-      "end on the grid of its ${widget.slotMinutes}-minute slots.",
-    );
+    final hoursError = _storeHoursError;
+    if (hoursError != null) {
+      throw hoursError;
+    }
+    _takeRules();
     final header = _buildHeader();
     final Widget view;
     switch (_view) {

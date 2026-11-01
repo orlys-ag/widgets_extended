@@ -79,7 +79,7 @@ void main() {
   test("DT5 under 08:00-18:00 the hours hold a start from 08:00 to before "
       "18:00 and an end from after 08:00 to 18:00, a range whose start and "
       "last day's end they hold, and any all-day range", () {
-    const office = CalendarDayHours(8 * 60, 18 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
     expect(office.holdsStart(8 * 60), isTrue);
     expect(office.holdsStart(9 * 60 + 10), isTrue);
     expect(office.holdsStart(18 * 60 - 1), isTrue);
@@ -130,20 +130,17 @@ void main() {
 
   test("DT6 roundedOutTo(30) of 08:10-17:50 is 08:00-18:00, and "
       "isOnSlotsOf(30) holds of 08:00-18:00 and not of 08:10-17:50", () {
-    const off = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
-    const office = CalendarDayHours(8 * 60, 18 * 60);
+    final off = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
     expect(off.roundedOutTo(30), office);
     expect(office.roundedOutTo(30), office);
     expect(off.isOnSlotsOf(30), isFalse);
-    expect(
-      const CalendarDayHours(8 * 60, 17 * 60 + 50).isOnSlotsOf(30),
-      isFalse,
-    );
+    expect(CalendarDayHours(8 * 60, 17 * 60 + 50).isOnSlotsOf(30), isFalse);
     expect(office.isOnSlotsOf(30), isTrue);
     expect(off.isOnSlotsOf(10), isTrue);
     // Rounded out, the end stays inside the day.
     expect(
-      const CalendarDayHours(0, minutesPerDay - 5).roundedOutTo(60),
+      CalendarDayHours(0, minutesPerDay - 5).roundedOutTo(60),
       CalendarDayHours.allDay,
     );
   });
@@ -151,7 +148,7 @@ void main() {
   test("DT7 slotCountOf(30) of the whole day is 48", () {
     expect(CalendarDayHours.allDay.slotCountOf(30), 48);
     expect(CalendarDayHours.allDay.slotCountOf(defaultSlotMinutes), 96);
-    expect(const CalendarDayHours(8 * 60, 18 * 60).slotCountOf(30), 20);
+    expect(CalendarDayHours(8 * 60, 18 * 60).slotCountOf(30), 20);
   });
 
   test("DST1 dstSkipReason answers null for a day found with the expected "

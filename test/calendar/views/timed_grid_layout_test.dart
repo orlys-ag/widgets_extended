@@ -81,11 +81,12 @@ CalendarShownEntry<String> allDayOf(
   );
 }
 
-/// The week from [monday] with a column for each workday, in office hours.
+/// The week from [monday] with a column for each workday, in [hours], or
+/// with none in office hours.
 GridTracks workweek({
   int slotMinutes = defaultSlotMinutes,
   int firstSlotRow = 1,
-  CalendarDayHours hours = const CalendarDayHours(8 * 60, 18 * 60),
+  CalendarDayHours? hours,
   CalendarWeekdaySet weekdays = CalendarWeekdaySet.workweek,
   int firstOffset = 0,
   int dayCount = 7,
@@ -94,7 +95,7 @@ GridTracks workweek({
     firstDay: dayFromMonday(firstOffset),
     dayCount: dayCount,
     weekdays: weekdays,
-    hours: hours,
+    hours: hours ?? CalendarDayHours(8 * 60, 18 * 60),
     firstSlotRow: firstSlotRow,
     slotMinutes: slotMinutes,
   );
@@ -258,7 +259,7 @@ void main() {
       "fewer entries": (<CalendarShownEntry<String>>[a], workweek()),
       "other hours": (
         shown,
-        workweek(hours: const CalendarDayHours(9 * 60, 18 * 60)),
+        workweek(hours: CalendarDayHours(9 * 60, 18 * 60)),
       ),
       "other weekdays": (shown, workweek(weekdays: CalendarWeekdaySet.all)),
       "another first day": (shown, workweek(firstOffset: -7)),

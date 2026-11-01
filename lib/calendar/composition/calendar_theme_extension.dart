@@ -14,8 +14,8 @@ import '../presentation/calendar_theme.dart';
 @immutable
 final class CalendarThemeExtension
     extends ThemeExtension<CalendarThemeExtension> {
-  /// The extension of [data], the built-in theme unless given.
-  const CalendarThemeExtension({this.data = const CalendarThemeData()});
+  /// The extension of [data], [CalendarThemeData.builtIn] unless given.
+  const CalendarThemeExtension({this.data = CalendarThemeData.builtIn});
 
   /// The extension of the theme [scheme]'s roles give: the accent from
   /// `primary`, `onPrimary` and `primaryContainer`; the body from
@@ -27,7 +27,7 @@ final class CalendarThemeExtension
   /// `shadow` at the built-in shadow's alpha. Every other field, the text
   /// styles included, takes its built-in value.
   factory CalendarThemeExtension.fromColorScheme(ColorScheme scheme) {
-    const builtIn = CalendarThemeData();
+    const builtIn = CalendarThemeData.builtIn;
     List<BoxShadow> inShadow(List<BoxShadow> shadows) {
       return <BoxShadow>[
         for (final shadow in shadows)

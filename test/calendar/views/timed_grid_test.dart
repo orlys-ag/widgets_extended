@@ -589,7 +589,7 @@ void main() {
     final office = GridTracks(
       firstDay: weekStartDay,
       dayCount: 7,
-      hours: const CalendarDayHours(8 * 60, 18 * 60),
+      hours: CalendarDayHours(8 * 60, 18 * 60),
     );
 
     test("rows count from the first hour", () {
@@ -725,7 +725,7 @@ void main() {
         onOpenEntry: (id) {},
         onCreate: (range) async {},
         weekdays: CalendarWeekdaySet.workweek,
-        hours: const CalendarDayHours(8 * 60, 18 * 60),
+        hours: CalendarDayHours(8 * 60, 18 * 60),
         hourLabelFormat: format,
         minDayWidth: 100.0,
         minSlotHeight: minSlotHeight,
@@ -823,7 +823,7 @@ void main() {
         editPolicy: lockPast
             ? HistoryLockPolicy<String>(lockEarlierToday: lockEarlierToday)
             : null,
-        hours: const CalendarDayHours(8 * 60, 16 * 60),
+        hours: CalendarDayHours(8 * 60, 16 * 60),
       );
     }
 
@@ -1092,14 +1092,14 @@ void main() {
         spreadRadius: 1.0,
       ),
     ];
-    const theme = CalendarThemeData(
+    final theme = CalendarThemeData(
       gripShadows: grip,
       liftedBlockShadows: lifted,
     );
     // The theme's shadows are not the built-in ones, so a grid that drew
     // those would fail below.
-    expect(grip, isNot(const CalendarThemeData().gripShadows));
-    expect(lifted, isNot(const CalendarThemeData().liftedBlockShadows));
+    expect(grip, isNot(CalendarThemeData().gripShadows));
+    expect(lifted, isNot(CalendarThemeData().liftedBlockShadows));
     final store = MemoryCalendarStore<String>(
       entries: <CalendarEntry<String>>[
         entryOf("talk", tuesday, 10 * 60, 12 * 60),
@@ -1456,7 +1456,7 @@ void main() {
         onCreate: (range) async {},
         editable: true,
         editPolicy: const HistoryLockPolicy<String>(lockEarlierToday: true),
-        hours: const CalendarDayHours(0, 16 * 60),
+        hours: CalendarDayHours(0, 16 * 60),
         minDayWidth: 60.0,
         minSlotHeight: 8.0,
       ),
@@ -1490,7 +1490,7 @@ void main() {
       final viewport = viewportOf(tester);
       final canvas = RecordingCanvas();
       viewport.background!.paint(canvas, viewport);
-      final tint = const CalendarThemeData().primaryTint.toARGB32();
+      final tint = CalendarThemeData().primaryTint.toARGB32();
       final left = canvas.rects
           .where((record) {
             return record.paint.color.toARGB32() == tint;
@@ -1581,7 +1581,7 @@ void main() {
           onSelectDay: (day) {},
           onOpenEntry: (id) {},
           onCreate: (range) async {},
-          hours: const CalendarDayHours(8 * 60, 18 * 60),
+          hours: CalendarDayHours(8 * 60, 18 * 60),
           hourLabelFormat: format,
           blockBuilder: recordBlock,
           chipBuilder: recordBar,

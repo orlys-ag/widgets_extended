@@ -85,13 +85,11 @@ void main() {
 
   testWidgets("TE1 a CalendarTheme above the calendar wins over the "
       "extension", (tester) async {
-    final ambient = const CalendarThemeData().copyWith(
+    final ambient = CalendarThemeData().copyWith(
       primary: const Color(0xFF112233),
     );
     final extension = CalendarThemeExtension(
-      data: const CalendarThemeData().copyWith(
-        primary: const Color(0xFF445566),
-      ),
+      data: CalendarThemeData().copyWith(primary: const Color(0xFF445566)),
     );
     await tester.pumpWidget(
       MaterialApp(
@@ -105,9 +103,7 @@ void main() {
 
   testWidgets("TE2 with no CalendarTheme the extension's data", (tester) async {
     final extension = CalendarThemeExtension(
-      data: const CalendarThemeData().copyWith(
-        primary: const Color(0xFF445566),
-      ),
+      data: CalendarThemeData().copyWith(primary: const Color(0xFF445566)),
     );
     await tester.pumpWidget(
       MaterialApp(
@@ -151,7 +147,7 @@ void main() {
     for (final MapEntry(key: name, value: (actual, role)) in roles.entries) {
       expect(actual, role, reason: name);
     }
-    const builtIn = CalendarThemeData();
+    final builtIn = CalendarThemeData();
     // Every other field keeps its built-in value.
     expect(
       theme,
@@ -189,7 +185,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(listTheme(tester), const CalendarThemeData());
+    expect(listTheme(tester), CalendarThemeData());
     expect(find.byType(CalendarTheme), findsNothing);
     expect(find.byType(Material), findsNothing);
   });
@@ -197,9 +193,7 @@ void main() {
   testWidgets("TE5 a view on its own under a Material theme with the "
       "extension reads the built-in theme", (tester) async {
     final extension = CalendarThemeExtension(
-      data: const CalendarThemeData().copyWith(
-        primary: const Color(0xFF445566),
-      ),
+      data: CalendarThemeData().copyWith(primary: const Color(0xFF445566)),
     );
     await tester.pumpWidget(
       MaterialApp(
@@ -209,13 +203,13 @@ void main() {
     );
     expect(
       CalendarTheme.of(tester.element(find.byType(WeekdayHeader))),
-      const CalendarThemeData(),
+      CalendarThemeData(),
     );
   });
 
   test("TE6 the extension's copyWith and lerp follow CalendarThemeData's", () {
     final extension = CalendarThemeExtension(
-      data: const CalendarThemeData().copyWith(
+      data: CalendarThemeData().copyWith(
         primary: const Color(0xFF445566),
         todayRingWidth: 3.0,
       ),
@@ -237,7 +231,7 @@ void main() {
     expect(extensionParameters, dataParameters);
 
     final other = CalendarThemeExtension(
-      data: const CalendarThemeData().copyWith(
+      data: CalendarThemeData().copyWith(
         primary: const Color(0xFF001122),
         todayRingWidth: 1.0,
       ),
@@ -259,7 +253,7 @@ void main() {
 
   test("TE7 a scheme's shadow role tints the built-in shadows at their "
       "alpha", () {
-    const builtIn = CalendarThemeData();
+    final builtIn = CalendarThemeData();
     final plain = CalendarThemeExtension.fromColorScheme(
       const ColorScheme.light(),
     ).data;

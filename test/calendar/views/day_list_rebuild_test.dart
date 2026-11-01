@@ -125,7 +125,7 @@ class ListHost {
   CalendarDayHours hours = CalendarDayHours.allDay;
   int slotMinutes = 15;
   bool editable = true;
-  CalendarThemeData theme = const CalendarThemeData();
+  CalendarThemeData theme = CalendarThemeData();
 
   final List<DateTime> topDays = <DateTime>[];
   final List<CalendarCreateRange> creates = <CalendarCreateRange>[];
@@ -409,7 +409,7 @@ void main() {
       await changed(tester, (host) {
         // Setup sanity: all day long, no banner.
         expect(find.byKey(banner, skipOffstage: false), findsNothing);
-        host.hours = const CalendarDayHours(10 * 60, 18 * 60);
+        host.hours = CalendarDayHours(10 * 60, 18 * 60);
       });
       expect(find.byKey(banner, skipOffstage: false), findsOneWidget);
     });
@@ -515,7 +515,7 @@ void main() {
       await changed(tester, (host) {
         // Setup sanity: the title is drawn in another colour first.
         expect(tester.widget<Text>(title).style?.color, isNot(green));
-        host.theme = const CalendarThemeData(text: green);
+        host.theme = CalendarThemeData(text: green);
       });
       expect(tester.widget<Text>(title).style?.color, green);
     });
