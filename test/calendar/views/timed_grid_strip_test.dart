@@ -4734,6 +4734,76 @@ void main() {
     }
   });
 
+  testWidgets("CM1 the range a create flow marks stays on its own days: "
+      "while the flow is open, a step to the next week marks no slot and no "
+      "strip cell there, and a step back marks the range again", (
+    tester,
+  ) async {
+    List<DateTime> weekOf(DateTime first) {
+      return <DateTime>[for (var i = 0; i < 7; i++) addDays(first, i)];
+    }
+
+    final shown = Shown.week(monday);
+    for (final strip in const <bool>[false, true]) {
+      final reason = strip ? "strip" : "slots";
+      final answer = Completer<void>();
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[]),
+        shown,
+        onCreate: (range) {
+          return answer.future;
+        },
+      );
+      await harness.pump(tester);
+      final from = strip
+          ? stripRect(tester, shown, thursday).center
+          : slotRect(tester, shown, thursday, 14 * 60).center;
+      final to = strip
+          ? stripRect(tester, shown, friday).center
+          : slotRect(tester, shown, thursday, 16 * 60).center;
+      await createDrag(tester, from, to);
+      void expectMarked() {
+        if (strip) {
+          expect(markedOf(tester, weekOf(monday)), <DateTime>[
+            thursday,
+            friday,
+          ], reason: reason);
+        } else {
+          expect(strokedRects(tester), <Matcher>[
+            nearRect(
+              slotsRect(
+                tester,
+                shown,
+                thursday,
+                14 * 60,
+                16 * 60 + 15,
+              ).deflate(1.0),
+            ),
+          ], reason: reason);
+        }
+      }
+
+      // Setup sanity: the open flow marks its range.
+      expectMarked();
+
+      harness.first = nextMonday;
+      await harness.rebuild(tester);
+      await tester.pumpAndSettle();
+      if (strip) {
+        expect(markedOf(tester, weekOf(nextMonday)), isEmpty, reason: reason);
+      } else {
+        expect(strokedRects(tester), isEmpty, reason: reason);
+      }
+
+      harness.first = monday;
+      await harness.rebuild(tester);
+      await tester.pumpAndSettle();
+      expectMarked();
+      answer.complete();
+      await tester.pumpAndSettle();
+    }
+  });
+
   testWidgets("GM1 while a block is lifted nothing creates: no drag or tap "
       "pressed during the lift, and none pressed before it whose drag or "
       "release comes during it; once the block is let go the same drag and "

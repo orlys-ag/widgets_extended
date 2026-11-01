@@ -1393,13 +1393,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ([_scheduleCrossRead]).
   bool _crossReadPending = false;
 
-  /// The day columns of the all-day range whose create flow is open, which
-  /// the strip marks; null while none is.
-  _StripMark? _stripCreating;
+  /// The all-day range whose create flow is open, which the strip marks on
+  /// the columns of its days the tracks show ([_columnsOf]); null while
+  /// none is.
+  CalendarCreateRange? _stripCreating;
 
-  /// The first and the last slot of the range whose create flow is open,
-  /// which the background marks; null while none is.
-  ({({int row, int col}) anchor, ({int row, int col}) focus})? _creating;
+  /// The wall minutes ([wallMinuteOf]) of the slots of the range whose
+  /// create flow is open, which the background marks on its days the
+  /// tracks show; null while none is. Times rather than cells, so new
+  /// days, and strip rows that move the slot rows, leave the mark on its
+  /// own slots.
+  ({int start, int end})? _creating;
 
   /// Counts the create flows opened, so only the last one's close clears
   /// [_creating].
@@ -1632,8 +1636,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (tracksChanged) {
       _tracks = tracks;
     }
-    if (tracksChanged && _range != null) {
-      // Its cells are rows and columns of the tracks it began on.
+    if (tracksChanged) {
+      // A create range in flight detaches, as its cells are rows and
+      // columns of the tracks it began on, and the strip marks an open
+      // create flow's days on the new columns.
       _detachRange();
       _updateStripMark();
     }
@@ -1953,27 +1959,19 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// returns whether they differ. A change moves every slot row by it: the
   /// tracks and the rows follow, a create range in flight, whose cells
   /// name rows it no longer has, detaches and reports nothing, an open
-  /// create flow's marks move with their slots, and a crossing drag reads
-  /// its cell again once the board has laid the new rows out. The caller
-  /// places the kept split on the new rows.
+  /// create flow's marks, kept as times, stay on their slots, and a
+  /// crossing drag reads its cell again once the board has laid the new
+  /// rows out. The caller places the kept split on the new rows.
   bool _applyStripRows(int rows) {
     if (rows == _stripRows) {
       _strip.value = _stripStateOf();
       return false;
     }
-    final shift = rows - _stripRows;
     _stripRows = rows;
     _tracks = _tracksOf(widget, rows);
     if (_range != null) {
       _detachRange();
       _updateStripMark();
-    }
-    final creating = _creating;
-    if (creating != null) {
-      _creating = (
-        anchor: (row: creating.anchor.row + shift, col: creating.anchor.col),
-        focus: (row: creating.focus.row + shift, col: creating.focus.col),
-      );
     }
     final size = _size;
     if (size != null) {
@@ -3450,7 +3448,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         last: math.max(range.anchor.col, range.focus.col),
       );
     } else {
-      mark = _stripCreating;
+      final creating = _stripCreating;
+      mark = creating == null ? null : _columnsOf(creating.start, creating.end);
     }
     _stripMark.value = mark;
   }
@@ -4159,9 +4158,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// Reports [range] through [TimedGrid.onCreate], marking until the
   /// create flow closes the range from the slot of [anchor] to that of
   /// [focus], or for a range across the strip, [strip], the strip cells of
-  /// their columns and those between. A throw within the call ends the
-  /// mark as a failure of the future does, and is left uncaught in the
-  /// zone as that failure is.
+  /// its days, on whichever days the grid shows meanwhile. A throw within
+  /// the call ends the mark as a failure of the future does, and is left
+  /// uncaught in the zone as that failure is.
   void _create(
     ({int row, int col}) anchor,
     ({int row, int col}) focus,
@@ -4172,12 +4171,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     setState(() {
       if (strip) {
         _creating = null;
-        _stripCreating = (
-          first: math.min(anchor.col, focus.col),
-          last: math.max(anchor.col, focus.col),
-        );
+        _stripCreating = range;
       } else {
-        _creating = (anchor: anchor, focus: focus);
+        _creating = _wallSpanOfCells(anchor, focus);
         _stripCreating = null;
       }
     });
@@ -4919,8 +4915,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final slotRange = range == null || range.strip || range.refused
         ? null
         : range;
-    final rangeAnchor = slotRange?.anchor ?? _creating?.anchor;
-    final rangeFocus = slotRange?.focus ?? _creating?.focus;
     final landing = _landingTimes();
     // `GestureBinding` sends a pointer's moves, lift and cancel along the
     // path its down hit, which still holds this listener once the grid has
@@ -4943,9 +4937,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             today: _calendarNow.today,
             range:
                 _laterDayRangeOf(landing) ??
-                (rangeAnchor == null || rangeFocus == null
-                    ? null
-                    : _wallSpanOfCells(rangeAnchor, rangeFocus)),
+                (slotRange == null
+                    ? _creating
+                    : _wallSpanOfCells(slotRange.anchor, slotRange.focus)),
             landing: _outlineOf(landing),
           ),
           foreground: _GridForegroundPainter(
