@@ -471,8 +471,13 @@ void main() {
       expect(dayStartUtc.earliest!.isUtc, isFalse);
 
       final time = offUtcTime!;
-      final later = CalendarEarliestStart(tuesday, time);
-      final laterUtc = CalendarEarliestStart(tuesday, time.toUtc());
+      final utc = time.toUtc();
+      final utcDate = DateTime(utc.year, utc.month, utc.day);
+      // The earlier of time's local and UTC dates: time's local date
+      // closes it in a zone east of UTC, and its UTC date in one west.
+      final day = utcDate.isBefore(tuesday) ? utcDate : tuesday;
+      final later = CalendarEarliestStart(day, time);
+      final laterUtc = CalendarEarliestStart(day, utc);
       expect(laterUtc.earliest, later.earliest);
       expect(laterUtc.earliest!.isUtc, isFalse);
       expect(laterUtc.closesDay, later.closesDay);
