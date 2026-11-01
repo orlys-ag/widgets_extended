@@ -25,6 +25,7 @@ import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
+import '../class_source.dart';
 import '../dst_days.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
@@ -408,29 +409,6 @@ Future<void> createDrag(WidgetTester tester, Offset from, Offset to) async {
   await tester.pump();
   await gesture.up();
   await tester.pumpAndSettle();
-}
-
-/// The body of the class [name] declares in [source], comments dropped, to
-/// its matching brace.
-String classBody(String source, String name) {
-  final code = source
-      .replaceAll(RegExp(r"/\*[\s\S]*?\*/"), "")
-      .replaceAll(RegExp(r"//[^\n]*"), "");
-  final start = code.indexOf(RegExp("class $name\\b"));
-  expect(start, isNot(-1), reason: name);
-  final open = code.indexOf("{", start);
-  var depth = 1;
-  var at = open + 1;
-  while (depth > 0) {
-    final char = code[at];
-    if (char == "{") {
-      depth++;
-    } else if (char == "}") {
-      depth--;
-    }
-    at++;
-  }
-  return code.substring(open + 1, at - 1);
 }
 
 void main() {
@@ -981,7 +959,7 @@ void main() {
   testWidgets("TR3b under hours 08:00-18:00 with maxDayCount 3, a create "
       "drag from Monday 10:00 released over Thursday 12:00 reports Monday "
       "10:00 to Wednesday 18:00", (tester) async {
-    const office = CalendarDayHours(8 * 60, 18 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
     final shown = Shown.week(monday, hours: office);
     final harness = Harness(
       storeOf(const <CalendarEntry<String>>[], hours: office),
@@ -1203,7 +1181,7 @@ void main() {
       harness.slotMinutes = 30;
     },
     "hours": (harness) {
-      harness.hours = const CalendarDayHours(0, 23 * 60);
+      harness.hours = CalendarDayHours(0, 23 * 60);
     },
   };
 
@@ -1253,7 +1231,7 @@ void main() {
       "hours that leave it outside": (
         entryOf("task", at(tuesday, 20), at(tuesday, 21)),
         (harness) {
-          harness.hours = const CalendarDayHours(8 * 60, 18 * 60);
+          harness.hours = CalendarDayHours(8 * 60, 18 * 60);
         },
       ),
     };
@@ -1796,7 +1774,7 @@ void main() {
     final edgeViews = <Shown>[
       Shown.week(monday),
       Shown.day(monday),
-      Shown.day(monday, hours: const CalendarDayHours(8 * 60, 18 * 60)),
+      Shown.day(monday, hours: CalendarDayHours(8 * 60, 18 * 60)),
     ];
 
     /// Monday at [minute] past its midnight, the next midnight for 1440.

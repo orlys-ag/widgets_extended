@@ -381,7 +381,7 @@ DateTime fixedClock() {
 }
 
 /// The calendar's hours, 08:00 to 18:00.
-const CalendarDayHours office = CalendarDayHours(8 * 60, 18 * 60);
+final CalendarDayHours office = CalendarDayHours(8 * 60, 18 * 60);
 
 /// [hour]:[minute] on [day].
 DateTime at(DateTime day, int hour, [int minute = 0]) {

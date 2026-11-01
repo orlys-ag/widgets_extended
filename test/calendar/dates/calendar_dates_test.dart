@@ -5,6 +5,11 @@ library;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
+/// Throws an [ArgumentError] whose name is [name].
+Matcher throwsArgumentNamed(String name) {
+  return throwsA(isArgumentError.having((error) => error.name, "name", name));
+}
+
 void main() {
   group("D1 MonthGrid over some of the weekdays", () {
     test("lays out the shown weekdays of each week holding the month", () {
@@ -213,19 +218,66 @@ void main() {
       expect(weekdays, CalendarWeekdaySet.workweek);
       expect(weekdays.hashCode, CalendarWeekdaySet.workweek.hashCode);
       expect(weekdays == CalendarWeekdaySet.all, isFalse);
-      expect(CalendarWeekdaySet.of(const <int>[]).isEmpty, isTrue);
-      expect(CalendarWeekdaySet.workweek.isEmpty, isFalse);
+      expect(() {
+        return CalendarWeekdaySet.of(const <int>[]);
+      }, throwsArgumentNamed("columns"));
+    });
+
+    test("RC1 of throws an ArgumentError for a column or a first column "
+        "outside 0 to 6, the first column first, and startingOn for a "
+        "column outside them", () {
+      expect(() {
+        return CalendarWeekdaySet.of(const <int>[7]);
+      }, throwsArgumentNamed("columns"));
+      expect(() {
+        return CalendarWeekdaySet.of(const <int>[-1]);
+      }, throwsArgumentNamed("columns"));
+      expect(() {
+        return CalendarWeekdaySet.of(const <int>[0], firstColumn: 7);
+      }, throwsArgumentNamed("firstColumn"));
+      expect(() {
+        return CalendarWeekdaySet.of(const <int>[0], firstColumn: -1);
+      }, throwsArgumentNamed("firstColumn"));
+      expect(() {
+        return CalendarWeekdaySet.of(const <int>[7], firstColumn: 7);
+      }, throwsArgumentNamed("firstColumn"));
+      expect(() {
+        return CalendarWeekdaySet.workweek.startingOn(7);
+      }, throwsArgumentNamed("column"));
+      expect(() {
+        return CalendarWeekdaySet.workweek.startingOn(-1);
+      }, throwsArgumentNamed("column"));
+      final fromSunday = CalendarWeekdaySet.workweek.startingOn(6);
+      expect(fromSunday.firstColumn, 6);
+      expect(fromSunday.columns, <int>[0, 1, 2, 3, 4]);
     });
   });
 
   group("C2 CalendarDayHours", () {
     test("counts its slots and holds the minutes inside it", () {
-      const office = CalendarDayHours(8 * 60, 18 * 60);
+      final office = CalendarDayHours(8 * 60, 18 * 60);
       expect(CalendarDayHours.allDay.slotCountOf(15), 96);
       expect(office.slotCountOf(15), 40);
       expect(office.contains(8 * 60, 18 * 60), isTrue);
       expect(office.contains(7 * 60 + 45, 9 * 60), isFalse);
       expect(office.contains(17 * 60, 18 * 60 + 15), isFalse);
+    });
+
+    test("RC2 the constructor throws an ArgumentError for a start under 0, "
+        "an end past the day and an end not after the start", () {
+      expect(() {
+        return CalendarDayHours(-1, 60);
+      }, throwsArgumentNamed("start"));
+      expect(() {
+        return CalendarDayHours(0, minutesPerDay + 1);
+      }, throwsArgumentNamed("end"));
+      expect(() {
+        return CalendarDayHours(60, 60);
+      }, throwsArgumentNamed("end"));
+      expect(() {
+        return CalendarDayHours(60, 30);
+      }, throwsArgumentNamed("end"));
+      expect(CalendarDayHours(0, minutesPerDay), CalendarDayHours.allDay);
     });
 
     test("compares by its minutes", () {
@@ -245,7 +297,7 @@ void main() {
   group("DH1 CalendarDayHours' starts and ends", () {
     test("holds a start from its start to before its end, and an end from "
         "after its start to its end", () {
-      const office = CalendarDayHours(480, 1080);
+      final office = CalendarDayHours(480, 1080);
       expect(office.holdsStart(480), isTrue);
       expect(office.holdsStart(1065), isTrue);
       expect(office.holdsStart(465), isFalse);
@@ -262,7 +314,7 @@ void main() {
   group("DH2 CalendarDayHours.holdsTimes is told the kind", () {
     test("holds Tuesday's start to Wednesday's as an all-day range under any "
         "hours, and as a timed one only under hours of the whole day", () {
-      const office = CalendarDayHours(480, 1080);
+      final office = CalendarDayHours(480, 1080);
       final tuesday = DateTime(2026, 4, 21);
       final wednesday = DateTime(2026, 4, 22);
       expect(office.holdsTimes(tuesday, wednesday, isAllDay: true), isTrue);
@@ -289,7 +341,7 @@ void main() {
         "CalendarWeekdaySet(We, Th, Fr, Mo, Tu; from We)",
       );
       expect(
-        const CalendarDayHours(480, 1080).toString(),
+        CalendarDayHours(480, 1080).toString(),
         "CalendarDayHours(08:00-18:00)",
       );
     });

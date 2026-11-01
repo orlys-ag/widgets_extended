@@ -14,7 +14,7 @@ const Color colour = Color(0xFF8A2B4C);
 /// A theme whose every field the defaults read differs from its built-in
 /// value, each text style the defaults read at a font size and a letter
 /// spacing no other of them has.
-const CalendarThemeData distinct = CalendarThemeData(
+final CalendarThemeData distinct = CalendarThemeData(
   primary: Color(0xFF0B5A3A),
   primaryTint: Color(0xFFD9F2E6),
   surface: Color(0xFFF7F1E3),
@@ -615,7 +615,7 @@ void main() {
     expect(extent, 16.0 + style.fontSize! * style.height!);
     expect(
       defaultCalendarCardExtent(
-        const CalendarThemeData(entryCardTitleStyle: TextStyle()),
+        CalendarThemeData(entryCardTitleStyle: TextStyle()),
       ),
       16.0 + kDefaultFontSize * 1.25,
     );

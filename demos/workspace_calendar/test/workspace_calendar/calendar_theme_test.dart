@@ -184,7 +184,7 @@ CalendarThemeData sentinelOf({
   Map<String, TextStyle Function(TextStyle style)> adjust =
       const <String, TextStyle Function(TextStyle style)>{},
 }) {
-  const builtIn = CalendarThemeData();
+  final builtIn = CalendarThemeData();
   final builtInStyles = stylesOf(builtIn);
   Color colour(String name) {
     return Color(colourBase + colourNames.indexOf(name) + 1);
@@ -637,7 +637,7 @@ Drawn drawnUnder(WidgetTester tester, List<Finder> roots) {
 /// The themes every sentinel check forbids: Harbor's and the built-in one.
 final List<CalendarThemeData> harborAndBuiltIn = <CalendarThemeData>[
   harborCalendarTheme,
-  const CalendarThemeData(),
+  CalendarThemeData(),
 ];
 
 /// Asserts that [drawn] holds only [theme]'s values: every colour, but
@@ -1352,7 +1352,7 @@ void main() {
       HarborColors.onNotice,
     ];
     final harborArgb = <int>{for (final colour in harbor) colour.toARGB32()};
-    for (final colour in coloursOf(const CalendarThemeData())) {
+    for (final colour in coloursOf(CalendarThemeData())) {
       expect(
         harborArgb.contains(colour.toARGB32()),
         isFalse,
@@ -1826,9 +1826,7 @@ void main() {
     expect(find.text("No items"), findsWidgets);
     expect(
       lineHeightAt(header, sentinelB.agendaHeaderTitleStyle),
-      isNot(
-        lineHeightAt(header, const CalendarThemeData().agendaHeaderTitleStyle),
-      ),
+      isNot(lineHeightAt(header, CalendarThemeData().agendaHeaderTitleStyle)),
     );
   });
 
@@ -2135,7 +2133,7 @@ void main() {
     expect(
       (shadow.decoration as BoxDecoration).boxShadow!.first.color.a,
       moreOrLessEquals(
-        const CalendarThemeData().liftedBlockShadows.first.color.a * 0.5,
+        CalendarThemeData().liftedBlockShadows.first.color.a * 0.5,
         epsilon: 0.01,
       ),
     );
@@ -2634,7 +2632,7 @@ void main() {
   test("C1 harborCalendarTheme takes each HarborColors value, the Harbor "
       "constants, the Material icons the views drew, and the built-in text "
       "styles", () {
-    const harbor = harborCalendarTheme;
+    final harbor = harborCalendarTheme;
     expect(coloursOf(harbor), const <Color>[
       HarborColors.primary,
       HarborColors.onPrimary,
@@ -2662,7 +2660,7 @@ void main() {
       Icons.more_horiz,
       Icons.add,
     ]);
-    expect(stylesOf(harbor), stylesOf(const CalendarThemeData()));
+    expect(stylesOf(harbor), stylesOf(CalendarThemeData()));
   });
 
   testWidgets("C10 each text draws the style and the colour field the "
@@ -3529,7 +3527,7 @@ void main() {
     expect(
       (shadow.decoration as BoxDecoration).boxShadow!.first.color.a,
       moreOrLessEquals(
-        const CalendarThemeData().liftedBlockShadows.first.color.a * 0.5,
+        CalendarThemeData().liftedBlockShadows.first.color.a * 0.5,
         epsilon: 0.01,
       ),
     );
@@ -3896,9 +3894,7 @@ void main() {
     final shadow = tester.widget<DecoratedBox>(find.byKey(liftedBlockKey));
     expect(
       (shadow.decoration as BoxDecoration).boxShadow!.first.color.a,
-      moreOrLessEquals(
-        const CalendarThemeData().liftedBlockShadows.first.color.a,
-      ),
+      moreOrLessEquals(CalendarThemeData().liftedBlockShadows.first.color.a),
     );
     await gesture.cancel();
     await tester.pumpAndSettle();

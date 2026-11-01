@@ -131,7 +131,7 @@ class CalendarSettings {
       <CalendarEditPolicy<ItemPayload>>[
         if (lockPast)
           HistoryLockPolicy<ItemPayload>(lockEarlierToday: lockEarlierToday),
-        const DayLimitPolicy<ItemPayload>(maxDayCount),
+        DayLimitPolicy<ItemPayload>(maxDayCount),
         if (!allowsOverlaps) const NoOverlapsPolicy<ItemPayload>(),
       ],
     );

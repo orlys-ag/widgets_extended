@@ -908,9 +908,9 @@ void main() {
 
   testWidgets("SL3 from 08:10-17:50 at slot 10, choosing 30 minutes gives "
       "08:00-18:00", (tester) async {
-    const off = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
-    const office = CalendarDayHours(8 * 60, 18 * 60);
-    final start = const CalendarSettings(hours: off, slotMinutes: 10);
+    final off = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
+    final start = CalendarSettings(hours: off, slotMinutes: 10);
     expect(
       start.withSlotMinutes(30),
       start.copyWith(hours: office, slotMinutes: 30),

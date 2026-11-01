@@ -30,7 +30,14 @@ enum CalendarLoadStatus {
 @immutable
 final class CalendarShownEntry<T> {
   /// The [entry] a view shows, and whether a write on it runs.
-  const CalendarShownEntry(this.entry, {required this.pending});
+  ///
+  /// Throws an [ArgumentError], in every build, naming `entry` for an
+  /// [entry] with no id: a shown entry is a stored one.
+  CalendarShownEntry(this.entry, {required this.pending}) {
+    if (entry.id == null) {
+      throw ArgumentError.value(entry, "entry", "A shown entry has an id");
+    }
+  }
 
   /// The entry to draw: a pending move's requested entry, else the stored
   /// one.
@@ -39,7 +46,7 @@ final class CalendarShownEntry<T> {
   /// Whether a write on the entry runs.
   final bool pending;
 
-  /// The entry's id. A shown entry is always a stored one, so it has one.
+  /// The entry's id, which the constructor requires.
   String get id {
     return entry.id!;
   }

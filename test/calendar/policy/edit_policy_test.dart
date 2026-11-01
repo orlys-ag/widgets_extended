@@ -10,6 +10,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 
+import '../dst_days.dart';
+
 /// A Tuesday.
 final DateTime tuesday = DateTime(2026, 4, 21);
 
@@ -226,6 +228,56 @@ void main() {
     expect(same.hashCode, now.hashCode);
     expect(nowAt(at(tuesday, 11, 7, 31)), isNot(now));
     expect(nowAt(at(tuesday, 11, 7, 30), wednesday), isNot(now));
+  });
+
+  test(
+    "RC8 a CalendarNow takes a UTC time as its local time, the same "
+    "instant",
+    skip: offUtcSkip,
+    () {
+      final time = offUtcTime!.add(const Duration(seconds: 30));
+      final local = CalendarNow(time: time, today: tuesday);
+      final fromUtc = CalendarNow(time: time.toUtc(), today: tuesday);
+      expect(fromUtc.time.isUtc, isFalse);
+      expect(fromUtc.time, time);
+      expect(fromUtc, local);
+      expect(fromUtc.timeOnToday, local.timeOnToday);
+    },
+  );
+
+  test(
+    "RC22 a CalendarNow still reads a UTC today by its year, month and "
+    "day, not as its local time",
+    skip: offUtcSkip,
+    () {
+      final today = offUtcTime!.toUtc();
+      expect(
+        CalendarNow(time: offUtcTime!, today: today).today,
+        DateTime(today.year, today.month, today.day),
+      );
+    },
+  );
+
+  group("on the 25-hour day", skip: longDaySkip, () {
+    test("RC9 a UTC time of the repeated stretch's second pass keeps that "
+        "occurrence", () {
+      final now = CalendarNow(
+        time: secondHalfPastOne.toUtc(),
+        today: longDayStart,
+      );
+      expect(now.time, secondHalfPastOne);
+      expect(now.timeOnToday, secondHalfPastOne);
+    });
+  });
+
+  group("on the 23-hour day", skip: shortDaySkip, () {
+    test("RC9 a UTC time past the skipped hour keeps its instant", () {
+      final time = shortDayStart.add(const Duration(hours: 2, minutes: 30));
+      expect(
+        CalendarNow(time: time.toUtc(), today: shortDayStart).timeOnToday,
+        time,
+      );
+    });
   });
 
   group("the policy of all of several", () {
@@ -518,7 +570,7 @@ void main() {
     test("EP12 limits a range to its days and nothing else: it moves, "
         "resizes both edges, edits, deletes and admits every change, lets a "
         "new entry start from a day's start and allows overlaps", () {
-      const policy = DayLimitPolicy<String>(3);
+      final policy = DayLimitPolicy<String>(3);
       final now = CalendarNow(time: at(tuesday, 11, 7), today: tuesday);
       final past = entryOf("past", at(monday, 9), at(monday, 10));
       expect(policy.dayLimit, 3);
@@ -542,7 +594,7 @@ void main() {
 
     test("EP13 two of the same limit are equal with equal hash codes; one "
         "of another limit, or under another type argument either way "
-        "round, is not; and a limit under 1 fails an assertion", () {
+        "round, is not; and a limit under 1 throws an ArgumentError", () {
       var limit = 2;
       final policy = DayLimitPolicy<String>(limit);
       final same = DayLimitPolicy<String>(limit);
@@ -553,9 +605,14 @@ void main() {
       expect(ofObjects, isNot(policy));
       expect(policy, isNot(ofObjects));
       limit = 0;
-      expect(() {
-        return DayLimitPolicy<String>(limit);
-      }, throwsAssertionError);
+      expect(
+        () {
+          return DayLimitPolicy<String>(limit);
+        },
+        throwsA(
+          isArgumentError.having((error) => error.name, "name", "dayLimit"),
+        ),
+      );
     });
 
     test("EP14 combined with the policy forbidding overlaps, it gives that "
@@ -563,7 +620,7 @@ void main() {
       final policy = CalendarEditPolicy<String>.all(
         <CalendarEditPolicy<String>>[
           const NoOverlapsPolicy<String>(),
-          const DayLimitPolicy<String>(2),
+          DayLimitPolicy<String>(2),
         ],
       );
       expect(policy.dayLimit, 2);

@@ -1,6 +1,8 @@
 /// The calendar's edit policy: what each answer limits in Week, Day, Month
 /// and Agenda, a policy change and a new minute during a gesture, a create
-/// range's earliest start as the minute moves, and an answer that throws.
+/// range's earliest start as the minute moves, an answer that throws, a
+/// day limit under 1, and Month's long press under store hours off the
+/// slot grid.
 library;
 
 import 'package:flutter/gestures.dart';
@@ -16,7 +18,7 @@ import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart'
-    show dayListGapKey;
+    show DayList, dayListGapKey;
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
@@ -1005,7 +1007,7 @@ void main() {
     testWidgets("with hours to 15:00 a range held at the 14:45 slot is "
         "refused once the boundary passes the hours' last slot, marking no "
         "range and creating nothing", (tester) async {
-      const hours = CalendarDayHours(8 * 60, 15 * 60);
+      final hours = CalendarDayHours(8 * 60, 15 * 60);
       for (final minutePasses in const <bool>[false, true]) {
         final host = await pumpDay(
           tester,
@@ -1091,7 +1093,7 @@ void main() {
         "clock on Monday, Day's range at 14:45 stops being marked", (
       tester,
     ) async {
-      const hours = CalendarDayHours(8 * 60, 15 * 60);
+      final hours = CalendarDayHours(8 * 60, 15 * 60);
       final host = Host(
         storeOf(const <CalendarEntry<String>>[], hours: hours),
         view: CalendarViewKind.day,
@@ -1154,7 +1156,7 @@ void main() {
 
     testWidgets("a range a refill refused for the entries its column holds "
         "is admitted again once a store write frees a slot", (tester) async {
-      const hours = CalendarDayHours(8 * 60, 15 * 60);
+      final hours = CalendarDayHours(8 * 60, 15 * 60);
       for (final frees in const <bool>[false, true]) {
         final host = await pumpDay(
           tester,
@@ -1739,11 +1741,143 @@ void main() {
     await tester.pump();
     expect(timesOf(policy.nows), <DateTime>{at(tuesday, 9, 1)});
   });
+
+  group("RC5 a policy whose day limit is under 1 throws an ArgumentError "
+      "from the build, and a valid one builds the view", () {
+    final viewTypes = <CalendarViewKind, Type>{
+      CalendarViewKind.agenda: DayList<String>,
+      CalendarViewKind.day: TimedGrid<String>,
+      CalendarViewKind.week: TimedGrid<String>,
+      CalendarViewKind.month: MonthBoard<String>,
+    };
+    for (final view in CalendarViewKind.values) {
+      for (final editable in <bool>[true, false]) {
+        testWidgets("in ${view.name} ${editable ? "in" : "out of"} edit "
+            "mode", (tester) async {
+          final host = Host(
+            storeOf(const <CalendarEntry<String>>[]),
+            view: view,
+            day: tuesday,
+            time: at(tuesday, 11, 7),
+            policy: const _ZeroDayLimit(),
+          );
+          host.editable.value = editable;
+          await host.pump(tester);
+          expect(
+            tester.takeException(),
+            isArgumentError.having((error) => error.name, "name", "policy"),
+          );
+
+          host.policy.value = null;
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          expect(find.byType(viewTypes[view]!), findsOneWidget);
+        });
+      }
+    }
+  });
+
+  group("PV14 after a hot reload the build takes the policy's answers "
+      "again, so a day limit the reload makes 0 throws an ArgumentError", () {
+    for (final view in <CalendarViewKind>[
+      CalendarViewKind.agenda,
+      CalendarViewKind.month,
+    ]) {
+      testWidgets("in ${view.name} out of edit mode", (tester) async {
+        _reloadedDayLimit = 1;
+        addTearDown(() {
+          _reloadedDayLimit = 1;
+        });
+        final host = Host(
+          storeOf(const <CalendarEntry<String>>[]),
+          view: view,
+          day: tuesday,
+          time: at(tuesday, 11, 7),
+          policy: const _ReloadedDayLimit(),
+        );
+        host.editable.value = false;
+        await host.pump(tester);
+        expect(tester.takeException(), isNull);
+
+        _reloadedDayLimit = 0;
+        final reassembled = tester.binding.reassembleApplication();
+        await tester.pump();
+        await reassembled;
+        expect(
+          tester.takeException(),
+          isArgumentError.having((error) => error.name, "name", "policy"),
+        );
+      });
+    }
+  });
+
+  testWidgets("RC17 Month's long press after a set of store hours off the "
+      "grid and before the next build creates nothing and reports the "
+      "rules' ArgumentError, and the build throws the store hours'", (
+    tester,
+  ) async {
+    final store = storeOf(
+      const <CalendarEntry<String>>[],
+      hours: CalendarDayHours(8 * 60, 18 * 60),
+    );
+    final host = Host(
+      store,
+      view: CalendarViewKind.month,
+      day: tuesday,
+      time: at(tuesday, 11, 7),
+    );
+    await host.pump(tester);
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(monthStripKey(thursday))),
+    );
+    store.hours = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
+    await recordingErrors((errors) async {
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      expect(host.creates, isEmpty);
+      expect(errors, isNotEmpty);
+      expect(
+        errors.first.exception,
+        isArgumentError.having((error) => error.name, "name", "hours"),
+      );
+      expect(
+        errors.last.exception,
+        isArgumentError.having((error) => error.name, "name", "store.hours"),
+      );
+    });
+    await gesture.up();
+  });
 }
 
 /// The clock readings of [nows], each once.
 Set<DateTime> timesOf(Iterable<CalendarNow> nows) {
   return <DateTime>{for (final now in nows) now.time};
+}
+
+/// What a [_ReloadedDayLimit] answers as its day limit, which a test sets
+/// as a hot reload changes what a getter answers.
+int _reloadedDayLimit = 1;
+
+/// Allows everything, and answers [_reloadedDayLimit] as its day limit.
+/// Compared by identity, so one instance stays `==` to itself across a
+/// reload.
+final class _ReloadedDayLimit extends CalendarEditPolicy<String> {
+  const _ReloadedDayLimit();
+
+  @override
+  int? get dayLimit {
+    return _reloadedDayLimit;
+  }
+}
+
+/// Allows everything, and answers a day limit of 0, under the least a
+/// policy may give.
+final class _ZeroDayLimit extends CalendarEditPolicy<String> {
+  const _ZeroDayLimit();
+
+  @override
+  int? get dayLimit {
+    return 0;
+  }
 }
 
 /// Allows everything, recording the [CalendarNow] each answer is asked

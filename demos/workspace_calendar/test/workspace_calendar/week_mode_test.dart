@@ -2222,7 +2222,7 @@ void main() {
         elapsed.inMicroseconds / 300000,
       );
       return <BoxShadow>[
-        for (final shadow in const CalendarThemeData().liftedBlockShadows)
+        for (final shadow in CalendarThemeData().liftedBlockShadows)
           shadow.copyWith(
             color: shadow.color.withValues(alpha: shadow.color.a * lift),
           ),
@@ -2248,7 +2248,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 150));
     expect(shadows(), liftedAt(const Duration(milliseconds: 150)));
     await tester.pump(const Duration(milliseconds: 150));
-    expect(shadows(), const CalendarThemeData().liftedBlockShadows);
+    expect(shadows(), CalendarThemeData().liftedBlockShadows);
 
     await gesture.up();
     await tester.pumpAndSettle();

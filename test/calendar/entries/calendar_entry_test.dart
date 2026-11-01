@@ -1,6 +1,6 @@
 /// CalendarEntry's fields, value semantics, copy, construction checks and
-/// stored all-day kind, the members it does not declare, and the
-/// data-source contract's signatures.
+/// stored all-day kind, the members it does not declare, the data-source
+/// contract's signatures, and the days a change of days takes.
 library;
 
 import 'dart:io';
@@ -12,6 +12,7 @@ import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 
+import '../class_source.dart';
 import '../dst_days.dart';
 
 /// A payload compared by its text, never by identity.
@@ -55,29 +56,6 @@ CalendarEntry<Note> entry({
     payload: Note(note),
     isAllDay: isAllDay,
   );
-}
-
-/// The body of the class [name] declares in [source], comments dropped, to
-/// its matching brace.
-String classBody(String source, String name) {
-  final code = source
-      .replaceAll(RegExp(r"/\*[\s\S]*?\*/"), "")
-      .replaceAll(RegExp(r"//[^\n]*"), "");
-  final start = code.indexOf(RegExp("class $name\\b"));
-  expect(start, isNot(-1), reason: name);
-  final open = code.indexOf("{", start);
-  var depth = 1;
-  var at = open + 1;
-  while (depth > 0) {
-    final char = code[at];
-    if (char == "{") {
-      depth++;
-    } else if (char == "}") {
-      depth--;
-    }
-    at++;
-  }
-  return code.substring(open + 1, at - 1);
 }
 
 /// Whether [body] declares a member named [name]: a field, a getter or a
@@ -401,5 +379,25 @@ void main() {
     replace = source.replace;
     final Future<void> Function(String id) delete = source.delete;
     <Object>[read, create, replace, delete];
+  });
+
+  test("RC13 a change of days throws an ArgumentError for a last day before "
+      "the first, and takes a last day equal to the first at any time", () {
+    expect(() {
+      return CalendarDaysChanged<String>(
+        DateTime(2026, 4, 22),
+        DateTime(2026, 4, 21),
+      );
+    }, throwsA(isArgumentError.having((error) => error.name, "name", "last")));
+    final earlierOnTheDay = CalendarDaysChanged<String>(
+      DateTime(2026, 4, 21, 10),
+      DateTime(2026, 4, 21, 9),
+    );
+    expect(earlierOnTheDay.last, DateTime(2026, 4, 21, 9));
+    final oneDay = CalendarDaysChanged<String>(
+      DateTime(2026, 4, 21),
+      DateTime(2026, 4, 21),
+    );
+    expect(oneDay.last, DateTime(2026, 4, 21));
   });
 }

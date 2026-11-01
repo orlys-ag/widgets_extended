@@ -1,6 +1,8 @@
 /// The local time zone's days of 2026 whose clock skips or repeats an hour,
 /// which the DST tests read, and the reason a DST group skips in a zone
-/// whose changes are not the ones the tests name.
+/// whose changes are not the ones the tests name; and a local time whose
+/// UTC date is another day, which the tests of a UTC time read, with the
+/// reason they skip in a zone that has none.
 library;
 
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
@@ -50,12 +52,7 @@ DstDay? _firstDayOf(int hours) {
 /// where [day] was found with [hour] equal to [expectedHour], and otherwise
 /// a reason naming what the zone has and the zone the tests are written
 /// for.
-String? dstSkipReason(
-  String what,
-  DateTime? day,
-  int? hour,
-  int expectedHour,
-) {
+String? dstSkipReason(String what, DateTime? day, int? hour, int expectedHour) {
   if (day == null) {
     return "No $what in this time zone; run with TZ=America/New_York";
   }
@@ -101,4 +98,30 @@ DateTime get secondHalfPastOne {
   return longDayStart
       .add(const Duration(minutes: 90))
       .add(const Duration(hours: 1));
+}
+
+/// A local time on April 21 2026 whose UTC date is another day: 23:30 where
+/// its UTC date is April 22, in a zone west of UTC, else 00:15 where its
+/// UTC date is April 20, in a zone east of UTC; null where neither is.
+final DateTime? offUtcTime = _offUtcTime();
+
+DateTime? _offUtcTime() {
+  final beforeMidnight = DateTime(2026, 4, 21, 23, 30);
+  if (beforeMidnight.toUtc().day == 22) {
+    return beforeMidnight;
+  }
+  final afterMidnight = DateTime(2026, 4, 21, 0, 15);
+  if (afterMidnight.toUtc().day == 20) {
+    return afterMidnight;
+  }
+  return null;
+}
+
+/// Why a test of a UTC time skips: null where [offUtcTime] is found.
+String? get offUtcSkip {
+  if (offUtcTime != null) {
+    return null;
+  }
+  return "This time zone reads UTC's date on 2026-04-21; run with "
+      "TZ=America/New_York";
 }

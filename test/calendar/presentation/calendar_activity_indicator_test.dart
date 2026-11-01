@@ -100,7 +100,7 @@ void main() {
     expect(given.paint.style, PaintingStyle.stroke);
     expect(given.paint.strokeCap, StrokeCap.round);
 
-    const theme = CalendarThemeData(primary: Color(0xFF0B5A3A));
+    final theme = CalendarThemeData(primary: Color(0xFF0B5A3A));
     await tester.pumpWidget(
       host(const CalendarActivityIndicator(), theme: theme),
     );
@@ -194,8 +194,8 @@ void main() {
 
   testWidgets("AI3 under zero motion it stands at the top and schedules no "
       "frame, and turns once motion is positive", (tester) async {
-    const still = CalendarThemeData(motionDuration: Duration.zero);
-    const moving = CalendarThemeData(motionDuration: Duration(seconds: 2));
+    final still = CalendarThemeData(motionDuration: Duration.zero);
+    final moving = CalendarThemeData(motionDuration: Duration(seconds: 2));
     await tester.pumpWidget(
       host(const CalendarActivityIndicator(), theme: still),
     );

@@ -95,7 +95,7 @@ const Curve harborMotionCurve = Curves.fastOutSlowIn;
 /// [harborDraggedItemOpacity], [harborMotionDuration] on
 /// [harborMotionCurve], and the Material icons the views draw, over the
 /// built-in text styles and shadows.
-const CalendarThemeData harborCalendarTheme = CalendarThemeData(
+final CalendarThemeData harborCalendarTheme = CalendarThemeData(
   primary: HarborColors.primary,
   onPrimary: HarborColors.onPrimary,
   primaryTint: HarborColors.primaryTint,

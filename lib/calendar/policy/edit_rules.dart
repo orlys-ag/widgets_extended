@@ -18,20 +18,28 @@ import 'overlap.dart';
 /// create on [day] reads from that answer.
 @immutable
 final class CalendarEarliestStart {
-  /// The start [earliest] that a policy gave [day], a day's start; a
-  /// [day] that is not one fails an assertion in a debug build.
-  CalendarEarliestStart(this.day, this.earliest)
-    : assert(
-        isDayStart(day),
-        "An earliest start's day, $day, is not a day's start.",
+  /// The start [earliest] that a policy gave [day], a local day's start,
+  /// with a UTC [earliest] taken as its local time, the same instant.
+  ///
+  /// Throws an [ArgumentError], in every build, naming `day` for a [day]
+  /// that is not a local day's start ([isDayStart]), a UTC one included.
+  CalendarEarliestStart(this.day, DateTime? earliest)
+    : earliest = earliest?.toLocal() {
+    if (!isDayStart(day)) {
+      throw ArgumentError.value(
+        day,
+        "day",
+        "An earliest start's day is a local day start",
       );
+    }
+  }
 
-  /// The day the answer is for, a day's start.
+  /// The day the answer is for, a local day's start.
   final DateTime day;
 
-  /// The answer: [day] or an instant before it for no limit, an instant
-  /// on [day] after its start, and null or an instant on a later day where
-  /// no new entry may start on [day].
+  /// The answer, a local time: [day] or an instant before it for no limit,
+  /// an instant on [day] after its start, and null or an instant on a
+  /// later day where no new entry may start on [day].
   final DateTime? earliest;
 
   /// Whether no new entry may start on [day]: [earliest] is null or on a
@@ -119,8 +127,8 @@ final class CalendarEarliestStart {
 /// view's to test, from what it shows, where [allowsOverlaps] is false.
 ///
 /// A `CalendarView` and its views make their rules of its `editPolicy`,
-/// or an [UnrestrictedEditPolicy] where that is null, its store's hours
-/// rounded out to its slots ([CalendarDayHours.roundedOutTo]) and its
+/// or an [UnrestrictedEditPolicy] where that is null, its store's hours,
+/// which its build requires on the grid of its slots, and its
 /// `slotMinutes`; a host that makes rules of the same three gets the
 /// answers the calendar gives.
 ///
@@ -129,8 +137,13 @@ final class CalendarEarliestStart {
 @immutable
 final class CalendarEditRules<T> {
   /// The rules of [policy] in [hours] and slots of [slotMinutes], reading
-  /// the policy's day limit and its answer on overlaps now. A day limit
-  /// under 1 fails an assertion in a debug build.
+  /// the policy's day limit and its answer on overlaps now.
+  ///
+  /// Throws an [ArgumentError], in every build, naming the first of these
+  /// that it does not take: `slotMinutes`, one that
+  /// `CalendarDates.slotMinuteChoices` does not hold; `hours`, hours off
+  /// the grid of its slots ([CalendarDayHours.isOnSlotsOf]); and `policy`,
+  /// a policy whose [CalendarEditPolicy.dayLimit] is under 1.
   CalendarEditRules({
     required CalendarEditPolicy<T> policy,
     required CalendarDayHours hours,
@@ -143,17 +156,36 @@ final class CalendarEditRules<T> {
          policy.allowsOverlaps,
        );
 
-  const CalendarEditRules._(
+  CalendarEditRules._(
     this.policy,
     this.hours,
     this.slotMinutes,
     this.dayLimit,
     this.allowsOverlaps,
-  ) : assert(
-        dayLimit == null || dayLimit >= 1,
-        "A CalendarEditPolicy's dayLimit, $dayLimit, is neither null nor at "
-        "least 1.",
+  ) {
+    if (!slotMinuteChoices.contains(slotMinutes)) {
+      throw ArgumentError.value(
+        slotMinutes,
+        "slotMinutes",
+        "is not one of $slotMinuteChoices",
       );
+    }
+    if (!hours.isOnSlotsOf(slotMinutes)) {
+      throw ArgumentError.value(
+        hours,
+        "hours",
+        "do not start and end on the grid of $slotMinutes-minute slots",
+      );
+    }
+    final limit = dayLimit;
+    if (limit != null && limit < 1) {
+      throw ArgumentError.value(
+        policy,
+        "policy",
+        "gives a dayLimit, $limit, under 1",
+      );
+    }
+  }
 
   /// The policy these rules ask.
   final CalendarEditPolicy<T> policy;
@@ -165,7 +197,7 @@ final class CalendarEditRules<T> {
   final int slotMinutes;
 
   /// [policy]'s [CalendarEditPolicy.dayLimit], as it answered when these
-  /// rules were made.
+  /// rules were made: null or at least 1.
   final int? dayLimit;
 
   /// [policy]'s [CalendarEditPolicy.allowsOverlaps], as it answered when
@@ -177,6 +209,10 @@ final class CalendarEditRules<T> {
   /// rules' policy in the new hours and slots, with the day limit and the
   /// answer on overlaps these rules read, so asking nothing; and otherwise
   /// new rules, which read them of [policy].
+  ///
+  /// Throws an [ArgumentError], in every build, as the constructor does,
+  /// for the [slotMinutes], the [hours] or the [policy] of the rules it
+  /// makes.
   CalendarEditRules<T> updated({
     required CalendarEditPolicy<T> policy,
     required CalendarDayHours hours,

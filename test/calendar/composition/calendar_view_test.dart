@@ -2,8 +2,8 @@
 /// the header built in, hidden or built by the host, what its gestures
 /// report and the routes it opens, the cost of a pinch, a fold and the
 /// month picker, the store's hours and range, the theme's motion and
-/// strip row, a move of the calendar under a new parent, and the source
-/// rules a release build depends on.
+/// strip row, a move of the calendar under a new parent, a clock reading
+/// UTC, and the source rules a release build depends on.
 library;
 
 import 'dart:async';
@@ -38,6 +38,7 @@ import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 
+import '../dst_days.dart';
 import 'recording_store.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
@@ -1112,7 +1113,7 @@ void main() {
     Finder addButton(DateTime day, int start) {
       return find.descendant(
         of: find.byKey(dayListGapKey(day, start)),
-        matching: find.byIcon(const CalendarThemeData().addEntryIcon),
+        matching: find.byIcon(CalendarThemeData().addEntryIcon),
       );
     }
 
@@ -1538,7 +1539,7 @@ void main() {
 
   group("CV18 the fold and the month picker move over the theme's motion", () {
     testWidgets("its duration and curve", (tester) async {
-      const slow = CalendarThemeData(
+      final slow = CalendarThemeData(
         motionDuration: Duration(seconds: 1),
         motionCurve: Curves.easeIn,
       );
@@ -1585,7 +1586,7 @@ void main() {
     });
 
     testWidgets("a zero duration moving each in one frame", (tester) async {
-      const instant = CalendarThemeData(motionDuration: Duration.zero);
+      final instant = CalendarThemeData(motionDuration: Duration.zero);
       await tester.pumpWidget(
         app(
           CalendarTheme(
@@ -1620,7 +1621,7 @@ void main() {
     final controller = CalendarController(view: CalendarViewKind.day);
     addTearDown(controller.dispose);
     final large = CalendarThemeExtension(
-      data: const CalendarThemeData().copyWith(
+      data: CalendarThemeData().copyWith(
         stripWeekdayStyle: const TextStyle(fontSize: 30.0),
       ),
     );
@@ -1739,7 +1740,7 @@ void main() {
                   children: <Widget>[
                     Expanded(
                       child: CalendarTheme(
-                        data: const CalendarThemeData(),
+                        data: CalendarThemeData.builtIn,
                         child: calendar,
                       ),
                     ),
@@ -1770,19 +1771,20 @@ void main() {
     expect(tester.state(find.byType(TimedGrid<String>)), same(grid));
     expect(
       CalendarTheme.of(tester.element(find.byType(TimedGrid<String>))),
-      same(const CalendarThemeData()),
+      same(CalendarThemeData.builtIn),
     );
   });
 
-  test("CV22 no assertion holds the views' throw, the slot length's throw "
-      "or the fallback to a listed view, which run in a release build", () {
+  test("CV22 no assertion holds the views' throw, the slot length's throw, "
+      "the store hours' throw, the rules the build makes or the fallback to "
+      "a listed view, which run in a release build", () {
     const files = <String>[
       "lib/calendar/composition/calendar_view.dart",
       "lib/calendar/composition/calendar_controller.dart",
     ];
     final named = RegExp(
-      r"\b(_viewsError|_slotMinutesError|calendarViewsError|"
-      r"calendarOpeningView)\b",
+      r"\b(_viewsError|_slotMinutesError|_storeHoursError|_takeRules|"
+      r"calendarViewsError|calendarOpeningView)\b",
     );
     var asserts = 0;
     for (final path in files) {
@@ -1792,7 +1794,7 @@ void main() {
       }
     }
     // The scan reads the assertions the files hold.
-    expect(asserts, greaterThan(3));
+    expect(asserts, greaterThan(2));
 
     final view = File(files.first).readAsStringSync();
     final select = methodBody(view, "void _selectView(CalendarViewKind view)");
@@ -1809,6 +1811,8 @@ void main() {
     final build = methodBody(view, "Widget build(BuildContext context)");
     expect(RegExp(r"\b_viewsError\b").hasMatch(build), isTrue);
     expect(RegExp(r"\b_slotMinutesError\b").hasMatch(build), isTrue);
+    expect(RegExp(r"\b_storeHoursError\b").hasMatch(build), isTrue);
+    expect(RegExp(r"\b_takeRules\(").hasMatch(build), isTrue);
   });
 
   testWidgets("CV23 Week's and Day's grid takes as its store range the "
@@ -2029,16 +2033,19 @@ void main() {
     }
   });
 
-  testWidgets("CV28 hours off the grid of the slot length fail an "
-      "assertion, and on it build", (tester) async {
-    const hours = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
+  testWidgets("CV28 hours off the grid of the slot length throw an "
+      "ArgumentError from the build, and on it build", (tester) async {
+    final hours = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
     final office = MemoryCalendarStore<String>(hours: hours);
     addTearDown(office.dispose);
     await tester.pumpWidget(
       app(CalendarView<String>(store: office, clock: fixedClock)),
     );
     final error = tester.takeException();
-    expect(error, isA<AssertionError>());
+    expect(
+      error,
+      isArgumentError.having((error) => error.name, "name", "store.hours"),
+    );
     expect("$error", contains("15-minute slots"));
     await tester.pumpWidget(
       app(
@@ -2050,10 +2057,74 @@ void main() {
     expect(find.byType(DayList<String>), findsOneWidget);
   });
 
+  testWidgets("RC3 a set of store hours off the grid of the slot length "
+      "throws an ArgumentError from the next build, and a set of hours on "
+      "it builds the views in them", (tester) async {
+    final office = MemoryCalendarStore<String>(
+      hours: CalendarDayHours(8 * 60, 18 * 60),
+    );
+    addTearDown(office.dispose);
+    await tester.pumpWidget(
+      app(CalendarView<String>(store: office, clock: fixedClock)),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byType(DayList<String>), findsOneWidget);
+
+    office.hours = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
+    await tester.pump();
+    expect(
+      tester.takeException(),
+      isArgumentError.having((error) => error.name, "name", "store.hours"),
+    );
+
+    final later = CalendarDayHours(9 * 60, 17 * 60);
+    office.hours = later;
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(
+      tester.widget<DayList<String>>(find.byType(DayList<String>)).hours,
+      later,
+    );
+  });
+
+  group("in a zone off UTC", skip: offUtcSkip, () {
+    testWidgets("RC10 a clock reading UTC marks as today the local day of "
+        "each reading", (tester) async {
+      var reading = offUtcTime!;
+      final controller = CalendarController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            store: store,
+            controller: controller,
+            clock: () {
+              return reading.toUtc();
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      CalendarCard<String> card() {
+        return tester.widget<CalendarCard<String>>(
+          find.byType(CalendarCard<String>),
+        );
+      }
+
+      expect(controller.selectedDay, tuesday);
+      expect(card().today, tuesday);
+
+      reading = DateTime(2026, 4, 22, reading.hour, reading.minute);
+      await tester.pump(const Duration(minutes: 1));
+      expect(card().today, wednesday);
+    });
+  });
+
   testWidgets("CV45 every view shows the store's hours, and a set of them "
       "reaches the view shown", (tester) async {
-    const office = CalendarDayHours(8 * 60, 18 * 60);
-    const late = CalendarDayHours(10 * 60, 20 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
+    final late = CalendarDayHours(10 * 60, 20 * 60);
     final memory = MemoryCalendarStore<String>(hours: office);
     addTearDown(memory.dispose);
     final controller = CalendarController(view: CalendarViewKind.week);
@@ -2117,7 +2188,7 @@ void main() {
     // Setup sanity: the create's notify reached Agenda's list.
     expect(find.text("talk"), findsOneWidget);
     expect(headers, built);
-    memory.hours = const CalendarDayHours(8 * 60, 18 * 60);
+    memory.hours = CalendarDayHours(8 * 60, 18 * 60);
     await tester.pump();
     expect(headers, built + 1);
   });
@@ -2125,8 +2196,8 @@ void main() {
   testWidgets("CV47 a new store's hours show and its sets reach the "
       "calendar, and once the calendar leaves, a set of either store's "
       "hours reaches it no more", (tester) async {
-    const office = CalendarDayHours(8 * 60, 18 * 60);
-    const late = CalendarDayHours(10 * 60, 20 * 60);
+    final office = CalendarDayHours(8 * 60, 18 * 60);
+    final late = CalendarDayHours(10 * 60, 20 * 60);
     final first = MemoryCalendarStore<String>();
     addTearDown(first.dispose);
     final second = MemoryCalendarStore<String>(hours: office);
@@ -2164,7 +2235,7 @@ void main() {
     final first = MemoryCalendarStore<String>();
     addTearDown(first.dispose);
     final second = MemoryCalendarStore<String>(
-      hours: const CalendarDayHours(8 * 60, 18 * 60),
+      hours: CalendarDayHours(8 * 60, 18 * 60),
     );
     addTearDown(second.dispose);
     var headers = 0;

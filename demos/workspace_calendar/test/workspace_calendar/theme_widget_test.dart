@@ -62,7 +62,7 @@ Future<void> pumpUnderHostTheme(WidgetTester tester) async {
       // The M3 ink sparkle shader cannot load under the test binding.
       theme: ThemeData(splashFactory: NoSplash.splashFactory),
       builder: (context, child) {
-        return CalendarTheme(data: const CalendarThemeData(), child: child!);
+        return CalendarTheme(data: CalendarThemeData(), child: child!);
       },
       home: WorkspaceCalendarExample(editing: true, today: today, api: api),
     ),

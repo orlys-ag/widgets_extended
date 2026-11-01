@@ -45,23 +45,22 @@ base class CalendarController extends ChangeNotifier {
   /// calendar's own choice when it binds it, the first view it lists and
   /// today's nearest shown day, and of the least sizes, logical pixels of
   /// layout, positive and finite.
+  ///
+  /// Throws an [ArgumentError], in every build, naming `minDayWidth` or
+  /// `minSlotHeight` for a size that is not positive and finite, NaN
+  /// included.
   CalendarController({
     CalendarViewKind? view,
     DateTime? selectedDay,
     double minDayWidth = minDayWidthLow,
     double minSlotHeight = defaultMinSlotHeight,
-  }) : assert(
-         _isSize(minDayWidth),
-         "A CalendarController's minDayWidth must be positive and finite.",
-       ),
-       assert(
-         _isSize(minSlotHeight),
-         "A CalendarController's minSlotHeight must be positive and finite.",
-       ),
-       _view = view,
+  }) : _view = view,
        _selectedDay = selectedDay == null ? null : dateOnly(selectedDay),
        _minDayWidth = minDayWidth,
-       _minSlotHeight = minSlotHeight;
+       _minSlotHeight = minSlotHeight {
+    _checkSize(minDayWidth, "minDayWidth");
+    _checkSize(minSlotHeight, "minSlotHeight");
+  }
 
   /// A controller holding what [other] holds: its view, selected day,
   /// sizes and range.
@@ -72,8 +71,17 @@ base class CalendarController extends ChangeNotifier {
       _minSlotHeight = other._minSlotHeight,
       _visibleRange = other._visibleRange;
 
+  /// Whether [value] is positive and finite; a NaN is not.
   static bool _isSize(double value) {
     return value > 0.0 && value < double.infinity;
+  }
+
+  /// Throws an [ArgumentError] named [name] for a [value] that is not a
+  /// size ([_isSize]).
+  static void _checkSize(double value, String name) {
+    if (!_isSize(value)) {
+      throw ArgumentError.value(value, name, "is not positive and finite");
+    }
   }
 
   CalendarViewKind? _view;
@@ -159,6 +167,10 @@ base class CalendarController extends ChangeNotifier {
   /// positive and finite; the days stretch past it to fill the calendar.
   /// A pinch across sets it within [minDayWidthLow] and [minDayWidthHigh],
   /// so the views move a value outside them into them at its first report.
+  ///
+  /// Set to a value that is not positive and finite, NaN included, it
+  /// throws an [ArgumentError], in every build, naming `minDayWidth`, and
+  /// changes nothing.
   double get minDayWidth {
     return _minDayWidth;
   }
@@ -172,6 +184,10 @@ base class CalendarController extends ChangeNotifier {
   /// calendar. A pinch up and down sets it within [minSlotHeightLow] and
   /// [minSlotHeightHigh], so the views move a value outside them into
   /// them at its first report.
+  ///
+  /// Set to a value that is not positive and finite, NaN included, it
+  /// throws an [ArgumentError], in every build, naming `minSlotHeight`, and
+  /// changes nothing.
   double get minSlotHeight {
     return _minSlotHeight;
   }
@@ -186,7 +202,10 @@ base class CalendarController extends ChangeNotifier {
   ///
   /// Set to a finite scale of at least 1, it sets [minSlotHeight] to
   /// [defaultMinSlotHeight] times the scale above 1, and at 1 to the
-  /// lesser of [minSlotHeight] and [defaultMinSlotHeight].
+  /// lesser of [minSlotHeight] and [defaultMinSlotHeight]. Set to a scale
+  /// under 1 or not finite, NaN included, or to one whose slot height is
+  /// not finite, it throws an [ArgumentError], in every build, naming
+  /// `monthWeekScale`, and changes nothing.
   double get monthWeekScale {
     return math.max(1.0, _minSlotHeight / defaultMinSlotHeight);
   }
@@ -197,33 +216,52 @@ base class CalendarController extends ChangeNotifier {
 
   /// Sets the sizes given, [minSlotHeight] or [monthWeekScale] but not
   /// both, each as its setter does, and notifies once where any changed.
+  ///
+  /// Throws an [ArgumentError], in every build, before it writes a size,
+  /// so a call that throws changes no size and notifies nothing: naming
+  /// `monthWeekScale` where it is given with [minSlotHeight]; then
+  /// `minDayWidth` or `minSlotHeight` for a size that is not positive and
+  /// finite, NaN included; and `monthWeekScale` for a scale under 1 or not
+  /// finite, or one whose slot height, [defaultMinSlotHeight] times it, is
+  /// not finite.
   void setZoom({
     double? minDayWidth,
     double? minSlotHeight,
     double? monthWeekScale,
   }) {
-    assert(
-      minSlotHeight == null || monthWeekScale == null,
-      "setZoom sets minSlotHeight or monthWeekScale, not both.",
-    );
-    assert(
-      minDayWidth == null || _isSize(minDayWidth),
-      "A CalendarController's minDayWidth must be positive and finite.",
-    );
-    assert(
-      minSlotHeight == null || _isSize(minSlotHeight),
-      "A CalendarController's minSlotHeight must be positive and finite.",
-    );
-    assert(
-      monthWeekScale == null ||
-          (monthWeekScale >= 1.0 && monthWeekScale < double.infinity),
-      "A CalendarController's monthWeekScale must be finite and at least 1.",
-    );
+    if (minSlotHeight != null && monthWeekScale != null) {
+      throw ArgumentError.value(
+        monthWeekScale,
+        "monthWeekScale",
+        "is given with minSlotHeight, and setZoom sets one of them",
+      );
+    }
+    if (minDayWidth != null) {
+      _checkSize(minDayWidth, "minDayWidth");
+    }
+    if (minSlotHeight != null) {
+      _checkSize(minSlotHeight, "minSlotHeight");
+    }
     var slot = minSlotHeight ?? _minSlotHeight;
     if (monthWeekScale != null) {
+      if (!(monthWeekScale >= 1.0 && monthWeekScale < double.infinity)) {
+        throw ArgumentError.value(
+          monthWeekScale,
+          "monthWeekScale",
+          "is under 1 or not finite",
+        );
+      }
       slot = monthWeekScale > 1.0
           ? defaultMinSlotHeight * monthWeekScale
           : math.min(_minSlotHeight, defaultMinSlotHeight);
+      // A finite scale can still overflow the product.
+      if (!_isSize(slot)) {
+        throw ArgumentError.value(
+          monthWeekScale,
+          "monthWeekScale",
+          "gives a slot height that is not finite",
+        );
+      }
     }
     final day = minDayWidth ?? _minDayWidth;
     if (slot == _minSlotHeight && day == _minDayWidth) {

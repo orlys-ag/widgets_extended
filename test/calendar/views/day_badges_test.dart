@@ -49,7 +49,7 @@ final CalendarDayBadges<String> badges = CalendarDayBadges<String>(
   },
 );
 
-const CalendarThemeData theme = CalendarThemeData();
+final CalendarThemeData theme = CalendarThemeData();
 
 DateTime april(int day) {
   return DateTime(2026, 4, day);

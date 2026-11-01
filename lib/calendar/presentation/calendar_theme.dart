@@ -12,8 +12,8 @@ import 'package:flutter/widgets.dart';
 ///
 /// Every field is set: a parameter left out takes its built-in value, a
 /// neutral light palette with the shadows, typography, motion and icons
-/// the views are designed around, so `const CalendarThemeData()` is a
-/// whole theme.
+/// the views are designed around, so `CalendarThemeData()` is a whole
+/// theme, equal to [builtIn].
 ///
 /// The text styles are partial (`inherit: true`): a view merges each over
 /// the ambient [DefaultTextStyle], as [Text] does, so the host's font and
@@ -31,12 +31,12 @@ import 'package:flutter/widgets.dart';
 final class CalendarThemeData with Diagnosticable {
   /// Creates a theme; each parameter left out takes its built-in value.
   ///
-  /// [todayRingWidth] must be zero or more, and [draggedBlockOpacity],
-  /// [entryTintOpacity] and [pendingEntryOpacity] each from 0 to 1.
-  /// [motionDuration] must be zero or more, and every text style
-  /// must have `inherit: true`; [CalendarTheme.of] asserts those two in a
-  /// debug build, since this constructor's asserts cannot read them.
-  const CalendarThemeData({
+  /// Throws an [ArgumentError], in every build, naming the first field, in
+  /// the order the fields are declared, outside its domain: a
+  /// [todayRingWidth] under 0 or NaN; a [draggedBlockOpacity],
+  /// [entryTintOpacity] or [pendingEntryOpacity] outside 0 to 1 or NaN; a
+  /// negative [motionDuration]; and a text style with `inherit: false`.
+  CalendarThemeData({
     this.primary = _primary,
     this.onPrimary = _onPrimary,
     this.primaryTint = _primaryTint,
@@ -96,19 +96,146 @@ final class CalendarThemeData with Diagnosticable {
     this.monthNameStyle = _monthNameStyle,
     this.monthNameMarkedStyle = _monthNameMarkedStyle,
     this.actionLabelStyle = _actionLabelStyle,
-  }) : assert(todayRingWidth >= 0.0, "todayRingWidth must be zero or more."),
-       assert(
-         draggedBlockOpacity >= 0.0 && draggedBlockOpacity <= 1.0,
-         "draggedBlockOpacity must be from 0 to 1.",
-       ),
-       assert(
-         entryTintOpacity >= 0.0 && entryTintOpacity <= 1.0,
-         "entryTintOpacity must be from 0 to 1.",
-       ),
-       assert(
-         pendingEntryOpacity >= 0.0 && pendingEntryOpacity <= 1.0,
-         "pendingEntryOpacity must be from 0 to 1.",
-       );
+  }) {
+    // Each test asks for the domain, so a NaN, which fails every
+    // comparison, lies outside it.
+    if (!(todayRingWidth >= 0.0)) {
+      throw ArgumentError.value(
+        todayRingWidth,
+        "todayRingWidth",
+        "is under 0 or NaN",
+      );
+    }
+    _checkOpacity(draggedBlockOpacity, "draggedBlockOpacity");
+    _checkOpacity(entryTintOpacity, "entryTintOpacity");
+    _checkOpacity(pendingEntryOpacity, "pendingEntryOpacity");
+    if (motionDuration.isNegative) {
+      throw ArgumentError.value(
+        motionDuration,
+        "motionDuration",
+        "is negative",
+      );
+    }
+    _checkStyle(hourLabelStyle, "hourLabelStyle");
+    _checkStyle(dayHeaderWeekdayStyle, "dayHeaderWeekdayStyle");
+    _checkStyle(dayHeaderNumberStyle, "dayHeaderNumberStyle");
+    _checkStyle(blockTitleStyle, "blockTitleStyle");
+    _checkStyle(blockSummaryStyle, "blockSummaryStyle");
+    _checkStyle(detailedBlockTitleStyle, "detailedBlockTitleStyle");
+    _checkStyle(detailedBlockDetailStyle, "detailedBlockDetailStyle");
+    _checkStyle(landingLabelStyle, "landingLabelStyle");
+    _checkStyle(badgeStyle, "badgeStyle");
+    _checkStyle(noticeStyle, "noticeStyle");
+    _checkStyle(messageStyle, "messageStyle");
+    _checkStyle(monthDayNumberStyle, "monthDayNumberStyle");
+    _checkStyle(monthDayNumberMarkedStyle, "monthDayNumberMarkedStyle");
+    _checkStyle(monthMoreStyle, "monthMoreStyle");
+    _checkStyle(chipTitleStyle, "chipTitleStyle");
+    _checkStyle(monthCardTitleStyle, "monthCardTitleStyle");
+    _checkStyle(monthCardTimeStyle, "monthCardTimeStyle");
+    _checkStyle(agendaHeaderTitleStyle, "agendaHeaderTitleStyle");
+    _checkStyle(agendaHeaderEmptyTitleStyle, "agendaHeaderEmptyTitleStyle");
+    _checkStyle(agendaHeaderCountStyle, "agendaHeaderCountStyle");
+    _checkStyle(agendaHeaderEmptyCountStyle, "agendaHeaderEmptyCountStyle");
+    _checkStyle(agendaTimeStyle, "agendaTimeStyle");
+    _checkStyle(entryCardTitleStyle, "entryCardTitleStyle");
+    _checkStyle(entryCardSummaryStyle, "entryCardSummaryStyle");
+    _checkStyle(dayNumberStyle, "dayNumberStyle");
+    _checkStyle(dayNumberMarkedStyle, "dayNumberMarkedStyle");
+    _checkStyle(stripWeekdayStyle, "stripWeekdayStyle");
+    _checkStyle(weekdayHeaderStyle, "weekdayHeaderStyle");
+    _checkStyle(weekdayLetterStyle, "weekdayLetterStyle");
+    _checkStyle(monthNameStyle, "monthNameStyle");
+    _checkStyle(monthNameMarkedStyle, "monthNameMarkedStyle");
+    _checkStyle(actionLabelStyle, "actionLabelStyle");
+  }
+
+  /// [builtIn]: each field at the value the public constructor defaults it
+  /// to.
+  const CalendarThemeData._builtIn()
+    : primary = _primary,
+      onPrimary = _onPrimary,
+      primaryTint = _primaryTint,
+      background = _background,
+      surface = _surface,
+      outline = _outline,
+      text = _text,
+      textSecondary = _textSecondary,
+      textMuted = _textMuted,
+      error = _error,
+      notice = _notice,
+      noticeOutline = _noticeOutline,
+      onNotice = _onNotice,
+      todayRing = _todayRing,
+      todayRingWidth = _todayRingWidth,
+      draggedBlockOpacity = _draggedBlockOpacity,
+      entryTintOpacity = _entryTintOpacity,
+      pendingEntryOpacity = _pendingEntryOpacity,
+      gripShadows = _gripShadows,
+      liftedBlockShadows = _liftedBlockShadows,
+      motionDuration = _motionDuration,
+      motionCurve = _motionCurve,
+      beforeHoursIcon = _beforeHoursIcon,
+      afterHoursIcon = _afterHoursIcon,
+      durationIcon = _durationIcon,
+      entryMenuIcon = _entryMenuIcon,
+      addEntryIcon = _addEntryIcon,
+      hourLabelStyle = _hourLabelStyle,
+      dayHeaderWeekdayStyle = _dayHeaderWeekdayStyle,
+      dayHeaderNumberStyle = _dayHeaderNumberStyle,
+      blockTitleStyle = _blockTitleStyle,
+      blockSummaryStyle = _blockSummaryStyle,
+      detailedBlockTitleStyle = _detailedBlockTitleStyle,
+      detailedBlockDetailStyle = _detailedBlockDetailStyle,
+      landingLabelStyle = _landingLabelStyle,
+      badgeStyle = _badgeStyle,
+      noticeStyle = _noticeStyle,
+      messageStyle = _messageStyle,
+      monthDayNumberStyle = _monthDayNumberStyle,
+      monthDayNumberMarkedStyle = _monthDayNumberMarkedStyle,
+      monthMoreStyle = _monthMoreStyle,
+      chipTitleStyle = _chipTitleStyle,
+      monthCardTitleStyle = _monthCardTitleStyle,
+      monthCardTimeStyle = _monthCardTimeStyle,
+      agendaHeaderTitleStyle = _agendaHeaderTitleStyle,
+      agendaHeaderEmptyTitleStyle = _agendaHeaderEmptyTitleStyle,
+      agendaHeaderCountStyle = _agendaHeaderCountStyle,
+      agendaHeaderEmptyCountStyle = _agendaHeaderEmptyCountStyle,
+      agendaTimeStyle = _agendaTimeStyle,
+      entryCardTitleStyle = _entryCardTitleStyle,
+      entryCardSummaryStyle = _entryCardSummaryStyle,
+      dayNumberStyle = _dayNumberStyle,
+      dayNumberMarkedStyle = _dayNumberMarkedStyle,
+      stripWeekdayStyle = _stripWeekdayStyle,
+      weekdayHeaderStyle = _weekdayHeaderStyle,
+      weekdayLetterStyle = _weekdayLetterStyle,
+      monthNameStyle = _monthNameStyle,
+      monthNameMarkedStyle = _monthNameMarkedStyle,
+      actionLabelStyle = _actionLabelStyle;
+
+  /// The built-in theme, a const value equal to `CalendarThemeData()`.
+  static const CalendarThemeData builtIn = CalendarThemeData._builtIn();
+
+  /// Throws an [ArgumentError] named [name] for an opacity [value] outside
+  /// 0 to 1 or NaN.
+  static void _checkOpacity(double value, String name) {
+    if (!(value >= 0.0 && value <= 1.0)) {
+      throw ArgumentError.value(value, name, "is outside 0 to 1 or NaN");
+    }
+  }
+
+  /// Throws an [ArgumentError] named [name] for a text [style] with
+  /// `inherit: false`.
+  static void _checkStyle(TextStyle style, String name) {
+    if (!style.inherit) {
+      throw ArgumentError.value(
+        style,
+        name,
+        "has inherit: false; a calendar text style merges over the ambient "
+        "DefaultTextStyle and interpolates",
+      );
+    }
+  }
 
   static const Color _primary = Color(0xFF3D4B5C);
   static const Color _onPrimary = Color(0xFFFEFEFE);
@@ -563,7 +690,9 @@ final class CalendarThemeData with Diagnosticable {
     ];
   }
 
-  /// A copy with each given field replaced and the others kept.
+  /// A copy with each given field replaced and the others kept. It
+  /// constructs the copy, so it throws the constructor's [ArgumentError],
+  /// in every build, for a field given outside its domain.
   CalendarThemeData copyWith({
     Color? primary,
     Color? onPrimary,
@@ -706,7 +835,9 @@ final class CalendarThemeData with Diagnosticable {
   /// and the curve are [a]'s below 0.5 and [b]'s from it. A [t] outside 0
   /// to 1, as an overshooting curve gives, may take the duration,
   /// [todayRingWidth], [draggedBlockOpacity], [entryTintOpacity] or
-  /// [pendingEntryOpacity] out of its domain, so each is clamped into it.
+  /// [pendingEntryOpacity] out of its domain, so each is clamped into it;
+  /// and [TextStyle.lerp] of two styles that inherit inherits, so for a
+  /// finite [t] it throws none of the constructor's errors.
   static CalendarThemeData lerp(
     CalendarThemeData a,
     CalendarThemeData b,
@@ -886,24 +1017,6 @@ final class CalendarThemeData with Diagnosticable {
         t,
       )!,
     );
-  }
-
-  /// Whether [motionDuration] and every text style lie in their domains:
-  /// asserts each, and returns true so it can sit inside an `assert`.
-  bool _debugCheckDomains() {
-    assert(
-      !motionDuration.isNegative,
-      "CalendarThemeData.motionDuration must be zero or more: "
-      "$motionDuration.",
-    );
-    assert(
-      _textStyles.every((style) {
-        return style.inherit;
-      }),
-      "Every CalendarThemeData text style must have inherit: true, so it "
-      "merges over the ambient DefaultTextStyle and interpolates.",
-    );
-    return true;
   }
 
   @override
@@ -1234,18 +1347,12 @@ class CalendarTheme extends InheritedTheme {
   final CalendarThemeData data;
 
   /// The [data] of the nearest [CalendarTheme] above [context], or the
-  /// built-in values, `const CalendarThemeData()`, where there is none.
+  /// built-in theme, [CalendarThemeData.builtIn], where there is none.
   /// Never null. Makes [context] depend on that theme, so it rebuilds when
   /// a theme that is not `==` replaces it.
-  ///
-  /// In a debug build, asserts that the theme's
-  /// [CalendarThemeData.motionDuration] is zero or more and that each of its
-  /// text styles has `inherit: true`.
   static CalendarThemeData of(BuildContext context) {
     final theme = context.dependOnInheritedWidgetOfExactType<CalendarTheme>();
-    final data = theme?.data ?? const CalendarThemeData();
-    assert(data._debugCheckDomains());
-    return data;
+    return theme?.data ?? CalendarThemeData.builtIn;
   }
 
   @override
