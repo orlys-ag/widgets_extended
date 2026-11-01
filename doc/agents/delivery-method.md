@@ -461,7 +461,9 @@ its problems, and a second breach ends the run `failed`. A builder whose
 context is compacted hands over: a report that stops before the final gates
 with no blocking finding, having verified a step or mutated a pin that no
 earlier report of this build had, is no breach, and a fresh builder continues
-the build.
+the build. A stop at the clean-tree check changes nothing, so a report that
+sets `stopped` beside such a step or pin, a blocking finding or the final
+gates is read without the stop.
 
 The builder receives the profile's `hotPaths` and the `runtime` lens's
 addendum as the project's runtime rules. On a hot path it adds none of

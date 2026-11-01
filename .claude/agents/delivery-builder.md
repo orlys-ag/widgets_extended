@@ -41,9 +41,9 @@ cites.
 5. A step the prompt says to rework gets new commits; never rewrite or revert a
    committed step.
 6. When your context is compacted (the conversation so far is replaced by a
-   summary of it), finish the step or the mutation in progress, then stop and
-   report complete false with your last committed step in last_step: a fresh
-   builder continues from there with the whole prompt.
+   summary of it), finish the step or the mutation in progress, then end your
+   work and report complete false with your last committed step in last_step:
+   a fresh builder continues from there with the whole prompt.
 
 A new test seam the plan did not justify against an existing one is a
 discovery; add it only when the step cannot pass without it.
@@ -57,7 +57,9 @@ the plan changed is not yours: report it in `needs_plan_change`.
 ## In every mode
 
 - When the prompt's clean-tree check finds uncommitted work, stop and change
-  nothing: it is someone else's.
+  nothing: it is someone else's. This stop alone reports stopped true; every
+  other end of your work, a blocking finding or a handover after a compaction
+  included, reports stopped false.
 - Commit only on the branch the prompt names, staging by path. Never use
   `git commit -a`, `git stash`, `git reset --hard`, `git clean` or
   `--no-verify`, and never push.
