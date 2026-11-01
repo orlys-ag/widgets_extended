@@ -31,6 +31,20 @@ whether two entries share time; `compareCalendarEntries` is the order a
 store answers entries in. A host extends `CalendarController`, the
 stores, `CalendarEditPolicy` and the localizations in classes it declares
 `final` or `base`.
+- The calendar's public values and `CalendarView`'s parameters throw an
+`ArgumentError` naming the value, in a release build as in a debug one,
+for a value they do not take: `CalendarWeekdaySet.of` and `startingOn` (a
+weekday set holds a weekday), `CalendarDayHours`, `DayLimitPolicy`,
+`CalendarEditRules`, `CalendarEarliestStart`, `CalendarCreateRange`,
+`CalendarMoveRequest`, `CalendarDaysChanged`, `CalendarShownEntry`,
+`CalendarThemeData` and its `copyWith`, `CalendarController`'s constructor
+and zoom setters, and a `CalendarView` whose store's hours lie off the grid
+of its `slotMinutes` or whose `editPolicy` gives a `dayLimit` under 1. Their
+constructors are not const; `CalendarDayHours.allDay`,
+`CalendarWeekdaySet.all` and `.workweek`, and `CalendarThemeData.builtIn`
+are const values.
+`CalendarNow` and `CalendarEarliestStart` take a UTC time as its local time,
+the same instant, so a `CalendarView.clock` reading UTC marks the local day.
 - `package:widgets_extended/widgets_extended.dart` exports the calendar,
 so an app that also imports a library declaring one of its names, as
 `syncfusion_flutter_calendar` declares `CalendarController`,
