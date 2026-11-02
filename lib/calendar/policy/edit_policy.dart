@@ -46,8 +46,8 @@ final class CalendarNow {
 
   /// The instant of the first wall minute from [wall] ([wallMinuteOf]) that
   /// the clock reads ([timeAtWallMinute]): [wall]'s own, or past a stretch
-  /// the clock skips, the first minute after it. Ends by the next day's
-  /// start, which every day's clock reads.
+  /// the clock skips, the first minute after it. Ends at the first minute
+  /// after a stretch the clock skips, which it reads.
   static DateTime _firstReadingFrom(int wall) {
     var minute = wall;
     var reading = timeAtWallMinute(minute);

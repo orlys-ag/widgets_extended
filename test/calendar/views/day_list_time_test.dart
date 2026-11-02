@@ -351,4 +351,101 @@ void main() {
       expect(find.text("card folds"), findsOneWidget);
     });
   });
+
+  group(
+    "on the day whose clock skips its midnight",
+    skip: skippedMidnightSkip,
+    () {
+      testWidgets("AG9 an entry from the day's start is listed from 01:00, "
+          "the minute its clock starts at, and reads 01:00", (tester) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final store = storeOf(<CalendarEntry<String>>[
+          entryOf("early", day, at(day, 2)),
+          entryOf("whole", day, addDays(day, 1)),
+        ]);
+        expect(rowsOf(store, day), <Object>[
+          ("early", 60, 120, false),
+          ("whole", 60, 1440, false),
+        ]);
+        await pumpList(tester, store, day, editable: false);
+        for (final id in <String>["early", "whole"]) {
+          expect(
+            find.descendant(
+              of: find.byKey(dayListTimeKey(id)),
+              matching: find.text("01:00"),
+            ),
+            findsOneWidget,
+            reason: id,
+          );
+        }
+      });
+
+      testWidgets("AG10 in edit mode, the skipped minutes before an entry at "
+          "01:00 are a gap from 00:00 with no add button", (tester) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final store = storeOf(<CalendarEntry<String>>[
+          entryOf("early", day, at(day, 2)),
+        ]);
+        expect(rowsOf(store, day, editable: true), <Object>[
+          (0, 60),
+          ("early", 60, 120, false),
+          (120, 1440),
+        ]);
+        await pumpList(tester, store, day);
+        final skipped = find.byKey(dayListGapKey(day, 0));
+        expect(skipped, findsOneWidget);
+        // Guard: red when a gap with no slot builds an add button at its
+        // start.
+        expect(
+          find.descendant(of: skipped, matching: find.textContaining("add")),
+          findsNothing,
+        );
+        // Guard: red when no gap builds an add button.
+        expect(
+          find.descendant(
+            of: find.byKey(dayListGapKey(day, 120)),
+            matching: find.text("add 120"),
+          ),
+          findsOneWidget,
+        );
+      });
+
+      testWidgets("AG11 in edit mode, the add button before an entry later "
+          "in the day is labelled at 01:00 and creates the day's first slot", (
+        tester,
+      ) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final handle = tester.ensureSemantics();
+        final store = storeOf(<CalendarEntry<String>>[
+          entryOf("talk", at(day, 9), at(day, 10)),
+        ]);
+        final creates = <CalendarCreateRange>[];
+        await pumpList(tester, store, day, creates: creates);
+        // Anchored: the add's semantics node also takes the label of the
+        // "add" text inside it, after its own.
+        expect(
+          find.bySemanticsLabel(RegExp(r"^Add an item at 01:00(\n|$)")),
+          findsOneWidget,
+        );
+        await tester.tap(
+          find.descendant(
+            of: find.byKey(dayListGapKey(day, 0)),
+            matching: find.text("add 60"),
+          ),
+        );
+        await tester.pumpAndSettle();
+        // Guard: red when the add reports a range other than its slot.
+        expect(creates, <CalendarCreateRange>[
+          CalendarCreateRange(
+            start: day,
+            end: day.add(const Duration(minutes: 15)),
+          ),
+        ]);
+        handle.dispose();
+      });
+    },
+  );
 }

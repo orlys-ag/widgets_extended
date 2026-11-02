@@ -330,4 +330,75 @@ void main() {
       isTrue,
     );
   });
+
+  group(
+    "on the day whose clock skips its midnight",
+    skip: skippedMidnightSkip,
+    () {
+      test("GL8 a piece from the day's start starts at the minute its clock "
+          "starts at, 01:00, and one continuing from the day before at its "
+          "minute 0", () {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final early = shownOf("early", day, at(day, 2));
+        final night = shownOf("night", at(before, 23), at(day, 2));
+        final layout = TimedGridLayout<String>.of(<CalendarShownEntry<String>>[
+          early,
+          night,
+        ], GridTracks(firstDay: dayNumber(before), dayCount: 2));
+        expect(
+          <GridPiece<String>>[
+            for (final piece in layout.pieces)
+              if (piece.shown == early) piece,
+          ],
+          <GridPiece<String>>[
+            GridPiece<String>(
+              shown: early,
+              day: dayNumber(day),
+              start: 60,
+              end: 120,
+              first: true,
+              last: true,
+            ),
+          ],
+        );
+        // Guard: red when a piece starts at its day's first minute the
+        // clock reads.
+        final nightOnDay = layout.pieces.singleWhere((piece) {
+          return piece.shown == night && piece.day == dayNumber(day);
+        });
+        expect((nightOnDay.start, nightOnDay.end), (0, 120));
+      });
+    },
+  );
+
+  group(
+    "on the day whose clock repeats its midnight",
+    skip: repeatedMidnightSkip,
+    () {
+      test("GL9 an entry ending at the later 00:00 has its one piece, the "
+          "last, on the day before, and is loose for the day it has no "
+          "piece on", () {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final late = shownOf("late", at(before, 23), laterMidnight);
+        final layout = TimedGridLayout<String>.of(<CalendarShownEntry<String>>[
+          late,
+        ], GridTracks(firstDay: dayNumber(before), dayCount: 2));
+        expect(layout.pieces, <GridPiece<String>>[
+          GridPiece<String>(
+            shown: late,
+            day: dayNumber(before),
+            start: 1380,
+            end: 1440,
+            first: true,
+            last: true,
+          ),
+        ]);
+        expect(layout.loose?.ids, <String>{"late"});
+      });
+    },
+  );
 }

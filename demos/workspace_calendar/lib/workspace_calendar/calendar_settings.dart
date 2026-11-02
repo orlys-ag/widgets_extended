@@ -17,11 +17,12 @@ import 'calendar_schema.dart';
 
 /// The field errors of an item from [start] to [end] that [hours] do not
 /// hold ([CalendarDayHours.holdsTimes]), keyed as `validateItemJson` keys
-/// them: the start when the hours do not hold its time of day as a start,
-/// the end when they do not hold its minute on its last day as an end, each
-/// naming the bounds [CalendarDayHours.holdsStart] and
-/// [CalendarDayHours.holdsEnd] take any minute between. It reads the range
-/// as timed: the hours hold every all-day range, so a store's hours
+/// them: the start and the end errors are those
+/// [CalendarHoursException.startOutside] and
+/// [CalendarHoursException.endOutside] name, for the exception of [hours],
+/// [start] and [end], each naming the bounds [CalendarDayHours.holdsStart]
+/// and [CalendarDayHours.holdsEnd] take any minute between. It reads the
+/// range as timed: the hours hold every all-day range, so a store's hours
 /// refusal names only a timed one.
 Map<String, String> hoursErrorsOf(
   DateTime start,
@@ -31,12 +32,13 @@ Map<String, String> hoursErrorsOf(
   if (hours.holdsTimes(start, end, isAllDay: false)) {
     return const <String, String>{};
   }
+  final refusal = CalendarHoursException(hours: hours, start: start, end: end);
   return <String, String>{
-    if (!hours.holdsStart(CalendarDates.minuteOfDay(start)))
+    if (refusal.startOutside)
       "start":
           "The start is from ${isoTime(hours.start)} to before "
           "${isoTime(hours.end)}, inside the calendar's hours.",
-    if (!hours.holdsEnd(CalendarDates.endMinuteOfDay(end)))
+    if (refusal.endOutside)
       "end":
           "The end is from after ${isoTime(hours.start)} to "
           "${isoTime(hours.end)}, inside the calendar's hours.",

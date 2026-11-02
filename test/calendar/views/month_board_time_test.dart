@@ -376,4 +376,24 @@ void main() {
       );
     });
   });
+
+  group(
+    "on the day whose clock skips its midnight",
+    skip: skippedMidnightSkip,
+    () {
+      test("MT8 under 00:00-01:00, an entry from the day's start, 01:00, "
+          "lies after the hours", () {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final grid = MonthGrid.of(day);
+        final split = splitMonthHours(
+          <Shown>[shownOf("early", day, at(day, 2))],
+          grid,
+          CalendarDayHours(0, 60),
+        );
+        expect(split.inside, isEmpty);
+        expect(countsByDay(split.later, grid), <DateTime, int>{day: 1});
+      });
+    },
+  );
 }

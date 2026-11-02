@@ -66,9 +66,19 @@ abstract final class CalendarDates {
     return dates.wallMinuteOf(time);
   }
 
+  /// {@macro widgets_extended.calendar.endWallMinuteOf}
+  static int endWallMinuteOf(DateTime end) {
+    return dates.endWallMinuteOf(end);
+  }
+
   /// {@macro widgets_extended.calendar.timeAtWallMinute}
   static DateTime? timeAtWallMinute(int wall, {DateTime? from}) {
     return dates.timeAtWallMinute(wall, from: from);
+  }
+
+  /// {@macro widgets_extended.calendar.endAtWallMinute}
+  static DateTime? endAtWallMinute(int wall, {DateTime? from}) {
+    return dates.endAtWallMinute(wall, from: from);
   }
 
   /// {@macro widgets_extended.calendar.isLaterOccurrence}

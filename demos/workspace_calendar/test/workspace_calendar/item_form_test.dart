@@ -9,6 +9,8 @@ import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/item_form.dart';
 
+import 'midnight_days.dart';
+
 final DateTime wednesday = DateTime(2026, 4, 22);
 
 /// A Task titled "Write" from [start] to [end], stored as "item-1".
@@ -272,4 +274,86 @@ void main() {
     expect(writes, hasLength(1));
     expect(find.byType(SwitchListTile), findsOneWidget);
   });
+
+  group(
+    "on the day whose clock skips its midnight",
+    skip: skippedMidnightSkip,
+    () {
+      testWidgets("MD4 a start time of 00:00, which the day's clock skips, "
+          "is not saved", (tester) async {
+        final day = shortDay!.day;
+        expectSkippedMidnight(day);
+        final writes = <CalendarItem?>[];
+        final store = MemoryCalendarStore<ItemPayload>(
+          entries: <CalendarItem>[
+            task(day, DateTime(day.year, day.month, day.day, 2)),
+          ],
+          onChanged: (old, entry) {
+            writes.add(entry);
+          },
+        );
+        addTearDown(store.dispose);
+        await openForm(tester, store);
+        await tester.tap(timeField("Start time"));
+        await tester.pumpAndSettle();
+        // The menu opens scrolled to the selected 01:00, which builds the
+        // 00:00 item above it offstage, in its list's cache extent.
+        final item = find.text("00:00", skipOffstage: false).last;
+        await tester.ensureVisible(item);
+        await tester.pumpAndSettle();
+        await tester.tap(item);
+        await tester.pumpAndSettle();
+        // Setup sanity: the pick took.
+        expect(
+          tester
+              .widget<DropdownButton<int>>(
+                find.descendant(
+                  of: timeField("Start time"),
+                  matching: find.byType(DropdownButton<int>),
+                ),
+              )
+              .value,
+          0,
+        );
+        await tester.tap(find.widgetWithText(FilledButton, "Save"));
+        await tester.pumpAndSettle();
+        // Guard: red also when the start converts as an end, which reads
+        // 00:00 as the day's start.
+        expect(writes, isEmpty);
+      });
+
+      testWidgets("MD3 an item ending at the day's start, the 24:00 before, "
+          "saved unchanged, is written ending at the day's start", (
+        tester,
+      ) async {
+        final day = shortDay!.day;
+        expectSkippedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final writes = <CalendarItem?>[];
+        final store = MemoryCalendarStore<ItemPayload>(
+          entries: <CalendarItem>[
+            task(DateTime(before.year, before.month, before.day, 23), day),
+          ],
+          onChanged: (old, entry) {
+            writes.add(entry);
+          },
+        );
+        addTearDown(store.dispose);
+        await openForm(tester, store);
+        await tester.tap(find.widgetWithText(FilledButton, "Save"));
+        await tester.pumpAndSettle();
+        // Guard: red when the end converts by the clock, which names no
+        // time at the skipped 00:00, so the form writes the day before's
+        // 24:00 as its own text, which the envelope refuses.
+        expect(
+          <(DateTime, DateTime)>[
+            for (final written in writes) (written!.start, written.end),
+          ],
+          <(DateTime, DateTime)>[
+            (DateTime(before.year, before.month, before.day, 23), day),
+          ],
+        );
+      });
+    },
+  );
 }

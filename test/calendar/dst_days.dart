@@ -1,10 +1,16 @@
 /// The local time zone's days of 2026 whose clock skips or repeats an hour,
 /// which the DST tests read, and the reason a DST group skips in a zone
-/// whose changes are not the ones the tests name; and a local time whose
-/// UTC date is another day, which the tests of a UTC time read, with the
-/// reason they skip in a zone that has none.
+/// whose changes are not the ones the tests name: New York's, at 02:00 and
+/// 01:00, or for the midnight tests Havana's, which skip and repeat the
+/// hour from 00:00 ([skippedMidnightSkip], [repeatedMidnightSkip]), with
+/// the checks each midnight test makes of its day first
+/// ([expectSkippedMidnight], [expectRepeatedMidnight]) and the later 00:00
+/// of the repeated midnight ([laterMidnight]); and a local time whose UTC
+/// date is another day, which the tests of a UTC time read, with the reason
+/// they skip in a zone that has none.
 library;
 
+import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
 
 /// A day of 2026 and the wall hour its clock skips or repeats.
@@ -15,6 +21,17 @@ const int easternSkippedHour = 2;
 
 /// The hour the tests' fixtures name as repeated, Eastern's 01:00.
 const int easternRepeatedHour = 1;
+
+/// The hour the midnight tests name as skipped and as repeated, 00:00.
+const int midnightHour = 0;
+
+/// How to run the DST tests whose fixtures name Eastern's changes.
+const String newYorkRun = "run with TZ=America/New_York";
+
+/// How to run the midnight tests, whose days are Havana's.
+const String havanaRun =
+    "run bash tool/test_calendar_in_havana.sh, which runs them in "
+    "America/Havana";
 
 /// The first day of 2026 that lasts 23 hours here, with the first hour `h`
 /// whose `DateTime(y, m, d, h, 30)` reads another hour; null where the zone
@@ -50,15 +67,21 @@ DstDay? _firstDayOf(int hours) {
 
 /// Why a group of DST tests of [what], such as "23-hour day", skips: null
 /// where [day] was found with [hour] equal to [expectedHour], and otherwise
-/// a reason naming what the zone has and the zone the tests are written
-/// for.
-String? dstSkipReason(String what, DateTime? day, int? hour, int expectedHour) {
+/// a reason naming what the zone has and ending with [run], how to run the
+/// tests in the zone they are written for.
+String? dstSkipReason(
+  String what,
+  DateTime? day,
+  int? hour,
+  int expectedHour, {
+  String run = newYorkRun,
+}) {
   if (day == null) {
-    return "No $what in this time zone; run with TZ=America/New_York";
+    return "No $what in this time zone; $run";
   }
   if (hour != expectedHour) {
     return "The $what of this time zone, ${isoDate(day)}, changes the hour "
-        "from $hour, not $expectedHour; run with TZ=America/New_York";
+        "from $hour, not $expectedHour; $run";
   }
   return null;
 }
@@ -83,14 +106,76 @@ String? get longDaySkip {
   );
 }
 
-/// The start of [shortDay]; only read inside a group [shortDaySkip] runs.
+/// [dstSkipReason] for the 23-hour day [shortDay] of the midnight tests,
+/// whose clock skips the hour from its midnight.
+String? get skippedMidnightSkip {
+  return dstSkipReason(
+    "23-hour day",
+    shortDay?.day,
+    shortDay?.hour,
+    midnightHour,
+    run: havanaRun,
+  );
+}
+
+/// [dstSkipReason] for the 25-hour day [longDay] of the midnight tests,
+/// whose clock repeats the hour from its midnight.
+String? get repeatedMidnightSkip {
+  return dstSkipReason(
+    "25-hour day",
+    longDay?.day,
+    longDay?.hour,
+    midnightHour,
+    run: havanaRun,
+  );
+}
+
+/// The start of [shortDay]; only read inside a group [shortDaySkip] or
+/// [skippedMidnightSkip] runs.
 DateTime get shortDayStart {
   return shortDay!.day;
 }
 
-/// The start of [longDay]; only read inside a group [longDaySkip] runs.
+/// The start of [longDay]; only read inside a group [longDaySkip] or
+/// [repeatedMidnightSkip] runs.
 DateTime get longDayStart {
   return longDay!.day;
+}
+
+/// The later 00:00 of [longDay], whose clock repeats its midnight: its
+/// start plus one hour. Only read inside a group [repeatedMidnightSkip]
+/// runs.
+DateTime get laterMidnight {
+  return longDayStart.add(const Duration(hours: 1));
+}
+
+/// Checks that [day] starts a civil day of 23 hours whose clock skips its
+/// midnight, so it reads 01:00.
+void expectSkippedMidnight(DateTime day) {
+  final start = DateTime(day.year, day.month, day.day);
+  expect(
+    DateTime(day.year, day.month, day.day + 1).difference(start),
+    const Duration(hours: 23),
+    reason: "$day's day lasts 23 hours",
+  );
+  expect(day.hour, 1, reason: "$day reads 01:00");
+}
+
+/// Checks that [day] starts a civil day of 25 hours whose clock repeats its
+/// midnight, so it reads 00:00 and so does the instant an hour after it.
+void expectRepeatedMidnight(DateTime day) {
+  final start = DateTime(day.year, day.month, day.day);
+  expect(
+    DateTime(day.year, day.month, day.day + 1).difference(start),
+    const Duration(hours: 25),
+    reason: "$day's day lasts 25 hours",
+  );
+  expect(day.hour, 0, reason: "$day reads 00:00");
+  expect(
+    day.add(const Duration(hours: 1)).hour,
+    0,
+    reason: "$day plus an hour reads 00:00",
+  );
 }
 
 /// The second 01:30 of [longDay], built from the unambiguous day start.

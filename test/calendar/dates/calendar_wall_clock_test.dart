@@ -2,7 +2,8 @@
 /// back, the wall minutes nearest a time in an occurrence, the last day a
 /// range has a part in, a range's piece on a day, the hours rule on starts,
 /// ends and ranges, the hours on the grid of a slot length, and the skipped
-/// and repeated times of the local zone's DST days.
+/// and repeated times of the local zone's DST days, those whose clock skips
+/// or repeats its midnight included.
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -304,4 +305,241 @@ void main() {
       }
     });
   });
+
+  group(
+    "on the day whose clock skips its midnight",
+    skip: skippedMidnightSkip,
+    () {
+      test("DT15 the day's start reads the minute its clock starts at, 01:00, "
+          "its minute 0 names no time, and a range ending at the day's start "
+          "ends at the 24:00 before", () {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final wall = dayNumber(day) * minutesPerDay;
+        expect(wallMinuteOf(day), wall + 60);
+        expect(timeAtWallMinute(wall), isNull);
+        // Guard: red when a wall minute converts at its elapsed minutes from
+        // the day's start.
+        expect(timeAtWallMinute(wall + 60), day);
+        expect(wallSpanOf(day, at(day, 2)), (
+          start: wall + 60,
+          end: wall + 120,
+        ));
+        // Guard: red when a range's end reads by the clock, at +60.
+        expect(wallSpanOf(at(before, 23), day), (start: wall - 60, end: wall));
+        expect(firstWallMinuteNotBefore(day), wall + 60);
+        expect(firstReadableSlot(day, 0, minutesPerDay, 60), (
+          start: day,
+          end: at(day, 2),
+        ));
+        // Guard: red when only the wall minute reads by the clock, and the
+        // instant of minute 0 is the day's start.
+        expect(isLaterOccurrence(day), isFalse);
+        // Guard: red when the walk reads by the clock, at +60.
+        expect(lastWallMinuteNotAfter(day), wall);
+      });
+    },
+  );
+
+  group(
+    "on the day whose clock repeats its midnight",
+    skip: repeatedMidnightSkip,
+    () {
+      test("DT16 minute 0 names the later 00:00 for a time in the later pass, "
+          "and the walks from a time in one pass reach the other's edge", () {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final wall = dayNumber(day) * minutesPerDay;
+        final later15 = laterMidnight.add(const Duration(minutes: 15));
+        final later30 = laterMidnight.add(const Duration(minutes: 30));
+        expect(timeAtWallMinute(wall, from: later15), laterMidnight);
+        // Guards: red when minute 0 names the later 00:00 without from:.
+        expect(timeAtWallMinute(wall), day);
+        expect(isLaterOccurrence(laterMidnight), isTrue);
+        final early15 = day.add(const Duration(minutes: 15));
+        expect(firstWallMinuteNotBefore(early15, from: later30), wall);
+        expect(lastWallMinuteNotAfter(early15, from: later30), wall - 1);
+        expect(
+          firstWallMinuteNotBefore(laterMidnight, from: laterMidnight),
+          wall,
+        );
+      });
+
+      test("DT17 the hours hold an end at the later 00:00 where its span ends, "
+          "and its days are the clock's", () {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final early15 = day.add(const Duration(minutes: 15));
+        expect(
+          CalendarDayHours.allDay.holdsTimes(
+            at(before, 23),
+            laterMidnight,
+            isAllDay: false,
+          ),
+          isTrue,
+        );
+        expect(
+          CalendarDayHours.allDay.holdsTimes(
+            early15,
+            laterMidnight,
+            isAllDay: false,
+          ),
+          isTrue,
+        );
+        expect(
+          CalendarDayHours(
+            0,
+            1080,
+          ).holdsTimes(day, laterMidnight, isAllDay: false),
+          isTrue,
+        );
+        // Guard: red when every end at the later 00:00 reads at 01:00.
+        expect(
+          CalendarDayHours(
+            0,
+            1425,
+          ).holdsTimes(at(before, 23), laterMidnight, isAllDay: false),
+          isFalse,
+        );
+        // Guards: red when its last day is the day before, at 24:00.
+        expect(lastDayNumberOf(at(before, 23), laterMidnight), dayNumber(day));
+        expect(endMinuteOfDay(laterMidnight), 0);
+        // Guard: red when the later 00:00 ends at its day's minute 60.
+        final span = wallSpanOf(at(before, 23), laterMidnight);
+        expect(pieceOn(span, dayNumber(day)), isNull);
+      });
+    },
+  );
+
+  test("DST3 the midnight tests' reasons name the Havana script, and skip "
+      "exactly where the zone's DST days do not change the hour from "
+      "00:00", () {
+    expect(
+      dstSkipReason("23-hour day", tuesday, 0, midnightHour, run: havanaRun),
+      isNull,
+    );
+    expect(
+      dstSkipReason("23-hour day", null, null, midnightHour, run: havanaRun),
+      allOf(
+        contains("America/Havana"),
+        contains("tool/test_calendar_in_havana.sh"),
+      ),
+    );
+    expect(
+      dstSkipReason("23-hour day", tuesday, 2, midnightHour, run: havanaRun),
+      allOf(
+        contains("from 2, not 0"),
+        contains("America/Havana"),
+        contains("tool/test_calendar_in_havana.sh"),
+      ),
+    );
+    // In the zone the tests run in: the null branch in America/Havana and
+    // the other in America/New_York.
+    for (final (reason, found) in <(String?, DstDay?)>[
+      (skippedMidnightSkip, shortDay),
+      (repeatedMidnightSkip, longDay),
+    ]) {
+      expect(reason == null, found?.hour == midnightHour, reason: "$found");
+      if (reason != null) {
+        expect(
+          reason,
+          allOf(
+            contains("America/Havana"),
+            contains("tool/test_calendar_in_havana.sh"),
+          ),
+        );
+      }
+    }
+  });
+
+  test("DT19 on a day whose clock reads every time once, the end readings "
+      "are the clock readings, and a day's start ends the day before", () {
+    final day = dayNumber(tuesday) * minutesPerDay;
+    for (var minute = 0; minute < minutesPerDay; minute += 15) {
+      final time = at(tuesday, minute ~/ 60, minute % 60);
+      expect(endWallMinuteOf(time), wallMinuteOf(time), reason: "$minute");
+      expect(
+        endAtWallMinute(day + minute),
+        timeAtWallMinute(day + minute),
+        reason: "$minute",
+      );
+    }
+    expect(endWallMinuteOf(wednesday), day + minutesPerDay);
+    expect(endAtWallMinute(day + minutesPerDay), wednesday);
+  });
+
+  test("DT22 on a day whose clock reads every time once, the hours read an "
+      "end at 00:00 past a day start, or at a UTC midnight, at minute 0", () {
+    final past = DateTime(2026, 4, 21, 0, 0, 30);
+    for (final hours in <CalendarDayHours>[
+      CalendarDayHours.allDay,
+      CalendarDayHours(60, 1440),
+    ]) {
+      expect(
+        hours.holdsTimes(DateTime(2026, 4, 20, 23), past, isAllDay: false),
+        isFalse,
+        reason: "$hours",
+      );
+    }
+    expect(
+      CalendarDayHours.allDay.holdsTimes(
+        DateTime.utc(2026, 4, 20, 23),
+        DateTime.utc(2026, 4, 21),
+        isAllDay: false,
+      ),
+      isFalse,
+    );
+  });
+
+  group(
+    "on the day whose clock skips its midnight, the end readings",
+    skip: skippedMidnightSkip,
+    () {
+      test("DT18 the last slot of the day before ends at the day's start", () {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        expect(firstReadableSlot(before, 1425, 1440, 15), (
+          start: at(before, 23, 45),
+          end: day,
+        ));
+      });
+
+      test("DT20 the day's start ends at its minute 0, the 24:00 before, and "
+          "minute 0 converts back to it, while a skipped minute after it "
+          "names no time", () {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final wall = dayNumber(day) * minutesPerDay;
+        expect(endWallMinuteOf(day), wall);
+        expect(endAtWallMinute(wall), day);
+        expect(endAtWallMinute(wall, from: day), day);
+        expect(endAtWallMinute(wall + 30), isNull);
+      });
+    },
+  );
+
+  group(
+    "on the day whose clock repeats its midnight, the end readings",
+    skip: repeatedMidnightSkip,
+    () {
+      test("DT21 minute 0 ends at the earlier 00:00, or at the later one for "
+          "a time in the later pass, and the later 00:00 ends at minute 0", () {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final wall = dayNumber(day) * minutesPerDay;
+        expect(endAtWallMinute(wall), day);
+        expect(
+          endAtWallMinute(
+            wall,
+            from: laterMidnight.add(const Duration(minutes: 15)),
+          ),
+          laterMidnight,
+        );
+        expect(endWallMinuteOf(laterMidnight), wall);
+      });
+    },
+  );
 }

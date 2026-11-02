@@ -322,19 +322,33 @@ int endMinuteOfDay(DateTime end) {
 }
 
 /// {@template widgets_extended.calendar.wallMinuteOf}
-/// [time] on the wall-clock coordinate: its [dayNumber] times
-/// [minutesPerDay], plus 0 for a day start and its [minuteOfDay]
-/// otherwise. A day's 24:00 is the next day's minute 0.
+/// [time] on the wall-clock coordinate as its clock reads it: its
+/// [dayNumber] times [minutesPerDay], plus its [minuteOfDay], so the start
+/// of a day whose clock skips its midnight lies at the minute its clock
+/// starts at. A range's end reads with [endWallMinuteOf].
 /// {@endtemplate}
 int wallMinuteOf(DateTime time) {
-  return dayNumber(time) * minutesPerDay +
-      (isDayStart(time) ? 0 : minuteOfDay(time));
+  return dayNumber(time) * minutesPerDay + minuteOfDay(time);
+}
+
+/// {@template widgets_extended.calendar.endWallMinuteOf}
+/// The wall minute a range ending at [end] ends at: its day's minute 0,
+/// the 24:00 of the day before, for a day's start, the instant
+/// `DateTime(year, month, day)` gives, the start of a day whose clock
+/// skips its midnight included, and [wallMinuteOf]'s otherwise. A day's
+/// 24:00 is the next day's minute 0.
+/// {@endtemplate}
+int endWallMinuteOf(DateTime end) {
+  return dayNumber(end) * minutesPerDay +
+      (isDayStart(end) ? 0 : minuteOfDay(end));
 }
 
 /// {@template widgets_extended.calendar.timeAtWallMinute}
-/// The instant the wall minute [wall] names: for minute 0 of a day its
-/// start, and otherwise the time its day's clock reads at that hour and
-/// minute; null for a time the clock skips.
+/// The instant the wall minute [wall] names as a start or a time of day:
+/// the time its day's clock reads at that hour and minute, minute 0
+/// included, which is the day's start where its clock reads 00:00; null
+/// for a time the clock skips, minute 0 of a day whose clock skips its
+/// midnight included. A range's end converts with [endAtWallMinute].
 ///
 /// On a day whose clock repeats a stretch, a time in it has two instants:
 /// the earlier, or the later where [from] lies on the same day and is
@@ -342,13 +356,27 @@ int wallMinuteOf(DateTime time) {
 /// began in the repeated stretch stays in the occurrence it began in.
 /// {@endtemplate}
 DateTime? timeAtWallMinute(int wall, {DateTime? from}) {
+  return _instantAtWallMinute(wall, from, end: false);
+}
+
+/// {@template widgets_extended.calendar.endAtWallMinute}
+/// The instant a range ending at the wall minute [wall] ends at:
+/// [timeAtWallMinute]'s, [from] read as it reads it, except that minute 0
+/// of a day whose clock skips its midnight, the 24:00 of the day before,
+/// is the day's start. A day's 24:00 is the next day's minute 0.
+/// {@endtemplate}
+DateTime? endAtWallMinute(int wall, {DateTime? from}) {
+  return _instantAtWallMinute(wall, from, end: true);
+}
+
+/// [timeAtWallMinute]'s instant where not [end], and [endAtWallMinute]'s
+/// where [end]: one reading of the clock, the two told apart only at
+/// minute 0 of a day whose clock skips its midnight.
+DateTime? _instantAtWallMinute(int wall, DateTime? from, {required bool end}) {
   // Floored, so a wall minute before the epoch's day keeps its minute.
   final minute = wall % minutesPerDay;
   final day = (wall - minute) ~/ minutesPerDay;
   final date = dateOfDayNumber(day);
-  if (minute == 0) {
-    return date;
-  }
   final hour = minute ~/ 60;
   final ofHour = minute % 60;
   bool reads(DateTime time) {
@@ -359,10 +387,13 @@ DateTime? timeAtWallMinute(int wall, {DateTime? from}) {
         time.minute == ofHour;
   }
 
-  final time = DateTime(date.year, date.month, date.day, hour, ofHour);
+  // The constructor's instant for hour 0 and minute 0 is the day's start.
+  final time = minute == 0
+      ? date
+      : DateTime(date.year, date.month, date.day, hour, ofHour);
   // A time the clock skips rolls over to another hour.
   if (!reads(time)) {
-    return null;
+    return end && minute == 0 ? date : null;
   }
   final change = repeatedStretchOf(date);
   if (change == Duration.zero) {
@@ -438,30 +469,30 @@ int firstWallMinuteNotBefore(DateTime time, {DateTime? from}) {
   return wall;
 }
 
-/// The last wall minute the clock reads whose instant in [from]'s
-/// occurrence ([timeAtWallMinute]) is not after [time], so a range to it
-/// ends at [time] or earlier: [time]'s own ([wallMinuteOf]), except where
-/// its day's clock reads [time] twice and [from] picks the other instant,
-/// where it is the last minute of the repeated stretch or the last before
-/// it, as [firstWallMinuteNotBefore] walks.
+/// The last wall minute whose instant as a range's end in [from]'s
+/// occurrence ([endAtWallMinute]) is not after [time], so a range to it
+/// ends at [time] or earlier: [time]'s own as an end ([endWallMinuteOf]),
+/// except where its day's clock reads [time] twice and [from] picks the
+/// other instant, where it is the last minute of the repeated stretch or
+/// the last before it, as [firstWallMinuteNotBefore] walks.
 int lastWallMinuteNotAfter(DateTime time, {DateTime? from}) {
-  var wall = wallMinuteOf(time);
-  while (!(timeAtWallMinute(wall + 1, from: from)?.isAfter(time) ?? true)) {
+  var wall = endWallMinuteOf(time);
+  while (!(endAtWallMinute(wall + 1, from: from)?.isAfter(time) ?? true)) {
     wall++;
   }
-  while (timeAtWallMinute(wall, from: from)?.isAfter(time) ?? true) {
+  while (endAtWallMinute(wall, from: from)?.isAfter(time) ?? true) {
     wall--;
   }
   return wall;
 }
 
-/// The first slot of [slotMinutes] on [day] whose start and end its clock
-/// reads ([timeAtWallMinute]), that [isFree] takes where it is given, and
-/// that ends by its minute [until]: the one from its minute [from], or
-/// where that one is not, the first from a later minute on the grid of
-/// [slotMinutes] from midnight; null where none is. Each time is in
-/// [occurrence]'s occurrence where [day]'s clock repeats it, as
-/// [timeAtWallMinute]'s `from` picks.
+/// The first slot of [slotMinutes] on [day] whose start its clock reads
+/// ([timeAtWallMinute]) and whose end converts ([endAtWallMinute]), that
+/// [isFree] takes where it is given, and that ends by its minute [until]:
+/// the one from its minute [from], or where that one is not, the first
+/// from a later minute on the grid of [slotMinutes] from midnight; null
+/// where none is. Each time is in [occurrence]'s occurrence where [day]'s
+/// clock repeats it, as [timeAtWallMinute]'s `from` picks.
 ({DateTime start, DateTime end})? firstReadableSlot(
   DateTime day,
   int from,
@@ -474,7 +505,7 @@ int lastWallMinuteNotAfter(DateTime time, {DateTime? from}) {
   var minute = from;
   while (minute + slotMinutes <= until) {
     final start = timeAtWallMinute(base + minute, from: occurrence);
-    final end = timeAtWallMinute(base + minute + slotMinutes, from: occurrence);
+    final end = endAtWallMinute(base + minute + slotMinutes, from: occurrence);
     if (start != null && end != null && (isFree?.call(start, end) ?? true)) {
       return (start: start, end: end);
     }
@@ -492,17 +523,34 @@ int lastDayNumberOf(DateTime start, DateTime end) {
   return isDayStart(end) ? dayNumber(end) - 1 : dayNumber(end);
 }
 
-/// The range from [start] to [end] in wall minutes ([wallMinuteOf]). An
-/// end whose wall minute is not after the start's, which only a stretch
-/// the clock repeats gives, is the start plus the range's length in
-/// minutes.
+/// The range from [start] to [end] in wall minutes: from its start's wall
+/// minute ([wallMinuteOf]) to its end's ([endWallMinuteOf]). An end whose
+/// wall minute is not after the start's, which only a stretch the clock
+/// repeats gives, is the start plus the range's length in minutes.
 ({int start, int end}) wallSpanOf(DateTime start, DateTime end) {
   final from = wallMinuteOf(start);
-  var to = wallMinuteOf(end);
+  var to = endWallMinuteOf(end);
   if (to <= from) {
     to = from + end.difference(start).inMinutes;
   }
   return (start: from, end: to);
+}
+
+/// The minute of its last day at which the hours read a range from
+/// [start] to [end] to end ([CalendarDayHours.holdsTimes]):
+/// [endMinuteOfDay]'s, except for a local end reading 00:00 that
+/// [isLaterOccurrence] names, the later 00:00 of a day whose clock repeats
+/// its midnight or a time inside its minute, where it is the minute of
+/// the end's day at which the range's wall span ([wallSpanOf]) ends, as
+/// Week and Day draw it, and [minutesPerDay] where that is the day's
+/// minute 0, the 24:00 before it.
+int hoursEndMinuteOf(DateTime start, DateTime end) {
+  final minute = endMinuteOfDay(end);
+  if (minute != 0 || end.isUtc || !isLaterOccurrence(end)) {
+    return minute;
+  }
+  final into = wallSpanOf(start, end).end - dayNumber(end) * minutesPerDay;
+  return into == 0 ? minutesPerDay : into;
 }
 
 /// The part of [span], in wall minutes, on the [dayNumber] [day], as
@@ -774,14 +822,21 @@ final class CalendarDayHours {
   /// range, which no hours limit; and a timed one whose start's minute of
   /// its day (`CalendarDates.minuteOfDay`) they hold as a start and whose
   /// end's minute on its last day (`CalendarDates.endMinuteOfDay`) they
-  /// hold as an end, so an overnight range may cross the hours' end and
-  /// start, and a timed range from a day start to a day start lies inside
-  /// them only where they run from 00:00 to 24:00.
+  /// hold as an end, except an end at the later 00:00 of a day whose clock
+  /// repeats its midnight, a local time reading 00:00 that
+  /// `CalendarDates.isLaterOccurrence` names, which they hold where Week
+  /// and Day draw it: at 24:00 for a range from an earlier day, the wall
+  /// minute it ends at (`CalendarDates.endWallMinuteOf`), and for one from
+  /// earlier that day at its start's minute plus its length in minutes. So
+  /// an overnight range may cross the hours' end and start, and a timed
+  /// range from a day start to a day start lies inside them only where
+  /// they run from 00:00 to 24:00.
   bool holdsTimes(DateTime from, DateTime to, {required bool isAllDay}) {
     if (isAllDay) {
       return true;
     }
-    return holdsStart(minuteOfDay(from)) && holdsEnd(endMinuteOfDay(to));
+    return holdsStart(minuteOfDay(from)) &&
+        holdsEnd(hoursEndMinuteOf(from, to));
   }
 
   @override

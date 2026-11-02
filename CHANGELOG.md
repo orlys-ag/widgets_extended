@@ -45,6 +45,20 @@ constructors are not const; `CalendarDayHours.allDay`,
 are const values.
 `CalendarNow` and `CalendarEarliestStart` take a UTC time as its local time,
 the same instant, so a `CalendarView.clock` reading UTC marks the local day.
+- On a day whose clock skips its midnight hour, as Cuba's does in March,
+Week and Day draw an entry from the day's start, 01:00, from the 01:00 row,
+and a create, move or resize that lands in the skipped rows requests
+nothing, as one in any skipped hour does; an end at the 24:00 before it is
+the day's start. `CalendarDates.wallMinuteOf` reads such a day's start at
+the minute its clock starts, `CalendarDates.timeAtWallMinute` answers null
+for its minute 0, and the new `CalendarDates.endWallMinuteOf` and
+`CalendarDates.endAtWallMinute` read a range's end, a day's 24:00 being the
+next day's minute 0. On a day whose clock repeats its midnight hour,
+`timeAtWallMinute` keeps the later 00:00 for a `from` in the later pass,
+and `CalendarDayHours.holdsTimes` and
+`CalendarHoursException.endOutside` read an end at the later 00:00 where
+Week and Day draw it: at 24:00 for a range from an earlier day, and at
+01:00 for one from the first 00:00 hour.
 - `package:widgets_extended/widgets_extended.dart` exports the calendar,
 so an app that also imports a library declaring one of its names, as
 `syncfusion_flutter_calendar` declares `CalendarController`,

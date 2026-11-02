@@ -66,9 +66,10 @@ final class CalendarEarliestStart {
   }
 
   /// The first wall minute ([CalendarDates.wallMinuteOf]) a start may
-  /// take: [day]'s start where [admitsDayStart], the next day's start
-  /// where [closesDay], and otherwise [earliest]'s, one more where it lies
-  /// inside a minute, since a minute any part of which has passed is past.
+  /// take: [day]'s minute 0 where [admitsDayStart], the next day's minute
+  /// 0 where [closesDay], and otherwise [earliest]'s, one more where it
+  /// lies inside a minute, since a minute any part of which has passed is
+  /// past.
   int get firstWallMinute {
     final number = dayNumber(day);
     final earliest = this.earliest;
@@ -270,9 +271,11 @@ final class CalendarEditRules<T> {
   /// [atEnd] its end moved, and otherwise its start. An all-day range ends
   /// at the start of the day after the limit's last day, or starts at the
   /// start of its first; a timed one ends at the hours' end on the limit's
-  /// last day, or starts at the hours' start on its first, so a held slot
-  /// range ends or starts on a slot the hours hold. Null where that is a
-  /// time the clock skips; the range itself with no limit.
+  /// last day, the next day's start where they end at 24:00, or starts at
+  /// the hours' start on its first, the day's start where they start at
+  /// 00:00, so a held slot range ends or starts on a slot the hours hold.
+  /// Null where that is a time the clock skips; the range itself with no
+  /// limit.
   ({DateTime start, DateTime end})? heldToLimit(
     DateTime start,
     DateTime end, {
@@ -287,11 +290,11 @@ final class CalendarEditRules<T> {
       final lastDay = dayNumber(start) + limit - 1;
       final held = isAllDay
           ? dateOfDayNumber(lastDay + 1)
-          : timeAtWallMinute(lastDay * minutesPerDay + hours.end);
+          : endAtWallMinute(lastDay * minutesPerDay + hours.end);
       return held == null ? null : (start: start, end: held);
     }
     final firstDay = lastDayNumberOf(start, end) - limit + 1;
-    final held = isAllDay
+    final held = isAllDay || hours.start == 0
         ? dateOfDayNumber(firstDay)
         : timeAtWallMinute(firstDay * minutesPerDay + hours.start);
     return held == null ? null : (start: held, end: end);
