@@ -4813,8 +4813,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         cutAtStart: cutAtStart,
         cutAtEnd: cutAtEnd,
         continuesBefore: !piece.first,
-        continuesAfter:
-            piece.day < lastDayNumberOf(entry.entry.start, entry.entry.end),
+        continuesAfter: piece.continuesAfter,
         hourLabelFormat: widget.hourLabelFormat,
       ),
       builder: _blockBuilder,

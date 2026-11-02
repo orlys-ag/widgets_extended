@@ -201,8 +201,9 @@ sealed class GridShape<T> {
 }
 
 /// The piece of [shown]'s entry on the [dayNumber] [day]: from [start] to
-/// [end] minutes after that day's midnight ([pieceOn]), and whether it
-/// holds the entry's start, [first], or its end, [last].
+/// [end] minutes after that day's midnight ([pieceOn]), whether it holds
+/// the entry's start, [first], or its end, [last], and whether the entry
+/// has a part on a later day, [continuesAfter].
 final class GridPiece<T> extends GridShape<T> {
   const GridPiece({
     required this.shown,
@@ -211,6 +212,7 @@ final class GridPiece<T> extends GridShape<T> {
     required this.end,
     required this.first,
     required this.last,
+    required this.continuesAfter,
   });
 
   @override
@@ -231,6 +233,10 @@ final class GridPiece<T> extends GridShape<T> {
   /// Whether the piece holds the entry's end.
   final bool last;
 
+  /// Whether the entry has a part on a day after [day]: [day] is before
+  /// its last day ([lastDayNumberOf]).
+  final bool continuesAfter;
+
   @override
   bool operator ==(Object other) {
     return other is GridPiece<T> &&
@@ -239,12 +245,13 @@ final class GridPiece<T> extends GridShape<T> {
         other.start == start &&
         other.end == end &&
         other.first == first &&
-        other.last == last;
+        other.last == last &&
+        other.continuesAfter == continuesAfter;
   }
 
   @override
   int get hashCode {
-    return Object.hash(shown, day, start, end, first, last);
+    return Object.hash(shown, day, start, end, first, last, continuesAfter);
   }
 
   @override
@@ -571,6 +578,7 @@ class TimedGridLayout<T> {
               first: day == firstDay,
               // The piece the span ends on, which holds the entry's end.
               last: span.end <= (day + 1) * minutesPerDay,
+              continuesAfter: day < lastDay,
             ),
           );
           if (tracks.repeatsStretchAt(column)) {
