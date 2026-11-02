@@ -2939,7 +2939,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// entry's start and end each move by the elapsed time from the anchor
   /// to the landing, so the entry keeps its length. A resize sets the end
   /// whose edge [to] moved off [from]'s to the time of that edge on the
-  /// piece's day, the occurrence of the old end's kept likewise.
+  /// piece's day, the occurrence of the old end's kept likewise, except
+  /// that an old end at the later 00:00 ([isLaterMidnight]), whose edge is
+  /// drawn where the first pass ends, gives the earlier occurrence.
   ({DateTime start, DateTime end})? _timesOf(
     GridPiece<T> piece,
     CalendarEntry<T> entry,
@@ -2992,7 +2994,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final bottom = to.endTrackOn(Axis.vertical);
     if ((bottom - from.endTrackOn(Axis.vertical)).abs() >
         precisionErrorTolerance) {
-      final edge = endAtWallMinute(wallAt(column, bottom), from: entry.end);
+      // An end at the later 00:00 is drawn where the first pass ends
+      // ([wallSpanOf]), so its edge moves within that pass.
+      final edge = endAtWallMinute(
+        wallAt(column, bottom),
+        from: isLaterMidnight(entry.end) ? null : entry.end,
+      );
       if (edge == null) {
         return null;
       }

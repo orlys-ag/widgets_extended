@@ -551,9 +551,7 @@ class TimedGridLayout<T> {
         final day = tracks.dayAt(column);
         final piece = pieceOn(span, day);
         if (piece == null) {
-          // A covered day whose part the span ends before, as an end at
-          // the later 00:00 of a day whose clock repeats its midnight
-          // leaves.
+          // A covered day the span does not reach.
           missed = true;
           continue;
         }

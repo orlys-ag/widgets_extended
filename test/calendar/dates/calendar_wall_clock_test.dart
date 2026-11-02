@@ -395,20 +395,36 @@ void main() {
           ).holdsTimes(day, laterMidnight, isAllDay: false),
           isTrue,
         );
-        // Guard: red when every end at the later 00:00 reads at 01:00.
+        // From the day before too, the hours read the end at 01:00, where
+        // the first pass ends: red when it reads at the 24:00 before it.
         expect(
           CalendarDayHours(
             0,
             1425,
           ).holdsTimes(at(before, 23), laterMidnight, isAllDay: false),
+          isTrue,
+        );
+        expect(
+          CalendarDayHours(
+            60,
+            1440,
+          ).holdsTimes(at(before, 23), laterMidnight, isAllDay: false),
           isFalse,
+        );
+        // Guard: red when it reads before 01:00.
+        expect(
+          CalendarDayHours(
+            59,
+            1440,
+          ).holdsTimes(at(before, 23), laterMidnight, isAllDay: false),
+          isTrue,
         );
         // Guards: red when its last day is the day before, at 24:00.
         expect(lastDayNumberOf(at(before, 23), laterMidnight), dayNumber(day));
         expect(endMinuteOfDay(laterMidnight), 0);
-        // Guard: red when the later 00:00 ends at its day's minute 60.
+        // Its last day holds the first pass, 00:00 to 01:00.
         final span = wallSpanOf(at(before, 23), laterMidnight);
-        expect(pieceOn(span, dayNumber(day)), isNull);
+        expect(pieceOn(span, dayNumber(day)), (start: 0, end: 60));
       });
     },
   );

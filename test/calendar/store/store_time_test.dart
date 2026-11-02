@@ -383,8 +383,8 @@ void main() {
     skip: repeatedMidnightSkip,
     () {
       test("SM10 an entry from the day before ending at the later 00:00 is "
-          "created and moved under the whole day, and its end lies outside "
-          "hours ending before 24:00", () async {
+          "created and moved under the whole day, and its end lies at "
+          "01:00, where the first pass ends", () async {
         final day = longDayStart;
         expectRepeatedMidnight(day);
         final before = DateTime(day.year, day.month, day.day - 1);
@@ -418,14 +418,23 @@ void main() {
           ).endOutside,
           isFalse,
         );
-        // Guard: red when every end at the later 00:00 reads at 01:00.
-        final short = CalendarHoursException(
-          hours: CalendarDayHours(0, 1425),
+        // Red when the end reads at the 24:00 before it.
+        expect(
+          CalendarHoursException(
+            hours: CalendarDayHours(0, 1425),
+            start: at(before, 23),
+            end: laterMidnight,
+          ).endOutside,
+          isFalse,
+        );
+        final fromOne = CalendarHoursException(
+          hours: CalendarDayHours(60, 1440),
           start: at(before, 23),
           end: laterMidnight,
         );
-        expect(short.endOutside, isTrue);
-        expect(short.startOutside, isFalse);
+        expect(fromOne.endOutside, isTrue);
+        // Guard: red when startOutside reads holdsTimes.
+        expect(fromOne.startOutside, isFalse);
       });
     },
   );
