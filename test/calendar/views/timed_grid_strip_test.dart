@@ -5542,7 +5542,8 @@ void main() {
     skip: repeatedMidnightSkip,
     () {
       testWidgets("TX32 in Week, the block of an entry ending at the later "
-          "00:00 continues after its day", (tester) async {
+          "00:00 continues after the day before, and its block on that day "
+          "continues from it and ends it", (tester) async {
         final day = longDayStart;
         expectRepeatedMidnight(day);
         final before = DateTime(day.year, day.month, day.day - 1);
@@ -5557,10 +5558,12 @@ void main() {
             return defaultCalendarBlockBuilder<String>(context, entry, given);
           },
         ).pump(tester);
-        // Guard: red when it reads whether the block holds the entry's end.
         expect(
-          <bool>{for (final built in details["late"]!) built.continuesAfter},
-          <bool>{true},
+          <(bool, bool)>{
+            for (final built in details["late"]!)
+              (built.continuesBefore, built.continuesAfter),
+          },
+          <(bool, bool)>{(false, true), (true, false)},
         );
       });
     },

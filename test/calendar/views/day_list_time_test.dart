@@ -448,4 +448,21 @@ void main() {
       });
     },
   );
+
+  group(
+    "on the day whose clock repeats its midnight",
+    skip: repeatedMidnightSkip,
+    () {
+      testWidgets("AG12 an entry from the day before ending at the later "
+          "00:00 is listed on that day from 00:00 to 01:00", (tester) async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final store = storeOf(<CalendarEntry<String>>[
+          entryOf("late", at(before, 23), laterMidnight),
+        ]);
+        expect(rowsOf(store, day), <Object>[("late", 0, 60, false)]);
+      });
+    },
+  );
 }

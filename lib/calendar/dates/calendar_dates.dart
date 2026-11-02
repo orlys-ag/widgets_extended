@@ -447,6 +447,19 @@ bool isLaterOccurrence(DateTime time) {
   return minute != timeAtWallMinute(wallMinuteOf(time));
 }
 
+/// Whether [time] is the later 00:00 of a day whose clock repeats its
+/// midnight, or a time inside its minute: a local time reading 00:00 that
+/// [isLaterOccurrence] names. Where the clock goes back to 00:00, it is the
+/// instant the stretch's first pass ends.
+bool isLaterMidnight(DateTime time) {
+  // A day's start is the earlier 00:00, and the cheaper test.
+  return !time.isUtc &&
+      time.hour == 0 &&
+      time.minute == 0 &&
+      !isDayStart(time) &&
+      isLaterOccurrence(time);
+}
+
 /// The first wall minute the clock reads whose instant in [from]'s
 /// occurrence ([timeAtWallMinute]) is not before [time], so a range from it
 /// starts at [time] or later: [time]'s own ([wallMinuteOf]) or, for a time
@@ -524,12 +537,20 @@ int lastDayNumberOf(DateTime start, DateTime end) {
 }
 
 /// The range from [start] to [end] in wall minutes: from its start's wall
-/// minute ([wallMinuteOf]) to its end's ([endWallMinuteOf]). An end whose
-/// wall minute is not after the start's, which only a stretch the clock
-/// repeats gives, is the start plus the range's length in minutes.
+/// minute ([wallMinuteOf]) to its end's ([endWallMinuteOf]), except at two
+/// ends a stretch the clock repeats gives. An end at the later 00:00
+/// ([isLaterMidnight]), which reads as the 24:00 before it, ends at its
+/// day's minute the length of the repeated stretch ([repeatedStretchOf]),
+/// 01:00 for an hour, where a clock going back to 00:00 ends the first
+/// pass, so the range has a piece on the day it ends on. And an end whose
+/// wall minute is not after the start's is the start plus the range's
+/// length in minutes.
 ({int start, int end}) wallSpanOf(DateTime start, DateTime end) {
   final from = wallMinuteOf(start);
   var to = endWallMinuteOf(end);
+  if (isLaterMidnight(end)) {
+    to += repeatedStretchOf(end).inMinutes;
+  }
   if (to <= from) {
     to = from + end.difference(start).inMinutes;
   }
@@ -538,19 +559,15 @@ int lastDayNumberOf(DateTime start, DateTime end) {
 
 /// The minute of its last day at which the hours read a range from
 /// [start] to [end] to end ([CalendarDayHours.holdsTimes]):
-/// [endMinuteOfDay]'s, except for a local end reading 00:00 that
-/// [isLaterOccurrence] names, the later 00:00 of a day whose clock repeats
-/// its midnight or a time inside its minute, where it is the minute of
-/// the end's day at which the range's wall span ([wallSpanOf]) ends, as
-/// Week and Day draw it, and [minutesPerDay] where that is the day's
-/// minute 0, the 24:00 before it.
+/// [endMinuteOfDay]'s, except for an end at the later 00:00
+/// ([isLaterMidnight]), where it is the minute of the end's day at which
+/// the range's wall span ([wallSpanOf]) ends, as Week and Day draw it.
 int hoursEndMinuteOf(DateTime start, DateTime end) {
   final minute = endMinuteOfDay(end);
-  if (minute != 0 || end.isUtc || !isLaterOccurrence(end)) {
+  if (minute != 0 || !isLaterMidnight(end)) {
     return minute;
   }
-  final into = wallSpanOf(start, end).end - dayNumber(end) * minutesPerDay;
-  return into == 0 ? minutesPerDay : into;
+  return wallSpanOf(start, end).end - dayNumber(end) * minutesPerDay;
 }
 
 /// The part of [span], in wall minutes, on the [dayNumber] [day], as
@@ -825,12 +842,11 @@ final class CalendarDayHours {
   /// hold as an end, except an end at the later 00:00 of a day whose clock
   /// repeats its midnight, a local time reading 00:00 that
   /// `CalendarDates.isLaterOccurrence` names, which they hold where Week
-  /// and Day draw it: at 24:00 for a range from an earlier day, the wall
-  /// minute it ends at (`CalendarDates.endWallMinuteOf`), and for one from
-  /// earlier that day at its start's minute plus its length in minutes. So
-  /// an overnight range may cross the hours' end and start, and a timed
-  /// range from a day start to a day start lies inside them only where
-  /// they run from 00:00 to 24:00.
+  /// and Day draw it: at the minute the repeated stretch's first pass ends,
+  /// 01:00 for an hour, whatever day the range starts on. So an overnight
+  /// range may cross the hours' end and start, and a timed range from a
+  /// day start to a day start lies inside them only where they run from
+  /// 00:00 to 24:00.
   bool holdsTimes(DateTime from, DateTime to, {required bool isAllDay}) {
     if (isAllDay) {
       return true;

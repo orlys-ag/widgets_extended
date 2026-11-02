@@ -377,9 +377,9 @@ void main() {
     "on the day whose clock repeats its midnight",
     skip: repeatedMidnightSkip,
     () {
-      test("GL9 an entry ending at the later 00:00 has its one piece, the "
-          "last, on the day before, and is loose for the day it has no "
-          "piece on", () {
+      test("GL9 an entry ending at the later 00:00 has a piece on the day "
+          "before and its last on that day, from 00:00 to 01:00, and is "
+          "loose for that day's repeated hour", () {
         final day = longDayStart;
         expectRepeatedMidnight(day);
         final before = DateTime(day.year, day.month, day.day - 1);
@@ -394,6 +394,14 @@ void main() {
             start: 1380,
             end: 1440,
             first: true,
+            last: false,
+          ),
+          GridPiece<String>(
+            shown: late,
+            day: dayNumber(day),
+            start: 0,
+            end: 60,
+            first: false,
             last: true,
           ),
         ]);

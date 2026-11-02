@@ -2148,8 +2148,8 @@ void main() {
       });
 
       testWidgets("TP41 in Week, an entry moved to end at the later 00:00 is "
-          "stored, draws on the day before alone, and holds its end grip "
-          "there", (tester) async {
+          "stored, draws on that day to the 01:00 row, and holds its end "
+          "grip there", (tester) async {
         final day = longDayStart;
         expectRepeatedMidnight(day);
         final before = DateTime(day.year, day.month, day.day - 1);
@@ -2172,17 +2172,28 @@ void main() {
         final moved = store.storedEntry("late")!;
         expect(moved.start, at(before, 23));
         expect(moved.end, laterMidnight);
-        // Guard: red when the later 00:00 ends at its day's minute 60.
-        expect(blocksOf("late"), findsOneWidget);
         expect(blockFinder("late", before), findsOneWidget);
-        await selectBlock(tester, blockFinder("late", before));
-        // Guard: red when the last piece is the one on the end's day.
+        expect(
+          tester.getRect(blockFinder("late", day)).bottom,
+          moreOrLessEquals(
+            cellRect(tester, shown.rowOf(60), shown.colOf(day)).top,
+          ),
+        );
+        await selectBlock(tester, blockFinder("late", day));
+        expect(
+          find.descendant(
+            of: blockFinder("late", day),
+            matching: find.byKey(blockGripKey("late", AxisDirection.down)),
+          ),
+          findsOneWidget,
+        );
+        // Guard: red when every piece holds the end grip.
         expect(
           find.descendant(
             of: blockFinder("late", before),
             matching: find.byKey(blockGripKey("late", AxisDirection.down)),
           ),
-          findsOneWidget,
+          findsNothing,
         );
       });
 
@@ -2211,6 +2222,36 @@ void main() {
         );
         expect(timesOf(harness.moves), <(DateTime, DateTime)>[
           (day, laterMidnight),
+        ]);
+      });
+
+      testWidgets("TP44 in Day, an entry from the day before ending at the "
+          "later 00:00 draws to the 01:00 row, and its end edge dragged up "
+          "a slot requests an end at the first 00:45", (tester) async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final shown = Shown.day(day);
+        final harness = Harness(
+          storeOf(<CalendarEntry<String>>[
+            entryOf("late", at(before, 23), laterMidnight),
+          ]),
+          shown,
+          recordsMoves: true,
+        );
+        await harness.pump(tester);
+        final block = blockFinder("late", day);
+        expect(
+          tester.getRect(block).bottom,
+          moreOrLessEquals(
+            cellRect(tester, shown.rowOf(60), shown.colOf(day)).top,
+          ),
+        );
+        final slot = slotRect(tester, shown, day, 0).height;
+        await selectBlock(tester, block);
+        await resizeEnd(tester, block, Offset(0.0, -slot - 2.0));
+        expect(timesOf(harness.moves), <(DateTime, DateTime)>[
+          (at(before, 23), day.add(const Duration(minutes: 45))),
         ]);
       });
     },

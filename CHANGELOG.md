@@ -54,11 +54,12 @@ the minute its clock starts, `CalendarDates.timeAtWallMinute` answers null
 for its minute 0, and the new `CalendarDates.endWallMinuteOf` and
 `CalendarDates.endAtWallMinute` read a range's end, a day's 24:00 being the
 next day's minute 0. On a day whose clock repeats its midnight hour,
-`timeAtWallMinute` keeps the later 00:00 for a `from` in the later pass,
-and `CalendarDayHours.holdsTimes` and
-`CalendarHoursException.endOutside` read an end at the later 00:00 where
-Week and Day draw it: at 24:00 for a range from an earlier day, and at
-01:00 for one from the first 00:00 hour.
+`timeAtWallMinute` keeps the later 00:00 for a `from` in the later pass.
+Week, Day and Agenda draw an entry ending at the later 00:00 on that day
+to 01:00, where the first 00:00 hour ends, whatever day it starts on, and
+an end edge dragged off it moves within that hour;
+`CalendarDayHours.holdsTimes` and `CalendarHoursException.endOutside` read
+such an end at 01:00.
 - `package:widgets_extended/widgets_extended.dart` exports the calendar,
 so an app that also imports a library declaring one of its names, as
 `syncfusion_flutter_calendar` declares `CalendarController`,

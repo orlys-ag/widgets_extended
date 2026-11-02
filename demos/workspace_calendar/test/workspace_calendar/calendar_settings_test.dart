@@ -243,21 +243,26 @@ void main() {
     "on the day whose clock repeats its midnight",
     skip: repeatedMidnightSkip,
     () {
-      test("MD2 hoursErrorsOf names no end error for an end at the later "
-          "00:00 under hours to 24:00", () {
+      test("MD2 hoursErrorsOf reads an end at the later 00:00 at 01:00, "
+          "where the first pass ends", () {
         final day = longDay!.day;
         expectRepeatedMidnight(day);
         final before = DateTime(day.year, day.month, day.day - 1);
+        final start = DateTime(before.year, before.month, before.day, 0, 30);
+        final end = day.add(const Duration(hours: 1));
         expect(
-          hoursErrorsOf(
-            DateTime(before.year, before.month, before.day, 0, 30),
-            day.add(const Duration(hours: 1)),
-            CalendarDayHours(60, 1440),
-          ),
+          hoursErrorsOf(start, end, CalendarDayHours(0, 1425)),
+          <String, String>{},
+        );
+        expect(
+          hoursErrorsOf(start, end, CalendarDayHours(60, 1440)),
           <String, String>{
             "start":
                 "The start is from 01:00 to before 24:00, inside the "
                 "calendar's hours.",
+            "end":
+                "The end is from after 01:00 to 24:00, inside the calendar's "
+                "hours.",
           },
         );
       });
