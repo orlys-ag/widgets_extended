@@ -657,4 +657,20 @@ void main() {
       isTrue,
     );
   });
+
+  group(
+    "on the day whose clock repeats its midnight",
+    skip: repeatedMidnightSkip,
+    () {
+      test("ER13 the first slot from an earliest start at the later 00:00 "
+          "starts at the later 00:00", () {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        expect(
+          rulesOf().firstSlot(CalendarEarliestStart(day, laterMidnight)),
+          slot(laterMidnight, laterMidnight.add(const Duration(minutes: 15))),
+        );
+      });
+    },
+  );
 }

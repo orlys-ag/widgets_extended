@@ -8,6 +8,8 @@ import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'midnight_days.dart';
+
 /// [minute] minutes after the midnight of Tuesday, April 21 2026.
 DateTime onTuesday(int minute) {
   return DateTime(2026, 4, 21, 0, minute);
@@ -236,4 +238,29 @@ void main() {
       }
     });
   });
+
+  group(
+    "on the day whose clock repeats its midnight",
+    skip: repeatedMidnightSkip,
+    () {
+      test("MD2 hoursErrorsOf names no end error for an end at the later "
+          "00:00 under hours to 24:00", () {
+        final day = longDay!.day;
+        expectRepeatedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        expect(
+          hoursErrorsOf(
+            DateTime(before.year, before.month, before.day, 0, 30),
+            day.add(const Duration(hours: 1)),
+            CalendarDayHours(60, 1440),
+          ),
+          <String, String>{
+            "start":
+                "The start is from 01:00 to before 24:00, inside the "
+                "calendar's hours.",
+          },
+        );
+      });
+    },
+  );
 }

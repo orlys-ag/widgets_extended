@@ -5300,6 +5300,58 @@ void main() {
     await bar.up();
     await tester.pumpAndSettle();
   });
+
+  group(
+    "on the day whose clock skips its midnight",
+    skip: skippedMidnightSkip,
+    () {
+      testWidgets("TX27 in Week, a bar dropped on the day's 00:00 slot "
+          "requests nothing, and one dropped on its 01:00 slot an hour from "
+          "the day's start", (tester) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final shown = Shown.week(addDays(day, -6));
+        final store = storeOf(<CalendarEntry<String>>[allDayOf("off", day)]);
+        await Harness(store, shown).pump(tester);
+        await dragTo(
+          tester,
+          tester.getCenter(barFinder("off")),
+          slotRect(tester, shown, day, 0).center,
+        );
+        expect(store.moves, isEmpty);
+        // Setup sanity: the same drop on the 01:00 slot lands.
+        await dragTo(
+          tester,
+          tester.getCenter(barFinder("off")),
+          slotRect(tester, shown, day, 60).center,
+        );
+        expect(store.moves, <CalendarEntry<String>>[
+          entryOf("off", day, at(day, 2)),
+        ]);
+      });
+
+      testWidgets("TX34 in Week under a one-day limit, a create drag from the "
+          "next day back onto the day's 00:00 slot is not held and reports "
+          "nothing", (tester) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final next = addDays(day, 1);
+        final shown = Shown.week(addDays(day, -5));
+        final harness = Harness(
+          storeOf(const <CalendarEntry<String>>[]),
+          shown,
+          maxDayCount: 1,
+        );
+        await harness.pump(tester);
+        await createDrag(
+          tester,
+          slotRect(tester, shown, next, 5 * 60).center,
+          slotRect(tester, shown, day, 0).center,
+        );
+        expect(harness.creates, isEmpty);
+      });
+    },
+  );
 }
 
 /// Lifts [block] at its centre, moves it so its top lies 2 px below

@@ -377,4 +377,56 @@ void main() {
       }
     });
   });
+
+  group(
+    "on the day whose clock repeats its midnight",
+    skip: repeatedMidnightSkip,
+    () {
+      test("SM10 an entry from the day before ending at the later 00:00 is "
+          "created and moved under the whole day, and its end lies outside "
+          "hours ending before 24:00", () async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final memory = MemoryCalendarStore<String>();
+        addTearDown(memory.dispose);
+        final created = await memory.create(
+          entryOf("night", at(before, 23), laterMidnight),
+        );
+        expect(created.start, at(before, 23));
+        expect(created.end, laterMidnight);
+        expect(memory.storedEntry("night"), created);
+
+        final late = entryOf("late", at(before, 21), at(before, 23));
+        for (final (name, store) in storesOf(
+          <CalendarEntry<String>>[late],
+          first: before,
+          last: day,
+        )) {
+          final moved = await store.requestMove(
+            late.copyWith(start: at(before, 23), end: laterMidnight),
+          );
+          expect(moved.start, at(before, 23), reason: name);
+          expect(moved.end, laterMidnight, reason: name);
+        }
+
+        expect(
+          CalendarHoursException(
+            hours: CalendarDayHours.allDay,
+            start: at(before, 23),
+            end: laterMidnight,
+          ).endOutside,
+          isFalse,
+        );
+        // Guard: red when every end at the later 00:00 reads at 01:00.
+        final short = CalendarHoursException(
+          hours: CalendarDayHours(0, 1425),
+          start: at(before, 23),
+          end: laterMidnight,
+        );
+        expect(short.endOutside, isTrue);
+        expect(short.startOutside, isFalse);
+      });
+    },
+  );
 }

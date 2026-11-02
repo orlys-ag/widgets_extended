@@ -22,6 +22,7 @@ import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
+import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
@@ -262,11 +263,12 @@ class HeldSource implements CalendarDataSource<String> {
 
 /// What a test pumps: the grid of [shown] over [store], in a view 800 wide
 /// and 2000 tall, where every slot of the day shows; [creates] records each
-/// create range it reports. [hours] and [slotMinutes] start as [shown]'s,
-/// and [rebuild] builds the grid again with them. The grid's policy is the
-/// unrestricted one, combined with a [DayLimitPolicy] of [maxDayCount]
-/// where it is given and with a [NoOverlapsPolicy] where [allowsOverlaps]
-/// is false.
+/// create range it reports, and where [recordsMoves] is true, [moves] each
+/// move and resize request it lands, which the store then does not write.
+/// [hours] and [slotMinutes] start as [shown]'s, and [rebuild] builds the
+/// grid again with them. The grid's policy is the unrestricted one,
+/// combined with a [DayLimitPolicy] of [maxDayCount] where it is given and
+/// with a [NoOverlapsPolicy] where [allowsOverlaps] is false.
 class Harness {
   Harness(
     this.store,
@@ -274,6 +276,7 @@ class Harness {
     this.maxDayCount,
     this.editable = true,
     this.allowsOverlaps = true,
+    this.recordsMoves = false,
   }) : hours = shown.hours,
        slotMinutes = shown.slotMinutes;
 
@@ -282,6 +285,7 @@ class Harness {
   final int? maxDayCount;
   final bool editable;
   final bool allowsOverlaps;
+  final bool recordsMoves;
 
   CalendarEditPolicy<String> get policy {
     final limit = maxDayCount;
@@ -296,6 +300,8 @@ class Harness {
   int slotMinutes;
 
   final List<CalendarCreateRange> creates = <CalendarCreateRange>[];
+  final List<CalendarMoveRequest<String>> moves =
+      <CalendarMoveRequest<String>>[];
   final ValueNotifier<CalendarNow> now = ValueNotifier<CalendarNow>(
     CalendarNow(time: DateTime(2026, 1, 5, 9), today: DateTime(2026, 1, 5)),
   );
@@ -313,6 +319,11 @@ class Harness {
       onCreate: (range) async {
         creates.add(range);
       },
+      onMoveRequest: recordsMoves
+          ? (request) async {
+              moves.add(request);
+            }
+          : null,
       editable: editable,
       editPolicy: policy,
       hours: hours,
@@ -345,6 +356,13 @@ CountingStore storeOf(
   final store = CountingStore(entries: entries, hours: hours);
   addTearDown(store.dispose);
   return store;
+}
+
+/// The requested start and end of each of [moves], in order.
+List<(DateTime, DateTime)> timesOf(List<CalendarMoveRequest<String>> moves) {
+  return <(DateTime, DateTime)>[
+    for (final move in moves) (move.requested.start, move.requested.end),
+  ];
 }
 
 /// Long-presses [at], lifting the block there, and returns the gesture.
@@ -1895,4 +1913,246 @@ void main() {
       }
     });
   });
+
+  group(
+    "on the day whose clock skips its midnight",
+    skip: skippedMidnightSkip,
+    () {
+      testWidgets("TP36 in Week and in Day, an entry from the day's start "
+          "draws from the 01:00 row, and one from the day before from the "
+          "00:00 row", (tester) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final early = entryOf("early", day, at(day, 2));
+        final night = entryOf("night", at(before, 23), at(day, 2));
+        for (final shown in <Shown>[
+          Shown.week(addDays(day, -6)),
+          Shown.day(day),
+        ]) {
+          await Harness(
+            storeOf(<CalendarEntry<String>>[early, night]),
+            shown,
+          ).pump(tester);
+          final col = shown.colOf(day);
+          final rect = tester.getRect(blockFinder("early", day));
+          expect(
+            rect.top,
+            moreOrLessEquals(cellRect(tester, shown.rowOf(60), col).top),
+            reason: shown.name,
+          );
+          // Guard, as the bottom of night's block below: red when a time
+          // reads at its elapsed minutes from its day's start.
+          expect(
+            rect.bottom,
+            moreOrLessEquals(cellRect(tester, shown.rowOf(120), col).top),
+            reason: shown.name,
+          );
+          // Guard: red when a piece starts at its day's first minute the
+          // clock reads.
+          final continued = tester.getRect(blockFinder("night", day));
+          expect(
+            continued.top,
+            moreOrLessEquals(cellRect(tester, shown.rowOf(0), col).top),
+            reason: shown.name,
+          );
+          expect(
+            continued.bottom,
+            moreOrLessEquals(cellRect(tester, shown.rowOf(120), col).top),
+            reason: shown.name,
+          );
+        }
+      });
+
+      testWidgets("TP37 in Day, a create drag between the 00:00 and the "
+          "01:00 slots reports nothing either way, and a tap on the 01:00 "
+          "slot creates from the day's start", (tester) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final shown = Shown.day(day);
+        final harness = Harness(
+          storeOf(const <CalendarEntry<String>>[]),
+          shown,
+        );
+        await harness.pump(tester);
+        // Guard: red when a press on the 00:00 slot starts a range and its
+        // start reads the day's start.
+        await createDrag(
+          tester,
+          slotRect(tester, shown, day, 0).center,
+          slotRect(tester, shown, day, 60).center,
+        );
+        expect(harness.creates, isEmpty);
+        await createDrag(
+          tester,
+          slotRect(tester, shown, day, 60).center,
+          slotRect(tester, shown, day, 0).center,
+        );
+        expect(harness.creates, isEmpty);
+        // Setup sanity: the 01:00 slot is the day's first.
+        await tester.tapAt(slotRect(tester, shown, day, 60).center);
+        await tester.pumpAndSettle();
+        expect(harness.creates, <CalendarCreateRange>[
+          CalendarCreateRange(
+            start: day,
+            end: day.add(const Duration(minutes: 15)),
+          ),
+        ]);
+      });
+
+      testWidgets("TP38 in Day, a move and a start edge onto the 00:00 row "
+          "request nothing, and a move onto the 01:00 row starts at the "
+          "day's start", (tester) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final shown = Shown.day(day);
+        final harness = Harness(
+          storeOf(<CalendarEntry<String>>[
+            entryOf("long", at(day, 5), at(day, 7)),
+            entryOf("edge", at(day, 2), at(day, 3)),
+          ]),
+          shown,
+          recordsMoves: true,
+        );
+        await harness.pump(tester);
+
+        var from = tester.getRect(blockFinder("long", day)).topLeft;
+        await moveBlock(
+          tester,
+          blockFinder("long", day),
+          slotRect(tester, shown, day, 0).topLeft -
+              from +
+              const Offset(0.0, 2.0),
+        );
+        expect(harness.moves, isEmpty);
+
+        final edge = blockFinder("edge", day);
+        await selectBlock(tester, edge);
+        await resizeStart(
+          tester,
+          edge,
+          Offset(
+            0.0,
+            slotRect(tester, shown, day, 0).top - tester.getRect(edge).top,
+          ),
+        );
+        expect(harness.moves, isEmpty);
+
+        // Setup sanity: the same move onto the 01:00 row lands.
+        from = tester.getRect(blockFinder("long", day)).topLeft;
+        await moveBlock(
+          tester,
+          blockFinder("long", day),
+          slotRect(tester, shown, day, 60).topLeft -
+              from +
+              const Offset(0.0, 2.0),
+        );
+        expect(timesOf(harness.moves), <(DateTime, DateTime)>[
+          (day, at(day, 3)),
+        ]);
+      });
+    },
+  );
+
+  group(
+    "on the day whose clock repeats its midnight",
+    skip: repeatedMidnightSkip,
+    () {
+      testWidgets("TP40 in Day, an entry in the later pass moved onto the "
+          "00:00 row starts at the later 00:00", (tester) async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final shown = Shown.day(day);
+        final start = laterMidnight.add(const Duration(minutes: 15));
+        final harness = Harness(
+          storeOf(<CalendarEntry<String>>[
+            entryOf("later", start, start.add(const Duration(minutes: 30))),
+          ]),
+          shown,
+          recordsMoves: true,
+        );
+        await harness.pump(tester);
+        final from = tester.getRect(blockFinder("later", day)).topLeft;
+        // Setup sanity: the block lies at the 00:15 row.
+        expect(from.dy, moreOrLessEquals(slotRect(tester, shown, day, 15).top));
+        await moveBlock(
+          tester,
+          blockFinder("later", day),
+          slotRect(tester, shown, day, 0).topLeft -
+              from +
+              const Offset(0.0, 2.0),
+        );
+        expect(timesOf(harness.moves), <(DateTime, DateTime)>[
+          (laterMidnight, laterMidnight.add(const Duration(minutes: 30))),
+        ]);
+      });
+
+      testWidgets("TP41 in Week, an entry moved to end at the later 00:00 is "
+          "stored, draws on the day before alone, and holds its end grip "
+          "there", (tester) async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final shown = Shown.week(addDays(day, -6));
+        // Two hours from the day's start, drawn from the 00:00 row to the
+        // 01:00 row: a block short enough to drop on the day before's last
+        // hour, where it ends two hours after 23:00.
+        final store = storeOf(<CalendarEntry<String>>[
+          entryOf("late", day, day.add(const Duration(hours: 2))),
+        ]);
+        await Harness(store, shown).pump(tester);
+        final from = tester.getRect(blockFinder("late", day)).topLeft;
+        await moveBlock(
+          tester,
+          blockFinder("late", day),
+          slotRect(tester, shown, before, 23 * 60).topLeft -
+              from +
+              const Offset(0.0, 2.0),
+        );
+        final moved = store.storedEntry("late")!;
+        expect(moved.start, at(before, 23));
+        expect(moved.end, laterMidnight);
+        // Guard: red when the later 00:00 ends at its day's minute 60.
+        expect(blocksOf("late"), findsOneWidget);
+        expect(blockFinder("late", before), findsOneWidget);
+        await selectBlock(tester, blockFinder("late", before));
+        // Guard: red when the last piece is the one on the end's day.
+        expect(
+          find.descendant(
+            of: blockFinder("late", before),
+            matching: find.byKey(blockGripKey("late", AxisDirection.down)),
+          ),
+          findsOneWidget,
+        );
+      });
+
+      testWidgets("TP43 in Day under 00:00-18:00, an hour moved onto the "
+          "00:00 row from a later time requests the earlier 00:00 to the "
+          "later 00:00", (tester) async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final hours = CalendarDayHours(0, 18 * 60);
+        final shown = Shown.day(day, hours: hours);
+        final harness = Harness(
+          storeOf(<CalendarEntry<String>>[
+            entryOf("hour", at(day, 3), at(day, 4)),
+          ], hours: hours),
+          shown,
+          recordsMoves: true,
+        );
+        await harness.pump(tester);
+        final from = tester.getRect(blockFinder("hour", day)).topLeft;
+        await moveBlock(
+          tester,
+          blockFinder("hour", day),
+          slotRect(tester, shown, day, 0).topLeft -
+              from +
+              const Offset(0.0, 2.0),
+        );
+        expect(timesOf(harness.moves), <(DateTime, DateTime)>[
+          (day, laterMidnight),
+        ]);
+      });
+    },
+  );
 }
