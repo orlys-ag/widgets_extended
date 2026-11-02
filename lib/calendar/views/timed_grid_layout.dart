@@ -486,9 +486,10 @@ class TimedGridLayout<T> {
   /// after them, and the entries on no day it has a column for; and,
   /// indexed ([loose]), the timed entries a change's rows on the board
   /// can miss: those with a piece wholly before or after the hours, those
-  /// covering a day of the range with no column, and those with a piece
-  /// on a day whose clock repeats a stretch, where a piece's rows do not
-  /// order as its instants do ([GridTracks.repeatsStretchAt]).
+  /// covering a day of the range with no column, those covering a shown
+  /// day where they have no piece, and those with a piece on a day whose
+  /// clock repeats a stretch, where a piece's rows do not order as its
+  /// instants do ([GridTracks.repeatsStretchAt]).
   ///
   /// Where [previous] split the identical entries, with the same pending
   /// flags in the same order, on the same days, weekdays and hours, the
@@ -550,6 +551,10 @@ class TimedGridLayout<T> {
         final day = tracks.dayAt(column);
         final piece = pieceOn(span, day);
         if (piece == null) {
+          // A covered day whose part the span ends before, as an end at
+          // the later 00:00 of a day whose clock repeats its midnight
+          // leaves.
+          missed = true;
           continue;
         }
         if (piece.end <= hours.start) {
@@ -566,7 +571,8 @@ class TimedGridLayout<T> {
               start: piece.start,
               end: piece.end,
               first: day == firstDay,
-              last: day == lastDay,
+              // The piece the span ends on, which holds the entry's end.
+              last: span.end <= (day + 1) * minutesPerDay,
             ),
           );
           if (tracks.repeatsStretchAt(column)) {

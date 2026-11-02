@@ -673,4 +673,46 @@ void main() {
       });
     },
   );
+
+  group(
+    "on the day whose clock skips its midnight",
+    skip: skippedMidnightSkip,
+    () {
+      test("ER14 a one-day limit holds a timed range's end at the day's "
+          "start, the 24:00 before, and its start at the day's start", () {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final rules = CalendarEditRules<String>(
+          policy: DayLimitPolicy<String>(1),
+          hours: CalendarDayHours.allDay,
+          slotMinutes: 15,
+        );
+        // Guard: red when the held end converts by the clock.
+        expect(
+          rules
+              .heldToLimit(
+                at(before, 22),
+                at(addDays(day, 1), 2),
+                atEnd: true,
+                isAllDay: false,
+              )
+              ?.end,
+          day,
+        );
+        // Guard: red when the held start converts by the clock.
+        expect(
+          rules
+              .heldToLimit(
+                at(addDays(before, -1), 22),
+                at(day, 2),
+                atEnd: false,
+                isAllDay: false,
+              )
+              ?.start,
+          day,
+        );
+      });
+    },
+  );
 }

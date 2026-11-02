@@ -2051,6 +2051,66 @@ void main() {
           (day, at(day, 3)),
         ]);
       });
+
+      testWidgets("TP39 in Week, an end edge dragged to the day before's "
+          "bottom and a create drag to its last slot end at the day's "
+          "start", (tester) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final shown = Shown.week(addDays(day, -6));
+        final harness = Harness(
+          storeOf(<CalendarEntry<String>>[
+            entryOf("late", at(before, 22), at(before, 23)),
+          ]),
+          shown,
+          recordsMoves: true,
+        );
+        await harness.pump(tester);
+        // Guard: red when a create's end converts by the clock. It runs
+        // before the resize, whose selection a press elsewhere clears.
+        await createDrag(
+          tester,
+          slotRect(tester, shown, before, 23 * 60).center,
+          slotRect(tester, shown, before, 23 * 60 + 45).center,
+        );
+        expect(harness.creates, <CalendarCreateRange>[
+          CalendarCreateRange(start: at(before, 23), end: day),
+        ]);
+        final slot = slotRect(tester, shown, before, 0).height;
+        final block = blockFinder("late", before);
+        await selectBlock(tester, block);
+        // Guard: red when the end edge converts by the clock.
+        await resizeEnd(tester, block, Offset(0.0, slot * 4));
+        expect(timesOf(harness.moves), <(DateTime, DateTime)>[
+          (at(before, 22), day),
+        ]);
+      });
+
+      testWidgets("TP42 in Week, the day's piece of an entry from the day "
+          "before, dropped with its top on the 02:00 row, moves the entry by "
+          "the hour from the day's start, 01:00", (tester) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final shown = Shown.week(addDays(day, -6));
+        final store = storeOf(<CalendarEntry<String>>[
+          entryOf("night", at(before, 23), at(day, 2)),
+        ]);
+        await Harness(store, shown).pump(tester);
+        final from = tester.getRect(blockFinder("night", day)).topLeft;
+        // Guard: red when the anchor of the piece's top, minute 0, reads by
+        // the clock, which names no time there.
+        await moveBlock(
+          tester,
+          blockFinder("night", day),
+          slotRect(tester, shown, day, 2 * 60).topLeft -
+              from +
+              const Offset(0.0, 2.0),
+        );
+        final moved = store.storedEntry("night")!;
+        expect((moved.start, moved.end), (day, at(day, 3)));
+      });
     },
   );
 

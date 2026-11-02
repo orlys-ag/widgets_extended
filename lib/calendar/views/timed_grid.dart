@@ -567,7 +567,7 @@ CalendarCreateRange? _createRangeOf(
   DateTime? occurrence,
 ) {
   final start = timeAtWallMinute(startWall, from: occurrence);
-  final end = timeAtWallMinute(endWall, from: occurrence);
+  final end = endAtWallMinute(endWall, from: occurrence);
   if (start == null || end == null || !end.isAfter(start)) {
     return null;
   }
@@ -994,9 +994,12 @@ final class _Ranging extends _GridMode {
 
   /// By column as [occurrences]: the first wall minute a range starting on
   /// the column's day may start at, the earliest start's own, one more
-  /// where it lies inside a minute, and the day's start for one at it or
-  /// before it; for a column before [anchor]'s whose day takes no start,
-  /// the next column's value, and for [anchor]'s own the next day's start.
+  /// where it lies inside a minute, and the day's minute 0 for one at its
+  /// start or before it; for a column before [anchor]'s whose day takes no
+  /// start, the next column's value, read where it is a day's minute 0 as
+  /// that day's start's own wall minute ([wallMinuteOf]), at which a range
+  /// reaching back into the column is held; and for [anchor]'s own where
+  /// its day takes no start, the next day's minute 0.
   final List<int> firstFrom;
 
   /// By column as [occurrences]: the first column from it to [anchor]'s
@@ -2953,11 +2956,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
     if (move) {
       final cut = piece.start < hours.start;
+      final top = math.max(piece.start, hours.start);
+      // A top at minute 0 shows the day's start, which a piece continuing
+      // from the day before begins at even where the clock skips 00:00.
       final anchor = piece.first && !cut
           ? entry.start
-          : timeAtWallMinute(
-              piece.day * minutesPerDay + math.max(piece.start, hours.start),
-            );
+          : top == 0
+          ? dateOfDayNumber(piece.day)
+          : timeAtWallMinute(piece.day * minutesPerDay + top);
       if (anchor == null) {
         return null;
       }
@@ -2986,7 +2992,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final bottom = to.endTrackOn(Axis.vertical);
     if ((bottom - from.endTrackOn(Axis.vertical)).abs() >
         precisionErrorTolerance) {
-      final edge = timeAtWallMinute(wallAt(column, bottom), from: entry.end);
+      final edge = endAtWallMinute(wallAt(column, bottom), from: entry.end);
       if (edge == null) {
         return null;
       }
@@ -3338,7 +3344,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   DateTime? _laterDayEndOf(GridKey key, int column, int row) {
     noteDropGate();
     final shape = _board.itemOf(key);
-    var end = timeAtWallMinute(
+    var end = endAtWallMinute(
       _tracks.dayAt(column) * minutesPerDay + _tracks.minuteAt(row + 1),
     );
     if (shape == null || end == null) {
@@ -4243,12 +4249,25 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       final start = _rules.earliestStartOn(tracks.dateAt(col), now);
       occurrences[index] = start.occurrence;
       firstFrom[index] = start.closesDay && !last
-          ? firstFrom[index + 1]
+          ? _closedColumnBoundOf(firstFrom[index + 1])
           : start.firstWallMinute;
       stripFrom[index] = start.admitsDayStart || last
           ? col
           : stripFrom[index + 1];
     }
+  }
+
+  /// The wall minute at which a create range reaching back into a column
+  /// whose day takes no start is held, for the next column's bound [bound]
+  /// ([_Ranging.firstFrom]): where [bound] is a day's minute 0, that day's
+  /// start's own wall minute ([wallMinuteOf]), which lies past it where
+  /// the clock skips the day's midnight, so the range starts at the day's
+  /// first time; and [bound] itself otherwise.
+  static int _closedColumnBoundOf(int bound) {
+    if (bound % minutesPerDay != 0) {
+      return bound;
+    }
+    return wallMinuteOf(dateOfDayNumber(bound ~/ minutesPerDay));
   }
 
   /// Reads the entries next to [range]'s anchor's slot that hold it, in
@@ -4362,7 +4381,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       if (limit != null && focusWall + _tracks.slotMinutes > limit) {
         focus = _lastCellEndingBy(limit, anchor);
       }
-      final end = timeAtWallMinute(
+      final end = endAtWallMinute(
         slotWallMinuteOf(_tracks, focus) + _tracks.slotMinutes,
         from: occurrence,
       );
@@ -4375,7 +4394,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
           isAllDay: false,
         );
         if (held != null) {
-          focus = _lastCellEndingBy(wallMinuteOf(held.end), anchor);
+          focus = _lastCellEndingBy(endWallMinuteOf(held.end), anchor);
         }
       }
       return focus;
@@ -4391,7 +4410,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       slotWallMinuteOf(_tracks, focus),
       from: occurrence,
     );
-    final end = timeAtWallMinute(
+    final end = endAtWallMinute(
       anchorWall + _tracks.slotMinutes,
       from: occurrence,
     );
@@ -4787,7 +4806,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         cutAtStart: cutAtStart,
         cutAtEnd: cutAtEnd,
         continuesBefore: !piece.first,
-        continuesAfter: !piece.last,
+        continuesAfter:
+            piece.day < lastDayNumberOf(entry.entry.start, entry.entry.end),
         hourLabelFormat: widget.hourLabelFormat,
       ),
       builder: _blockBuilder,
@@ -4834,7 +4854,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   ) {
     final wall = slotWallMinuteOf(_tracks, anchor);
     final start = timeAtWallMinute(wall, from: occurrence);
-    final end = timeAtWallMinute(wall + _tracks.slotMinutes, from: occurrence);
+    final end = endAtWallMinute(wall + _tracks.slotMinutes, from: occurrence);
     int? next;
     int? previous;
     if (start == null || end == null) {

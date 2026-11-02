@@ -901,13 +901,14 @@ CalendarEntry<String> nightEntry() {
   return entryOf("night", at(monday, 22), at(tuesday, 2));
 }
 
-/// The LD tests' gesture: in Week over [hours], under [limit], or under
-/// [editPolicy] where it is given, the entry [id] of [entries] selected
-/// and the end grip of its last piece, on [day], pressed 2 px above that
-/// block's bottom, on the grip's half inside the block, or with [outside]
-/// 2 px below it, on the half outside; then dragged so the pointer lies
-/// over the slot starting at [minute] in [over]'s column. Returns the
-/// gesture still held, the store and the harness.
+/// The LD tests' gesture: in Week from [first], or with none from
+/// [monday], over [hours], under [limit], or under [editPolicy] where it
+/// is given, the entry [id] of [entries] selected and the end grip of its
+/// last piece, on [day], pressed 2 px above that block's bottom, on the
+/// grip's half inside the block, or with [outside] 2 px below it, on the
+/// half outside; then dragged so the pointer lies over the slot starting
+/// at [minute] in [over]'s column. Returns the gesture still held, the
+/// store and the harness.
 Future<(TestGesture, MoveRecordingStore, Harness)> holdEndOver(
   WidgetTester tester, {
   required List<CalendarEntry<String>> entries,
@@ -920,8 +921,9 @@ Future<(TestGesture, MoveRecordingStore, Harness)> holdEndOver(
   Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
   CalendarEditPolicy<String>? editPolicy,
   CalendarDayHours hours = CalendarDayHours.allDay,
+  DateTime? first,
 }) async {
-  final shown = Shown.week(monday, hours: hours);
+  final shown = Shown.week(first ?? monday, hours: hours);
   final store = storeOf(entries, hours: hours);
   final harness = Harness(
     store,
@@ -974,6 +976,7 @@ Future<MoveRecordingStore> releaseEndOver(
   Future<void> Function(CalendarMoveRequest<String> request)? onMoveRequest,
   CalendarEditPolicy<String>? editPolicy,
   CalendarDayHours hours = CalendarDayHours.allDay,
+  DateTime? first,
 }) async {
   final (gesture, store, _) = await holdEndOver(
     tester,
@@ -987,6 +990,7 @@ Future<MoveRecordingStore> releaseEndOver(
     onMoveRequest: onMoveRequest,
     editPolicy: editPolicy,
     hours: hours,
+    first: first,
   );
   await gesture.up();
   await tester.pumpAndSettle();
@@ -5349,6 +5353,215 @@ void main() {
           slotRect(tester, shown, day, 0).center,
         );
         expect(harness.creates, isEmpty);
+      });
+
+      testWidgets("TX28 in Week, an end handle let go over the last slot of "
+          "a later day, the day before, ends the entry at the day's start", (
+        tester,
+      ) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final earlier = addDays(before, -1);
+        final evening = entryOf("evening", at(earlier, 22), at(earlier, 23));
+        // Guard: red when the slot's end converts by the clock.
+        final store = await releaseEndOver(
+          tester,
+          entries: <CalendarEntry<String>>[evening],
+          id: "evening",
+          day: earlier,
+          over: before,
+          minute: 23 * 60 + 45,
+          first: addDays(day, -6),
+        );
+        expect(store.moves, <CalendarEntry<String>>[
+          evening.copyWith(end: day),
+        ]);
+      });
+
+      testWidgets("TX29 in Week where overlaps are forbidden, a create range "
+          "from the day before's last slot toward an entry from the day's "
+          "start is held at that slot and ends at the day's start", (
+        tester,
+      ) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final shown = Shown.week(addDays(day, -6));
+        final harness = Harness(
+          storeOf(<CalendarEntry<String>>[entryOf("talk", day, at(day, 2))]),
+          shown,
+          allowsOverlaps: false,
+        );
+        await harness.pump(tester);
+        final from = slotRect(tester, shown, before, 23 * 60 + 45).center;
+        final to = slotRect(tester, shown, day, 3 * 60).center;
+        final gesture = await tester.startGesture(
+          from,
+          kind: PointerDeviceKind.mouse,
+        );
+        await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+        await tester.pump();
+        await gesture.moveTo(to);
+        await tester.pump();
+        // Guard: red when the bound before the entry reads by the clock,
+        // at 01:00, which marks the day's 00:00 to 01:00 rows too.
+        expect(strokedRects(tester), <Matcher>[
+          nearRect(
+            slotsRect(
+              tester,
+              shown,
+              before,
+              23 * 60 + 45,
+              24 * 60,
+            ).deflate(1.0),
+          ),
+        ]);
+        await gesture.up();
+        await tester.pumpAndSettle();
+        // Guard: red when the anchor slot's end converts by the clock, which
+        // reads no entry next to it.
+        expect(harness.creates, <CalendarCreateRange>[
+          CalendarCreateRange(start: at(before, 23, 45), end: day),
+        ]);
+      });
+
+      testWidgets("TX30 in Week under a one-day limit, create ranges held at "
+          "the limit end at the day's start and start at the day's start", (
+        tester,
+      ) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final earlier = addDays(before, -1);
+        final shown = Shown.week(addDays(day, -6));
+        final harness = Harness(
+          storeOf(const <CalendarEntry<String>>[]),
+          shown,
+          maxDayCount: 1,
+        );
+        await harness.pump(tester);
+        // Guard: red when the forward end converts by the clock, which
+        // holds nothing, so the range covers two days.
+        await createDrag(
+          tester,
+          slotRect(tester, shown, earlier, 22 * 60).center,
+          slotRect(tester, shown, before, 23 * 60 + 45).center,
+        );
+        // Guard: red when the backward end converts by the clock.
+        await createDrag(
+          tester,
+          slotRect(tester, shown, before, 23 * 60 + 45).center,
+          slotRect(tester, shown, earlier, 22 * 60).center,
+        );
+        // Guard: red when the held start's wall minute reads as an end,
+        // which holds the range at the 00:00 slot, whose start the clock
+        // skips.
+        await createDrag(
+          tester,
+          slotRect(tester, shown, day, 5 * 60).center,
+          slotRect(tester, shown, before, 22 * 60).center,
+        );
+        expect(harness.creates, <CalendarCreateRange>[
+          CalendarCreateRange(start: at(earlier, 22), end: before),
+          CalendarCreateRange(start: before, end: day),
+          CalendarCreateRange(start: day, end: at(day, 5, 15)),
+        ]);
+      });
+
+      testWidgets("TX31 in Week under a two-day limit, a create range held at "
+          "the limit marks the slots to the day before's end and ends at the "
+          "day's start", (tester) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final earlier = addDays(before, -1);
+        final shown = Shown.week(addDays(day, -6));
+        final harness = Harness(
+          storeOf(const <CalendarEntry<String>>[]),
+          shown,
+          maxDayCount: 2,
+        );
+        await harness.pump(tester);
+        final from = slotRect(tester, shown, earlier, 22 * 60).center;
+        final to = slotRect(tester, shown, day, 3 * 60).center;
+        final gesture = await tester.startGesture(
+          from,
+          kind: PointerDeviceKind.mouse,
+        );
+        await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+        await tester.pump();
+        await gesture.moveTo(to);
+        await tester.pump();
+        // Guard: red when the held end's wall minute reads by the clock,
+        // which marks the day's 00:00 to 01:00 rows too.
+        expect(strokedRects(tester), <Matcher>[
+          nearRect(
+            slotsRect(tester, shown, earlier, 22 * 60, 24 * 60).deflate(1.0),
+          ),
+          nearRect(slotsRect(tester, shown, before, 0, 24 * 60).deflate(1.0)),
+        ]);
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(harness.creates, <CalendarCreateRange>[
+          CalendarCreateRange(start: at(earlier, 22), end: day),
+        ]);
+      });
+
+      testWidgets("TX33 in Week under lockPast with today the day, a create "
+          "drag back into the day before, which the lock closes, starts at "
+          "the day's start", (tester) async {
+        final day = shortDayStart;
+        expectSkippedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final shown = Shown.week(addDays(day, -6));
+        final harness = Harness(
+          storeOf(const <CalendarEntry<String>>[]),
+          shown,
+          lockPast: true,
+          today: day,
+        );
+        await harness.pump(tester);
+        // Guard: red when the closed day's bound stays the day's minute 0,
+        // which holds the range at the 00:00 slot, whose start the clock
+        // skips.
+        await createDrag(
+          tester,
+          slotRect(tester, shown, day, 5 * 60).center,
+          slotRect(tester, shown, before, 3 * 60).center,
+        );
+        expect(harness.creates, <CalendarCreateRange>[
+          CalendarCreateRange(start: day, end: at(day, 5, 15)),
+        ]);
+      });
+    },
+  );
+
+  group(
+    "on the day whose clock repeats its midnight",
+    skip: repeatedMidnightSkip,
+    () {
+      testWidgets("TX32 in Week, the block of an entry ending at the later "
+          "00:00 continues after its day", (tester) async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final details = <String, List<CalendarBlockDetails>>{};
+        await Harness(
+          storeOf(<CalendarEntry<String>>[
+            entryOf("late", at(before, 23), laterMidnight),
+          ]),
+          Shown.week(addDays(day, -6)),
+          blockBuilder: (context, entry, given) {
+            (details[entry.id] ??= <CalendarBlockDetails>[]).add(given);
+            return defaultCalendarBlockBuilder<String>(context, entry, given);
+          },
+        ).pump(tester);
+        // Guard: red when it reads whether the block holds the entry's end.
+        expect(
+          <bool>{for (final built in details["late"]!) built.continuesAfter},
+          <bool>{true},
+        );
       });
     },
   );

@@ -263,4 +263,25 @@ void main() {
       });
     },
   );
+
+  test("MD1 the midnight tests skip exactly where the zone's DST days do "
+      "not change the hour from 00:00, naming the Havana script", () {
+    // In the zone the tests run in: the null branch in America/Havana and
+    // the other in America/New_York.
+    for (final (reason, found) in <(String?, ({DateTime day, int hour})?)>[
+      (skippedMidnightSkip, shortDay),
+      (repeatedMidnightSkip, longDay),
+    ]) {
+      expect(reason == null, found?.hour == 0, reason: "$found");
+      if (reason != null) {
+        expect(
+          reason,
+          allOf(
+            contains("America/Havana"),
+            contains("tool/test_calendar_in_havana.sh"),
+          ),
+        );
+      }
+    }
+  });
 }

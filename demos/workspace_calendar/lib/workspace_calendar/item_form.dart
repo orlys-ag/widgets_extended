@@ -418,22 +418,28 @@ class _ItemFormState extends State<_ItemForm> {
       "title": _title.text,
       "start": _allDay
           ? itemTimeText(_startDate, allDay: true)
-          : _timeText(_startDate, _startMinute),
+          : _timeText(_startDate, _startMinute, end: false),
       "end": _allDay
           ? itemTimeText(CalendarDates.addDays(_endDate, 1), allDay: true)
-          : _timeText(_endDate, _endMinute),
+          : _timeText(_endDate, _endMinute, end: true),
       "fields": fields,
     };
   }
 
   /// [minute] of [day] as the envelope writes a timed item's time
-  /// ([itemTimeText]): the time [timeAtWallMinute] gives, the earlier of a
-  /// time the clock repeats, so 24:00 is the next day's start; and a time
-  /// the clock skips as its own text, which the validator then reports.
-  static String _timeText(DateTime day, int minute) {
-    final time = CalendarDates.timeAtWallMinute(
-      CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay + minute,
-    );
+  /// ([itemTimeText]): for a start the time
+  /// [CalendarDates.timeAtWallMinute] gives, and for an [end] the one
+  /// [CalendarDates.endAtWallMinute] gives, each the earlier of a time the
+  /// clock repeats, so an end at 24:00 is the next day's start, even where
+  /// the clock skips that day's midnight; and a time the clock skips, as
+  /// it skips a start at 00:00 of such a day, as its own text, which the
+  /// validator then reports.
+  static String _timeText(DateTime day, int minute, {required bool end}) {
+    final wall =
+        CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay + minute;
+    final time = end
+        ? CalendarDates.endAtWallMinute(wall)
+        : CalendarDates.timeAtWallMinute(wall);
     if (time == null) {
       return "${isoDate(day)}T${isoTime(minute)}";
     }
