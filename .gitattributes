@@ -2,6 +2,9 @@
 # holds a carriage return, so every checkout keeps them LF.
 .claude/** text eol=lf
 
+# Bash on Windows reads a carriage return as part of a command.
+tool/*.sh text eol=lf
+
 # The Flutter tool writes these with LF and rewrites any copy whose content
 # differs, so a CRLF checkout would show them modified after every pub get.
 demos/workspace_calendar/windows/flutter/generated_plugin_registrant.* text eol=lf

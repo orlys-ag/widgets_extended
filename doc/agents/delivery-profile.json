@@ -5,6 +5,7 @@
     "lib",
     "test",
     "demos",
+    "tool",
     "pubspec.yaml",
     "analysis_options.yaml",
     "README.md",
@@ -152,6 +153,20 @@
           "^lib/",
           "^demos/workspace_calendar/",
           "^pubspec\\.yaml$"
+        ]
+      },
+      "scope": "step"
+    },
+    {
+      "name": "calendar-havana",
+      "command": "bash tool/test_calendar_in_havana.sh",
+      "pass": "it prints All tests passed!, and where tzutil exists, MSYS_NO_PATHCONV=1 tzutil /g run afterwards prints the zone it printed before the command. The script runs the calendar's tests in a zone whose clock skips its midnight hour on 2026-03-08 and repeats it on 2026-11-01: on Windows by switching the system zone to Cuba Standard Time and back on exit, and elsewhere with TZ=America/Havana. It runs one test file in that zone when given the file's path, and takes flutter test's other arguments too.",
+      "when": {
+        "paths": [
+          "^lib/calendar/",
+          "^test/calendar/",
+          "^pubspec\\.yaml$",
+          "^tool/test_calendar_in_havana\\.sh$"
         ]
       },
       "scope": "step"
