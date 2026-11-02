@@ -125,6 +125,7 @@ void main() {
         end: 11 * 60,
         first: true,
         last: true,
+        continuesAfter: false,
       ),
       GridPiece<String>(
         shown: b,
@@ -133,6 +134,7 @@ void main() {
         end: 24 * 60,
         first: true,
         last: false,
+        continuesAfter: true,
       ),
       GridPiece<String>(
         shown: b,
@@ -141,6 +143,7 @@ void main() {
         end: 10 * 60,
         first: false,
         last: true,
+        continuesAfter: false,
       ),
     ]);
     expect(layout.loose, isNull);
@@ -360,6 +363,7 @@ void main() {
               end: 120,
               first: true,
               last: true,
+              continuesAfter: false,
             ),
           ],
         );
@@ -395,6 +399,7 @@ void main() {
             end: 1440,
             first: true,
             last: false,
+            continuesAfter: true,
           ),
           GridPiece<String>(
             shown: late,
@@ -403,6 +408,7 @@ void main() {
             end: 60,
             first: false,
             last: true,
+            continuesAfter: false,
           ),
         ]);
         expect(layout.loose?.ids, <String>{"late"});

@@ -49,17 +49,19 @@ the same instant, so a `CalendarView.clock` reading UTC marks the local day.
 Week and Day draw an entry from the day's start, 01:00, from the 01:00 row,
 and a create, move or resize that lands in the skipped rows requests
 nothing, as one in any skipped hour does; an end at the 24:00 before it is
-the day's start. `CalendarDates.wallMinuteOf` reads such a day's start at
-the minute its clock starts, `CalendarDates.timeAtWallMinute` answers null
-for its minute 0, and the new `CalendarDates.endWallMinuteOf` and
-`CalendarDates.endAtWallMinute` read a range's end, a day's 24:00 being the
-next day's minute 0. On a day whose clock repeats its midnight hour,
-`timeAtWallMinute` keeps the later 00:00 for a `from` in the later pass.
-Week, Day and Agenda draw an entry ending at the later 00:00 on that day
-to 01:00, where the first 00:00 hour ends, whatever day it starts on, and
-an end edge dragged off it moves within that hour;
-`CalendarDayHours.holdsTimes` and `CalendarHoursException.endOutside` read
-such an end at 01:00.
+the day's start; and in edit mode Agenda's add from the day's start is
+labelled at 01:00, where it creates. `CalendarDates.wallMinuteOf` reads
+such a day's start at the minute its clock starts,
+`CalendarDates.timeAtWallMinute` answers null for its minute 0, and the new
+`CalendarDates.endWallMinuteOf` and `CalendarDates.endAtWallMinute` read a
+range's end, a day's 24:00 being the next day's minute 0. On a day whose
+clock repeats its midnight hour, `timeAtWallMinute` keeps the later 00:00
+for a `from` in the later pass, so `CalendarEditRules.firstSlot` from an
+earliest start at the later 00:00 starts at the later 00:00. Week, Day and
+Agenda draw an entry ending at the later 00:00 on that day to 01:00, where
+the first 00:00 hour ends, whatever day it starts on, and an end edge
+dragged off it moves within that hour; `CalendarDayHours.holdsTimes` and
+`CalendarHoursException.endOutside` read such an end at 01:00.
 - `package:widgets_extended/widgets_extended.dart` exports the calendar,
 so an app that also imports a library declaring one of its names, as
 `syncfusion_flutter_calendar` declares `CalendarController`,
