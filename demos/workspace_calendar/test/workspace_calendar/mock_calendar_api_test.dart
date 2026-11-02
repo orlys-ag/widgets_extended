@@ -563,26 +563,27 @@ void main() {
   });
 
   final skipped = _skippedHalfHour();
-  testWidgets(
-    "A4 the validator refuses a start or an end the clock skips",
-    (tester) async {
-      final api = MockCalendarApi(latency: latency);
-      final day = skipped!.substring(0, 10);
-      expect(
-        await errorOf(tester, api.create(timed(skipped, "${day}T23:00"))),
-        validationOf(<String>{"start"}),
-      );
-      expect(
-        await errorOf(tester, api.create(timed("${day}T00:30", skipped))),
-        validationOf(<String>{"end"}),
-      );
-      expect(
-        await listed(tester, api, DateTime(2026), DateTime(2026, 12, 31)),
-        isEmpty,
-      );
-    },
-    skip: skipped == null,
-  );
+  testWidgets("A4 the validator refuses a start or an end the clock skips", (
+    tester,
+  ) async {
+    final api = MockCalendarApi(latency: latency);
+    final day = skipped!.substring(0, 10);
+    // The skipped hour can be the day's first, so the start whose end is
+    // skipped is on the day before.
+    final dayBefore = isoDate(CalendarDates.addDays(DateTime.parse(day), -1));
+    expect(
+      await errorOf(tester, api.create(timed(skipped, "${day}T23:00"))),
+      validationOf(<String>{"start"}),
+    );
+    expect(
+      await errorOf(tester, api.create(timed("${dayBefore}T23:00", skipped))),
+      validationOf(<String>{"end"}),
+    );
+    expect(
+      await listed(tester, api, DateTime(2026), DateTime(2026, 12, 31)),
+      isEmpty,
+    );
+  }, skip: skipped == null);
 
   testWidgets("A5 overlap rules: instants that intersect conflict, an "
       "overnight entry with each day it covers, and an all-day entry with "
