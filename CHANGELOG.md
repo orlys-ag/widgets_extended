@@ -59,9 +59,13 @@ clock repeats its midnight hour, `timeAtWallMinute` keeps the later 00:00
 for a `from` in the later pass, so `CalendarEditRules.firstSlot` from an
 earliest start at the later 00:00 starts at the later 00:00. Week, Day and
 Agenda draw an entry ending at the later 00:00 on that day to 01:00, where
-the first 00:00 hour ends, whatever day it starts on, and an end edge
-dragged off it moves within that hour; `CalendarDayHours.holdsTimes` and
-`CalendarHoursException.endOutside` read such an end at 01:00.
+the first 00:00 hour ends, whatever day it starts on;
+`CalendarDayHours.holdsTimes` and `CalendarHoursException.endOutside` read
+such an end at 01:00. Where Week and Day draw an end edge away from the
+end's own wall time, as at the later 00:00 and for an end in a repeated
+hour whose wall time is not after the start's, dragging the edge moves the
+end by the minutes dragged wherever the entry then still ends at the edge,
+so dragging it up shortens the entry.
 - `package:widgets_extended/widgets_extended.dart` exports the calendar,
 so an app that also imports a library declaring one of its names, as
 `syncfusion_flutter_calendar` declares `CalendarController`,

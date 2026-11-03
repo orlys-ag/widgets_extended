@@ -2937,11 +2937,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// [to]'s start on its column's day, the occurrence of the anchor's kept
   /// on a day whose clock repeats a stretch ([timeAtWallMinute]), and the
   /// entry's start and end each move by the elapsed time from the anchor
-  /// to the landing, so the entry keeps its length. A resize sets the end
+  /// to the landing, so the entry keeps its length. A resize sets the start
   /// whose edge [to] moved off [from]'s to the time of that edge on the
-  /// piece's day, the occurrence of the old end's kept likewise, except
-  /// that an old end at the later 00:00 ([isLaterMidnight]), whose edge is
-  /// drawn where the first pass ends, gives the earlier occurrence.
+  /// piece's day, the occurrence of the old start's kept likewise, and the
+  /// end whose edge moved as [_endAtEdge] gives.
   ({DateTime start, DateTime end})? _timesOf(
     GridPiece<T> piece,
     CalendarEntry<T> entry,
@@ -2994,12 +2993,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final bottom = to.endTrackOn(Axis.vertical);
     if ((bottom - from.endTrackOn(Axis.vertical)).abs() >
         precisionErrorTolerance) {
-      // An end at the later 00:00 is drawn where the first pass ends
-      // ([wallSpanOf]), so its edge moves within that pass.
-      final edge = endAtWallMinute(
-        wallAt(column, bottom),
-        from: isLaterMidnight(entry.end) ? null : entry.end,
-      );
+      final edge = _endAtEdge(entry, start, wallAt(column, bottom));
       if (edge == null) {
         return null;
       }
@@ -3009,6 +3003,29 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return null;
     }
     return (start: start, end: end);
+  }
+
+  /// The end a range from [start] takes when the end edge of [entry]'s last
+  /// piece moves to the wall minute [wall].
+  ///
+  /// Where that edge is drawn at the old end's own wall minute
+  /// ([endWallMinuteOf]), it is the time of [wall], in the old end's
+  /// occurrence where the clock reads it twice ([endAtWallMinute]). Where
+  /// [wallSpanOf] draws the edge elsewhere, as for an end at the later 00:00
+  /// or one whose wall minute is not after the start's, the edge does not
+  /// show the old end's occurrence: the end moves by the minutes the edge
+  /// moved, wherever a range from [start] to that end is drawn to [wall],
+  /// and is otherwise the earlier occurrence of the time of [wall].
+  DateTime? _endAtEdge(CalendarEntry<T> entry, DateTime start, int wall) {
+    final drawn = wallSpanOf(entry.start, entry.end).end;
+    if (drawn == endWallMinuteOf(entry.end)) {
+      return endAtWallMinute(wall, from: entry.end);
+    }
+    final moved = entry.end.add(Duration(minutes: wall - drawn));
+    if (wallSpanOf(start, moved).end == wall) {
+      return moved;
+    }
+    return endAtWallMinute(wall);
   }
 
   /// A move the board reports, from a drag or a semantics action.
