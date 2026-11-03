@@ -1786,6 +1786,111 @@ void main() {
       expect(blockFinder("long", day), findsOneWidget);
       expect(find.byKey(allDayBarKey("long")), findsNothing);
     });
+
+    testWidgets("TP45 in Day, the first 01:30 to the second 01:00 draws to "
+        "the 02:00 row, and its end edge dragged up a slot requests an end "
+        "at the first 01:45", (tester) async {
+      final day = longDayStart;
+      final shown = Shown.day(day);
+      final first = day.add(const Duration(minutes: 90));
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("folds", first, first.add(const Duration(minutes: 30))),
+        ]),
+        shown,
+        recordsMoves: true,
+      );
+      await harness.pump(tester);
+      final block = blockFinder("folds", day);
+      // Setup sanity: the end edge lies at the start plus the length, not
+      // at the end's 01:00.
+      expect(
+        tester.getRect(block).bottom,
+        moreOrLessEquals(slotRect(tester, shown, day, 120).top),
+      );
+      final slot = slotRect(tester, shown, day, 0).height;
+      await selectBlock(tester, block);
+      await resizeEnd(tester, block, Offset(0.0, -slot - 2.0));
+      expect(timesOf(harness.moves), <(DateTime, DateTime)>[
+        (first, first.add(const Duration(minutes: 15))),
+      ]);
+    });
+
+    testWidgets("TP46 in Day, the first 01:30 to the second 01:00 with its "
+        "end edge dragged down a slot requests an end at the second 01:15", (
+      tester,
+    ) async {
+      final day = longDayStart;
+      final shown = Shown.day(day);
+      final first = day.add(const Duration(minutes: 90));
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("folds", first, first.add(const Duration(minutes: 30))),
+        ]),
+        shown,
+        recordsMoves: true,
+      );
+      await harness.pump(tester);
+      final block = blockFinder("folds", day);
+      final slot = slotRect(tester, shown, day, 0).height;
+      await selectBlock(tester, block);
+      await resizeEnd(tester, block, Offset(0.0, slot + 2.0));
+      expect(timesOf(harness.moves), <(DateTime, DateTime)>[
+        (first, secondHalfPastOne.subtract(const Duration(minutes: 15))),
+      ]);
+    });
+
+    testWidgets("TP47 in Day, the first 01:30 to the second 01:15 draws to "
+        "the 02:15 row, and its end edge dragged up a slot requests an end "
+        "at the second 01:00", (tester) async {
+      final day = longDayStart;
+      final shown = Shown.day(day);
+      final first = day.add(const Duration(minutes: 90));
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("folds", first, first.add(const Duration(minutes: 45))),
+        ]),
+        shown,
+        recordsMoves: true,
+      );
+      await harness.pump(tester);
+      final block = blockFinder("folds", day);
+      // Setup sanity: the end edge lies at the start plus the length, not
+      // at the end's 01:15.
+      expect(
+        tester.getRect(block).bottom,
+        moreOrLessEquals(slotRect(tester, shown, day, 135).top),
+      );
+      final slot = slotRect(tester, shown, day, 0).height;
+      await selectBlock(tester, block);
+      await resizeEnd(tester, block, Offset(0.0, -slot - 2.0));
+      expect(timesOf(harness.moves), <(DateTime, DateTime)>[
+        (first, secondHalfPastOne.subtract(const Duration(minutes: 30))),
+      ]);
+    });
+
+    testWidgets("TP49 in Day, the first 01:30 to the second 01:00 with its "
+        "end edge dragged down three slots, past the second 01:30, requests "
+        "an end at 02:45", (tester) async {
+      final day = longDayStart;
+      final shown = Shown.day(day);
+      final first = day.add(const Duration(minutes: 90));
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("folds", first, first.add(const Duration(minutes: 30))),
+        ]),
+        shown,
+        recordsMoves: true,
+      );
+      await harness.pump(tester);
+      final block = blockFinder("folds", day);
+      final slot = slotRect(tester, shown, day, 0).height;
+      await selectBlock(tester, block);
+      await resizeEnd(tester, block, Offset(0.0, 3 * slot + 2.0));
+      expect(timesOf(harness.moves), <(DateTime, DateTime)>[
+        (first, at(day, 2, 45)),
+      ]);
+    });
   });
 
   group("the hours' edges", () {
@@ -2252,6 +2357,36 @@ void main() {
         await resizeEnd(tester, block, Offset(0.0, -slot - 2.0));
         expect(timesOf(harness.moves), <(DateTime, DateTime)>[
           (at(before, 23), day.add(const Duration(minutes: 45))),
+        ]);
+      });
+
+      testWidgets("TP48 in Day, the first 00:30 to the later 00:15 draws to "
+          "the 01:15 row, and its end edge dragged up a slot requests an end "
+          "at the later 00:00", (tester) async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final shown = Shown.day(day);
+        final first = day.add(const Duration(minutes: 30));
+        final harness = Harness(
+          storeOf(<CalendarEntry<String>>[
+            entryOf("folds", first, first.add(const Duration(minutes: 45))),
+          ]),
+          shown,
+          recordsMoves: true,
+        );
+        await harness.pump(tester);
+        final block = blockFinder("folds", day);
+        // Setup sanity: the end edge lies at the start plus the length, not
+        // at the end's 00:15.
+        expect(
+          tester.getRect(block).bottom,
+          moreOrLessEquals(slotRect(tester, shown, day, 75).top),
+        );
+        final slot = slotRect(tester, shown, day, 0).height;
+        await selectBlock(tester, block);
+        await resizeEnd(tester, block, Offset(0.0, -slot - 2.0));
+        expect(timesOf(harness.moves), <(DateTime, DateTime)>[
+          (first, laterMidnight),
         ]);
       });
     },
