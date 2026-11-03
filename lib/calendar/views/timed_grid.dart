@@ -1404,13 +1404,20 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return _themed!;
   }
 
+  /// The message of the asserts that a [TimedGrid.slotMinutes] of
+  /// [slotMinutes] is one of [CalendarDates.slotMinuteChoices], which
+  /// [initState] and [didUpdateWidget] make.
+  static String _slotMinutesMessage(int slotMinutes) {
+    return "A TimedGrid's slotMinutes, $slotMinutes, is not one of "
+        "${CalendarDates.slotMinuteChoices}.";
+  }
+
   @override
   void initState() {
     super.initState();
     assert(
       CalendarDates.slotMinuteChoices.contains(widget.slotMinutes),
-      "A TimedGrid's slotMinutes, ${widget.slotMinutes}, is not one of "
-      "${CalendarDates.slotMinuteChoices}.",
+      _slotMinutesMessage(widget.slotMinutes),
     );
     _takePolicy();
     _calendarNow = widget.now.value;
@@ -1474,8 +1481,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     super.didUpdateWidget(oldWidget);
     assert(
       CalendarDates.slotMinuteChoices.contains(widget.slotMinutes),
-      "A TimedGrid's slotMinutes, ${widget.slotMinutes}, is not one of "
-      "${CalendarDates.slotMinuteChoices}.",
+      _slotMinutesMessage(widget.slotMinutes),
     );
     final slotsChanged =
         widget.slotMinutes != oldWidget.slotMinutes ||

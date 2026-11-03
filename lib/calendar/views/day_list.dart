@@ -847,13 +847,20 @@ class _DayListState<T> extends State<DayList<T>> {
   /// answer changes.
   late final _RowsNow _calendarNow = _RowsNow(widget.now.value);
 
+  /// The message of the asserts that a [DayList.slotMinutes] of
+  /// [slotMinutes] is one of [CalendarDates.slotMinuteChoices], which
+  /// [initState] and [didUpdateWidget] make.
+  static String _slotMinutesMessage(int slotMinutes) {
+    return "A DayList's slotMinutes, $slotMinutes, is not one of "
+        "${CalendarDates.slotMinuteChoices}.";
+  }
+
   @override
   void initState() {
     super.initState();
     assert(
       CalendarDates.slotMinuteChoices.contains(widget.slotMinutes),
-      "A DayList's slotMinutes, ${widget.slotMinutes}, is not one of "
-      "${CalendarDates.slotMinuteChoices}.",
+      _slotMinutesMessage(widget.slotMinutes),
     );
     _centreOn(widget.selectedDay);
     _scroll = ScrollController(initialScrollOffset: _offsetOf(_topDay));
@@ -884,8 +891,7 @@ class _DayListState<T> extends State<DayList<T>> {
     super.didUpdateWidget(oldWidget);
     assert(
       CalendarDates.slotMinuteChoices.contains(widget.slotMinutes),
-      "A DayList's slotMinutes, ${widget.slotMinutes}, is not one of "
-      "${CalendarDates.slotMinuteChoices}.",
+      _slotMinutesMessage(widget.slotMinutes),
     );
     if (widget.now != oldWidget.now) {
       oldWidget.now.removeListener(_handleNow);
