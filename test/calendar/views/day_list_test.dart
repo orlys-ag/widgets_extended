@@ -1,6 +1,6 @@
 /// The day list: the rows it lays out for a day's entries, its gaps and
 /// its banners outside the hours, a card drawn again for a new payload,
-/// and a failed row's retry.
+/// a failed row's retry, and the slot lengths it takes.
 library;
 
 import 'dart:async';
@@ -424,5 +424,42 @@ void main() {
       for (final d in failed)
         if (find.byKey(dayListLoadingKey(d)).evaluate().isNotEmpty) d,
     ], failed);
+  });
+
+  testWidgets("a day list asserts on its first build that its slot length "
+      "is a choice, listing the choices", (tester) async {
+    final day = DateTime(2026, 4, 21);
+    final store = MemoryCalendarStore<String>();
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: nineOClock(), today: day),
+    );
+    addTearDown(now.dispose);
+    Widget list(int slotMinutes) {
+      return MaterialApp(
+        home: DayList<String>(
+          store: store,
+          weekdays: CalendarWeekdaySet.all,
+          format: CalendarHourLabelFormat.twentyFourHour,
+          hours: CalendarDayHours.allDay,
+          slotMinutes: slotMinutes,
+          editable: false,
+          selectedDay: day,
+          now: now,
+          onTopDay: (day) {},
+          onCreateRange: (range) {},
+          onEdit: (id) {},
+          onDelete: (id) {},
+        ),
+      );
+    }
+
+    await tester.pumpWidget(list(7));
+    final error = tester.takeException();
+    expect(error, isAssertionError);
+    expect(
+      (error as AssertionError).message,
+      "A DayList's slotMinutes, 7, is not one of [5, 10, 15, 20, 30, 60].",
+    );
   });
 }

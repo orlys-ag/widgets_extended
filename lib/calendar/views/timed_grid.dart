@@ -1410,7 +1410,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     assert(
       CalendarDates.slotMinuteChoices.contains(widget.slotMinutes),
       "A TimedGrid's slotMinutes, ${widget.slotMinutes}, is not one of "
-      "$CalendarDates.slotMinuteChoices.",
+      "${CalendarDates.slotMinuteChoices}.",
     );
     _takePolicy();
     _calendarNow = widget.now.value;
@@ -1475,7 +1475,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     assert(
       CalendarDates.slotMinuteChoices.contains(widget.slotMinutes),
       "A TimedGrid's slotMinutes, ${widget.slotMinutes}, is not one of "
-      "$CalendarDates.slotMinuteChoices.",
+      "${CalendarDates.slotMinuteChoices}.",
     );
     final slotsChanged =
         widget.slotMinutes != oldWidget.slotMinutes ||

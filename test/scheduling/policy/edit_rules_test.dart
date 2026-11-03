@@ -102,6 +102,20 @@ Matcher throwsArgumentNamed(String name) {
   return throwsA(isArgumentError.having((error) => error.name, "name", name));
 }
 
+/// Throws the [ArgumentError] of a slot length that is not a choice, whose
+/// message lists the choices.
+Matcher throwsSlotMinutesError() {
+  return throwsA(
+    isArgumentError
+        .having((error) => error.name, "name", "slotMinutes")
+        .having(
+          (error) => error.message,
+          "message",
+          "is not one of [5, 10, 15, 20, 30, 60]",
+        ),
+  );
+}
+
 /// The slot from [start] to [end] as a record.
 ({DateTime start, DateTime end}) slot(DateTime start, DateTime end) {
   return (start: start, end: end);
@@ -533,13 +547,13 @@ void main() {
   });
 
   test("RC6 rules throw an ArgumentError for a slot length that is not a "
-      "choice and for hours off its grid, the slot length first, as do "
-      "updates to them", () {
+      "choice, listing the choices, and for hours off its grid, the slot "
+      "length first, as do updates to them", () {
     final offGrid = CalendarDayHours(8 * 60 + 10, 17 * 60 + 50);
     for (final slotMinutes in <int>[7, 0]) {
       expect(() {
         return rulesOf(hours: office, slotMinutes: slotMinutes);
-      }, throwsArgumentNamed("slotMinutes"));
+      }, throwsSlotMinutesError());
     }
     expect(() {
       return rulesOf(hours: offGrid);
@@ -567,7 +581,7 @@ void main() {
         hours: office,
         slotMinutes: 45,
       );
-    }, throwsArgumentNamed("slotMinutes"));
+    }, throwsSlotMinutesError());
     expect(() {
       return rules.updated(policy: _Asking(), hours: offGrid, slotMinutes: 15);
     }, throwsArgumentNamed("hours"));

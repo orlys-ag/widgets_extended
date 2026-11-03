@@ -1,8 +1,8 @@
 /// The timed grid: where an entry's pieces sit on its tracks, over some
 /// of the weekdays and part of the day, the create ranges its gestures
-/// pick, the weekdays,
-/// hours, hour format and least sizes it lays out from, the edit mode and
-/// lock choices its drags follow, what each of those defaults to, a
+/// pick, the weekdays, hours, hour format, least sizes and slot lengths it
+/// lays out from, the edit mode and lock choices its drags follow, what
+/// each of those defaults to, a
 /// block drawn again for a new payload, the theme's shadows, when its days
 /// are ready on the range its owner asks, its selection as the store
 /// moves off that range, and the ids a move request takes.
@@ -950,6 +950,37 @@ void main() {
     expect(() => grid(minDayWidth: double.infinity), throwsAssertionError);
     expect(() => grid(minSlotHeight: 0.0), throwsAssertionError);
     expect(() => grid(minSlotHeight: double.infinity), throwsAssertionError);
+  });
+
+  testWidgets("a timed grid asserts on its first build that its slot "
+      "length is a choice, listing the choices", (tester) async {
+    final store = MemoryCalendarStore<String>();
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 21, 9), today: tuesday),
+    );
+    addTearDown(now.dispose);
+    TimedGrid<String> grid(int slotMinutes) {
+      return TimedGrid<String>(
+        store: store,
+        firstDay: monday,
+        dayCount: 7,
+        selectedDay: tuesday,
+        now: now,
+        onSelectDay: (day) {},
+        onOpenEntry: (id) {},
+        onCreate: (range) async {},
+        slotMinutes: slotMinutes,
+      );
+    }
+
+    await pumpBoxed(tester, const Size(400.0, 800.0), grid(7));
+    final error = tester.takeException();
+    expect(error, isAssertionError);
+    expect(
+      (error as AssertionError).message,
+      "A TimedGrid's slotMinutes, 7, is not one of [5, 10, 15, 20, 30, 60].",
+    );
   });
 
   testWidgets("TG5 a timed grid draws its selected block's grips and its "

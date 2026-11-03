@@ -455,7 +455,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     return ArgumentError.value(
       slotMinutes,
       "slotMinutes",
-      "is not one of $CalendarDates.slotMinuteChoices",
+      "is not one of ${CalendarDates.slotMinuteChoices}",
     );
   }
 

@@ -170,7 +170,7 @@ final class CalendarEditRules<T> {
       throw ArgumentError.value(
         slotMinutes,
         "slotMinutes",
-        "is not one of $CalendarDates.slotMinuteChoices",
+        "is not one of ${CalendarDates.slotMinuteChoices}",
       );
     }
     if (!hours.isOnSlotsOf(slotMinutes)) {

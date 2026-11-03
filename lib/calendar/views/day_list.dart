@@ -853,7 +853,7 @@ class _DayListState<T> extends State<DayList<T>> {
     assert(
       CalendarDates.slotMinuteChoices.contains(widget.slotMinutes),
       "A DayList's slotMinutes, ${widget.slotMinutes}, is not one of "
-      "$CalendarDates.slotMinuteChoices.",
+      "${CalendarDates.slotMinuteChoices}.",
     );
     _centreOn(widget.selectedDay);
     _scroll = ScrollController(initialScrollOffset: _offsetOf(_topDay));
@@ -885,7 +885,7 @@ class _DayListState<T> extends State<DayList<T>> {
     assert(
       CalendarDates.slotMinuteChoices.contains(widget.slotMinutes),
       "A DayList's slotMinutes, ${widget.slotMinutes}, is not one of "
-      "$CalendarDates.slotMinuteChoices.",
+      "${CalendarDates.slotMinuteChoices}.",
     );
     if (widget.now != oldWidget.now) {
       oldWidget.now.removeListener(_handleNow);

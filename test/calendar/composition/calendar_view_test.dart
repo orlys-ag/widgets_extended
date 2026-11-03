@@ -1976,7 +1976,7 @@ void main() {
     expect(marksRange(tester), isFalse);
   });
   testWidgets("CV26 a slotMinutes of 0, -15, 7, 45 or 120 throws an "
-      "ArgumentError from the build", (tester) async {
+      "ArgumentError from the build that lists the choices", (tester) async {
     for (final slotMinutes in const <int>[0, -15, 7, 45, 120]) {
       await tester.pumpWidget(
         app(
@@ -1991,6 +1991,7 @@ void main() {
       expect(error, isA<ArgumentError>(), reason: "$slotMinutes");
       expect((error as ArgumentError).name, "slotMinutes");
       expect(error.invalidValue, slotMinutes);
+      expect(error.message, "is not one of [5, 10, 15, 20, 30, 60]");
       expect(find.byType(DayList<String>), findsNothing);
     }
   });
