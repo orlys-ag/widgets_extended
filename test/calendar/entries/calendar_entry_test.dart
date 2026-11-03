@@ -247,10 +247,20 @@ void main() {
     test("ET15 its start to the next day's start, built without isAllDay, "
         "is timed, and with isAllDay true constructs all-day", () {
       final day = shortDayStart;
-      expect(addDays(day, 1).difference(day), const Duration(hours: 23));
-      expect(entry(start: day, end: addDays(day, 1)).isAllDay, isFalse);
       expect(
-        entry(start: day, end: addDays(day, 1), isAllDay: true).isAllDay,
+        CalendarDates.addDays(day, 1).difference(day),
+        const Duration(hours: 23),
+      );
+      expect(
+        entry(start: day, end: CalendarDates.addDays(day, 1)).isAllDay,
+        isFalse,
+      );
+      expect(
+        entry(
+          start: day,
+          end: CalendarDates.addDays(day, 1),
+          isAllDay: true,
+        ).isAllDay,
         isTrue,
       );
     });
@@ -260,10 +270,20 @@ void main() {
     test("ET15 its start to the next day's start, built without isAllDay, "
         "is timed, and with isAllDay true constructs all-day", () {
       final day = longDayStart;
-      expect(addDays(day, 1).difference(day), const Duration(hours: 25));
-      expect(entry(start: day, end: addDays(day, 1)).isAllDay, isFalse);
       expect(
-        entry(start: day, end: addDays(day, 1), isAllDay: true).isAllDay,
+        CalendarDates.addDays(day, 1).difference(day),
+        const Duration(hours: 25),
+      );
+      expect(
+        entry(start: day, end: CalendarDates.addDays(day, 1)).isAllDay,
+        isFalse,
+      );
+      expect(
+        entry(
+          start: day,
+          end: CalendarDates.addDays(day, 1),
+          isAllDay: true,
+        ).isAllDay,
         isTrue,
       );
     });

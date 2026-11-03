@@ -7,8 +7,6 @@ import 'dart:ui' as ui;
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:widgets_extended/widgets_extended.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart'
-    show daysBetween;
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api_source.dart';
@@ -406,7 +404,11 @@ void main() {
     await pickMode(tester, "Day");
     expect(listCalls(api), lists);
 
-    await step(tester, "Next day", times: daysBetween(today, readTo));
+    await step(
+      tester,
+      "Next day",
+      times: CalendarDates.daysBetween(today, readTo),
+    );
     expect(gridDay(tester), readTo);
     expect(listCalls(api), lists);
 

@@ -11,9 +11,13 @@ Matcher throwsArgumentNamed(String name) {
 }
 
 void main() {
-  group("D1 MonthGrid over some of the weekdays", () {
+  group("D1 CalendarMonthGrid over some of the weekdays", () {
     test("lays out the shown weekdays of each week holding the month", () {
-      final april = MonthGrid(2026, 4, weekdays: CalendarWeekdaySet.workweek);
+      final april = CalendarMonthGrid(
+        2026,
+        4,
+        weekdays: CalendarWeekdaySet.workweek,
+      );
       expect(april.columnCount, 5);
       expect(april.weekCount, 5);
       expect(april.firstDay, DateTime(2026, 3, 30));
@@ -24,8 +28,12 @@ void main() {
 
     test("drops a first week whose days of the month are all hidden", () {
       // August 2026 starts on a Saturday.
-      final august = MonthGrid(2026, 8, weekdays: CalendarWeekdaySet.workweek);
-      expect(MonthGrid(2026, 8).weekCount, 6);
+      final august = CalendarMonthGrid(
+        2026,
+        8,
+        weekdays: CalendarWeekdaySet.workweek,
+      );
+      expect(CalendarMonthGrid(2026, 8).weekCount, 6);
       expect(august.weekCount, 5);
       expect(august.firstDay, DateTime(2026, 8, 3));
       expect(august.lastDay, DateTime(2026, 9, 4));
@@ -34,7 +42,7 @@ void main() {
 
     test("drops a last week whose days of the month are all hidden", () {
       // August 2026 ends on a Monday.
-      final august = MonthGrid(
+      final august = CalendarMonthGrid(
         2026,
         8,
         weekdays: CalendarWeekdaySet.of(const <int>[1, 2, 3, 4, 5, 6]),
@@ -51,16 +59,16 @@ void main() {
         "shown day of its month, later first", () {
       const workweek = CalendarWeekdaySet.workweek;
       expect(
-        shownDayNear(DateTime(2026, 4, 22), workweek),
+        CalendarDates.shownDayNear(DateTime(2026, 4, 22), workweek),
         DateTime(2026, 4, 22),
       );
       expect(
-        shownDayNear(DateTime(2026, 4, 25), workweek),
+        CalendarDates.shownDayNear(DateTime(2026, 4, 25), workweek),
         DateTime(2026, 4, 27),
       );
       // May 30 2026 is a Saturday, and June 1 is in the next month.
       expect(
-        shownDayNear(DateTime(2026, 5, 30), workweek),
+        CalendarDates.shownDayNear(DateTime(2026, 5, 30), workweek),
         DateTime(2026, 5, 29),
       );
     });
@@ -68,12 +76,18 @@ void main() {
     test("shownDaysOfWeek lists the shown days of the day's Monday-first "
         "week", () {
       expect(
-        shownDaysOfWeek(DateTime(2026, 4, 22), CalendarWeekdaySet.all),
+        CalendarDates.shownDaysOfWeek(
+          DateTime(2026, 4, 22),
+          CalendarWeekdaySet.all,
+        ),
         <DateTime>[for (var day = 20; day <= 26; day++) DateTime(2026, 4, day)],
       );
       // A Sunday is the last day of its week, and May 1 2026 a Friday.
       expect(
-        shownDaysOfWeek(DateTime(2026, 5, 3), CalendarWeekdaySet.workweek),
+        CalendarDates.shownDaysOfWeek(
+          DateTime(2026, 5, 3),
+          CalendarWeekdaySet.workweek,
+        ),
         <DateTime>[
           DateTime(2026, 4, 27),
           DateTime(2026, 4, 28),
@@ -83,7 +97,7 @@ void main() {
         ],
       );
       expect(
-        shownDaysOfWeek(
+        CalendarDates.shownDaysOfWeek(
           DateTime(2026, 4, 22),
           CalendarWeekdaySet.of(const <int>[0, 2, 6]),
         ),
@@ -98,15 +112,15 @@ void main() {
     test("nextShownDay steps over hidden days either way", () {
       const workweek = CalendarWeekdaySet.workweek;
       expect(
-        nextShownDay(DateTime(2026, 4, 22), 1, workweek),
+        CalendarDates.nextShownDay(DateTime(2026, 4, 22), 1, workweek),
         DateTime(2026, 4, 23),
       );
       expect(
-        nextShownDay(DateTime(2026, 4, 24), 1, workweek),
+        CalendarDates.nextShownDay(DateTime(2026, 4, 24), 1, workweek),
         DateTime(2026, 4, 27),
       );
       expect(
-        nextShownDay(DateTime(2026, 4, 27), -1, workweek),
+        CalendarDates.nextShownDay(DateTime(2026, 4, 27), -1, workweek),
         DateTime(2026, 4, 24),
       );
     });
@@ -151,8 +165,10 @@ void main() {
         DateTime(2026, 4, 22),
       );
       expect(
-        fromWednesday.weekStartOfDay(dayNumber(DateTime(2026, 4, 21))),
-        dayNumber(DateTime(2026, 4, 15)),
+        fromWednesday.weekStartOfDay(
+          CalendarDates.dayNumber(DateTime(2026, 4, 21)),
+        ),
+        CalendarDates.dayNumber(DateTime(2026, 4, 15)),
       );
       expect(fromWednesday == CalendarWeekdaySet.workweek, isFalse);
       expect(
@@ -163,10 +179,10 @@ void main() {
     });
   });
 
-  group("D5 MonthGrid and shownDaysOfWeek from the first weekday", () {
+  group("D5 CalendarMonthGrid and shownDaysOfWeek from the first weekday", () {
     // May 2026 runs from a Friday to a Sunday.
     test("starts each week on the first weekday", () {
-      final may = MonthGrid(
+      final may = CalendarMonthGrid(
         2026,
         5,
         weekdays: CalendarWeekdaySet.all.startingOn(6),
@@ -175,7 +191,7 @@ void main() {
     });
 
     test("holds the weeks a later first weekday adds", () {
-      final may = MonthGrid(
+      final may = CalendarMonthGrid(
         2026,
         5,
         weekdays: CalendarWeekdaySet.all.startingOn(6),
@@ -184,7 +200,7 @@ void main() {
     });
 
     test("puts the shown weekdays' columns in the week's order", () {
-      final may = MonthGrid(
+      final may = CalendarMonthGrid(
         2026,
         5,
         weekdays: CalendarWeekdaySet.workweek.startingOn(6),
@@ -194,7 +210,7 @@ void main() {
 
     test("lists a week's shown days from its first weekday", () {
       expect(
-        shownDaysOfWeek(
+        CalendarDates.shownDaysOfWeek(
           DateTime(2026, 4, 21),
           CalendarWeekdaySet.workweek.startingOn(6),
         ),
@@ -209,8 +225,8 @@ void main() {
       for (var offset = -9; offset <= 9; offset++) {
         final date = DateTime(1970, 1, 1 + offset);
         expect(
-          weekdayColumnOfDay(dayNumber(date)),
-          weekdayColumn(date),
+          CalendarDates.weekdayColumnOfDay(CalendarDates.dayNumber(date)),
+          CalendarDates.weekdayColumn(date),
           reason: "$date",
         );
       }
@@ -231,8 +247,14 @@ void main() {
       final wednesday = CalendarWeekdaySet.of(const <int>[2]);
       expect(wednesday.containsDate(DateTime(2026, 4, 22)), isTrue);
       expect(wednesday.containsDate(DateTime(2026, 4, 23)), isFalse);
-      expect(wednesday.containsDay(dayNumber(DateTime(2026, 4, 29))), isTrue);
-      expect(wednesday.containsDay(dayNumber(DateTime(2026, 4, 28))), isFalse);
+      expect(
+        wednesday.containsDay(CalendarDates.dayNumber(DateTime(2026, 4, 29))),
+        isTrue,
+      );
+      expect(
+        wednesday.containsDay(CalendarDates.dayNumber(DateTime(2026, 4, 28))),
+        isFalse,
+      );
     });
 
     test("compares by the columns it holds", () {
@@ -291,7 +313,7 @@ void main() {
         return CalendarDayHours(-1, 60);
       }, throwsArgumentNamed("start"));
       expect(() {
-        return CalendarDayHours(0, minutesPerDay + 1);
+        return CalendarDayHours(0, CalendarDates.minutesPerDay + 1);
       }, throwsArgumentNamed("end"));
       expect(() {
         return CalendarDayHours(60, 60);
@@ -299,7 +321,10 @@ void main() {
       expect(() {
         return CalendarDayHours(60, 30);
       }, throwsArgumentNamed("end"));
-      expect(CalendarDayHours(0, minutesPerDay), CalendarDayHours.allDay);
+      expect(
+        CalendarDayHours(0, CalendarDates.minutesPerDay),
+        CalendarDayHours.allDay,
+      );
     });
 
     test("compares by its minutes", () {
@@ -355,9 +380,9 @@ void main() {
   group("DI1 the developers' text", () {
     test("isoTime writes hours and minutes, 1440 as 24:00, and the weekday "
         "sets and day hours write themselves with it", () {
-      expect(isoTime(0), "00:00");
-      expect(isoTime(570), "09:30");
-      expect(isoTime(1440), "24:00");
+      expect(CalendarDates.isoTime(0), "00:00");
+      expect(CalendarDates.isoTime(570), "09:30");
+      expect(CalendarDates.isoTime(1440), "24:00");
       expect(
         CalendarWeekdaySet.workweek.startingOn(2).toString(),
         "CalendarWeekdaySet(We, Th, Fr, Mo, Tu; from We)",

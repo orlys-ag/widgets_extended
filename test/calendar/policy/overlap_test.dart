@@ -8,7 +8,6 @@ import 'dart:ui' show Color;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
-import 'package:widgets_extended/calendar/policy/overlap.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -44,11 +43,19 @@ void main() {
       DateTime(2026, 4, 21, 0, 30),
       DateTime(2026, 4, 21, 1, 30),
     );
-    expect(entriesShareTime(late, early), isTrue);
-    expect(entriesShareTime(early, late), isTrue);
-    expect(rangeSharesTime(late.start, late.end, early), isTrue);
+    expect(NoOverlapsPolicy.entriesShareTime(late, early), isTrue);
+    expect(NoOverlapsPolicy.entriesShareTime(early, late), isTrue);
     expect(
-      timesOverlap(late.start, late.end, early.start, early.end),
+      NoOverlapsPolicy.rangeSharesTime(late.start, late.end, early),
+      isTrue,
+    );
+    expect(
+      NoOverlapsPolicy.timesOverlap(
+        late.start,
+        late.end,
+        early.start,
+        early.end,
+      ),
       isTrue,
     );
     // The same minutes a day apart share none.
@@ -57,7 +64,7 @@ void main() {
       DateTime(2026, 4, 22, 0, 30),
       DateTime(2026, 4, 22, 1, 30),
     );
-    expect(entriesShareTime(late, nextDay), isFalse);
+    expect(NoOverlapsPolicy.entriesShareTime(late, nextDay), isFalse);
   });
 
   test("OV2 09:00-10:00 and 10:00-11:00 do not share time, the intervals "
@@ -72,10 +79,10 @@ void main() {
       DateTime(2026, 4, 21, 10),
       DateTime(2026, 4, 21, 11),
     );
-    expect(entriesShareTime(nine, ten), isFalse);
-    expect(entriesShareTime(ten, nine), isFalse);
+    expect(NoOverlapsPolicy.entriesShareTime(nine, ten), isFalse);
+    expect(NoOverlapsPolicy.entriesShareTime(ten, nine), isFalse);
     expect(
-      timesOverlap(nine.start, nine.end, ten.start, ten.end),
+      NoOverlapsPolicy.timesOverlap(nine.start, nine.end, ten.start, ten.end),
       isFalse,
     );
     final longer = entryOf(
@@ -83,7 +90,7 @@ void main() {
       DateTime(2026, 4, 21, 9),
       DateTime(2026, 4, 21, 10, 1),
     );
-    expect(entriesShareTime(longer, ten), isTrue);
+    expect(NoOverlapsPolicy.entriesShareTime(longer, ten), isTrue);
   });
 
   test("OV3 an all-day entry shares time with neither a timed nor an "
@@ -107,15 +114,26 @@ void main() {
     );
     // Their instants do meet.
     expect(
-      timesOverlap(allDay.start, allDay.end, timed.start, timed.end),
+      NoOverlapsPolicy.timesOverlap(
+        allDay.start,
+        allDay.end,
+        timed.start,
+        timed.end,
+      ),
       isTrue,
     );
-    expect(entriesShareTime(allDay, timed), isFalse);
-    expect(entriesShareTime(timed, allDay), isFalse);
-    expect(entriesShareTime(allDay, other), isFalse);
-    expect(entriesShareTime(other, allDay), isFalse);
-    expect(rangeSharesTime(timed.start, timed.end, allDay), isFalse);
-    expect(rangeSharesTime(allDay.start, allDay.end, timed), isTrue);
+    expect(NoOverlapsPolicy.entriesShareTime(allDay, timed), isFalse);
+    expect(NoOverlapsPolicy.entriesShareTime(timed, allDay), isFalse);
+    expect(NoOverlapsPolicy.entriesShareTime(allDay, other), isFalse);
+    expect(NoOverlapsPolicy.entriesShareTime(other, allDay), isFalse);
+    expect(
+      NoOverlapsPolicy.rangeSharesTime(timed.start, timed.end, allDay),
+      isFalse,
+    );
+    expect(
+      NoOverlapsPolicy.rangeSharesTime(allDay.start, allDay.end, timed),
+      isTrue,
+    );
   });
 
   test("OV4 a timed entry from Tuesday's start to Wednesday's shares time "
@@ -143,7 +161,12 @@ void main() {
     for (final timed in <CalendarEntry<String>>[whole, ten]) {
       // Their instants do meet.
       expect(
-        timesOverlap(allDay.start, allDay.end, timed.start, timed.end),
+        NoOverlapsPolicy.timesOverlap(
+          allDay.start,
+          allDay.end,
+          timed.start,
+          timed.end,
+        ),
         isTrue,
         reason: timed.id,
       );

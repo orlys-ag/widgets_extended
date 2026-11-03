@@ -5,6 +5,7 @@ library;
 
 import 'package:flutter/widgets.dart';
 
+import '../dates/calendar_dates.dart';
 import '../store/calendar_store.dart';
 import 'calendar_localizations.dart';
 

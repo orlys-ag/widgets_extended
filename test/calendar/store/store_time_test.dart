@@ -62,13 +62,13 @@ class OverlapSource implements CalendarDataSource<String> {
   @override
   Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
     reads.add((first, last));
-    final from = dayNumber(first);
-    final to = dayNumber(last);
+    final from = CalendarDates.dayNumber(first);
+    final to = CalendarDates.dayNumber(last);
     return SynchronousFuture<List<CalendarEntry<String>>>(
       <CalendarEntry<String>>[
         for (final entry in entries.values)
-          if (dayNumber(entry.start) <= to &&
-              lastDayNumberOf(entry.start, entry.end) >= from)
+          if (CalendarDates.dayNumber(entry.start) <= to &&
+              CalendarDates.lastDayNumberOf(entry.start, entry.end) >= from)
             entry,
       ],
     );
@@ -328,12 +328,12 @@ void main() {
   group("on the 23-hour day", skip: shortDaySkip, () {
     test("SM6 the day's entries are answered for that day once", () {
       final day = shortDayStart;
-      final next = addDays(day, 1);
+      final next = CalendarDates.addDays(day, 1);
       final allDay = entryOf("all-day", day, next, isAllDay: true);
       final early = entryOf("early", at(day, 1, 30), at(day, 3, 30));
       for (final (name, store) in storesOf(
         <CalendarEntry<String>>[allDay, early],
-        first: addDays(day, -1),
+        first: CalendarDates.addDays(day, -1),
         last: next,
       )) {
         expect(idsOf(store.entriesOn(day)), <String>[
@@ -341,11 +341,16 @@ void main() {
           "early",
         ], reason: name);
         expect(store.entriesOn(next), isEmpty, reason: name);
-        expect(store.entriesOn(addDays(day, -1)), isEmpty, reason: name);
-        expect(idsOf(store.entriesBetween(addDays(day, -1), next)), <String>[
-          "all-day",
-          "early",
-        ], reason: name);
+        expect(
+          store.entriesOn(CalendarDates.addDays(day, -1)),
+          isEmpty,
+          reason: name,
+        );
+        expect(
+          idsOf(store.entriesBetween(CalendarDates.addDays(day, -1), next)),
+          <String>["all-day", "early"],
+          reason: name,
+        );
       }
     });
   });
@@ -353,7 +358,7 @@ void main() {
   group("on the 25-hour day", skip: longDaySkip, () {
     test("SM6 the day's entries are answered for that day once", () {
       final day = longDayStart;
-      final next = addDays(day, 1);
+      final next = CalendarDates.addDays(day, 1);
       final allDay = entryOf("all-day", day, next, isAllDay: true);
       final repeated = entryOf(
         "repeated",
@@ -362,7 +367,7 @@ void main() {
       );
       for (final (name, store) in storesOf(
         <CalendarEntry<String>>[allDay, repeated],
-        first: addDays(day, -1),
+        first: CalendarDates.addDays(day, -1),
         last: next,
       )) {
         expect(idsOf(store.entriesOn(day)), <String>[
@@ -370,10 +375,11 @@ void main() {
           "repeated",
         ], reason: name);
         expect(store.entriesOn(next), isEmpty, reason: name);
-        expect(idsOf(store.entriesBetween(addDays(day, -1), next)), <String>[
-          "all-day",
-          "repeated",
-        ], reason: name);
+        expect(
+          idsOf(store.entriesBetween(CalendarDates.addDays(day, -1), next)),
+          <String>["all-day", "repeated"],
+          reason: name,
+        );
       }
     });
   });

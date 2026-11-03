@@ -190,8 +190,8 @@ final class ScriptedEditPolicy<T> extends CalendarEditPolicy<T> {
 }
 
 /// An in-memory store that records every move it is asked for, and the
-/// range of days, as [dayNumber]s, of each [entriesBetween] it is asked
-/// while no move of its own runs: the reads of its own overlap refusal
+/// range of days, as [CalendarDates.dayNumber]s, of each [entriesBetween] it is
+/// asked while no move of its own runs: the reads of its own overlap refusal
 /// and of the split its write's notify runs within the call are left out.
 base class MoveRecordingStore extends MemoryCalendarStore<String> {
   MoveRecordingStore({super.entries, super.hours}) : super();
@@ -219,7 +219,10 @@ base class MoveRecordingStore extends MemoryCalendarStore<String> {
     DateTime last,
   ) {
     if (!_moving) {
-      reads.add((first: dayNumber(first), last: dayNumber(last)));
+      reads.add((
+        first: CalendarDates.dayNumber(first),
+        last: CalendarDates.dayNumber(last),
+      ));
     }
     return super.entriesBetween(first, last);
   }

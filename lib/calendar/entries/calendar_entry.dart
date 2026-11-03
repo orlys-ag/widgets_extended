@@ -1,5 +1,7 @@
-/// One calendar entry: its id, its start and end, whether it is all-day,
-/// its title, its colour and the host's payload.
+/// One calendar entry, [CalendarEntry]: its id, its start and end, whether
+/// it is all-day, its title, its colour and the host's payload; and the
+/// range of time a create gesture picks, [CalendarCreateRange], whose times
+/// an entry takes.
 library;
 
 import 'dart:ui' show Color;
@@ -24,7 +26,7 @@ final class CalendarEntry<T> {
   /// rules a time breaks, in this order: [start] and then [end] is a local
   /// time, not UTC; [start] and then [end] has no second, millisecond or
   /// microsecond; [end] is after [start]; and for an all-day entry, [start]
-  /// and then [end] is a local day start ([isDayStart]).
+  /// and then [end] is a local day start ([CalendarDates.isDayStart]).
   CalendarEntry({
     this.id,
     required this.start,
@@ -61,14 +63,14 @@ final class CalendarEntry<T> {
         "An entry ends after its start, $start",
       );
     }
-    if (isAllDay && !isDayStart(start)) {
+    if (isAllDay && !CalendarDates.isDayStart(start)) {
       throw ArgumentError.value(
         start,
         "start",
         "An all-day entry starts at a local day start",
       );
     }
-    if (isAllDay && !isDayStart(end)) {
+    if (isAllDay && !CalendarDates.isDayStart(end)) {
       throw ArgumentError.value(
         end,
         "end",
@@ -150,11 +152,111 @@ final class CalendarEntry<T> {
   @override
   String toString() {
     if (isAllDay) {
-      return "CalendarEntry(${id ?? "draft"}, ${isoDate(start)} to "
-          "${isoDate(end)}, all day, \"$title\", $payload)";
+      return "CalendarEntry(${id ?? "draft"}, "
+          "${CalendarDates.isoDate(start)} to "
+          "${CalendarDates.isoDate(end)}, all day, \"$title\", $payload)";
     }
-    return "CalendarEntry(${id ?? "draft"}, ${isoDate(start)} "
-        "${isoTime(minuteOfDay(start))} to ${isoDate(end)} "
-        "${isoTime(minuteOfDay(end))}, \"$title\", $payload)";
+    return "CalendarEntry(${id ?? "draft"}, ${CalendarDates.isoDate(start)} "
+        "${CalendarDates.isoTime(CalendarDates.minuteOfDay(start))} to "
+        "${CalendarDates.isoDate(end)} "
+        "${CalendarDates.isoTime(CalendarDates.minuteOfDay(end))}, "
+        "\"$title\", $payload)";
+  }
+}
+
+/// The time a create gesture picked: one continuous range from [start] to
+/// [end], an exclusive end, both local times, all-day where [isAllDay].
+@immutable
+final class CalendarCreateRange {
+  /// The range from [start] to [end], all-day where [isAllDay], as the
+  /// gesture that picked it tells it.
+  ///
+  /// Throws an [ArgumentError], in every build, naming the first of
+  /// [CalendarEntry]'s rules its times break, in [CalendarEntry]'s order,
+  /// so an entry of its times constructs: [start] and then [end] is a local
+  /// time, not UTC; [start] and then [end] has no second, millisecond or
+  /// microsecond; [end] is after [start]; and for an all-day range, [start]
+  /// and then [end] is a local day start ([CalendarDates.isDayStart]).
+  CalendarCreateRange({
+    required this.start,
+    required this.end,
+    this.isAllDay = false,
+  }) {
+    if (start.isUtc) {
+      throw ArgumentError.value(
+        start,
+        "start",
+        "A range starts at a local time",
+      );
+    }
+    if (end.isUtc) {
+      throw ArgumentError.value(end, "end", "A range ends at a local time");
+    }
+    if (start.second != 0 || start.millisecond != 0 || start.microsecond != 0) {
+      throw ArgumentError.value(
+        start,
+        "start",
+        "A range starts on a whole minute",
+      );
+    }
+    if (end.second != 0 || end.millisecond != 0 || end.microsecond != 0) {
+      throw ArgumentError.value(end, "end", "A range ends on a whole minute");
+    }
+    if (!end.isAfter(start)) {
+      throw ArgumentError.value(
+        end,
+        "end",
+        "A range ends after its start, $start",
+      );
+    }
+    if (isAllDay && !CalendarDates.isDayStart(start)) {
+      throw ArgumentError.value(
+        start,
+        "start",
+        "An all-day range starts at a local day start",
+      );
+    }
+    if (isAllDay && !CalendarDates.isDayStart(end)) {
+      throw ArgumentError.value(
+        end,
+        "end",
+        "An all-day range ends at a local day start",
+      );
+    }
+  }
+
+  /// Where the range starts.
+  final DateTime start;
+
+  /// Where the range ends, after [start].
+  final DateTime end;
+
+  /// Whether the range is all-day, stored as constructed: true for a range
+  /// a create across the all-day strip picks, whose [start] and [end] are
+  /// day starts, and false for every other, a range of slots from a day
+  /// start to a day start included.
+  final bool isAllDay;
+
+  @override
+  bool operator ==(Object other) {
+    return other is CalendarCreateRange &&
+        other.start == start &&
+        other.end == end &&
+        other.isAllDay == isAllDay;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(start, end, isAllDay);
+  }
+
+  @override
+  String toString() {
+    return "CalendarCreateRange("
+        "${CalendarDates.isoDate(start)} "
+        "${CalendarDates.isoTime(CalendarDates.minuteOfDay(start))} "
+        "to ${CalendarDates.isoDate(end)} "
+        "${CalendarDates.isoTime(CalendarDates.minuteOfDay(end))}"
+        "${isAllDay ? ", all day" : ""})";
   }
 }

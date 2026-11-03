@@ -11,7 +11,7 @@ import 'package:flutter/foundation.dart';
 
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
-import '../policy/overlap.dart';
+import '../policy/edit_policy.dart';
 import '../store/calendar_store.dart';
 import 'entry_split.dart';
 
@@ -37,7 +37,7 @@ class GridTracks {
     this.weekdays = CalendarWeekdaySet.all,
     this.hours = CalendarDayHours.allDay,
     this.firstSlotRow = 1,
-    this.slotMinutes = defaultSlotMinutes,
+    this.slotMinutes = CalendarDates.defaultSlotMinutes,
   }) : assert(dayCount >= 1),
        assert(firstSlotRow >= 0),
        assert(slotMinutes > 0),
@@ -46,7 +46,7 @@ class GridTracks {
            if (weekdays.containsDay(day)) day,
        ]);
 
-  /// The [dayNumber] of the range's first day, shown or not.
+  /// The [CalendarDates.dayNumber] of the range's first day, shown or not.
   final int firstDay;
 
   /// The days in the range, shown or not.
@@ -62,11 +62,11 @@ class GridTracks {
   /// its grid ([CalendarDayHours.isOnSlotsOf]).
   final int slotMinutes;
 
-  /// The [dayNumber]s of the shown days, ascending: column `c` shows
-  /// `_days[c - 1]`.
+  /// The [CalendarDates.dayNumber]s of the shown days, ascending: column `c`
+  /// shows `_days[c - 1]`.
   final List<int> _days;
 
-  /// The [dayNumber] of the range's last day, shown or not.
+  /// The [CalendarDates.dayNumber] of the range's last day, shown or not.
   int get lastDay {
     return firstDay + dayCount - 1;
   }
@@ -89,16 +89,18 @@ class GridTracks {
   /// The local midnights of the shown days, by column as [_days]: built at
   /// the first [dateAt] of this instance, so a later one builds no date.
   late final List<DateTime> _dates = List<DateTime>.unmodifiable(<DateTime>[
-    for (final day in _days) dateOfDayNumber(day),
+    for (final day in _days) CalendarDates.dateOfDayNumber(day),
   ]);
 
   /// Whether each shown day's clock repeats a stretch, by column as
   /// [_days]: built at the first [repeatsStretchAt] of this instance.
   late final List<bool> _repeats = List<bool>.unmodifiable(<bool>[
-    for (final date in _dates) repeatedStretchOf(date) > Duration.zero,
+    for (final date in _dates)
+      CalendarDates.repeatedStretchOf(date) > Duration.zero,
   ]);
 
-  /// The [dayNumber] of the day [column] shows, 1 to [columnCount].
+  /// The [CalendarDates.dayNumber] of the day [column] shows, 1 to
+  /// [columnCount].
   int dayAt(int column) {
     assert(column >= 1 && column <= columnCount);
     return _days[column - 1];
@@ -111,15 +113,16 @@ class GridTracks {
   }
 
   /// Whether the clock of the day [column] shows, 1 to [columnCount],
-  /// reads a stretch twice ([repeatedStretchOf]), where a piece's rows,
-  /// which follow its wall minutes ([wallSpanOf]), do not order as its
-  /// instants do.
+  /// reads a stretch twice ([CalendarDates.repeatedStretchOf]), where a piece's
+  /// rows, which follow its wall minutes ([CalendarDates.wallSpanOf]), do not
+  /// order as its instants do.
   bool repeatsStretchAt(int column) {
     assert(column >= 1 && column <= columnCount);
     return _repeats[column - 1];
   }
 
-  /// The column showing the [dayNumber] [day], or null when none does.
+  /// The column showing the [CalendarDates.dayNumber] [day], or null when none
+  /// does.
   int? columnOf(int day) {
     final column = firstColumnFrom(day);
     if (column <= columnCount && dayAt(column) == day) {
@@ -200,10 +203,11 @@ sealed class GridShape<T> {
   CalendarShownEntry<T> get shown;
 }
 
-/// The piece of [shown]'s entry on the [dayNumber] [day]: from [start] to
-/// [end] minutes after that day's midnight ([pieceOn]), whether it holds
-/// the entry's start, [first], or its end, [last], and whether the entry
-/// has a part on a later day, [continuesAfter].
+/// The piece of [shown]'s entry on the [CalendarDates.dayNumber] [day]: from
+/// [start] to [end] minutes after that day's midnight
+/// ([CalendarDates.pieceOn]), whether it holds the entry's start, [first], or
+/// its end, [last], and whether the entry has a part on a later day,
+/// [continuesAfter].
 final class GridPiece<T> extends GridShape<T> {
   const GridPiece({
     required this.shown,
@@ -218,7 +222,7 @@ final class GridPiece<T> extends GridShape<T> {
   @override
   final CalendarShownEntry<T> shown;
 
-  /// The [dayNumber] of the piece's day.
+  /// The [CalendarDates.dayNumber] of the piece's day.
   final int day;
 
   /// Minutes after the day's midnight, on the wall clock.
@@ -234,7 +238,7 @@ final class GridPiece<T> extends GridShape<T> {
   final bool last;
 
   /// Whether the entry has a part on a day after [day]: [day] is before
-  /// its last day ([lastDayNumberOf]).
+  /// its last day ([CalendarDates.lastDayNumberOf]).
   final bool continuesAfter;
 
   @override
@@ -256,15 +260,16 @@ final class GridPiece<T> extends GridShape<T> {
 
   @override
   String toString() {
-    return "GridPiece(${shown.id}, ${isoDate(dateOfDayNumber(day))} "
-        "${isoTime(start)}-${isoTime(end)})";
+    return "GridPiece(${shown.id}, "
+        "${CalendarDates.isoDate(CalendarDates.dateOfDayNumber(day))} "
+        "${CalendarDates.isoTime(start)}-${CalendarDates.isoTime(end)})";
   }
 }
 
 /// The bar of [shown]'s all-day entry in the all-day strip: across the
-/// columns from the [dayNumber] [firstDay], the first shown day it covers,
-/// to [lastDay], the last, in the strip's [row] from 0, and whether the
-/// entry covers days before [firstDay], [continuesBefore], or after
+/// columns from the [CalendarDates.dayNumber] [firstDay], the first shown day
+/// it covers, to [lastDay], the last, in the strip's [row] from 0, and whether
+/// the entry covers days before [firstDay], [continuesBefore], or after
 /// [lastDay], [continuesAfter].
 final class GridBar<T> extends GridShape<T> {
   const GridBar({
@@ -310,8 +315,10 @@ final class GridBar<T> extends GridShape<T> {
 
   @override
   String toString() {
-    return "GridBar(${shown.id}, ${isoDate(dateOfDayNumber(firstDay))} to "
-        "${isoDate(dateOfDayNumber(lastDay))}, row $row)";
+    return "GridBar(${shown.id}, "
+        "${CalendarDates.isoDate(CalendarDates.dateOfDayNumber(firstDay))} to "
+        "${CalendarDates.isoDate(CalendarDates.dateOfDayNumber(lastDay))}, "
+        "row $row)";
   }
 }
 
@@ -381,8 +388,8 @@ class GridHiddenCounts {
 /// O(log n) with no allocation: their ids, and their starts and their ends
 /// as [DateTime.microsecondsSinceEpoch], each list sorted ascending on its
 /// own. For the index of the days outside a grid's range, [readFrom] and
-/// [readTo] are the [dayNumber]s of the days it has read: from [readFrom]
-/// to the day before the range, and from the day after the range to
+/// [readTo] are the [CalendarDates.dayNumber]s of the days it has read: from
+/// [readFrom] to the day before the range, and from the day after the range to
 /// [readTo], each run empty while its end is the range's own day.
 class GridOverlapIndex {
   GridOverlapIndex({this.readFrom = 0, this.readTo = 0});
@@ -434,7 +441,8 @@ class GridOverlapIndex {
     if (count >= 2) {
       return true;
     }
-    return !ids.contains(id) || !timesOverlap(own.start, own.end, start, end);
+    return !ids.contains(id) ||
+        !NoOverlapsPolicy.timesOverlap(own.start, own.end, start, end);
   }
 
   /// How many of the ascending [values] are less than [bound], by binary
@@ -484,9 +492,9 @@ class TimedGridLayout<T> {
   });
 
   /// The split of [shown] on [tracks]: for each timed entry its piece on
-  /// each shown day it covers ([pieceOn]) that has a minute inside the
-  /// hours, walking only the columns from its first day's to its last
-  /// day's, so it yields at most one piece per shown day ([pieces]); each
+  /// each shown day it covers ([CalendarDates.pieceOn]) that has a minute
+  /// inside the hours, walking only the columns from its first day's to its
+  /// last day's, so it yields at most one piece per shown day ([pieces]); each
   /// all-day entry's bar across the shown days it covers, stacked
   /// ([bars]); the entries with no block or bar, counted ([hidden]): on
   /// each day column the pieces wholly before its hours and those wholly
@@ -532,8 +540,8 @@ class TimedGridLayout<T> {
     for (final entry in shown) {
       final start = entry.entry.start;
       final end = entry.entry.end;
-      final firstDay = dayNumber(start);
-      final lastDay = lastDayNumberOf(start, end);
+      final firstDay = CalendarDates.dayNumber(start);
+      final lastDay = CalendarDates.lastDayNumberOf(start, end);
       final first = tracks.firstColumnFrom(firstDay);
       final last = tracks.lastColumnUpTo(lastDay);
       if (last < first) {
@@ -553,10 +561,10 @@ class TimedGridLayout<T> {
           math.min(lastDay, tracks.lastDay) -
               math.max(firstDay, tracks.firstDay) +
               1;
-      final span = wallSpanOf(start, end);
+      final span = CalendarDates.wallSpanOf(start, end);
       for (var column = first; column <= last; column++) {
         final day = tracks.dayAt(column);
-        final piece = pieceOn(span, day);
+        final piece = CalendarDates.pieceOn(span, day);
         if (piece == null) {
           // A covered day the span does not reach.
           missed = true;
@@ -577,7 +585,7 @@ class TimedGridLayout<T> {
               end: piece.end,
               first: day == firstDay,
               // The piece the span ends on, which holds the entry's end.
-              last: span.end <= (day + 1) * minutesPerDay,
+              last: span.end <= (day + 1) * CalendarDates.minutesPerDay,
               continuesAfter: day < lastDay,
             ),
           );
@@ -714,8 +722,9 @@ class TimedGridLayout<T> {
           firstDay: firstDay,
           lastDay: lastDay,
           row: row,
-          continuesBefore: dayNumber(entry.start) < firstDay,
-          continuesAfter: lastDayNumberOf(entry.start, entry.end) > lastDay,
+          continuesBefore: CalendarDates.dayNumber(entry.start) < firstDay,
+          continuesAfter:
+              CalendarDates.lastDayNumberOf(entry.start, entry.end) > lastDay,
         ),
       );
       if (row >= collapsedStripRows) {

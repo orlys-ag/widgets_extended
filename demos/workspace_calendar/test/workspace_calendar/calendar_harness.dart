@@ -9,7 +9,7 @@ import 'dart:ui' as ui;
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart'
-    show addMonths, parseIsoDate;
+    show parseIsoDate;
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
@@ -164,13 +164,13 @@ Finder formDateFinder(String label) {
 }
 
 /// The item form's date field labelled [label] showing [date], as
-/// [isoDate] writes it.
+/// [CalendarDates.isoDate] writes it.
 Finder formDateShows(String label, String date) {
   return find.descendant(of: formDateFinder(label), matching: find.text(date));
 }
 
 /// Expects the item form's Start date to name [day] and its End date the
-/// day [days] - 1 days after it, both as [isoDate] writes them.
+/// day [days] - 1 days after it, both as [CalendarDates.isoDate] writes them.
 void expectFormDays(String day, int days) {
   expect(formDateShows("Start date", day), findsOneWidget);
   expect(
@@ -383,7 +383,9 @@ Future<void> selectNextMonth(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(motion);
   await tester.pump(const Duration(milliseconds: 16));
-  await tester.tap(find.byKey(dayCellKey(addMonths(selected, 1))));
+  await tester.tap(
+    find.byKey(dayCellKey(CalendarDates.addMonths(selected, 1))),
+  );
 }
 
 /// The one board's viewport: in Week and Day the timed grid's, keyed by

@@ -6,7 +6,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
-import '../dates/calendar_date_helpers.dart';
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
 
@@ -96,7 +95,7 @@ final class CalendarHoursException extends CalendarStoreException {
   /// Whether [hours] do not hold [start]'s minute of its day as a start
   /// ([CalendarDayHours.holdsStart]).
   bool get startOutside {
-    return !hours.holdsStart(minuteOfDay(start));
+    return !hours.holdsStart(CalendarDates.minuteOfDay(start));
   }
 
   /// Whether [hours] do not hold [end]'s minute of its last day as an end
@@ -302,7 +301,7 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
 /// one sorted run and the pending list as another, and merges them, so it
 /// costs the entries it answers and a log of the runs, with no sort.
 ///
-/// Days are [dayNumber]s.
+/// Days are [CalendarDates.dayNumber]s.
 class CalendarEntryIndex<T> {
   /// An empty index. With [opensEveryDay], [put] opens every day an entry
   /// covers, and a day [put] or [forget] empties closes; otherwise only
@@ -653,18 +652,18 @@ class CalendarEntryIndex<T> {
     return false;
   }
 
-  /// The [dayNumber] of the first day [entry] has a part in.
+  /// The [CalendarDates.dayNumber] of the first day [entry] has a part in.
   static int _firstDayOf<T>(CalendarEntry<T> entry) {
-    return dayNumber(entry.start);
+    return CalendarDates.dayNumber(entry.start);
   }
 
-  /// The [dayNumber] of the last day [entry] has a part in
-  /// ([lastDayNumberOf]), never a day its end is the start of.
+  /// The [CalendarDates.dayNumber] of the last day [entry] has a part in
+  /// ([CalendarDates.lastDayNumberOf]), never a day its end is the start of.
   static int _lastDayOf<T>(CalendarEntry<T> entry) {
-    return lastDayNumberOf(entry.start, entry.end);
+    return CalendarDates.lastDayNumberOf(entry.start, entry.end);
   }
 
-  /// Whether [entry] has a part in the [dayNumber] [day].
+  /// Whether [entry] has a part in the [CalendarDates.dayNumber] [day].
   static bool _covers<T>(CalendarEntry<T> entry, int day) {
     return day >= _firstDayOf(entry) && day <= _lastDayOf(entry);
   }

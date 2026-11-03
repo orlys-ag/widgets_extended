@@ -28,9 +28,9 @@ CalendarEntry<String> task(
   );
 }
 
-/// The [dayNumber] of the 21 April 2026 plus [offset] days.
+/// The [CalendarDates.dayNumber] of the 21 April 2026 plus [offset] days.
 int day(int offset) {
-  return dayNumber(DateTime(2026, 4, 21 + offset));
+  return CalendarDates.dayNumber(DateTime(2026, 4, 21 + offset));
 }
 
 /// The ids filed under [dayOffset]'s day, in order.

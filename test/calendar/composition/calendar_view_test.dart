@@ -104,7 +104,7 @@ DayRange gridRange(
   DateTime day, {
   CalendarWeekdaySet weekdays = CalendarWeekdaySet.all,
 }) {
-  final grid = MonthGrid.of(day, weekdays: weekdays);
+  final grid = CalendarMonthGrid.of(day, weekdays: weekdays);
   return (first: grid.firstDay, last: grid.lastDay);
 }
 
@@ -122,12 +122,12 @@ class HeldSource implements CalendarDataSource<String> {
 
   @override
   Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
-    final from = dayNumber(first);
-    final to = dayNumber(last);
+    final from = CalendarDates.dayNumber(first);
+    final to = CalendarDates.dayNumber(last);
     final answer = <CalendarEntry<String>>[
       for (final entry in entries)
-        if (dayNumber(entry.start) <= to &&
-            lastDayNumberOf(entry.start, entry.end) >= from)
+        if (CalendarDates.dayNumber(entry.start) <= to &&
+            CalendarDates.lastDayNumberOf(entry.start, entry.end) >= from)
           entry,
     ];
     if (!holds) {
@@ -262,7 +262,7 @@ int dayRowOf(int minute) {
 
 /// Week's grid column of [day], Monday's being 1.
 int weekColOf(DateTime day) {
-  return 1 + weekdayColumnOfDay(dayNumber(day));
+  return 1 + CalendarDates.weekdayColumnOfDay(CalendarDates.dayNumber(day));
 }
 
 /// The global centre of the timed grid's cell at [row] and [col].
@@ -1520,7 +1520,10 @@ void main() {
         shown: store.shows.last,
       ));
     });
-    final moved = shownDayNear(saturday, CalendarWeekdaySet.workweek);
+    final moved = CalendarDates.shownDayNear(
+      saturday,
+      CalendarWeekdaySet.workweek,
+    );
     expect(moved, isNot(saturday));
     final range = gridRange(moved, weekdays: CalendarWeekdaySet.workweek);
     expect(range, isNot(gridRange(saturday)));
@@ -1995,11 +1998,14 @@ void main() {
   testWidgets("CV27 the slot length is 15 minutes by default, and each of "
       "slotMinuteChoices builds Week's grid with its slots", (tester) async {
     useTallView(tester);
-    expect(defaultSlotMinutes, 15);
-    expect(CalendarView<String>(store: store).slotMinutes, defaultSlotMinutes);
+    expect(CalendarDates.defaultSlotMinutes, 15);
+    expect(
+      CalendarView<String>(store: store).slotMinutes,
+      CalendarDates.defaultSlotMinutes,
+    );
     final controller = CalendarController(view: CalendarViewKind.week);
     addTearDown(controller.dispose);
-    for (final slotMinutes in slotMinuteChoices) {
+    for (final slotMinutes in CalendarDates.slotMinuteChoices) {
       await tester.pumpWidget(
         app(
           CalendarView<String>(
@@ -2027,7 +2033,7 @@ void main() {
             .rows
             .axis
             .trackCount,
-        2 + minutesPerDay ~/ slotMinutes + 1,
+        2 + CalendarDates.minutesPerDay ~/ slotMinutes + 1,
         reason: "$slotMinutes",
       );
     }

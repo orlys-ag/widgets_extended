@@ -188,7 +188,7 @@ class _MonthStyles {
 /// The key of the item [id]'s bar in the calendar week starting on
 /// [weekStart]: `"<id>@<yyyy-mm-dd>"`.
 String monthSegmentKey(String id, DateTime weekStart) {
-  return "$id@${isoDate(weekStart)}";
+  return "$id@${CalendarDates.isoDate(weekStart)}";
 }
 
 /// The key of the chip of the bar [segmentKey] names.
@@ -198,30 +198,30 @@ ValueKey<String> monthChipKey(String segmentKey) {
 
 /// The key of the month board's cell showing [day].
 ValueKey<String> monthDayKey(DateTime day) {
-  return ValueKey<String>("month-day-${isoDate(day)}");
+  return ValueKey<String>("month-day-${CalendarDates.isoDate(day)}");
 }
 
 /// The key of the number strip of the cell showing [day].
 ValueKey<String> monthStripKey(DateTime day) {
-  return ValueKey<String>("month-strip-${isoDate(day)}");
+  return ValueKey<String>("month-strip-${CalendarDates.isoDate(day)}");
 }
 
 /// The key of the banner saying how many chips the cell showing [day]
 /// hides.
 ValueKey<String> monthMoreKey(DateTime day) {
-  return ValueKey<String>("month-more-${isoDate(day)}");
+  return ValueKey<String>("month-more-${CalendarDates.isoDate(day)}");
 }
 
 /// The key of the banner counting the items of the cell showing [day]
 /// that lie wholly before the calendar's hours.
 ValueKey<String> monthEarlierKey(DateTime day) {
-  return ValueKey<String>("month-earlier-${isoDate(day)}");
+  return ValueKey<String>("month-earlier-${CalendarDates.isoDate(day)}");
 }
 
 /// The key of the banner counting the items of the cell showing [day]
 /// that lie wholly after the calendar's hours.
 ValueKey<String> monthLaterKey(DateTime day) {
-  return ValueKey<String>("month-later-${isoDate(day)}");
+  return ValueKey<String>("month-later-${CalendarDates.isoDate(day)}");
 }
 
 /// One item's bar in one calendar week: the month board's payload.
@@ -269,16 +269,16 @@ class MonthChip<T> {
 
 /// Where each of [shown] sits on the month board of [grid]: one placement
 /// per week of the grid whose shown days the entry covers, from the day of
-/// its start to the last day it has a part in ([lastDayNumberOf]), on that
-/// week's row and on the columns from the first shown day on or after its
-/// first day to the last shown day on or before its last. So an entry
-/// covering more than one day, timed or all-day, is a bar across them, and
-/// a one-day timed entry a chip. A week whose shown days the entry misses
-/// has none, as the timed grid shows no piece on a day it has no column
-/// for.
+/// its start to the last day it has a part in
+/// ([CalendarDates.lastDayNumberOf]), on that week's row and on the columns
+/// from the first shown day on or after its first day to the last shown day on
+/// or before its last. So an entry covering more than one day, timed or
+/// all-day, is a bar across them, and a one-day timed entry a chip. A week
+/// whose shown days the entry misses has none, as the timed grid shows no piece
+/// on a day it has no column for.
 List<BoardPlacement<MonthChip<T>>> monthPlacementsOf<T>(
   Iterable<CalendarShownEntry<T>> shown,
-  MonthGrid grid,
+  CalendarMonthGrid grid,
 ) {
   final weeks = grid.weekCount;
   final columns = grid.columnCount;
@@ -286,14 +286,19 @@ List<BoardPlacement<MonthChip<T>>> monthPlacementsOf<T>(
   final days = Int32List(weeks * columns);
   for (var row = 0; row < weeks; row++) {
     for (var col = 0; col < columns; col++) {
-      days[row * columns + col] = dayNumber(grid.dateAt(row, col));
+      days[row * columns + col] = CalendarDates.dayNumber(
+        grid.dateAt(row, col),
+      );
     }
   }
   final placements = <BoardPlacement<MonthChip<T>>>[];
   for (final entry in shown) {
     final calendarEntry = entry.entry;
-    final first = dayNumber(calendarEntry.start);
-    final last = lastDayNumberOf(calendarEntry.start, calendarEntry.end);
+    final first = CalendarDates.dayNumber(calendarEntry.start);
+    final last = CalendarDates.lastDayNumberOf(
+      calendarEntry.start,
+      calendarEntry.end,
+    );
     for (var row = 0; row < weeks; row++) {
       final weekFirst = grid.weekdays.weekStartOfDay(days[row * columns]);
       final weekLast = weekFirst + DateTime.daysPerWeek - 1;
@@ -317,7 +322,10 @@ List<BoardPlacement<MonthChip<T>>> monthPlacementsOf<T>(
       placements.add(
         BoardPlacement<MonthChip<T>>(
           MonthChip<T>(
-            key: monthSegmentKey(entry.id, dateOfDayNumber(weekFirst)),
+            key: monthSegmentKey(
+              entry.id,
+              CalendarDates.dateOfDayNumber(weekFirst),
+            ),
             entry: entry,
             continuesBefore: first < weekFirst,
             continuesAfter: last > weekLast,
@@ -333,15 +341,15 @@ List<BoardPlacement<MonthChip<T>>> monthPlacementsOf<T>(
 /// Which of [shown] a month board of [grid] shows as chips under [hours],
 /// and how many of the others each cell counts, at
 /// `row * columnCount + col`. An all-day entry is inside the hours, and so
-/// is a timed one any piece of which ([pieceOn]) on a day of the grid has a
-/// minute inside them; every other entry has no chip, and each of its
-/// pieces counts on its own day where the grid shows that day, in
+/// is a timed one any piece of which ([CalendarDates.pieceOn]) on a day of the
+/// grid has a minute inside them; every other entry has no chip, and each of
+/// its pieces counts on its own day where the grid shows that day, in
 /// `earlier` where it ends at or before the hours' start and in `later`
 /// otherwise, as Agenda's `dayListRowsOf` counts it.
 ({List<CalendarShownEntry<T>> inside, Int32List earlier, Int32List later})
 splitMonthHours<T>(
   Iterable<CalendarShownEntry<T>> shown,
-  MonthGrid grid,
+  CalendarMonthGrid grid,
   CalendarDayHours hours,
 ) {
   final columns = grid.columnCount;
@@ -352,7 +360,7 @@ splitMonthHours<T>(
   final cells = <int, int>{
     for (var row = 0; row < grid.weekCount; row++)
       for (var col = 0; col < columns; col++)
-        dayNumber(grid.dateAt(row, col)): row * columns + col,
+        CalendarDates.dayNumber(grid.dateAt(row, col)): row * columns + col,
   };
   // A day outside the grid's first and last has no cell, so each entry's
   // days are walked only inside them; a grid of no weekdays has none.
@@ -365,15 +373,21 @@ splitMonthHours<T>(
       inside.add(entry);
       continue;
     }
-    final span = wallSpanOf(calendarEntry.start, calendarEntry.end);
-    final first = math.max(dayNumber(calendarEntry.start), gridFirst);
+    final span = CalendarDates.wallSpanOf(
+      calendarEntry.start,
+      calendarEntry.end,
+    );
+    final first = math.max(
+      CalendarDates.dayNumber(calendarEntry.start),
+      gridFirst,
+    );
     final last = math.min(
-      lastDayNumberOf(calendarEntry.start, calendarEntry.end),
+      CalendarDates.lastDayNumberOf(calendarEntry.start, calendarEntry.end),
       gridLast,
     );
     var holds = false;
     for (var day = first; day <= last && !holds; day++) {
-      final piece = pieceOn(span, day);
+      final piece = CalendarDates.pieceOn(span, day);
       holds =
           cells.containsKey(day) &&
           piece != null &&
@@ -385,7 +399,7 @@ splitMonthHours<T>(
     }
     for (var day = first; day <= last; day++) {
       final cell = cells[day];
-      final piece = pieceOn(span, day);
+      final piece = CalendarDates.pieceOn(span, day);
       if (cell == null || piece == null) {
         continue;
       }
@@ -406,14 +420,14 @@ splitMonthHours<T>(
 int compareMonthChips<T>(MonthChip<T> a, MonthChip<T> b) {
   final x = a.entry.entry;
   final y = b.entry.entry;
-  final xFirst = dayNumber(x.start);
-  final yFirst = dayNumber(y.start);
+  final xFirst = CalendarDates.dayNumber(x.start);
+  final yFirst = CalendarDates.dayNumber(y.start);
   final byDay = xFirst.compareTo(yFirst);
   if (byDay != 0) {
     return byDay;
   }
-  final xDays = lastDayNumberOf(x.start, x.end) - xFirst;
-  final yDays = lastDayNumberOf(y.start, y.end) - yFirst;
+  final xDays = CalendarDates.lastDayNumberOf(x.start, x.end) - xFirst;
+  final yDays = CalendarDates.lastDayNumberOf(y.start, y.end) - yFirst;
   final byLength = yDays.compareTo(xDays);
   if (byLength != 0) {
     return byLength;
@@ -449,7 +463,7 @@ int compareMonthChips<T>(MonthChip<T> a, MonthChip<T> b) {
 ({List<BoardPlacement<MonthChip<T>>> shown, Int32List hidden})
 fitMonthPlacements<T>(
   List<BoardPlacement<MonthChip<T>>> placements,
-  MonthGrid grid,
+  CalendarMonthGrid grid,
   int lanes,
 ) {
   assert(lanes >= 1);
@@ -516,7 +530,7 @@ fitMonthPlacements<T>(
 ({List<List<int>> weeks, Int32List lanes, Int32List weekLanes})
 _laneMonthPlacements<T>(
   List<BoardPlacement<MonthChip<T>>> placements,
-  MonthGrid grid,
+  CalendarMonthGrid grid,
 ) {
   final weeks = <List<int>>[
     for (var row = 0; row < grid.weekCount; row++) <int>[],
@@ -565,7 +579,7 @@ _laneMonthPlacements<T>(
 /// deepest chip, and 0 for a day no chip covers.
 Int32List monthDayLanesOf<T>(
   List<BoardPlacement<MonthChip<T>>> placements,
-  MonthGrid grid,
+  CalendarMonthGrid grid,
 ) {
   final columns = grid.columnCount;
   final days = Int32List(grid.weekCount * columns);
@@ -684,7 +698,7 @@ class MonthBoard<T> extends StatefulWidget {
   final CalendarStore<T> store;
 
   /// The month the board shows.
-  final MonthGrid grid;
+  final CalendarMonthGrid grid;
 
   /// Whether a week grows to hold its chips or keeps its share of the
   /// height and hides the chips that do not fit.
@@ -805,7 +819,7 @@ typedef _BannerHours = ({
 /// ([splitMonthHours]); and the bars of those inside ([monthPlacementsOf]).
 typedef _MonthSplit<T> = ({
   List<CalendarShownEntry<T>> read,
-  MonthGrid grid,
+  CalendarMonthGrid grid,
   CalendarDayHours hours,
   List<CalendarShownEntry<T>> inside,
   Int32List earlier,
@@ -912,7 +926,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// The grid, the layout, the hours, the week extent, the room above the
   /// lanes and the column width the axes were last given; null and zero
   /// before the first layout.
-  MonthGrid? _fittedGrid;
+  CalendarMonthGrid? _fittedGrid;
   CalendarMonthLayout? _fittedLayout;
   CalendarDayHours? _fittedHours;
   double _fitted = 0.0;
@@ -1137,18 +1151,18 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     super.dispose();
   }
 
-  static List<_KeptDay?> _emptyDays(MonthGrid grid) {
+  static List<_KeptDay?> _emptyDays(CalendarMonthGrid grid) {
     return List<_KeptDay?>.filled(grid.weekCount * grid.columnCount, null);
   }
 
-  static bool _sameGrid(MonthGrid a, MonthGrid b) {
+  static bool _sameGrid(CalendarMonthGrid a, CalendarMonthGrid b) {
     return a.year == b.year && a.month == b.month && a.weekdays == b.weekdays;
   }
 
   /// [weekCount] weeks resting at [fitted], each growing past it to the
   /// [padding] above its lanes plus its lanes, each [laneExtent] tall.
   static BoardAxisConfig _rowsConfig(
-    MonthGrid grid,
+    CalendarMonthGrid grid,
     double fitted,
     double laneExtent,
     double padding,
@@ -1178,9 +1192,13 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     _rangeRead = _everyDayRead(widget.store, widget.grid);
   }
 
-  static bool _everyDayRead<T>(CalendarStore<T> store, MonthGrid grid) {
+  static bool _everyDayRead<T>(CalendarStore<T> store, CalendarMonthGrid grid) {
     final last = grid.lastDay;
-    for (var day = grid.firstDay; !day.isAfter(last); day = addDays(day, 1)) {
+    for (
+      var day = grid.firstDay;
+      !day.isAfter(last);
+      day = CalendarDates.addDays(day, 1)
+    ) {
       if (!store.isRead(day)) {
         return false;
       }
@@ -1529,7 +1547,11 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// answers the entries the last split read, the identical instances with
   /// the same pending flags in the same order, for the same grid and hours,
   /// the split is that one, [_split], and runs nothing.
-  _MonthSplit<T> _splitOf(MonthGrid grid, CalendarDayHours hours, bool ready) {
+  _MonthSplit<T> _splitOf(
+    CalendarMonthGrid grid,
+    CalendarDayHours hours,
+    bool ready,
+  ) {
     final read = ready
         ? widget.store.entriesBetween(grid.firstDay, grid.lastDay)
         : <CalendarShownEntry<T>>[];
@@ -1595,7 +1617,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// down to. Runs in the layout callback's build scope, so the cells that
   /// listen rebuild in it. Returns whether any cell's least height changed.
   bool _writeHidden(
-    MonthGrid grid,
+    CalendarMonthGrid grid,
     Int32List? hidden,
     int? lanes,
     double laneExtent,
@@ -1713,7 +1735,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// is still the grid. The first reveal of a new grid can read a week at
   /// its estimate, and the layout it causes measures that week, so a
   /// reveal that moved asks once more after it.
-  void _revealSelected(MonthGrid scheduledFor, {required bool again}) {
+  void _revealSelected(CalendarMonthGrid scheduledFor, {required bool again}) {
     if (!mounted ||
         !_sameGrid(widget.grid, scheduledFor) ||
         !_scroll.hasClients) {
@@ -1912,7 +1934,7 @@ class _MonthGridPainter extends BoardBackgroundPainter {
             !grid.contains(grid.dateAt(row, col)),
       ];
 
-  final MonthGrid grid;
+  final CalendarMonthGrid grid;
   final _MonthStyles styles;
 
   /// Whether each cell of [grid], at `row * columnCount + col`, shows a day

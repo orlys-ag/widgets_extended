@@ -14,7 +14,7 @@ import 'package:widgets_extended/board/board_controller.dart'
     show BoardControllerInternals;
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:widgets_extended/calendar/dates/calendar_dates.dart'
-    show MonthGrid, parseIsoDate;
+    show parseIsoDate;
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
@@ -363,7 +363,7 @@ bool nearRect(Rect a, Rect b) {
 
 /// The days of [grid] whose whole cell the month board's background fills
 /// in the background colour.
-List<DateTime> filledDays(WidgetTester tester, MonthGrid grid) {
+List<DateTime> filledDays(WidgetTester tester, CalendarMonthGrid grid) {
   final fills = paintMonthBackground(
     tester,
   ).fillsOf(HarborColors.background).toList();
@@ -417,7 +417,7 @@ void main() {
     "day it covers",
     (tester) async {
       final api = await pumpSeededMonth(tester, showAll: true);
-      final grid = MonthGrid.of(today);
+      final grid = CalendarMonthGrid.of(today);
       final listed = await listAll(tester, api, grid.firstDay, grid.lastDay);
       // Sanity: the seed holds items across the month.
       expect(listed.length, greaterThan(10));
@@ -1547,7 +1547,7 @@ void main() {
     (tester) async {
       await pumpMonth(tester);
       // April 2026 runs from Monday, March 30 to Sunday, May 3.
-      expect(filledDays(tester, MonthGrid(2026, 4)), <DateTime>[
+      expect(filledDays(tester, CalendarMonthGrid(2026, 4)), <DateTime>[
         DateTime(2026, 3, 30),
         DateTime(2026, 3, 31),
         may(1),
@@ -1612,7 +1612,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text("Mar 2026"), findsOneWidget);
       // March 2026 runs from Sunday, March 1 to Tuesday, March 31.
-      expect(filledDays(tester, MonthGrid(2026, 3)), <DateTime>[
+      expect(filledDays(tester, CalendarMonthGrid(2026, 3)), <DateTime>[
         for (var day = 23; day <= 28; day++) DateTime(2026, 2, day),
         for (var day = 1; day <= 5; day++) april(day),
       ]);
@@ -1628,7 +1628,7 @@ void main() {
       expect(
         filledDays(
           tester,
-          MonthGrid(2026, 3, weekdays: CalendarWeekdaySet.workweek),
+          CalendarMonthGrid(2026, 3, weekdays: CalendarWeekdaySet.workweek),
         ),
         <DateTime>[april(1), april(2), april(3)],
       );

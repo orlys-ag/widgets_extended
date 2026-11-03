@@ -10,8 +10,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart'
-    show daysBetween;
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
@@ -597,7 +595,7 @@ DateTime lastDayListed(MockCalendarApi api) {
 /// Steps Day forward with its chevron, settling after each step, until its
 /// grid would show [day], every weekday shown.
 Future<void> stepDayTo(WidgetTester tester, DateTime day) async {
-  for (var i = daysBetween(gridDay(tester), day); i > 0; i--) {
+  for (var i = CalendarDates.daysBetween(gridDay(tester), day); i > 0; i--) {
     await tester.tap(find.byTooltip("Next day"));
     await tester.pumpAndSettle();
   }

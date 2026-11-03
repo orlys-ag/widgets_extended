@@ -5,8 +5,7 @@
 /// lock choices its drags follow, what each of those defaults to, a
 /// block drawn again for a new payload, the theme's shadows, when its days
 /// are ready on the range its owner asks, its selection as the store
-/// moves off that range, and the times a create range and the ids a move
-/// request take.
+/// moves off that range, and the ids a move request takes.
 library;
 
 import 'dart:async';
@@ -24,7 +23,6 @@ import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
-import 'package:widgets_extended/calendar/presentation/calendar_localizations.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
@@ -35,7 +33,7 @@ import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
 /// The Monday of the week shown.
-final int weekStartDay = dayNumber(DateTime(2026, 4, 20));
+final int weekStartDay = CalendarDates.dayNumber(DateTime(2026, 4, 20));
 
 /// The week from [weekStartDay], every day and every minute shown.
 final GridTracks week = GridTracks(firstDay: weekStartDay, dayCount: 7);
@@ -140,13 +138,13 @@ class ReadSource implements CalendarDataSource<String> {
         StateError("The read failed."),
       );
     }
-    final from = dayNumber(first);
-    final to = dayNumber(last);
+    final from = CalendarDates.dayNumber(first);
+    final to = CalendarDates.dayNumber(last);
     return SynchronousFuture<List<CalendarEntry<String>>>(
       <CalendarEntry<String>>[
         for (final entry in entries)
-          if (dayNumber(entry.start) <= to &&
-              lastDayNumberOf(entry.start, entry.end) >= from)
+          if (CalendarDates.dayNumber(entry.start) <= to &&
+              CalendarDates.lastDayNumberOf(entry.start, entry.end) >= from)
             entry,
       ],
     );
@@ -276,12 +274,12 @@ void main() {
     test("places each piece of an entry from before the week in its own "
         "day's column", () {
       // Friday 18:00 to Tuesday 19:00: all of Monday, and Tuesday to 19:00.
-      final span = wallSpanOf(
+      final span = CalendarDates.wallSpanOf(
         DateTime(2026, 4, 17, 18),
         DateTime(2026, 4, 21, 19),
       );
-      final onMonday = pieceOn(span, weekStartDay)!;
-      final onTuesday = pieceOn(span, weekStartDay + 1)!;
+      final onMonday = CalendarDates.pieceOn(span, weekStartDay)!;
+      final onTuesday = CalendarDates.pieceOn(span, weekStartDay + 1)!;
       expect(
         pieceSpanOf(week, 1, onMonday.start, onMonday.end),
         const BoardSpan(rowStart: 1, colStart: 1, rowSpan: 96, colSpan: 1),
@@ -336,132 +334,6 @@ void main() {
         ),
       );
     });
-  });
-
-  test("RC11 a create range throws CalendarEntry's ArgumentError for the "
-      "first rule its times break, in CalendarEntry's order, its message "
-      "naming a range", () {
-    final wednesday = DateTime(2026, 4, 22);
-    final start = at(tuesday, 600);
-    final end = at(tuesday, 660);
-    const second = Duration(seconds: 1);
-    const millisecond = Duration(milliseconds: 1);
-    const microsecond = Duration(microseconds: 1);
-    final cases =
-        <({DateTime start, DateTime end, bool isAllDay, String? breaks})>[
-          (start: start.toUtc(), end: end, isAllDay: false, breaks: "start"),
-          (start: start, end: end.toUtc(), isAllDay: false, breaks: "end"),
-          (
-            start: start.add(second),
-            end: end,
-            isAllDay: false,
-            breaks: "start",
-          ),
-          (start: start, end: end.add(second), isAllDay: false, breaks: "end"),
-          (
-            start: start.add(millisecond),
-            end: end,
-            isAllDay: false,
-            breaks: "start",
-          ),
-          (
-            start: start,
-            end: end.add(millisecond),
-            isAllDay: false,
-            breaks: "end",
-          ),
-          (
-            start: start.add(microsecond),
-            end: end,
-            isAllDay: false,
-            breaks: "start",
-          ),
-          (
-            start: start,
-            end: end.add(microsecond),
-            isAllDay: false,
-            breaks: "end",
-          ),
-          (start: start, end: start, isAllDay: false, breaks: "end"),
-          (start: end, end: start, isAllDay: false, breaks: "end"),
-          (
-            start: at(tuesday, 60),
-            end: wednesday,
-            isAllDay: true,
-            breaks: "start",
-          ),
-          (
-            start: tuesday,
-            end: at(wednesday, 60),
-            isAllDay: true,
-            breaks: "end",
-          ),
-          // Two rules broken, of different names: the earlier rule names it.
-          (
-            start: start.add(second),
-            end: end.toUtc(),
-            isAllDay: false,
-            breaks: "end",
-          ),
-          (
-            start: start.toUtc(),
-            end: end.add(second),
-            isAllDay: false,
-            breaks: "start",
-          ),
-          (
-            start: at(wednesday, 60),
-            end: tuesday,
-            isAllDay: true,
-            breaks: "end",
-          ),
-          (start: start, end: end, isAllDay: false, breaks: null),
-          (start: tuesday, end: wednesday, isAllDay: true, breaks: null),
-        ];
-    ArgumentError? errorOf(void Function() make) {
-      try {
-        make();
-        return null;
-      } on ArgumentError catch (error) {
-        return error;
-      }
-    }
-
-    for (final times in cases) {
-      final reason = "$times";
-      final rangeError = errorOf(() {
-        CalendarCreateRange(
-          start: times.start,
-          end: times.end,
-          isAllDay: times.isAllDay,
-        );
-      });
-      final entryError = errorOf(() {
-        CalendarEntry<String>(
-          start: times.start,
-          end: times.end,
-          isAllDay: times.isAllDay,
-          title: "range",
-          color: const Color(0xFF336699),
-          payload: "range",
-        );
-      });
-      // The case breaks the rule it names for an entry.
-      expect(entryError?.name, times.breaks, reason: reason);
-      expect(rangeError?.name, times.breaks, reason: reason);
-      expect(
-        rangeError?.invalidValue,
-        entryError?.invalidValue,
-        reason: reason,
-      );
-      expect(
-        rangeError?.message,
-        (entryError?.message as String?)
-            ?.replaceFirst("An entry", "A range")
-            .replaceFirst("all-day entry", "all-day range"),
-        reason: reason,
-      );
-    }
   });
 
   test("RC12 a move request throws an ArgumentError for an entry with no "
@@ -527,13 +399,16 @@ void main() {
 
     test("lays the held days out in order, the others with no column", () {
       expect(noWednesday.columnCount, 6);
-      expect(noWednesday.dayAt(2), dayNumber(tuesday));
-      expect(noWednesday.dayAt(3), dayNumber(thursday));
+      expect(noWednesday.dayAt(2), CalendarDates.dayNumber(tuesday));
+      expect(noWednesday.dayAt(3), CalendarDates.dayNumber(thursday));
       expect(noWednesday.dateAt(6), DateTime(2026, 4, 26));
-      expect(noWednesday.columnOf(dayNumber(thursday)), 3);
-      expect(noWednesday.columnOf(dayNumber(wednesday)), isNull);
-      expect(noWednesday.firstColumnFrom(dayNumber(wednesday)), 3);
-      expect(noWednesday.lastColumnUpTo(dayNumber(wednesday)), 2);
+      expect(noWednesday.columnOf(CalendarDates.dayNumber(thursday)), 3);
+      expect(noWednesday.columnOf(CalendarDates.dayNumber(wednesday)), isNull);
+      expect(
+        noWednesday.firstColumnFrom(CalendarDates.dayNumber(wednesday)),
+        3,
+      );
+      expect(noWednesday.lastColumnUpTo(CalendarDates.dayNumber(wednesday)), 2);
       expect(noWednesday.firstColumnFrom(weekStartDay + 7), 7);
       expect(noWednesday.lastColumnUpTo(weekStartDay - 1), 0);
     });
@@ -542,7 +417,7 @@ void main() {
       expect(
         pieceSpanOf(
           noWednesday,
-          noWednesday.columnOf(dayNumber(thursday))!,
+          noWednesday.columnOf(CalendarDates.dayNumber(thursday))!,
           600,
           660,
         ),
@@ -561,13 +436,16 @@ void main() {
       expect(
         pieceSpanOf(
           workweek,
-          workweek.columnOf(dayNumber(DateTime(2026, 4, 24)))!,
+          workweek.columnOf(CalendarDates.dayNumber(DateTime(2026, 4, 24)))!,
           600,
           660,
         ),
         const BoardSpan(rowStart: 41, colStart: 5, rowSpan: 4, colSpan: 1),
       );
-      expect(workweek.columnOf(dayNumber(DateTime(2026, 4, 25))), isNull);
+      expect(
+        workweek.columnOf(CalendarDates.dayNumber(DateTime(2026, 4, 25))),
+        isNull,
+      );
     });
 
     test("a create range over the hidden day covers it", () {
@@ -1274,7 +1152,7 @@ void main() {
         onOpenEntry: (id) {},
         onCreate: (range) async {},
         editable: true,
-        storeRange: (first: first, last: addDays(first, 6)),
+        storeRange: (first: first, last: CalendarDates.addDays(first, 6)),
       );
     }
 

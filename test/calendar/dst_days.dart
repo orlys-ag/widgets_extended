@@ -57,8 +57,9 @@ final DstDay? longDay = _firstDayOf(25);
 
 DstDay? _firstDayOf(int hours) {
   // Days are built from their fields here rather than stepped with
-  // [addDays], the step under test: an [addDays] that lasts 24 hours would
-  // otherwise find no DST day and skip the tests that would catch it.
+  // [CalendarDates.addDays], the step under test: a [CalendarDates.addDays]
+  // that lasts 24 hours would otherwise find no DST day and skip the tests
+  // that would catch it.
   for (var index = 0; DateTime(2026, 1, 1 + index).year == 2026; index++) {
     final day = DateTime(2026, 1, 1 + index);
     if (DateTime(2026, 1, 2 + index).difference(day).inHours != hours) {
@@ -92,8 +93,8 @@ String? dstSkipReason(
     return "No $what in this time zone; $run";
   }
   if (hour != expectedHour) {
-    return "The $what of this time zone, ${isoDate(day)}, changes the hour "
-        "from $hour, not $expectedHour; $run";
+    return "The $what of this time zone, ${CalendarDates.isoDate(day)}, "
+        "changes the hour from $hour, not $expectedHour; $run";
   }
   return null;
 }

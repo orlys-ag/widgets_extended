@@ -7,11 +7,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
-import '../dates/calendar_date_helpers.dart';
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
 import 'edit_policy.dart';
-import 'overlap.dart';
 
 /// Where a new entry may start on [day]: [earliest], what
 /// [CalendarEditPolicy.earliestStartOn] answered for it, and the times a
@@ -22,10 +20,11 @@ final class CalendarEarliestStart {
   /// with a UTC [earliest] taken as its local time, the same instant.
   ///
   /// Throws an [ArgumentError], in every build, naming `day` for a [day]
-  /// that is not a local day's start ([isDayStart]), a UTC one included.
+  /// that is not a local day's start ([CalendarDates.isDayStart]), a UTC one
+  /// included.
   CalendarEarliestStart(this.day, DateTime? earliest)
     : earliest = earliest?.toLocal() {
-    if (!isDayStart(day)) {
+    if (!CalendarDates.isDayStart(day)) {
       throw ArgumentError.value(
         day,
         "day",
@@ -46,7 +45,8 @@ final class CalendarEarliestStart {
   /// later day.
   bool get closesDay {
     final earliest = this.earliest;
-    return earliest == null || dayNumber(earliest) > dayNumber(day);
+    return earliest == null ||
+        CalendarDates.dayNumber(earliest) > CalendarDates.dayNumber(day);
   }
 
   /// Whether a new entry may start at [day]'s start, as an all-day one
@@ -71,19 +71,19 @@ final class CalendarEarliestStart {
   /// lies inside a minute, since a minute any part of which has passed is
   /// past.
   int get firstWallMinute {
-    final number = dayNumber(day);
+    final number = CalendarDates.dayNumber(day);
     final earliest = this.earliest;
-    if (earliest == null || dayNumber(earliest) > number) {
-      return (number + 1) * minutesPerDay;
+    if (earliest == null || CalendarDates.dayNumber(earliest) > number) {
+      return (number + 1) * CalendarDates.minutesPerDay;
     }
     if (!earliest.isAfter(day)) {
-      return number * minutesPerDay;
+      return number * CalendarDates.minutesPerDay;
     }
     final passed =
         earliest.second > 0 ||
         earliest.millisecond > 0 ||
         earliest.microsecond > 0;
-    return wallMinuteOf(earliest) + (passed ? 1 : 0);
+    return CalendarDates.wallMinuteOf(earliest) + (passed ? 1 : 0);
   }
 
   /// The minute of [day] from which the slots of [slotMinutes] from
@@ -92,9 +92,11 @@ final class CalendarEarliestStart {
   /// [firstWallMinute]'s minute of the day, rounded up to the slot grid.
   int firstSlotMinute(int slotMinutes) {
     if (closesDay) {
-      return minutesPerDay;
+      return CalendarDates.minutesPerDay;
     }
-    final minute = firstWallMinute - dayNumber(day) * minutesPerDay;
+    final minute =
+        firstWallMinute -
+        CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay;
     return (minute + slotMinutes - 1) ~/ slotMinutes * slotMinutes;
   }
 
@@ -112,7 +114,7 @@ final class CalendarEarliestStart {
 
   @override
   String toString() {
-    return "CalendarEarliestStart(${isoDate(day)}, $earliest)";
+    return "CalendarEarliestStart(${CalendarDates.isoDate(day)}, $earliest)";
   }
 }
 
@@ -164,11 +166,11 @@ final class CalendarEditRules<T> {
     this.dayLimit,
     this.allowsOverlaps,
   ) {
-    if (!slotMinuteChoices.contains(slotMinutes)) {
+    if (!CalendarDates.slotMinuteChoices.contains(slotMinutes)) {
       throw ArgumentError.value(
         slotMinutes,
         "slotMinutes",
-        "is not one of $slotMinuteChoices",
+        "is not one of $CalendarDates.slotMinuteChoices",
       );
     }
     if (!hours.isOnSlotsOf(slotMinutes)) {
@@ -263,7 +265,10 @@ final class CalendarEditRules<T> {
   bool coversAtMost(DateTime start, DateTime end) {
     final limit = dayLimit;
     return limit == null ||
-        lastDayNumberOf(start, end) - dayNumber(start) + 1 <= limit;
+        CalendarDates.lastDayNumberOf(start, end) -
+                CalendarDates.dayNumber(start) +
+                1 <=
+            limit;
   }
 
   /// The range from [start] to [end], all-day where [isAllDay] and timed
@@ -287,16 +292,20 @@ final class CalendarEditRules<T> {
       return (start: start, end: end);
     }
     if (atEnd) {
-      final lastDay = dayNumber(start) + limit - 1;
+      final lastDay = CalendarDates.dayNumber(start) + limit - 1;
       final held = isAllDay
-          ? dateOfDayNumber(lastDay + 1)
-          : endAtWallMinute(lastDay * minutesPerDay + hours.end);
+          ? CalendarDates.dateOfDayNumber(lastDay + 1)
+          : CalendarDates.endAtWallMinute(
+              lastDay * CalendarDates.minutesPerDay + hours.end,
+            );
       return held == null ? null : (start: start, end: held);
     }
-    final firstDay = lastDayNumberOf(start, end) - limit + 1;
+    final firstDay = CalendarDates.lastDayNumberOf(start, end) - limit + 1;
     final held = isAllDay || hours.start == 0
-        ? dateOfDayNumber(firstDay)
-        : timeAtWallMinute(firstDay * minutesPerDay + hours.start);
+        ? CalendarDates.dateOfDayNumber(firstDay)
+        : CalendarDates.timeAtWallMinute(
+            firstDay * CalendarDates.minutesPerDay + hours.start,
+          );
     return held == null ? null : (start: held, end: end);
   }
 
@@ -312,8 +321,9 @@ final class CalendarEditRules<T> {
   /// the first slot ending by [until], or with none the hours' end, whose
   /// start and end the day's clock reads, each in [start]'s occurrence
   /// ([CalendarEarliestStart.occurrence]), and that shares no time
-  /// ([rangeSharesTime]) with any of [clearOf]; null where none does, as
-  /// on a day [start] closes. [from] and [until] are minutes of the day.
+  /// ([NoOverlapsPolicy.rangeSharesTime]) with any of [clearOf]; null where
+  /// none does, as on a day [start] closes. [from] and [until] are minutes of
+  /// the day.
   ///
   /// A slot is [slotMinutes] of wall-clock time
   /// ([CalendarDates.timeAtWallMinute]), so on a day whose clock repeats a
@@ -334,7 +344,7 @@ final class CalendarEditRules<T> {
       occurrence: start.occurrence,
       isFree: (slotStart, slotEnd) {
         for (final other in clearOf) {
-          if (rangeSharesTime(slotStart, slotEnd, other)) {
+          if (NoOverlapsPolicy.rangeSharesTime(slotStart, slotEnd, other)) {
             return false;
           }
         }

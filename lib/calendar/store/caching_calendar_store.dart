@@ -12,7 +12,8 @@ import '../entries/calendar_data_source.dart';
 import '../entries/calendar_entry.dart';
 import 'calendar_store.dart';
 
-/// One `read` call in flight, over the [dayNumber]s [first] to [last].
+/// One `read` call in flight, over the [CalendarDates.dayNumber]s [first] to
+/// [last].
 class _Read {
   _Read(this.first, this.last, this.sentAt, this.done);
 
@@ -196,7 +197,7 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// ([_takeOver]).
   int _clock = 0;
 
-  /// Each read day, by [dayNumber].
+  /// Each read day, by [CalendarDates.dayNumber].
   final Map<int, _Day> _days = <int, _Day>{};
 
   /// The clock when every entry was last taken to have changed.
@@ -229,9 +230,9 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// The reads in flight, in the order they were sent.
   final List<_Read> _reads = <_Read>[];
 
-  /// The unread days, by [dayNumber], whose last read failed, each with
-  /// the failure that marked it, until a read fills them or a [show], a
-  /// [retry] or a [refresh] reads them.
+  /// The unread days, by [CalendarDates.dayNumber], whose last read failed,
+  /// each with the failure that marked it, until a read fills them or a [show],
+  /// a [retry] or a [refresh] reads them.
   final Map<int, _Mark> _failedDays = <int, _Mark>{};
 
   /// The count of failed reads, which orders their marks in [_failedDays].
@@ -294,8 +295,8 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// changes nothing, and so does a show after [dispose].
   @override
   void show(DateTime first, DateTime last) {
-    final firstDay = dayNumber(first);
-    final lastDay = dayNumber(last);
+    final firstDay = CalendarDates.dayNumber(first);
+    final lastDay = CalendarDates.dayNumber(last);
     if (_disposed || (firstDay == _shownFirst && lastDay == _shownLast)) {
       return;
     }
@@ -323,7 +324,7 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// Whether [day] is read. A changed day stays read.
   @override
   bool isRead(DateTime day) {
-    return _days.containsKey(dayNumber(day));
+    return _days.containsKey(CalendarDates.dayNumber(day));
   }
 
   /// Whether a read of [day], which is unread, failed while no read a
@@ -334,13 +335,14 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// leaves the mark until it fills the day.
   @override
   bool readFailed(DateTime day) {
-    return _failedDays.containsKey(dayNumber(day));
+    return _failedDays.containsKey(CalendarDates.dayNumber(day));
   }
 
   /// Whether the shown range is exactly [first] to [last].
   @override
   bool isShown(DateTime first, DateTime last) {
-    return _shownFirst == dayNumber(first) && _shownLast == dayNumber(last);
+    return _shownFirst == CalendarDates.dayNumber(first) &&
+        _shownLast == CalendarDates.dayNumber(last);
   }
 
   /// Whether the shown range holds every day from [first] to [last]. False
@@ -351,8 +353,8 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     final shownLast = _shownLast;
     return shownFirst != null &&
         shownLast != null &&
-        shownFirst <= dayNumber(first) &&
-        dayNumber(last) <= shownLast;
+        shownFirst <= CalendarDates.dayNumber(first) &&
+        CalendarDates.dayNumber(last) <= shownLast;
   }
 
   /// Ends the [readFailed] mark of each day of the shown range and, where
@@ -393,8 +395,8 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
       }
       ({int first, int last})? givenSpan;
       if (first != null && last != null) {
-        final firstDay = dayNumber(first);
-        final lastDay = dayNumber(last);
+        final firstDay = CalendarDates.dayNumber(first);
+        final lastDay = CalendarDates.dayNumber(last);
         givenSpan = _retrySpan(firstDay, lastDay);
         _endFailed(firstDay, lastDay, ended);
       }
@@ -459,7 +461,10 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     if (_disposed) {
       return;
     }
-    final span = _spanToRead(dayNumber(first), dayNumber(last));
+    final span = _spanToRead(
+      CalendarDates.dayNumber(first),
+      CalendarDates.dayNumber(last),
+    );
     if (span != null) {
       _send(span.first, span.last);
     }
@@ -475,8 +480,8 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// nothing after [dispose].
   @override
   void invalidate(DateTime first, DateTime last) {
-    final firstDay = dayNumber(first);
-    final lastDay = dayNumber(last);
+    final firstDay = CalendarDates.dayNumber(first);
+    final lastDay = CalendarDates.dayNumber(last);
     if (_disposed || firstDay > lastDay) {
       return;
     }
@@ -686,8 +691,8 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     return _failedDays.length != before;
   }
 
-  /// The [dayNumber]s of the read days from [first] to [last], walking the
-  /// shorter of the span and the read days.
+  /// The [CalendarDates.dayNumber]s of the read days from [first] to [last],
+  /// walking the shorter of the span and the read days.
   Iterable<int> _readDaysIn(int first, int last) sync* {
     if (last - first < _days.length) {
       for (var day = first; day <= last; day++) {
@@ -707,8 +712,8 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// Marks changed at the clock [at] the days [entry] covers
   /// ([_markChanged]), except those of [except], if given.
   void _markDaysOf(CalendarEntry<T> entry, int at, {_Read? except}) {
-    final first = dayNumber(entry.start);
-    final last = lastDayNumberOf(entry.start, entry.end);
+    final first = CalendarDates.dayNumber(entry.start);
+    final last = CalendarDates.lastDayNumberOf(entry.start, entry.end);
     if (except == null) {
       _markChanged(first, last, at);
       return;
@@ -897,7 +902,10 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     _reads.add(read);
     _callSource<List<CalendarEntry<T>>>(
       () {
-        return _dataSource.read(dateOfDayNumber(first), dateOfDayNumber(last));
+        return _dataSource.read(
+          CalendarDates.dateOfDayNumber(first),
+          CalendarDates.dateOfDayNumber(last),
+        );
       },
       (entries) {
         _finishRead(read, entries: entries);
@@ -1104,9 +1112,12 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
         }
       }
       if (_newestFillAt > at && _filledAfter(entry, at)) {
-        final first = math.max(dayNumber(entry.start), read.first);
+        final first = math.max(
+          CalendarDates.dayNumber(entry.start),
+          read.first,
+        );
         final last = math.min(
-          lastDayNumberOf(entry.start, entry.end),
+          CalendarDates.lastDayNumberOf(entry.start, entry.end),
           read.last,
         );
         for (var day = first; day <= last; day++) {
@@ -1174,8 +1185,8 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
 
   /// Whether a read sent after the clock [at] filled a day [entry] covers.
   bool _filledAfter(CalendarEntry<T> entry, int at) {
-    final first = dayNumber(entry.start);
-    final last = lastDayNumberOf(entry.start, entry.end);
+    final first = CalendarDates.dayNumber(entry.start);
+    final last = CalendarDates.lastDayNumberOf(entry.start, entry.end);
     for (final day in _readDaysIn(first, last)) {
       if (_days[day]!.filledAt > at) {
         return true;
@@ -1293,8 +1304,8 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
 
   /// Whether [entry] covers a read day or a day a read in flight covers.
   bool _coversHeldDay(CalendarEntry<T> entry) {
-    final first = dayNumber(entry.start);
-    final last = lastDayNumberOf(entry.start, entry.end);
+    final first = CalendarDates.dayNumber(entry.start);
+    final last = CalendarDates.lastDayNumberOf(entry.start, entry.end);
     for (final read in _reads) {
       if (read.first <= last && read.last >= first) {
         return true;
@@ -1307,21 +1318,24 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// filed under it when it is read, and the pending entries covering it.
   @override
   List<CalendarShownEntry<T>> entriesOn(DateTime day) {
-    return _index.entriesOn(dayNumber(day));
+    return _index.entriesOn(CalendarDates.dayNumber(day));
   }
 
   /// The entries shown on any day from [first] to [last], each once,
   /// sorted as [entriesOn] sorts.
   @override
   List<CalendarShownEntry<T>> entriesBetween(DateTime first, DateTime last) {
-    return _index.entriesBetween(dayNumber(first), dayNumber(last));
+    return _index.entriesBetween(
+      CalendarDates.dayNumber(first),
+      CalendarDates.dayNumber(last),
+    );
   }
 
   /// Whether [day] shows a marker: it has shown entries, and, while the
   /// shown range is not ready, it was read under an earlier [show] call.
   @override
   bool dayHasShownEntries(DateTime day) {
-    final number = dayNumber(day);
+    final number = CalendarDates.dayNumber(day);
     final record = _days[number];
     if (record == null) {
       return false;
@@ -1674,8 +1688,8 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     if (read == null || answer == null) {
       return false;
     }
-    final first = dayNumber(answer.start);
-    final last = lastDayNumberOf(answer.start, answer.end);
+    final first = CalendarDates.dayNumber(answer.start);
+    final last = CalendarDates.lastDayNumberOf(answer.start, answer.end);
     return last < read.first || first > read.last;
   }
 

@@ -49,7 +49,7 @@ DayRange gridRange(
   DateTime day, {
   CalendarWeekdaySet weekdays = CalendarWeekdaySet.all,
 }) {
-  final grid = MonthGrid.of(day, weekdays: weekdays);
+  final grid = CalendarMonthGrid.of(day, weekdays: weekdays);
   return (first: grid.firstDay, last: grid.lastDay);
 }
 
@@ -279,7 +279,10 @@ void main() {
       weekdays: CalendarWeekdaySet.workweek,
     );
     notifies.clear();
-    final shown = shownDayNear(saturday, CalendarWeekdaySet.workweek);
+    final shown = CalendarDates.shownDayNear(
+      saturday,
+      CalendarWeekdaySet.workweek,
+    );
     expect(shown, DateTime(2026, 4, 27));
     controller.selectedDay = saturday;
     expect(controller.selectedDay, shown);

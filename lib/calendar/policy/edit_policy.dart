@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
-import 'overlap.dart' as overlap;
 
 /// The time a [CalendarEditPolicy] answers at: the clock reading [time],
 /// and [today], the day the calendar marks as today, which a host may pin
@@ -26,7 +25,7 @@ final class CalendarNow {
       milliseconds: local.millisecond,
       microseconds: local.microsecond,
     );
-    var onToday = dateOnly(local) == day
+    var onToday = CalendarDates.dateOnly(local) == day
         ? local.subtract(into)
         : DateTime(day.year, day.month, day.day, local.hour, local.minute);
     if (onToday.hour != local.hour || onToday.minute != local.minute) {
@@ -34,7 +33,8 @@ final class CalendarNow {
       // the clock's change. The first minute after the skip is the time
       // of day's first reading, rounded up or not.
       onToday = _firstReadingFrom(
-        dayNumber(day) * minutesPerDay + minuteOfDay(local),
+        CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay +
+            CalendarDates.minuteOfDay(local),
       );
     } else if (into > Duration.zero) {
       onToday = onToday.add(const Duration(minutes: 1));
@@ -44,16 +44,17 @@ final class CalendarNow {
 
   const CalendarNow._(this.time, this.today, this.timeOnToday);
 
-  /// The instant of the first wall minute from [wall] ([wallMinuteOf]) that
-  /// the clock reads ([timeAtWallMinute]): [wall]'s own, or past a stretch
-  /// the clock skips, the first minute after it. Ends at the first minute
-  /// after a stretch the clock skips, which it reads.
+  /// The instant of the first wall minute from [wall]
+  /// ([CalendarDates.wallMinuteOf]) that the clock reads
+  /// ([CalendarDates.timeAtWallMinute]): [wall]'s own, or past a stretch the
+  /// clock skips, the first minute after it. Ends at the first minute after a
+  /// stretch the clock skips, which it reads.
   static DateTime _firstReadingFrom(int wall) {
     var minute = wall;
-    var reading = timeAtWallMinute(minute);
+    var reading = CalendarDates.timeAtWallMinute(minute);
     while (reading == null) {
       minute++;
-      reading = timeAtWallMinute(minute);
+      reading = CalendarDates.timeAtWallMinute(minute);
     }
     return reading;
   }
@@ -87,7 +88,7 @@ final class CalendarNow {
 
   @override
   String toString() {
-    return "CalendarNow($time, today ${isoDate(today)})";
+    return "CalendarNow($time, today ${CalendarDates.isoDate(today)})";
   }
 }
 
@@ -305,6 +306,34 @@ final class NoOverlapsPolicy<T> extends CalendarEditPolicy<T> {
   /// Forbids overlaps.
   const NoOverlapsPolicy();
 
+  /// Whether the half-open ranges `[aStart, aEnd)` and `[bStart, bEnd)` of
+  /// instants meet.
+  static bool timesOverlap(
+    DateTime aStart,
+    DateTime aEnd,
+    DateTime bStart,
+    DateTime bEnd,
+  ) {
+    return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
+  }
+
+  /// Whether the timed range from [start] to [end] shares time with [other]:
+  /// never for an all-day [other] ([CalendarEntry.isAllDay]), which shares
+  /// time with nothing, and otherwise where their instants meet
+  /// ([timesOverlap]). The range is read as timed whatever its times, from a
+  /// day start to a day start too, so a caller passes only a timed range: an
+  /// all-day one shares time with nothing ([entriesShareTime]).
+  static bool rangeSharesTime(
+    DateTime start,
+    DateTime end,
+    CalendarEntry<Object?> other,
+  ) {
+    if (other.isAllDay) {
+      return false;
+    }
+    return timesOverlap(start, end, other.start, other.end);
+  }
+
   /// Whether [a] and [b] share time, as this policy reads it: never where
   /// either is all-day, and otherwise where their instants meet. A data
   /// source that refuses the writes this policy refuses tests each write's
@@ -313,7 +342,10 @@ final class NoOverlapsPolicy<T> extends CalendarEditPolicy<T> {
     CalendarEntry<Object?> a,
     CalendarEntry<Object?> b,
   ) {
-    return overlap.entriesShareTime(a, b);
+    if (a.isAllDay) {
+      return false;
+    }
+    return rangeSharesTime(a.start, a.end, b);
   }
 
   @override

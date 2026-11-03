@@ -223,7 +223,9 @@ int rowOf(int minute) {
 
 /// Week's grid column of [day], Monday's being 1; Day's one column is 1.
 int colOf(DateTime day, {bool week = true}) {
-  return week ? 1 + weekdayColumnOfDay(dayNumber(day)) : 1;
+  return week
+      ? 1 + CalendarDates.weekdayColumnOfDay(CalendarDates.dayNumber(day))
+      : 1;
 }
 
 /// The global centre of the grid's slot holding [minute] in [day]'s
@@ -563,7 +565,10 @@ void main() {
     await tester.longPress(find.byKey(monthStripKey(thursday)));
     await tester.pumpAndSettle();
     expect(host.creates, hasLength(2));
-    expect(dayNumber(host.creates.last.start), dayNumber(thursday));
+    expect(
+      CalendarDates.dayNumber(host.creates.last.start),
+      CalendarDates.dayNumber(thursday),
+    );
     expect(host.creates.last.start.isBefore(at(thursday, 10)), isFalse);
 
     // Agenda.
@@ -579,7 +584,9 @@ void main() {
     await tester.pumpAndSettle();
     final thursdayAdds = <int>[
       for (final add in host.adds.sublist(addsBefore))
-        if (dayNumber(add.day) == dayNumber(thursday)) add.startMinute,
+        if (CalendarDates.dayNumber(add.day) ==
+            CalendarDates.dayNumber(thursday))
+          add.startMinute,
     ];
     // Setup sanity: Thursday's gap rows built their buttons.
     expect(thursdayAdds, isNotEmpty);

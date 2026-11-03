@@ -17,6 +17,7 @@ import 'package:flutter/widgets.dart';
 
 import '../../sliver_tree/sliver_tree.dart';
 import '../dates/calendar_dates.dart';
+import '../entries/calendar_entry.dart';
 import '../policy/edit_policy.dart';
 import '../policy/edit_rules.dart';
 import '../presentation/calendar_builders.dart';
@@ -25,7 +26,6 @@ import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import '../store/calendar_store.dart';
 import 'answer_builder.dart';
-import 'timed_grid.dart' show CalendarCreateRange;
 
 /// The style the day list animates its rows with under [theme]: every
 /// family over its [CalendarThemeData.motionDuration] on its
@@ -201,13 +201,13 @@ ValueKey<String> dayListTimeKey(String id) {
 
 /// The key of the header of [day].
 ValueKey<String> dayListHeaderKey(DateTime day) {
-  return ValueKey<String>("day-list-header-${isoDate(day)}");
+  return ValueKey<String>("day-list-header-${CalendarDates.isoDate(day)}");
 }
 
 /// The key of [day]'s dashed row of the gap that starts [start] minutes
 /// after midnight.
 ValueKey<String> dayListGapKey(DateTime day, int start) {
-  return ValueKey<String>("day-list-gap-$start@${isoDate(day)}");
+  return ValueKey<String>("day-list-gap-$start@${CalendarDates.isoDate(day)}");
 }
 
 /// The key of the chip naming the length of the item [id], under its
@@ -220,7 +220,9 @@ ValueKey<String> dayListDurationKey(String id) {
 /// or wholly after them when [above] is false.
 ValueKey<String> dayListHiddenKey(DateTime day, {required bool above}) {
   final side = above ? "above" : "below";
-  return ValueKey<String>("day-list-hidden-$side-${isoDate(day)}");
+  return ValueKey<String>(
+    "day-list-hidden-$side-${CalendarDates.isoDate(day)}",
+  );
 }
 
 /// The key of the marker of the current time.
@@ -228,12 +230,12 @@ const ValueKey<String> dayListNowKey = ValueKey<String>("day-list-now");
 
 /// The key of the row showing [day] is being read.
 ValueKey<String> dayListLoadingKey(DateTime day) {
-  return ValueKey<String>("day-list-loading-${isoDate(day)}");
+  return ValueKey<String>("day-list-loading-${CalendarDates.isoDate(day)}");
 }
 
 /// The key of the row saying [day] could not be read.
 ValueKey<String> dayListFailedKey(DateTime day) {
-  return ValueKey<String>("day-list-failed-${isoDate(day)}");
+  return ValueKey<String>("day-list-failed-${CalendarDates.isoDate(day)}");
 }
 
 /// One row of the day list, under or as the header of its [day].
@@ -261,7 +263,7 @@ final class DayListHeader extends DayListRow {
 
   /// The [key] of [day]'s header.
   static String headerKeyOf(DateTime day) {
-    return "day-${isoDate(day)}";
+    return "day-${CalendarDates.isoDate(day)}";
   }
 
   @override
@@ -276,7 +278,7 @@ final class DayListHeader extends DayListRow {
 
   @override
   String toString() {
-    return "DayListHeader(${isoDate(day)})";
+    return "DayListHeader(${CalendarDates.isoDate(day)})";
   }
 }
 
@@ -290,7 +292,7 @@ final class DayListBody extends DayListRow {
 
   @override
   String get key {
-    return "body-${isoDate(day)}";
+    return "body-${CalendarDates.isoDate(day)}";
   }
 
   @override
@@ -305,13 +307,13 @@ final class DayListBody extends DayListRow {
 
   @override
   String toString() {
-    return "DayListBody(${isoDate(day)})";
+    return "DayListBody(${CalendarDates.isoDate(day)})";
   }
 }
 
 /// The row of the entry [entry] on [day]: its piece there, from [start]
-/// to [end] minutes after the day's midnight ([pieceOn]), and whether the
-/// entry is all-day, [allDay].
+/// to [end] minutes after the day's midnight ([CalendarDates.pieceOn]), and
+/// whether the entry is all-day, [allDay].
 final class DayListEntry<T> extends DayListRow {
   const DayListEntry(super.day, this.entry, this.start, this.end, this.allDay);
 
@@ -328,18 +330,19 @@ final class DayListEntry<T> extends DayListRow {
 
   /// Whether the piece holds the entry's start.
   bool get first {
-    return dayNumber(entry.entry.start) == dayNumber(day);
+    return CalendarDates.dayNumber(entry.entry.start) ==
+        CalendarDates.dayNumber(day);
   }
 
   /// Whether the piece holds the entry's end.
   bool get last {
-    return lastDayNumberOf(entry.entry.start, entry.entry.end) ==
-        dayNumber(day);
+    return CalendarDates.lastDayNumberOf(entry.entry.start, entry.entry.end) ==
+        CalendarDates.dayNumber(day);
   }
 
   @override
   String get key {
-    return "item-${entry.id}@${isoDate(day)}";
+    return "item-${entry.id}@${CalendarDates.isoDate(day)}";
   }
 
   @override
@@ -359,7 +362,7 @@ final class DayListEntry<T> extends DayListRow {
 
   @override
   String toString() {
-    return "DayListEntry(${isoDate(day)}, $entry)";
+    return "DayListEntry(${CalendarDates.isoDate(day)}, $entry)";
   }
 }
 
@@ -375,7 +378,7 @@ final class DayListGap extends DayListRow {
 
   @override
   String get key {
-    return "gap-$start@${isoDate(day)}";
+    return "gap-$start@${CalendarDates.isoDate(day)}";
   }
 
   @override
@@ -393,8 +396,8 @@ final class DayListGap extends DayListRow {
 
   @override
   String toString() {
-    return "DayListGap(${isoDate(day)}, ${isoTime(start)}-"
-        "${isoTime(end)})";
+    return "DayListGap(${CalendarDates.isoDate(day)}, "
+        "${CalendarDates.isoTime(start)}-${CalendarDates.isoTime(end)})";
   }
 }
 
@@ -408,7 +411,7 @@ final class DayListHidden extends DayListRow {
 
   @override
   String get key {
-    return "hidden-${above ? "above" : "below"}@${isoDate(day)}";
+    return "hidden-${above ? "above" : "below"}@${CalendarDates.isoDate(day)}";
   }
 
   @override
@@ -426,7 +429,8 @@ final class DayListHidden extends DayListRow {
 
   @override
   String toString() {
-    return "DayListHidden(${isoDate(day)}, $count, above: $above)";
+    return "DayListHidden(${CalendarDates.isoDate(day)}, $count, "
+        "above: $above)";
   }
 }
 
@@ -436,7 +440,7 @@ final class DayListLoading extends DayListRow {
 
   @override
   String get key {
-    return "loading-${isoDate(day)}";
+    return "loading-${CalendarDates.isoDate(day)}";
   }
 
   @override
@@ -456,7 +460,7 @@ final class DayListFailed extends DayListRow {
 
   @override
   String get key {
-    return "failed-${isoDate(day)}";
+    return "failed-${CalendarDates.isoDate(day)}";
   }
 
   @override
@@ -472,9 +476,9 @@ final class DayListFailed extends DayListRow {
 
 /// The rows of [day]'s block for [entries], the entries the store answers
 /// on [day], sorted as [CalendarStore.entriesOn] sorts them, each row
-/// holding the entry's piece on [day] ([pieceOn]). The all-day entries come
-/// first, in that order. A timed entry whose piece has no minute inside
-/// [hours] has no row: a [DayListHidden] after the all-day rows counts
+/// holding the entry's piece on [day] ([CalendarDates.pieceOn]). The all-day
+/// entries come first, in that order. A timed entry whose piece has no minute
+/// inside [hours] has no row: a [DayListHidden] after the all-day rows counts
 /// those before the hours, and one last those after them, as the timed
 /// grid counts the pieces it has no block for. Each other timed entry has
 /// its row, and where [editable], one gap row for each run of minutes in
@@ -491,15 +495,15 @@ List<DayListRow> dayListRowsOf<T>(
 }) {
   final allDay = <DayListRow>[];
   final rows = <DayListRow>[];
-  final number = dayNumber(day);
+  final number = CalendarDates.dayNumber(day);
   var before = 0;
   var after = 0;
   // The latest end among the pieces so far, or the hours' start.
   var covered = hours.start;
   for (final entry in entries) {
     final calendarEntry = entry.entry;
-    final piece = pieceOn(
-      wallSpanOf(calendarEntry.start, calendarEntry.end),
+    final piece = CalendarDates.pieceOn(
+      CalendarDates.wallSpanOf(calendarEntry.start, calendarEntry.end),
       number,
     );
     if (piece == null) {
@@ -600,7 +604,7 @@ class DayList<T> extends StatefulWidget {
     required this.weekdays,
     required this.format,
     required this.hours,
-    this.slotMinutes = defaultSlotMinutes,
+    this.slotMinutes = CalendarDates.defaultSlotMinutes,
     required this.editable,
     this.editPolicy,
     required this.selectedDay,
@@ -630,8 +634,8 @@ class DayList<T> extends StatefulWidget {
   final CalendarDayHours hours;
 
   /// The length of the slot a gap row's add button creates, in minutes,
-  /// one of [slotMinuteChoices], which the list's state asserts; an
-  /// earliest start of the policy is rounded up to the grid of it from
+  /// one of [CalendarDates.slotMinuteChoices], which the list's state asserts;
+  /// an earliest start of the policy is rounded up to the grid of it from
   /// midnight ([CalendarEarliestStart.firstSlotMinute]).
   final int slotMinutes;
 
@@ -734,7 +738,8 @@ class _DayListState<T> extends State<DayList<T>> {
   /// The text the rows read, as [_styles] their look.
   late CalendarLocalizations _strings;
 
-  /// The [dayNumber]s of the first and the last day the list holds.
+  /// The [CalendarDates.dayNumber]s of the first and the last day the list
+  /// holds.
   late int _first;
   late int _last;
 
@@ -803,7 +808,7 @@ class _DayListState<T> extends State<DayList<T>> {
 
   /// The day of the time [DayList.now] reads, whose block marks the
   /// current time.
-  late DateTime _nowDay = dateOnly(widget.now.value.time);
+  late DateTime _nowDay = CalendarDates.dateOnly(widget.now.value.time);
 
   /// The day [DayList.now] marks as today, which the headers name.
   late DateTime _today = widget.now.value.today;
@@ -850,9 +855,9 @@ class _DayListState<T> extends State<DayList<T>> {
   void initState() {
     super.initState();
     assert(
-      slotMinuteChoices.contains(widget.slotMinutes),
+      CalendarDates.slotMinuteChoices.contains(widget.slotMinutes),
       "A DayList's slotMinutes, ${widget.slotMinutes}, is not one of "
-      "$slotMinuteChoices.",
+      "$CalendarDates.slotMinuteChoices.",
     );
     _centreOn(widget.selectedDay);
     _scroll = ScrollController(initialScrollOffset: _offsetOf(_topDay));
@@ -882,15 +887,15 @@ class _DayListState<T> extends State<DayList<T>> {
   void didUpdateWidget(DayList<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
     assert(
-      slotMinuteChoices.contains(widget.slotMinutes),
+      CalendarDates.slotMinuteChoices.contains(widget.slotMinutes),
       "A DayList's slotMinutes, ${widget.slotMinutes}, is not one of "
-      "$slotMinuteChoices.",
+      "$CalendarDates.slotMinuteChoices.",
     );
     if (widget.now != oldWidget.now) {
       oldWidget.now.removeListener(_handleNow);
       widget.now.addListener(_handleNow);
       final now = widget.now.value;
-      _nowDay = dateOnly(now.time);
+      _nowDay = CalendarDates.dateOnly(now.time);
       _today = now.today;
       if (now != _calendarNow.value) {
         _pendingNow = now;
@@ -931,7 +936,7 @@ class _DayListState<T> extends State<DayList<T>> {
   /// that show an answer ask [_policy] again.
   void _handleNow() {
     final now = widget.now.value;
-    final day = dateOnly(now.time);
+    final day = CalendarDates.dateOnly(now.time);
     if (day != _nowDay || now.today != _today) {
       setState(() {
         _nowDay = day;
@@ -947,7 +952,7 @@ class _DayListState<T> extends State<DayList<T>> {
 
   /// Holds the days around [day] and makes their rows.
   void _centreOn(DateTime day) {
-    final number = dayNumber(day);
+    final number = CalendarDates.dayNumber(day);
     _first = number - dayListWindowDays;
     _last = number + dayListWindowDays;
     _rows = _rowsOf();
@@ -1035,7 +1040,7 @@ class _DayListState<T> extends State<DayList<T>> {
       if (!widget.weekdays.containsDay(number)) {
         continue;
       }
-      final day = dateOfDayNumber(number);
+      final day = CalendarDates.dateOfDayNumber(number);
       rows.add(DayListHeader(day));
       rows.add(DayListBody(day));
     }
@@ -1072,7 +1077,7 @@ class _DayListState<T> extends State<DayList<T>> {
   /// motion, or at once where its duration is zero, or re-centres the list
   /// on it when it is too near or past either end of the days.
   Future<void> _reveal(DateTime day) async {
-    final number = dayNumber(day);
+    final number = CalendarDates.dayNumber(day);
     final tree = _tree;
     if (tree == null ||
         !_scroll.hasClients ||
@@ -1084,7 +1089,7 @@ class _DayListState<T> extends State<DayList<T>> {
       });
       return;
     }
-    final from = dayNumber(_topDay);
+    final from = CalendarDates.dayNumber(_topDay);
     _topDay = day;
     final reveals = ++_reveals;
     final key = DayListHeader.headerKeyOf(day);
@@ -1128,16 +1133,16 @@ class _DayListState<T> extends State<DayList<T>> {
   }
 
   /// The height the row [key] names will take once laid out, for a reveal
-  /// from the day [from], a [dayNumber], whose target the tree sums from
-  /// the rows' heights. A row the tree has not laid out it takes as this.
-  /// The tree lays out a row before [from], above the list's top, at
+  /// from the day [from], a [CalendarDates.dayNumber], whose target the tree
+  /// sums from the rows' heights. A row the tree has not laid out it takes as
+  /// this. The tree lays out a row before [from], above the list's top, at
   /// [TreeController.defaultExtent] until it builds it, so that stays its
   /// height here; a row from [from] on the reveal scrolls through, and the
   /// tree lays it out at its own height, which this predicts from what the
   /// row shows.
   double _estimatedExtentOf(String key, int from) {
     final row = _rowsByKey[key];
-    if (row == null || dayNumber(row.day) < from) {
+    if (row == null || CalendarDates.dayNumber(row.day) < from) {
       return TreeController.defaultExtent;
     }
     switch (row) {
@@ -1256,7 +1261,7 @@ class _DayListState<T> extends State<DayList<T>> {
   /// when it lies near either end of the list's days.
   void _reportTopDay(DateTime day) {
     widget.onTopDay(day);
-    final number = dayNumber(day);
+    final number = CalendarDates.dayNumber(day);
     if (number > _last - _edgeDays) {
       setState(() {
         _last += dayListWindowDays;
@@ -1311,13 +1316,13 @@ class _DayListState<T> extends State<DayList<T>> {
   }
 
   /// The weeks of the mounted rows' days, from the first day of the
-  /// earliest to the last day of the latest, as [dayNumber]s; null while
-  /// no row is mounted.
+  /// earliest to the last day of the latest, as [CalendarDates.dayNumber]s;
+  /// null while no row is mounted.
   ({int first, int last})? _mountedWeeks() {
     int? first;
     int? last;
     for (final marker in _markers) {
-      final number = dayNumber(marker.widget.day);
+      final number = CalendarDates.dayNumber(marker.widget.day);
       first = first == null ? number : math.min(first, number);
       last = last == null ? number : math.max(last, number);
     }
@@ -1339,8 +1344,8 @@ class _DayListState<T> extends State<DayList<T>> {
       return;
     }
     widget.store.prefetch(
-      dateOfDayNumber(weeks.first),
-      dateOfDayNumber(weeks.last),
+      CalendarDates.dateOfDayNumber(weeks.first),
+      CalendarDates.dateOfDayNumber(weeks.last),
     );
   }
 
@@ -1355,8 +1360,8 @@ class _DayListState<T> extends State<DayList<T>> {
       return;
     }
     widget.store.retry(
-      dateOfDayNumber(weeks.first),
-      dateOfDayNumber(weeks.last),
+      CalendarDates.dateOfDayNumber(weeks.first),
+      CalendarDates.dateOfDayNumber(weeks.last),
     );
   }
 
@@ -1541,7 +1546,8 @@ class _DayListState<T> extends State<DayList<T>> {
   ) {
     final addMinute = add == null
         ? start
-        : wallMinuteOf(add.start) - dayNumber(day) * minutesPerDay;
+        : CalendarDates.wallMinuteOf(add.start) -
+              CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay;
     return _buildDashed(
       key: dayListGapKey(day, start),
       label: _strings.formatTime(start, widget.format),
@@ -1729,7 +1735,9 @@ class _DayListState<T> extends State<DayList<T>> {
       time = _strings.formatTimeRange(row.start, row.end, widget.format);
     }
     final pieceStart = row.first ? calendarEntry.start : row.day;
-    final pieceEnd = row.last ? calendarEntry.end : addDays(row.day, 1);
+    final pieceEnd = row.last
+        ? calendarEntry.end
+        : CalendarDates.addDays(row.day, 1);
     final editable = widget.editable;
     final styles = _styles;
     return Row(
@@ -2234,7 +2242,7 @@ class _NowSpan {
     for (final row in rows) {
       final start = switch (row) {
         DayListHidden(above: true) => -1,
-        DayListHidden(above: false) => minutesPerDay + 1,
+        DayListHidden(above: false) => CalendarDates.minutesPerDay + 1,
         DayListEntry(allDay: true) => null,
         DayListEntry(:final start) => start,
         DayListGap(:final start) => start,
@@ -2248,7 +2256,9 @@ class _NowSpan {
       for (var i = 0; i < starts.length; i++)
         starts[i].$1.key: _NowSpan(
           from: starts[i].$2,
-          until: i + 1 < starts.length ? starts[i + 1].$2 : minutesPerDay + 1,
+          until: i + 1 < starts.length
+              ? starts[i + 1].$2
+              : CalendarDates.minutesPerDay + 1,
           first: i == 0,
           piece: switch (starts[i].$1) {
             DayListEntry(:final start, :final end) => (

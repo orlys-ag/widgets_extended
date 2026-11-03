@@ -114,7 +114,7 @@ void main() {
       "later day, admits the day's start from it and before it, takes the "
       "occurrence of one after it, and gives its first minutes, one more "
       "inside a minute, rounded up to the slot grid", () {
-    final number = dayNumber(tuesday);
+    final number = CalendarDates.dayNumber(tuesday);
     CalendarEarliestStart startAt(DateTime? earliest) {
       return CalendarEarliestStart(tuesday, earliest);
     }
@@ -124,27 +124,31 @@ void main() {
       expect(start.closesDay, isTrue, reason: "$earliest");
       expect(start.admitsDayStart, isFalse, reason: "$earliest");
       expect(start.occurrence, earliest, reason: "$earliest");
-      expect(start.firstWallMinute, (number + 1) * minutesPerDay);
-      expect(start.firstSlotMinute(15), minutesPerDay, reason: "$earliest");
+      expect(start.firstWallMinute, (number + 1) * CalendarDates.minutesPerDay);
+      expect(
+        start.firstSlotMinute(15),
+        CalendarDates.minutesPerDay,
+        reason: "$earliest",
+      );
     }
     for (final earliest in <DateTime>[tuesday, at(monday, 22)]) {
       final start = startAt(earliest);
       expect(start.closesDay, isFalse, reason: "$earliest");
       expect(start.admitsDayStart, isTrue, reason: "$earliest");
       expect(start.occurrence, isNull, reason: "$earliest");
-      expect(start.firstWallMinute, number * minutesPerDay);
+      expect(start.firstWallMinute, number * CalendarDates.minutesPerDay);
       expect(start.firstSlotMinute(15), 0, reason: "$earliest");
     }
     final later = startAt(at(tuesday, 11, 7));
     expect(later.closesDay, isFalse);
     expect(later.admitsDayStart, isFalse);
     expect(later.occurrence, at(tuesday, 11, 7));
-    expect(later.firstWallMinute, number * minutesPerDay + 667);
+    expect(later.firstWallMinute, number * CalendarDates.minutesPerDay + 667);
     expect(later.firstSlotMinute(15), 675);
     expect(later.firstSlotMinute(30), 690);
     expect(startAt(at(tuesday, 11, 15)).firstSlotMinute(15), 675);
     final inside = startAt(at(tuesday, 11, 15, 30));
-    expect(inside.firstWallMinute, number * minutesPerDay + 676);
+    expect(inside.firstWallMinute, number * CalendarDates.minutesPerDay + 676);
     expect(inside.firstSlotMinute(15), 690);
   });
 
@@ -693,7 +697,7 @@ void main() {
           rules
               .heldToLimit(
                 at(before, 22),
-                at(addDays(day, 1), 2),
+                at(CalendarDates.addDays(day, 1), 2),
                 atEnd: true,
                 isAllDay: false,
               )
@@ -704,7 +708,7 @@ void main() {
         expect(
           rules
               .heldToLimit(
-                at(addDays(before, -1), 22),
+                at(CalendarDates.addDays(before, -1), 22),
                 at(day, 2),
                 atEnd: false,
                 isAllDay: false,

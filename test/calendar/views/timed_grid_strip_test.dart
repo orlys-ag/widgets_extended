@@ -21,7 +21,6 @@ import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
-import 'package:widgets_extended/calendar/policy/overlap.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_activity_indicator.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_defaults.dart';
@@ -79,7 +78,13 @@ CalendarEntry<String> allDayOf(
   int days = 1,
   String? title,
 }) {
-  return entryOf(id, first, addDays(first, days), title: title, isAllDay: true);
+  return entryOf(
+    id,
+    first,
+    CalendarDates.addDays(first, days),
+    title: title,
+    isAllDay: true,
+  );
 }
 
 /// A grid the tests pump: Week over the seven days from [first], under a
@@ -124,7 +129,7 @@ class Shown {
 
   /// The column of [day], which the grid shows.
   int colOf(DateTime day) {
-    return week ? 1 + daysBetween(first, day) : 1;
+    return week ? 1 + CalendarDates.daysBetween(first, day) : 1;
   }
 
   String get name {
@@ -340,7 +345,10 @@ class _NearRect extends Matcher {
 /// The range of days, as [MoveRecordingStore.reads] records it, from [first]
 /// to [last].
 ({int first, int last}) daysOf(DateTime first, DateTime last) {
-  return (first: dayNumber(first), last: dayNumber(last));
+  return (
+    first: CalendarDates.dayNumber(first),
+    last: CalendarDates.dayNumber(last),
+  );
 }
 
 /// A store holding [entries], disposed at the test's end.
@@ -372,18 +380,18 @@ class HeldSource implements CalendarDataSource<String> {
   List<CalendarEntry<String>> _between(int from, int to) {
     return <CalendarEntry<String>>[
       for (final entry in entries)
-        if (dayNumber(entry.start) <= to &&
-            lastDayNumberOf(entry.start, entry.end) >= from)
+        if (CalendarDates.dayNumber(entry.start) <= to &&
+            CalendarDates.lastDayNumberOf(entry.start, entry.end) >= from)
           entry,
     ];
   }
 
   @override
   Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
-    final from = dayNumber(first);
-    final to = dayNumber(last);
+    final from = CalendarDates.dayNumber(first);
+    final to = CalendarDates.dayNumber(last);
     final holds = held.any((day) {
-      final number = dayNumber(day);
+      final number = CalendarDates.dayNumber(day);
       return number >= from && number <= to;
     });
     if (!holds) {
@@ -397,7 +405,9 @@ class HeldSource implements CalendarDataSource<String> {
   /// Answers every held read.
   void release(DateTime first, DateTime last) {
     for (final read in reads) {
-      read.complete(_between(dayNumber(first), dayNumber(last)));
+      read.complete(
+        _between(CalendarDates.dayNumber(first), CalendarDates.dayNumber(last)),
+      );
     }
     reads.clear();
   }
@@ -1429,7 +1439,7 @@ void main() {
       (tester) async {
         final day = shortDayStart;
         for (final shown in <Shown>[
-          Shown.week(addDays(day, -6)),
+          Shown.week(CalendarDates.addDays(day, -6)),
           Shown.day(day),
         ]) {
           final store = storeOf(<CalendarEntry<String>>[allDayOf("dst", day)]);
@@ -1450,7 +1460,7 @@ void main() {
       (tester) async {
         final day = longDayStart;
         for (final shown in <Shown>[
-          Shown.week(addDays(day, -6)),
+          Shown.week(CalendarDates.addDays(day, -6)),
           Shown.day(day),
         ]) {
           final store = storeOf(<CalendarEntry<String>>[allDayOf("dst", day)]);
@@ -1517,7 +1527,7 @@ void main() {
     expect(week.firstSlotRow, week.stripStart + 2 + 1);
     final top = cellRect(tester, week.firstSlotRow, 1).top;
 
-    store.show(nextMonday, addDays(nextMonday, 6));
+    store.show(nextMonday, CalendarDates.addDays(nextMonday, 6));
     harness.first = nextMonday;
     await harness.rebuild(tester);
     for (var frame = 0; frame < 5; frame++) {
@@ -1526,7 +1536,7 @@ void main() {
     }
     // Setup sanity: the read has not landed.
     expect(source.reads, isNotEmpty);
-    source.release(nextMonday, addDays(nextMonday, 6));
+    source.release(nextMonday, CalendarDates.addDays(nextMonday, 6));
     await tester.pumpAndSettle();
     // The new week's empty strip has the edit mode's one row.
     expect(week.firstSlotRow, week.stripStart + 1 + 1);
@@ -1738,7 +1748,7 @@ void main() {
       )).moves.length;
     }
     for (final (limit, id, day, side, over) in tx8Releases) {
-      writes["TX8 $limit $id ${side.name} ${isoDate(over)}"] =
+      writes["TX8 $limit $id ${side.name} ${CalendarDates.isoDate(over)}"] =
           (await releaseBarEdge(
             tester,
             limit: limit,
@@ -1759,7 +1769,9 @@ void main() {
       tester,
     ) async {
       final shown = Shown.week(monday);
-      final days = <DateTime>[for (var i = 0; i < 7; i++) addDays(monday, i)];
+      final days = <DateTime>[
+        for (var i = 0; i < 7; i++) CalendarDates.addDays(monday, i),
+      ];
       Future<MoveRecordingStore> pumpLocked(
         List<CalendarEntry<String>> entries,
       ) async {
@@ -1912,7 +1924,7 @@ void main() {
       );
       expect(
         markedOf(tester, <DateTime>[
-          for (var i = 0; i < 7; i++) addDays(monday, i),
+          for (var i = 0; i < 7; i++) CalendarDates.addDays(monday, i),
         ]),
         <DateTime>[monday, tuesday, wednesday],
       );
@@ -1948,7 +1960,7 @@ void main() {
           over: over,
           others: <CalendarEntry<String>>[allDayOf("w", wednesday)],
         );
-        final reason = "$id over ${isoDate(over)}";
+        final reason = "$id over ${CalendarDates.isoDate(over)}";
         if (side == AxisDirection.right) {
           expectTimes(store, id, day, thursday, reason: reason);
         } else {
@@ -2016,7 +2028,7 @@ void main() {
       "and, in Week, a bar moved two columns writes days two later", (
     tester,
   ) async {
-    final late = CalendarDayHours(8 * 60, minutesPerDay);
+    final late = CalendarDayHours(8 * 60, CalendarDates.minutesPerDay);
     for (final shown in bothGrids(hours: late)) {
       final store = storeOf(<CalendarEntry<String>>[
         allDayOf("off", tuesday),
@@ -2059,7 +2071,7 @@ void main() {
     (tester) async {
       final day = shortDayStart;
       for (final shown in <Shown>[
-        Shown.week(addDays(day, -6)),
+        Shown.week(CalendarDates.addDays(day, -6)),
         Shown.day(day),
       ]) {
         final store = storeOf(<CalendarEntry<String>>[allDayOf("dst", day)]);
@@ -2402,7 +2414,9 @@ void main() {
       "is back over a slot no strip cell is marked", (tester) async {
     for (final shown in bothGrids()) {
       final days = shown.week
-          ? <DateTime>[for (var i = 0; i < 7; i++) addDays(monday, i)]
+          ? <DateTime>[
+              for (var i = 0; i < 7; i++) CalendarDates.addDays(monday, i),
+            ]
           : <DateTime>[tuesday];
       final store = storeOf(<CalendarEntry<String>>[
         entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
@@ -2483,13 +2497,16 @@ void main() {
         for (var i = 0; i < 20; i++)
           entryOf(
             "b$i",
-            at(addDays(monday, i % 7), 5 + (i ~/ 7) * 2),
-            at(addDays(monday, i % 7), 6 + (i ~/ 7) * 2),
+            at(CalendarDates.addDays(monday, i % 7), 5 + (i ~/ 7) * 2),
+            at(CalendarDates.addDays(monday, i % 7), 6 + (i ~/ 7) * 2),
           ),
       ]);
       // Setup sanity: the 20 blocks are mounted.
       for (var i = 0; i < 20; i++) {
-        expect(blockFinder("b$i", addDays(monday, i % 7)), findsOneWidget);
+        expect(
+          blockFinder("b$i", CalendarDates.addDays(monday, i % 7)),
+          findsOneWidget,
+        );
       }
       final over = slotRect(tester, shown, tuesday, 2 * 60).center;
       final gesture = await liftTo(
@@ -2872,7 +2889,7 @@ void main() {
       // Setup sanity: the edge is held at Wednesday.
       expect(
         markedOf(tester, <DateTime>[
-          for (var i = 0; i < 7; i++) addDays(monday, i),
+          for (var i = 0; i < 7; i++) CalendarDates.addDays(monday, i),
         ]),
         <DateTime>[monday, tuesday, wednesday],
       );
@@ -3127,7 +3144,7 @@ void main() {
                 "its release writes";
       testWidgets(name, (tester) async {
         final hours = notice
-            ? CalendarDayHours(8 * 60, minutesPerDay)
+            ? CalendarDayHours(8 * 60, CalendarDates.minutesPerDay)
             : CalendarDayHours.allDay;
         for (final shown in bothGrids(hours: hours)) {
           final day = shown.week ? monday : tuesday;
@@ -3180,7 +3197,7 @@ void main() {
             ),
             reason: shown.name,
           );
-          final minute = minuteOfDay(under.start);
+          final minute = CalendarDates.minuteOfDay(under.start);
           expect(strokedRects(tester), <Matcher>[
             nearRect(
               slotsRect(
@@ -3233,7 +3250,7 @@ void main() {
       const key = GridKey.bar("long");
       final span = boardOf(tester).controller.spanOf(key);
 
-      final next = addDays(shown.first, shown.week ? 7 : 1);
+      final next = CalendarDates.addDays(shown.first, shown.week ? 7 : 1);
       harness.first = next;
       await harness.rebuild(tester);
       await tester.pump();
@@ -3508,22 +3525,6 @@ void main() {
     }
   });
 
-  test("TR11 a create range stores its kind: false by default, compared by "
-      "equality and named by toString", () {
-    final timed = CalendarCreateRange(start: monday, end: tuesday);
-    final allDay = CalendarCreateRange(
-      start: monday,
-      end: tuesday,
-      isAllDay: true,
-    );
-    expect(timed.isAllDay, isFalse);
-    expect(allDay.isAllDay, isTrue);
-    expect(timed, isNot(allDay));
-    expect(timed, CalendarCreateRange(start: monday, end: tuesday));
-    expect(allDay.toString(), contains(", all day"));
-    expect(timed.toString(), isNot(contains("all day")));
-  });
-
   group("TR9", () {
     testWidgets("a create drag held still over the 11:00 slot, across a "
         "device pixel ratio change that replaces each scrollable's position "
@@ -3689,7 +3690,7 @@ void main() {
       );
       expect(store.moves, <CalendarEntry<String>>[
         entryOf("night", at(monday, 22), end),
-      ], reason: "$limit over ${isoDate(over)}");
+      ], reason: "$limit over ${CalendarDates.isoDate(over)}");
     }
   });
 
@@ -4744,7 +4745,9 @@ void main() {
     tester,
   ) async {
     List<DateTime> weekOf(DateTime first) {
-      return <DateTime>[for (var i = 0; i < 7; i++) addDays(first, i)];
+      return <DateTime>[
+        for (var i = 0; i < 7; i++) CalendarDates.addDays(first, i),
+      ];
     }
 
     final shown = Shown.week(monday);
@@ -5249,7 +5252,7 @@ void main() {
       // a release on the grid writes (TX8).
       expect(
         markedOf(tester, <DateTime>[
-          for (var i = 0; i < 7; i++) addDays(monday, i),
+          for (var i = 0; i < 7; i++) CalendarDates.addDays(monday, i),
         ]),
         <DateTime>[monday, tuesday, wednesday],
         reason: reason,
@@ -5314,7 +5317,7 @@ void main() {
           "the day's start", (tester) async {
         final day = shortDayStart;
         expectSkippedMidnight(day);
-        final shown = Shown.week(addDays(day, -6));
+        final shown = Shown.week(CalendarDates.addDays(day, -6));
         final store = storeOf(<CalendarEntry<String>>[allDayOf("off", day)]);
         await Harness(store, shown).pump(tester);
         await dragTo(
@@ -5339,8 +5342,8 @@ void main() {
           "nothing", (tester) async {
         final day = shortDayStart;
         expectSkippedMidnight(day);
-        final next = addDays(day, 1);
-        final shown = Shown.week(addDays(day, -5));
+        final next = CalendarDates.addDays(day, 1);
+        final shown = Shown.week(CalendarDates.addDays(day, -5));
         final harness = Harness(
           storeOf(const <CalendarEntry<String>>[]),
           shown,
@@ -5362,7 +5365,7 @@ void main() {
         final day = shortDayStart;
         expectSkippedMidnight(day);
         final before = DateTime(day.year, day.month, day.day - 1);
-        final earlier = addDays(before, -1);
+        final earlier = CalendarDates.addDays(before, -1);
         final evening = entryOf("evening", at(earlier, 22), at(earlier, 23));
         // Guard: red when the slot's end converts by the clock.
         final store = await releaseEndOver(
@@ -5372,7 +5375,7 @@ void main() {
           day: earlier,
           over: before,
           minute: 23 * 60 + 45,
-          first: addDays(day, -6),
+          first: CalendarDates.addDays(day, -6),
         );
         expect(store.moves, <CalendarEntry<String>>[
           evening.copyWith(end: day),
@@ -5387,7 +5390,7 @@ void main() {
         final day = shortDayStart;
         expectSkippedMidnight(day);
         final before = DateTime(day.year, day.month, day.day - 1);
-        final shown = Shown.week(addDays(day, -6));
+        final shown = Shown.week(CalendarDates.addDays(day, -6));
         final harness = Harness(
           storeOf(<CalendarEntry<String>>[entryOf("talk", day, at(day, 2))]),
           shown,
@@ -5433,8 +5436,8 @@ void main() {
         final day = shortDayStart;
         expectSkippedMidnight(day);
         final before = DateTime(day.year, day.month, day.day - 1);
-        final earlier = addDays(before, -1);
-        final shown = Shown.week(addDays(day, -6));
+        final earlier = CalendarDates.addDays(before, -1);
+        final shown = Shown.week(CalendarDates.addDays(day, -6));
         final harness = Harness(
           storeOf(const <CalendarEntry<String>>[]),
           shown,
@@ -5475,8 +5478,8 @@ void main() {
         final day = shortDayStart;
         expectSkippedMidnight(day);
         final before = DateTime(day.year, day.month, day.day - 1);
-        final earlier = addDays(before, -1);
-        final shown = Shown.week(addDays(day, -6));
+        final earlier = CalendarDates.addDays(before, -1);
+        final shown = Shown.week(CalendarDates.addDays(day, -6));
         final harness = Harness(
           storeOf(const <CalendarEntry<String>>[]),
           shown,
@@ -5514,7 +5517,7 @@ void main() {
         final day = shortDayStart;
         expectSkippedMidnight(day);
         final before = DateTime(day.year, day.month, day.day - 1);
-        final shown = Shown.week(addDays(day, -6));
+        final shown = Shown.week(CalendarDates.addDays(day, -6));
         final harness = Harness(
           storeOf(const <CalendarEntry<String>>[]),
           shown,
@@ -5552,7 +5555,7 @@ void main() {
           storeOf(<CalendarEntry<String>>[
             entryOf("late", at(before, 23), laterMidnight),
           ]),
-          Shown.week(addDays(day, -6)),
+          Shown.week(CalendarDates.addDays(day, -6)),
           blockBuilder: (context, entry, given) {
             (details[entry.id] ??= <CalendarBlockDetails>[]).add(given);
             return defaultCalendarBlockBuilder<String>(context, entry, given);
@@ -5588,7 +5591,7 @@ List<CalendarEntry<String>> movesSharingTime(
 ) {
   return <CalendarEntry<String>>[
     for (final move in store.moves)
-      if (rangeSharesTime(move.start, move.end, other)) move,
+      if (NoOverlapsPolicy.rangeSharesTime(move.start, move.end, other)) move,
   ];
 }
 

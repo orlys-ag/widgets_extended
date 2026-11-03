@@ -67,7 +67,7 @@ Future<List<CalendarCreateRange>> pumpCalendar(
   bool lock = true,
   bool allowsOverlaps = true,
   CalendarDayHours hours = CalendarDayHours.allDay,
-  int slotMinutes = defaultSlotMinutes,
+  int slotMinutes = CalendarDates.defaultSlotMinutes,
   List<DateTime>? refusals,
 }) async {
   tester.view.devicePixelRatio = 1.0;
@@ -409,7 +409,9 @@ void main() {
         "at the second 01:30 when released on the 01:30 row, and at the "
         "second 01:45 on the 01:45 row", (tester) async {
       final day = longDayStart;
-      final next = dateOfDayNumber(dayNumber(day) + 1);
+      final next = CalendarDates.dateOfDayNumber(
+        CalendarDates.dayNumber(day) + 1,
+      );
       tester.view.devicePixelRatio = 1.0;
       tester.view.physicalSize = const Size(800.0, 1200.0);
       addTearDown(tester.view.reset);
@@ -422,7 +424,7 @@ void main() {
         final bar = entryOf(
           "bar",
           next,
-          dateOfDayNumber(dayNumber(next) + 1),
+          CalendarDates.dateOfDayNumber(CalendarDates.dayNumber(next) + 1),
           isAllDay: true,
         );
         final store = MemoryCalendarStore<String>(
@@ -442,7 +444,9 @@ void main() {
               controller: controller,
               // The 25-hour day is the week's first column, which
               // [slotRect] reads, and the next day its second.
-              weekdays: CalendarWeekdaySet.all.startingOn(weekdayColumn(day)),
+              weekdays: CalendarWeekdaySet.all.startingOn(
+                CalendarDates.weekdayColumn(day),
+              ),
               clock: () {
                 return secondHalfPastOne;
               },
@@ -533,7 +537,7 @@ void main() {
         "press creates at 01:00 the day before but refuses the 23-hour day, "
         "whose clock skips an end of each slot", (tester) async {
       final day = shortDayStart;
-      final dayBefore = addDays(day, -1);
+      final dayBefore = CalendarDates.addDays(day, -1);
       final refusals = <DateTime>[];
       final creates = await pumpCalendar(
         tester,

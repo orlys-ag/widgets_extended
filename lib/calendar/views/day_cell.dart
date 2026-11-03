@@ -585,7 +585,8 @@ class WeekdayHeader extends StatelessWidget {
     );
   }
 
-  /// The name of the weekday of [column], a [weekdayColumn], Monday 0.
+  /// The name of the weekday of [column], a [CalendarDates.weekdayColumn],
+  /// Monday 0.
   Widget _buildLetter(
     int column,
     _DayCellStyles styles,

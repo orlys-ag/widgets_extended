@@ -398,7 +398,7 @@ void main() {
 
       expect(slotMinuteOn(earlier, today), 11 * 60 + 15);
       expect(slotMinuteOn(earlier, wednesday), 0);
-      expect(slotMinuteOn(earlier, monday), minutesPerDay);
+      expect(slotMinuteOn(earlier, monday), CalendarDates.minutesPerDay);
       final earliest = earlier.earliestStartOn(today, now)!;
       expect(at(today, 11, 7).isBefore(earliest), isFalse);
       expect(at(today, 11).isBefore(earliest), isTrue);
@@ -468,7 +468,7 @@ void main() {
         earlier.admitsChange(
           entry,
           today,
-          addDays(today, 2),
+          CalendarDates.addDays(today, 2),
           tenOClock,
           isAllDay: true,
         ),
@@ -478,7 +478,7 @@ void main() {
         earlier.admitsChange(
           entry,
           wednesday,
-          addDays(today, 2),
+          CalendarDates.addDays(today, 2),
           tenOClock,
           isAllDay: true,
         ),
@@ -500,9 +500,12 @@ void main() {
       }
 
       expect(slotMinuteOn(wednesday, now), 0);
-      expect(slotMinuteOn(addDays(today, 10), now), 0);
-      expect(slotMinuteOn(monday, now), minutesPerDay);
-      expect(slotMinuteOn(addDays(today, -10), now), minutesPerDay);
+      expect(slotMinuteOn(CalendarDates.addDays(today, 10), now), 0);
+      expect(slotMinuteOn(monday, now), CalendarDates.minutesPerDay);
+      expect(
+        slotMinuteOn(CalendarDates.addDays(today, -10), now),
+        CalendarDates.minutesPerDay,
+      );
 
       // The host pins today to Wednesday while the clock reads Tuesday.
       final pinned = CalendarNow(
@@ -514,7 +517,7 @@ void main() {
         DateTime(2026, 4, 22, 11, 8),
       );
       expect(slotMinuteOn(wednesday, pinned), 11 * 60 + 15);
-      expect(slotMinuteOn(today, pinned), minutesPerDay);
+      expect(slotMinuteOn(today, pinned), CalendarDates.minutesPerDay);
     });
 
     test("HL4 an ended entry and one in progress keep their kind, and a free "
@@ -554,7 +557,7 @@ void main() {
         earlier.admitsChange(
           todayAllDay,
           today,
-          addDays(today, 2),
+          CalendarDates.addDays(today, 2),
           tenOClock,
           isAllDay: true,
         ),

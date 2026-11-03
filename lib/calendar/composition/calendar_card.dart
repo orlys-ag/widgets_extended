@@ -204,7 +204,11 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
   /// every other week, and the weekday header.
   double get _foldDistance {
     final month = widget.month;
-    final grid = MonthGrid(month.year, month.month, weekdays: widget.weekdays);
+    final grid = CalendarMonthGrid(
+      month.year,
+      month.month,
+      weekdays: widget.weekdays,
+    );
     return (grid.weekCount - 1) * _rowHeight + weekdayHeaderHeight;
   }
 

@@ -12,7 +12,6 @@ import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
 import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
-import 'package:widgets_extended/calendar/presentation/calendar_localizations.dart';
 import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
@@ -319,9 +318,9 @@ void main() {
     }
     final failed = <DateTime>[
       for (
-        var d = addDays(day, -14);
-        !d.isAfter(addDays(day, 28));
-        d = addDays(d, 1)
+        var d = CalendarDates.addDays(day, -14);
+        !d.isAfter(CalendarDates.addDays(day, 28));
+        d = CalendarDates.addDays(d, 1)
       )
         if (find.byKey(dayListFailedKey(d)).evaluate().isNotEmpty) d,
     ];
@@ -334,7 +333,10 @@ void main() {
       (source.held.last.first, source.held.last.last),
       (
         CalendarWeekdaySet.all.weekStartOf(failed.first),
-        addDays(CalendarWeekdaySet.all.weekStartOf(failed.last), 6),
+        CalendarDates.addDays(
+          CalendarWeekdaySet.all.weekStartOf(failed.last),
+          6,
+        ),
       ),
     );
     await tester.pump();
@@ -350,8 +352,8 @@ void main() {
       "loading", (tester) async {
     final day = DateTime(2026, 5, 5);
     final weekStart = CalendarWeekdaySet.all.weekStartOf(day);
-    final shownFirst = addDays(weekStart, -7);
-    final shownLast = addDays(weekStart, -1);
+    final shownFirst = CalendarDates.addDays(weekStart, -7);
+    final shownLast = CalendarDates.addDays(weekStart, -1);
     final source = HeldReads();
     final store = CachingCalendarStore<String>(dataSource: source);
     addTearDown(store.dispose);
@@ -395,9 +397,9 @@ void main() {
     expect(store.status, CalendarLoadStatus.failed);
     final failed = <DateTime>[
       for (
-        var d = addDays(day, -14);
-        !d.isAfter(addDays(day, 28));
-        d = addDays(d, 1)
+        var d = CalendarDates.addDays(day, -14);
+        !d.isAfter(CalendarDates.addDays(day, 28));
+        d = CalendarDates.addDays(d, 1)
       )
         if (find.byKey(dayListFailedKey(d)).evaluate().isNotEmpty) d,
     ];
@@ -409,7 +411,13 @@ void main() {
     expect(source.held, hasLength(reads + 1));
     expect(
       (source.held.last.first, source.held.last.last),
-      (shownFirst, addDays(CalendarWeekdaySet.all.weekStartOf(failed.last), 6)),
+      (
+        shownFirst,
+        CalendarDates.addDays(
+          CalendarWeekdaySet.all.weekStartOf(failed.last),
+          6,
+        ),
+      ),
     );
     await tester.pump();
     expect(<DateTime>[

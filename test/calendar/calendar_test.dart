@@ -225,11 +225,10 @@ void main() {
 
   test("B2 the barrel shows by name; of the views only the types the "
       "calendar's signatures use, and no view; of the localizations file "
-      "the localizations, their English default and "
-      "CalendarHourLabelFormat; of the policy layer exactly the policies, "
-      "the types their signatures name "
-      "and the edit rules; and of the dates layer exactly the day hours, "
-      "the weekday sets and CalendarDates", () {
+      "the localizations and their English default; of the policy layer "
+      "exactly the policies, the types their signatures name and the edit "
+      "rules; and of the dates layer exactly the day hours, the weekday "
+      "sets, the month grid, the hour label format and CalendarDates", () {
     final source = File(barrelPath).readAsStringSync();
     final exports = exportsOf(source);
     // Every directive the barrel holds was read.
@@ -242,11 +241,11 @@ void main() {
       },
       <String, Set<String>>{
         "lib/calendar/dates/calendar_dates.dart": <String>{
-          "CalendarDayHours",
-          "CalendarWeekdaySet",
-        },
-        "lib/calendar/dates/calendar_date_helpers.dart": <String>{
           "CalendarDates",
+          "CalendarDayHours",
+          "CalendarHourLabelFormat",
+          "CalendarMonthGrid",
+          "CalendarWeekdaySet",
         },
       },
     );
@@ -264,7 +263,6 @@ void main() {
         "CalendarMoveKind",
         "CalendarMoveRequest",
       },
-      "lib/calendar/views/timed_grid.dart": <String>{"CalendarCreateRange"},
     });
     expect(
       <List<String>?>[
@@ -274,11 +272,7 @@ void main() {
             export.shown,
       ],
       <List<String>>[
-        <String>[
-          "CalendarLocalizations",
-          "DefaultCalendarLocalizations",
-          "CalendarHourLabelFormat",
-        ],
+        <String>["CalendarLocalizations", "DefaultCalendarLocalizations"],
       ],
     );
     const viewWidgets = <String>{
@@ -538,6 +532,7 @@ void main() {
         path: "lib/calendar/dates/calendar_dates.dart",
         name: "CalendarDayHours",
       ),
+      (path: "lib/calendar/dates/calendar_dates.dart", name: "CalendarDates"),
       (path: "lib/calendar/policy/edit_policy.dart", name: "DayLimitPolicy"),
       (
         path: "lib/calendar/policy/edit_rules.dart",
@@ -556,7 +551,10 @@ void main() {
         path: "lib/calendar/presentation/calendar_theme.dart",
         name: "CalendarThemeData",
       ),
-      (path: "lib/calendar/views/timed_grid.dart", name: "CalendarCreateRange"),
+      (
+        path: "lib/calendar/entries/calendar_entry.dart",
+        name: "CalendarCreateRange",
+      ),
       (
         path: "lib/calendar/views/move_request.dart",
         name: "CalendarMoveRequest",
@@ -636,7 +634,7 @@ void main() {
         dayStarts: true,
       ),
       (
-        path: "lib/calendar/views/timed_grid.dart",
+        path: "lib/calendar/entries/calendar_entry.dart",
         declaration: "  CalendarCreateRange({",
         dayStarts: true,
       ),
@@ -661,8 +659,10 @@ void main() {
         "factory CalendarWeekdaySet.of(",
         "CalendarWeekdaySet startingOn(",
         "CalendarDayHours(",
+        "static DateTime nextShownDay(",
       ],
       "entries/calendar_data_source.dart": <String>["CalendarDaysChanged("],
+      "entries/calendar_entry.dart": <String>["CalendarCreateRange({"],
       "policy/edit_policy.dart": <String>["DayLimitPolicy("],
       "policy/edit_rules.dart": <String>[
         "CalendarEarliestStart(",
@@ -674,7 +674,6 @@ void main() {
         "CalendarThemeData({",
         "CalendarThemeData copyWith(",
       ],
-      "views/timed_grid.dart": <String>["CalendarCreateRange({"],
       "views/move_request.dart": <String>["CalendarMoveRequest({"],
       "composition/calendar_controller.dart": <String>[
         "CalendarController({",

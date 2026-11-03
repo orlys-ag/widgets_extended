@@ -7,7 +7,6 @@
 library;
 
 import 'dart:async';
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -26,7 +25,6 @@ import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
-import '../class_source.dart';
 import '../dst_days.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
@@ -101,7 +99,7 @@ class Shown {
 
   /// The column of [day], which the grid shows.
   int colOf(DateTime day) {
-    return week ? 1 + daysBetween(first, day) : 1;
+    return week ? 1 + CalendarDates.daysBetween(first, day) : 1;
   }
 
   String get name {
@@ -231,13 +229,13 @@ class HeldSource implements CalendarDataSource<String> {
 
   @override
   Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
-    final from = dayNumber(first);
-    final to = dayNumber(last);
+    final from = CalendarDates.dayNumber(first);
+    final to = CalendarDates.dayNumber(last);
     return SynchronousFuture<List<CalendarEntry<String>>>(
       <CalendarEntry<String>>[
         for (final entry in entries)
-          if (dayNumber(entry.start) <= to &&
-              lastDayNumberOf(entry.start, entry.end) >= from)
+          if (CalendarDates.dayNumber(entry.start) <= to &&
+              CalendarDates.lastDayNumberOf(entry.start, entry.end) >= from)
             entry,
       ],
     );
@@ -448,7 +446,7 @@ void main() {
         final shown = view(day);
         final harness = Harness(storeOf(<CalendarEntry<String>>[night]), shown);
         await harness.pump(tester);
-        final last = shown.rowOf(minutesPerDay - 15);
+        final last = shown.rowOf(CalendarDates.minutesPerDay - 15);
         if (shown.week || day == monday) {
           final rect = tester.getRect(blockFinder("night", monday));
           final col = shown.colOf(monday);
@@ -486,8 +484,8 @@ void main() {
       "three blocks, each at its piece's rows", (tester) async {
     final long = entryOf("long", at(monday, 10), at(wednesday, 12));
     final pieces = <DateTime, (int, int)>{
-      monday: (10 * 60, minutesPerDay),
-      tuesday: (0, minutesPerDay),
+      monday: (10 * 60, CalendarDates.minutesPerDay),
+      tuesday: (0, CalendarDates.minutesPerDay),
       wednesday: (0, 12 * 60),
     };
     for (final day in pieces.keys) {
@@ -540,7 +538,11 @@ void main() {
           expect(
             tester.getRect(blockFinder("late", monday)).bottom,
             moreOrLessEquals(
-              cellRect(tester, shown.rowOf(minutesPerDay - 15), col).bottom,
+              cellRect(
+                tester,
+                shown.rowOf(CalendarDates.minutesPerDay - 15),
+                col,
+              ).bottom,
             ),
             reason: shown.name,
           );
@@ -724,8 +726,12 @@ void main() {
 
   testWidgets("TP14 an entry 366 days long draws 7 blocks in Week and 1 in "
       "Day", (tester) async {
-    final from = addDays(monday, -100);
-    final year = entryOf("year", at(from, 10), at(addDays(from, 366), 10));
+    final from = CalendarDates.addDays(monday, -100);
+    final year = entryOf(
+      "year",
+      at(from, 10),
+      at(CalendarDates.addDays(from, 366), 10),
+    );
     for (final view in views) {
       final shown = view(wednesday);
       await Harness(storeOf(<CalendarEntry<String>>[year]), shown).pump(tester);
@@ -771,7 +777,7 @@ void main() {
     final source = HeldSource(<CalendarEntry<String>>[night]);
     final store = CachingCalendarStore<String>(dataSource: source);
     addTearDown(store.dispose);
-    store.show(monday, addDays(monday, 6));
+    store.show(monday, CalendarDates.addDays(monday, 6));
     final shown = Shown.week(monday);
     await Harness(store, shown).pump(tester);
     store.requestMove(night.copyWith(title: "renamed"));
@@ -1004,35 +1010,12 @@ void main() {
     await createDrag(
       tester,
       slotRect(tester, shown, tuesday, 0).center,
-      slotRect(tester, shown, tuesday, minutesPerDay - 15).center,
+      slotRect(tester, shown, tuesday, CalendarDates.minutesPerDay - 15).center,
     );
     expect(harness.creates, <CalendarCreateRange>[
       CalendarCreateRange(start: tuesday, end: wednesday),
     ]);
     expect(harness.creates.single.isAllDay, isFalse);
-  });
-
-  test("TR5 the CalendarCreateRange class declares no member of the day, "
-      "minute and day-count time", () {
-    final body = classBody(
-      File("lib/calendar/views/timed_grid.dart").readAsStringSync(),
-      "CalendarCreateRange",
-    );
-    bool declares(String name) {
-      return RegExp(
-        "(final|get)\\s+(int|DateTime)?\\s*$name\\b",
-      ).hasMatch(body);
-    }
-
-    expect(declares("start") || declares("day"), isTrue);
-    for (final name in const <String>[
-      "day",
-      "startMinute",
-      "endMinute",
-      "dayCount",
-    ]) {
-      expect(declares(name), isFalse, reason: name);
-    }
   });
 
   testWidgets("TR6 a press on the free part of the 09:00 slot under an entry "
@@ -1342,7 +1325,11 @@ void main() {
       expect(
         rect.bottom,
         moreOrLessEquals(
-          cellRect(tester, shown.rowOf(minutesPerDay - 15), col).bottom,
+          cellRect(
+            tester,
+            shown.rowOf(CalendarDates.minutesPerDay - 15),
+            col,
+          ).bottom,
         ),
         reason: shown.name,
       );
@@ -1436,7 +1423,7 @@ void main() {
       final day = shortDayStart;
       final early = entryOf("early", at(day, 1, 30), at(day, 3, 30));
       for (final shown in <Shown>[
-        Shown.week(addDays(day, -6)),
+        Shown.week(CalendarDates.addDays(day, -6)),
         Shown.day(day),
       ]) {
         await Harness(
@@ -1446,7 +1433,10 @@ void main() {
         final col = shown.colOf(day);
         final viewport = viewportOf(tester);
         expect(
-          viewport.rectOfCell(shown.rowOf(minutesPerDay - 15), col),
+          viewport.rectOfCell(
+            shown.rowOf(CalendarDates.minutesPerDay - 15),
+            col,
+          ),
           isNotNull,
         );
         expect(
@@ -1551,9 +1541,12 @@ void main() {
         "with its top on the day's 00:00 row, is stored timed from the day's "
         "start to the next day's and draws as a block", (tester) async {
       final day = shortDayStart;
-      final before = addDays(day, -1);
-      expect(addDays(day, 1).difference(day), const Duration(hours: 23));
-      final shown = Shown.week(addDays(day, -6));
+      final before = CalendarDates.addDays(day, -1);
+      expect(
+        CalendarDates.addDays(day, 1).difference(day),
+        const Duration(hours: 23),
+      );
+      final shown = Shown.week(CalendarDates.addDays(day, -6));
       final store = storeOf(<CalendarEntry<String>>[
         entryOf("long", before, at(before, 23)),
       ]);
@@ -1566,7 +1559,7 @@ void main() {
       );
       final moved = store.storedEntry("long")!;
       expect(moved.start, day);
-      expect(moved.end, addDays(day, 1));
+      expect(moved.end, CalendarDates.addDays(day, 1));
       expect(moved.isAllDay, isFalse);
       expect(blockFinder("long", day), findsOneWidget);
       expect(find.byKey(allDayBarKey("long")), findsNothing);
@@ -1585,7 +1578,7 @@ void main() {
         secondHalfPastOne.add(const Duration(minutes: 30)),
       );
       for (final shown in <Shown>[
-        Shown.week(addDays(day, -6)),
+        Shown.week(CalendarDates.addDays(day, -6)),
         Shown.day(day),
       ]) {
         await Harness(
@@ -1637,7 +1630,7 @@ void main() {
       final moved = store.storedEntry("task")!;
       expect(moved.start, at(day, 0, 30));
       expect(moved.end, day.add(const Duration(minutes: 90)));
-      expect(isLaterOccurrence(moved.end), isFalse);
+      expect(CalendarDates.isLaterOccurrence(moved.end), isFalse);
     });
 
     testWidgets("TP17 at slot 15 an entry starting at the second 01:30, moved "
@@ -1660,7 +1653,7 @@ void main() {
       );
       final moved = store.storedEntry("second")!;
       expect(moved.start, secondHalfPastOne.add(const Duration(minutes: 15)));
-      expect(isLaterOccurrence(moved.start), isTrue);
+      expect(CalendarDates.isLaterOccurrence(moved.start), isTrue);
     });
 
     testWidgets("TP18 an entry from the second 01:00 to the second 01:45 "
@@ -1735,7 +1728,7 @@ void main() {
         secondHalfPastOne.subtract(const Duration(minutes: 15)),
       );
       for (final shown in <Shown>[
-        Shown.week(addDays(day, -6)),
+        Shown.week(CalendarDates.addDays(day, -6)),
         Shown.day(day),
       ]) {
         await Harness(
@@ -1762,9 +1755,12 @@ void main() {
         "on the day's 00:00 row, is stored timed from the day's start to the "
         "next day's and draws as a block", (tester) async {
       final day = longDayStart;
-      final before = addDays(day, -1);
-      expect(addDays(day, 1).difference(day), const Duration(hours: 25));
-      final shown = Shown.week(addDays(day, -6));
+      final before = CalendarDates.addDays(day, -1);
+      expect(
+        CalendarDates.addDays(day, 1).difference(day),
+        const Duration(hours: 25),
+      );
+      final shown = Shown.week(CalendarDates.addDays(day, -6));
       final store = storeOf(<CalendarEntry<String>>[
         entryOf("long", before, before.add(const Duration(hours: 25))),
       ]);
@@ -1781,7 +1777,7 @@ void main() {
       );
       final moved = store.storedEntry("long")!;
       expect(moved.start, day);
-      expect(moved.end, addDays(day, 1));
+      expect(moved.end, CalendarDates.addDays(day, 1));
       expect(moved.isAllDay, isFalse);
       expect(blockFinder("long", day), findsOneWidget);
       expect(find.byKey(allDayBarKey("long")), findsNothing);
@@ -2026,7 +2022,10 @@ void main() {
         "the 01:30 row, which ends at the second 01:00 and draws to the 02:00 "
         "row, is requested", (tester) async {
       final day = longDayStart;
-      final shown = Shown.day(day, hours: CalendarDayHours(90, minutesPerDay));
+      final shown = Shown.day(
+        day,
+        hours: CalendarDayHours(90, CalendarDates.minutesPerDay),
+      );
       final harness = Harness(
         storeOf(<CalendarEntry<String>>[
           entryOf("task", at(day, 5), at(day, 5, 30)),
@@ -2189,7 +2188,7 @@ void main() {
         final early = entryOf("early", day, at(day, 2));
         final night = entryOf("night", at(before, 23), at(day, 2));
         for (final shown in <Shown>[
-          Shown.week(addDays(day, -6)),
+          Shown.week(CalendarDates.addDays(day, -6)),
           Shown.day(day),
         ]) {
           await Harness(
@@ -2320,7 +2319,7 @@ void main() {
         final day = shortDayStart;
         expectSkippedMidnight(day);
         final before = DateTime(day.year, day.month, day.day - 1);
-        final shown = Shown.week(addDays(day, -6));
+        final shown = Shown.week(CalendarDates.addDays(day, -6));
         final harness = Harness(
           storeOf(<CalendarEntry<String>>[
             entryOf("late", at(before, 22), at(before, 23)),
@@ -2355,7 +2354,7 @@ void main() {
         final day = shortDayStart;
         expectSkippedMidnight(day);
         final before = DateTime(day.year, day.month, day.day - 1);
-        final shown = Shown.week(addDays(day, -6));
+        final shown = Shown.week(CalendarDates.addDays(day, -6));
         final store = storeOf(<CalendarEntry<String>>[
           entryOf("night", at(before, 23), at(day, 2)),
         ]);
@@ -2415,7 +2414,7 @@ void main() {
         final day = longDayStart;
         expectRepeatedMidnight(day);
         final before = DateTime(day.year, day.month, day.day - 1);
-        final shown = Shown.week(addDays(day, -6));
+        final shown = Shown.week(CalendarDates.addDays(day, -6));
         // Two hours from the day's start, drawn from the 00:00 row to the
         // 01:00 row: a block short enough to drop on the day before's last
         // hour, where it ends two hours after 23:00.
@@ -2583,7 +2582,7 @@ void main() {
         expectRepeatedLastHour(day);
         final first = day.add(const Duration(minutes: 23 * 60 + 30));
         for (final shown in <Shown>[
-          Shown.week(addDays(day, -6)),
+          Shown.week(CalendarDates.addDays(day, -6)),
           Shown.day(day),
         ]) {
           await Harness(

@@ -6,8 +6,6 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart'
-    show isoDate;
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
@@ -62,7 +60,7 @@ Future<double> sliderValue(WidgetTester tester, Key key) async {
 /// The month board's cell of [day].
 Rect monthDayRect(WidgetTester tester, DateTime day) {
   return tester.getRect(
-    find.byKey(ValueKey<String>("month-day-${isoDate(day)}")),
+    find.byKey(ValueKey<String>("month-day-${CalendarDates.isoDate(day)}")),
   );
 }
 

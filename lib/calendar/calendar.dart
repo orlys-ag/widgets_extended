@@ -17,8 +17,13 @@ export 'composition/calendar_header.dart'
 export 'composition/calendar_theme_extension.dart' show CalendarThemeExtension;
 export 'composition/calendar_view.dart'
     show CalendarController, CalendarEntryTapDetails, CalendarView;
-export 'dates/calendar_date_helpers.dart' show CalendarDates;
-export 'dates/calendar_dates.dart' show CalendarDayHours, CalendarWeekdaySet;
+export 'dates/calendar_dates.dart'
+    show
+        CalendarDates,
+        CalendarDayHours,
+        CalendarHourLabelFormat,
+        CalendarMonthGrid,
+        CalendarWeekdaySet;
 export 'entries/calendar_data_source.dart'
     show
         CalendarAllChanged,
@@ -27,7 +32,7 @@ export 'entries/calendar_data_source.dart'
         CalendarEntryPut,
         CalendarEntryRemoved,
         CalendarSourceChange;
-export 'entries/calendar_entry.dart' show CalendarEntry;
+export 'entries/calendar_entry.dart' show CalendarCreateRange, CalendarEntry;
 export 'policy/edit_policy.dart'
     show
         CalendarEditPolicy,
@@ -67,10 +72,7 @@ export 'presentation/calendar_defaults.dart'
         defaultCalendarFailureBuilder,
         defaultCalendarLoadingBuilder;
 export 'presentation/calendar_localizations.dart'
-    show
-        CalendarLocalizations,
-        DefaultCalendarLocalizations,
-        CalendarHourLabelFormat;
+    show CalendarLocalizations, DefaultCalendarLocalizations;
 export 'presentation/calendar_theme.dart' show CalendarTheme, CalendarThemeData;
 export 'store/caching_calendar_store.dart' show CachingCalendarStore;
 export 'store/calendar_store.dart'
@@ -86,4 +88,3 @@ export 'store/memory_calendar_store.dart'
     show CalendarEntryChanged, MemoryCalendarStore;
 export 'views/month_board.dart' show CalendarMonthLayout;
 export 'views/move_request.dart' show CalendarMoveKind, CalendarMoveRequest;
-export 'views/timed_grid.dart' show CalendarCreateRange;

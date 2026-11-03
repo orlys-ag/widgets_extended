@@ -161,18 +161,21 @@ base class MemoryCalendarStore<T> extends CalendarStore<T> {
 
   @override
   List<CalendarShownEntry<T>> entriesOn(DateTime day) {
-    return _index.entriesOn(dayNumber(day));
+    return _index.entriesOn(CalendarDates.dayNumber(day));
   }
 
   @override
   List<CalendarShownEntry<T>> entriesBetween(DateTime first, DateTime last) {
-    return _index.entriesBetween(dayNumber(first), dayNumber(last));
+    return _index.entriesBetween(
+      CalendarDates.dayNumber(first),
+      CalendarDates.dayNumber(last),
+    );
   }
 
   /// Whether an entry covers [day].
   @override
   bool dayHasShownEntries(DateTime day) {
-    return _index.hasShownOn(dayNumber(day));
+    return _index.hasShownOn(CalendarDates.dayNumber(day));
   }
 
   /// False: every write applies within its call.

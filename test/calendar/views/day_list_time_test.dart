@@ -16,8 +16,6 @@ import 'package:widgets_extended/calendar/presentation/calendar_localizations.da
 import 'package:widgets_extended/calendar/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
-import 'package:widgets_extended/calendar/views/timed_grid.dart'
-    show CalendarCreateRange;
 
 import '../dst_days.dart';
 
@@ -291,14 +289,14 @@ void main() {
     testWidgets("AG3 the day is listed once with its entries", (tester) async {
       final day = shortDayStart;
       final store = storeOf(<CalendarEntry<String>>[
-        entryOf("all-day", day, addDays(day, 1), isAllDay: true),
+        entryOf("all-day", day, CalendarDates.addDays(day, 1), isAllDay: true),
         entryOf("early", at(day, 1, 30), at(day, 3, 30)),
       ]);
       expect(rowsOf(store, day), <Object>[
         ("all-day", 0, 1440, true),
         ("early", 90, 210, false),
       ]);
-      expect(rowsOf(store, addDays(day, 1)), isEmpty);
+      expect(rowsOf(store, CalendarDates.addDays(day, 1)), isEmpty);
       await pumpList(tester, store, day, editable: false);
       expect(find.byKey(dayListHeaderKey(day)), findsOneWidget);
       expect(find.text("card early"), findsOneWidget);
@@ -310,7 +308,7 @@ void main() {
     testWidgets("AG3 the day is listed once with its entries", (tester) async {
       final day = longDayStart;
       final store = storeOf(<CalendarEntry<String>>[
-        entryOf("all-day", day, addDays(day, 1), isAllDay: true),
+        entryOf("all-day", day, CalendarDates.addDays(day, 1), isAllDay: true),
         entryOf(
           "repeated",
           secondHalfPastOne,
@@ -362,7 +360,7 @@ void main() {
         expectSkippedMidnight(day);
         final store = storeOf(<CalendarEntry<String>>[
           entryOf("early", day, at(day, 2)),
-          entryOf("whole", day, addDays(day, 1)),
+          entryOf("whole", day, CalendarDates.addDays(day, 1)),
         ]);
         expect(rowsOf(store, day), <Object>[
           ("early", 60, 120, false),
