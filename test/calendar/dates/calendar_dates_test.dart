@@ -112,6 +112,28 @@ void main() {
     });
   });
 
+  group("NS1 CalendarDates.nextShownDay's direction", () {
+    test("throws an ArgumentError naming direction for a direction of 0, "
+        "and steps over hidden days either way otherwise", () {
+      expect(() {
+        return CalendarDates.nextShownDay(
+          DateTime(2026, 4, 22),
+          0,
+          CalendarWeekdaySet.all,
+        );
+      }, throwsArgumentNamed("direction"));
+      const workweek = CalendarWeekdaySet.workweek;
+      expect(
+        CalendarDates.nextShownDay(DateTime(2026, 4, 24), 1, workweek),
+        DateTime(2026, 4, 27),
+      );
+      expect(
+        CalendarDates.nextShownDay(DateTime(2026, 4, 27), -1, workweek),
+        DateTime(2026, 4, 24),
+      );
+    });
+  });
+
   group("D4 CalendarWeekdaySet's first weekday", () {
     test("orders the columns from it, finds each week's first day, and "
         "tells two sets apart by it", () {
