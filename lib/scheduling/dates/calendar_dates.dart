@@ -383,14 +383,15 @@ abstract final class CalendarDates {
 
   /// The range from [start] to [end] in wall minutes: from its start's wall
   /// minute ([wallMinuteOf]) to its end's ([endWallMinuteOf]), except at two
-  /// ends a stretch the clock repeats gives. An end at the later 00:00
-  /// ([isLaterMidnight]), which reads as the 24:00 before it, ends at its
-  /// day's minute the length of the repeated stretch ([repeatedStretchOf]),
-  /// 01:00 for an hour, where a clock going back to 00:00 ends the first
-  /// pass, so the range has a piece on the day it ends on. And an end whose
-  /// wall minute is not after the start's is the start plus the range's
-  /// length in minutes, held at the 24:00 of the end's day, the last day the
-  /// range has a piece on ([lastDayNumberOf]).
+  /// ends a stretch the clock repeats gives. An end at the later 00:00 of a
+  /// day whose clock repeats its midnight ([isLaterOccurrence]), which reads
+  /// as the 24:00 before it, ends at its day's minute the length of the
+  /// repeated stretch ([repeatedStretchOf]), 01:00 for an hour, where a
+  /// clock going back to 00:00 ends the first pass, so the range has a piece
+  /// on the day it ends on. And an end whose wall minute is not after the
+  /// start's is the start plus the range's length in minutes, held at the
+  /// 24:00 of the end's day, the last day the range has a piece on
+  /// ([lastDayNumberOf]).
   static ({int start, int end}) wallSpanOf(DateTime start, DateTime end) {
     final from = wallMinuteOf(start);
     var to = endWallMinuteOf(end);
