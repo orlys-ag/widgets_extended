@@ -1891,6 +1891,163 @@ void main() {
         (first, at(day, 2, 45)),
       ]);
     });
+
+    testWidgets("TP52 a tap on the 01:45 row reports a range from the first "
+        "01:45 to the second 01:00, where the first pass ends", (tester) async {
+      final day = longDayStart;
+      final shown = Shown.day(day);
+      final harness = Harness(storeOf(const <CalendarEntry<String>>[]), shown);
+      await harness.pump(tester);
+      await tester.tapAt(slotRect(tester, shown, day, 105).center);
+      await tester.pumpAndSettle();
+      final first = day.add(const Duration(minutes: 105));
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(
+          start: first,
+          end: first.add(const Duration(minutes: 15)),
+        ),
+      ]);
+    });
+
+    testWidgets("TP55 a create drag from the 01:15 row down to the 01:45 row "
+        "ends at the second 01:00, and one from the 00:45 row ends at 02:00, "
+        "past the second pass", (tester) async {
+      final day = longDayStart;
+      final shown = Shown.day(day);
+      final harness = Harness(storeOf(const <CalendarEntry<String>>[]), shown);
+      await harness.pump(tester);
+      await createDrag(
+        tester,
+        slotRect(tester, shown, day, 75).center,
+        slotRect(tester, shown, day, 105).center,
+      );
+      await createDrag(
+        tester,
+        slotRect(tester, shown, day, 45).center,
+        slotRect(tester, shown, day, 105).center,
+      );
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(
+          start: day.add(const Duration(minutes: 75)),
+          end: day.add(const Duration(minutes: 120)),
+        ),
+        CalendarCreateRange(start: at(day, 0, 45), end: at(day, 2)),
+      ]);
+    });
+
+    testWidgets("TP56 where overlaps are forbidden, a create drag from the "
+        "01:45 row up to the 00:45 row, beside an entry in the second pass, "
+        "holds at the 01:00 row and ends at the second 01:00", (tester) async {
+      final day = longDayStart;
+      final shown = Shown.day(day);
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[
+          entryOf(
+            "later",
+            day.add(const Duration(minutes: 135)),
+            day.add(const Duration(minutes: 150)),
+          ),
+        ]),
+        shown,
+        allowsOverlaps: false,
+      );
+      await harness.pump(tester);
+      await createDrag(
+        tester,
+        slotRect(tester, shown, day, 105).center,
+        slotRect(tester, shown, day, 45).center,
+      );
+      // A start before 01:00 would end the range at 02:00, over the entry.
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(
+          start: day.add(const Duration(minutes: 60)),
+          end: day.add(const Duration(minutes: 120)),
+        ),
+      ]);
+    });
+
+    testWidgets("TP57 where overlaps are forbidden, a create drag from the "
+        "01:15 row down to the 01:45 row, before an entry from the second "
+        "01:00, reaches the 01:45 row and ends at the second 01:00", (
+      tester,
+    ) async {
+      final day = longDayStart;
+      final shown = Shown.day(day);
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[
+          entryOf(
+            "later",
+            day.add(const Duration(minutes: 120)),
+            day.add(const Duration(minutes: 135)),
+          ),
+        ]),
+        shown,
+        allowsOverlaps: false,
+      );
+      await harness.pump(tester);
+      await createDrag(
+        tester,
+        slotRect(tester, shown, day, 75).center,
+        slotRect(tester, shown, day, 105).center,
+      );
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(
+          start: day.add(const Duration(minutes: 75)),
+          end: day.add(const Duration(minutes: 120)),
+        ),
+      ]);
+    });
+
+    testWidgets("TP58 in Day, the first 01:00 to the first 01:30 with its end "
+        "edge dragged down two slots requests an end at the second 01:00", (
+      tester,
+    ) async {
+      final day = longDayStart;
+      final shown = Shown.day(day);
+      final first = day.add(const Duration(minutes: 60));
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("task", first, first.add(const Duration(minutes: 30))),
+        ]),
+        shown,
+        recordsMoves: true,
+      );
+      await harness.pump(tester);
+      final block = blockFinder("task", day);
+      final slot = slotRect(tester, shown, day, 0).height;
+      await selectBlock(tester, block);
+      await resizeEnd(tester, block, Offset(0.0, 2 * slot + 2.0));
+      expect(timesOf(harness.moves), <(DateTime, DateTime)>[
+        (first, first.add(const Duration(minutes: 60))),
+      ]);
+    });
+
+    testWidgets("TP59 in Day under 01:30-24:00, a 30-minute entry dropped on "
+        "the 01:30 row, which ends at the second 01:00 and draws to the 02:00 "
+        "row, is requested", (tester) async {
+      final day = longDayStart;
+      final shown = Shown.day(day, hours: CalendarDayHours(90, minutesPerDay));
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("task", at(day, 5), at(day, 5, 30)),
+        ]),
+        shown,
+        recordsMoves: true,
+      );
+      await harness.pump(tester);
+      final from = tester.getRect(blockFinder("task", day)).topLeft;
+      await moveBlock(
+        tester,
+        blockFinder("task", day),
+        slotRect(tester, shown, day, 90).topLeft -
+            from +
+            const Offset(0.0, 2.0),
+      );
+      final first = day.add(const Duration(minutes: 90));
+      expect(timesOf(harness.moves), <(DateTime, DateTime)>[
+        (first, first.add(const Duration(minutes: 30))),
+      ]);
+    });
   });
 
   group("the hours' edges", () {
@@ -2387,6 +2544,116 @@ void main() {
         await resizeEnd(tester, block, Offset(0.0, -slot - 2.0));
         expect(timesOf(harness.moves), <(DateTime, DateTime)>[
           (first, laterMidnight),
+        ]);
+      });
+
+      testWidgets("TP53 in Day, a tap on the 00:45 row reports a range from "
+          "the first 00:45 to the later 00:00, where the first pass ends", (
+        tester,
+      ) async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final shown = Shown.day(day);
+        final harness = Harness(
+          storeOf(const <CalendarEntry<String>>[]),
+          shown,
+        );
+        await harness.pump(tester);
+        await tester.tapAt(slotRect(tester, shown, day, 45).center);
+        await tester.pumpAndSettle();
+        expect(harness.creates, <CalendarCreateRange>[
+          CalendarCreateRange(
+            start: day.add(const Duration(minutes: 45)),
+            end: laterMidnight,
+          ),
+        ]);
+      });
+    },
+  );
+
+  group(
+    "on the day whose clock repeats its last hour",
+    skip: repeatedLastHourSkip,
+    () {
+      testWidgets("TP50 in Week and in Day, the first 23:30 to the second "
+          "23:30 draws to the day's 24:00 and holds its end grip there", (
+        tester,
+      ) async {
+        final day = longDayStart;
+        expectRepeatedLastHour(day);
+        final first = day.add(const Duration(minutes: 23 * 60 + 30));
+        for (final shown in <Shown>[
+          Shown.week(addDays(day, -6)),
+          Shown.day(day),
+        ]) {
+          await Harness(
+            storeOf(<CalendarEntry<String>>[
+              entryOf("folds", first, first.add(const Duration(hours: 1))),
+            ]),
+            shown,
+          ).pump(tester);
+          final block = blockFinder("folds", day);
+          expect(
+            tester.getRect(block).bottom,
+            moreOrLessEquals(slotRect(tester, shown, day, 23 * 60 + 45).bottom),
+            reason: shown.name,
+          );
+          await selectBlock(tester, block);
+          expect(
+            find.descendant(
+              of: block,
+              matching: find.byKey(blockGripKey("folds", AxisDirection.down)),
+            ),
+            findsOneWidget,
+            reason: shown.name,
+          );
+        }
+      });
+
+      testWidgets("TP51 in Day, the first 23:30 to the second 23:30 with its "
+          "end edge dragged up a slot requests an end at the first 23:45", (
+        tester,
+      ) async {
+        final day = longDayStart;
+        expectRepeatedLastHour(day);
+        final shown = Shown.day(day);
+        final first = day.add(const Duration(minutes: 23 * 60 + 30));
+        final harness = Harness(
+          storeOf(<CalendarEntry<String>>[
+            entryOf("folds", first, first.add(const Duration(hours: 1))),
+          ]),
+          shown,
+          recordsMoves: true,
+        );
+        await harness.pump(tester);
+        final block = blockFinder("folds", day);
+        final slot = slotRect(tester, shown, day, 0).height;
+        await selectBlock(tester, block);
+        await resizeEnd(tester, block, Offset(0.0, -slot - 2.0));
+        expect(timesOf(harness.moves), <(DateTime, DateTime)>[
+          (first, first.add(const Duration(minutes: 15))),
+        ]);
+      });
+
+      testWidgets("TP54 in Day, a tap on the 23:45 row reports a range from "
+          "the first 23:45 to the later 23:00, where the first pass ends", (
+        tester,
+      ) async {
+        final day = longDayStart;
+        expectRepeatedLastHour(day);
+        final shown = Shown.day(day);
+        final harness = Harness(
+          storeOf(const <CalendarEntry<String>>[]),
+          shown,
+        );
+        await harness.pump(tester);
+        await tester.tapAt(slotRect(tester, shown, day, 23 * 60 + 45).center);
+        await tester.pumpAndSettle();
+        expect(harness.creates, <CalendarCreateRange>[
+          CalendarCreateRange(
+            start: day.add(const Duration(minutes: 23 * 60 + 45)),
+            end: laterLastHour,
+          ),
         ]);
       });
     },

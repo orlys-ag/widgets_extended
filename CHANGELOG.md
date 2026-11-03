@@ -66,6 +66,19 @@ end's own wall time, as at the later 00:00 and for an end in a repeated
 hour whose wall time is not after the start's, dragging the edge moves the
 end by the minutes dragged wherever the entry then still ends at the edge,
 so dragging it up shortens the entry.
+On a day whose clock repeats an hour, a range from the hour's first pass
+to the minute the hour ends ends with that pass, as the clock goes back: a
+tap on the hour's last slot, a create drag or an end resize to that edge,
+and `CalendarEditRules.firstSlot` give the slot's own minutes, so a tap on
+New York's 01:45 slot gives 15 minutes, not 75, while a range to that edge
+from before the hour still runs through the second pass. Where the clock
+goes back from 24:00 to 23:00, as Santiago's does in April, Week and Day draw
+an entry from the first 23:00 hour to a time in the second that is not
+after its start to the day's 24:00, where its block holds its end grip.
+`CalendarDayHours.holdsTimes` and `CalendarHoursException.endOutside` read
+an end in a repeated hour whose wall time is not after the start's where
+Week and Day draw it, so such an entry lies inside hours that start in the
+repeated hour.
 - `package:widgets_extended/widgets_extended.dart` exports the calendar,
 so an app that also imports a library declaring one of its names, as
 `syncfusion_flutter_calendar` declares `CalendarController`,

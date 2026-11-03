@@ -304,6 +304,62 @@ void main() {
         }
       }
     });
+
+    test("DT23 a range from the first pass ends at 02:00 where the first pass "
+        "ends, the second 01:00, and a range from any other start where "
+        "endAtWallMinute ends it", () {
+      final day = dayNumber(longDayStart) * minutesPerDay;
+      final firstOne = longDayStart.add(const Duration(hours: 1));
+      final secondOne = firstOne.add(const Duration(hours: 1));
+      final first15 = firstOne.add(const Duration(minutes: 15));
+      final first45 = firstOne.add(const Duration(minutes: 45));
+      expect(rangeEndAtWallMinute(first45, day + 120), secondOne);
+      expect(
+        rangeEndAtWallMinute(first15, day + 120, from: first15),
+        secondOne,
+      );
+      expect(firstReadableSlot(longDayStart, 105, minutesPerDay, 15), (
+        start: first45,
+        end: secondOne,
+      ));
+      expect(lastWallMinuteNotAfter(secondOne, start: first15), day + 120);
+      // Guard: red when every range to 02:00 ends with the first pass.
+      expect(
+        rangeEndAtWallMinute(at(longDayStart, 0, 45), day + 120),
+        at(longDayStart, 2),
+      );
+      // Guard: red when an end past 02:00 stays in the first pass.
+      expect(
+        rangeEndAtWallMinute(
+          firstOne.add(const Duration(minutes: 30)),
+          day + 135,
+        ),
+        at(longDayStart, 2, 15),
+      );
+    });
+
+    test("DT24 the hours read an end in the second pass, not after the "
+        "start's time, where its span ends", () {
+      final firstHalf = longDayStart.add(const Duration(minutes: 90));
+      final secondOne = longDayStart.add(const Duration(hours: 2));
+      // Drawn from 01:30 to 02:00, the start plus its 30 minutes.
+      expect(hoursEndMinuteOf(firstHalf, secondOne), 120);
+      expect(
+        CalendarDayHours(
+          90,
+          minutesPerDay,
+        ).holdsTimes(firstHalf, secondOne, isAllDay: false),
+        isTrue,
+      );
+      // Red when the hours read the end at its own 01:00.
+      expect(
+        CalendarDayHours(
+          30,
+          100,
+        ).holdsTimes(firstHalf, secondOne, isAllDay: false),
+        isFalse,
+      );
+    });
   });
 
   group(
@@ -426,6 +482,71 @@ void main() {
         final span = wallSpanOf(at(before, 23), laterMidnight);
         expect(pieceOn(span, dayNumber(day)), (start: 0, end: 60));
       });
+
+      test("DT25 a range from the first pass ends at 01:00 where the first "
+          "pass ends, the later 00:00, and one from the day before at the "
+          "01:00 after the second pass", () {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final before = DateTime(day.year, day.month, day.day - 1);
+        final wall = dayNumber(day) * minutesPerDay;
+        final first45 = day.add(const Duration(minutes: 45));
+        expect(rangeEndAtWallMinute(first45, wall + 60), laterMidnight);
+        expect(firstReadableSlot(day, 45, minutesPerDay, 15), (
+          start: first45,
+          end: laterMidnight,
+        ));
+        // Guard: red when every range to 01:00 ends with the first pass.
+        expect(rangeEndAtWallMinute(at(before, 23, 45), wall + 60), at(day, 1));
+      });
+    },
+  );
+
+  group(
+    "on the day whose clock repeats its last hour",
+    skip: repeatedLastHourSkip,
+    () {
+      test("DT26 the first 23:30 to the second 23:30 spans to the day's "
+          "24:00, the end of its last day, where the hours read its end", () {
+        final day = longDayStart;
+        expectRepeatedLastHour(day);
+        final wall = dayNumber(day) * minutesPerDay;
+        final first = day.add(const Duration(minutes: 23 * 60 + 30));
+        final second = laterLastHour.add(const Duration(minutes: 30));
+        // Setup sanity: the second reads 23:30 of the day, an hour on.
+        expect(
+          (second.difference(first), second.day, second.hour, second.minute),
+          (const Duration(hours: 1), day.day, 23, 30),
+        );
+        expect(wallSpanOf(first, second), (
+          start: wall + 1410,
+          end: wall + minutesPerDay,
+        ));
+        expect(hoursEndMinuteOf(first, second), minutesPerDay);
+        expect(
+          CalendarDayHours.allDay.holdsTimes(first, second, isAllDay: false),
+          isTrue,
+        );
+      });
+
+      test("DT27 a range from the first pass ends at 24:00 where the first "
+          "pass ends, the later 23:00, and one from 22:45 at the next day's "
+          "start", () {
+        final day = longDayStart;
+        expectRepeatedLastHour(day);
+        final next = dayNumber(day) * minutesPerDay + minutesPerDay;
+        final first45 = day.add(const Duration(minutes: 23 * 60 + 45));
+        expect(rangeEndAtWallMinute(first45, next), laterLastHour);
+        expect(firstReadableSlot(day, 1425, minutesPerDay, 15), (
+          start: first45,
+          end: laterLastHour,
+        ));
+        // Guard: red when every range to 24:00 ends with the first pass.
+        expect(
+          rangeEndAtWallMinute(at(day, 22, 45), next),
+          DateTime(day.year, day.month, day.day + 1),
+        );
+      });
     },
   );
 
@@ -467,6 +588,36 @@ void main() {
           ),
         );
       }
+    }
+  });
+
+  test("DST4 the last-hour tests' reasons name the Santiago script, and skip "
+      "exactly where the zone's 25-hour day does not change the hour from "
+      "23:00", () {
+    expect(
+      dstSkipReason("25-hour day", tuesday, 23, lastHour, run: santiagoRun),
+      isNull,
+    );
+    expect(
+      dstSkipReason("25-hour day", tuesday, 1, lastHour, run: santiagoRun),
+      allOf(
+        contains("from 1, not 23"),
+        contains("America/Santiago"),
+        contains("tool/test_calendar_in_santiago.sh"),
+      ),
+    );
+    // In the zone the tests run in: the null branch in America/Santiago and
+    // the other in America/New_York.
+    final reason = repeatedLastHourSkip;
+    expect(reason == null, longDay?.hour == lastHour, reason: "$longDay");
+    if (reason != null) {
+      expect(
+        reason,
+        allOf(
+          contains("America/Santiago"),
+          contains("tool/test_calendar_in_santiago.sh"),
+        ),
+      );
     }
   });
 

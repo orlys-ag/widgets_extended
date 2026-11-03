@@ -102,8 +102,9 @@ final class CalendarHoursException extends CalendarStoreException {
   /// Whether [hours] do not hold [end]'s minute of its last day as an end
   /// ([CalendarDayHours.holdsEnd], [CalendarDates.endMinuteOfDay]), the end
   /// read as [CalendarDayHours.holdsTimes] reads it, so an end at the later
-  /// 00:00 of a day whose clock repeats its midnight lies where Week and
-  /// Day draw it.
+  /// 00:00 of a day whose clock repeats its midnight, and one in a repeated
+  /// stretch's second pass whose time is not after the start's, lie where
+  /// Week and Day draw them.
   bool get endOutside {
     return !hours.holdsEnd(hoursEndMinuteOf(start, end));
   }
