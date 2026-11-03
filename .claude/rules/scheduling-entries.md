@@ -1,19 +1,21 @@
 ---
 paths:
-  - "lib/calendar/entries/*.dart"
-  - "lib/calendar/entries/**/*.dart"
+  - "lib/scheduling/entries/*.dart"
+  - "lib/scheduling/entries/**/*.dart"
 ---
 
-# calendar architecture: entries
+# scheduling architecture: entries
 
-The contract of `CalendarEntry<T>` and the data-source contract. The conventions every layer follows are in `calendar.md`.
+The contract of `CalendarEntry<T>`, `CalendarCreateRange` and the data-source contract. The layer's imports are in `scheduling.md`'s table, and the conventions every layer follows in `scheduling.md` and `shared-calendar-conventions.md`.
 
-- **Imports**: `dart:ui` for `Color`, and of Flutter only
-  `package:flutter/foundation.dart`.
 - **`CalendarEntry<T>`** is immutable: an id, its start and end, whether
   it is all-day, a title, a colour and a payload of the host's type `T`;
   its constructor throws an `ArgumentError` for a time it does not take, in
   every build. An id names one entry in a store.
+- **`CalendarCreateRange`** is the range of time a create gesture picks,
+  all-day or timed; its constructor throws an `ArgumentError`, in every
+  build, naming the first of `CalendarEntry`'s time rules its times break,
+  in `CalendarEntry`'s order, so an entry of its times constructs.
 - **The data-source contract**: asynchronous reads of the entries covering a
   range of days, and writes that create, replace or delete one entry. A read
   or write completes with what it stored, or fails with an error.

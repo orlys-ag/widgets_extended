@@ -1,17 +1,18 @@
 ---
 paths:
-  - "lib/calendar/policy/*.dart"
-  - "lib/calendar/policy/**/*.dart"
+  - "lib/scheduling/policy/*.dart"
+  - "lib/scheduling/policy/**/*.dart"
 ---
 
-# calendar architecture: policy
+# scheduling architecture: policy
 
-The contract of the rules that limit edits. The conventions every layer follows are in `calendar.md`.
+The contract of the rules that limit edits. The layer's imports are in `scheduling.md`'s table, and the conventions every layer follows in `scheduling.md` and `shared-calendar-conventions.md`.
 
-- **Imports**: of Flutter, only `package:flutter/foundation.dart`.
 - **Stateless answers.** A policy answers from the entries, the times and
   the boundary it is given, and holds no store and no widget.
-- **The overlap rule** decides whether two entries share time.
+- **The overlap rule** decides whether two entries share time. It is the
+  statics of `NoOverlapsPolicy`: `timesOverlap`, `rangeSharesTime` and
+  `entriesShareTime`.
 - **Combined policies.** `CalendarEditPolicy.all` allows only what each of
   its policies allows: each answer is the strictest of theirs.
 - **Single-purpose policies.** `DayLimitPolicy` limits only the days a

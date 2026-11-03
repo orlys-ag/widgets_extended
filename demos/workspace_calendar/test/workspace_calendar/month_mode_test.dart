@@ -13,7 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board_controller.dart'
     show BoardControllerInternals;
 import 'package:widgets_extended/widgets_extended.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart'
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart'
     show parseIsoDate;
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';

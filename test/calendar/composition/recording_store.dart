@@ -3,7 +3,7 @@
 library;
 
 import 'package:flutter/scheduler.dart';
-import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 
 typedef DayRange = ({DateTime first, DateTime last});
 

@@ -1,14 +1,13 @@
 ---
 paths:
-  - "lib/calendar/store/*.dart"
-  - "lib/calendar/store/**/*.dart"
+  - "lib/scheduling/store/*.dart"
+  - "lib/scheduling/store/**/*.dart"
 ---
 
-# calendar architecture: store
+# scheduling architecture: store
 
-The contract of `CalendarStore` and its two stores. The conventions every layer follows are in `calendar.md`.
+The contract of `CalendarStore` and its two stores. The layer's imports are in `scheduling.md`'s table, and the conventions every layer follows in `scheduling.md` and `shared-calendar-conventions.md`.
 
-- **Imports**: of Flutter, only `package:flutter/foundation.dart`.
 - **`CalendarStore`** is listenable, and answers the entries covering a
   range, the load state of the range the calendar shows, and writes.
 - **Hours.** The store holds the calendar's one copy of its hours, which

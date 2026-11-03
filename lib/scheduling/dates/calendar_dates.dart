@@ -10,8 +10,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
-/// The calendar's civil-date helpers and constants, on the local wall
-/// clock: the day steps, day numbers and minutes that [CalendarDayHours],
+/// The scheduling module's civil-date helpers and constants, on the local
+/// wall clock, which the calendar counts days and minutes with: the day
+/// steps, day numbers and minutes that [CalendarDayHours],
 /// [CalendarWeekdaySet], a `CalendarDataSource`'s reads by days and a
 /// `CalendarEntry`'s times are counted in.
 ///

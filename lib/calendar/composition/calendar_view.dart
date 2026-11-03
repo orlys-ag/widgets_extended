@@ -10,14 +10,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
-import '../dates/calendar_dates.dart';
-import '../entries/calendar_entry.dart';
-import '../policy/edit_policy.dart';
-import '../policy/edit_rules.dart';
+import '../../scheduling/scheduling.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
-import '../store/calendar_store.dart';
 import '../views/day_list.dart';
 import '../views/month_board.dart';
 import '../views/month_picker.dart';

@@ -8,7 +8,7 @@ import 'dart:ui' show Color;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/scheduling/scheduling.dart';
 
 /// The error a test fails a data-source call with.
 class SourceFailure implements Exception {

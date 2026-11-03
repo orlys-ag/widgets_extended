@@ -1,9 +1,9 @@
-/// The calendar's dates: the month grid and the shown days over some of
-/// the weekdays, the weekday set, and the hours of a day.
+/// The scheduling module's dates: the month grid and the shown days over
+/// some of the weekdays, the weekday set, and the hours of a day.
 library;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 
 /// Throws an [ArgumentError] whose name is [name].
 Matcher throwsArgumentNamed(String name) {

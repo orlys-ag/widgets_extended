@@ -3,7 +3,7 @@ library;
 
 import 'package:flutter/foundation.dart';
 
-import '../entries/calendar_entry.dart';
+import '../../scheduling/scheduling.dart';
 
 /// Which gesture landed a [CalendarMoveRequest].
 enum CalendarMoveKind {

@@ -8,11 +8,10 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
-import '../dates/calendar_dates.dart';
+import '../../scheduling/scheduling.dart';
 import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
-import '../store/calendar_store.dart';
 import '../views/day_cell.dart';
 import '../views/month_strip.dart';
 import '../views/week_strip.dart';

@@ -7,7 +7,7 @@ import 'dart:io';
 import 'dart:ui' show Color;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 
 import '../class_source.dart';
 
@@ -165,7 +165,7 @@ void main() {
   test("TR5 the CalendarCreateRange class declares no member of the day, "
       "minute and day-count time", () {
     final body = classBody(
-      File("lib/calendar/entries/calendar_entry.dart").readAsStringSync(),
+      File("lib/scheduling/entries/calendar_entry.dart").readAsStringSync(),
       "CalendarCreateRange",
     );
     bool declares(String name) {

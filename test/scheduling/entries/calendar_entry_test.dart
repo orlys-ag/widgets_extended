@@ -8,9 +8,9 @@ import 'dart:ui' show Color;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
-import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 
 import '../class_source.dart';
 import '../dst_days.dart';
@@ -331,7 +331,7 @@ void main() {
   test("ET19 the CalendarEntry class checks its times with no assert and no "
       "debug-only branch", () {
     final body = classBody(
-      File("lib/calendar/entries/calendar_entry.dart").readAsStringSync(),
+      File("lib/scheduling/entries/calendar_entry.dart").readAsStringSync(),
       "CalendarEntry",
     );
     // The search finds the checks the class does make.
@@ -364,7 +364,7 @@ void main() {
   test("ET16 the CalendarEntry class declares no member of the day, minute "
       "and day-count time", () {
     final body = classBody(
-      File("lib/calendar/entries/calendar_entry.dart").readAsStringSync(),
+      File("lib/scheduling/entries/calendar_entry.dart").readAsStringSync(),
       "CalendarEntry",
     );
     // The search finds a member the class does declare.

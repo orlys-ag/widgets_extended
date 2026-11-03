@@ -6,7 +6,7 @@
 #
 # Usage: bash tool/test_calendar_in_zone.sh <IANA zone> <Windows zone id>
 #          [flutter test arguments]
-# With no flutter test arguments it runs test/calendar.
+# With no flutter test arguments it runs test/scheduling and test/calendar.
 set -u
 
 if [ "$#" -lt 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
@@ -19,7 +19,7 @@ windows="$2"
 shift 2
 
 if [ "$#" -eq 0 ]; then
-  set -- test/calendar
+  set -- test/scheduling test/calendar
 fi
 
 if ! command -v tzutil >/dev/null 2>&1; then

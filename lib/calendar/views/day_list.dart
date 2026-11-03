@@ -15,16 +15,12 @@ import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
+import '../../scheduling/scheduling.dart';
 import '../../sliver_tree/sliver_tree.dart';
-import '../dates/calendar_dates.dart';
-import '../entries/calendar_entry.dart';
-import '../policy/edit_policy.dart';
-import '../policy/edit_rules.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
-import '../store/calendar_store.dart';
 import 'answer_builder.dart';
 
 /// The style the day list animates its rows with under [theme]: every

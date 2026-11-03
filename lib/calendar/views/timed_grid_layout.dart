@@ -9,10 +9,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
-import '../dates/calendar_dates.dart';
-import '../entries/calendar_entry.dart';
-import '../policy/edit_policy.dart';
-import '../store/calendar_store.dart';
+import '../../scheduling/scheduling.dart';
 import 'entry_split.dart';
 
 /// The all-day strip's rows shown collapsed before its count row.

@@ -14,7 +14,7 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 
 /// A day of 2026 and the wall hour its clock skips or repeats.
 typedef DstDay = ({DateTime day, int hour});

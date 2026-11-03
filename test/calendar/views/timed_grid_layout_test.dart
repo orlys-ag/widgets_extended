@@ -7,13 +7,13 @@ library;
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
-import 'package:widgets_extended/calendar/store/calendar_store.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/views/entry_split.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
-import '../dst_days.dart';
+import '../../scheduling/dst_days.dart';
 
 /// Monday, April 20 2026, the first day of the tracks the tests lay out.
 final DateTime monday = DateTime(2026, 4, 20);

@@ -6,10 +6,11 @@ paths:
 
 # calendar architecture: presentation
 
-The contract of the calendar's theme, text and builder signatures. The conventions every layer follows are in `calendar.md`.
+The contract of the calendar's theme, text and builder signatures. The conventions every layer follows are in `calendar.md` and `shared-calendar-conventions.md`.
 
 - **Imports**: of Flutter, `package:flutter/widgets.dart` and the libraries
-  below it.
+  below it; and the scheduling module, through
+  `lib/scheduling/scheduling.dart`.
 - **`CalendarThemeData`** is immutable and holds every colour, text style,
   motion duration and curve, and icon the views draw. `CalendarTheme.of`
   reads the nearest `CalendarTheme`, and the theme's built-in values where

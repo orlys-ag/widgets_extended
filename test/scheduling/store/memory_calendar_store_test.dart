@@ -6,7 +6,7 @@ import 'dart:ui' show Color;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/calendar.dart';
+import 'package:widgets_extended/scheduling/scheduling.dart';
 
 const Color taskColor = Color(0xFF3060C0);
 

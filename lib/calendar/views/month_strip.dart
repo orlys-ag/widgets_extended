@@ -9,10 +9,9 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-import '../dates/calendar_dates.dart';
+import '../../scheduling/scheduling.dart';
 import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
-import '../store/calendar_store.dart';
 import 'day_cell.dart';
 import 'week_strip.dart';
 

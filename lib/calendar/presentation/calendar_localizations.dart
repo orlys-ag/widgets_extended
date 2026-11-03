@@ -6,7 +6,7 @@ library;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
-import '../dates/calendar_dates.dart';
+import '../../scheduling/scheduling.dart';
 
 /// Every text the calendar shows or a screen reader hears: the names of the
 /// months and weekdays, the times and dates, and the views', the header's

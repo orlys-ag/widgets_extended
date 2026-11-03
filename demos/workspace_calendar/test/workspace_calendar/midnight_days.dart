@@ -2,7 +2,7 @@
 /// midnight, which the demo's midnight tests read, the reason their groups
 /// skip in a zone whose changes are at another hour, and the checks each
 /// test makes of its day first. The same scan, reasons and checks as the
-/// package's `test/calendar/dst_days.dart`, whose midnight tests these
+/// package's `test/scheduling/dst_days.dart`, whose midnight tests these
 /// mirror.
 library;
 
