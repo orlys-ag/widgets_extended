@@ -62,6 +62,22 @@ List<String> moduleFiles() {
   return files;
 }
 
+/// The file, from the package root, that [uri], a directive's URI in the
+/// file at [path], names: a relative URI resolved against [path], and a
+/// `package:widgets_extended/` URI under lib/; null for any other scheme.
+String? packageFileOf(String path, String uri) {
+  final parsed = Uri.parse(uri);
+  if (!parsed.hasScheme) {
+    return Uri.parse(path).resolve(uri).path;
+  }
+  if (parsed.scheme == "package" &&
+      parsed.pathSegments.isNotEmpty &&
+      parsed.pathSegments.first == "widgets_extended") {
+    return "lib/${parsed.pathSegments.skip(1).join("/")}";
+  }
+  return null;
+}
+
 /// The names the scheduling barrel's exports show.
 Set<String> schedulingNames() {
   return <String>{
@@ -406,10 +422,10 @@ void main() {
     final wrong = <String>[];
     for (final path in files) {
       for (final uri in directiveUris(File(path).readAsStringSync())) {
-        if (Uri.parse(uri).hasScheme) {
+        final target = packageFileOf(path, uri);
+        if (target == null) {
           continue;
         }
-        final target = Uri.parse(path).resolve(uri).path;
         if (lowerLayers.any(target.startsWith) ||
             (target.startsWith("lib/scheduling/") &&
                 target != schedulingBarrelPath)) {
