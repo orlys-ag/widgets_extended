@@ -1,13 +1,16 @@
 /// The local time zone's days of 2026 whose clock skips or repeats an hour,
 /// which the DST tests read, and the reason a DST group skips in a zone
 /// whose changes are not the ones the tests name: New York's, at 02:00 and
-/// 01:00, or for the midnight tests Havana's, which skip and repeat the
-/// hour from 00:00 ([skippedMidnightSkip], [repeatedMidnightSkip]), with
-/// the checks each midnight test makes of its day first
+/// 01:00; for the midnight tests Havana's, which skip and repeat the hour
+/// from 00:00 ([skippedMidnightSkip], [repeatedMidnightSkip]), with the
+/// checks each midnight test makes of its day first
 /// ([expectSkippedMidnight], [expectRepeatedMidnight]) and the later 00:00
-/// of the repeated midnight ([laterMidnight]); and a local time whose UTC
-/// date is another day, which the tests of a UTC time read, with the reason
-/// they skip in a zone that has none.
+/// of the repeated midnight ([laterMidnight]); and for the last-hour tests
+/// Santiago's, whose clock goes back from 24:00 to 23:00
+/// ([repeatedLastHourSkip]), with their check of the day
+/// ([expectRepeatedLastHour]) and the later 23:00 ([laterLastHour]). And a
+/// local time whose UTC date is another day, which the tests of a UTC time
+/// read, with the reason they skip in a zone that has none.
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -25,6 +28,10 @@ const int easternRepeatedHour = 1;
 /// The hour the midnight tests name as skipped and as repeated, 00:00.
 const int midnightHour = 0;
 
+/// The hour the last-hour tests name as repeated, 23:00, which a clock
+/// going back from 24:00 to 23:00 reads twice.
+const int lastHour = 23;
+
 /// How to run the DST tests whose fixtures name Eastern's changes.
 const String newYorkRun = "run with TZ=America/New_York";
 
@@ -32,6 +39,11 @@ const String newYorkRun = "run with TZ=America/New_York";
 const String havanaRun =
     "run bash tool/test_calendar_in_havana.sh, which runs them in "
     "America/Havana";
+
+/// How to run the last-hour tests, whose day is Santiago's.
+const String santiagoRun =
+    "run bash tool/test_calendar_in_santiago.sh, which runs them in "
+    "America/Santiago";
 
 /// The first day of 2026 that lasts 23 hours here, with the first hour `h`
 /// whose `DateTime(y, m, d, h, 30)` reads another hour; null where the zone
@@ -130,14 +142,26 @@ String? get repeatedMidnightSkip {
   );
 }
 
+/// [dstSkipReason] for the 25-hour day [longDay] of the last-hour tests,
+/// whose clock repeats its last hour, going back from 24:00 to 23:00.
+String? get repeatedLastHourSkip {
+  return dstSkipReason(
+    "25-hour day",
+    longDay?.day,
+    longDay?.hour,
+    lastHour,
+    run: santiagoRun,
+  );
+}
+
 /// The start of [shortDay]; only read inside a group [shortDaySkip] or
 /// [skippedMidnightSkip] runs.
 DateTime get shortDayStart {
   return shortDay!.day;
 }
 
-/// The start of [longDay]; only read inside a group [longDaySkip] or
-/// [repeatedMidnightSkip] runs.
+/// The start of [longDay]; only read inside a group [longDaySkip],
+/// [repeatedMidnightSkip] or [repeatedLastHourSkip] runs.
 DateTime get longDayStart {
   return longDay!.day;
 }
@@ -147,6 +171,32 @@ DateTime get longDayStart {
 /// runs.
 DateTime get laterMidnight {
   return longDayStart.add(const Duration(hours: 1));
+}
+
+/// The later 23:00 of [longDay], whose clock repeats its last hour: its
+/// start plus 24 hours, the instant the clock goes back from 24:00. Only
+/// read inside a group [repeatedLastHourSkip] runs.
+DateTime get laterLastHour {
+  return longDayStart.add(const Duration(hours: 24));
+}
+
+/// Checks that [day] starts a civil day of 25 hours whose clock repeats its
+/// last hour: 23 and 24 hours after it both read 23:00 of its day.
+void expectRepeatedLastHour(DateTime day) {
+  final next = DateTime(day.year, day.month, day.day + 1);
+  expect(
+    next.difference(day),
+    const Duration(hours: 25),
+    reason: "$day's day lasts 25 hours",
+  );
+  for (final hours in const <int>[23, 24]) {
+    final time = day.add(Duration(hours: hours));
+    expect(
+      (time.day, time.hour, time.minute),
+      (day.day, 23, 0),
+      reason: "$day plus $hours hours reads 23:00 of its day",
+    );
+  }
 }
 
 /// Checks that [day] starts a civil day of 23 hours whose clock skips its

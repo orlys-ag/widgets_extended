@@ -317,8 +317,9 @@ final class CalendarEditRules<T> {
   ///
   /// A slot is [slotMinutes] of wall-clock time
   /// ([CalendarDates.timeAtWallMinute]), so on a day whose clock repeats a
-  /// stretch, one from the stretch's first pass to a time after it lasts
-  /// that stretch longer.
+  /// stretch, one from the stretch's first pass to a time after the
+  /// stretch's end lasts that stretch longer, and one from the first pass
+  /// to the stretch's end ends with that pass, as the clock goes back.
   ({DateTime start, DateTime end})? firstSlot(
     CalendarEarliestStart start, {
     Iterable<CalendarEntry<T>> clearOf = const <Never>[],

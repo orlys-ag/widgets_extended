@@ -567,8 +567,11 @@ CalendarCreateRange? _createRangeOf(
   DateTime? occurrence,
 ) {
   final start = timeAtWallMinute(startWall, from: occurrence);
-  final end = endAtWallMinute(endWall, from: occurrence);
-  if (start == null || end == null || !end.isAfter(start)) {
+  if (start == null) {
+    return null;
+  }
+  final end = rangeEndAtWallMinute(start, endWall, from: occurrence);
+  if (end == null || !end.isAfter(start)) {
     return null;
   }
   return CalendarCreateRange(start: start, end: end);
@@ -3009,23 +3012,24 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// piece moves to the wall minute [wall].
   ///
   /// Where that edge is drawn at the old end's own wall minute
-  /// ([endWallMinuteOf]), it is the time of [wall], in the old end's
-  /// occurrence where the clock reads it twice ([endAtWallMinute]). Where
-  /// [wallSpanOf] draws the edge elsewhere, as for an end at the later 00:00
-  /// or one whose wall minute is not after the start's, the edge does not
-  /// show the old end's occurrence: the end moves by the minutes the edge
-  /// moved, wherever a range from [start] to that end is drawn to [wall],
-  /// and is otherwise the earlier occurrence of the time of [wall].
+  /// ([endWallMinuteOf]), it is the end of a range from [start] at [wall],
+  /// in the old end's occurrence where the clock reads it twice
+  /// ([rangeEndAtWallMinute]). Where [wallSpanOf] draws the edge
+  /// elsewhere, as for an end at the later 00:00 or one whose wall minute
+  /// is not after the start's, the edge does not show the old end's
+  /// occurrence: the end moves by the minutes the edge moved, wherever a
+  /// range from [start] to that end is drawn to [wall], and is otherwise
+  /// the end at [wall] in the earlier occurrence.
   DateTime? _endAtEdge(CalendarEntry<T> entry, DateTime start, int wall) {
     final drawn = wallSpanOf(entry.start, entry.end).end;
     if (drawn == endWallMinuteOf(entry.end)) {
-      return endAtWallMinute(wall, from: entry.end);
+      return rangeEndAtWallMinute(start, wall, from: entry.end);
     }
     final moved = entry.end.add(Duration(minutes: wall - drawn));
     if (wallSpanOf(start, moved).end == wall) {
       return moved;
     }
-    return endAtWallMinute(wall);
+    return rangeEndAtWallMinute(start, wall);
   }
 
   /// A move the board reports, from a drag or a semantics action.
@@ -4405,11 +4409,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       if (limit != null && focusWall + _tracks.slotMinutes > limit) {
         focus = _lastCellEndingBy(limit, anchor);
       }
-      final end = endAtWallMinute(
-        slotWallMinuteOf(_tracks, focus) + _tracks.slotMinutes,
-        from: occurrence,
-      );
       final start = timeAtWallMinute(anchorWall, from: occurrence);
+      final end = start == null
+          ? null
+          : rangeEndAtWallMinute(
+              start,
+              slotWallMinuteOf(_tracks, focus) + _tracks.slotMinutes,
+              from: occurrence,
+            );
       if (start != null && end != null && !_rules.coversAtMost(start, end)) {
         final held = _rules.heldToLimit(
           start,
@@ -4434,10 +4441,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       slotWallMinuteOf(_tracks, focus),
       from: occurrence,
     );
-    final end = endAtWallMinute(
-      anchorWall + _tracks.slotMinutes,
-      from: occurrence,
-    );
+    final end = start == null
+        ? null
+        : rangeEndAtWallMinute(
+            start,
+            anchorWall + _tracks.slotMinutes,
+            from: occurrence,
+          );
     if (start != null && end != null && !_rules.coversAtMost(start, end)) {
       final held = _rules.heldToLimit(
         start,
@@ -4866,36 +4876,65 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// The wall minutes next to [anchor]'s slot that a create range from it
   /// may not pass, in [occurrence]'s occurrence, which its times take
-  /// ([_reach]): the last not after the earliest start after the slot's
-  /// start ([lastWallMinuteNotAfter]), and the first not before the latest
-  /// end before its end ([firstWallMinuteNotBefore]), among the timed
-  /// entries the store shows on the grid's days; each null where there is
-  /// none.
+  /// ([_reach]): the last at which a range from the slot's start ends not
+  /// after the earliest start after it ([lastWallMinuteNotAfter]), and the
+  /// first not before the latest end before the slot's end
+  /// ([firstWallMinuteNotBefore]), among the timed entries the store shows
+  /// on the grid's days; each null where there is none.
+  ///
+  /// Where the slot is the last of the first pass of a stretch the clock
+  /// repeats, it ends with that pass, while a range to its end from a start
+  /// before the stretch ends after the second pass
+  /// ([rangeEndAtWallMinute]); where an entry shares time with that second
+  /// pass, the range's start may not pass the stretch's start.
   ({int? next, int? previous}) _conflictsAround(
     ({int row, int col}) anchor,
     DateTime? occurrence,
   ) {
     final wall = slotWallMinuteOf(_tracks, anchor);
     final start = timeAtWallMinute(wall, from: occurrence);
-    final end = endAtWallMinute(wall + _tracks.slotMinutes, from: occurrence);
     int? next;
     int? previous;
-    if (start == null || end == null) {
+    if (start == null) {
       return (next: next, previous: previous);
     }
+    final endWall = wall + _tracks.slotMinutes;
+    final end = rangeEndAtWallMinute(start, endWall, from: occurrence);
+    if (end == null) {
+      return (next: next, previous: previous);
+    }
+    final passEnd = endAtWallMinute(endWall, from: occurrence);
+    final secondPass = passEnd != null && passEnd.isAfter(end)
+        ? (start: end, end: passEnd)
+        : null;
+    var holdsInPass = false;
     for (final shown in _shownBetween(widget.firstDay, _lastDay)) {
       final entry = shown.entry;
       if (entry.isAllDay) {
         continue;
       }
       if (entry.start.isAfter(start)) {
-        final at = lastWallMinuteNotAfter(entry.start, from: occurrence);
+        final at = lastWallMinuteNotAfter(
+          entry.start,
+          from: occurrence,
+          start: start,
+        );
         next = next == null ? at : math.min(next, at);
       }
       if (entry.end.isBefore(end)) {
         final at = firstWallMinuteNotBefore(entry.end, from: occurrence);
         previous = previous == null ? at : math.max(previous, at);
       }
+      if (secondPass != null &&
+          rangeSharesTime(secondPass.start, secondPass.end, entry)) {
+        holdsInPass = true;
+      }
+    }
+    if (holdsInPass) {
+      // The first pass ends at the instant the clock goes back, which
+      // reads the stretch's start.
+      final at = wallMinuteOf(end);
+      previous = previous == null ? at : math.max(previous, at);
     }
     return (next: next, previous: previous);
   }

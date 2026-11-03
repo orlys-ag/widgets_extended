@@ -35,20 +35,23 @@ flutter analyze lib test                                  # the package
 (cd demos/workspace_calendar && flutter analyze)
 
 # The calendar's tests, then the demo's, in America/Havana, whose clock skips
-# its midnight hour on 2026-03-08 and repeats it on 2026-11-01. On Windows
-# the script switches the system zone until it exits, so run nothing else
-# meanwhile.
+# its midnight hour on 2026-03-08 and repeats it on 2026-11-01, and in
+# America/Santiago, whose clock goes back from 24:00 to 23:00 on 2026-04-04.
+# On Windows each script switches the system zone until it exits, and refuses
+# to start while another holds it, so run nothing else meanwhile.
 bash tool/test_calendar_in_havana.sh
 (cd demos/workspace_calendar && bash ../../tool/test_calendar_in_havana.sh test)
+bash tool/test_calendar_in_santiago.sh
+(cd demos/workspace_calendar && bash ../../tool/test_calendar_in_santiago.sh test)
 ```
 
 - After a behaviour change under `lib/`, also run the demo's tests and
   analyzer, and the examples' when `examples/pubspec.yaml` exists: they can
   fail where `test/` passes.
-- After a change under `lib/calendar/`, also run both Havana commands; after
-  one under `test/calendar/` or `demos/workspace_calendar/`, the one for that
-  suite. The demo's runs its whole suite: any of its tests, not only its
-  midnight ones, can assume a midnight the clock skips.
+- After a change under `lib/calendar/`, also run the four zone commands;
+  after one under `test/calendar/` or `demos/workspace_calendar/`, the Havana
+  and Santiago ones for that suite. The demo's run its whole suite: any of its
+  tests, not only its DST ones, can assume a clock these zones do not keep.
 - `flutter analyze lib test` and the demo's `flutter analyze` report no issues;
   keep it that way. A plain `flutter analyze` at the root also analyzes
   `examples/`, where neither command reports zero problems, so there compare
