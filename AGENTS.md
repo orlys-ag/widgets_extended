@@ -33,11 +33,22 @@ flutter analyze lib test                                  # the package
 # demos/workspace_calendar/: the tracked demo app, on the library by path.
 (cd demos/workspace_calendar && flutter test)
 (cd demos/workspace_calendar && flutter analyze)
+
+# The calendar's tests, then the demo's, in America/Havana, whose clock skips
+# its midnight hour on 2026-03-08 and repeats it on 2026-11-01. On Windows
+# the script switches the system zone until it exits, so run nothing else
+# meanwhile.
+bash tool/test_calendar_in_havana.sh
+(cd demos/workspace_calendar && bash ../../tool/test_calendar_in_havana.sh test)
 ```
 
 - After a behaviour change under `lib/`, also run the demo's tests and
   analyzer, and the examples' when `examples/pubspec.yaml` exists: they can
   fail where `test/` passes.
+- After a change under `lib/calendar/`, also run both Havana commands; after
+  one under `test/calendar/` or `demos/workspace_calendar/`, the one for that
+  suite. The demo's runs its whole suite: any of its tests, not only its
+  midnight ones, can assume a midnight the clock skips.
 - `flutter analyze lib test` and the demo's `flutter analyze` report no issues;
   keep it that way. A plain `flutter analyze` at the root also analyzes
   `examples/`, where neither command reports zero problems, so there compare

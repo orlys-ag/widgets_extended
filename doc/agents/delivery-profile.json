@@ -172,6 +172,20 @@
       "scope": "step"
     },
     {
+      "name": "demo-havana",
+      "command": "(cd demos/workspace_calendar && bash ../../tool/test_calendar_in_havana.sh test)",
+      "pass": "it prints All tests passed!, and where tzutil exists, MSYS_NO_PATHCONV=1 tzutil /g run afterwards prints the zone it printed before the command. It runs the demo's whole suite in the zone of the calendar-havana gate's script, since any of its tests, not only its midnight ones, can assume a midnight the clock skips.",
+      "when": {
+        "paths": [
+          "^lib/calendar/",
+          "^demos/workspace_calendar/",
+          "^pubspec\\.yaml$",
+          "^tool/test_calendar_in_havana\\.sh$"
+        ]
+      },
+      "scope": "step"
+    },
+    {
       "name": "delivery-harness",
       "command": "node .claude/workflows/feature-delivery.harness.mjs",
       "pass": "0 failed",
