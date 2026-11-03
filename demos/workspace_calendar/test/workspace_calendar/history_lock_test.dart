@@ -7,8 +7,6 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart'
-    show isoDate;
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
@@ -569,7 +567,7 @@ void main() {
     await pickMode(tester, "Month");
     Future<void> longPress(DateTime day) async {
       final cell = tester.getRect(
-        find.byKey(ValueKey<String>("month-day-${isoDate(day)}")),
+        find.byKey(ValueKey<String>("month-day-${CalendarDates.isoDate(day)}")),
       );
       await tester.longPressAt(Offset(cell.center.dx, cell.bottom - 4.0));
       await tester.pumpAndSettle();

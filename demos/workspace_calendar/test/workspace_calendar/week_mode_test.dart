@@ -5,8 +5,6 @@ library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:widgets_extended/widgets_extended.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart'
-    show daysBetween;
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
@@ -278,7 +276,9 @@ void main() {
       }
       placed++;
       final start = startOfJson(item);
-      final col = colOf(daysBetween(monday, CalendarDates.dateOnly(start)));
+      final col = colOf(
+        CalendarDates.daysBetween(monday, CalendarDates.dateOnly(start)),
+      );
       final first = cellRect(
         tester,
         rowOf(CalendarDates.minuteOfDay(start)),

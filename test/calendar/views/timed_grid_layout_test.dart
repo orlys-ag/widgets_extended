@@ -7,13 +7,13 @@ library;
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
-import 'package:widgets_extended/calendar/store/calendar_store.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/views/entry_split.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
-import '../dst_days.dart';
+import '../../scheduling/dst_days.dart';
 
 /// Monday, April 20 2026, the first day of the tracks the tests lay out.
 final DateTime monday = DateTime(2026, 4, 20);
@@ -23,9 +23,9 @@ DateTime dayAfterMonday(int offset) {
   return DateTime(monday.year, monday.month, monday.day + offset);
 }
 
-/// The [dayNumber] of the [offset]th day after [monday].
+/// The [CalendarDates.dayNumber] of the [offset]th day after [monday].
 int dayFromMonday(int offset) {
-  return dayNumber(dayAfterMonday(offset));
+  return CalendarDates.dayNumber(dayAfterMonday(offset));
 }
 
 /// [day] at [hour] and [minute] by the wall clock.
@@ -84,7 +84,7 @@ CalendarShownEntry<String> allDayOf(
 /// The week from [monday] with a column for each workday, in [hours], or
 /// with none in office hours.
 GridTracks workweek({
-  int slotMinutes = defaultSlotMinutes,
+  int slotMinutes = CalendarDates.defaultSlotMinutes,
   int firstSlotRow = 1,
   CalendarDayHours? hours,
   CalendarWeekdaySet weekdays = CalendarWeekdaySet.workweek,
@@ -295,7 +295,7 @@ void main() {
       final day = longDayStart;
       final layout = TimedGridLayout<String>.of(<CalendarShownEntry<String>>[
         shownOf("repeated", at(day, 10), at(day, 11)),
-      ], GridTracks(firstDay: dayNumber(day), dayCount: 1));
+      ], GridTracks(firstDay: CalendarDates.dayNumber(day), dayCount: 1));
       expect(layout.pieces, hasLength(1));
       expect(layout.loose?.ids, <String>{"repeated"});
     });
@@ -349,7 +349,7 @@ void main() {
         final layout = TimedGridLayout<String>.of(<CalendarShownEntry<String>>[
           early,
           night,
-        ], GridTracks(firstDay: dayNumber(before), dayCount: 2));
+        ], GridTracks(firstDay: CalendarDates.dayNumber(before), dayCount: 2));
         expect(
           <GridPiece<String>>[
             for (final piece in layout.pieces)
@@ -358,7 +358,7 @@ void main() {
           <GridPiece<String>>[
             GridPiece<String>(
               shown: early,
-              day: dayNumber(day),
+              day: CalendarDates.dayNumber(day),
               start: 60,
               end: 120,
               first: true,
@@ -370,7 +370,8 @@ void main() {
         // Guard: red when a piece starts at its day's first minute the
         // clock reads.
         final nightOnDay = layout.pieces.singleWhere((piece) {
-          return piece.shown == night && piece.day == dayNumber(day);
+          return piece.shown == night &&
+              piece.day == CalendarDates.dayNumber(day);
         });
         expect((nightOnDay.start, nightOnDay.end), (0, 120));
       });
@@ -390,11 +391,11 @@ void main() {
         final late = shownOf("late", at(before, 23), laterMidnight);
         final layout = TimedGridLayout<String>.of(<CalendarShownEntry<String>>[
           late,
-        ], GridTracks(firstDay: dayNumber(before), dayCount: 2));
+        ], GridTracks(firstDay: CalendarDates.dayNumber(before), dayCount: 2));
         expect(layout.pieces, <GridPiece<String>>[
           GridPiece<String>(
             shown: late,
-            day: dayNumber(before),
+            day: CalendarDates.dayNumber(before),
             start: 1380,
             end: 1440,
             first: true,
@@ -403,7 +404,7 @@ void main() {
           ),
           GridPiece<String>(
             shown: late,
-            day: dayNumber(day),
+            day: CalendarDates.dayNumber(day),
             start: 0,
             end: 60,
             first: false,

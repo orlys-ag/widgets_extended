@@ -9,8 +9,8 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
@@ -49,7 +49,7 @@ DayRange gridRange(
   DateTime day, {
   CalendarWeekdaySet weekdays = CalendarWeekdaySet.all,
 }) {
-  final grid = MonthGrid.of(day, weekdays: weekdays);
+  final grid = CalendarMonthGrid.of(day, weekdays: weekdays);
   return (first: grid.firstDay, last: grid.lastDay);
 }
 
@@ -279,7 +279,10 @@ void main() {
       weekdays: CalendarWeekdaySet.workweek,
     );
     notifies.clear();
-    final shown = shownDayNear(saturday, CalendarWeekdaySet.workweek);
+    final shown = CalendarDates.shownDayNear(
+      saturday,
+      CalendarWeekdaySet.workweek,
+    );
     expect(shown, DateTime(2026, 4, 27));
     controller.selectedDay = saturday;
     expect(controller.selectedDay, shown);

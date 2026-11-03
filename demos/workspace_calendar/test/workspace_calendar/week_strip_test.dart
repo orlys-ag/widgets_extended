@@ -8,8 +8,6 @@ import 'dart:ui' show Tristate;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:widgets_extended/widgets_extended.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart'
-    show daysBetween;
 import 'package:workspace_calendar/workspace_calendar/calendar_api_source.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
@@ -415,7 +413,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     final days = stripDays(tester);
-    expect(daysBetween(april(20), days.first), greaterThan(2));
+    expect(CalendarDates.daysBetween(april(20), days.first), greaterThan(2));
     expect(
       tester.getRect(stripDay(days.first)).left,
       moreOrLessEquals(strip.left),

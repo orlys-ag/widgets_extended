@@ -14,8 +14,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/calendar/views/entry_split.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
@@ -80,9 +80,13 @@ List<CalendarEntry<String>> monthOfEntries() {
     final number = day.day;
     final kind = k % 10;
     if (kind == 0 && number < 30) {
-      entries.add(entryOf("n$k", at(day, 22), at(addDays(day, 1), 1)));
+      entries.add(
+        entryOf("n$k", at(day, 22), at(CalendarDates.addDays(day, 1), 1)),
+      );
     } else if (kind == 1 && number <= 18) {
-      entries.add(entryOf("m$k", at(day, 20), at(addDays(day, 2), 2)));
+      entries.add(
+        entryOf("m$k", at(day, 20), at(CalendarDates.addDays(day, 2), 2)),
+      );
     } else if (number < 21 || number > 24) {
       final start = 13 * 60 + (k * 7) % 480;
       entries.add(
@@ -210,7 +214,7 @@ void main() {
     resetCounts();
     final free = store.storedEntry("free")!;
     store.requestMove(
-      free.copyWith(start: saturday, end: addDays(saturday, 1)),
+      free.copyWith(start: saturday, end: CalendarDates.addDays(saturday, 1)),
     );
     await tester.pumpAndSettle();
     expect(counts(), (1, 1), reason: "a store write");
@@ -325,7 +329,7 @@ void main() {
     resetCounts();
     final free = store.storedEntry("free")!;
     store.requestMove(
-      free.copyWith(start: saturday, end: addDays(saturday, 1)),
+      free.copyWith(start: saturday, end: CalendarDates.addDays(saturday, 1)),
     );
     await tester.pumpAndSettle();
     expect(debugEntrySplitCount, 1, reason: "a store write");

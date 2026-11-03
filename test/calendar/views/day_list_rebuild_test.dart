@@ -7,18 +7,16 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
-import 'package:widgets_extended/calendar/policy/edit_policy.dart';
-import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
+import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_localizations.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
-import 'package:widgets_extended/calendar/store/calendar_store.dart';
-import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
-import 'package:widgets_extended/calendar/views/timed_grid.dart'
-    show CalendarCreateRange;
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart'
     show SyncedSliverTree, TreeAnimationStyle;
 
@@ -30,10 +28,10 @@ DateTime at(DateTime day, int hour, [int minute = 0, int second = 0]) {
   return DateTime(day.year, day.month, day.day, hour, minute, second);
 }
 
-/// The id of [day]'s entry [k], which ends in the day's [isoDate], as the
-/// key of each of its rows does.
+/// The id of [day]'s entry [k], which ends in the day's
+/// [CalendarDates.isoDate], as the key of each of its rows does.
 String idOn(DateTime day, int k) {
-  return "$k@${isoDate(day)}";
+  return "$k@${CalendarDates.isoDate(day)}";
 }
 
 /// Three entries on each of the [days] days from [first], at 09:00, 11:00
@@ -43,12 +41,12 @@ List<CalendarEntry<String>> threeADay(DateTime first, int days) {
     for (var d = 0; d < days; d++)
       for (var k = 0; k < 3; k++)
         CalendarEntry<String>(
-          id: idOn(addDays(first, d), k),
-          start: at(addDays(first, d), 9 + 2 * k),
-          end: at(addDays(first, d), 10 + 2 * k),
-          title: idOn(addDays(first, d), k),
+          id: idOn(CalendarDates.addDays(first, d), k),
+          start: at(CalendarDates.addDays(first, d), 9 + 2 * k),
+          end: at(CalendarDates.addDays(first, d), 10 + 2 * k),
+          title: idOn(CalendarDates.addDays(first, d), k),
           color: const Color(0xFF336699),
-          payload: idOn(addDays(first, d), k),
+          payload: idOn(CalendarDates.addDays(first, d), k),
         ),
   ];
 }
@@ -281,7 +279,7 @@ void main() {
     });
     // Setup sanity: the write reached the moved entry's card.
     expect(rebuilt, contains(entryCardKey(idOn(tuesday, 0)).value));
-    final ofTuesday = isoDate(tuesday);
+    final ofTuesday = CalendarDates.isoDate(tuesday);
     expect(
       rebuilt.where((key) {
         return key.startsWith("card-") && !key.endsWith(ofTuesday);
@@ -526,11 +524,11 @@ void main() {
         // Setup sanity: Wednesday is loading.
         expect(find.byKey(loading, skipOffstage: false), findsOneWidget);
         host.loadingBuilder = (context, state) {
-          return Text("loading ${isoDate(state.first)}");
+          return Text("loading ${CalendarDates.isoDate(state.first)}");
         };
       });
       expect(
-        textUnder(loading, "loading ${isoDate(wednesday)}"),
+        textUnder(loading, "loading ${CalendarDates.isoDate(wednesday)}"),
         findsOneWidget,
       );
     });
@@ -541,11 +539,11 @@ void main() {
         // Setup sanity: Wednesday failed to read.
         expect(find.byKey(failedRow, skipOffstage: false), findsOneWidget);
         host.failureBuilder = (context, state) {
-          return Text("failed ${isoDate(state.first)}");
+          return Text("failed ${CalendarDates.isoDate(state.first)}");
         };
       });
       expect(
-        textUnder(failedRow, "failed ${isoDate(wednesday)}"),
+        textUnder(failedRow, "failed ${CalendarDates.isoDate(wednesday)}"),
         findsOneWidget,
       );
     });

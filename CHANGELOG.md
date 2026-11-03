@@ -45,6 +45,27 @@ constructors are not const; `CalendarDayHours.allDay`,
 are const values.
 `CalendarNow` and `CalendarEarliestStart` take a UTC time as its local time,
 the same instant, so a `CalendarView.clock` reading UTC marks the local day.
+- Added `scheduling`, experimental as the calendar is: its API may change in
+any release, a patch release included, until it is declared stable. Its
+barrel, `package:widgets_extended/scheduling/scheduling.dart`, gives an app
+the core the calendar builds on, without the calendar: `CalendarEntry` and
+the `CalendarDataSource` contract with its `CalendarSourceChange`s, the edit
+policies and `CalendarEditRules`, the stores, the civil-date helpers of
+`CalendarDates`, `CalendarCreateRange` and `CalendarHourLabelFormat`.
+`package:widgets_extended/calendar/calendar.dart` and
+`package:widgets_extended/widgets_extended.dart` still export every name moved
+there. These helpers become public: `CalendarDates.addMonths`,
+`CalendarDates.daysBetween`, `CalendarDates.firstWallMinuteNotBefore`,
+`CalendarDates.isDayStart`, `CalendarDates.isoDate`, `CalendarDates.isoTime`,
+`CalendarDates.lastWallMinuteNotAfter`, `CalendarDates.nextShownDay`,
+`CalendarDates.pieceOn`, `CalendarDates.rangeEndAtWallMinute`,
+`CalendarDates.repeatedStretchOf`, `CalendarDates.shownDayNear`,
+`CalendarDates.shownDaysOfWeek`, `CalendarDates.wallSpanOf`,
+`CalendarDates.weekdayColumnOfDay`, `NoOverlapsPolicy.timesOverlap` and
+`NoOverlapsPolicy.rangeSharesTime`, and `CalendarMonthGrid`, the weeks one
+month occupies over the weekdays a `CalendarWeekdaySet` shows.
+`CalendarDates.nextShownDay` throws an `ArgumentError` naming `direction`, in
+every build, for a direction of 0.
 - On a day whose clock skips its midnight hour, as Cuba's does in March,
 Week and Day draw an entry from the day's start, 01:00, from the 01:00 row,
 and a create, move or resize that lands in the skipped rows requests

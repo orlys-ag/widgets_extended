@@ -3,10 +3,48 @@
 /// of the host's entries or a [CachingCalendarStore] reading and writing
 /// through the host's [CalendarDataSource].
 ///
+/// The calendar builds on the scheduling module,
+/// `package:widgets_extended/scheduling/scheduling.dart`, and shows every
+/// name that barrel shows.
+///
 /// Experimental: the calendar's API may change in any release, a patch
 /// release included, until it is declared stable.
 library;
 
+export '../scheduling/scheduling.dart'
+    show
+        CachingCalendarStore,
+        CalendarAllChanged,
+        CalendarCreateRange,
+        CalendarDataSource,
+        CalendarDates,
+        CalendarDayHours,
+        CalendarDaysChanged,
+        CalendarEarliestStart,
+        CalendarEditPolicy,
+        CalendarEditRules,
+        CalendarEntry,
+        CalendarEntryChanged,
+        CalendarEntryPut,
+        CalendarEntryRemoved,
+        CalendarHourLabelFormat,
+        CalendarHoursException,
+        CalendarLoadStatus,
+        CalendarMonthGrid,
+        CalendarNow,
+        CalendarResizeEdges,
+        CalendarShownEntry,
+        CalendarSourceChange,
+        CalendarStore,
+        CalendarStoreException,
+        CalendarWeekdaySet,
+        CalendarWritePendingException,
+        DayLimitPolicy,
+        HistoryLockPolicy,
+        MemoryCalendarStore,
+        NoOverlapsPolicy,
+        UnrestrictedEditPolicy,
+        compareCalendarEntries;
 export 'composition/calendar_header.dart'
     show
         CalendarHeaderBuilder,
@@ -17,27 +55,6 @@ export 'composition/calendar_header.dart'
 export 'composition/calendar_theme_extension.dart' show CalendarThemeExtension;
 export 'composition/calendar_view.dart'
     show CalendarController, CalendarEntryTapDetails, CalendarView;
-export 'dates/calendar_date_helpers.dart' show CalendarDates;
-export 'dates/calendar_dates.dart' show CalendarDayHours, CalendarWeekdaySet;
-export 'entries/calendar_data_source.dart'
-    show
-        CalendarAllChanged,
-        CalendarDataSource,
-        CalendarDaysChanged,
-        CalendarEntryPut,
-        CalendarEntryRemoved,
-        CalendarSourceChange;
-export 'entries/calendar_entry.dart' show CalendarEntry;
-export 'policy/edit_policy.dart'
-    show
-        CalendarEditPolicy,
-        CalendarNow,
-        CalendarResizeEdges,
-        DayLimitPolicy,
-        NoOverlapsPolicy,
-        UnrestrictedEditPolicy;
-export 'policy/edit_rules.dart' show CalendarEarliestStart, CalendarEditRules;
-export 'policy/history_lock_policy.dart' show HistoryLockPolicy;
 export 'presentation/calendar_activity_indicator.dart'
     show CalendarActivityIndicator;
 export 'presentation/calendar_builders.dart'
@@ -67,23 +84,7 @@ export 'presentation/calendar_defaults.dart'
         defaultCalendarFailureBuilder,
         defaultCalendarLoadingBuilder;
 export 'presentation/calendar_localizations.dart'
-    show
-        CalendarLocalizations,
-        DefaultCalendarLocalizations,
-        CalendarHourLabelFormat;
+    show CalendarLocalizations, DefaultCalendarLocalizations;
 export 'presentation/calendar_theme.dart' show CalendarTheme, CalendarThemeData;
-export 'store/caching_calendar_store.dart' show CachingCalendarStore;
-export 'store/calendar_store.dart'
-    show
-        CalendarHoursException,
-        CalendarLoadStatus,
-        CalendarShownEntry,
-        CalendarStore,
-        CalendarStoreException,
-        CalendarWritePendingException,
-        compareCalendarEntries;
-export 'store/memory_calendar_store.dart'
-    show CalendarEntryChanged, MemoryCalendarStore;
 export 'views/month_board.dart' show CalendarMonthLayout;
 export 'views/move_request.dart' show CalendarMoveKind, CalendarMoveRequest;
-export 'views/timed_grid.dart' show CalendarCreateRange;

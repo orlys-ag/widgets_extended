@@ -6,10 +6,11 @@ paths:
 
 # calendar architecture: composition
 
-The contract of `CalendarView`, `CalendarController`, the header and the default chrome. The conventions every layer follows are in `calendar.md`.
+The contract of `CalendarView`, `CalendarController`, the header and the default chrome. The conventions every layer follows are in `calendar.md` and `shared-calendar-conventions.md`.
 
 - **Imports**: of Flutter, `package:flutter/material.dart` and the libraries
-  below it; and the board and sliver_tree modules.
+  below it; the scheduling module, through
+  `lib/scheduling/scheduling.dart`; and the board and sliver_tree modules.
 - **`CalendarView`** offers in its view menu the views its parameters list,
   opening on the one they name, and builds no `Scaffold` or app bar. Its
   configuration is its parameters, and it shows and schedules in its

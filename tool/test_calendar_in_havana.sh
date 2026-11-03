@@ -5,6 +5,6 @@
 # switching the system zone to Cuba Standard Time until it exits.
 #
 # Usage: bash tool/test_calendar_in_havana.sh [flutter test arguments]
-# With no arguments it runs test/calendar.
+# With no arguments it runs test/scheduling and test/calendar.
 exec bash "$(dirname "$0")/test_calendar_in_zone.sh" America/Havana \
   "Cuba Standard Time" "$@"

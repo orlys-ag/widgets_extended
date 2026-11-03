@@ -8,22 +8,18 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 
-import 'class_source.dart';
+import '../scheduling/class_source.dart';
 
 /// The module barrel, from the package root, where `flutter test` runs.
 const String barrelPath = "lib/calendar/calendar.dart";
 
+/// The scheduling module's barrel, the one file of lib/scheduling/ the
+/// calendar reaches.
+const String schedulingBarrelPath = "lib/scheduling/scheduling.dart";
+
 /// The module's layers, each a directory of lib/calendar/, in the order
 /// their files import up.
-const List<String> layers = <String>[
-  "dates",
-  "entries",
-  "policy",
-  "store",
-  "presentation",
-  "views",
-  "composition",
-];
+const List<String> layers = <String>["presentation", "views", "composition"];
 
 /// The widgets library and the Flutter libraries its own sources import.
 const Set<String> widgetsAndBelow = <String>{
@@ -41,10 +37,6 @@ const Set<String> widgetsAndBelow = <String>{
 
 /// The Flutter libraries each layer's rule lets its files import.
 const Map<String, Set<String>> flutterLibrariesOf = <String, Set<String>>{
-  "dates": <String>{"foundation"},
-  "entries": <String>{"foundation"},
-  "policy": <String>{"foundation"},
-  "store": <String>{"foundation"},
   "presentation": widgetsAndBelow,
   "views": widgetsAndBelow,
   "composition": <String>{...widgetsAndBelow, "material", "cupertino"},
@@ -56,57 +48,45 @@ String layerOf(String path) {
   return path.split("/")[2];
 }
 
-/// The URIs of the import and export directives of [source].
-List<String> directiveUris(String source) {
-  return <String>[
-    for (final match in RegExp(
-      r"""^\s*(?:import|export)\s+['"]([^'"]+)['"]""",
-      multiLine: true,
-    ).allMatches(source))
-      match.group(1)!,
-  ];
-}
-
-/// Each export directive of [source]: the path it exports, resolved from
-/// the package root against [barrelPath], and the names its `show` clause
-/// lists, null for a directive with none.
-List<({String path, List<String>? shown})> exportsOf(String source) {
-  return <({String path, List<String>? shown})>[
-    for (final match in RegExp(
-      r"""^\s*export\s+['"]([^'"]+)['"]\s*(?:show\s+([^;]+))?;""",
-      multiLine: true,
-    ).allMatches(source))
-      (
-        path: Uri.parse(barrelPath).resolve(match.group(1)!).path,
-        shown: match.group(2)?.split(",").map((name) {
-          return name.trim();
-        }).toList(),
-      ),
-  ];
-}
-
 /// The module's Dart files but the barrel, from the package root: those
-/// Git tracks and the new ones it does not ignore. Checks that Git ran and
-/// that the list holds a file of each layer from dates to views.
+/// Git tracks and the new ones it does not ignore. Checks that the list
+/// holds a file of each layer.
 List<String> moduleFiles() {
-  final result = Process.runSync("git", <String>[
-    "ls-files",
-    "--cached",
-    "--others",
-    "--exclude-standard",
-    "--",
-    "lib/calendar",
-  ]);
-  expect(result.exitCode, 0, reason: "${result.stderr}");
   final files = <String>[
-    for (final line in (result.stdout as String).split("\n"))
-      if (line.trim().endsWith(".dart") && line.trim() != barrelPath)
-        line.trim(),
+    for (final file in trackedDartFiles("lib/calendar"))
+      if (file != barrelPath) file,
   ];
   expect(<String>{
     for (final file in files) layerOf(file),
-  }, containsAll(layers.take(6)));
+  }, containsAll(layers));
   return files;
+}
+
+/// The file, from the package root, that [uri], a directive's URI in the
+/// file at [path], names: a relative URI resolved against [path], and a
+/// `package:widgets_extended/` URI under lib/; null for any other scheme.
+String? packageFileOf(String path, String uri) {
+  final parsed = Uri.parse(uri);
+  if (!parsed.hasScheme) {
+    return Uri.parse(path).resolve(uri).path;
+  }
+  if (parsed.scheme == "package" &&
+      parsed.pathSegments.isNotEmpty &&
+      parsed.pathSegments.first == "widgets_extended") {
+    return "lib/${parsed.pathSegments.skip(1).join("/")}";
+  }
+  return null;
+}
+
+/// The names the scheduling barrel's exports show.
+Set<String> schedulingNames() {
+  return <String>{
+    for (final export in exportsOf(
+      File(schedulingBarrelPath).readAsStringSync(),
+      schedulingBarrelPath,
+    ))
+      ...?export.shown,
+  };
 }
 
 void main() {
@@ -116,6 +96,7 @@ void main() {
     <Object>[
       CalendarDayHours,
       CalendarWeekdaySet,
+      CalendarMonthGrid,
       CalendarDates.dayNumber,
       CalendarDates.dateOfDayNumber,
       CalendarDates.defaultSlotMinutes,
@@ -132,6 +113,21 @@ void main() {
       CalendarDates.timeAtWallMinute,
       CalendarDates.wallMinuteOf,
       CalendarDates.weekdayColumn,
+      CalendarDates.addMonths,
+      CalendarDates.daysBetween,
+      CalendarDates.firstWallMinuteNotBefore,
+      CalendarDates.isDayStart,
+      CalendarDates.isoDate,
+      CalendarDates.isoTime,
+      CalendarDates.lastWallMinuteNotAfter,
+      CalendarDates.nextShownDay,
+      CalendarDates.pieceOn,
+      CalendarDates.rangeEndAtWallMinute,
+      CalendarDates.repeatedStretchOf,
+      CalendarDates.shownDayNear,
+      CalendarDates.shownDaysOfWeek,
+      CalendarDates.wallSpanOf,
+      CalendarDates.weekdayColumnOfDay,
       CalendarEntry,
       CalendarDataSource,
       CalendarEditPolicy,
@@ -144,6 +140,8 @@ void main() {
       CalendarEarliestStart,
       HistoryLockPolicy,
       NoOverlapsPolicy.entriesShareTime,
+      NoOverlapsPolicy.timesOverlap,
+      NoOverlapsPolicy.rangeSharesTime,
       CalendarStore,
       compareCalendarEntries,
       CachingCalendarStore,
@@ -205,36 +203,26 @@ void main() {
     ];
   });
 
-  test("B2 the barrel shows by name; of the views only the types the "
-      "calendar's signatures use, and no view; of the localizations file "
-      "the localizations, their English default and "
-      "CalendarHourLabelFormat; of the policy layer exactly the policies, "
-      "the types their signatures name "
-      "and the edit rules; and of the dates layer exactly the day hours, "
-      "the weekday sets and CalendarDates", () {
+  test("B2 the barrel shows by name: the scheduling barrel's every name, "
+      "through one export of that barrel; of the views only the types the "
+      "calendar's signatures use, and no view; and of the localizations "
+      "file the localizations and their English default", () {
     final source = File(barrelPath).readAsStringSync();
-    final exports = exportsOf(source);
+    final exports = exportsOf(source, barrelPath);
     // Every directive the barrel holds was read.
     expect(exports, hasLength(directiveUris(source).length));
-    expect(
-      <String, Set<String>>{
-        for (final export in exports)
-          if (export.path.startsWith("lib/calendar/dates/"))
-            export.path: export.shown!.toSet(),
-      },
-      <String, Set<String>>{
-        "lib/calendar/dates/calendar_dates.dart": <String>{
-          "CalendarDayHours",
-          "CalendarWeekdaySet",
-        },
-        "lib/calendar/dates/calendar_date_helpers.dart": <String>{
-          "CalendarDates",
-        },
-      },
-    );
     for (final export in exports) {
       expect(export.shown, isNotNull, reason: export.path);
     }
+    final scheduling = <String, Set<String>>{
+      for (final export in exports)
+        if (export.path.startsWith("lib/scheduling/"))
+          export.path: export.shown!.toSet(),
+    };
+    expect(scheduling.keys, <String>[schedulingBarrelPath]);
+    // Setup sanity: the scheduling barrel's names were read.
+    expect(schedulingNames(), containsAll(<String>{"CalendarEntry"}));
+    expect(scheduling[schedulingBarrelPath], schedulingNames());
     final views = <String, Set<String>>{
       for (final export in exports)
         if (export.path.startsWith("lib/calendar/views/"))
@@ -246,7 +234,6 @@ void main() {
         "CalendarMoveKind",
         "CalendarMoveRequest",
       },
-      "lib/calendar/views/timed_grid.dart": <String>{"CalendarCreateRange"},
     });
     expect(
       <List<String>?>[
@@ -256,11 +243,7 @@ void main() {
             export.shown,
       ],
       <List<String>>[
-        <String>[
-          "CalendarLocalizations",
-          "DefaultCalendarLocalizations",
-          "CalendarHourLabelFormat",
-        ],
+        <String>["CalendarLocalizations", "DefaultCalendarLocalizations"],
       ],
     );
     const viewWidgets = <String>{
@@ -272,30 +255,6 @@ void main() {
       "MonthPicker",
       "DayCell",
     };
-    expect(
-      <String, Set<String>>{
-        for (final export in exports)
-          if (export.path.startsWith("lib/calendar/policy/"))
-            export.path: export.shown!.toSet(),
-      },
-      <String, Set<String>>{
-        "lib/calendar/policy/edit_policy.dart": <String>{
-          "CalendarEditPolicy",
-          "CalendarNow",
-          "CalendarResizeEdges",
-          "DayLimitPolicy",
-          "NoOverlapsPolicy",
-          "UnrestrictedEditPolicy",
-        },
-        "lib/calendar/policy/history_lock_policy.dart": <String>{
-          "HistoryLockPolicy",
-        },
-        "lib/calendar/policy/edit_rules.dart": <String>{
-          "CalendarEarliestStart",
-          "CalendarEditRules",
-        },
-      },
-    );
     for (final export in exports) {
       expect(
         export.shown!.toSet().intersection(viewWidgets),
@@ -305,29 +264,10 @@ void main() {
     }
   });
 
-  test("B3 the barrel's show clauses name no CalendarEntryTime", () {
-    final exports = exportsOf(File(barrelPath).readAsStringSync());
-    final entries = <List<String>?>[
-      for (final export in exports)
-        if (export.path == "lib/calendar/entries/calendar_entry.dart")
-          export.shown,
-    ];
-    // The barrel shows the entry's file, by name.
-    expect(entries, hasLength(1));
-    expect(entries.single, contains("CalendarEntry"));
-    for (final export in exports) {
-      expect(
-        export.shown,
-        isNot(contains("CalendarEntryTime")),
-        reason: export.path,
-      );
-    }
-  });
-
-  test("B4 each class the barrel shows says how a host builds on it: a "
-      "class a host extends is base, the data source an interface, the "
-      "widgets neither, and every other class final or sealed; and each "
-      "function or constant it shows names the calendar", () {
+  test("B4 each class the barrel shows of the module's own files says how "
+      "a host builds on it: a class a host extends is base, the widgets "
+      "neither, and every other class final or sealed; and each function "
+      "or constant it shows names the calendar", () {
     const widgets = <String>{
       "CalendarView",
       "CalendarActivityIndicator",
@@ -335,17 +275,15 @@ void main() {
     };
     const bases = <String>{
       "CalendarController",
-      "CalendarStore",
-      "MemoryCalendarStore",
-      "CachingCalendarStore",
-      "CalendarEditPolicy",
       "CalendarLocalizations",
       "DefaultCalendarLocalizations",
     };
-    const interfaces = <String>{"CalendarDataSource"};
     final shown = <String>{
-      for (final export in exportsOf(File(barrelPath).readAsStringSync()))
-        ...export.shown!,
+      for (final export in exportsOf(
+        File(barrelPath).readAsStringSync(),
+        barrelPath,
+      ))
+        if (export.path.startsWith("lib/calendar/")) ...export.shown!,
     };
     final classDeclaration = RegExp(
       r"^((?:(?:abstract|base|final|interface|sealed)\s+)*)class\s+(\w+)",
@@ -385,17 +323,16 @@ void main() {
         }
       }
     }
-    // Every name the barrel shows has a declaration the scan reads, and
-    // the scan reads a class of each kind.
+    // Every name the barrel shows of the module's own files has a
+    // declaration the scan reads, and the scan reads a class of each kind.
     expect(shown.difference(declared), isEmpty);
     expect(
       kindOf.keys,
       containsAll(<String>{
         ...widgets,
         ...bases,
-        ...interfaces,
-        "CalendarEntry",
-        "CalendarStoreException",
+        "CalendarThemeData",
+        "CalendarMoveRequest",
       }),
     );
     expect(<String, String>{
@@ -406,8 +343,6 @@ void main() {
                     ? "open"
                     : bases.contains(name)
                     ? "base"
-                    : interfaces.contains(name)
-                    ? "interface"
                     : "closed"))
           name: kindOf[name]!,
     }, isEmpty);
@@ -428,8 +363,8 @@ void main() {
   });
 
   test("LY1 each file imports the package's files by relative paths, up "
-      "the layer table, and the board and sliver_tree modules only "
-      "through their barrels", () {
+      "the layer table, and the scheduling, board and sliver_tree modules "
+      "only through their barrels", () {
     for (final path in moduleFiles()) {
       final layer = layerOf(path);
       expect(layers, contains(layer), reason: path);
@@ -446,9 +381,10 @@ void main() {
             layers.contains(layerOf(target)) &&
             layers.indexOf(layerOf(target)) <= layers.indexOf(layer);
         final moduleBarrel =
-            (layer == "views" || layer == "composition") &&
-            (target == "lib/board/board.dart" ||
-                target == "lib/sliver_tree/sliver_tree.dart");
+            target == schedulingBarrelPath ||
+            ((layer == "views" || layer == "composition") &&
+                (target == "lib/board/board.dart" ||
+                    target == "lib/sliver_tree/sliver_tree.dart"));
         expect(upTheTable || moduleBarrel, isTrue, reason: "$path: $uri");
       }
     }
@@ -469,6 +405,39 @@ void main() {
         expect(allowed, contains(library), reason: "$path: $uri");
       }
     }
+  });
+
+  test("LY5 no file under lib/calendar, the barrel included, reaches the "
+      "scheduling module but through its barrel, nor a lower layer under "
+      "lib/calendar", () {
+    final files = trackedDartFiles("lib/calendar");
+    expect(files, contains(barrelPath));
+    const lowerLayers = <String>[
+      "lib/calendar/dates/",
+      "lib/calendar/entries/",
+      "lib/calendar/policy/",
+      "lib/calendar/store/",
+    ];
+    final reaching = <String>{};
+    final wrong = <String>[];
+    for (final path in files) {
+      for (final uri in directiveUris(File(path).readAsStringSync())) {
+        final target = packageFileOf(path, uri);
+        if (target == null) {
+          continue;
+        }
+        if (lowerLayers.any(target.startsWith) ||
+            (target.startsWith("lib/scheduling/") &&
+                target != schedulingBarrelPath)) {
+          wrong.add("$path: $uri");
+        } else if (target == schedulingBarrelPath) {
+          reaching.add(path);
+        }
+      }
+    }
+    expect(wrong, isEmpty);
+    // Setup sanity: the module reaches the scheduling barrel.
+    expect(reaching, isNotEmpty);
   });
 
   test("LY4 no file under lib/calendar/views holds a literal colour", () {
@@ -513,32 +482,9 @@ void main() {
       "branch", () {
     const classes = <({String path, String name})>[
       (
-        path: "lib/calendar/dates/calendar_dates.dart",
-        name: "CalendarWeekdaySet",
-      ),
-      (
-        path: "lib/calendar/dates/calendar_dates.dart",
-        name: "CalendarDayHours",
-      ),
-      (path: "lib/calendar/policy/edit_policy.dart", name: "DayLimitPolicy"),
-      (
-        path: "lib/calendar/policy/edit_rules.dart",
-        name: "CalendarEarliestStart",
-      ),
-      (path: "lib/calendar/policy/edit_rules.dart", name: "CalendarEditRules"),
-      (
-        path: "lib/calendar/entries/calendar_data_source.dart",
-        name: "CalendarDaysChanged",
-      ),
-      (
-        path: "lib/calendar/store/calendar_store.dart",
-        name: "CalendarShownEntry",
-      ),
-      (
         path: "lib/calendar/presentation/calendar_theme.dart",
         name: "CalendarThemeData",
       ),
-      (path: "lib/calendar/views/timed_grid.dart", name: "CalendarCreateRange"),
       (
         path: "lib/calendar/views/move_request.dart",
         name: "CalendarMoveRequest",
@@ -553,56 +499,12 @@ void main() {
       final body = classBody(File(path).readAsStringSync(), name);
       expect(body, contains("throw ArgumentError"), reason: name);
       expect(body, isNot(contains("kDebugMode")), reason: name);
-      // CalendarDayHours keeps slotCountOf's assert, of a method's
-      // argument.
-      expect(
-        asserts.allMatches(body),
-        hasLength(name == "CalendarDayHours" ? 1 : 0),
-        reason: name,
-      );
+      expect(asserts.allMatches(body), isEmpty, reason: name);
     }
   });
 
-  test("RC21 a check builds nothing on a valid value but the DateTime "
-      "isDayStart builds: CalendarThemeData's constructor builds no list "
-      "of its styles, and the day checks build no DateTime of their own", () {
-    String constructorBody(String path, String declaration) {
-      final source = File(path).readAsStringSync();
-      final start = source.indexOf(declaration);
-      expect(start, isNot(-1), reason: declaration);
-      var at = source.indexOf("(", start) + 1;
-      var depth = 1;
-      while (depth > 0) {
-        final char = source[at];
-        if (char == "(") {
-          depth++;
-        } else if (char == ")") {
-          depth--;
-        }
-        at++;
-      }
-      final open = source.indexOf("{", at);
-      // The body starts at the brace after the parameters and any
-      // initializers, which hold no brace.
-      expect(
-        source.substring(at, open),
-        isNot(contains(";")),
-        reason: declaration,
-      );
-      depth = 1;
-      at = open + 1;
-      while (depth > 0) {
-        final char = source[at];
-        if (char == "{") {
-          depth++;
-        } else if (char == "}") {
-          depth--;
-        }
-        at++;
-      }
-      return source.substring(open + 1, at - 1);
-    }
-
+  test("RC21 a check builds nothing on a valid value: CalendarThemeData's "
+      "constructor builds no list of its styles", () {
     final theme = constructorBody(
       "lib/calendar/presentation/calendar_theme.dart",
       "  CalendarThemeData({",
@@ -611,52 +513,15 @@ void main() {
     expect(theme, contains("hourLabelStyle"));
     expect(theme, isNot(contains("_textStyles")));
     expect(theme, isNot(contains("[")));
-    final dayChecks = <({String path, String declaration, bool dayStarts})>[
-      (
-        path: "lib/calendar/policy/edit_rules.dart",
-        declaration: "  CalendarEarliestStart(",
-        dayStarts: true,
-      ),
-      (
-        path: "lib/calendar/views/timed_grid.dart",
-        declaration: "  CalendarCreateRange({",
-        dayStarts: true,
-      ),
-      (
-        path: "lib/calendar/entries/calendar_data_source.dart",
-        declaration: "  CalendarDaysChanged(",
-        dayStarts: false,
-      ),
-    ];
-    for (final (:path, :declaration, :dayStarts) in dayChecks) {
-      final body = constructorBody(path, declaration);
-      expect(body, contains("throw ArgumentError"), reason: declaration);
-      expect(body.contains("isDayStart("), dayStarts, reason: declaration);
-      expect(body, isNot(contains("DateTime(")), reason: declaration);
-    }
   });
 
   test("RC20 the doc of each check says it throws an [ArgumentError] in "
       "every build, and none says it asserts or runs in a debug build", () {
     const declarations = <String, List<String>>{
-      "dates/calendar_dates.dart": <String>[
-        "factory CalendarWeekdaySet.of(",
-        "CalendarWeekdaySet startingOn(",
-        "CalendarDayHours(",
-      ],
-      "entries/calendar_data_source.dart": <String>["CalendarDaysChanged("],
-      "policy/edit_policy.dart": <String>["DayLimitPolicy("],
-      "policy/edit_rules.dart": <String>[
-        "CalendarEarliestStart(",
-        "CalendarEditRules({",
-        "CalendarEditRules<T> updated(",
-      ],
-      "store/calendar_store.dart": <String>["CalendarShownEntry("],
       "presentation/calendar_theme.dart": <String>[
         "CalendarThemeData({",
         "CalendarThemeData copyWith(",
       ],
-      "views/timed_grid.dart": <String>["CalendarCreateRange({"],
       "views/move_request.dart": <String>["CalendarMoveRequest({"],
       "composition/calendar_controller.dart": <String>[
         "CalendarController({",

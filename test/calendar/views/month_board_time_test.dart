@@ -8,19 +8,19 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
-import 'package:widgets_extended/calendar/policy/edit_policy.dart';
-import 'package:widgets_extended/calendar/store/calendar_store.dart';
-import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
+import 'package:widgets_extended/scheduling/store/calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 
-import '../dst_days.dart';
+import '../../scheduling/dst_days.dart';
 
 typedef Shown = CalendarShownEntry<String>;
 
 /// April 2026, whose weeks start on March 30 and April 6, 13, 20 and 27.
-final MonthGrid april = MonthGrid(2026, 4);
+final CalendarMonthGrid april = CalendarMonthGrid(2026, 4);
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -60,7 +60,10 @@ Shown shownOf(
 
 /// The placements of [shown] on [grid], by id: each one's week row, first
 /// column and column span.
-Map<String, List<(int, int, int)>> spansOf(List<Shown> shown, MonthGrid grid) {
+Map<String, List<(int, int, int)>> spansOf(
+  List<Shown> shown,
+  CalendarMonthGrid grid,
+) {
   final spans = <String, List<(int, int, int)>>{};
   for (final placement in monthPlacementsOf(shown, grid)) {
     final span = placement.span;
@@ -74,7 +77,7 @@ Map<String, List<(int, int, int)>> spansOf(List<Shown> shown, MonthGrid grid) {
 }
 
 /// The counts of [counts] other than zero on [grid], by day.
-Map<DateTime, int> countsByDay(Int32List counts, MonthGrid grid) {
+Map<DateTime, int> countsByDay(Int32List counts, CalendarMonthGrid grid) {
   return <DateTime, int>{
     for (var row = 0; row < grid.weekCount; row++)
       for (var col = 0; col < grid.columnCount; col++)
@@ -86,7 +89,7 @@ Map<DateTime, int> countsByDay(Int32List counts, MonthGrid grid) {
 /// The month board over [grid] with [entries] in [hours].
 Future<void> pumpMonth(
   WidgetTester tester,
-  MonthGrid grid,
+  CalendarMonthGrid grid,
   DateTime selectedDay,
   List<CalendarEntry<String>> entries, {
   CalendarDayHours hours = CalendarDayHours.allDay,
@@ -120,7 +123,12 @@ Future<void> pumpMonth(
 
 /// Whether the board draws [id]'s chip in its week of [day] inside the
 /// cell of [day].
-bool chipInCell(WidgetTester tester, MonthGrid grid, String id, DateTime day) {
+bool chipInCell(
+  WidgetTester tester,
+  CalendarMonthGrid grid,
+  String id,
+  DateTime day,
+) {
   final weekStart = grid.dateAt(grid.cellOf(day).row, 0);
   final chip = find.byKey(monthChipKey(monthSegmentKey(id, weekStart)));
   if (chip.evaluate().length != 1) {
@@ -263,10 +271,10 @@ void main() {
   group("on the 23-hour day", skip: shortDaySkip, () {
     test("MT2 the day shows once with its entries", () {
       final day = shortDayStart;
-      final grid = MonthGrid.of(day);
+      final grid = CalendarMonthGrid.of(day);
       final cell = grid.cellOf(day);
       final spans = spansOf(<Shown>[
-        shownOf("all-day", day, addDays(day, 1), isAllDay: true),
+        shownOf("all-day", day, CalendarDates.addDays(day, 1), isAllDay: true),
         shownOf("early", at(day, 1, 30), at(day, 3, 30)),
       ], grid);
       expect(spans, <String, List<(int, int, int)>>{
@@ -289,7 +297,7 @@ void main() {
         "entry at 00:30 the next day in that day's cell", (tester) async {
       final day = shortDayStart;
       final next = DateTime(day.year, day.month, day.day + 1);
-      final grid = MonthGrid.of(day);
+      final grid = CalendarMonthGrid.of(day);
       await pumpMonth(tester, grid, day, <CalendarEntry<String>>[
         entryOf("all-day", day, next, isAllDay: true),
         entryOf("early", at(day, 1, 30), at(day, 3, 30)),
@@ -309,10 +317,10 @@ void main() {
   group("on the 25-hour day", skip: longDaySkip, () {
     test("MT2 the day shows once with its entries", () {
       final day = longDayStart;
-      final grid = MonthGrid.of(day);
+      final grid = CalendarMonthGrid.of(day);
       final cell = grid.cellOf(day);
       final spans = spansOf(<Shown>[
-        shownOf("all-day", day, addDays(day, 1), isAllDay: true),
+        shownOf("all-day", day, CalendarDates.addDays(day, 1), isAllDay: true),
         shownOf(
           "repeated",
           secondHalfPastOne,
@@ -328,7 +336,7 @@ void main() {
     testWidgets("MT4 the board draws the day's entries in its cell, before "
         "and after the repeated hour", (tester) async {
       final day = longDayStart;
-      final grid = MonthGrid.of(day);
+      final grid = CalendarMonthGrid.of(day);
       await pumpMonth(tester, grid, day, <CalendarEntry<String>>[
         entryOf(
           "all-day",
@@ -356,7 +364,7 @@ void main() {
     testWidgets("MT5 under hours from 02:30, 00:30 to the second 02:30 and "
         "the first 01:30 to the second 01:15 count as earlier", (tester) async {
       final day = longDayStart;
-      final grid = MonthGrid.of(day);
+      final grid = CalendarMonthGrid.of(day);
       await pumpMonth(tester, grid, day, <CalendarEntry<String>>[
         // 180 minutes, over the repeated hour.
         entryOf("spans", at(day, 0, 30), at(day, 2, 30)),
@@ -366,7 +374,7 @@ void main() {
           day.add(const Duration(minutes: 90)),
           secondHalfPastOne.subtract(const Duration(minutes: 15)),
         ),
-      ], hours: CalendarDayHours(150, minutesPerDay));
+      ], hours: CalendarDayHours(150, CalendarDates.minutesPerDay));
       expect(
         find.descendant(
           of: find.byKey(monthEarlierKey(day)),
@@ -385,7 +393,7 @@ void main() {
           "lies after the hours", () {
         final day = shortDayStart;
         expectSkippedMidnight(day);
-        final grid = MonthGrid.of(day);
+        final grid = CalendarMonthGrid.of(day);
         final split = splitMonthHours(
           <Shown>[shownOf("early", day, at(day, 2))],
           grid,

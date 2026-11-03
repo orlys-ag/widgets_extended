@@ -5,7 +5,7 @@ library;
 
 import 'package:flutter/widgets.dart';
 
-import '../store/calendar_store.dart';
+import '../../scheduling/scheduling.dart';
 import 'calendar_localizations.dart';
 
 /// The height of the strip a card builder draws across a card's top for

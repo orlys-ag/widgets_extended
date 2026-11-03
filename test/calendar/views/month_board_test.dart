@@ -12,15 +12,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
-import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
-import 'package:widgets_extended/calendar/policy/edit_policy.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
-import 'package:widgets_extended/calendar/presentation/calendar_localizations.dart';
-import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
-import 'package:widgets_extended/calendar/store/calendar_store.dart';
-import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 
 import '../recording_errors.dart';
@@ -28,7 +27,7 @@ import '../recording_errors.dart';
 typedef ShownItem = CalendarShownEntry<String>;
 
 /// April 2026, whose weeks start on March 30 and April 6, 13, 20 and 27.
-final MonthGrid grid = MonthGrid(2026, 4);
+final CalendarMonthGrid grid = CalendarMonthGrid(2026, 4);
 
 /// The Monday of April 21 2026's week.
 final DateTime monday = DateTime(2026, 4, 20);
@@ -123,13 +122,13 @@ class ReadSource implements CalendarDataSource<String> {
         StateError("The read failed."),
       );
     }
-    final from = dayNumber(first);
-    final to = dayNumber(last);
+    final from = CalendarDates.dayNumber(first);
+    final to = CalendarDates.dayNumber(last);
     return SynchronousFuture<List<CalendarEntry<String>>>(
       <CalendarEntry<String>>[
         for (final entry in entries)
-          if (dayNumber(entry.start) <= to &&
-              lastDayNumberOf(entry.start, entry.end) >= from)
+          if (CalendarDates.dayNumber(entry.start) <= to &&
+              CalendarDates.lastDayNumberOf(entry.start, entry.end) >= from)
             entry,
       ],
     );
@@ -235,7 +234,7 @@ void main() {
       for (var i = 0; i < 70; i++)
         task(
           "i$i",
-          addDays(grid.firstDay, random.nextInt(35)),
+          CalendarDates.addDays(grid.firstDay, random.nextInt(35)),
           8 + random.nextInt(10),
           dayCount: random.nextInt(4) == 0 ? 2 + random.nextInt(5) : 1,
         ),
@@ -322,7 +321,7 @@ void main() {
 
   test("F9 a bar splits at the weeks' first weekday and continues across "
       "it", () {
-    final fromSunday = MonthGrid(
+    final fromSunday = CalendarMonthGrid(
       2026,
       4,
       weekdays: CalendarWeekdaySet.all.startingOn(6),
@@ -367,7 +366,7 @@ void main() {
       MaterialApp(
         home: MonthBoard<String>(
           store: store,
-          grid: MonthGrid.of(day),
+          grid: CalendarMonthGrid.of(day),
           selectedDay: day,
           now: now,
           onSelectDay: (day) {},
@@ -422,18 +421,22 @@ void main() {
       CalendarNow(time: april(21), today: april(21)),
     );
     addTearDown(now.dispose);
-    final workweek = MonthGrid(2026, 4, weekdays: CalendarWeekdaySet.workweek);
-    final june = MonthGrid(2026, 6);
+    final workweek = CalendarMonthGrid(
+      2026,
+      4,
+      weekdays: CalendarWeekdaySet.workweek,
+    );
+    final june = CalendarMonthGrid(2026, 6);
     // The board's grid is not the one the store shows.
     expect(workweek.lastDay, isNot(grid.lastDay));
 
-    Widget board(MonthGrid shown, {double weekScale = 1.0}) {
+    Widget board(CalendarMonthGrid shown, {double weekScale = 1.0}) {
       return MaterialApp(
         home: MonthBoard<String>(
           store: store,
           grid: shown,
           weekScale: weekScale,
-          selectedDay: shownDayNear(
+          selectedDay: CalendarDates.shownDayNear(
             DateTime(shown.year, shown.month),
             shown.weekdays,
           ),
@@ -470,7 +473,7 @@ void main() {
     expectShows(chips: true);
 
     source.fails = true;
-    final may = MonthGrid(2026, 5);
+    final may = CalendarMonthGrid(2026, 5);
     store.show(may.firstDay, may.lastDay);
     await tester.pump();
     expect(store.status, CalendarLoadStatus.failed);
@@ -600,7 +603,7 @@ void main() {
       return MaterialApp(
         home: MonthBoard<String>(
           store: store,
-          grid: MonthGrid.of(day),
+          grid: CalendarMonthGrid.of(day),
           selectedDay: day,
           now: now,
           onSelectDay: (day) {},

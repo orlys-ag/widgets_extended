@@ -5,15 +5,14 @@ library;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
-import '../dates/calendar_dates.dart';
+import '../../scheduling/scheduling.dart';
 import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
-import '../store/calendar_store.dart';
 import 'day_cell.dart';
 
 /// The key of the week strip's cell showing [day].
 ValueKey<String> weekStripDayKey(DateTime day) {
-  return ValueKey<String>("strip-day-${isoDate(day)}");
+  return ValueKey<String>("strip-day-${CalendarDates.isoDate(day)}");
 }
 
 /// As many days side by side as [weekdays] holds of a week, opening on the
@@ -178,13 +177,13 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
   DateTime _dayAt(int index) {
     final week = _floorDiv(index, _count);
     final offset = _columns[index - week * _count];
-    return addDays(_origin, week * DateTime.daysPerWeek + offset);
+    return CalendarDates.addDays(_origin, week * DateTime.daysPerWeek + offset);
   }
 
   /// The index of [day], or where [day] is not shown, of the first shown
   /// day after it.
   int _indexOf(DateTime day) {
-    final days = daysBetween(_origin, day);
+    final days = CalendarDates.daysBetween(_origin, day);
     final week = _floorDiv(days, DateTime.daysPerWeek);
     final offset = days - week * DateTime.daysPerWeek;
     var position = 0;
@@ -304,8 +303,8 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
     final first = _dayAt((start + _epsilon).floor());
     final last = _dayAt((start + _count - _epsilon).ceil() - 1);
     widget.store.prefetch(
-      shownDaysOfWeek(first, widget.weekdays).first,
-      shownDaysOfWeek(last, widget.weekdays).last,
+      CalendarDates.shownDaysOfWeek(first, widget.weekdays).first,
+      CalendarDates.shownDaysOfWeek(last, widget.weekdays).last,
     );
   }
 

@@ -12,10 +12,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
-import 'package:widgets_extended/calendar/policy/edit_policy.dart';
-import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
+import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart'
     show DayList, dayListGapKey;
@@ -223,7 +223,9 @@ int rowOf(int minute) {
 
 /// Week's grid column of [day], Monday's being 1; Day's one column is 1.
 int colOf(DateTime day, {bool week = true}) {
-  return week ? 1 + weekdayColumnOfDay(dayNumber(day)) : 1;
+  return week
+      ? 1 + CalendarDates.weekdayColumnOfDay(CalendarDates.dayNumber(day))
+      : 1;
 }
 
 /// The global centre of the grid's slot holding [minute] in [day]'s
@@ -563,7 +565,10 @@ void main() {
     await tester.longPress(find.byKey(monthStripKey(thursday)));
     await tester.pumpAndSettle();
     expect(host.creates, hasLength(2));
-    expect(dayNumber(host.creates.last.start), dayNumber(thursday));
+    expect(
+      CalendarDates.dayNumber(host.creates.last.start),
+      CalendarDates.dayNumber(thursday),
+    );
     expect(host.creates.last.start.isBefore(at(thursday, 10)), isFalse);
 
     // Agenda.
@@ -579,7 +584,9 @@ void main() {
     await tester.pumpAndSettle();
     final thursdayAdds = <int>[
       for (final add in host.adds.sublist(addsBefore))
-        if (dayNumber(add.day) == dayNumber(thursday)) add.startMinute,
+        if (CalendarDates.dayNumber(add.day) ==
+            CalendarDates.dayNumber(thursday))
+          add.startMinute,
     ];
     // Setup sanity: Thursday's gap rows built their buttons.
     expect(thursdayAdds, isNotEmpty);

@@ -55,7 +55,9 @@ base class CalendarController extends ChangeNotifier {
     double minDayWidth = minDayWidthLow,
     double minSlotHeight = defaultMinSlotHeight,
   }) : _view = view,
-       _selectedDay = selectedDay == null ? null : dateOnly(selectedDay),
+       _selectedDay = selectedDay == null
+           ? null
+           : CalendarDates.dateOnly(selectedDay),
        _minDayWidth = minDayWidth,
        _minSlotHeight = minSlotHeight {
     _checkSize(minDayWidth, "minDayWidth");
@@ -155,7 +157,7 @@ base class CalendarController extends ChangeNotifier {
       binding._selectDay(value);
       return;
     }
-    final day = dateOnly(value);
+    final day = CalendarDates.dateOnly(value);
     if (day == _selectedDay) {
       return;
     }

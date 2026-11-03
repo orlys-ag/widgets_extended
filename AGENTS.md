@@ -9,7 +9,8 @@ A Flutter package (`widgets_extended`) providing rich utility widgets, in these 
 - **sliver_tree**: a high-performance sliver-based tree widget with animated expand/collapse, FLIP reorder slides, node diffing, drag-and-drop reordering, and sticky headers.
 - **sectioned_sliver_list**: a sectioned list (sections + items) built on top of the sliver_tree stack (`SectionedListController` wraps a `TreeController` + `TreeSyncController` with section/item-typed keys).
 - **board**: a two-axis lattice viewport built on `RenderTwoDimensionalViewport`, with spanning items, overlap lanes, animated enter/exit and slides, drag-and-drop moves and resizes, cell and range selection, and frozen tracks.
-- **calendar**: a calendar widget (`CalendarView`) with Agenda, Day, Week and Month views on the board and sliver_tree modules, whose rules are in `.claude/rules/calendar.md`. Its barrel is `lib/calendar/calendar.dart`, and its API is experimental: it may change in any release, a patch release included, until it is declared stable.
+- **scheduling**: the scheduling core under `lib/scheduling/`, which the calendar builds on: the dates, entries, policy and store layers, holding civil days on the local wall clock, `CalendarEntry<T>` and the data-source contract, the edit policies and rules, and the stores, whose rules are in `.claude/rules/scheduling.md` and `.claude/rules/shared-calendar-conventions.md`. Its barrel is `lib/scheduling/scheduling.dart`, it imports nothing of the calendar, and its API is experimental: it may change in any release, a patch release included, until it is declared stable.
+- **calendar**: a calendar widget (`CalendarView`) with Agenda, Day, Week and Month views on the scheduling, board and sliver_tree modules, whose rules are in `.claude/rules/calendar.md` and `.claude/rules/shared-calendar-conventions.md`. Its barrel is `lib/calendar/calendar.dart`, and its API is experimental: it may change in any release, a patch release included, until it is declared stable.
 
 The barrel file `lib/widgets_extended.dart` re-exports each of them.
 
@@ -34,9 +35,10 @@ flutter analyze lib test                                  # the package
 (cd demos/workspace_calendar && flutter test)
 (cd demos/workspace_calendar && flutter analyze)
 
-# The calendar's tests, then the demo's, in America/Havana, whose clock skips
-# its midnight hour on 2026-03-08 and repeats it on 2026-11-01, and in
-# America/Santiago, whose clock goes back from 24:00 to 23:00 on 2026-04-04.
+# The scheduling and calendar modules' tests, then the demo's, in
+# America/Havana, whose clock skips its midnight hour on 2026-03-08 and
+# repeats it on 2026-11-01, and in America/Santiago, whose clock goes back
+# from 24:00 to 23:00 on 2026-04-04.
 # On Windows each script switches the system zone until it exits, and refuses
 # to start while another holds it, so run nothing else meanwhile.
 bash tool/test_calendar_in_havana.sh
@@ -48,10 +50,11 @@ bash tool/test_calendar_in_santiago.sh
 - After a behaviour change under `lib/`, also run the demo's tests and
   analyzer, and the examples' when `examples/pubspec.yaml` exists: they can
   fail where `test/` passes.
-- After a change under `lib/calendar/`, also run the four zone commands;
-  after one under `test/calendar/` or `demos/workspace_calendar/`, the Havana
-  and Santiago ones for that suite. The demo's run its whole suite: any of its
-  tests, not only its DST ones, can assume a clock these zones do not keep.
+- After a change under `lib/calendar/` or `lib/scheduling/`, also run the
+  four zone commands; after one under `test/calendar/`, `test/scheduling/` or
+  `demos/workspace_calendar/`, the Havana and Santiago ones for that suite.
+  The demo's run its whole suite: any of its tests, not only its DST ones, can
+  assume a clock these zones do not keep.
 - `flutter analyze lib test` and the demo's `flutter analyze` report no issues;
   keep it that way. A plain `flutter analyze` at the root also analyzes
   `examples/`, where neither command reports zero problems, so there compare
@@ -142,7 +145,8 @@ layer rule's `paths:` names the files it governs.
 |---|---|
 | [sliver_tree architecture](.claude/rules/sliver-tree.md), and the `sliver-tree-*.md` layer rules naming the file | Editing `lib/sliver_tree/**`, `lib/sectioned_sliver_list/**` or their tests |
 | [board architecture](.claude/rules/board.md), and the `board-*.md` layer rules naming the file | Editing `lib/board/**` or its tests |
-| [calendar architecture](.claude/rules/calendar.md), and the `calendar-*.md` rule of the file's layer | Editing `lib/calendar/**` or its tests, or changing demo code so it can move into `lib/calendar/` |
+| [scheduling architecture](.claude/rules/scheduling.md), [conventions shared with the calendar](.claude/rules/shared-calendar-conventions.md), and the `scheduling-*.md` rule of the file's layer | Editing `lib/scheduling/**` or `test/scheduling/**`, or changing demo code so it can move into `lib/scheduling/` |
+| [calendar architecture](.claude/rules/calendar.md), [conventions shared with the scheduling module](.claude/rules/shared-calendar-conventions.md), and the `calendar-*.md` rule of the file's layer | Editing `lib/calendar/**` or its tests, or changing demo code so it can move into `lib/calendar/` |
 | [Testing patterns](.claude/rules/testing.md) | Writing or changing tests under `test/**` |
 | [Comments](.claude/rules/comments.md) | Adding or changing a comment in Dart source under `lib/`, `test/` or `examples/` |
 | [Feature delivery method](doc/agents/delivery-method.md) | Writing a plan, or running, resuming or reading a feature-delivery run, whose files are under `plans/delivery/` |

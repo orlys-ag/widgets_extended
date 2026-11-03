@@ -4,7 +4,7 @@ library;
 
 import 'package:flutter/widgets.dart';
 
-import '../entries/calendar_entry.dart';
+import '../../scheduling/scheduling.dart';
 
 /// One kind of entry a day's badges mark: the fill of its dot, and its
 /// name in what a screen reader hears for the day. Two kinds are equal

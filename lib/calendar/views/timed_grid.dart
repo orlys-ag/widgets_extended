@@ -14,16 +14,11 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../board/board.dart';
-import '../dates/calendar_dates.dart';
-import '../entries/calendar_entry.dart';
-import '../policy/edit_policy.dart';
-import '../policy/edit_rules.dart';
-import '../policy/overlap.dart';
+import '../../scheduling/scheduling.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
-import '../store/calendar_store.dart';
 import 'answer_builder.dart';
 import 'entry_split.dart';
 import 'move_request.dart';
@@ -47,7 +42,7 @@ const int _openingMinute = 8 * 60;
 /// before [now]'s hour when it shows [now]'s day, [_openingMinute]
 /// otherwise, or the nearer end of its hours when they do not hold that.
 int _openingMinuteOf(GridTracks tracks, DateTime now) {
-  final minute = tracks.columnOf(dayNumber(now)) == null
+  final minute = tracks.columnOf(CalendarDates.dayNumber(now)) == null
       ? _openingMinute
       : math.max(0, (now.hour - 1) * 60);
   final hours = tracks.hours;
@@ -291,12 +286,12 @@ class _GridStyles {
 
 /// The key of the day header cell showing [day].
 ValueKey<String> dayHeaderKey(DateTime day) {
-  return ValueKey<String>("grid-day-${isoDate(day)}");
+  return ValueKey<String>("grid-day-${CalendarDates.isoDate(day)}");
 }
 
 /// The key of the block showing the piece of the entry [id] on [day].
 ValueKey<String> blockKey(String id, DateTime day) {
-  return ValueKey<String>("block-$id@${isoDate(day)}");
+  return ValueKey<String>("block-$id@${CalendarDates.isoDate(day)}");
 }
 
 /// The key of the outline and the resize handles over the block, or the
@@ -320,13 +315,13 @@ ValueKey<String> allDayBarKey(String id) {
 
 /// The key of [day]'s cell in the all-day strip's first row.
 ValueKey<String> allDayCellKey(DateTime day) {
-  return ValueKey<String>("grid-all-day-${isoDate(day)}");
+  return ValueKey<String>("grid-all-day-${CalendarDates.isoDate(day)}");
 }
 
 /// The key of the pill counting the bars the collapsed all-day strip hides
 /// on [day], a tap on which expands the strip.
 ValueKey<String> allDayMoreKey(DateTime day) {
-  return ValueKey<String>("grid-all-day-more-${isoDate(day)}");
+  return ValueKey<String>("grid-all-day-more-${CalendarDates.isoDate(day)}");
 }
 
 /// The key of the pill that collapses the expanded all-day strip.
@@ -339,13 +334,13 @@ const ValueKey<String> hiddenCountKey = ValueKey<String>("grid-hidden-count");
 /// The key of [day]'s cell in the row above the slots that counts the
 /// shown items before the hours.
 ValueKey<String> hiddenAboveKey(DateTime day) {
-  return ValueKey<String>("grid-hidden-above-${isoDate(day)}");
+  return ValueKey<String>("grid-hidden-above-${CalendarDates.isoDate(day)}");
 }
 
 /// The key of [day]'s cell in the row below the slots that counts the
 /// shown items after the hours.
 ValueKey<String> hiddenBelowKey(DateTime day) {
-  return ValueKey<String>("grid-hidden-below-${isoDate(day)}");
+  return ValueKey<String>("grid-hidden-below-${CalendarDates.isoDate(day)}");
 }
 
 /// Whether a grid lays out a row above its slots and one below them.
@@ -356,101 +351,6 @@ const ValueKey<String> landingLabelKey = ValueKey<String>("grid-landing-label");
 
 /// The key of the shadow under the block a move carries.
 const ValueKey<String> liftedBlockKey = ValueKey<String>("grid-lifted-block");
-
-/// The time a create gesture picked: one continuous range from [start] to
-/// [end], an exclusive end, both local times, all-day where [isAllDay].
-@immutable
-final class CalendarCreateRange {
-  /// The range from [start] to [end], all-day where [isAllDay], as the
-  /// gesture that picked it tells it.
-  ///
-  /// Throws an [ArgumentError], in every build, naming the first of
-  /// [CalendarEntry]'s rules its times break, in [CalendarEntry]'s order,
-  /// so an entry of its times constructs: [start] and then [end] is a local
-  /// time, not UTC; [start] and then [end] has no second, millisecond or
-  /// microsecond; [end] is after [start]; and for an all-day range, [start]
-  /// and then [end] is a local day start ([isDayStart]).
-  CalendarCreateRange({
-    required this.start,
-    required this.end,
-    this.isAllDay = false,
-  }) {
-    if (start.isUtc) {
-      throw ArgumentError.value(
-        start,
-        "start",
-        "A range starts at a local time",
-      );
-    }
-    if (end.isUtc) {
-      throw ArgumentError.value(end, "end", "A range ends at a local time");
-    }
-    if (start.second != 0 || start.millisecond != 0 || start.microsecond != 0) {
-      throw ArgumentError.value(
-        start,
-        "start",
-        "A range starts on a whole minute",
-      );
-    }
-    if (end.second != 0 || end.millisecond != 0 || end.microsecond != 0) {
-      throw ArgumentError.value(end, "end", "A range ends on a whole minute");
-    }
-    if (!end.isAfter(start)) {
-      throw ArgumentError.value(
-        end,
-        "end",
-        "A range ends after its start, $start",
-      );
-    }
-    if (isAllDay && !isDayStart(start)) {
-      throw ArgumentError.value(
-        start,
-        "start",
-        "An all-day range starts at a local day start",
-      );
-    }
-    if (isAllDay && !isDayStart(end)) {
-      throw ArgumentError.value(
-        end,
-        "end",
-        "An all-day range ends at a local day start",
-      );
-    }
-  }
-
-  /// Where the range starts.
-  final DateTime start;
-
-  /// Where the range ends, after [start].
-  final DateTime end;
-
-  /// Whether the range is all-day, stored as constructed: true for a range
-  /// a create across the all-day strip picks, whose [start] and [end] are
-  /// day starts, and false for every other, a range of slots from a day
-  /// start to a day start included.
-  final bool isAllDay;
-
-  @override
-  bool operator ==(Object other) {
-    return other is CalendarCreateRange &&
-        other.start == start &&
-        other.end == end &&
-        other.isAllDay == isAllDay;
-  }
-
-  @override
-  int get hashCode {
-    return Object.hash(start, end, isAllDay);
-  }
-
-  @override
-  String toString() {
-    return "CalendarCreateRange("
-        "${isoDate(start)} ${isoTime(minuteOfDay(start))} "
-        "to ${isoDate(end)} ${isoTime(minuteOfDay(end))}"
-        "${isAllDay ? ", all day" : ""})";
-  }
-}
 
 /// The key of a timed grid's board item: the entry [id] it shows, and for
 /// a piece its day's offset from the entry's first day, so a one-day
@@ -517,18 +417,19 @@ BoardSpan? pieceSpanOf(GridTracks tracks, int column, int start, int end) {
   );
 }
 
-/// The wall minute ([wallMinuteOf]) the slot of the body [cell] starts at
-/// on the grid [tracks] lays out.
+/// The wall minute ([CalendarDates.wallMinuteOf]) the slot of the body [cell]
+/// starts at on the grid [tracks] lays out.
 int slotWallMinuteOf(GridTracks tracks, ({int row, int col}) cell) {
-  return tracks.dayAt(cell.col) * minutesPerDay + tracks.minuteAt(cell.row);
+  return tracks.dayAt(cell.col) * CalendarDates.minutesPerDay +
+      tracks.minuteAt(cell.row);
 }
 
 /// What a tap on the body [cell] creates: its one slot, or null where its
 /// start or its end is a time the clock skips. On a day whose clock
 /// repeats a stretch, each end is the earlier instant of its time, or the
 /// later where [occurrence] is a later instant on that day
-/// ([timeAtWallMinute]), as an earliest start in the stretch's second pass
-/// is ([CalendarEditPolicy.earliestStartOn]).
+/// ([CalendarDates.timeAtWallMinute]), as an earliest start in the stretch's
+/// second pass is ([CalendarEditPolicy.earliestStartOn]).
 CalendarCreateRange? createRangeAt(
   GridTracks tracks,
   ({int row, int col}) cell, {
@@ -566,11 +467,15 @@ CalendarCreateRange? _createRangeOf(
   int endWall,
   DateTime? occurrence,
 ) {
-  final start = timeAtWallMinute(startWall, from: occurrence);
+  final start = CalendarDates.timeAtWallMinute(startWall, from: occurrence);
   if (start == null) {
     return null;
   }
-  final end = rangeEndAtWallMinute(start, endWall, from: occurrence);
+  final end = CalendarDates.rangeEndAtWallMinute(
+    start,
+    endWall,
+    from: occurrence,
+  );
   if (end == null || !end.isAfter(start)) {
     return null;
   }
@@ -740,7 +645,7 @@ class TimedGrid<T> extends StatefulWidget {
     this.editPolicy,
     this.weekdays = CalendarWeekdaySet.all,
     this.hours = CalendarDayHours.allDay,
-    this.slotMinutes = defaultSlotMinutes,
+    this.slotMinutes = CalendarDates.defaultSlotMinutes,
     this.hourLabelFormat = CalendarHourLabelFormat.twentyFourHour,
     this.minDayWidth = minDayWidthLow,
     this.minSlotHeight = defaultMinSlotHeight,
@@ -853,7 +758,7 @@ class TimedGrid<T> extends StatefulWidget {
 
   /// The length of one slot, one row, in minutes: the step the rows, a
   /// move's landing, a resize's edge and a create range snap to. One of
-  /// [slotMinuteChoices], which the grid's state asserts.
+  /// [CalendarDates.slotMinuteChoices], which the grid's state asserts.
   final int slotMinutes;
 
   /// The format the grid writes times of day in: the hour gutter's
@@ -1000,9 +905,9 @@ final class _Ranging extends _GridMode {
   /// where it lies inside a minute, and the day's minute 0 for one at its
   /// start or before it; for a column before [anchor]'s whose day takes no
   /// start, the next column's value, read where it is a day's minute 0 as
-  /// that day's start's own wall minute ([wallMinuteOf]), at which a range
-  /// reaching back into the column is held; and for [anchor]'s own where
-  /// its day takes no start, the next day's minute 0.
+  /// that day's start's own wall minute ([CalendarDates.wallMinuteOf]), at
+  /// which a range reaching back into the column is held; and for [anchor]'s
+  /// own where its day takes no start, the next day's minute 0.
   final List<int> firstFrom;
 
   /// By column as [occurrences]: the first column from it to [anchor]'s
@@ -1404,8 +1309,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// none is.
   CalendarCreateRange? _stripCreating;
 
-  /// The wall minutes ([wallMinuteOf]) of the slots of the range whose
-  /// create flow is open, which the background marks on its days the
+  /// The wall minutes ([CalendarDates.wallMinuteOf]) of the slots of the range
+  /// whose create flow is open, which the background marks on its days the
   /// tracks show; null while none is. Times rather than cells, so new
   /// days, and strip rows that move the slot rows, leave the mark on its
   /// own slots.
@@ -1499,13 +1404,20 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return _themed!;
   }
 
+  /// The message of the asserts that a [TimedGrid.slotMinutes] of
+  /// [slotMinutes] is one of [CalendarDates.slotMinuteChoices], which
+  /// [initState] and [didUpdateWidget] make.
+  static String _slotMinutesMessage(int slotMinutes) {
+    return "A TimedGrid's slotMinutes, $slotMinutes, is not one of "
+        "${CalendarDates.slotMinuteChoices}.";
+  }
+
   @override
   void initState() {
     super.initState();
     assert(
-      slotMinuteChoices.contains(widget.slotMinutes),
-      "A TimedGrid's slotMinutes, ${widget.slotMinutes}, is not one of "
-      "$slotMinuteChoices.",
+      CalendarDates.slotMinuteChoices.contains(widget.slotMinutes),
+      _slotMinutesMessage(widget.slotMinutes),
     );
     _takePolicy();
     _calendarNow = widget.now.value;
@@ -1568,9 +1480,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   void didUpdateWidget(TimedGrid<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
     assert(
-      slotMinuteChoices.contains(widget.slotMinutes),
-      "A TimedGrid's slotMinutes, ${widget.slotMinutes}, is not one of "
-      "$slotMinuteChoices.",
+      CalendarDates.slotMinuteChoices.contains(widget.slotMinutes),
+      _slotMinutesMessage(widget.slotMinutes),
     );
     final slotsChanged =
         widget.slotMinutes != oldWidget.slotMinutes ||
@@ -1791,7 +1702,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// The tracks [widget] lays out under [stripRows] all-day strip rows.
   static GridTracks _tracksOf<T>(TimedGrid<T> widget, int stripRows) {
     final tracks = GridTracks(
-      firstDay: dayNumber(widget.firstDay),
+      firstDay: CalendarDates.dayNumber(widget.firstDay),
       dayCount: widget.dayCount,
       weekdays: widget.weekdays,
       hours: widget.hours,
@@ -1879,7 +1790,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   static GridKey _keyOf<T>(GridShape<T> shape) {
     switch (shape) {
       case GridPiece<T>(:final shown, :final day):
-        return GridKey.piece(shown.id, day - dayNumber(shown.entry.start));
+        return GridKey.piece(
+          shown.id,
+          day - CalendarDates.dayNumber(shown.entry.start),
+        );
       case GridBar<T>(:final shown):
         return GridKey.bar(shown.id);
     }
@@ -2297,13 +2211,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     shown.removeWhere((entry) {
       return _held.containsKey(entry.id);
     });
-    final from = dayNumber(first);
-    final to = dayNumber(last);
+    final from = CalendarDates.dayNumber(first);
+    final to = CalendarDates.dayNumber(last);
     for (final MapEntry(key: id, value: request) in _held.entries) {
       final entry = request.requested;
       if (widget.store.storedEntry(id) != null &&
-          dayNumber(entry.start) <= to &&
-          lastDayNumberOf(entry.start, entry.end) >= from) {
+          CalendarDates.dayNumber(entry.start) <= to &&
+          CalendarDates.lastDayNumberOf(entry.start, entry.end) >= from) {
         shown.add(CalendarShownEntry<T>(entry, pending: true));
       }
     }
@@ -2354,7 +2268,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     DateTime first,
     DateTime last,
   ) {
-    for (var day = first; !day.isAfter(last); day = addDays(day, 1)) {
+    for (
+      var day = first;
+      !day.isAfter(last);
+      day = CalendarDates.addDays(day, 1)
+    ) {
       if (!store.isRead(day)) {
         return false;
       }
@@ -2363,7 +2281,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   DateTime get _lastDay {
-    return dateOfDayNumber(_tracks.lastDay);
+    return CalendarDates.dateOfDayNumber(_tracks.lastDay);
   }
 
   /// Whether this grid's days are ready. With no [TimedGrid.storeRange],
@@ -2675,9 +2593,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// bar moves only by days, and to times [_policy] admits, a move where
   /// it lets the entry move and a day-edge resize where it lets that edge
   /// resize: two asks of it at most. A bar
-  /// shares time with no entry ([rangeSharesTime]), so it lands over
-  /// another bar's cells too. Over them a day-edge resize previews the
-  /// resized bar's new extent across that bar, which keeps its rect: the
+  /// shares time with no entry ([NoOverlapsPolicy.rangeSharesTime]), so it
+  /// lands over another bar's cells too. Over them a day-edge resize previews
+  /// the resized bar's new extent across that bar, which keeps its rect: the
   /// two lie laned in one column by their stored spans and paint in the
   /// board's own item order, which the grid does not set, until the
   /// release stacks them in rows ([TimedGridLayout.bars]). A span of a running
@@ -2805,8 +2723,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (move) {
       final shift = _tracks.dayAt(to.colStart) - _tracks.dayAt(from.colStart);
       return (
-        start: dateOfDayNumber(dayNumber(entry.start) + shift),
-        end: dateOfDayNumber(dayNumber(entry.end) + shift),
+        start: CalendarDates.dateOfDayNumber(
+          CalendarDates.dayNumber(entry.start) + shift,
+        ),
+        end: CalendarDates.dateOfDayNumber(
+          CalendarDates.dayNumber(entry.end) + shift,
+        ),
       );
     }
     var start = entry.start;
@@ -2816,7 +2738,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     final last = _columnEndOf(to);
     if (last != _columnEndOf(from)) {
-      end = dateOfDayNumber(_tracks.dayAt(last) + 1);
+      end = CalendarDates.dateOfDayNumber(_tracks.dayAt(last) + 1);
     }
     if (!end.isAfter(start)) {
       return null;
@@ -2826,12 +2748,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Whether a timed range from [start] to [end] shares time with a timed
   /// entry other than [id], whose entry is [own], that the store shows on
-  /// the days the range covers, shown or not ([rangeSharesTime]): a board
-  /// piece in the rows the range covers on the shown columns, one of the
-  /// entries those rows can miss that the split indexes
-  /// ([TimedGridLayout.loose]), and, for a range with a day outside the
-  /// tracks' range, one the store shows there ([_offRangeOver]). The walk,
-  /// as many columns as the range covers, and at most two O(log n)
+  /// the days the range covers, shown or not
+  /// ([NoOverlapsPolicy.rangeSharesTime]): a board piece in the rows the range
+  /// covers on the shown columns, one of the entries those rows can miss that
+  /// the split indexes ([TimedGridLayout.loose]), and, for a range with a day
+  /// outside the tracks' range, one the store shows there ([_offRangeOver]).
+  /// The walk, as many columns as the range covers, and at most two O(log n)
   /// searches; a store read only for days outside the range no check
   /// since the last clearing of [_offRange] covered.
   bool _meetsOtherEntry(
@@ -2840,8 +2762,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     DateTime start,
     DateTime end,
   ) {
-    final firstDay = dayNumber(start);
-    final lastDay = lastDayNumberOf(start, end);
+    final firstDay = CalendarDates.dayNumber(start);
+    final lastDay = CalendarDates.lastDayNumberOf(start, end);
     final tracks = _tracks;
     if (_meetsPiece(id, start, end, firstDay, lastDay)) {
       return true;
@@ -2856,10 +2778,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// The index of the timed entries the store shows on the days outside
-  /// the tracks' range that the [dayNumber]s [firstDay] to [lastDay] cover,
-  /// [_offRange], having read first the days among them it has not: one
-  /// [CalendarStore.entriesBetween] before the range and one after it at
-  /// most, each wholly outside the range.
+  /// the tracks' range that the [CalendarDates.dayNumber]s [firstDay] to
+  /// [lastDay] cover, [_offRange], having read first the days among them it has
+  /// not: one [CalendarStore.entriesBetween] before the range and one after it
+  /// at most, each wholly outside the range.
   GridOverlapIndex _offRangeOver(int firstDay, int lastDay) {
     final tracks = _tracks;
     final index = _offRange ??= GridOverlapIndex(
@@ -2869,8 +2791,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (firstDay < index.readFrom) {
       index.addAll(
         _shownBetween(
-          dateOfDayNumber(firstDay),
-          dateOfDayNumber(index.readFrom - 1),
+          CalendarDates.dateOfDayNumber(firstDay),
+          CalendarDates.dateOfDayNumber(index.readFrom - 1),
         ),
       );
       index.readFrom = firstDay;
@@ -2878,8 +2800,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (lastDay > index.readTo) {
       index.addAll(
         _shownBetween(
-          dateOfDayNumber(index.readTo + 1),
-          dateOfDayNumber(lastDay),
+          CalendarDates.dateOfDayNumber(index.readTo + 1),
+          CalendarDates.dateOfDayNumber(lastDay),
         ),
       );
       index.readTo = lastDay;
@@ -2889,7 +2811,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Whether a board piece of an entry other than [id] in the rows the
   /// range from [start] to [end] covers on the shown columns of its days,
-  /// the [dayNumber]s [firstDay] to [lastDay], shares time with it.
+  /// the [CalendarDates.dayNumber]s [firstDay] to [lastDay], shares time with
+  /// it.
   bool _meetsPiece(
     String id,
     DateTime start,
@@ -2899,9 +2822,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   ) {
     final first = _tracks.firstColumnFrom(firstDay);
     final last = _tracks.lastColumnUpTo(lastDay);
-    final span = wallSpanOf(start, end);
+    final span = CalendarDates.wallSpanOf(start, end);
     for (var column = first; column <= last; column++) {
-      final piece = pieceOn(span, _tracks.dayAt(column));
+      final piece = CalendarDates.pieceOn(span, _tracks.dayAt(column));
       if (piece == null) {
         continue;
       }
@@ -2921,7 +2844,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         }
         final occupant = _board.itemOf(other);
         if (occupant != null &&
-            rangeSharesTime(start, end, occupant.shown.entry)) {
+            NoOverlapsPolicy.rangeSharesTime(
+              start,
+              end,
+              occupant.shown.entry,
+            )) {
           return true;
         }
       }
@@ -2938,10 +2865,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// not cut by the hours, and otherwise the time the piece's top shows,
   /// its day's start or the hours' start. The landing is the time of
   /// [to]'s start on its column's day, the occurrence of the anchor's kept
-  /// on a day whose clock repeats a stretch ([timeAtWallMinute]), and the
-  /// entry's start and end each move by the elapsed time from the anchor
-  /// to the landing, so the entry keeps its length. A resize sets the start
-  /// whose edge [to] moved off [from]'s to the time of that edge on the
+  /// on a day whose clock repeats a stretch ([CalendarDates.timeAtWallMinute]),
+  /// and the entry's start and end each move by the elapsed time from the
+  /// anchor to the landing, so the entry keeps its length. A resize sets the
+  /// start whose edge [to] moved off [from]'s to the time of that edge on the
   /// piece's day, the occurrence of the old start's kept likewise, and the
   /// end whose edge moved as [_endAtEdge] gives.
   ({DateTime start, DateTime end})? _timesOf(
@@ -2953,7 +2880,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }) {
     final hours = _tracks.hours;
     int wallAt(int column, double track) {
-      return _tracks.dayAt(column) * minutesPerDay +
+      return _tracks.dayAt(column) * CalendarDates.minutesPerDay +
           hours.start +
           ((track - _tracks.firstSlotRow) * _tracks.slotMinutes).round();
     }
@@ -2966,12 +2893,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       final anchor = piece.first && !cut
           ? entry.start
           : top == 0
-          ? dateOfDayNumber(piece.day)
-          : timeAtWallMinute(piece.day * minutesPerDay + top);
+          ? CalendarDates.dateOfDayNumber(piece.day)
+          : CalendarDates.timeAtWallMinute(
+              piece.day * CalendarDates.minutesPerDay + top,
+            );
       if (anchor == null) {
         return null;
       }
-      final landing = timeAtWallMinute(
+      final landing = CalendarDates.timeAtWallMinute(
         wallAt(to.colStart, to.startTrackOn(Axis.vertical)),
         from: anchor,
       );
@@ -2987,7 +2916,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final top = to.startTrackOn(Axis.vertical);
     if ((top - from.startTrackOn(Axis.vertical)).abs() >
         precisionErrorTolerance) {
-      final edge = timeAtWallMinute(wallAt(column, top), from: entry.start);
+      final edge = CalendarDates.timeAtWallMinute(
+        wallAt(column, top),
+        from: entry.start,
+      );
       if (edge == null) {
         return null;
       }
@@ -3012,24 +2944,24 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// piece moves to the wall minute [wall].
   ///
   /// Where that edge is drawn at the old end's own wall minute
-  /// ([endWallMinuteOf]), it is the end of a range from [start] at [wall],
-  /// in the old end's occurrence where the clock reads it twice
-  /// ([rangeEndAtWallMinute]). Where [wallSpanOf] draws the edge
-  /// elsewhere, as for an end at the later 00:00 or one whose wall minute
-  /// is not after the start's, the edge does not show the old end's
+  /// ([CalendarDates.endWallMinuteOf]), it is the end of a range from [start]
+  /// at [wall], in the old end's occurrence where the clock reads it twice
+  /// ([CalendarDates.rangeEndAtWallMinute]). Where [CalendarDates.wallSpanOf]
+  /// draws the edge elsewhere, as for an end at the later 00:00 or one whose
+  /// wall minute is not after the start's, the edge does not show the old end's
   /// occurrence: the end moves by the minutes the edge moved, wherever a
   /// range from [start] to that end is drawn to [wall], and is otherwise
   /// the end at [wall] in the earlier occurrence.
   DateTime? _endAtEdge(CalendarEntry<T> entry, DateTime start, int wall) {
-    final drawn = wallSpanOf(entry.start, entry.end).end;
-    if (drawn == endWallMinuteOf(entry.end)) {
-      return rangeEndAtWallMinute(start, wall, from: entry.end);
+    final drawn = CalendarDates.wallSpanOf(entry.start, entry.end).end;
+    if (drawn == CalendarDates.endWallMinuteOf(entry.end)) {
+      return CalendarDates.rangeEndAtWallMinute(start, wall, from: entry.end);
     }
     final moved = entry.end.add(Duration(minutes: wall - drawn));
-    if (wallSpanOf(start, moved).end == wall) {
+    if (CalendarDates.wallSpanOf(start, moved).end == wall) {
       return moved;
     }
-    return rangeEndAtWallMinute(start, wall);
+    return CalendarDates.rangeEndAtWallMinute(start, wall);
   }
 
   /// A move the board reports, from a drag or a semantics action.
@@ -3285,8 +3217,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     final entry = shape.shown.entry;
     final day = _tracks.dayAt(column);
-    final start = dateOfDayNumber(day);
-    final end = dateOfDayNumber(day + 1);
+    final start = CalendarDates.dateOfDayNumber(day);
+    final end = CalendarDates.dateOfDayNumber(day + 1);
     final now = _calendarNow;
     try {
       if (!_policy.mayMove(entry, now) ||
@@ -3305,9 +3237,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// hour after it. A start the day's clock repeats takes the occurrence of
   /// the earliest start [_policy] gives the day
   /// ([CalendarEarliestStart.occurrence]), as a create's times do
-  /// ([timeAtWallMinute]). Null where the start is a time the clock skips,
-  /// where [_policy] does not let the entry move or [_rules] refuse the
-  /// range, by the day limit or by the hours and the policy
+  /// ([CalendarDates.timeAtWallMinute]). Null where the start is a time the
+  /// clock skips, where [_policy] does not let the entry move or [_rules]
+  /// refuse the range, by the day limit or by the hours and the policy
   /// ([CalendarEditRules.admitsTimes]), or the policy's answer throws
   /// ([_reportPolicyThrow]), or where the policy forbids overlaps and the
   /// range shares time with another timed entry the store shows
@@ -3330,8 +3262,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       if (!_policy.mayMove(entry, now)) {
         return null;
       }
-      start = timeAtWallMinute(
-        _tracks.dayAt(column) * minutesPerDay + _tracks.minuteAt(row),
+      start = CalendarDates.timeAtWallMinute(
+        _tracks.dayAt(column) * CalendarDates.minutesPerDay +
+            _tracks.minuteAt(row),
         from: _rules.earliestStartOn(_tracks.dateAt(column), now).occurrence,
       );
     } catch (exception, stack) {
@@ -3372,8 +3305,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   DateTime? _laterDayEndOf(GridKey key, int column, int row) {
     noteDropGate();
     final shape = _board.itemOf(key);
-    var end = endAtWallMinute(
-      _tracks.dayAt(column) * minutesPerDay + _tracks.minuteAt(row + 1),
+    var end = CalendarDates.endAtWallMinute(
+      _tracks.dayAt(column) * CalendarDates.minutesPerDay +
+          _tracks.minuteAt(row + 1),
     );
     if (shape == null || end == null) {
       return null;
@@ -3423,14 +3357,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// Whether the range from [start] to [end] shares time with a timed
   /// entry other than [id], or with any where [id] is null, that the store
   /// shows on the days the range covers, shown columns or not
-  /// ([rangeSharesTime]).
+  /// ([NoOverlapsPolicy.rangeSharesTime]).
   bool _sharesShownTime(String? id, DateTime start, DateTime end) {
     final shown = _shownBetween(
-      dateOfDayNumber(dayNumber(start)),
-      dateOfDayNumber(lastDayNumberOf(start, end)),
+      CalendarDates.dateOfDayNumber(CalendarDates.dayNumber(start)),
+      CalendarDates.dateOfDayNumber(CalendarDates.lastDayNumberOf(start, end)),
     );
     for (final other in shown) {
-      if (other.id != id && rangeSharesTime(start, end, other.entry)) {
+      if (other.id != id &&
+          NoOverlapsPolicy.rangeSharesTime(start, end, other.entry)) {
         return true;
       }
     }
@@ -3491,8 +3426,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// The shown day columns the range from [start] to [end] covers, or null
   /// where it covers none.
   _StripMark? _columnsOf(DateTime start, DateTime end) {
-    final first = _tracks.firstColumnFrom(dayNumber(start));
-    final last = _tracks.lastColumnUpTo(lastDayNumberOf(start, end));
+    final first = _tracks.firstColumnFrom(CalendarDates.dayNumber(start));
+    final last = _tracks.lastColumnUpTo(
+      CalendarDates.lastDayNumberOf(start, end),
+    );
     return last < first ? null : (first: first, last: last);
   }
 
@@ -3742,7 +3679,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (drag.key.isBar != drag.crosses) {
       return null;
     }
-    return wallSpanOf(times.start, times.end);
+    return CalendarDates.wallSpanOf(times.start, times.end);
   }
 
   /// The wall minutes the background marks for [times], what
@@ -3759,14 +3696,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         !drag.crosses) {
       return null;
     }
-    return wallSpanOf(times.start, times.end);
+    return CalendarDates.wallSpanOf(times.start, times.end);
   }
 
   /// Where the line marking [now] sits: null when no column shows its day
   /// or the hours do not hold its minute.
   _NowMark? _nowMarkOf(DateTime now) {
-    final column = _tracks.columnOf(dayNumber(now));
-    final minute = minuteOfDay(now);
+    final column = _tracks.columnOf(CalendarDates.dayNumber(now));
+    final minute = CalendarDates.minuteOfDay(now);
     final hours = _tracks.hours;
     if (column == null || minute < hours.start || minute > hours.end) {
       return null;
@@ -3905,9 +3842,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return true;
     }
     return !_slotMeetsEntry(cell, slot) &&
-        // A block lies on the rows of its wall minutes ([wallSpanOf]),
-        // which order as its instants do except where the clock reads a
-        // stretch twice; only there can it hold the slot from other rows.
+        // A block lies on the rows of its wall minutes
+        // ([CalendarDates.wallSpanOf]), which order as its instants do except
+        // where the clock reads a stretch twice; only there can it hold the
+        // slot from other rows.
         (!_tracks.repeatsStretchAt(cell.col) ||
             !_sharesShownTime(null, slot.start, slot.end));
   }
@@ -3919,7 +3857,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     for (final key in keys) {
       final shape = _board.itemOf(key);
       if (shape != null &&
-          rangeSharesTime(slot.start, slot.end, shape.shown.entry)) {
+          NoOverlapsPolicy.rangeSharesTime(
+            slot.start,
+            slot.end,
+            shape.shown.entry,
+          )) {
         return true;
       }
     }
@@ -4231,7 +4173,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   CalendarCreateRange _stripRangeOver(int anchor, int focus) {
     return CalendarCreateRange(
       start: _tracks.dateAt(math.min(anchor, focus)),
-      end: dateOfDayNumber(_tracks.dayAt(math.max(anchor, focus)) + 1),
+      end: CalendarDates.dateOfDayNumber(
+        _tracks.dayAt(math.max(anchor, focus)) + 1,
+      ),
       isAllDay: true,
     );
   }
@@ -4288,14 +4232,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// The wall minute at which a create range reaching back into a column
   /// whose day takes no start is held, for the next column's bound [bound]
   /// ([_Ranging.firstFrom]): where [bound] is a day's minute 0, that day's
-  /// start's own wall minute ([wallMinuteOf]), which lies past it where
-  /// the clock skips the day's midnight, so the range starts at the day's
+  /// start's own wall minute ([CalendarDates.wallMinuteOf]), which lies past it
+  /// where the clock skips the day's midnight, so the range starts at the day's
   /// first time; and [bound] itself otherwise.
   static int _closedColumnBoundOf(int bound) {
-    if (bound % minutesPerDay != 0) {
+    if (bound % CalendarDates.minutesPerDay != 0) {
       return bound;
     }
-    return wallMinuteOf(dateOfDayNumber(bound ~/ minutesPerDay));
+    return CalendarDates.wallMinuteOf(
+      CalendarDates.dateOfDayNumber(bound ~/ CalendarDates.minutesPerDay),
+    );
   }
 
   /// Reads the entries next to [range]'s anchor's slot that hold it, in
@@ -4379,11 +4325,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         col = col >= anchor.col
             ? math.max(
                 anchor.col,
-                _tracks.lastColumnUpTo(lastDayNumberOf(held.start, held.end)),
+                _tracks.lastColumnUpTo(
+                  CalendarDates.lastDayNumberOf(held.start, held.end),
+                ),
               )
             : math.min(
                 anchor.col,
-                _tracks.firstColumnFrom(dayNumber(held.start)),
+                _tracks.firstColumnFrom(CalendarDates.dayNumber(held.start)),
               );
       }
     }
@@ -4409,10 +4357,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       if (limit != null && focusWall + _tracks.slotMinutes > limit) {
         focus = _lastCellEndingBy(limit, anchor);
       }
-      final start = timeAtWallMinute(anchorWall, from: occurrence);
+      final start = CalendarDates.timeAtWallMinute(
+        anchorWall,
+        from: occurrence,
+      );
       final end = start == null
           ? null
-          : rangeEndAtWallMinute(
+          : CalendarDates.rangeEndAtWallMinute(
               start,
               slotWallMinuteOf(_tracks, focus) + _tracks.slotMinutes,
               from: occurrence,
@@ -4425,7 +4376,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
           isAllDay: false,
         );
         if (held != null) {
-          focus = _lastCellEndingBy(endWallMinuteOf(held.end), anchor);
+          focus = _lastCellEndingBy(
+            CalendarDates.endWallMinuteOf(held.end),
+            anchor,
+          );
         }
       }
       return focus;
@@ -4437,13 +4391,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       focus = _firstCellStartingFrom(earliest, anchor);
     }
     final occurrence = range.occurrences[focus.col - 1];
-    final start = timeAtWallMinute(
+    final start = CalendarDates.timeAtWallMinute(
       slotWallMinuteOf(_tracks, focus),
       from: occurrence,
     );
     final end = start == null
         ? null
-        : rangeEndAtWallMinute(
+        : CalendarDates.rangeEndAtWallMinute(
             start,
             anchorWall + _tracks.slotMinutes,
             from: occurrence,
@@ -4456,7 +4410,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         isAllDay: false,
       );
       if (held != null) {
-        focus = _firstCellStartingFrom(wallMinuteOf(held.start), anchor);
+        focus = _firstCellStartingFrom(
+          CalendarDates.wallMinuteOf(held.start),
+          anchor,
+        );
       }
     }
     return focus;
@@ -4471,8 +4428,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   ) {
     final tracks = _tracks;
     final hours = tracks.hours;
-    final into = wall % minutesPerDay;
-    final day = (wall - into) ~/ minutesPerDay;
+    final into = wall % CalendarDates.minutesPerDay;
+    final day = (wall - into) ~/ CalendarDates.minutesPerDay;
     var column = tracks.lastColumnUpTo(day);
     ({int row, int col})? cell;
     if (column >= 1) {
@@ -4504,8 +4461,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   ) {
     final tracks = _tracks;
     final hours = tracks.hours;
-    final into = wall % minutesPerDay;
-    final day = (wall - into) ~/ minutesPerDay;
+    final into = wall % CalendarDates.minutesPerDay;
+    final day = (wall - into) ~/ CalendarDates.minutesPerDay;
     var column = tracks.firstColumnFrom(day);
     ({int row, int col})? cell;
     if (column <= tracks.columnCount) {
@@ -4614,10 +4571,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
     final col = range.anchor.col;
     final from = range.firstFrom[col - 1];
-    final dayStart = _tracks.dayAt(col) * minutesPerDay;
+    final dayStart = _tracks.dayAt(col) * CalendarDates.minutesPerDay;
     if (range.strip) {
       range.refused = from != dayStart;
-    } else if (from >= dayStart + minutesPerDay) {
+    } else if (from >= dayStart + CalendarDates.minutesPerDay) {
       // Its day takes no start.
       range.refused = true;
     } else if (from <= slotWallMinuteOf(_tracks, range.anchor)) {
@@ -4662,7 +4619,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     DateTime? occurrence,
   ) {
     final tracks = _tracks;
-    final into = from - tracks.dayAt(col) * minutesPerDay - tracks.hours.start;
+    final into =
+        from -
+        tracks.dayAt(col) * CalendarDates.minutesPerDay -
+        tracks.hours.start;
     final first =
         tracks.firstSlotRow +
         math.max<int>(0, (into + tracks.slotMinutes - 1) ~/ tracks.slotMinutes);
@@ -4829,7 +4789,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final cutAtStart = piece.start < hours.start;
     final cutAtEnd = piece.end > hours.end;
     return _Block<T>(
-      key: blockKey(entry.id, dateOfDayNumber(piece.day)),
+      key: blockKey(entry.id, CalendarDates.dateOfDayNumber(piece.day)),
       pieceKey: _keyOf(piece),
       entry: entry,
       details: CalendarBlockDetails(
@@ -4877,33 +4837,38 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// The wall minutes next to [anchor]'s slot that a create range from it
   /// may not pass, in [occurrence]'s occurrence, which its times take
   /// ([_reach]): the last at which a range from the slot's start ends not
-  /// after the earliest start after it ([lastWallMinuteNotAfter]), and the
-  /// first not before the latest end before the slot's end
-  /// ([firstWallMinuteNotBefore]), among the timed entries the store shows
-  /// on the grid's days; each null where there is none.
+  /// after the earliest start after it
+  /// ([CalendarDates.lastWallMinuteNotAfter]), and the first not before the
+  /// latest end before the slot's end
+  /// ([CalendarDates.firstWallMinuteNotBefore]), among the timed entries the
+  /// store shows on the grid's days; each null where there is none.
   ///
   /// Where the slot is the last of the first pass of a stretch the clock
   /// repeats, it ends with that pass, while a range to its end from a start
   /// before the stretch ends after the second pass
-  /// ([rangeEndAtWallMinute]); where an entry shares time with that second
-  /// pass, the range's start may not pass the stretch's start.
+  /// ([CalendarDates.rangeEndAtWallMinute]); where an entry shares time with
+  /// that second pass, the range's start may not pass the stretch's start.
   ({int? next, int? previous}) _conflictsAround(
     ({int row, int col}) anchor,
     DateTime? occurrence,
   ) {
     final wall = slotWallMinuteOf(_tracks, anchor);
-    final start = timeAtWallMinute(wall, from: occurrence);
+    final start = CalendarDates.timeAtWallMinute(wall, from: occurrence);
     int? next;
     int? previous;
     if (start == null) {
       return (next: next, previous: previous);
     }
     final endWall = wall + _tracks.slotMinutes;
-    final end = rangeEndAtWallMinute(start, endWall, from: occurrence);
+    final end = CalendarDates.rangeEndAtWallMinute(
+      start,
+      endWall,
+      from: occurrence,
+    );
     if (end == null) {
       return (next: next, previous: previous);
     }
-    final passEnd = endAtWallMinute(endWall, from: occurrence);
+    final passEnd = CalendarDates.endAtWallMinute(endWall, from: occurrence);
     final secondPass = passEnd != null && passEnd.isAfter(end)
         ? (start: end, end: passEnd)
         : null;
@@ -4914,7 +4879,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         continue;
       }
       if (entry.start.isAfter(start)) {
-        final at = lastWallMinuteNotAfter(
+        final at = CalendarDates.lastWallMinuteNotAfter(
           entry.start,
           from: occurrence,
           start: start,
@@ -4922,18 +4887,25 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         next = next == null ? at : math.min(next, at);
       }
       if (entry.end.isBefore(end)) {
-        final at = firstWallMinuteNotBefore(entry.end, from: occurrence);
+        final at = CalendarDates.firstWallMinuteNotBefore(
+          entry.end,
+          from: occurrence,
+        );
         previous = previous == null ? at : math.max(previous, at);
       }
       if (secondPass != null &&
-          rangeSharesTime(secondPass.start, secondPass.end, entry)) {
+          NoOverlapsPolicy.rangeSharesTime(
+            secondPass.start,
+            secondPass.end,
+            entry,
+          )) {
         holdsInPass = true;
       }
     }
     if (holdsInPass) {
       // The first pass ends at the instant the clock goes back, which
       // reads the stretch's start.
-      final at = wallMinuteOf(end);
+      final at = CalendarDates.wallMinuteOf(end);
       previous = previous == null ? at : math.max(previous, at);
     }
     return (next: next, previous: previous);
@@ -4944,7 +4916,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// with none for its shown range, failed, with the store's load error as
   /// it holds it, and what the loading builder draws otherwise.
   Widget _buildCover(BuildContext context, CalendarStore<T> store) {
-    final first = dateOfDayNumber(_tracks.firstDay);
+    final first = CalendarDates.dateOfDayNumber(_tracks.firstDay);
     final last = _lastDay;
     final range = widget.storeRange;
     if (store.status == CalendarLoadStatus.failed &&
@@ -6047,8 +6019,8 @@ class _TimedGridPainter extends BoardBackgroundPainter {
   final GridTracks tracks;
   final DateTime today;
 
-  /// The wall minutes ([wallMinuteOf]) of the create range, or of the range
-  /// an end handle dragged into a later day gives, or null.
+  /// The wall minutes ([CalendarDates.wallMinuteOf]) of the create range, or of
+  /// the range an end handle dragged into a later day gives, or null.
   final ({int start, int end})? range;
 
   /// The wall minutes a move would land on, or null.
@@ -6075,12 +6047,12 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     }
     final first = geometry.visibleCellRect(slotFirst, firstCol);
     final last = geometry.visibleCellRect(slotLast, lastCol);
-    final todayColumn = tracks.columnOf(dayNumber(today));
+    final todayColumn = tracks.columnOf(CalendarDates.dayNumber(today));
     for (var col = firstCol; col <= lastCol; col++) {
       final Paint fill;
       if (col == todayColumn) {
         fill = styles.tintPaint;
-      } else if (weekdayColumnOfDay(tracks.dayAt(col)) >= 5) {
+      } else if (CalendarDates.weekdayColumnOfDay(tracks.dayAt(col)) >= 5) {
         fill = styles.backgroundPaint;
       } else {
         continue;
@@ -6144,7 +6116,7 @@ class _TimedGridPainter extends BoardBackgroundPainter {
       col <= geometry.lastVisibleCol;
       col++
     ) {
-      final piece = pieceOn(marked, tracks.dayAt(col));
+      final piece = CalendarDates.pieceOn(marked, tracks.dayAt(col));
       if (piece == null) {
         continue;
       }
@@ -6384,7 +6356,7 @@ class _HourLabels {
   CalendarHourLabelFormat _format = CalendarHourLabelFormat.twentyFourHour;
   CalendarLocalizations _strings = const DefaultCalendarLocalizations();
   CalendarDayHours? _hours;
-  int _slotMinutes = defaultSlotMinutes;
+  int _slotMinutes = CalendarDates.defaultSlotMinutes;
   double _leastSlot = 0.0;
 
   /// The minutes of the labelled lines, from the top: the first slot's,

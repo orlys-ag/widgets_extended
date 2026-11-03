@@ -6,15 +6,17 @@ paths:
 
 # calendar architecture: views
 
-The contract of the four views and their parts. The conventions every layer follows are in `calendar.md`.
+The contract of the four views and their parts. The conventions every layer follows are in `calendar.md` and `shared-calendar-conventions.md`.
 
 - **Imports**: of Flutter, `package:flutter/widgets.dart` and the libraries
-  below it; and the board and sliver_tree modules.
+  below it; the scheduling module, through
+  `lib/scheduling/scheduling.dart`; and the board and sliver_tree modules.
 - **Reads.** A view reads entries only through a `CalendarStore`, every
   colour, text style, motion and icon from `CalendarTheme`, and every word
   from `CalendarLocalizations`. It builds entry content and the loading and
   failure states through the presentation layer's builders, and takes its
-  edit limits from the policy layer.
+  edit limits from the scheduling module's `CalendarEditPolicy` and
+  `CalendarEditRules`.
 - **Store calls.** A view calls a store method that can notify, such as
   `prefetch`, `retry` or a write, from a gesture or after the frame, never
   during layout.

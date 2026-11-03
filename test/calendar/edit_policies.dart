@@ -4,11 +4,11 @@
 library;
 
 import 'package:flutter/scheduler.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
-import 'package:widgets_extended/calendar/policy/edit_policy.dart';
-import 'package:widgets_extended/calendar/store/calendar_store.dart';
-import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
+import 'package:widgets_extended/scheduling/store/calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/entry_split.dart';
 
 /// One ask of a [CountingEditPolicy]: the member's [name], the scheduler's
@@ -190,8 +190,8 @@ final class ScriptedEditPolicy<T> extends CalendarEditPolicy<T> {
 }
 
 /// An in-memory store that records every move it is asked for, and the
-/// range of days, as [dayNumber]s, of each [entriesBetween] it is asked
-/// while no move of its own runs: the reads of its own overlap refusal
+/// range of days, as [CalendarDates.dayNumber]s, of each [entriesBetween] it is
+/// asked while no move of its own runs: the reads of its own overlap refusal
 /// and of the split its write's notify runs within the call are left out.
 base class MoveRecordingStore extends MemoryCalendarStore<String> {
   MoveRecordingStore({super.entries, super.hours}) : super();
@@ -219,7 +219,10 @@ base class MoveRecordingStore extends MemoryCalendarStore<String> {
     DateTime last,
   ) {
     if (!_moving) {
-      reads.add((first: dayNumber(first), last: dayNumber(last)));
+      reads.add((
+        first: CalendarDates.dayNumber(first),
+        last: CalendarDates.dayNumber(last),
+      ));
     }
     return super.entriesBetween(first, last);
   }

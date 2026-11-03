@@ -9,10 +9,9 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-import '../dates/calendar_dates.dart';
+import '../../scheduling/scheduling.dart';
 import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
-import '../store/calendar_store.dart';
 import 'day_cell.dart';
 import 'week_strip.dart';
 
@@ -46,16 +45,19 @@ DateTime monthFoldDay(
   }
   if (holds(today)) {
     // `shownDayNear` stays inside the month of the day it is given.
-    return shownDayNear(today, weekdays);
+    return CalendarDates.shownDayNear(today, weekdays);
   }
-  return shownDayNear(DateTime(month.year, month.month), weekdays);
+  return CalendarDates.shownDayNear(
+    DateTime(month.year, month.month),
+    weekdays,
+  );
 }
 
 /// The months side by side, opening on [month], one at a time across the
 /// strip, each a grid of [weekdays]' columns and a row [rowHeight] tall for
-/// each of its weeks ([MonthGrid]), its days as [DayCell]s: the selected
-/// day's in the primary colour, today's ringed, and badges on a day with
-/// items once the store has read it, one for each kind [dayBadges] gives
+/// each of its weeks ([CalendarMonthGrid]), its days as [DayCell]s: the
+/// selected day's in the primary colour, today's ringed, and badges on a day
+/// with items once the store has read it, one for each kind [dayBadges] gives
 /// its entries. The cells before a month's first day
 /// and after its last are blank. A tap on a day reports [onSelectDay].
 ///
@@ -241,8 +243,12 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
     return (month.year - _origin.year) * 12 + month.month - _origin.month;
   }
 
-  MonthGrid _gridOf(DateTime month) {
-    return MonthGrid(month.year, month.month, weekdays: widget.weekdays);
+  CalendarMonthGrid _gridOf(DateTime month) {
+    return CalendarMonthGrid(
+      month.year,
+      month.month,
+      weekdays: widget.weekdays,
+    );
   }
 
   double _heightAt(int index) {
@@ -372,13 +378,13 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
     final DateTime day;
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.arrowLeft) {
-      day = nextShownDay(selected, -forward, widget.weekdays);
+      day = CalendarDates.nextShownDay(selected, -forward, widget.weekdays);
     } else if (key == LogicalKeyboardKey.arrowRight) {
-      day = nextShownDay(selected, forward, widget.weekdays);
+      day = CalendarDates.nextShownDay(selected, forward, widget.weekdays);
     } else if (key == LogicalKeyboardKey.arrowUp) {
-      day = addDays(selected, -DateTime.daysPerWeek);
+      day = CalendarDates.addDays(selected, -DateTime.daysPerWeek);
     } else if (key == LogicalKeyboardKey.arrowDown) {
-      day = addDays(selected, DateTime.daysPerWeek);
+      day = CalendarDates.addDays(selected, DateTime.daysPerWeek);
     } else {
       return KeyEventResult.ignored;
     }
@@ -508,7 +514,7 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
     );
   }
 
-  Widget _buildDay(MonthGrid grid, DateTime day) {
+  Widget _buildDay(CalendarMonthGrid grid, DateTime day) {
     if (!grid.contains(day)) {
       return _NeighbourDay<T>(
         store: widget.store,

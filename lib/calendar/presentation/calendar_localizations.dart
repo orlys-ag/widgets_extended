@@ -1,20 +1,12 @@
-/// The calendar's text: [CalendarLocalizations], its English default
-/// [DefaultCalendarLocalizations], and [CalendarHourLabelFormat].
+/// The calendar's text: [CalendarLocalizations] and its English default
+/// [DefaultCalendarLocalizations], which name a time of day on the clock a
+/// [CalendarHourLabelFormat] picks.
 library;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
-import '../dates/calendar_dates.dart';
-
-/// How the calendar names a time of day ([CalendarLocalizations.formatTime]).
-enum CalendarHourLabelFormat {
-  /// The 24-hour clock: "13:00" in English.
-  twentyFourHour,
-
-  /// The 12-hour clock: "1 PM" in English.
-  twelveHour,
-}
+import '../../scheduling/scheduling.dart';
 
 /// Every text the calendar shows or a screen reader hears: the names of the
 /// months and weekdays, the times and dates, and the views', the header's
@@ -359,7 +351,7 @@ base class DefaultCalendarLocalizations extends CalendarLocalizations {
     if (day.year != today.year) {
       date = "$date, ${day.year}";
     }
-    final offset = daysBetween(today, day);
+    final offset = CalendarDates.daysBetween(today, day);
     final String name;
     if (offset == 0) {
       name = "Today";
@@ -397,7 +389,7 @@ base class DefaultCalendarLocalizations extends CalendarLocalizations {
       final minutes = (minute % 60).toString().padLeft(2, "0");
       return "$hours:$minutes";
     }
-    final ofDay = minute % minutesPerDay;
+    final ofDay = minute % CalendarDates.minutesPerDay;
     final hour = ofDay ~/ 60;
     final half = hour < 12 ? "AM" : "PM";
     final shown = hour % 12 == 0 ? 12 : hour % 12;
@@ -428,7 +420,11 @@ base class DefaultCalendarLocalizations extends CalendarLocalizations {
     if (isAllDay) {
       return allDay;
     }
-    return formatTimeRange(minuteOfDay(start), endMinuteOfDay(end), format);
+    return formatTimeRange(
+      CalendarDates.minuteOfDay(start),
+      CalendarDates.endMinuteOfDay(end),
+      format,
+    );
   }
 
   @override
@@ -556,18 +552,18 @@ base class DefaultCalendarLocalizations extends CalendarLocalizations {
     CalendarHourLabelFormat format, {
     required bool isAllDay,
   }) {
-    final first = dayNumber(start);
-    final last = lastDayNumberOf(start, end);
-    final from = dayTitle(dateOfDayNumber(first), today);
-    final to = dayTitle(dateOfDayNumber(last), today);
+    final first = CalendarDates.dayNumber(start);
+    final last = CalendarDates.lastDayNumberOf(start, end);
+    final from = dayTitle(CalendarDates.dateOfDayNumber(first), today);
+    final to = dayTitle(CalendarDates.dateOfDayNumber(last), today);
     if (isAllDay) {
       return first == last ? "$from, all day" : "$from to $to, all day";
     }
     if (first == last) {
       return "$from, ${entryTimes(start, end, format, isAllDay: false)}";
     }
-    final startTime = formatTime(minuteOfDay(start), format);
-    final endTime = formatTime(endMinuteOfDay(end), format);
+    final startTime = formatTime(CalendarDates.minuteOfDay(start), format);
+    final endTime = formatTime(CalendarDates.endMinuteOfDay(end), format);
     return "$from, $startTime to $to, $endTime";
   }
 
@@ -586,10 +582,12 @@ base class DefaultCalendarLocalizations extends CalendarLocalizations {
     required bool pending,
     required bool isAllDay,
   }) {
-    final first = dateOfDayNumber(dayNumber(start));
-    final last = dateOfDayNumber(lastDayNumberOf(start, end));
-    final startTime = formatTime(minuteOfDay(start), format);
-    final endTime = formatTime(endMinuteOfDay(end), format);
+    final first = CalendarDates.dateOfDayNumber(CalendarDates.dayNumber(start));
+    final last = CalendarDates.dateOfDayNumber(
+      CalendarDates.lastDayNumberOf(start, end),
+    );
+    final startTime = formatTime(CalendarDates.minuteOfDay(start), format);
+    final endTime = formatTime(CalendarDates.endMinuteOfDay(end), format);
     final String when;
     if (isAllDay) {
       when = first == last

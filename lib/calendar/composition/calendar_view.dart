@@ -10,16 +10,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
-import '../dates/calendar_date_helpers.dart';
-import '../dates/calendar_dates.dart';
-import '../entries/calendar_entry.dart';
-import '../policy/edit_policy.dart';
-import '../policy/edit_rules.dart';
+import '../../scheduling/scheduling.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_day_badges.dart';
-import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
-import '../store/calendar_store.dart';
 import '../views/day_list.dart';
 import '../views/month_board.dart';
 import '../views/month_picker.dart';
@@ -221,7 +215,7 @@ class CalendarView<T> extends StatefulWidget {
     this.editable = false,
     this.editPolicy,
     this.weekdays = CalendarWeekdaySet.all,
-    this.slotMinutes = defaultSlotMinutes,
+    this.slotMinutes = CalendarDates.defaultSlotMinutes,
     this.hourLabelFormat = CalendarHourLabelFormat.twentyFourHour,
     this.monthLayout = CalendarMonthLayout.fitScreen,
     this.clock,
@@ -455,13 +449,13 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// [CalendarDates.slotMinuteChoices] does not hold, or null.
   ArgumentError? get _slotMinutesError {
     final slotMinutes = widget.slotMinutes;
-    if (slotMinuteChoices.contains(slotMinutes)) {
+    if (CalendarDates.slotMinuteChoices.contains(slotMinutes)) {
       return null;
     }
     return ArgumentError.value(
       slotMinutes,
       "slotMinutes",
-      "is not one of $slotMinuteChoices",
+      "is not one of ${CalendarDates.slotMinuteChoices}",
     );
   }
 
@@ -539,7 +533,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   DateTime? _browsedDay;
 
   /// The month grid of the selected day.
-  late MonthGrid _grid;
+  late CalendarMonthGrid _grid;
 
   /// Whether the calendar card settles on the selected day's week rather
   /// than its month. Only meaningful in Agenda and Day, which open
@@ -666,9 +660,9 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     final weekdaysChanged = widget.weekdays != oldWidget.weekdays;
     if (weekdaysChanged) {
       _noteLifecycle();
-      final day = shownDayNear(_day, widget.weekdays);
+      final day = CalendarDates.shownDayNear(_day, widget.weekdays);
       _controller._selectedDay = day;
-      _grid = MonthGrid.of(day, weekdays: widget.weekdays);
+      _grid = CalendarMonthGrid.of(day, weekdays: widget.weekdays);
     }
     if (widget.store != oldWidget.store) {
       oldWidget.store.removeListener(_handleStoreChange);
@@ -733,15 +727,17 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     } else {
       view = _listedView(named);
     }
-    final day = shownDayNear(
-      dateOnly(controller._selectedDay ?? shown?.day ?? _now.value.today),
+    final day = CalendarDates.shownDayNear(
+      CalendarDates.dateOnly(
+        controller._selectedDay ?? shown?.day ?? _now.value.today,
+      ),
       widget.weekdays,
     );
     controller._visibleRange = _askedRange;
     if (shown == null) {
       controller._view = view;
       controller._selectedDay = day;
-      _grid = MonthGrid.of(day, weekdays: widget.weekdays);
+      _grid = CalendarMonthGrid.of(day, weekdays: widget.weekdays);
       _resetForView(view);
     } else {
       controller._view = shown.view;
@@ -967,9 +963,12 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
         return (first: _grid.firstDay, last: _grid.lastDay);
       case CalendarViewKind.week:
         final first = weekdays.weekStartOf(_day);
-        return (first: first, last: addDays(first, DateTime.daysPerWeek - 1));
+        return (
+          first: first,
+          last: CalendarDates.addDays(first, DateTime.daysPerWeek - 1),
+        );
       case CalendarViewKind.day:
-        final days = shownDaysOfWeek(_day, weekdays);
+        final days = CalendarDates.shownDaysOfWeek(_day, weekdays);
         return (first: days.first, last: days.last);
     }
   }
@@ -1036,7 +1035,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     _controller._selectedDay = day;
     _browsedDay = null;
     if (!_grid.contains(day)) {
-      _grid = MonthGrid.of(day, weekdays: widget.weekdays);
+      _grid = CalendarMonthGrid.of(day, weekdays: widget.weekdays);
     }
   }
 
@@ -1066,7 +1065,9 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
 
   /// A host's set of the selected day.
   void _selectDay(DateTime day) {
-    _select(shownDayNear(dateOnly(day), widget.weekdays));
+    _select(
+      CalendarDates.shownDayNear(CalendarDates.dateOnly(day), widget.weekdays),
+    );
   }
 
   /// A menu pick, a header's [CalendarHeaderDetails.onSelectView] or a
@@ -1090,7 +1091,10 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     if (_picksMonth) {
       _closeMonthPicker();
     }
-    final target = shownDayNear(dateOnly(day), widget.weekdays);
+    final target = CalendarDates.shownDayNear(
+      CalendarDates.dateOnly(day),
+      widget.weekdays,
+    );
     if (target != _day) {
       _select(target);
       return;
@@ -1164,14 +1168,19 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
           _pickerYear += direction;
         });
       case CalendarStepUnit.day:
-        _select(nextShownDay(_day, direction, weekdays));
+        _select(CalendarDates.nextShownDay(_day, direction, weekdays));
       case CalendarStepUnit.week:
-        _select(addDays(_day, DateTime.daysPerWeek * direction));
+        _select(CalendarDates.addDays(_day, DateTime.daysPerWeek * direction));
       case CalendarStepUnit.month:
         if (_view == CalendarViewKind.agenda) {
-          _browse(addMonths(_cardMonth, direction));
+          _browse(CalendarDates.addMonths(_cardMonth, direction));
         } else {
-          _select(shownDayNear(addMonths(_day, direction), weekdays));
+          _select(
+            CalendarDates.shownDayNear(
+              CalendarDates.addMonths(_day, direction),
+              weekdays,
+            ),
+          );
         }
     }
   }
@@ -1203,7 +1212,12 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// The month picker stays open, filling [month].
   void _pickMonth(DateTime month) {
     final months = (month.year - _day.year) * 12 + month.month - _day.month;
-    _select(shownDayNear(addMonths(_day, months), widget.weekdays));
+    _select(
+      CalendarDates.shownDayNear(
+        CalendarDates.addMonths(_day, months),
+        widget.weekdays,
+      ),
+    );
   }
 
   bool get _showsCalendarCard {

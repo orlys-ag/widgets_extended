@@ -20,16 +20,16 @@ import 'package:widgets_extended/calendar/composition/calendar_card.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_theme_extension.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
-import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
-import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_day_badges.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
-import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
-import 'package:widgets_extended/calendar/store/calendar_store.dart';
-import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
@@ -38,7 +38,7 @@ import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 
-import '../dst_days.dart';
+import '../../scheduling/dst_days.dart';
 import 'recording_store.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
@@ -104,7 +104,7 @@ DayRange gridRange(
   DateTime day, {
   CalendarWeekdaySet weekdays = CalendarWeekdaySet.all,
 }) {
-  final grid = MonthGrid.of(day, weekdays: weekdays);
+  final grid = CalendarMonthGrid.of(day, weekdays: weekdays);
   return (first: grid.firstDay, last: grid.lastDay);
 }
 
@@ -122,12 +122,12 @@ class HeldSource implements CalendarDataSource<String> {
 
   @override
   Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
-    final from = dayNumber(first);
-    final to = dayNumber(last);
+    final from = CalendarDates.dayNumber(first);
+    final to = CalendarDates.dayNumber(last);
     final answer = <CalendarEntry<String>>[
       for (final entry in entries)
-        if (dayNumber(entry.start) <= to &&
-            lastDayNumberOf(entry.start, entry.end) >= from)
+        if (CalendarDates.dayNumber(entry.start) <= to &&
+            CalendarDates.lastDayNumberOf(entry.start, entry.end) >= from)
           entry,
     ];
     if (!holds) {
@@ -262,7 +262,7 @@ int dayRowOf(int minute) {
 
 /// Week's grid column of [day], Monday's being 1.
 int weekColOf(DateTime day) {
-  return 1 + weekdayColumnOfDay(dayNumber(day));
+  return 1 + CalendarDates.weekdayColumnOfDay(CalendarDates.dayNumber(day));
 }
 
 /// The global centre of the timed grid's cell at [row] and [col].
@@ -1520,7 +1520,10 @@ void main() {
         shown: store.shows.last,
       ));
     });
-    final moved = shownDayNear(saturday, CalendarWeekdaySet.workweek);
+    final moved = CalendarDates.shownDayNear(
+      saturday,
+      CalendarWeekdaySet.workweek,
+    );
     expect(moved, isNot(saturday));
     final range = gridRange(moved, weekdays: CalendarWeekdaySet.workweek);
     expect(range, isNot(gridRange(saturday)));
@@ -1973,7 +1976,7 @@ void main() {
     expect(marksRange(tester), isFalse);
   });
   testWidgets("CV26 a slotMinutes of 0, -15, 7, 45 or 120 throws an "
-      "ArgumentError from the build", (tester) async {
+      "ArgumentError from the build that lists the choices", (tester) async {
     for (final slotMinutes in const <int>[0, -15, 7, 45, 120]) {
       await tester.pumpWidget(
         app(
@@ -1988,6 +1991,7 @@ void main() {
       expect(error, isA<ArgumentError>(), reason: "$slotMinutes");
       expect((error as ArgumentError).name, "slotMinutes");
       expect(error.invalidValue, slotMinutes);
+      expect(error.message, "is not one of [5, 10, 15, 20, 30, 60]");
       expect(find.byType(DayList<String>), findsNothing);
     }
   });
@@ -1995,11 +1999,14 @@ void main() {
   testWidgets("CV27 the slot length is 15 minutes by default, and each of "
       "slotMinuteChoices builds Week's grid with its slots", (tester) async {
     useTallView(tester);
-    expect(defaultSlotMinutes, 15);
-    expect(CalendarView<String>(store: store).slotMinutes, defaultSlotMinutes);
+    expect(CalendarDates.defaultSlotMinutes, 15);
+    expect(
+      CalendarView<String>(store: store).slotMinutes,
+      CalendarDates.defaultSlotMinutes,
+    );
     final controller = CalendarController(view: CalendarViewKind.week);
     addTearDown(controller.dispose);
-    for (final slotMinutes in slotMinuteChoices) {
+    for (final slotMinutes in CalendarDates.slotMinuteChoices) {
       await tester.pumpWidget(
         app(
           CalendarView<String>(
@@ -2027,7 +2034,7 @@ void main() {
             .rows
             .axis
             .trackCount,
-        2 + minutesPerDay ~/ slotMinutes + 1,
+        2 + CalendarDates.minutesPerDay ~/ slotMinutes + 1,
         reason: "$slotMinutes",
       );
     }

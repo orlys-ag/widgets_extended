@@ -16,17 +16,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
-import 'package:widgets_extended/calendar/policy/edit_policy.dart';
-import 'package:widgets_extended/calendar/policy/history_lock_policy.dart';
-import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
+import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
+import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
-import '../dst_days.dart';
+import '../../scheduling/dst_days.dart';
 
 /// [day] at [hour] and [minute] by the wall clock.
 DateTime at(DateTime day, int hour, [int minute = 0]) {
@@ -67,7 +67,7 @@ Future<List<CalendarCreateRange>> pumpCalendar(
   bool lock = true,
   bool allowsOverlaps = true,
   CalendarDayHours hours = CalendarDayHours.allDay,
-  int slotMinutes = defaultSlotMinutes,
+  int slotMinutes = CalendarDates.defaultSlotMinutes,
   List<DateTime>? refusals,
 }) async {
   tester.view.devicePixelRatio = 1.0;
@@ -409,7 +409,9 @@ void main() {
         "at the second 01:30 when released on the 01:30 row, and at the "
         "second 01:45 on the 01:45 row", (tester) async {
       final day = longDayStart;
-      final next = dateOfDayNumber(dayNumber(day) + 1);
+      final next = CalendarDates.dateOfDayNumber(
+        CalendarDates.dayNumber(day) + 1,
+      );
       tester.view.devicePixelRatio = 1.0;
       tester.view.physicalSize = const Size(800.0, 1200.0);
       addTearDown(tester.view.reset);
@@ -422,7 +424,7 @@ void main() {
         final bar = entryOf(
           "bar",
           next,
-          dateOfDayNumber(dayNumber(next) + 1),
+          CalendarDates.dateOfDayNumber(CalendarDates.dayNumber(next) + 1),
           isAllDay: true,
         );
         final store = MemoryCalendarStore<String>(
@@ -442,7 +444,9 @@ void main() {
               controller: controller,
               // The 25-hour day is the week's first column, which
               // [slotRect] reads, and the next day its second.
-              weekdays: CalendarWeekdaySet.all.startingOn(weekdayColumn(day)),
+              weekdays: CalendarWeekdaySet.all.startingOn(
+                CalendarDates.weekdayColumn(day),
+              ),
               clock: () {
                 return secondHalfPastOne;
               },
@@ -533,7 +537,7 @@ void main() {
         "press creates at 01:00 the day before but refuses the 23-hour day, "
         "whose clock skips an end of each slot", (tester) async {
       final day = shortDayStart;
-      final dayBefore = addDays(day, -1);
+      final dayBefore = CalendarDates.addDays(day, -1);
       final refusals = <DateTime>[];
       final creates = await pumpCalendar(
         tester,

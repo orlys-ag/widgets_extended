@@ -5,7 +5,7 @@ library;
 
 import 'package:flutter/widgets.dart';
 
-import '../store/calendar_store.dart';
+import '../../scheduling/scheduling.dart';
 import 'calendar_activity_indicator.dart';
 import 'calendar_builders.dart';
 import 'calendar_localizations.dart';

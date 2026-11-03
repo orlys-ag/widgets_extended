@@ -1,21 +1,20 @@
 /// The day list: the rows it lays out for a day's entries, its gaps and
 /// its banners outside the hours, a card drawn again for a new payload,
-/// and a failed row's retry.
+/// a failed row's retry, and the slot lengths it takes.
 library;
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:widgets_extended/calendar/dates/calendar_dates.dart';
-import 'package:widgets_extended/calendar/entries/calendar_data_source.dart';
-import 'package:widgets_extended/calendar/entries/calendar_entry.dart';
-import 'package:widgets_extended/calendar/policy/edit_policy.dart';
+import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
-import 'package:widgets_extended/calendar/presentation/calendar_localizations.dart';
-import 'package:widgets_extended/calendar/store/caching_calendar_store.dart';
-import 'package:widgets_extended/calendar/store/calendar_store.dart';
-import 'package:widgets_extended/calendar/store/memory_calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 
 typedef ShownItem = CalendarShownEntry<String>;
@@ -319,9 +318,9 @@ void main() {
     }
     final failed = <DateTime>[
       for (
-        var d = addDays(day, -14);
-        !d.isAfter(addDays(day, 28));
-        d = addDays(d, 1)
+        var d = CalendarDates.addDays(day, -14);
+        !d.isAfter(CalendarDates.addDays(day, 28));
+        d = CalendarDates.addDays(d, 1)
       )
         if (find.byKey(dayListFailedKey(d)).evaluate().isNotEmpty) d,
     ];
@@ -334,7 +333,10 @@ void main() {
       (source.held.last.first, source.held.last.last),
       (
         CalendarWeekdaySet.all.weekStartOf(failed.first),
-        addDays(CalendarWeekdaySet.all.weekStartOf(failed.last), 6),
+        CalendarDates.addDays(
+          CalendarWeekdaySet.all.weekStartOf(failed.last),
+          6,
+        ),
       ),
     );
     await tester.pump();
@@ -350,8 +352,8 @@ void main() {
       "loading", (tester) async {
     final day = DateTime(2026, 5, 5);
     final weekStart = CalendarWeekdaySet.all.weekStartOf(day);
-    final shownFirst = addDays(weekStart, -7);
-    final shownLast = addDays(weekStart, -1);
+    final shownFirst = CalendarDates.addDays(weekStart, -7);
+    final shownLast = CalendarDates.addDays(weekStart, -1);
     final source = HeldReads();
     final store = CachingCalendarStore<String>(dataSource: source);
     addTearDown(store.dispose);
@@ -395,9 +397,9 @@ void main() {
     expect(store.status, CalendarLoadStatus.failed);
     final failed = <DateTime>[
       for (
-        var d = addDays(day, -14);
-        !d.isAfter(addDays(day, 28));
-        d = addDays(d, 1)
+        var d = CalendarDates.addDays(day, -14);
+        !d.isAfter(CalendarDates.addDays(day, 28));
+        d = CalendarDates.addDays(d, 1)
       )
         if (find.byKey(dayListFailedKey(d)).evaluate().isNotEmpty) d,
     ];
@@ -409,12 +411,55 @@ void main() {
     expect(source.held, hasLength(reads + 1));
     expect(
       (source.held.last.first, source.held.last.last),
-      (shownFirst, addDays(CalendarWeekdaySet.all.weekStartOf(failed.last), 6)),
+      (
+        shownFirst,
+        CalendarDates.addDays(
+          CalendarWeekdaySet.all.weekStartOf(failed.last),
+          6,
+        ),
+      ),
     );
     await tester.pump();
     expect(<DateTime>[
       for (final d in failed)
         if (find.byKey(dayListLoadingKey(d)).evaluate().isNotEmpty) d,
     ], failed);
+  });
+
+  testWidgets("a day list asserts on its first build that its slot length "
+      "is a choice, listing the choices", (tester) async {
+    final day = DateTime(2026, 4, 21);
+    final store = MemoryCalendarStore<String>();
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: nineOClock(), today: day),
+    );
+    addTearDown(now.dispose);
+    Widget list(int slotMinutes) {
+      return MaterialApp(
+        home: DayList<String>(
+          store: store,
+          weekdays: CalendarWeekdaySet.all,
+          format: CalendarHourLabelFormat.twentyFourHour,
+          hours: CalendarDayHours.allDay,
+          slotMinutes: slotMinutes,
+          editable: false,
+          selectedDay: day,
+          now: now,
+          onTopDay: (day) {},
+          onCreateRange: (range) {},
+          onEdit: (id) {},
+          onDelete: (id) {},
+        ),
+      );
+    }
+
+    await tester.pumpWidget(list(7));
+    final error = tester.takeException();
+    expect(error, isAssertionError);
+    expect(
+      (error as AssertionError).message,
+      "A DayList's slotMinutes, 7, is not one of [5, 10, 15, 20, 30, 60].",
+    );
   });
 }
