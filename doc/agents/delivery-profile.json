@@ -160,13 +160,14 @@
     {
       "name": "calendar-havana",
       "command": "bash tool/test_calendar_in_havana.sh",
-      "pass": "it prints All tests passed!, and where tzutil exists, MSYS_NO_PATHCONV=1 tzutil /g run afterwards prints the zone it printed before the command. The script runs the calendar's tests in a zone whose clock skips its midnight hour on 2026-03-08 and repeats it on 2026-11-01: on Windows by switching the system zone to Cuba Standard Time and back on exit, and elsewhere with TZ=America/Havana. It runs one test file in that zone when given the file's path, and takes flutter test's other arguments too.",
+      "pass": "it prints All tests passed!, and where tzutil exists, MSYS_NO_PATHCONV=1 tzutil /g run afterwards prints the zone it printed before the command. The script runs the calendar's tests in a zone whose clock skips its midnight hour on 2026-03-08 and repeats it on 2026-11-01: on Windows by switching the system zone to Cuba Standard Time and back on exit, through tool/test_calendar_in_zone.sh, which refuses to start while another run holds the zone, and elsewhere with TZ=America/Havana. It runs one test file in that zone when given the file's path, and takes flutter test's other arguments too.",
       "when": {
         "paths": [
           "^lib/calendar/",
           "^test/calendar/",
           "^pubspec\\.yaml$",
-          "^tool/test_calendar_in_havana\\.sh$"
+          "^tool/test_calendar_in_havana\\.sh$",
+          "^tool/test_calendar_in_zone\\.sh$"
         ]
       },
       "scope": "step"
@@ -180,7 +181,38 @@
           "^lib/calendar/",
           "^demos/workspace_calendar/",
           "^pubspec\\.yaml$",
-          "^tool/test_calendar_in_havana\\.sh$"
+          "^tool/test_calendar_in_havana\\.sh$",
+          "^tool/test_calendar_in_zone\\.sh$"
+        ]
+      },
+      "scope": "step"
+    },
+    {
+      "name": "calendar-santiago",
+      "command": "bash tool/test_calendar_in_santiago.sh",
+      "pass": "it prints All tests passed!, and where tzutil exists, MSYS_NO_PATHCONV=1 tzutil /g run afterwards prints the zone it printed before the command. The script runs the calendar's tests in a zone whose clock goes back from 24:00 to 23:00 on 2026-04-04 and skips its midnight hour on 2026-09-06: on Windows by switching the system zone to Pacific SA Standard Time and back on exit, through the calendar-havana gate's zone script, and elsewhere with TZ=America/Santiago. It takes flutter test's arguments as that gate's script does.",
+      "when": {
+        "paths": [
+          "^lib/calendar/",
+          "^test/calendar/",
+          "^pubspec\\.yaml$",
+          "^tool/test_calendar_in_santiago\\.sh$",
+          "^tool/test_calendar_in_zone\\.sh$"
+        ]
+      },
+      "scope": "step"
+    },
+    {
+      "name": "demo-santiago",
+      "command": "(cd demos/workspace_calendar && bash ../../tool/test_calendar_in_santiago.sh test)",
+      "pass": "it prints All tests passed!, and where tzutil exists, MSYS_NO_PATHCONV=1 tzutil /g run afterwards prints the zone it printed before the command. It runs the demo's whole suite in the zone of the calendar-santiago gate's script, since any of its tests, not only its DST ones, can assume a clock that zone does not keep.",
+      "when": {
+        "paths": [
+          "^lib/calendar/",
+          "^demos/workspace_calendar/",
+          "^pubspec\\.yaml$",
+          "^tool/test_calendar_in_santiago\\.sh$",
+          "^tool/test_calendar_in_zone\\.sh$"
         ]
       },
       "scope": "step"
