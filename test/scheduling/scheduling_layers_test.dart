@@ -1,7 +1,7 @@
 /// The scheduling module's files: what each imports, the names its barrel
-/// shows and how a host builds on each, the statics that hold the helpers'
-/// bodies, the imports of its tests, and the classes and docs of the checks
-/// a release build runs.
+/// shows and how a host builds on each, the package barrel's export of that
+/// barrel, the statics that hold the helpers' bodies, the imports of its
+/// tests, and the classes and docs of the checks a release build runs.
 library;
 
 import 'dart:io';
@@ -196,7 +196,8 @@ void main() {
   });
 
   test("SY3 the barrel exports each file by name, the shown names of each "
-      "file exactly those of the module's public surface", () {
+      "file exactly those of the module's public surface; and the package "
+      "barrel exports the barrel", () {
     schedulingFiles();
     final source = File(barrelPath).readAsStringSync();
     final exports = exportsOf(source, barrelPath);
@@ -259,6 +260,12 @@ void main() {
         },
       },
     );
+
+    // The calendar barrel's show brings every name to the package barrel
+    // without this export, so no compiled read of the package barrel sees
+    // it go.
+    final package = File("lib/widgets_extended.dart").readAsStringSync();
+    expect(package, contains("export 'scheduling/scheduling.dart';"));
   });
 
   test("SY4 the barrel's show clauses name no CalendarEntryTime", () {
