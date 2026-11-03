@@ -71,6 +71,14 @@
       ],
       "vocabulary": "Module vocabulary: seven layers, each a directory of lib/calendar/ (dates, entries, policy, store, presentation, views, composition), whose imports run only up that order, with Material in composition alone and nothing the demo owns; entries (CalendarEntry<T>, with a host payload): all-day entries, whose isAllDay is true, covering whole local days from the local midnight of the start to that of the end, an exclusive end, and timed entries, every other entry whatever its times, which Week and Day draw as one piece per day they cover; the board and sliver_tree modules, reached through their own barrels; the slot the timed grid's rows and gestures snap to; board lanes for entries sharing time; pending writes, one per entry, a failure releasing it; a CalendarStore, in memory or caching over a data source; the overlap rule, the history lock and CalendarEditPolicy; CalendarTheme; and civil days on the local wall clock."
     },
+    "scheduling": {
+      "paths": [
+        "^lib/scheduling/",
+        "^test/scheduling/"
+      ],
+      "guidance": [],
+      "vocabulary": "Module vocabulary: the scheduling core under the calendar, four layers (dates, entries, policy, store) whose imports run only up that order and reach nothing of lib/calendar/, which builds on the core through its barrel, lib/scheduling/scheduling.dart: civil days on the local wall clock (day numbers, wall minutes, day hours, weekday sets); CalendarEntry<T>, with a host payload, all-day or timed, and the data-source contract; the overlap rule, the history lock, CalendarEditPolicy and CalendarEditRules; and a CalendarStore, in memory or caching over a data source, with one pending write per entry."
+    },
     "workspace_calendar": {
       "paths": [
         "^demos/workspace_calendar/"
@@ -164,6 +172,8 @@
       "when": {
         "paths": [
           "^lib/calendar/",
+          "^lib/scheduling/",
+          "^test/scheduling/",
           "^test/calendar/",
           "^pubspec\\.yaml$",
           "^tool/test_calendar_in_havana\\.sh$",
@@ -179,6 +189,7 @@
       "when": {
         "paths": [
           "^lib/calendar/",
+          "^lib/scheduling/",
           "^demos/workspace_calendar/",
           "^pubspec\\.yaml$",
           "^tool/test_calendar_in_havana\\.sh$",
@@ -194,6 +205,8 @@
       "when": {
         "paths": [
           "^lib/calendar/",
+          "^lib/scheduling/",
+          "^test/scheduling/",
           "^test/calendar/",
           "^pubspec\\.yaml$",
           "^tool/test_calendar_in_santiago\\.sh$",
@@ -209,6 +222,7 @@
       "when": {
         "paths": [
           "^lib/calendar/",
+          "^lib/scheduling/",
           "^demos/workspace_calendar/",
           "^pubspec\\.yaml$",
           "^tool/test_calendar_in_santiago\\.sh$",
