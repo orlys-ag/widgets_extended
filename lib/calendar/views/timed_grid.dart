@@ -20,6 +20,7 @@ import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import 'answer_builder.dart';
+import 'create_details.dart';
 import 'entry_split.dart';
 import 'move_request.dart';
 import 'pinch_zoom.dart';
@@ -544,12 +545,16 @@ CalendarCreateRange? _createRangeOf(
 /// over other entries' times as over free ones, the blocks sharing a day's
 /// time laid side by side, and a move or a resize another answer refuses
 /// goes back rather than sliding to free time. Where it forbids them, a
-/// move dropped onto another entry's time lands at the nearest free time
-/// that shows, on that day or the day before or after it, and goes back
-/// where there is none; a resize dragged onto one stops at its edge, and
-/// so does a create's range. While a drag runs, a label over the grid
-/// names the days and times a release would give, or that a move has
-/// nowhere to land, and a move outlines the times it would land on.
+/// move, a resize and a create go over the times only of the entries
+/// [CalendarEditPolicy.mayOverlap] lets the change share. A move dropped
+/// where the policy refuses lands at the nearest time no entry shares that
+/// shows, on that day or the day before or after it, and goes back where
+/// there is none; a resize the policy refuses stops its dragged edge at the
+/// first entry in its way, allowed or not; and a create's range stops at
+/// the entries the policy does not let it share. While a drag runs, a label
+/// over the grid names the days and times a release would give, or that a
+/// move has nowhere to land, and a move outlines the times it would land
+/// on.
 ///
 /// In edit mode a bar takes a long press as a block does. On a grid of more
 /// than one day column it moves by days, and once selected its left grip drags
@@ -583,8 +588,10 @@ CalendarCreateRange? _createRangeOf(
 /// or a stylus and after a press and hold on touch, so a touch drag without one
 /// scrolls the grid, and a tap, or a hold let go where it began, picks its one
 /// slot. Where [editPolicy] forbids overlaps, a slot that shares time with an
-/// entry takes no create gesture. The range picked stays marked, as a range
-/// being dragged is, until the create flow [onCreate] opens closes.
+/// entry [CalendarEditPolicy.mayOverlap] does not let a create of the slot
+/// share takes no create gesture, and a press on a block starts none,
+/// whatever the policy answers about it. The range picked stays marked, as a
+/// range being dragged is, until the create flow [onCreate] opens closes.
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than [minDayWidth] and [minSlotHeight]; past those, it scrolls.
@@ -695,11 +702,19 @@ class TimedGrid<T> extends StatefulWidget {
   /// Reports a tap on a block that is not pending, with its entry's id.
   final ValueChanged<String> onOpenEntry;
 
-  /// Opens the create flow for the range a create gesture on empty cells
-  /// picked, and completes when it closes. A failure of the function,
-  /// whether it throws within the call or its future fails, is not caught:
-  /// a host that handles one passes a function that does.
-  final Future<void> Function(CalendarCreateRange range) onCreate;
+  /// Opens the create flow for a create gesture on empty cells, and
+  /// completes when it closes: the details give the range the gesture
+  /// picked, whether the user chose its length, a range from one cell to
+  /// another, and the rect, in global logical pixels, of the cells the
+  /// grid marks for it in the column where the gesture ended, read from
+  /// the board when the create is reported
+  /// ([BoardController.globalRectOfCell]); where the board gives none,
+  /// with no board laid out, as after a build of the grid threw while a
+  /// create range ran, the empty rect at the pointer where the gesture was
+  /// let go. A failure of the function, whether it throws within the call
+  /// or its future fails, is not caught: a host that handles one passes a
+  /// function that does.
+  final Future<void> Function(CalendarCreateDetails details) onCreate;
 
   /// Takes each move or resize a gesture lands, and completes once the
   /// host has written it or let it go. Until then the grid shows the
@@ -733,16 +748,26 @@ class TimedGrid<T> extends StatefulWidget {
   /// applies to it. It reads [CalendarEditPolicy.allowsOverlaps] then
   /// too: where it is false, no move or resize gives an entry times that
   /// share time with another timed entry the store shows on the days they
-  /// cover, whether the grid shows those days or not, and a create range
-  /// stops at the entries beside the slot it starts on. A new policy
-  /// cancels a move or a resize in flight and ends a create range in
-  /// flight.
+  /// cover, whether the grid shows those days or not, that
+  /// [CalendarEditPolicy.mayOverlap] does not let the change share, and a
+  /// create range stops at the entries beside the slot it starts on that it
+  /// does not let the create share. A move or a resize asks about the times
+  /// it would give, with the stored entry, and a slot press about the
+  /// slot's times, with no entry. A create range is not picked when it
+  /// asks, at its start, at a store notify and at a new minute, so it asks
+  /// about a candidate with no entry over the grid's days, from [firstDay]
+  /// to the start of the day after the last column's: a policy that answers
+  /// from the candidate's times answers about those days, and its refusal
+  /// holds the range at that entry. A new policy cancels a move or a resize
+  /// in flight and ends a create range in flight.
   ///
   /// An answer that throws in a crossing's landing or an end handle's
   /// later day, which the grid asks inside its pointer handlers, is
   /// reported and refuses, as the board's drop gate does
-  /// ([BoardDragConfig.canDropAt]); one that throws in a build, a press or
-  /// a tap goes through.
+  /// ([BoardDragConfig.canDropAt]); one that throws while a create range
+  /// reads its entries again, at a store notify or a new minute, is
+  /// reported and ends the range, which then creates nothing; and one that
+  /// throws in a build, a press or a tap goes through.
   final CalendarEditPolicy<T>? editPolicy;
 
   /// The weekdays whose days the grid shows. At least one day of the range
@@ -916,12 +941,16 @@ final class _Ranging extends _GridMode {
   /// does.
   final List<int> stripFrom;
 
-  /// The wall minute of the earliest start after [anchor]'s slot, which a
-  /// range reaching later may not pass, or null.
+  /// The wall minute of the earliest start after [anchor]'s slot of the
+  /// entries that hold the range, which a range reaching later may not
+  /// pass, or null. An entry the policy lets share the candidate of the
+  /// grid's days ([_TimedGridState._conflictsAround]) sets it not.
   int? nextStart;
 
-  /// The wall minute of the latest end before [anchor]'s slot, which a
-  /// range reaching earlier may not pass, or null.
+  /// The wall minute of the latest end before [anchor]'s slot of the
+  /// entries that hold the range, which a range reaching earlier may not
+  /// pass, or null. An entry the policy lets share the candidate of the
+  /// grid's days ([_TimedGridState._conflictsAround]) sets it not.
   int? previousEnd;
 }
 
@@ -1121,13 +1150,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// A block's move and resize stay inside the slot rows ([_boundsOf]), so
   /// one dragged past the first or the last slot stops there. Where the
   /// policy forbids overlaps, a move [_canDropAt] refuses for meeting
-  /// another entry slides to the placement nearest on screen that holds it
-  /// clear, at any time that shows of the day it was dropped on or of the
-  /// day before or after it, however busy the time around it is, and a
-  /// resize it refuses for meeting another entry stops its dragged edge at
-  /// that entry. The drag reports
-  /// keep [_drag], which the landing label and outline show. A drag's
-  /// start plays a haptic, and the block a move carries casts a shadow.
+  /// another entry the policy does not let it share slides to the placement
+  /// nearest on screen that holds it clear of every entry, at any time that
+  /// shows of the day it was dropped on or of the day before or after it,
+  /// however busy the time around it is, past a nearer one that shares only
+  /// the time of entries [CalendarEditPolicy.mayOverlap] allows; and a
+  /// resize it refuses for meeting one stops its dragged edge at the first
+  /// entry in its way, allowed or not. The board's fit and clamp pass by
+  /// every placement that meets another item before they ask the gate, and
+  /// ask it of each one they keep, so each landing is one [_canDropAt]
+  /// admits. The drag reports keep [_drag], which the landing label and
+  /// outline show. A drag's start plays a haptic, and the block a move
+  /// carries casts a shadow.
   /// [_applyTheme] makes the three again for a theme with another
   /// dragged-block opacity, which the board hands its live drag.
   ///
@@ -1213,7 +1247,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// before the first. Cleared by a store notify, a new store and new
   /// tracks' first day or day count, and kept across builds, layouts and
   /// drags.
-  GridOverlapIndex? _offRange;
+  GridOverlapIndex<T>? _offRange;
 
   /// What the all-day strip's cells show. The cell builder runs only when
   /// the board rebuilds a cell, so the strip cells listen to this.
@@ -1239,7 +1273,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// The rules of the policy the grid last took ([_takePolicy]), in the
   /// grid's hours and slots ([CalendarEditRules.updated]), which the gates
   /// ask. They read the policy's day limit and its answer on overlaps when
-  /// the grid took it, so no gesture asks them.
+  /// the grid took it: no gesture asks the day limit, and a gesture reads
+  /// the answer on overlaps again only inside a per-pair ask, as
+  /// [CalendarEditPolicy.mayOverlap]'s default and
+  /// [CalendarEditPolicy.all]'s do.
   late CalendarEditRules<T> _rules;
 
   /// The policy the grid last took, which the gates ask.
@@ -2138,7 +2175,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// held by again, a refused one places its anchor again on the entries
   /// the sync placed ([_placeRangeAnchor]), and where the policy forbids
   /// overlaps a drag the board runs asks its gates again
-  /// ([_askDragAgain]).
+  /// ([_askDragAgain]). Where the policy's answer throws while the range
+  /// reads its entries again, which asks [CalendarEditPolicy.mayOverlap],
+  /// the throw is reported ([_reportPolicyThrow]) and the range is
+  /// detached and cleared, so it creates nothing.
   void _handleStore() {
     final showedRange = _showsRange;
     _noteRange();
@@ -2148,10 +2188,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _offRange = null;
     _sync();
     final range = _range;
-    if (range != null && range.refused) {
-      _placeRangeAnchor(range);
-    } else if (range != null) {
-      _readRangeConflicts(range);
+    try {
+      if (range != null && range.refused) {
+        _placeRangeAnchor(range);
+      } else if (range != null) {
+        _readRangeConflicts(range);
+      }
+    } catch (exception, stack) {
+      _reportPolicyThrow(exception, stack);
+      setState(_detachRange);
+      _updateStripMark();
     }
     _askDragAgain();
     setState(() {});
@@ -2512,9 +2558,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// [_policy]'s [CalendarEditPolicy.mayMove], and its resize the edge it
   /// changes in [CalendarEditPolicy.resizableEdges]; then [_rules] must
   /// admit the times ([CalendarEditRules.admitsTimes]): two asks of the
-  /// policy at most, and none per neighbouring entry. Where it forbids
-  /// overlaps the times must also share none with another entry
-  /// ([_meetsOtherEntry]).
+  /// policy at most besides [CalendarEditPolicy.mayOverlap]'s. Where its
+  /// [CalendarEditPolicy.allowsOverlaps] is false the times must also share
+  /// none with another entry the policy does not let the change share
+  /// ([_meetsOtherEntry]), which asks [CalendarEditPolicy.mayOverlap] about
+  /// the neighbouring entries that share the times, up to the first it
+  /// refuses, with one candidate of the times and the entry.
   bool _canDropAt(GridKey key, BoardSpan span) {
     noteDropGate();
     if (_drag?.spent ?? false) {
@@ -2562,8 +2611,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         )) {
       return false;
     }
-    return _allowsOverlaps ||
-        !_meetsOtherEntry(key.id, entry, times.start, times.end);
+    if (_allowsOverlaps) {
+      return true;
+    }
+    return !_meetsOtherEntry(
+      key.id,
+      entry,
+      CalendarOverlapCandidate<T>(
+        start: times.start,
+        end: times.end,
+        entry: entry,
+      ),
+    );
   }
 
   /// Whether [edges] let [entry] take [start] and [end]: each of its times
@@ -2746,35 +2805,47 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return (start: start, end: end);
   }
 
-  /// Whether a timed range from [start] to [end] shares time with a timed
-  /// entry other than [id], whose entry is [own], that the store shows on
-  /// the days the range covers, shown or not
-  /// ([NoOverlapsPolicy.rangeSharesTime]): a board piece in the rows the range
-  /// covers on the shown columns, one of the entries those rows can miss that
-  /// the split indexes ([TimedGridLayout.loose]), and, for a range with a day
-  /// outside the tracks' range, one the store shows there ([_offRangeOver]).
-  /// The walk, as many columns as the range covers, and at most two O(log n)
-  /// searches; a store read only for days outside the range no check
-  /// since the last clearing of [_offRange] covered.
+  /// Whether [candidate]'s timed range, the change of the entry [id],
+  /// whose entry is [own], shares time with a timed entry other than [id]
+  /// that the store shows on the days the range covers, shown or not
+  /// ([NoOverlapsPolicy.rangeSharesTime]), and that [_policy] does not let
+  /// it share ([CalendarEditPolicy.mayOverlap]): a board piece in the rows
+  /// the range covers on the shown columns, one of the entries those rows
+  /// can miss that the split indexes ([TimedGridLayout.loose]), and, for a
+  /// range with a day outside the tracks' range, one the store shows there
+  /// ([_offRangeOver]). Asks the policy about each such entry, up to the
+  /// first it refuses, an entry with a piece on several columns, or both a
+  /// piece and an indexed time, once for each. The walk, as many columns as
+  /// the range covers, and at most two searches of O((m + 1) log n), m
+  /// being the indexed entries sharing the times that each reaches
+  /// ([GridOverlapIndex.refusesOverlap]); a store read only for days
+  /// outside the range no check since the last clearing of [_offRange]
+  /// covered.
   bool _meetsOtherEntry(
     String id,
     CalendarEntry<T> own,
-    DateTime start,
-    DateTime end,
+    CalendarOverlapCandidate<T> candidate,
   ) {
-    final firstDay = CalendarDates.dayNumber(start);
-    final lastDay = CalendarDates.lastDayNumberOf(start, end);
+    final firstDay = CalendarDates.dayNumber(candidate.start);
+    final lastDay = CalendarDates.lastDayNumberOf(
+      candidate.start,
+      candidate.end,
+    );
     final tracks = _tracks;
-    if (_meetsPiece(id, start, end, firstDay, lastDay)) {
+    final policy = _policy;
+    if (_meetsPiece(id, candidate, firstDay, lastDay)) {
       return true;
     }
-    if (_layout.loose?.sharesTime(id, own, start, end) ?? false) {
+    if (_layout.loose?.refusesOverlap(id, own, candidate, policy) ?? false) {
       return true;
     }
     if (firstDay >= tracks.firstDay && lastDay <= tracks.lastDay) {
       return false;
     }
-    return _offRangeOver(firstDay, lastDay).sharesTime(id, own, start, end);
+    return _offRangeOver(
+      firstDay,
+      lastDay,
+    ).refusesOverlap(id, own, candidate, policy);
   }
 
   /// The index of the timed entries the store shows on the days outside
@@ -2782,9 +2853,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// [lastDay] cover, [_offRange], having read first the days among them it has
   /// not: one [CalendarStore.entriesBetween] before the range and one after it
   /// at most, each wholly outside the range.
-  GridOverlapIndex _offRangeOver(int firstDay, int lastDay) {
+  GridOverlapIndex<T> _offRangeOver(int firstDay, int lastDay) {
     final tracks = _tracks;
-    final index = _offRange ??= GridOverlapIndex(
+    final index = _offRange ??= GridOverlapIndex<T>(
       readFrom: tracks.firstDay,
       readTo: tracks.lastDay,
     );
@@ -2809,17 +2880,19 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return index;
   }
 
-  /// Whether a board piece of an entry other than [id] in the rows the
-  /// range from [start] to [end] covers on the shown columns of its days,
-  /// the [CalendarDates.dayNumber]s [firstDay] to [lastDay], shares time with
-  /// it.
+  /// Whether a board piece of an entry other than [id] in the rows
+  /// [candidate]'s range covers on the shown columns of its days, the
+  /// [CalendarDates.dayNumber]s [firstDay] to [lastDay], shares time with it
+  /// and is one [_policy] does not let it share
+  /// ([CalendarEditPolicy.mayOverlap]), asked after the time test.
   bool _meetsPiece(
     String id,
-    DateTime start,
-    DateTime end,
+    CalendarOverlapCandidate<T> candidate,
     int firstDay,
     int lastDay,
   ) {
+    final start = candidate.start;
+    final end = candidate.end;
     final first = _tracks.firstColumnFrom(firstDay);
     final last = _tracks.lastColumnUpTo(lastDay);
     final span = CalendarDates.wallSpanOf(start, end);
@@ -2848,7 +2921,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
               start,
               end,
               occupant.shown.entry,
-            )) {
+            ) &&
+            !_policy.mayOverlap(candidate, occupant.shown.entry)) {
           return true;
         }
       }
@@ -3241,10 +3315,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// clock skips, where [_policy] does not let the entry move or [_rules]
   /// refuse the range, by the day limit or by the hours and the policy
   /// ([CalendarEditRules.admitsTimes]), or the policy's answer throws
-  /// ([_reportPolicyThrow]), or where the policy forbids overlaps and the
-  /// range shares time with another timed entry the store shows
-  /// ([_meetsOtherEntry]). Three asks of the policy at most, the day's
-  /// date read from [_tracks], which holds it.
+  /// ([_reportPolicyThrow]), or where the policy's
+  /// [CalendarEditPolicy.allowsOverlaps] is false and the range shares time
+  /// with another timed entry the store shows that the policy does not let
+  /// it share ([_meetsOtherEntry]). Three asks of the policy at most
+  /// besides [CalendarEditPolicy.mayOverlap]'s, the day's date read from
+  /// [_tracks], which holds it.
   ({DateTime start, DateTime end})? _barLandingOf(
     GridKey key,
     int column,
@@ -3286,8 +3362,19 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _reportPolicyThrow(exception, stack);
       return null;
     }
-    if (!_allowsOverlaps && _meetsOtherEntry(key.id, entry, start, end)) {
-      return null;
+    if (!_allowsOverlaps) {
+      try {
+        if (_meetsOtherEntry(
+          key.id,
+          entry,
+          CalendarOverlapCandidate<T>(start: start, end: end, entry: entry),
+        )) {
+          return null;
+        }
+      } catch (exception, stack) {
+        _reportPolicyThrow(exception, stack);
+        return null;
+      }
     }
     return (start: start, end: end);
   }
@@ -3300,8 +3387,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// clock skips, where [_policy] does not let the entry's end resize or
   /// refuses the range from the entry's start to it, or its answer throws
   /// ([_reportPolicyThrow]), where the hours ([CalendarDayHours.holdsTimes])
-  /// refuse that range, or where the policy forbids overlaps and it shares
-  /// time with another timed entry the store shows ([_meetsOtherEntry]).
+  /// refuse that range, or where the policy's
+  /// [CalendarEditPolicy.allowsOverlaps] is false and it shares time with
+  /// another timed entry the store shows that the policy does not let it
+  /// share ([_meetsOtherEntry]).
   DateTime? _laterDayEndOf(GridKey key, int column, int row) {
     noteDropGate();
     final shape = _board.itemOf(key);
@@ -3334,8 +3423,19 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _reportPolicyThrow(exception, stack);
       return null;
     }
-    if (!_allowsOverlaps && _meetsOtherEntry(key.id, entry, start, end)) {
-      return null;
+    if (!_allowsOverlaps) {
+      try {
+        if (_meetsOtherEntry(
+          key.id,
+          entry,
+          CalendarOverlapCandidate<T>(start: start, end: end, entry: entry),
+        )) {
+          return null;
+        }
+      } catch (exception, stack) {
+        _reportPolicyThrow(exception, stack);
+        return null;
+      }
     }
     return end;
   }
@@ -3354,18 +3454,22 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// Whether the range from [start] to [end] shares time with a timed
-  /// entry other than [id], or with any where [id] is null, that the store
-  /// shows on the days the range covers, shown columns or not
-  /// ([NoOverlapsPolicy.rangeSharesTime]).
-  bool _sharesShownTime(String? id, DateTime start, DateTime end) {
+  /// Whether [candidate]'s range shares time with a timed entry other than
+  /// [id], or with any where [id] is null, that the store shows on the days
+  /// the range covers, shown columns or not
+  /// ([NoOverlapsPolicy.rangeSharesTime]), and that [_policy] does not let
+  /// it share ([CalendarEditPolicy.mayOverlap]), asked after the time test.
+  bool _sharesShownTime(String? id, CalendarOverlapCandidate<T> candidate) {
+    final start = candidate.start;
+    final end = candidate.end;
     final shown = _shownBetween(
       CalendarDates.dateOfDayNumber(CalendarDates.dayNumber(start)),
       CalendarDates.dateOfDayNumber(CalendarDates.lastDayNumberOf(start, end)),
     );
     for (final other in shown) {
       if (other.id != id &&
-          NoOverlapsPolicy.rangeSharesTime(start, end, other.entry)) {
+          NoOverlapsPolicy.rangeSharesTime(start, end, other.entry) &&
+          !_policy.mayOverlap(candidate, other.entry)) {
         return true;
       }
     }
@@ -3831,37 +3935,51 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Whether a create range may start on [cell]'s [slot] by the entries
-  /// the grid shows: any slot where the policy allows overlaps, and
-  /// otherwise one no board piece in [cell]'s row and column shares time
-  /// with, as one from 09:10 does with the 09:00 slot, and on a day whose
-  /// clock reads a stretch twice, no entry the store shows does, whose
-  /// block may lie on other rows ([_sharesShownTime]). A press and a
-  /// create range's anchor placement ([_placeRangeAnchor]) both test it.
+  /// the grid shows: any slot where the policy's
+  /// [CalendarEditPolicy.allowsOverlaps] is true, and otherwise one that no
+  /// entry the policy does not let a create of the slot share
+  /// ([CalendarEditPolicy.mayOverlap]) shares time with: no board piece in
+  /// [cell]'s row and column, as one from 09:10 does with the 09:00 slot,
+  /// and on a day whose clock reads a stretch twice, no entry the store
+  /// shows, whose block may lie on other rows ([_sharesShownTime]). Builds
+  /// one candidate of the slot's times and no entry, and asks the policy
+  /// about each entry sharing them, up to the first it refuses. A press and
+  /// a create range's anchor placement ([_placeRangeAnchor]) both test it.
   bool _slotIsFree(({int row, int col}) cell, CalendarCreateRange slot) {
     if (_allowsOverlaps) {
       return true;
     }
-    return !_slotMeetsEntry(cell, slot) &&
+    final candidate = CalendarOverlapCandidate<T>(
+      start: slot.start,
+      end: slot.end,
+    );
+    return !_slotMeetsEntry(cell, candidate) &&
         // A block lies on the rows of its wall minutes
         // ([CalendarDates.wallSpanOf]), which order as its instants do except
         // where the clock reads a stretch twice; only there can it hold the
         // slot from other rows.
         (!_tracks.repeatsStretchAt(cell.col) ||
-            !_sharesShownTime(null, slot.start, slot.end));
+            !_sharesShownTime(null, candidate));
   }
 
   /// Whether a board piece in [cell]'s row and column shares time with
-  /// [slot], the cell's slot.
-  bool _slotMeetsEntry(({int row, int col}) cell, CalendarCreateRange slot) {
+  /// [candidate]'s range, the cell's slot, and is one [_policy] does not
+  /// let it share ([CalendarEditPolicy.mayOverlap]), asked after the time
+  /// test.
+  bool _slotMeetsEntry(
+    ({int row, int col}) cell,
+    CalendarOverlapCandidate<T> candidate,
+  ) {
     final keys = _board.itemsIn(cell.row, cell.row + 1, cell.col, cell.col + 1);
     for (final key in keys) {
       final shape = _board.itemOf(key);
       if (shape != null &&
           NoOverlapsPolicy.rangeSharesTime(
-            slot.start,
-            slot.end,
+            candidate.start,
+            candidate.end,
             shape.shown.entry,
-          )) {
+          ) &&
+          !_policy.mayOverlap(candidate, shape.shown.entry)) {
         return true;
       }
     }
@@ -4110,7 +4228,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final global = details.globalPosition;
     final strip = _stripCellAt(global);
     if (strip != null) {
-      _create(strip, strip, _stripRangeOver(strip.col, strip.col), strip: true);
+      _create(
+        strip,
+        strip,
+        _stripRangeOver(strip.col, strip.col),
+        point: global,
+        strip: true,
+      );
       return;
     }
     final cell = _bodyCellAt(global);
@@ -4128,21 +4252,32 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (range == null) {
       return;
     }
-    _create(cell, cell, range);
+    _create(cell, cell, range, point: global);
   }
 
   /// Reports [range] through [TimedGrid.onCreate], marking until the
   /// create flow closes the range from the slot of [anchor] to that of
   /// [focus], or for a range across the strip, [strip], the strip cells of
-  /// its days, on whichever days the grid shows meanwhile. A throw within
-  /// the call ends the mark as a failure of the future does, and is left
-  /// uncaught in the zone as that failure is.
+  /// its days, on whichever days the grid shows meanwhile. The report says
+  /// the user chose the length where [focus] is not [anchor], and gives the
+  /// rect of [_createRectOf], read before the mark, or where that is null
+  /// the empty rect at [point], the pointer's global position at the
+  /// release. A throw within the call ends the mark as a failure of the
+  /// future does, and is left uncaught in the zone as that failure is.
   void _create(
     ({int row, int col}) anchor,
     ({int row, int col}) focus,
     CalendarCreateRange range, {
+    required Offset point,
     bool strip = false,
   }) {
+    final details = CalendarCreateDetails(
+      range: range,
+      globalRect:
+          _createRectOf(anchor, focus, strip: strip) ??
+          Rect.fromLTWH(point.dx, point.dy, 0.0, 0.0),
+      userChoseLength: focus != anchor,
+    );
     final create = ++_creates;
     setState(() {
       if (strip) {
@@ -4155,7 +4290,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     });
     _updateStripMark();
     Future<void>.sync(() {
-      return widget.onCreate(range);
+      return widget.onCreate(details);
     }).whenComplete(() {
       if (mounted && create == _creates) {
         setState(() {
@@ -4165,6 +4300,42 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _updateStripMark();
       }
     });
+  }
+
+  /// The global rect of the cells a create from [anchor] to [focus] marks
+  /// in [focus]'s column, as the board paints them
+  /// ([BoardController.globalRectOfCell]): for a range across the strip
+  /// ([strip]), [focus]'s strip cell; for one over the slots, the slots of
+  /// its piece on [focus]'s day ([_wallSpanOfCells]), held to the hours,
+  /// from the first one's top to the last one's bottom. Null where the
+  /// board gives no rect for them, as with no board laid out.
+  Rect? _createRectOf(
+    ({int row, int col}) anchor,
+    ({int row, int col}) focus, {
+    required bool strip,
+  }) {
+    if (strip) {
+      return _board.globalRectOfCell(focus.row, focus.col);
+    }
+    final hours = _tracks.hours;
+    // The span holds [focus]'s own slot, so its day holds a piece, whose
+    // ends are slot edges.
+    final piece = CalendarDates.pieceOn(
+      _wallSpanOfCells(anchor, focus),
+      _tracks.dayAt(focus.col),
+    )!;
+    final first = _board.globalRectOfCell(
+      _tracks.rowOf(math.max(piece.start, hours.start)),
+      focus.col,
+    );
+    final last = _board.globalRectOfCell(
+      _tracks.rowOf(math.min(piece.end, hours.end)) - 1,
+      focus.col,
+    );
+    if (first == null || last == null) {
+      return null;
+    }
+    return first.expandToInclude(last);
   }
 
   /// The all-day range a create across the strip from the column [anchor]
@@ -4525,15 +4696,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (created == null) {
       return;
     }
-    _create(anchor, focus, created, strip: range.strip);
+    _create(anchor, focus, created, point: range.point, strip: range.strip);
   }
 
   /// Refills the running create range's limits at a new [_calendarNow]
   /// ([_readRangeLimit]) and places its anchor by them
-  /// ([_placeRangeAnchor]). A throw of the policy is reported, and the
-  /// range is detached and cleared, so it creates nothing and no release
-  /// reads limits two minutes gave. Runs after the now mark and [_limits]
-  /// are written.
+  /// ([_placeRangeAnchor]), which asks [CalendarEditPolicy.mayOverlap]. A
+  /// throw of the policy in either is reported, and the range is detached
+  /// and cleared, so it creates nothing and no release reads limits two
+  /// minutes gave. Runs after the now mark and [_limits] are written.
   void _refillRange() {
     final range = _range;
     if (range == null) {
@@ -4541,13 +4712,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     try {
       _readRangeLimit(range);
+      _placeRangeAnchor(range);
     } catch (exception, stack) {
       _reportPolicyThrow(exception, stack);
       setState(_detachRange);
       _updateStripMark();
-      return;
     }
-    _placeRangeAnchor(range);
   }
 
   /// Places [range]'s anchor by its limits and the entries as they stand.
@@ -4841,13 +5011,25 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ([CalendarDates.lastWallMinuteNotAfter]), and the first not before the
   /// latest end before the slot's end
   /// ([CalendarDates.firstWallMinuteNotBefore]), among the timed entries the
-  /// store shows on the grid's days; each null where there is none.
+  /// store shows on the grid's days that hold the range; each null where
+  /// there is none.
   ///
   /// Where the slot is the last of the first pass of a stretch the clock
   /// repeats, it ends with that pass, while a range to its end from a start
   /// before the stretch ends after the second pass
-  /// ([CalendarDates.rangeEndAtWallMinute]); where an entry shares time with
-  /// that second pass, the range's start may not pass the stretch's start.
+  /// ([CalendarDates.rangeEndAtWallMinute]); where an entry that holds the
+  /// range shares time with that second pass, the range's start may not
+  /// pass the stretch's start.
+  ///
+  /// The range is not picked yet, so [_policy] is asked about a candidate
+  /// with no entry over the grid's days, from [TimedGrid.firstDay] to the
+  /// start of the day after the last column's, which holds every range a
+  /// release from the slot reports ([createRangeOver]). An entry that would
+  /// move neither bound nor, beside the second pass, hold the start, holds
+  /// nothing and is not asked; one that would is asked once, after its time
+  /// test, and holds the range only where the policy does not let the
+  /// candidate share its time ([CalendarEditPolicy.mayOverlap]). One
+  /// candidate per call, and none per entry.
   ({int? next, int? previous}) _conflictsAround(
     ({int row, int col}) anchor,
     DateTime? occurrence,
@@ -4873,32 +5055,55 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         ? (start: end, end: passEnd)
         : null;
     var holdsInPass = false;
+    final candidate = CalendarOverlapCandidate<T>(
+      start: widget.firstDay,
+      end: CalendarDates.dateOfDayNumber(_tracks.lastDay + 1),
+    );
+    final policy = _policy;
     for (final shown in _shownBetween(widget.firstDay, _lastDay)) {
       final entry = shown.entry;
       if (entry.isAllDay) {
         continue;
       }
-      if (entry.start.isAfter(start)) {
-        final at = CalendarDates.lastWallMinuteNotAfter(
-          entry.start,
-          from: occurrence,
-          start: start,
-        );
-        next = next == null ? at : math.min(next, at);
-      }
-      if (entry.end.isBefore(end)) {
-        final at = CalendarDates.firstWallMinuteNotBefore(
-          entry.end,
-          from: occurrence,
-        );
-        previous = previous == null ? at : math.max(previous, at);
-      }
-      if (secondPass != null &&
+      final nextAt = entry.start.isAfter(start)
+          ? CalendarDates.lastWallMinuteNotAfter(
+              entry.start,
+              from: occurrence,
+              start: start,
+            )
+          : null;
+      final previousAt = entry.end.isBefore(end)
+          ? CalendarDates.firstWallMinuteNotBefore(entry.end, from: occurrence)
+          : null;
+      final inPass =
+          secondPass != null &&
           NoOverlapsPolicy.rangeSharesTime(
             secondPass.start,
             secondPass.end,
             entry,
-          )) {
+          );
+      final moves =
+          (nextAt != null && (next == null || nextAt < next)) ||
+          (previousAt != null && (previous == null || previousAt > previous)) ||
+          (inPass && !holdsInPass);
+      if (!moves ||
+          (NoOverlapsPolicy.rangeSharesTime(
+                candidate.start,
+                candidate.end,
+                entry,
+              ) &&
+              policy.mayOverlap(candidate, entry))) {
+        continue;
+      }
+      if (nextAt != null) {
+        next = next == null ? nextAt : math.min(next, nextAt);
+      }
+      if (previousAt != null) {
+        previous = previous == null
+            ? previousAt
+            : math.max(previous, previousAt);
+      }
+      if (inPass) {
         holdsInPass = true;
       }
     }

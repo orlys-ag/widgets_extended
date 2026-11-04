@@ -32,6 +32,7 @@ export 'policy/edit_policy.dart'
     show
         CalendarEditPolicy,
         CalendarNow,
+        CalendarOverlapCandidate,
         CalendarResizeEdges,
         DayLimitPolicy,
         NoOverlapsPolicy,

@@ -144,7 +144,7 @@ void main() {
       selectedDay: tuesday,
       now: now,
       onTopDay: (day) {},
-      onCreateRange: (range) {},
+      onCreateRange: (range) async {},
       onEdit: (id) {},
       onDelete: (id) {},
     );

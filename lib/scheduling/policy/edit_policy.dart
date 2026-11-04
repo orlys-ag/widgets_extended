@@ -119,6 +119,74 @@ enum CalendarResizeEdges {
   }
 }
 
+/// The candidates [CalendarOverlapCandidate]'s constructor has built, in a
+/// debug build; tests read differences.
+int debugOverlapCandidateCount = 0;
+
+/// Adds one to [debugOverlapCandidateCount] in a debug build.
+void noteOverlapCandidate() {
+  assert(() {
+    debugOverlapCandidateCount++;
+    return true;
+  }());
+}
+
+/// A change [CalendarEditPolicy.mayOverlap] is asked about: the times it
+/// gives, [start] to [end], and the [entry] it changes, none for a create.
+///
+/// Compared and hashed by [start], [end] and [entry].
+@immutable
+final class CalendarOverlapCandidate<T> {
+  /// The change of [entry], or with none a create, to the times [start] to
+  /// [end]. It checks neither time.
+  CalendarOverlapCandidate({
+    required this.start,
+    required this.end,
+    this.entry,
+  }) {
+    noteOverlapCandidate();
+  }
+
+  /// The start of the times asked about: those of the change, or for a
+  /// change still being picked, of a span holding every time it may reach,
+  /// which each asker gives, such as a create drag in Week and Day, which
+  /// asks about the grid's days.
+  final DateTime start;
+
+  /// The end of the times asked about: those of the change, or for a
+  /// change still being picked, of a span holding every time it may reach,
+  /// which each asker gives, such as a create drag in Week and Day, which
+  /// asks about the grid's days.
+  final DateTime end;
+
+  /// The entry a move or a resize changes, as stored, with its payload;
+  /// null for a create.
+  final CalendarEntry<T>? entry;
+
+  @override
+  bool operator ==(Object other) {
+    return other is CalendarOverlapCandidate<T> &&
+        other.start == start &&
+        other.end == end &&
+        other.entry == entry;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(start, end, entry);
+  }
+
+  @override
+  String toString() {
+    return "CalendarOverlapCandidate("
+        "${CalendarDates.isoDate(start)} "
+        "${CalendarDates.isoTime(CalendarDates.minuteOfDay(start))} "
+        "to ${CalendarDates.isoDate(end)} "
+        "${CalendarDates.isoTime(CalendarDates.minuteOfDay(end))}, "
+        "${entry ?? "a create"})";
+  }
+}
+
 /// The limits on what may change of a calendar's entries, and where a new
 /// entry may start: each answer asked of an entry, a change or a day, at
 /// the time [CalendarNow] gives.
@@ -131,15 +199,19 @@ enum CalendarResizeEdges {
 /// error. A subclass with fields compares them in `==` and `hashCode`.
 ///
 /// The views ask it in edit mode only, and read [dayLimit] and
-/// [allowsOverlaps] each time they take a policy. An answer that throws in
-/// a drag's gates, which the views ask during a drag and inside their
-/// pointer handlers, is reported through [FlutterError.reportError] and
-/// refuses; one that throws in a build, a press or a tap goes through; and
-/// one that throws where a new minute asks again what a view shows is
+/// [allowsOverlaps] each time they take a policy. They ask [mayOverlap]
+/// only where [allowsOverlaps] is false, and a per-pair ask through
+/// [mayOverlap]'s default, or through [CalendarEditPolicy.all], reads
+/// [allowsOverlaps] again. An answer that throws in a drag's gates, which
+/// the views ask during a drag and inside their pointer handlers, is
+/// reported through [FlutterError.reportError] and refuses; one that
+/// throws in a build, a press or a tap goes through; and one that throws
+/// where a new minute or a store notify asks again what a view shows is
 /// reported through [FlutterError.reportError], the view showing what the
-/// last answer gave. A view given a policy not `==` to the last cancels a
-/// move, a resize or a create range in flight, so a host's policy defines
-/// value equality, or is kept as one instance across builds.
+/// last answer gave, or for a create range in flight, ending it. A view
+/// given a policy not `==` to the last cancels a move, a resize or a
+/// create range in flight, so a host's policy defines value equality, or
+/// is kept as one instance across builds.
 @immutable
 abstract base class CalendarEditPolicy<T> {
   /// Const, so a subclass can be const.
@@ -148,6 +220,8 @@ abstract base class CalendarEditPolicy<T> {
   /// A policy that allows only what each of [policies] allows, each answer
   /// the strictest of theirs: [mayMove], [mayEdit], [mayDelete],
   /// [admitsChange] and [allowsOverlaps] are true where every one's is;
+  /// [mayOverlap] is true where every one's is, a policy whose
+  /// [allowsOverlaps] is true allowing every pair and not being asked;
   /// [resizableEdges] are the edges every one gives; [earliestStartOn] is
   /// the latest instant they give, and null where any gives null; and
   /// [dayLimit] is the least limit they give, and null where none gives
@@ -220,14 +294,58 @@ abstract base class CalendarEditPolicy<T> {
   /// Whether two entries may share time, which the views read for Week's
   /// and Day's moves, resizes and creates. Where it is true they go over
   /// other entries' times as over free ones; where it is false no move or
-  /// resize gives a timed entry times another timed entry shares, and a
-  /// move dropped onto one lands at the nearest free time or goes back.
-  /// An all-day entry shares time with none, so neither answer limits a
-  /// bar within the all-day strip. A [NoOverlapsPolicy] combined with
+  /// resize gives a timed entry times another timed entry shares unless
+  /// [mayOverlap] lets the two share them. A move dropped where the policy
+  /// refuses lands at the nearest time no entry shares, or goes back, and
+  /// a resize it refuses stops at the first entry in its way, allowed or
+  /// not. An all-day entry shares time with none, so neither answer limits
+  /// a bar within the all-day strip. A [NoOverlapsPolicy] combined with
   /// other policies ([CalendarEditPolicy.all]) makes it false for them.
   /// True here.
+  ///
+  /// It is the fast path of [mayOverlap]: where it is true nothing asks
+  /// [mayOverlap], and where it is false the askers [mayOverlap] names ask
+  /// it about each entry sharing the times of a change.
   bool get allowsOverlaps {
     return true;
+  }
+
+  /// Whether the change [candidate] gives may share time with [other]:
+  /// true lets the two share it. Here it answers [allowsOverlaps], so a
+  /// policy that overrides only [allowsOverlaps], to false, refuses every
+  /// pair it is asked about.
+  ///
+  /// It is asked only where [allowsOverlaps] is false, and only about a
+  /// timed [other] that shares time with the candidate's times
+  /// ([NoOverlapsPolicy.rangeSharesTime] of [CalendarOverlapCandidate.start]
+  /// and [CalendarOverlapCandidate.end]) and that is not the entry the
+  /// candidate changes ([CalendarOverlapCandidate.entry]). Its askers:
+  ///
+  /// - `CalendarEditRules.firstSlot`, which Agenda's add buttons and
+  ///   Month's long press take, asks about each entry it is given that
+  ///   shares a slot's time, with a candidate of the slot's times and no
+  ///   entry, and takes no slot that shares time with one it refuses.
+  /// - Week's and Day's moves and resizes, a bar dropped on the slots and
+  ///   an end handle dragged into a later day ask, at each placement they
+  ///   test, about each entry sharing the times the change would give,
+  ///   with a candidate of those times and the stored entry, and land on no
+  ///   placement that shares time with one it refuses.
+  /// - Their slot presses ask with a candidate of the slot's times and no
+  ///   entry, and start no create on a slot sharing time with one it
+  ///   refuses.
+  /// - Their create drags, whose range is not picked when they ask, at its
+  ///   start, at a store notify and at a new minute, ask about each entry
+  ///   that would hold the range, with a candidate of no entry over the
+  ///   grid's days, a span holding every range the drag may report; a
+  ///   refusal holds the range at that entry.
+  ///
+  /// One test of a change can ask about one pair more than once, so the
+  /// answer is a question, as every answer of the policy is.
+  bool mayOverlap(
+    CalendarOverlapCandidate<T> candidate,
+    CalendarEntry<T> other,
+  ) {
+    return allowsOverlaps;
   }
 }
 
@@ -471,6 +589,19 @@ final class _AllEditPolicies<T> extends CalendarEditPolicy<T> {
   bool get allowsOverlaps {
     for (final policy in policies) {
       if (!policy.allowsOverlaps) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  bool mayOverlap(
+    CalendarOverlapCandidate<T> candidate,
+    CalendarEntry<T> other,
+  ) {
+    for (final policy in policies) {
+      if (!policy.allowsOverlaps && !policy.mayOverlap(candidate, other)) {
         return false;
       }
     }

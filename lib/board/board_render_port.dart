@@ -164,6 +164,12 @@ abstract interface class BoardRenderPort<TKey> {
   /// drag session, whose pointer events arrive global.
   Offset globalToPaintLocal(Offset global);
 
+  /// Converts a viewport-paint-space point into a GLOBAL position, the
+  /// inverse of [globalToPaintLocal]. Internal-use for
+  /// `BoardController.globalRectOfCell`, which maps the corners of
+  /// [rectOfCell] through it.
+  Offset paintLocalToGlobal(Offset local);
+
   /// The vertical scroll position, or null when the offset driving this
   /// axis is not a [ScrollPosition].
   ScrollPosition? get verticalPosition;

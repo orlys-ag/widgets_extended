@@ -3651,6 +3651,11 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   }
 
   @override
+  Offset paintLocalToGlobal(Offset local) {
+    return localToGlobal(local);
+  }
+
+  @override
   void pinItem(TKey key) {
     _pinnedDragKey = key;
   }

@@ -1,7 +1,7 @@
 /// The timed grid's layout of its entries, made without a widget: the
 /// pieces of timed entries, the entries it has no block for and those it
 /// indexes as loose, the bars of all-day entries stacked in rows, the
-/// split it keeps for the same input, and the overlap index's search.
+/// split it keeps for the same input, and the overlap index's searches.
 library;
 
 import 'dart:ui';
@@ -9,6 +9,7 @@ import 'dart:ui';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/calendar/views/entry_split.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
@@ -334,6 +335,162 @@ void main() {
     );
   });
 
+  test("GL10 the overlap index finds the first entry other than the one "
+      "asked about, in start order, that shares a range's time and that "
+      "the policy refuses, asking only about the entries sharing it, in "
+      "start order up to that one, and visiting a bounded count of its "
+      "nodes", () {
+    // Sixty timed entries over Tuesday, the last alone from 22:00 to
+    // 22:30, the others ending by 21:00, and two all-day entries over it.
+    final timed = <CalendarEntry<String>>[
+      for (var i = 0; i < 59; i++)
+        i % 20 == 0
+            ? entryOf("e$i", at(tuesday, 0, i * 10), at(tuesday, 10, i * 10))
+            : entryOf(
+                "e$i",
+                at(tuesday, 0, i * 97 % 1080),
+                at(tuesday, 0, i * 97 % 1080 + 5 + i * 61 % 175),
+              ),
+      entryOf("e59", at(tuesday, 22), at(tuesday, 22, 30)),
+    ];
+    final index = GridOverlapIndex<String>()
+      ..addAll(<CalendarShownEntry<String>>[
+        for (final entry in timed)
+          CalendarShownEntry<String>(entry, pending: false),
+        allDayOf("bar", tuesday, 1),
+        allDayOf("wide", monday, 3),
+      ]);
+    // Setup sanity: every timed entry is held, and no all-day one.
+    expect(index.ids, hasLength(60));
+    final byStart = <CalendarEntry<String>>[...timed]
+      ..sort((a, b) {
+        final order = a.start.compareTo(b.start);
+        return order != 0 ? order : a.id!.compareTo(b.id!);
+      });
+    // log2(60), the implicit tree's height.
+    const height = 5;
+    final refused = <String>{for (var i = 0; i < 60; i += 7) "e$i"};
+    final elsewhere = entryOf("new", at(wednesday, 9), at(wednesday, 10));
+    var asking = 0;
+    for (var j = 0; j < 42; j++) {
+      // Forty ranges over the entries, then one over "e59" alone and one
+      // over no entry.
+      final ({
+        String id,
+        CalendarEntry<String> own,
+        DateTime start,
+        DateTime end,
+      })
+      query;
+      if (j == 40) {
+        query = (
+          id: "e59",
+          own: timed.last,
+          start: at(tuesday, 22, 5),
+          end: at(tuesday, 22, 20),
+        );
+      } else if (j == 41) {
+        query = (
+          id: "new",
+          own: elsewhere,
+          start: at(tuesday, 23),
+          end: at(tuesday, 23, 30),
+        );
+      } else {
+        final start = at(tuesday, 0, j * 131 % 1260);
+        final own = j.isEven ? timed[j] : elsewhere;
+        query = (
+          id: own.id!,
+          own: own,
+          start: start,
+          end: start.add(Duration(minutes: 5 + j * 47 % 300)),
+        );
+      }
+      final sharing = <CalendarEntry<String>>[
+        for (final entry in byStart)
+          if (entry.id != query.id &&
+              NoOverlapsPolicy.timesOverlap(
+                query.start,
+                query.end,
+                entry.start,
+                entry.end,
+              ))
+            entry,
+      ];
+      final refusal = sharing.indexWhere((entry) {
+        return refused.contains(entry.id);
+      });
+      final expectedAsks = <String>[
+        for (final entry
+            in refusal < 0 ? sharing : sharing.sublist(0, refusal + 1))
+          entry.id!,
+      ];
+      final policy = _PairRecording(refused);
+      final candidate = CalendarOverlapCandidate<String>(
+        start: query.start,
+        end: query.end,
+      );
+      final visitsBefore = debugOverlapIndexVisitCount;
+      final answer = index.refusesOverlap(
+        query.id,
+        query.own,
+        candidate,
+        policy,
+      );
+      final visits = debugOverlapIndexVisitCount - visitsBefore;
+      final reason = "${query.id} ${query.start} to ${query.end}";
+      expect(answer, refusal >= 0, reason: reason);
+      expect(policy.asked, expectedAsks, reason: reason);
+      for (final other in policy.candidates) {
+        expect(identical(other, candidate), isTrue, reason: reason);
+      }
+      final asks = policy.asked.length;
+      expect(
+        visits,
+        lessThanOrEqualTo(1 + 2 * (asks + 2) * (height + 1)),
+        reason: reason,
+      );
+      if (j >= 40) {
+        expect(sharing, isEmpty, reason: reason);
+        expect(visits, 0, reason: reason);
+      }
+      if (asks > 0) {
+        asking++;
+      }
+    }
+    // Setup sanity: the ranges ask, and some are refused partway.
+    expect(asking, greaterThan(30));
+
+    // 1024 entries back to back, five minutes each, from Monday's start.
+    final packed = GridOverlapIndex<String>()
+      ..addAll(<CalendarShownEntry<String>>[
+        for (var k = 0; k < 1024; k++)
+          shownOf(
+            "b$k",
+            monday.add(Duration(minutes: 5 * k)),
+            monday.add(Duration(minutes: 5 * k + 5)),
+          ),
+      ]);
+    final inside = CalendarOverlapCandidate<String>(
+      start: monday.add(const Duration(minutes: 5001)),
+      end: monday.add(const Duration(minutes: 5004)),
+    );
+    for (final refusing in <bool>[false, true]) {
+      final policy = _PairRecording(
+        refusing ? const <String>{"b1000"} : const <String>{},
+      );
+      final visitsBefore = debugOverlapIndexVisitCount;
+      expect(packed.refusesOverlap("new", elsewhere, inside, policy), refusing);
+      expect(policy.asked, <String>["b1000"]);
+      // log2(1024) is 10: 1 + 2 * (1 + 2) * (10 + 1).
+      expect(
+        debugOverlapIndexVisitCount - visitsBefore,
+        lessThanOrEqualTo(67),
+        reason: "refusing: $refusing",
+      );
+    }
+  });
+
   group(
     "on the day whose clock skips its midnight",
     skip: skippedMidnightSkip,
@@ -416,4 +573,34 @@ void main() {
       });
     },
   );
+}
+
+/// A policy limiting overlaps that refuses a pair where the other entry's
+/// id is in [refused], recording the id of each other entry it is asked
+/// about in [asked] and each candidate in [candidates]. Compared by
+/// identity.
+final class _PairRecording extends CalendarEditPolicy<String> {
+  _PairRecording(this.refused);
+
+  final Set<String> refused;
+
+  final List<String> asked = <String>[];
+
+  final List<CalendarOverlapCandidate<String>> candidates =
+      <CalendarOverlapCandidate<String>>[];
+
+  @override
+  bool get allowsOverlaps {
+    return false;
+  }
+
+  @override
+  bool mayOverlap(
+    CalendarOverlapCandidate<String> candidate,
+    CalendarEntry<String> other,
+  ) {
+    asked.add(other.id!);
+    candidates.add(candidate);
+    return !refused.contains(other.id);
+  }
 }

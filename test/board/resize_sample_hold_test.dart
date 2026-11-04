@@ -156,6 +156,11 @@ class _JitterPort implements BoardRenderPort<String> {
   }
 
   @override
+  Offset paintLocalToGlobal(Offset local) {
+    return _inner.paintLocalToGlobal(local);
+  }
+
+  @override
   ScrollPosition? get verticalPosition {
     return _inner.verticalPosition;
   }

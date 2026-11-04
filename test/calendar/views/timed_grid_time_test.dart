@@ -314,8 +314,8 @@ class Harness {
       now: now,
       onSelectDay: (day) {},
       onOpenEntry: (id) {},
-      onCreate: (range) async {
-        creates.add(range);
+      onCreate: (details) async {
+        creates.add(details.range);
       },
       onMoveRequest: recordsMoves
           ? (request) async {

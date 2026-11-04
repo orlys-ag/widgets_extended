@@ -95,8 +95,8 @@ Future<List<CalendarCreateRange>> pumpCalendar(
           if (!allowsOverlaps) const NoOverlapsPolicy<String>(),
         ]),
         slotMinutes: slotMinutes,
-        onCreateRange: (range) async {
-          creates.add(range);
+        onCreateRange: (details) async {
+          creates.add(details.range);
         },
         onCreateRefused: refusals?.add,
         addButtonBuilder: (context, details) {

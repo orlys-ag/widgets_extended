@@ -14,6 +14,7 @@ import '../../scheduling/scheduling.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
+import '../views/create_details.dart';
 import '../views/day_list.dart';
 import '../views/month_board.dart';
 import '../views/month_picker.dart';
@@ -97,8 +98,9 @@ final class CalendarEntryTapDetails<T> {
 ///   the store's hours shows only in a count on a notice banner. A line
 ///   marks the current time over the rows of the clock's day. In edit mode
 ///   the list marks each gap in the hours with a dashed row whose button
-///   reports a create through [onCreateRange], and each card's builder
-///   receives the [CalendarCardDetails.onEdit] and
+///   reports a create through [onCreateRange], marking the row until the
+///   create's future completes or a later create moves the mark, and each
+///   card's builder receives the [CalendarCardDetails.onEdit] and
 ///   [CalendarCardDetails.onDelete]
 ///   [editPolicy] allows ([CalendarEditPolicy.mayEdit],
 ///   [CalendarEditPolicy.mayDelete]), which report through [onEditRequest] and
@@ -122,13 +124,18 @@ final class CalendarEntryTapDetails<T> {
 ///   tap on a chip reports the entry, and a tap anywhere else on a day
 ///   opens that day in Day where [views] lists Day, and otherwise selects
 ///   it. In edit mode a long press on a day reports a create through
-///   [onCreateRange] at the day's first free slot from the earliest start
-///   [editPolicy] gives it ([CalendarEditPolicy.earliestStartOn]), or
-///   where none is free, at its first slot from that start, over an
-///   entry, selecting the day when it is in the month; or, where that
+///   [onCreateRange] at the day's first slot from the earliest start
+///   [editPolicy] gives it ([CalendarEditPolicy.earliestStartOn]) that is
+///   free of the entries that block it: each entry sharing its time where
+///   [CalendarEditPolicy.allowsOverlaps] is true, and otherwise each one
+///   [CalendarEditPolicy.mayOverlap] does not let the create share. Where
+///   none is free it reports one at the day's first slot from that start,
+///   over an entry, which may be one the policy refuses, and marks the day
+///   until the create's future completes or a later create moves the
+///   mark. It selects the day when it is in the month; or, where that
 ///   start leaves no slot of the store's hours that day whose start and
 ///   end the day's clock both read, as where the clock skips the start or
-///   the end of each, [onCreateRefused].
+///   the end of each, it reports [onCreateRefused] and marks nothing.
 ///
 /// An entry runs from its start to its end ([CalendarEntry]): Week and Day
 /// draw a timed entry as one block per shown day it covers, at its exact
@@ -285,13 +292,23 @@ class CalendarView<T> extends StatefulWidget {
   /// Day's moves, resizes and creates may give an entry times another
   /// entry shares: where it is true they go over other entries' times as
   /// over free ones, the blocks sharing a day's time side by side; where
-  /// it is false none gives times that another timed entry shares, and a
-  /// move dropped onto another entry's time lands at the nearest free time
-  /// or goes back. Under either answer Agenda's add buttons create at a
-  /// free slot, and Month's long press does where one is left. The
-  /// calendar checks no write of the host's, and [store] refuses none for
-  /// sharing time: a host whose data forbids it refuses the write in its
-  /// data source.
+  /// it is false none gives times that another timed entry shares unless
+  /// [CalendarEditPolicy.mayOverlap] lets the change share them. A move
+  /// dropped where the policy refuses lands at the nearest time no entry
+  /// shares, or goes back, and a resize it refuses stops at the first entry
+  /// in its way, allowed or not. A move or a resize asks about the times it
+  /// would give, with the stored entry, and a slot press about the slot's
+  /// times, with no entry. A create drag's range is not picked when it
+  /// asks, at its start, at a store notify and at a new minute, so it asks
+  /// about a candidate with no entry over the days the grid shows: a
+  /// policy that answers from the candidate's times answers about those
+  /// days, and its refusal holds the range at that entry. Agenda's add
+  /// buttons create at a slot free of every
+  /// entry where it is true, and where it is false free of each entry
+  /// [CalendarEditPolicy.mayOverlap] does not let the create share; Month's
+  /// long press does too where such a slot is left. The calendar checks no
+  /// write of the host's, and [store] refuses none for sharing time: a host
+  /// whose data forbids it refuses the write in its data source.
   ///
   /// A policy not `==` to the last one given cancels a move or a resize in
   /// flight, which then requests nothing, and ends a create range in flight,
@@ -376,14 +393,20 @@ class CalendarView<T> extends StatefulWidget {
   /// nothing.
   final ValueChanged<CalendarEntryTapDetails<T>>? onEntryTap;
 
-  /// A create the calendar's gestures picked, in edit mode: the range a
-  /// gesture picked in Week or Day, which stays marked until the future
-  /// completes; a gap's first free slot in Agenda, the add button's; and a
-  /// day's first free slot in Month, a long press's. Null reports nothing,
-  /// and the marked range clears at once. A failure of the function,
-  /// whether it throws within the call or its future fails, is not caught:
-  /// a host that handles one passes a function that does.
-  final Future<void> Function(CalendarCreateRange range)? onCreateRange;
+  /// A create the calendar's gestures picked, in edit mode, as a
+  /// [CalendarCreateDetails]: its range, the range a gesture picked in Week
+  /// or Day, a gap's first free slot in Agenda, the add button's, and a
+  /// day's first free slot in Month, a long press's; where its mark is on
+  /// screen when it is reported, in global logical pixels
+  /// ([CalendarCreateDetails.globalRect]); and whether the user chose its
+  /// length ([CalendarCreateDetails.userChoseLength]), which only a drag in
+  /// Week or Day does. The view marks the create, Week and Day its range,
+  /// Agenda the gap's row and Month the day, until the future completes or
+  /// fails, unless a later create in that view has moved the mark. Null
+  /// reports nothing, and the mark clears at once. A failure of the
+  /// function, whether it throws within the call or its future fails, is
+  /// not caught: a host that handles one passes a function that does.
+  final Future<void> Function(CalendarCreateDetails details)? onCreateRange;
 
   /// A move or a resize the gestures landed in Week or Day, in edit mode,
   /// whose entry shows at the requested times, pending, until the future
@@ -1308,12 +1331,16 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     );
   }
 
-  Future<void> _createRange(CalendarCreateRange range) {
+  /// [CalendarView.onCreateRange]'s future for [details], a throw within
+  /// the call failing it, so a view that marks the create clears the mark.
+  Future<void> _createRange(CalendarCreateDetails details) {
     final onCreateRange = widget.onCreateRange;
     if (onCreateRange == null) {
       return Future<void>.value();
     }
-    return onCreateRange(range);
+    return Future<void>.sync(() {
+      return onCreateRange(details);
+    });
   }
 
   void _requestEdit(String id) {
@@ -1332,25 +1359,31 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     }
   }
 
-  /// Month's long press on [day], selecting it first when it is a day of
-  /// the shown month; a day of another month leaves the selection and the
-  /// month as they are.
-  void _createOn(DateTime day) {
+  /// Month's long press on [day], whose cell lies at [globalRect],
+  /// selecting it first when it is a day of the shown month; a day of
+  /// another month leaves the selection and the month as they are. Returns
+  /// what [_openCreateFlow] returns.
+  Future<void>? _createOn(DateTime day, Rect globalRect) {
     if (_grid.contains(day)) {
       _select(day);
     }
-    _openCreateFlow(day);
+    return _openCreateFlow(day, globalRect);
   }
 
   /// Reports a create on [day] at the first slot of the hours, from the
   /// earliest start [_policy] gives it ([CalendarEditPolicy.earliestStartOn]),
-  /// that shares no time with an entry the store shows on it, or where
-  /// none is free, at the first slot of the hours from that start
+  /// that shares no time with an entry the store shows on it that blocks it
+  /// (every one where [_policy]'s [CalendarEditPolicy.allowsOverlaps] is
+  /// true, and otherwise each its [CalendarEditPolicy.mayOverlap] refuses),
+  /// or where none is free, at the first slot of the hours from that start,
+  /// over an entry, refused or not, which asks [_policy] nothing
   /// ([CalendarEditRules.firstSlot]): each one whose times the clock reads,
   /// in that start's occurrence where [day]'s clock repeats its time, so
-  /// none starts before it. Where it leaves no such slot in the hours,
-  /// reports [CalendarView.onCreateRefused] instead.
-  void _openCreateFlow(DateTime day) {
+  /// none starts before it, with [globalRect], the day cell's, as its rect
+  /// and returning [_createRange]'s future. Where it leaves no such slot in
+  /// the hours, reports [CalendarView.onCreateRefused] instead and returns
+  /// null.
+  Future<void>? _openCreateFlow(DateTime day, Rect globalRect) {
     final rules = _takeRules();
     final start = rules.earliestStartOn(day, _now.value);
     final shown = widget.store.entriesOn(day).map((shown) {
@@ -1360,9 +1393,15 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
         rules.firstSlot(start, clearOf: shown) ?? rules.firstSlot(start);
     if (slot == null) {
       widget.onCreateRefused?.call(day);
-      return;
+      return null;
     }
-    _createRange(CalendarCreateRange(start: slot.start, end: slot.end));
+    return _createRange(
+      CalendarCreateDetails(
+        range: CalendarCreateRange(start: slot.start, end: slot.end),
+        globalRect: globalRect,
+        userChoseLength: false,
+      ),
+    );
   }
 
   CalendarHeaderDetails _headerDetails() {

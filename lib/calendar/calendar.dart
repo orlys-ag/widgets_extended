@@ -32,6 +32,7 @@ export '../scheduling/scheduling.dart'
         CalendarLoadStatus,
         CalendarMonthGrid,
         CalendarNow,
+        CalendarOverlapCandidate,
         CalendarResizeEdges,
         CalendarShownEntry,
         CalendarSourceChange,
@@ -86,5 +87,6 @@ export 'presentation/calendar_defaults.dart'
 export 'presentation/calendar_localizations.dart'
     show CalendarLocalizations, DefaultCalendarLocalizations;
 export 'presentation/calendar_theme.dart' show CalendarTheme, CalendarThemeData;
+export 'views/create_details.dart' show CalendarCreateDetails;
 export 'views/month_board.dart' show CalendarMonthLayout;
 export 'views/move_request.dart' show CalendarMoveKind, CalendarMoveRequest;

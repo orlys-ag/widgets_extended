@@ -1,6 +1,7 @@
 /// The edit policies and the store the views' policy tests share: a policy
-/// that records each ask, one whose answers a test scripts, and a store
-/// that records each move it is asked for.
+/// that records each ask, one that records each pair it is asked about,
+/// one whose answers a test scripts, and a store that records each move it
+/// is asked for.
 library;
 
 import 'package:flutter/scheduler.dart';
@@ -86,6 +87,65 @@ final class CountingEditPolicy<T> extends CalendarEditPolicy<T> {
     _note("allowsOverlaps");
     return inner.allowsOverlaps;
   }
+
+  @override
+  bool mayOverlap(
+    CalendarOverlapCandidate<T> candidate,
+    CalendarEntry<T> other,
+  ) {
+    _note("mayOverlap");
+    return inner.mayOverlap(candidate, other);
+  }
+}
+
+/// One ask of a [PairRecordingPolicy]: the [candidate] and the [other]
+/// entry it was asked about, and [debugDropGateCount] at the ask, which
+/// groups the asks of one gate call.
+typedef PairAsk<T> = ({
+  CalendarOverlapCandidate<T> candidate,
+  CalendarEntry<T> other,
+  int gate,
+});
+
+/// Answers [allowsOverlaps] with [overlaps] and each pair with [allows],
+/// recording each pair it is asked about in [asked]; every other answer
+/// limits nothing. Compared by identity.
+final class PairRecordingPolicy<T> extends CalendarEditPolicy<T> {
+  PairRecordingPolicy({required this.allows, this.overlaps = false});
+
+  final bool Function(
+    CalendarOverlapCandidate<T> candidate,
+    CalendarEntry<T> other,
+  )
+  allows;
+
+  final bool overlaps;
+
+  final List<PairAsk<T>> asked = <PairAsk<T>>[];
+
+  @override
+  bool get allowsOverlaps {
+    return overlaps;
+  }
+
+  @override
+  bool mayOverlap(
+    CalendarOverlapCandidate<T> candidate,
+    CalendarEntry<T> other,
+  ) {
+    asked.add((candidate: candidate, other: other, gate: debugDropGateCount));
+    return allows(candidate, other);
+  }
+}
+
+/// Lets a pair share time where the payload of the candidate's entry or of
+/// [other] starts with "tentative".
+bool tentativePair(
+  CalendarOverlapCandidate<String> candidate,
+  CalendarEntry<String> other,
+) {
+  return (candidate.entry?.payload.startsWith("tentative") ?? false) ||
+      other.payload.startsWith("tentative");
 }
 
 /// What a [ScriptedEditPolicy] throws, naming the answer that threw.

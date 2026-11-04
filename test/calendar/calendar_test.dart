@@ -229,6 +229,9 @@ void main() {
           export.path: export.shown!.toSet(),
     };
     expect(views, <String, Set<String>>{
+      "lib/calendar/views/create_details.dart": <String>{
+        "CalendarCreateDetails",
+      },
       "lib/calendar/views/month_board.dart": <String>{"CalendarMonthLayout"},
       "lib/calendar/views/move_request.dart": <String>{
         "CalendarMoveKind",
@@ -262,6 +265,36 @@ void main() {
         reason: export.path,
       );
     }
+  });
+
+  test("B5 CalendarCreateDetails is an immutable final class whose fields "
+      "are exactly the range, the global rect and whether the user chose "
+      "the length", () {
+    final source = File(
+      "lib/calendar/views/create_details.dart",
+    ).readAsStringSync();
+    expect(
+      RegExp(
+        r"^@immutable\s+final class CalendarCreateDetails\b",
+        multiLine: true,
+      ).hasMatch(source),
+      isTrue,
+    );
+    // Each final field, initialized or not, and each getter but hashCode.
+    final members = RegExp(
+      r"^\s*(?:(?:late\s+)?final\s+[\w<>?, ]+\s+(\w+)\s*[;=]"
+      r"|(?:[\w<>?, ]+\s+)?get\s+(\w+))",
+      multiLine: true,
+    );
+    expect(
+      <String>{
+        for (final match in members.allMatches(
+          classBody(source, "CalendarCreateDetails"),
+        ))
+          (match.group(1) ?? match.group(2))!,
+      }.difference(<String>{"hashCode"}),
+      <String>{"range", "globalRect", "userChoseLength"},
+    );
   });
 
   test("B4 each class the barrel shows of the module's own files says how "

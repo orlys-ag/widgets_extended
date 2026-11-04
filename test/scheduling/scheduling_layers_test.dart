@@ -230,6 +230,7 @@ void main() {
         "lib/scheduling/policy/edit_policy.dart": <String>{
           "CalendarEditPolicy",
           "CalendarNow",
+          "CalendarOverlapCandidate",
           "CalendarResizeEdges",
           "DayLimitPolicy",
           "NoOverlapsPolicy",

@@ -364,7 +364,8 @@ passes `horizontalDetails: ScrollableDetails.horizontal(reverse: true)`.
 `updateItem` change one item; `setItems` replaces them all, diffing by key.
 `itemCount`, `keys`, `itemsAt` and `itemsIn` read them back.
 `animateScrollToCell`, `jumpToCell` and `revealCell` scroll to a cell,
-`cellAt` and `itemAt` name what paints under a global point, and
+`cellAt` and `itemAt` name what paints under a global point,
+`globalRectOfCell` gives the global rect a cell paints at, and
 `BoardAnimationStyle` times every animation (`BoardAnimationStyle.disabled`
 snaps them). An item builder's `view.presence` is the item's enter/exit ramp
 as an `Animation<double>`, so `FadeTransition(opacity: view.presence, ...)`
@@ -440,8 +441,13 @@ and answers entries in the order `compareCalendarEntries` gives.
 minutes with, such as `addDays` and `dayNumber`.
 
 **Editing.** With `editable: true`, Week's and Day's blocks move and
-resize, and a create gesture reports its range through `onCreateRange`. A
-move or a resize goes to `onMoveRequest`, or, where that is null, straight
+resize, and a create gesture reports a `CalendarCreateDetails` through
+`onCreateRange`: the range it picked, where its mark is on screen when it
+is reported (`globalRect`, in global logical pixels), and whether the user
+chose the range's length (`userChoseLength`), as a drag in Week or Day
+does. Each view marks a create until that function's future completes:
+Week and Day the range, Agenda the gap's row and Month the day. A move or
+a resize goes to `onMoveRequest`, or, where that is null, straight
 to the store's `requestMove`. A tap on an entry in Week, Day or Month
 reports through `onEntryTap`, and a card builder of yours that calls
 `CalendarCardDetails.onEdit` or `onDelete` reports through
@@ -452,7 +458,10 @@ it is, `NoOverlapsPolicy` keeps Week's and Day's moves, resizes and
 creates off other timed entries' times, `DayLimitPolicy` caps the days a
 range covers, and `CalendarEditPolicy.all` combines them. A policy of
 your own extends `CalendarEditPolicy`, in a class you declare `final` or
-`base`.
+`base`. Where its `allowsOverlaps` is false, its `mayOverlap` may still let
+a change share time with some entries: the views ask it about each timed
+entry a change would share time with, given a `CalendarOverlapCandidate`
+of the change's times and the entry it changes.
 
 **Look and words.** A `CalendarThemeData` holds every colour, text style,
 motion and icon the views draw. Give it through a `CalendarTheme`, or in a
