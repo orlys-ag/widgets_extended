@@ -15,6 +15,7 @@ import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
+import 'answer_builder.dart';
 import 'create_details.dart';
 import 'day_cell.dart';
 import 'entry_split.dart';
@@ -123,6 +124,10 @@ class _MonthStyles {
         borderRadius: BorderRadius.circular(4.0),
       ),
       moreLabel = theme.monthMoreStyle.copyWith(color: theme.onNotice),
+      createMark = BoxDecoration(
+        color: theme.primaryTint,
+        border: Border.all(color: theme.primary, width: 2.0),
+      ),
       scrim = theme.background.withValues(alpha: 0.85);
 
   /// The styles of [theme]: those made for it before, or for a theme `==`
@@ -178,6 +183,10 @@ class _MonthStyles {
   /// A day's "+N more".
   final BoxDecoration more;
   final TextStyle moreLabel;
+
+  /// A day whose create is open, drawn as the timed grid draws a strip
+  /// cell it marks.
+  final BoxDecoration createMark;
 
   /// The scrim over the board while its days are not ready.
   final Color scrim;
@@ -736,8 +745,11 @@ class MonthBoard<T> extends StatefulWidget {
   /// This day was long-pressed outside its chips, its cell lying at the
   /// rect, in global logical pixels, the function is given: it returns the
   /// future of the create it reports, or null where it reports none, as
-  /// where the create is refused. Null where a long press creates nothing,
-  /// as out of edit mode, and opens the day as a tap does.
+  /// where the create is refused. The board marks the day while that
+  /// future runs, until it completes or fails, unless a later long press's
+  /// create has moved the mark to its own day; a failure is left uncaught
+  /// in the zone the long press ran in. Null where a long press creates
+  /// nothing, as out of edit mode, and opens the day as a tap does.
   final Future<void>? Function(DateTime day, Rect globalRect)? onCreateOnDay;
 
   /// The chip of this item, which is not pending, was tapped.
@@ -905,6 +917,14 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   late final ValueNotifier<bool> _creates = ValueNotifier<bool>(
     widget.onCreateOnDay != null,
   );
+
+  /// The day whose long press reported the latest create, while that
+  /// create's future runs, which the kept day cells listen to and mark.
+  final ValueNotifier<DateTime?> _createMark = ValueNotifier<DateTime?>(null);
+
+  /// Counts the creates the long presses reported, so only the latest
+  /// one's completion clears [_createMark].
+  int _createCount = 0;
 
   /// [MonthBoard.hours] and [MonthBoard.hourLabelFormat], which the kept
   /// day cells listen to for their banners' labels.
@@ -1144,6 +1164,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     _board.dispose();
     _today.dispose();
     _creates.dispose();
+    _createMark.dispose();
     _bannerHours.dispose();
     for (final hidden in _hidden) {
       hidden.dispose();
@@ -1262,7 +1283,18 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       return;
     }
     _focusNode.requestFocus();
-    create(day, globalRect);
+    final future = create(day, globalRect);
+    if (future == null) {
+      return;
+    }
+    final count = ++_createCount;
+    _createMark.value = day;
+    future.whenComplete(() {
+      // After dispose the notifier takes no write.
+      if (mounted && count == _createCount) {
+        _createMark.value = null;
+      }
+    });
   }
 
   void _openEntry(String id) {
@@ -1778,6 +1810,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       hidden: _hidden[index],
       bannerHours: _bannerHours,
       creates: _creates,
+      createMark: _createMark,
       onOpen: _openDay,
       onCreate: _createOnDay,
     );
@@ -1996,6 +2029,7 @@ class _MonthDayCell extends StatelessWidget {
     required this.hidden,
     required this.bannerHours,
     required this.creates,
+    required this.createMark,
     required this.onOpen,
     required this.onCreate,
   });
@@ -2011,6 +2045,10 @@ class _MonthDayCell extends StatelessWidget {
   final ValueListenable<_Hidden> hidden;
   final ValueListenable<_BannerHours> bannerHours;
   final ValueListenable<bool> creates;
+
+  /// The day whose create is open, which the cell marks while it is [day].
+  final ValueListenable<DateTime?> createMark;
+
   final ValueChanged<DateTime> onOpen;
 
   /// Takes a long press's create on [day], with the cell's rect in global
@@ -2079,6 +2117,23 @@ class _MonthDayCell extends StatelessWidget {
             // out at its extent takes the whole cell.
             child: Stack(
               children: <Widget>[
+                // Positioned, the mark leaves the stack's size to the
+                // children below, and only its own answer builds it again.
+                Positioned.fill(
+                  child: AnswerBuilder<bool>(
+                    listenables: <Listenable>[createMark],
+                    answer: () {
+                      return createMark.value == day;
+                    },
+                    builder: (context, marked, child) {
+                      return DecoratedBox(
+                        decoration: marked
+                            ? styles.createMark
+                            : const BoxDecoration(),
+                      );
+                    },
+                  ),
+                ),
                 SizedBox(height: hides.extent),
                 SizedBox(
                   key: monthStripKey(day),

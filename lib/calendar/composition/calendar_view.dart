@@ -98,8 +98,9 @@ final class CalendarEntryTapDetails<T> {
 ///   the store's hours shows only in a count on a notice banner. A line
 ///   marks the current time over the rows of the clock's day. In edit mode
 ///   the list marks each gap in the hours with a dashed row whose button
-///   reports a create through [onCreateRange], and each card's builder
-///   receives the [CalendarCardDetails.onEdit] and
+///   reports a create through [onCreateRange], marking the row until the
+///   create's future completes or a later create moves the mark, and each
+///   card's builder receives the [CalendarCardDetails.onEdit] and
 ///   [CalendarCardDetails.onDelete]
 ///   [editPolicy] allows ([CalendarEditPolicy.mayEdit],
 ///   [CalendarEditPolicy.mayDelete]), which report through [onEditRequest] and
@@ -129,11 +130,12 @@ final class CalendarEntryTapDetails<T> {
 ///   [CalendarEditPolicy.allowsOverlaps] is true, and otherwise each one
 ///   [CalendarEditPolicy.mayOverlap] does not let the create share. Where
 ///   none is free it reports one at the day's first slot from that start,
-///   over an entry, which may be one the policy refuses. It selects the
-///   day when it is in the month; or, where that start leaves no slot of
-///   the store's hours that day whose start and end the day's clock both
-///   read, as where the clock skips the start or the end of each, it
-///   reports [onCreateRefused].
+///   over an entry, which may be one the policy refuses, and marks the day
+///   until the create's future completes or a later create moves the
+///   mark. It selects the day when it is in the month; or, where that
+///   start leaves no slot of the store's hours that day whose start and
+///   end the day's clock both read, as where the clock skips the start or
+///   the end of each, it reports [onCreateRefused] and marks nothing.
 ///
 /// An entry runs from its start to its end ([CalendarEntry]): Week and Day
 /// draw a timed entry as one block per shown day it covers, at its exact
@@ -393,16 +395,17 @@ class CalendarView<T> extends StatefulWidget {
 
   /// A create the calendar's gestures picked, in edit mode, as a
   /// [CalendarCreateDetails]: its range, the range a gesture picked in Week
-  /// or Day, which stays marked until the future completes, a gap's first
-  /// free slot in Agenda, the add button's, and a day's first free slot in
-  /// Month, a long press's; where its mark is on screen when it is
-  /// reported, in global logical pixels
+  /// or Day, a gap's first free slot in Agenda, the add button's, and a
+  /// day's first free slot in Month, a long press's; where its mark is on
+  /// screen when it is reported, in global logical pixels
   /// ([CalendarCreateDetails.globalRect]); and whether the user chose its
   /// length ([CalendarCreateDetails.userChoseLength]), which only a drag in
-  /// Week or Day does. Null reports nothing, and the marked range clears at
-  /// once. A failure of the function, whether it throws within the call or
-  /// its future fails, is not caught: a host that handles one passes a
-  /// function that does.
+  /// Week or Day does. The view marks the create, Week and Day its range,
+  /// Agenda the gap's row and Month the day, until the future completes or
+  /// fails, unless a later create in that view has moved the mark. Null
+  /// reports nothing, and the mark clears at once. A failure of the
+  /// function, whether it throws within the call or its future fails, is
+  /// not caught: a host that handles one passes a function that does.
   final Future<void> Function(CalendarCreateDetails details)? onCreateRange;
 
   /// A move or a resize the gestures landed in Week or Day, in edit mode,
@@ -1328,12 +1331,16 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     );
   }
 
+  /// [CalendarView.onCreateRange]'s future for [details], a throw within
+  /// the call failing it, so a view that marks the create clears the mark.
   Future<void> _createRange(CalendarCreateDetails details) {
     final onCreateRange = widget.onCreateRange;
     if (onCreateRange == null) {
       return Future<void>.value();
     }
-    return onCreateRange(details);
+    return Future<void>.sync(() {
+      return onCreateRange(details);
+    });
   }
 
   void _requestEdit(String id) {

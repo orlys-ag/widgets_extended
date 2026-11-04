@@ -97,6 +97,12 @@ where it began, a drag the entries around it held there, Agenda's add button
 and Month's long press. The rect does not follow a later scroll; where Week's
 or Day's board is not laid out at the release, as after a build of the grid
 threw during the drag, it is the empty rect at the pointer.
+- Agenda marks the gap row whose add button reported a create, and Month the
+long-pressed day, until the future `onCreateRange` returns completes or
+fails, as Week and Day mark the range they report: a later create in the view
+moves the mark, an earlier create's completion leaves it, and a long press
+Month refuses marks nothing. The mark is the theme's `primaryTint` edged in
+its `primary`, as Week's and Day's marked strip cells are.
 - On a day whose clock skips its midnight hour, as Cuba's does in March,
 Week and Day draw an entry from the day's start, 01:00, from the 01:00 row,
 and a create, move or resize that lands in the skipped rows requests

@@ -445,8 +445,9 @@ resize, and a create gesture reports a `CalendarCreateDetails` through
 `onCreateRange`: the range it picked, where its mark is on screen when it
 is reported (`globalRect`, in global logical pixels), and whether the user
 chose the range's length (`userChoseLength`), as a drag in Week or Day
-does. A
-move or a resize goes to `onMoveRequest`, or, where that is null, straight
+does. Each view marks a create until that function's future completes:
+Week and Day the range, Agenda the gap's row and Month the day. A move or
+a resize goes to `onMoveRequest`, or, where that is null, straight
 to the store's `requestMove`. A tap on an entry in Week, Day or Month
 reports through `onEntryTap`, and a card builder of yours that calls
 `CalendarCardDetails.onEdit` or `onDelete` reports through

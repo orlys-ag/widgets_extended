@@ -32,6 +32,7 @@ import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
+import 'package:widgets_extended/calendar/views/answer_builder.dart';
 import 'package:widgets_extended/calendar/views/create_details.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
@@ -390,6 +391,26 @@ class ArmedTimesDelegate extends LocalizationsDelegate<CalendarLocalizations> {
   bool shouldReload(ArmedTimesDelegate old) {
     return !identical(old.strings, strings);
   }
+}
+
+/// The decoration of Agenda's and Month's create mark under the theme above
+/// [view]: the theme's primary tint, edged in its primary colour.
+BoxDecoration createMarkIn(WidgetTester tester, Finder view) {
+  final theme = CalendarTheme.of(tester.element(view));
+  return BoxDecoration(
+    color: theme.primaryTint,
+    border: Border.all(color: theme.primary, width: 2.0),
+  );
+}
+
+/// The create marks, boxes drawing [mark], under [of].
+Finder createMarksUnder(Finder of, BoxDecoration mark) {
+  return find.descendant(
+    of: of,
+    matching: find.byWidgetPredicate((widget) {
+      return widget is DecoratedBox && widget.decoration == mark;
+    }),
+  );
 }
 
 /// The nearest Material above [element].
@@ -2565,10 +2586,7 @@ void main() {
     await tester.tapAt(cellCenter(tester, weekRowOf(14 * 60), wednesdayCol));
     await tester.pumpAndSettle();
     expectCreate(
-      CalendarCreateRange(
-        start: at(wednesday, 14),
-        end: at(wednesday, 14, 15),
-      ),
+      CalendarCreateRange(start: at(wednesday, 14), end: at(wednesday, 14, 15)),
       chose: false,
     );
     await holdInPlace(
@@ -2576,10 +2594,7 @@ void main() {
       cellCenter(tester, weekRowOf(15 * 60), wednesdayCol),
     );
     expectCreate(
-      CalendarCreateRange(
-        start: at(wednesday, 15),
-        end: at(wednesday, 15, 15),
-      ),
+      CalendarCreateRange(start: at(wednesday, 15), end: at(wednesday, 15, 15)),
       chose: false,
     );
     await clickCell(
@@ -2588,10 +2603,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expectCreate(
-      CalendarCreateRange(
-        start: at(wednesday, 16),
-        end: at(wednesday, 16, 15),
-      ),
+      CalendarCreateRange(start: at(wednesday, 16), end: at(wednesday, 16, 15)),
       chose: false,
     );
     await tester.tapAt(cellCenter(tester, 1, wednesdayCol));
@@ -2650,10 +2662,7 @@ void main() {
       cellCenter(tester, weekRowOf(12 * 60), tuesdayCol),
     );
     expectCreate(
-      CalendarCreateRange(
-        start: at(tuesday, 9, 45),
-        end: at(tuesday, 12, 15),
-      ),
+      CalendarCreateRange(start: at(tuesday, 9, 45), end: at(tuesday, 12, 15)),
       chose: true,
     );
     // "busy" from 10:00 holds the range at the slot it began on.
@@ -3152,5 +3161,521 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+  });
+
+  group("CV59 Agenda marks the gap whose add button reported a create until "
+      "the create's future completes, fails or throws, and a later create "
+      "moves the mark", () {
+    /// Wednesday's standup, from 10:00 to 11:00, leaves gaps at 00:00 and
+    /// 11:00.
+    MemoryCalendarStore<String> storeOfWednesday() {
+      final memory = MemoryCalendarStore<String>(
+        entries: <CalendarEntry<String>>[
+          entryOf("standup", wednesday, 10 * 60, 11 * 60),
+        ],
+      );
+      addTearDown(memory.dispose);
+      return memory;
+    }
+
+    CalendarController agendaOfWednesday() {
+      final controller = CalendarController(
+        view: CalendarViewKind.agenda,
+        selectedDay: wednesday,
+      );
+      addTearDown(controller.dispose);
+      return controller;
+    }
+
+    final gapA = find.byKey(dayListGapKey(wednesday, 0));
+    final gapB = find.byKey(dayListGapKey(wednesday, 11 * 60));
+    Finder addOf(Finder gap) {
+      return find.descendant(
+        of: gap,
+        matching: find.byIcon(CalendarThemeData().addEntryIcon),
+      );
+    }
+
+    testWidgets("1 to 3: the mark stays until its future completes, a "
+        "later create's mark stays at an earlier one's completion, and a "
+        "failed future or a throw within the call clears it", (tester) async {
+      useTallView(tester);
+      final memory = storeOfWednesday();
+      final controller = agendaOfWednesday();
+      late Future<void> Function() answer;
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            store: memory,
+            controller: controller,
+            clock: fixedClock,
+            editable: true,
+            onCreateRange: (details) {
+              return answer();
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final mark = createMarkIn(tester, find.byType(DayList<String>));
+
+      // 1. A's mark lasts until a completes.
+      final a = Completer<void>();
+      answer = () {
+        return a.future;
+      };
+      await tester.tap(addOf(gapA));
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(gapA, mark), findsOneWidget);
+      expect(createMarksUnder(gapB, mark), findsNothing);
+      a.complete();
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(gapA, mark), findsNothing);
+
+      // 2. B's create moves the mark, and a's completion leaves it.
+      final a2 = Completer<void>();
+      answer = () {
+        return a2.future;
+      };
+      await tester.tap(addOf(gapA));
+      await tester.pumpAndSettle();
+      final b = Completer<void>();
+      answer = () {
+        return b.future;
+      };
+      await tester.tap(addOf(gapB));
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(gapA, mark), findsNothing);
+      expect(createMarksUnder(gapB, mark), findsOneWidget);
+      a2.complete();
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(gapB, mark), findsOneWidget);
+      b.complete();
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(gapB, mark), findsNothing);
+
+      // 3. A failed future, then a throw within the call, each left
+      // uncaught in the zone the press ran in.
+      final failure = StateError("the create flow failed");
+      final uncaught = <Object>[];
+      // Made in the press's zone, where the view listens to it: a
+      // future's error reaches no listener in another error zone
+      // ([Zone.inSameErrorZone]).
+      late Completer<void> c;
+      answer = () {
+        c = Completer<void>();
+        return c.future;
+      };
+      await runZonedGuarded(
+        () async {
+          await tester.tap(addOf(gapA));
+        },
+        (error, stackTrace) {
+          uncaught.add(error);
+        },
+      );
+      await tester.pumpAndSettle();
+      // Setup sanity: the create marks its gap.
+      expect(createMarksUnder(gapA, mark), findsOneWidget);
+      c.completeError(failure);
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(gapA, mark), findsNothing);
+      expect(uncaught, <Matcher>[same(failure)]);
+      answer = () {
+        throw failure;
+      };
+      await runZonedGuarded(
+        () async {
+          await tester.tap(addOf(gapB));
+        },
+        (error, stackTrace) {
+          uncaught.add(error);
+        },
+      );
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(gapB, mark), findsNothing);
+      expect(uncaught, <Matcher>[same(failure), same(failure)]);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets("4: a mark and its clear build no card and no add button "
+        "again, and only the marked gap's answer, once at each", (
+      tester,
+    ) async {
+      useTallView(tester);
+      final memory = storeOfWednesday();
+      final controller = agendaOfWednesday();
+      var cards = 0;
+      var addButtons = 0;
+      final a = Completer<void>();
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            store: memory,
+            controller: controller,
+            clock: fixedClock,
+            editable: true,
+            cardBuilder: (context, entry, details) {
+              cards++;
+              return Text(entry.entry.title);
+            },
+            cardExtentOf: (entry) {
+              return 56.0;
+            },
+            addButtonBuilder: (context, details) {
+              addButtons++;
+              return GestureDetector(
+                onTap: details.onPressed,
+                child: Text("add ${details.startMinute}"),
+              );
+            },
+            onCreateRange: (details) {
+              return a.future;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final mark = createMarkIn(tester, find.byType(DayList<String>));
+      // Setup sanity: the builders record their builds.
+      expect(cards, greaterThan(0));
+      expect(addButtons, greaterThan(0));
+      cards = 0;
+      addButtons = 0;
+      final answerOfA = tester.element(
+        find.descendant(of: gapA, matching: find.byType(AnswerBuilder<bool>)),
+      );
+      final built = <Element>[];
+      debugOnRebuildDirtyWidget = (element, builtOnce) {
+        if (element.widget is AnswerBuilder<bool>) {
+          built.add(element);
+        }
+      };
+      try {
+        await tester.tap(
+          find.descendant(of: gapA, matching: find.text("add 0")),
+        );
+        await tester.pumpAndSettle();
+        // Setup sanity: the create marks its gap.
+        expect(createMarksUnder(gapA, mark), findsOneWidget);
+        expect(built, <Element>[answerOfA]);
+        a.complete();
+        await tester.pumpAndSettle();
+      } finally {
+        debugOnRebuildDirtyWidget = null;
+      }
+      expect(createMarksUnder(gapA, mark), findsNothing);
+      expect(built, <Element>[answerOfA, answerOfA]);
+      expect(cards, 0);
+      expect(addButtons, 0);
+    });
+
+    testWidgets("5: a create whose future completes after Agenda left the "
+        "tree writes nothing", (tester) async {
+      useTallView(tester);
+      final memory = storeOfWednesday();
+      final controller = agendaOfWednesday();
+      final a = Completer<void>();
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            store: memory,
+            controller: controller,
+            clock: fixedClock,
+            editable: true,
+            onCreateRange: (details) {
+              return a.future;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final mark = createMarkIn(tester, find.byType(DayList<String>));
+      final uncaught = <Object>[];
+      await runZonedGuarded(
+        () async {
+          await tester.tap(addOf(gapA));
+        },
+        (error, stackTrace) {
+          uncaught.add(error);
+        },
+      );
+      await tester.pumpAndSettle();
+      // Setup sanity: the create marks its gap, and then the list is gone.
+      expect(createMarksUnder(gapA, mark), findsOneWidget);
+      await tester.pumpWidget(app(const SizedBox()));
+      expect(find.byType(DayList<String>), findsNothing);
+      a.complete();
+      await tester.pumpAndSettle();
+      expect(uncaught, isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group("CV60 Month marks the day whose long press reported a create until "
+      "the create's future completes, fails or throws, and a later create "
+      "moves the mark", () {
+    final friday = DateTime(2026, 4, 24);
+    final dayA = find.byKey(monthDayKey(thursday));
+    final dayB = find.byKey(monthDayKey(friday));
+
+    CalendarController monthOfThursday() {
+      final controller = CalendarController(
+        view: CalendarViewKind.month,
+        selectedDay: thursday,
+      );
+      addTearDown(controller.dispose);
+      return controller;
+    }
+
+    Future<void> longPressOn(WidgetTester tester, DateTime day) {
+      return tester.longPress(find.byKey(monthStripKey(day)));
+    }
+
+    testWidgets("1 to 3: the mark stays until its future completes, a "
+        "later create's mark stays at an earlier one's completion, and a "
+        "failed future or a throw within the call clears it", (tester) async {
+      final memory = MemoryCalendarStore<String>();
+      addTearDown(memory.dispose);
+      final controller = monthOfThursday();
+      late Future<void> Function() answer;
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            store: memory,
+            controller: controller,
+            clock: fixedClock,
+            editable: true,
+            onCreateRange: (details) {
+              return answer();
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final mark = createMarkIn(tester, find.byType(MonthBoard<String>));
+
+      // 1. A's mark lasts until a completes.
+      final a = Completer<void>();
+      answer = () {
+        return a.future;
+      };
+      await longPressOn(tester, thursday);
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(dayA, mark), findsOneWidget);
+      expect(createMarksUnder(dayB, mark), findsNothing);
+      a.complete();
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(dayA, mark), findsNothing);
+
+      // 2. B's create moves the mark, and a's completion leaves it.
+      final a2 = Completer<void>();
+      answer = () {
+        return a2.future;
+      };
+      await longPressOn(tester, thursday);
+      await tester.pumpAndSettle();
+      final b = Completer<void>();
+      answer = () {
+        return b.future;
+      };
+      await longPressOn(tester, friday);
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(dayA, mark), findsNothing);
+      expect(createMarksUnder(dayB, mark), findsOneWidget);
+      a2.complete();
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(dayB, mark), findsOneWidget);
+      b.complete();
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(dayB, mark), findsNothing);
+
+      // 3. A failed future, then a throw within the call, each left
+      // uncaught in the zone the press ran in.
+      final failure = StateError("the create flow failed");
+      final uncaught = <Object>[];
+      // Made in the press's zone, where the view listens to it: a
+      // future's error reaches no listener in another error zone
+      // ([Zone.inSameErrorZone]).
+      late Completer<void> c;
+      answer = () {
+        c = Completer<void>();
+        return c.future;
+      };
+      await runZonedGuarded(
+        () async {
+          await longPressOn(tester, thursday);
+        },
+        (error, stackTrace) {
+          uncaught.add(error);
+        },
+      );
+      await tester.pumpAndSettle();
+      // Setup sanity: the create marks its day.
+      expect(createMarksUnder(dayA, mark), findsOneWidget);
+      c.completeError(failure);
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(dayA, mark), findsNothing);
+      expect(uncaught, <Matcher>[same(failure)]);
+      answer = () {
+        throw failure;
+      };
+      await runZonedGuarded(
+        () async {
+          await longPressOn(tester, friday);
+        },
+        (error, stackTrace) {
+          uncaught.add(error);
+        },
+      );
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(dayB, mark), findsNothing);
+      expect(uncaught, <Matcher>[same(failure), same(failure)]);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets("4: a refused long press while a create runs leaves that "
+        "create's completion to clear its mark", (tester) async {
+      final memory = MemoryCalendarStore<String>();
+      addTearDown(memory.dispose);
+      final controller = monthOfThursday();
+      final refused = <DateTime>[];
+      final a = Completer<void>();
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            store: memory,
+            controller: controller,
+            clock: fixedClock,
+            editable: true,
+            editPolicy: const HistoryLockPolicy<String>(lockEarlierToday: true),
+            onCreateRange: (details) {
+              return a.future;
+            },
+            onCreateRefused: refused.add,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final mark = createMarkIn(tester, find.byType(MonthBoard<String>));
+      await longPressOn(tester, thursday);
+      await tester.pumpAndSettle();
+      // Setup sanity: the create marks its day, and the lock refuses
+      // Monday, which it holds whole.
+      expect(createMarksUnder(dayA, mark), findsOneWidget);
+      await longPressOn(tester, monday);
+      await tester.pumpAndSettle();
+      expect(refused, <DateTime>[monday]);
+      expect(createMarksUnder(dayA, mark), findsOneWidget);
+      a.complete();
+      await tester.pumpAndSettle();
+      expect(createMarksUnder(dayA, mark), findsNothing);
+    });
+
+    testWidgets("5: a mark and its clear build no chip again, and only the "
+        "marked day's answer, once at each", (tester) async {
+      final memory = MemoryCalendarStore<String>(
+        entries: <CalendarEntry<String>>[
+          entryOf("standup", wednesday, 10 * 60, 11 * 60),
+          entryOf("review", thursday, 14 * 60, 15 * 60),
+        ],
+      );
+      addTearDown(memory.dispose);
+      final controller = monthOfThursday();
+      var chips = 0;
+      var answer = Completer<void>()..complete();
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            store: memory,
+            controller: controller,
+            clock: fixedClock,
+            editable: true,
+            chipBuilder: (context, entry, details) {
+              chips++;
+              return Text(entry.entry.title);
+            },
+            onCreateRange: (details) {
+              return answer.future;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final mark = createMarkIn(tester, find.byType(MonthBoard<String>));
+      // A first create, done at once, gives the board the keyboard, so the
+      // one recorded below changes nothing else.
+      await longPressOn(tester, thursday);
+      await tester.pumpAndSettle();
+      // Setup sanity: the chip builder records its builds.
+      expect(chips, greaterThan(0));
+      chips = 0;
+      final answerOfA = tester.element(
+        find.descendant(of: dayA, matching: find.byType(AnswerBuilder<bool>)),
+      );
+      final a = Completer<void>();
+      answer = a;
+      final built = <Element>[];
+      debugOnRebuildDirtyWidget = (element, builtOnce) {
+        if (element.widget is AnswerBuilder<bool>) {
+          built.add(element);
+        }
+      };
+      try {
+        await longPressOn(tester, thursday);
+        await tester.pumpAndSettle();
+        // Setup sanity: the create marks its day.
+        expect(createMarksUnder(dayA, mark), findsOneWidget);
+        expect(built, <Element>[answerOfA]);
+        a.complete();
+        await tester.pumpAndSettle();
+      } finally {
+        debugOnRebuildDirtyWidget = null;
+      }
+      expect(createMarksUnder(dayA, mark), findsNothing);
+      expect(built, <Element>[answerOfA, answerOfA]);
+      expect(chips, 0);
+    });
+
+    testWidgets("6: a create whose future completes after Month left the "
+        "tree writes nothing", (tester) async {
+      final memory = MemoryCalendarStore<String>();
+      addTearDown(memory.dispose);
+      final controller = monthOfThursday();
+      final a = Completer<void>();
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            store: memory,
+            controller: controller,
+            clock: fixedClock,
+            editable: true,
+            onCreateRange: (details) {
+              return a.future;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final mark = createMarkIn(tester, find.byType(MonthBoard<String>));
+      final uncaught = <Object>[];
+      await runZonedGuarded(
+        () async {
+          await longPressOn(tester, thursday);
+        },
+        (error, stackTrace) {
+          uncaught.add(error);
+        },
+      );
+      await tester.pumpAndSettle();
+      // Setup sanity: the create marks its day, and then the board is gone.
+      expect(createMarksUnder(dayA, mark), findsOneWidget);
+      await tester.pumpWidget(app(const SizedBox()));
+      expect(find.byType(MonthBoard<String>), findsNothing);
+      a.complete();
+      await tester.pumpAndSettle();
+      expect(uncaught, isEmpty);
+      expect(tester.takeException(), isNull);
+    });
   });
 }

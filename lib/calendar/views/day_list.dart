@@ -84,6 +84,10 @@ class _ListStyles {
         borderRadius: BorderRadius.circular(8.0),
       ),
       nowLabel = theme.badgeStyle.copyWith(color: theme.onPrimary),
+      createMark = BoxDecoration(
+        color: theme.primaryTint,
+        border: Border.all(color: theme.primary, width: 2.0),
+      ),
       nowLine = Expanded(
         child: SizedBox(
           height: 2.0 * _NowLinePainter.dotRadius,
@@ -162,6 +166,10 @@ class _ListStyles {
   final BoxDecoration nowPill;
   final TextStyle nowLabel;
   final Widget nowLine;
+
+  /// A gap row whose create is open, drawn as the timed grid draws a
+  /// strip cell it marks.
+  final BoxDecoration createMark;
 }
 
 /// The room between the list's sides and its rows' content.
@@ -671,7 +679,10 @@ class DayList<T> extends StatefulWidget {
   /// an entry can hold time in a gap it is not listed beside. The details
   /// give that slot as their range, the gap's row, in global logical pixels
   /// when the button was pressed, as their rect, and false for whether the
-  /// user chose the length.
+  /// user chose the length. The list marks that row until the function's
+  /// future completes, whether it fails or the function throws within the
+  /// call, while no later add has moved the mark to its own row; a failure
+  /// is left uncaught in the zone the press ran in.
   final Future<void> Function(CalendarCreateDetails details) onCreateRange;
 
   final void Function(String id) onEdit;
@@ -797,6 +808,16 @@ class _DayListState<T> extends State<DayList<T>> {
   /// Counts the reveals started, so a top day check scheduled before one
   /// reports nothing.
   int _reveals = 0;
+
+  /// The [CalendarDates.dayNumber] and the start of the gap row whose add
+  /// button reported the latest create, while that create's future runs;
+  /// each gap row listens and draws the mark while it names the row.
+  final ValueNotifier<({int day, int start})?> _createMark =
+      ValueNotifier<({int day, int start})?>(null);
+
+  /// Counts the creates the add buttons reported, so only the latest one's
+  /// completion clears [_createMark].
+  int _createCount = 0;
 
   /// Whether the list waits to land on the day it opened or re-centred on.
   /// It lays out first at an offset that takes each row before that day
@@ -933,6 +954,7 @@ class _DayListState<T> extends State<DayList<T>> {
     widget.now.removeListener(_handleNow);
     _calendarNow.dispose();
     _scroll.dispose();
+    _createMark.dispose();
     super.dispose();
   }
 
@@ -1556,8 +1578,10 @@ class _DayListState<T> extends State<DayList<T>> {
         ? start
         : CalendarDates.wallMinuteOf(add.start) -
               CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay;
+    final mark = (day: CalendarDates.dayNumber(day), start: start);
     return _buildDashed(
       key: dayListGapKey(day, start),
+      mark: mark,
       label: _strings.formatTime(start, widget.format),
       day: day,
       addMinute: addMinute,
@@ -1567,13 +1591,22 @@ class _DayListState<T> extends State<DayList<T>> {
       onAdd: add == null
           ? null
           : (globalRect) {
-              widget.onCreateRange(
-                CalendarCreateDetails(
-                  range: CalendarCreateRange(start: add.start, end: add.end),
-                  globalRect: globalRect,
-                  userChoseLength: false,
-                ),
-              );
+              final create = ++_createCount;
+              _createMark.value = mark;
+              Future<void>.sync(() {
+                return widget.onCreateRange(
+                  CalendarCreateDetails(
+                    range: CalendarCreateRange(start: add.start, end: add.end),
+                    globalRect: globalRect,
+                    userChoseLength: false,
+                  ),
+                );
+              }).whenComplete(() {
+                // After dispose the notifier takes no write.
+                if (mounted && create == _createCount) {
+                  _createMark.value = null;
+                }
+              });
             },
     );
   }
@@ -1903,9 +1936,12 @@ class _DayListState<T> extends State<DayList<T>> {
   /// screen reader hears as [addLabel], holding what the add button builder
   /// draws for a press that adds an item at [addMinute] on [day] through
   /// [onAdd], given the row's rect in global logical pixels at the press,
-  /// or the square's room where [onAdd] is null.
+  /// or the square's room where [onAdd] is null. The row draws the create
+  /// mark while [_createMark] holds [mark], and only that answer builds it
+  /// again.
   Widget _buildDashed({
     required Key key,
+    required ({int day, int start}) mark,
     required String label,
     required DateTime day,
     required int addMinute,
@@ -1917,53 +1953,67 @@ class _DayListState<T> extends State<DayList<T>> {
         return SizedBox(
           key: key,
           height: _lineRowExtent,
-          child: Row(
-            children: <Widget>[
-              Container(
-                width: dayListTimeWidth,
-                padding: const EdgeInsets.only(right: dayListTimeGap),
-                alignment: Alignment.centerRight,
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: _styles.gapTime,
-                ),
-              ),
-              _styles.dashedLine,
-              const SizedBox(width: 8.0),
-              if (onAdd == null)
-                const SizedBox(width: dayListAddButtonSize)
-              else
-                Semantics(
-                  container: true,
-                  label: addLabel,
-                  child: SizedBox.square(
-                    dimension: dayListAddButtonSize,
-                    child: Builder(
-                      builder: (context) {
-                        final add =
-                            widget.addButtonBuilder ??
-                            defaultCalendarAddButtonBuilder;
-                        return add(
-                          context,
-                          CalendarAddButtonDetails(
-                            day: day,
-                            startMinute: addMinute,
-                            onPressed: () {
-                              // The builder's render object is the keyed
-                              // row's box, its first descendant's.
-                              final box =
-                                  rowContext.findRenderObject()! as RenderBox;
-                              onAdd(globalRectOf(box, Offset.zero & box.size));
-                            },
-                          ),
-                        );
-                      },
-                    ),
+          child: AnswerBuilder<bool>(
+            listenables: <Listenable>[_createMark],
+            answer: () {
+              return _createMark.value == mark;
+            },
+            builder: (context, marked, row) {
+              return DecoratedBox(
+                decoration: marked ? _styles.createMark : const BoxDecoration(),
+                child: row,
+              );
+            },
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: dayListTimeWidth,
+                  padding: const EdgeInsets.only(right: dayListTimeGap),
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _styles.gapTime,
                   ),
                 ),
-            ],
+                _styles.dashedLine,
+                const SizedBox(width: 8.0),
+                if (onAdd == null)
+                  const SizedBox(width: dayListAddButtonSize)
+                else
+                  Semantics(
+                    container: true,
+                    label: addLabel,
+                    child: SizedBox.square(
+                      dimension: dayListAddButtonSize,
+                      child: Builder(
+                        builder: (context) {
+                          final add =
+                              widget.addButtonBuilder ??
+                              defaultCalendarAddButtonBuilder;
+                          return add(
+                            context,
+                            CalendarAddButtonDetails(
+                              day: day,
+                              startMinute: addMinute,
+                              onPressed: () {
+                                // The builder's render object is the keyed
+                                // row's box, its first descendant's.
+                                final box =
+                                    rowContext.findRenderObject()! as RenderBox;
+                                onAdd(
+                                  globalRectOf(box, Offset.zero & box.size),
+                                );
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         );
       },
