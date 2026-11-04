@@ -15,8 +15,9 @@ writes through the host's `CalendarDataSource`, applies a stream of
 `CalendarSourceChange`s, and reads changed days again on `invalidate` and
 `refresh`. In edit mode (`editable`) Week's and Day's blocks move and
 resize and the views' gestures pick ranges to create, reported through
-`onCreateRange` and `onMoveRequest` (or, where that is null, written
-through the store's `requestMove`), as an `editPolicy` allows
+`onCreateRange` (as a `CalendarCreateDetails`) and `onMoveRequest` (or,
+where that is null, written through the store's `requestMove`), as an
+`editPolicy` allows
 (`HistoryLockPolicy`, `NoOverlapsPolicy`, `DayLimitPolicy`, combined by
 `CalendarEditPolicy.all`); a host's card builder requests edits and
 deletes through `onEditRequest` and `onDeleteRequest`. A
@@ -84,6 +85,18 @@ and Month's long press does too where such a slot is left. A throw of
 `mayOverlap` is reported as the policy's other answers' are, and one while
 a create range reads its entries again, at a store notify or a new minute,
 ends the range.
+- `CalendarView.onCreateRange` takes a `CalendarCreateDetails`: the `range` a
+create gesture picked; the `globalRect`, in global logical pixels, that the
+create's mark covers on screen when it is reported, which in Week and Day is
+the rect of the slots or the strip cell it marks in the column where the
+gesture ended, in Agenda the gap row whose add button was pressed and in
+Month the long-pressed day; and `userChoseLength`, true where a drag in Week
+or Day let go of a range from one slot or strip cell to another, and false
+where the calendar chose the one slot or day: a tap, a hold or a drag let go
+where it began, a drag the entries around it held there, Agenda's add button
+and Month's long press. The rect does not follow a later scroll; where Week's
+or Day's board is not laid out at the release, as after a build of the grid
+threw during the drag, it is the empty rect at the pointer.
 - On a day whose clock skips its midnight hour, as Cuba's does in March,
 Week and Day draw an entry from the day's start, 01:00, from the 01:00 row,
 and a create, move or resize that lands in the skipped rows requests
@@ -571,6 +584,12 @@ reported through `FlutterError.reportError`, and that sort orders by id.
 cell and the topmost item painting under a global point, so an app's own
 gestures over the board need not find its render object. Both answer null with
 no board mounted on the controller and before its first layout.
+- Added `BoardController.globalRectOfCell`, which gives the rect, in global
+logical pixels, at which a cell paints, a frozen cell in its band. It answers
+null with no board mounted on the controller, before its first layout and for
+an index outside its axis. It maps the corners of the port's `rectOfCell`
+through `BoardRenderPort.paintLocalToGlobal`, a new member of the port and the
+inverse of `globalToPaintLocal`, which every implementation of the port gains.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin with no clip, so it was drawn over whatever sat above the scroll
 view: a tree short enough to fit its viewport declares no visual overflow, so

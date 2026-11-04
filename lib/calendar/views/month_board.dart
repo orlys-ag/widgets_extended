@@ -15,6 +15,7 @@ import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
+import 'create_details.dart';
 import 'day_cell.dart';
 import 'entry_split.dart';
 import 'pinch_zoom.dart';
@@ -732,10 +733,12 @@ class MonthBoard<T> extends StatefulWidget {
   /// This day was tapped outside its chips.
   final ValueChanged<DateTime> onOpenDay;
 
-  /// This day was long-pressed outside its chips. Null where a long press
-  /// creates nothing, as out of edit mode, and opens the day as a tap
-  /// does.
-  final ValueChanged<DateTime>? onCreateOnDay;
+  /// This day was long-pressed outside its chips, its cell lying at the
+  /// rect, in global logical pixels, the function is given: it returns the
+  /// future of the create it reports, or null where it reports none, as
+  /// where the create is refused. Null where a long press creates nothing,
+  /// as out of edit mode, and opens the day as a tap does.
+  final Future<void>? Function(DateTime day, Rect globalRect)? onCreateOnDay;
 
   /// The chip of this item, which is not pending, was tapped.
   final ValueChanged<String> onOpenEntry;
@@ -1253,13 +1256,13 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     widget.onOpenDay(day);
   }
 
-  void _createOnDay(DateTime day) {
+  void _createOnDay(DateTime day, Rect globalRect) {
     final create = widget.onCreateOnDay;
     if (create == null || _pinch.pinched.value) {
       return;
     }
     _focusNode.requestFocus();
-    create(day);
+    create(day, globalRect);
   }
 
   void _openEntry(String id) {
@@ -2009,7 +2012,10 @@ class _MonthDayCell extends StatelessWidget {
   final ValueListenable<_BannerHours> bannerHours;
   final ValueListenable<bool> creates;
   final ValueChanged<DateTime> onOpen;
-  final ValueChanged<DateTime> onCreate;
+
+  /// Takes a long press's create on [day], with the cell's rect in global
+  /// logical pixels.
+  final void Function(DateTime day, Rect globalRect) onCreate;
 
   @override
   Widget build(BuildContext context) {
@@ -2021,7 +2027,10 @@ class _MonthDayCell extends StatelessWidget {
     }
 
     void createOn() {
-      onCreate(day);
+      // The cell's render object is its root box, which the board lays
+      // out over the cell.
+      final box = context.findRenderObject()! as RenderBox;
+      onCreate(day, globalRectOf(box, Offset.zero & box.size));
     }
 
     return ListenableBuilder(

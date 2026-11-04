@@ -1238,6 +1238,29 @@ class BoardController<TKey, TItem> {
     return port.itemAt(port.globalToPaintLocal(global));
   }
 
+  /// The rect, in GLOBAL logical pixels, at which the cell at [row] and
+  /// [col] paints: a frozen cell in its band, a scrolled one at its
+  /// scrolled offset, read through the geometry as it paints mid track
+  /// resize, so a scrolled cell out of view answers a rect past the
+  /// viewport. Null where either index is outside its axis, and with no
+  /// board mounted on this controller or before its first layout. A
+  /// geometric query, as [cellAt] is.
+  Rect? globalRectOfCell(int row, int col) {
+    _assertNotDisposed();
+    final port = _renderPort;
+    if (port == null || !port.isLaidOut) {
+      return null;
+    }
+    final local = port.rectOfCell(row, col);
+    if (local == null) {
+      return null;
+    }
+    return Rect.fromPoints(
+      port.paintLocalToGlobal(local.topLeft),
+      port.paintLocalToGlobal(local.bottomRight),
+    );
+  }
+
   /// Drops every mounted cell's cached measurement and schedules one
   /// layout that re-measures each, except a cell that shows nothing for a
   /// null builder answer, which still contributes nothing to its track.

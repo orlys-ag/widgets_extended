@@ -313,11 +313,11 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     }
   }
 
-  Future<void> _openCreateFlow(CalendarCreateRange range) {
+  Future<void> _openCreateFlow(CalendarCreateDetails details) {
     return showCreateFlow(
       context,
       store: _store,
-      range: range,
+      range: details.range,
       policy: _settings.editPolicy,
       now: _currentNow,
       slotMinutes: _settings.slotMinutes,

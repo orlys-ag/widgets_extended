@@ -1,5 +1,6 @@
 /// Tests of `BoardController.cellAt` and `BoardController.itemAt`, which
-/// answer for a global point.
+/// answer for a global point, and of `BoardController.globalRectOfCell`,
+/// which answers a cell's rect in global coordinates.
 library;
 
 import 'package:flutter/material.dart';
@@ -30,6 +31,11 @@ BoardController<String, _Item> _controller(WidgetTester tester) {
   return controller;
 }
 
+/// The key of the box the board builds for the cell at [row] and [col].
+Key _cellKey(int row, int col) {
+  return ValueKey<String>("cell-$row-$col");
+}
+
 /// The board in a 200x150 frame inset from the screen's origin, or the
 /// frame alone where [shown] is false.
 Widget _board(
@@ -54,7 +60,11 @@ Widget _board(
                       controller: vertical,
                     ),
                     cellBuilder: (context, cell) {
-                      return const SizedBox(width: 40.0, height: 50.0);
+                      return SizedBox(
+                        key: _cellKey(cell.row, cell.col),
+                        width: 40.0,
+                        height: 50.0,
+                      );
                     },
                     itemBuilder: (context, item) {
                       return const ColoredBox(color: Color(0xFF4CAF50));
@@ -138,5 +148,54 @@ void main() {
     await tester.pumpWidget(_board(controller, vertical, shown: false));
     expect(controller.cellAt(point), isNull);
     expect(controller.itemAt(point), isNull);
+  });
+
+  testWidgets("BQ1 globalRectOfCell gives the global rect a scrolled and a "
+      "frozen cell paint at", (tester) async {
+    final controller = _controller(tester);
+    final vertical = ScrollController();
+    addTearDown(vertical.dispose);
+    await tester.pumpWidget(_board(controller, vertical));
+    vertical.jumpTo(125.0);
+    await tester.pump();
+    // Setup sanity: the board's origin is not the screen's, so a rect left
+    // in the viewport's paint space lies elsewhere.
+    expect(tester.getTopLeft(find.byKey(_frameKey)), const Offset(100.0, 60.0));
+
+    // Row 4 paints from 75 px to 125 px down at a 125 px scroll, under
+    // the frozen row 0's band.
+    expect(
+      controller.globalRectOfCell(4, 1),
+      rectMoreOrLessEquals(
+        tester.getRect(find.byKey(_cellKey(4, 1))),
+        epsilon: 0.01,
+      ),
+    );
+    expect(
+      controller.globalRectOfCell(0, 2),
+      rectMoreOrLessEquals(
+        tester.getRect(find.byKey(_cellKey(0, 2))),
+        epsilon: 0.01,
+      ),
+    );
+  });
+
+  testWidgets("BQ2 globalRectOfCell answers null with no board mounted and "
+      "for an index past its axis", (tester) async {
+    final controller = _controller(tester);
+    final vertical = ScrollController();
+    addTearDown(vertical.dispose);
+
+    await tester.pumpWidget(_board(controller, vertical, shown: false));
+    expect(controller.globalRectOfCell(1, 1), isNull);
+
+    await tester.pumpWidget(_board(controller, vertical));
+    // Setup sanity: mounted, the board answers for the same cell.
+    expect(controller.globalRectOfCell(1, 1), isNotNull);
+    expect(controller.globalRectOfCell(20, 1), isNull);
+    expect(controller.globalRectOfCell(1, 4), isNull);
+
+    await tester.pumpWidget(_board(controller, vertical, shown: false));
+    expect(controller.globalRectOfCell(1, 1), isNull);
   });
 }

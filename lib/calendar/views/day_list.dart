@@ -22,6 +22,7 @@ import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import 'answer_builder.dart';
+import 'create_details.dart';
 
 /// The style the day list animates its rows with under [theme]: every
 /// family over its [CalendarThemeData.motionDuration] on its
@@ -667,8 +668,11 @@ class DayList<T> extends StatefulWidget {
   /// [CalendarEditPolicy.mayOverlap] refuses), in that earliest start's
   /// occurrence where the day's clock repeats its time, so it starts at
   /// the earliest start or after. On a day whose clock repeats a stretch,
-  /// an entry can hold time in a gap it is not listed beside.
-  final void Function(CalendarCreateRange range) onCreateRange;
+  /// an entry can hold time in a gap it is not listed beside. The details
+  /// give that slot as their range, the gap's row, in global logical pixels
+  /// when the button was pressed, as their rect, and false for whether the
+  /// user chose the length.
+  final Future<void> Function(CalendarCreateDetails details) onCreateRange;
 
   final void Function(String id) onEdit;
   final void Function(String id) onDelete;
@@ -1562,9 +1566,13 @@ class _DayListState<T> extends State<DayList<T>> {
       ),
       onAdd: add == null
           ? null
-          : () {
+          : (globalRect) {
               widget.onCreateRange(
-                CalendarCreateRange(start: add.start, end: add.end),
+                CalendarCreateDetails(
+                  range: CalendarCreateRange(start: add.start, end: add.end),
+                  globalRect: globalRect,
+                  userChoseLength: false,
+                ),
               );
             },
     );
@@ -1894,60 +1902,71 @@ class _DayListState<T> extends State<DayList<T>> {
   /// cards' width, and at its end a [dayListAddButtonSize] square, which a
   /// screen reader hears as [addLabel], holding what the add button builder
   /// draws for a press that adds an item at [addMinute] on [day] through
-  /// [onAdd], or the square's room where [onAdd] is null.
+  /// [onAdd], given the row's rect in global logical pixels at the press,
+  /// or the square's room where [onAdd] is null.
   Widget _buildDashed({
     required Key key,
     required String label,
     required DateTime day,
     required int addMinute,
     required String addLabel,
-    required VoidCallback? onAdd,
+    required ValueChanged<Rect>? onAdd,
   }) {
-    return SizedBox(
-      key: key,
-      height: _lineRowExtent,
-      child: Row(
-        children: <Widget>[
-          Container(
-            width: dayListTimeWidth,
-            padding: const EdgeInsets.only(right: dayListTimeGap),
-            alignment: Alignment.centerRight,
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: _styles.gapTime,
-            ),
-          ),
-          _styles.dashedLine,
-          const SizedBox(width: 8.0),
-          if (onAdd == null)
-            const SizedBox(width: dayListAddButtonSize)
-          else
-            Semantics(
-              container: true,
-              label: addLabel,
-              child: SizedBox.square(
-                dimension: dayListAddButtonSize,
-                child: Builder(
-                  builder: (context) {
-                    final add =
-                        widget.addButtonBuilder ??
-                        defaultCalendarAddButtonBuilder;
-                    return add(
-                      context,
-                      CalendarAddButtonDetails(
-                        day: day,
-                        startMinute: addMinute,
-                        onPressed: onAdd,
-                      ),
-                    );
-                  },
+    return Builder(
+      builder: (rowContext) {
+        return SizedBox(
+          key: key,
+          height: _lineRowExtent,
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: dayListTimeWidth,
+                padding: const EdgeInsets.only(right: dayListTimeGap),
+                alignment: Alignment.centerRight,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _styles.gapTime,
                 ),
               ),
-            ),
-        ],
-      ),
+              _styles.dashedLine,
+              const SizedBox(width: 8.0),
+              if (onAdd == null)
+                const SizedBox(width: dayListAddButtonSize)
+              else
+                Semantics(
+                  container: true,
+                  label: addLabel,
+                  child: SizedBox.square(
+                    dimension: dayListAddButtonSize,
+                    child: Builder(
+                      builder: (context) {
+                        final add =
+                            widget.addButtonBuilder ??
+                            defaultCalendarAddButtonBuilder;
+                        return add(
+                          context,
+                          CalendarAddButtonDetails(
+                            day: day,
+                            startMinute: addMinute,
+                            onPressed: () {
+                              // The builder's render object is the keyed
+                              // row's box, its first descendant's.
+                              final box =
+                                  rowContext.findRenderObject()! as RenderBox;
+                              onAdd(globalRectOf(box, Offset.zero & box.size));
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

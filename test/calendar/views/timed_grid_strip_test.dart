@@ -30,6 +30,7 @@ import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
+import 'package:widgets_extended/calendar/views/create_details.dart';
 import 'package:widgets_extended/calendar/views/entry_split.dart';
 import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
@@ -483,7 +484,7 @@ class Harness {
   final DateTime today;
   final Future<void> Function(CalendarMoveRequest<String> request)?
   onMoveRequest;
-  final Future<void> Function(CalendarCreateRange range)? onCreate;
+  final Future<void> Function(CalendarCreateDetails details)? onCreate;
   final void Function(double minSlotHeight, double minDayWidth)? onZoom;
   final CalendarBlockBuilder<String>? blockBuilder;
   final CalendarHourLabelFormat hourLabelFormat;
@@ -532,8 +533,8 @@ class Harness {
       onOpenEntry: opened.add,
       onCreate:
           onCreate ??
-          (range) async {
-            creates.add(range);
+          (details) async {
+            creates.add(details.range);
           },
       onMoveRequest: onMoveRequest,
       onZoom: onZoom,
@@ -5332,8 +5333,8 @@ void main() {
       final harness = Harness(
         storeOf(<CalendarEntry<String>>[]),
         shown,
-        onCreate: (range) {
-          created.add(range);
+        onCreate: (details) {
+          created.add(details.range);
           throw failure;
         },
       );

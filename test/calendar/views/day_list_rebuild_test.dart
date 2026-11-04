@@ -179,8 +179,8 @@ class ListHost {
                   selectedDay = day;
                   rebuild();
                 },
-                onCreateRange: (range) {
-                  creates.add(range);
+                onCreateRange: (details) async {
+                  creates.add(details.range);
                 },
                 onEdit: (id) {},
                 onDelete: (id) {},

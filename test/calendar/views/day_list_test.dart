@@ -244,7 +244,7 @@ void main() {
           selectedDay: day,
           now: now,
           onTopDay: (day) {},
-          onCreateRange: (range) {},
+          onCreateRange: (range) async {},
           onEdit: (id) {},
           onDelete: (id) {},
           cardBuilder: (context, entry, details) {
@@ -296,7 +296,7 @@ void main() {
           selectedDay: day,
           now: now,
           onTopDay: (day) {},
-          onCreateRange: (range) {},
+          onCreateRange: (range) async {},
           onEdit: (id) {},
           onDelete: (id) {},
           loadingBuilder: (context, state) {
@@ -374,7 +374,7 @@ void main() {
           selectedDay: day,
           now: now,
           onTopDay: (day) {},
-          onCreateRange: (range) {},
+          onCreateRange: (range) async {},
           onEdit: (id) {},
           onDelete: (id) {},
           loadingBuilder: (context, state) {
@@ -447,7 +447,7 @@ void main() {
           selectedDay: day,
           now: now,
           onTopDay: (day) {},
-          onCreateRange: (range) {},
+          onCreateRange: (range) async {},
           onEdit: (id) {},
           onDelete: (id) {},
         ),

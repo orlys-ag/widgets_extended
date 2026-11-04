@@ -161,8 +161,8 @@ class Host {
                 );
               },
               onEntryTap: taps.add,
-              onCreateRange: (range) async {
-                creates.add(range);
+              onCreateRange: (details) async {
+                creates.add(details.range);
               },
               onMoveRequest: onMoveRequest,
             );

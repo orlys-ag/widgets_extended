@@ -122,8 +122,8 @@ Future<void> pumpList(
         selectedDay: day,
         now: now,
         onTopDay: (day) {},
-        onCreateRange: (range) {
-          creates?.add(range);
+        onCreateRange: (details) async {
+          creates?.add(details.range);
         },
         onEdit: (id) {},
         onDelete: (id) {},

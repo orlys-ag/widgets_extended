@@ -23,13 +23,16 @@ import 'package:widgets_extended/calendar/composition/calendar_view.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_day_badges.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_localizations.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
+import 'package:widgets_extended/calendar/views/create_details.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
@@ -289,6 +292,104 @@ Future<void> clickCell(WidgetTester tester, Offset at) async {
   await gesture.moveBy(const Offset(2.0, 0.0));
   await tester.pump();
   await gesture.up();
+}
+
+/// A mouse press at [from] that moves to the point halfway to [to], then
+/// to [to], pumping a frame after each move, and lets go.
+Future<void> mouseDrag(WidgetTester tester, Offset from, Offset to) async {
+  final gesture = await tester.startGesture(
+    from,
+    kind: PointerDeviceKind.mouse,
+  );
+  await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+  await tester.pump();
+  await gesture.moveTo(to);
+  await tester.pump();
+  await gesture.up();
+  await tester.pumpAndSettle();
+}
+
+/// A touch press at [at] held past the long-press timeout, then let go
+/// where it began.
+Future<void> holdInPlace(WidgetTester tester, Offset at) async {
+  final gesture = await tester.startGesture(at);
+  await tester.pump(kLongPressTimeout + kPressTimeout);
+  await gesture.up();
+  await tester.pumpAndSettle();
+}
+
+/// The global rect from the top of the timed grid's cell at row [first] to
+/// the bottom of its cell at row [last], both in column [col]: the two
+/// cells' rects in the viewport's paint space, joined and mapped through
+/// the viewport's localToGlobal.
+Rect gridRowsRect(WidgetTester tester, int first, int last, int col) {
+  final viewport = gridViewport(tester);
+  final joined = viewport
+      .rectOfCell(first, col)!
+      .expandToInclude(viewport.rectOfCell(last, col)!);
+  return Rect.fromPoints(
+    viewport.localToGlobal(joined.topLeft),
+    viewport.localToGlobal(joined.bottomRight),
+  );
+}
+
+/// Records each create a calendar reports through
+/// [CalendarView.onCreateRange], with what [expected] gives at the report.
+class CreateRecorder {
+  /// Read inside the callback, at each report.
+  Rect Function() expected = () {
+    return Rect.zero;
+  };
+
+  final List<({CalendarCreateDetails details, Rect expected})> reports =
+      <({CalendarCreateDetails details, Rect expected})>[];
+
+  Future<void> call(CalendarCreateDetails details) async {
+    reports.add((details: details, expected: expected()));
+  }
+}
+
+/// What [ArmedTimes.formatTime] throws while armed.
+class LabelFailure implements Exception {
+  const LabelFailure();
+}
+
+/// English, but for the times of day, whose writing throws a
+/// [LabelFailure] while [armed].
+final class ArmedTimes extends DefaultCalendarLocalizations {
+  ArmedTimes();
+
+  bool armed = false;
+
+  @override
+  String formatTime(int minute, CalendarHourLabelFormat format) {
+    if (armed) {
+      throw const LabelFailure();
+    }
+    return super.formatTime(minute, format);
+  }
+}
+
+/// Gives [strings] for every locale.
+class ArmedTimesDelegate extends LocalizationsDelegate<CalendarLocalizations> {
+  const ArmedTimesDelegate(this.strings);
+
+  final CalendarLocalizations strings;
+
+  @override
+  bool isSupported(Locale locale) {
+    return true;
+  }
+
+  @override
+  Future<CalendarLocalizations> load(Locale locale) {
+    return SynchronousFuture<CalendarLocalizations>(strings);
+  }
+
+  @override
+  bool shouldReload(ArmedTimesDelegate old) {
+    return !identical(old.strings, strings);
+  }
 }
 
 /// The nearest Material above [element].
@@ -1091,8 +1192,8 @@ void main() {
           cardExtentOf: cardExtent,
           onEntryTap: reports ? taps.add : null,
           onCreateRange: reports
-              ? (range) {
-                  creates.add(range);
+              ? (details) {
+                  creates.add(details.range);
                   final completer = Completer<void>();
                   pending.add(completer);
                   return completer.future;
@@ -1252,8 +1353,8 @@ void main() {
           clock: fixedClock,
           editable: true,
           editPolicy: const HistoryLockPolicy<String>(lockEarlierToday: true),
-          onCreateRange: (range) async {
-            creates.add(range);
+          onCreateRange: (details) async {
+            creates.add(details.range);
           },
           onCreateRefused: refused.add,
         ),
@@ -1945,8 +2046,8 @@ void main() {
           controller: controller,
           clock: fixedClock,
           editable: true,
-          onCreateRange: (range) async {
-            creates.add(range);
+          onCreateRange: (details) async {
+            creates.add(details.range);
           },
         ),
       ),
@@ -2291,8 +2392,8 @@ void main() {
           editable: true,
           editPolicy: const HistoryLockPolicy<String>(lockEarlierToday: true),
           slotMinutes: 30,
-          onCreateRange: (range) async {
-            creates.add(range);
+          onCreateRange: (details) async {
+            creates.add(details.range);
           },
         ),
       ),
@@ -2382,5 +2483,674 @@ void main() {
     expect(thursdayIn(week), <List<CalendarBadgeKind?>>[
       <CalendarBadgeKind?>[null],
     ]);
+  });
+
+  testWidgets("CV54 in Week and Day a create reports that the user chose its "
+      "length where its range runs from one slot or strip cell to another, "
+      "and not for a tap, a hold or a click let go in place, a strip tap, or "
+      "a drag held at its first slot", (tester) async {
+    useTallView(tester);
+    final friday = DateTime(2026, 4, 24);
+    final empty = MemoryCalendarStore<String>();
+    addTearDown(empty.dispose);
+    final busy = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        entryOf("busy", tuesday, 10 * 60, 11 * 60),
+      ],
+    );
+    addTearDown(busy.dispose);
+    final controller = CalendarController(
+      view: CalendarViewKind.week,
+      selectedDay: tuesday,
+    );
+    addTearDown(controller.dispose);
+    final recorder = CreateRecorder();
+    Widget calendar(
+      CalendarStore<String> store, {
+      CalendarEditPolicy<String>? policy,
+    }) {
+      return app(
+        CalendarView<String>(
+          store: store,
+          controller: controller,
+          clock: fixedClock,
+          editable: true,
+          editPolicy: policy,
+          onCreateRange: recorder.call,
+        ),
+      );
+    }
+
+    var seen = 0;
+    void expectCreate(CalendarCreateRange range, {required bool chose}) {
+      expect(recorder.reports, hasLength(seen + 1));
+      seen = recorder.reports.length;
+      expect(recorder.reports.last.details.range, range);
+      expect(recorder.reports.last.details.userChoseLength, chose);
+    }
+
+    await tester.pumpWidget(calendar(empty));
+    await tester.pumpAndSettle();
+
+    // Week. The strip's row lies under the day header.
+    final tuesdayCol = weekColOf(tuesday);
+    final wednesdayCol = weekColOf(wednesday);
+    await mouseDrag(
+      tester,
+      cellCenter(tester, weekRowOf(10 * 60), tuesdayCol),
+      cellCenter(tester, weekRowOf(12 * 60), tuesdayCol),
+    );
+    expectCreate(
+      CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 12, 15)),
+      chose: true,
+    );
+    await mouseDrag(
+      tester,
+      cellCenter(tester, weekRowOf(14 * 60), tuesdayCol),
+      cellCenter(tester, weekRowOf(16 * 60), weekColOf(thursday)),
+    );
+    expectCreate(
+      CalendarCreateRange(start: at(tuesday, 14), end: at(thursday, 16, 15)),
+      chose: true,
+    );
+    await mouseDrag(
+      tester,
+      cellCenter(tester, 1, tuesdayCol),
+      cellCenter(tester, 1, weekColOf(friday)),
+    );
+    expectCreate(
+      CalendarCreateRange(start: tuesday, end: saturday, isAllDay: true),
+      chose: true,
+    );
+    await tester.tapAt(cellCenter(tester, weekRowOf(14 * 60), wednesdayCol));
+    await tester.pumpAndSettle();
+    expectCreate(
+      CalendarCreateRange(
+        start: at(wednesday, 14),
+        end: at(wednesday, 14, 15),
+      ),
+      chose: false,
+    );
+    await holdInPlace(
+      tester,
+      cellCenter(tester, weekRowOf(15 * 60), wednesdayCol),
+    );
+    expectCreate(
+      CalendarCreateRange(
+        start: at(wednesday, 15),
+        end: at(wednesday, 15, 15),
+      ),
+      chose: false,
+    );
+    await clickCell(
+      tester,
+      cellCenter(tester, weekRowOf(16 * 60), wednesdayCol),
+    );
+    await tester.pumpAndSettle();
+    expectCreate(
+      CalendarCreateRange(
+        start: at(wednesday, 16),
+        end: at(wednesday, 16, 15),
+      ),
+      chose: false,
+    );
+    await tester.tapAt(cellCenter(tester, 1, wednesdayCol));
+    await tester.pumpAndSettle();
+    expectCreate(
+      CalendarCreateRange(start: wednesday, end: thursday, isAllDay: true),
+      chose: false,
+    );
+
+    // Day, whose strip is its top row.
+    controller.view = CalendarViewKind.day;
+    await tester.pumpAndSettle();
+    await mouseDrag(
+      tester,
+      cellCenter(tester, dayRowOf(10 * 60), 1),
+      cellCenter(tester, dayRowOf(12 * 60), 1),
+    );
+    expectCreate(
+      CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 12, 15)),
+      chose: true,
+    );
+    await tester.tapAt(cellCenter(tester, dayRowOf(14 * 60), 1));
+    await tester.pumpAndSettle();
+    expectCreate(
+      CalendarCreateRange(start: at(tuesday, 14), end: at(tuesday, 14, 15)),
+      chose: false,
+    );
+    await holdInPlace(tester, cellCenter(tester, dayRowOf(15 * 60), 1));
+    expectCreate(
+      CalendarCreateRange(start: at(tuesday, 15), end: at(tuesday, 15, 15)),
+      chose: false,
+    );
+    await clickCell(tester, cellCenter(tester, dayRowOf(16 * 60), 1));
+    await tester.pumpAndSettle();
+    expectCreate(
+      CalendarCreateRange(start: at(tuesday, 16), end: at(tuesday, 16, 15)),
+      chose: false,
+    );
+    await tester.tapAt(cellCenter(tester, 0, 1));
+    await tester.pumpAndSettle();
+    expectCreate(
+      CalendarCreateRange(start: tuesday, end: wednesday, isAllDay: true),
+      chose: false,
+    );
+
+    // Week under NoOverlapsPolicy. Setup sanity: over an empty store the
+    // drag leaves the slot it began on.
+    controller.view = CalendarViewKind.week;
+    await tester.pumpWidget(
+      calendar(empty, policy: const NoOverlapsPolicy<String>()),
+    );
+    await tester.pumpAndSettle();
+    await mouseDrag(
+      tester,
+      cellCenter(tester, weekRowOf(9 * 60 + 45), tuesdayCol),
+      cellCenter(tester, weekRowOf(12 * 60), tuesdayCol),
+    );
+    expectCreate(
+      CalendarCreateRange(
+        start: at(tuesday, 9, 45),
+        end: at(tuesday, 12, 15),
+      ),
+      chose: true,
+    );
+    // "busy" from 10:00 holds the range at the slot it began on.
+    await tester.pumpWidget(
+      calendar(busy, policy: const NoOverlapsPolicy<String>()),
+    );
+    await tester.pumpAndSettle();
+    await mouseDrag(
+      tester,
+      cellCenter(tester, weekRowOf(9 * 60 + 45), tuesdayCol),
+      cellCenter(tester, weekRowOf(12 * 60), tuesdayCol),
+    );
+    expectCreate(
+      CalendarCreateRange(start: at(tuesday, 9, 45), end: at(tuesday, 10)),
+      chose: false,
+    );
+  });
+
+  testWidgets("CV55 Agenda's add button and Month's long press report that "
+      "the calendar chose the create's length", (tester) async {
+    useTallView(tester);
+    final memory = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        entryOf("standup", wednesday, 10 * 60, 11 * 60),
+      ],
+    );
+    addTearDown(memory.dispose);
+    final controller = CalendarController(
+      view: CalendarViewKind.agenda,
+      selectedDay: wednesday,
+    );
+    addTearDown(controller.dispose);
+    final recorder = CreateRecorder();
+    await tester.pumpWidget(
+      app(
+        CalendarView<String>(
+          store: memory,
+          controller: controller,
+          clock: fixedClock,
+          editable: true,
+          onCreateRange: recorder.call,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(dayListGapKey(wednesday, 11 * 60)),
+        matching: find.byIcon(CalendarThemeData().addEntryIcon),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(recorder.reports, hasLength(1));
+    expect(
+      recorder.reports.last.details.range,
+      CalendarCreateRange(start: at(wednesday, 11), end: at(wednesday, 11, 15)),
+    );
+    expect(recorder.reports.last.details.userChoseLength, isFalse);
+
+    controller.view = CalendarViewKind.month;
+    await tester.pumpAndSettle();
+    await tester.longPress(find.byKey(monthStripKey(thursday)));
+    await tester.pumpAndSettle();
+    expect(recorder.reports, hasLength(2));
+    expect(
+      recorder.reports.last.details.range,
+      CalendarCreateRange(start: at(thursday, 0), end: at(thursday, 0, 15)),
+    );
+    expect(recorder.reports.last.details.userChoseLength, isFalse);
+  });
+
+  group("CV56 Week's and Day's create reports, read inside the callback, "
+      "the global rect of the cells it marks in the column where the "
+      "gesture ended", () {
+    /// The calendar of [store] in edit mode under [controller], reporting
+    /// to [recorder].
+    Widget calendar(
+      CalendarStore<String> store,
+      CalendarController controller,
+      CreateRecorder recorder,
+    ) {
+      return app(
+        CalendarView<String>(
+          store: store,
+          controller: controller,
+          clock: fixedClock,
+          editable: true,
+          onCreateRange: recorder.call,
+        ),
+      );
+    }
+
+    /// Expects one report more than [before], whose rect is the one its
+    /// [CreateRecorder.expected] gave.
+    void expectRect(CreateRecorder recorder, int before) {
+      expect(recorder.reports, hasLength(before + 1));
+      final report = recorder.reports.last;
+      expect(
+        report.details.globalRect,
+        rectMoreOrLessEquals(report.expected, epsilon: 0.01),
+      );
+    }
+
+    testWidgets("in Week: a drag's slots, a cross-day drag's piece on its "
+        "last day, a tap's slot and a strip drag's last cell", (tester) async {
+      useTallView(tester);
+      final friday = DateTime(2026, 4, 24);
+      final memory = MemoryCalendarStore<String>();
+      addTearDown(memory.dispose);
+      final controller = CalendarController(
+        view: CalendarViewKind.week,
+        selectedDay: tuesday,
+      );
+      addTearDown(controller.dispose);
+      final recorder = CreateRecorder();
+      await tester.pumpWidget(calendar(memory, controller, recorder));
+      await tester.pumpAndSettle();
+      final tuesdayCol = weekColOf(tuesday);
+      final thursdayCol = weekColOf(thursday);
+      final fridayCol = weekColOf(friday);
+
+      // 1. Tuesday 10:00 to 12:00.
+      recorder.expected = () {
+        return gridRowsRect(
+          tester,
+          weekRowOf(10 * 60),
+          weekRowOf(12 * 60),
+          tuesdayCol,
+        );
+      };
+      await mouseDrag(
+        tester,
+        cellCenter(tester, weekRowOf(10 * 60), tuesdayCol),
+        cellCenter(tester, weekRowOf(12 * 60), tuesdayCol),
+      );
+      expectRect(recorder, 0);
+
+      // 2. Tuesday 14:00 to Thursday 16:00: Thursday's piece, from the
+      // day's start.
+      recorder.expected = () {
+        return gridRowsRect(
+          tester,
+          weekRowOf(0),
+          weekRowOf(16 * 60),
+          thursdayCol,
+        );
+      };
+      await mouseDrag(
+        tester,
+        cellCenter(tester, weekRowOf(14 * 60), tuesdayCol),
+        cellCenter(tester, weekRowOf(16 * 60), thursdayCol),
+      );
+      expectRect(recorder, 1);
+
+      // 3. A tap on Thursday 09:00.
+      recorder.expected = () {
+        return gridRowsRect(
+          tester,
+          weekRowOf(9 * 60),
+          weekRowOf(9 * 60),
+          thursdayCol,
+        );
+      };
+      await tester.tapAt(cellCenter(tester, weekRowOf(9 * 60), thursdayCol));
+      await tester.pumpAndSettle();
+      expectRect(recorder, 2);
+
+      // 4. A strip drag from Tuesday to Friday, in the strip's row under
+      // the day header.
+      recorder.expected = () {
+        return gridRowsRect(tester, 1, 1, fridayCol);
+      };
+      await mouseDrag(
+        tester,
+        cellCenter(tester, 1, tuesdayCol),
+        cellCenter(tester, 1, fridayCol),
+      );
+      expectRect(recorder, 3);
+    });
+
+    testWidgets("in Week, after the grid scrolled down by 300 pixels", (
+      tester,
+    ) async {
+      final memory = MemoryCalendarStore<String>();
+      addTearDown(memory.dispose);
+      final controller = CalendarController(
+        view: CalendarViewKind.week,
+        selectedDay: tuesday,
+      );
+      addTearDown(controller.dispose);
+      final recorder = CreateRecorder();
+      await tester.pumpWidget(calendar(memory, controller, recorder));
+      await tester.pumpAndSettle();
+      final position = gridViewport(tester).verticalPosition!;
+      final before = position.pixels;
+      position.jumpTo(before + 300.0);
+      await tester.pumpAndSettle();
+      // Setup sanity: the grid scrolled the whole 300 pixels.
+      expect(position.pixels, before + 300.0);
+      final viewport = gridViewport(tester);
+      final first = viewport.firstVisibleRow + 2;
+      final last = first + 4;
+      expect(last, lessThan(viewport.lastVisibleRow));
+      final col = weekColOf(tuesday);
+      recorder.expected = () {
+        return gridRowsRect(tester, first, last, col);
+      };
+      await mouseDrag(
+        tester,
+        cellCenter(tester, first, col),
+        cellCenter(tester, last, col),
+      );
+      expectRect(recorder, 0);
+    });
+
+    testWidgets("in Day: a drag's slots and a strip tap's cell", (
+      tester,
+    ) async {
+      useTallView(tester);
+      final memory = MemoryCalendarStore<String>();
+      addTearDown(memory.dispose);
+      final controller = CalendarController(
+        view: CalendarViewKind.day,
+        selectedDay: tuesday,
+      );
+      addTearDown(controller.dispose);
+      final recorder = CreateRecorder();
+      await tester.pumpWidget(calendar(memory, controller, recorder));
+      await tester.pumpAndSettle();
+
+      // 6. Tuesday 10:00 to 12:00.
+      recorder.expected = () {
+        return gridRowsRect(tester, dayRowOf(10 * 60), dayRowOf(12 * 60), 1);
+      };
+      await mouseDrag(
+        tester,
+        cellCenter(tester, dayRowOf(10 * 60), 1),
+        cellCenter(tester, dayRowOf(12 * 60), 1),
+      );
+      expectRect(recorder, 0);
+
+      // 7. A tap on the strip, Day's top row.
+      recorder.expected = () {
+        return gridRowsRect(tester, 0, 0, 1);
+      };
+      await tester.tapAt(cellCenter(tester, 0, 1));
+      await tester.pumpAndSettle();
+      expectRect(recorder, 1);
+    });
+
+    testWidgets("in Week, after the grid scrolled sideways", (tester) async {
+      useTallView(tester);
+      final memory = MemoryCalendarStore<String>();
+      addTearDown(memory.dispose);
+      final controller = CalendarController(
+        view: CalendarViewKind.week,
+        selectedDay: tuesday,
+        minDayWidth: CalendarController.minDayWidthHigh,
+      );
+      addTearDown(controller.dispose);
+      final recorder = CreateRecorder();
+      await tester.pumpWidget(calendar(memory, controller, recorder));
+      await tester.pumpAndSettle();
+      final position = gridViewport(tester).horizontalPosition!;
+      final before = position.pixels;
+      position.jumpTo(before + 300.0);
+      await tester.pumpAndSettle();
+      // Setup sanity: the grid scrolled the whole 300 pixels sideways.
+      expect(position.pixels, before + 300.0);
+      final col = gridViewport(tester).firstVisibleCol + 1;
+      recorder.expected = () {
+        return gridRowsRect(
+          tester,
+          weekRowOf(10 * 60),
+          weekRowOf(12 * 60),
+          col,
+        );
+      };
+      await mouseDrag(
+        tester,
+        cellCenter(tester, weekRowOf(10 * 60), col),
+        cellCenter(tester, weekRowOf(12 * 60), col),
+      );
+      expectRect(recorder, 0);
+    });
+
+    testWidgets("in Week, with a notice row above the slots", (tester) async {
+      useTallView(tester);
+      final memory = MemoryCalendarStore<String>(
+        entries: <CalendarEntry<String>>[
+          entryOf("early", tuesday, 6 * 60, 7 * 60),
+        ],
+        hours: CalendarDayHours(8 * 60, 18 * 60),
+      );
+      addTearDown(memory.dispose);
+      final controller = CalendarController(
+        view: CalendarViewKind.week,
+        selectedDay: tuesday,
+      );
+      addTearDown(controller.dispose);
+      final recorder = CreateRecorder();
+      await tester.pumpWidget(calendar(memory, controller, recorder));
+      await tester.pumpAndSettle();
+      // Setup sanity: the row above the first slot is the notice's, which
+      // the band of frozen rows takes in, where the room it replaces lies
+      // outside the band.
+      final board = tester.widget<Board<GridKey, Object?>>(
+        find.byWidgetPredicate((widget) {
+          return widget is Board<GridKey, Object?>;
+        }),
+      );
+      expect(board.controller.rows.frozenStart, weekRowOf(8 * 60));
+      final col = weekColOf(tuesday);
+      recorder.expected = () {
+        return gridRowsRect(
+          tester,
+          weekRowOf(10 * 60),
+          weekRowOf(12 * 60),
+          col,
+        );
+      };
+      await mouseDrag(
+        tester,
+        cellCenter(tester, weekRowOf(10 * 60), col),
+        cellCenter(tester, weekRowOf(12 * 60), col),
+      );
+      expectRect(recorder, 0);
+    });
+  });
+
+  testWidgets("CV57 Agenda's add button reports the global rect of its gap "
+      "row, read inside the callback", (tester) async {
+    useTallView(tester);
+    final memory = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        entryOf("standup", wednesday, 10 * 60, 11 * 60),
+      ],
+    );
+    addTearDown(memory.dispose);
+    final controller = CalendarController(
+      view: CalendarViewKind.agenda,
+      selectedDay: wednesday,
+    );
+    addTearDown(controller.dispose);
+    final recorder = CreateRecorder();
+    await tester.pumpWidget(
+      app(
+        CalendarView<String>(
+          store: memory,
+          controller: controller,
+          clock: fixedClock,
+          editable: true,
+          onCreateRange: recorder.call,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final gap = find.byKey(dayListGapKey(wednesday, 11 * 60));
+    recorder.expected = () {
+      return tester.getRect(gap);
+    };
+    await tester.tap(
+      find.descendant(
+        of: gap,
+        matching: find.byIcon(CalendarThemeData().addEntryIcon),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(recorder.reports, hasLength(1));
+    final report = recorder.reports.single;
+    expect(
+      report.details.globalRect,
+      rectMoreOrLessEquals(report.expected, epsilon: 0.01),
+    );
+  });
+
+  testWidgets("CV58 Month's long press reports the global rect of the day "
+      "cell, read inside the callback", (tester) async {
+    final memory = MemoryCalendarStore<String>();
+    addTearDown(memory.dispose);
+    final controller = CalendarController(view: CalendarViewKind.month);
+    addTearDown(controller.dispose);
+    final recorder = CreateRecorder();
+    await tester.pumpWidget(
+      app(
+        CalendarView<String>(
+          store: memory,
+          controller: controller,
+          clock: fixedClock,
+          editable: true,
+          onCreateRange: recorder.call,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    recorder.expected = () {
+      return tester.getRect(find.byKey(monthDayKey(thursday)));
+    };
+    await tester.longPress(find.byKey(monthStripKey(thursday)));
+    await tester.pumpAndSettle();
+    expect(recorder.reports, hasLength(1));
+    final report = recorder.reports.single;
+    expect(
+      report.details.globalRect,
+      rectMoreOrLessEquals(report.expected, epsilon: 0.01),
+    );
+  });
+
+  testWidgets("CV61 a create drag let go after a build of Week's grid threw "
+      "reports the empty rect at the pointer where it was let go", (
+    tester,
+  ) async {
+    useTallView(tester);
+    final memory = MemoryCalendarStore<String>();
+    addTearDown(memory.dispose);
+    final controller = CalendarController(
+      view: CalendarViewKind.week,
+      selectedDay: tuesday,
+    );
+    addTearDown(controller.dispose);
+    final strings = ArmedTimes();
+    final recorder = CreateRecorder();
+    Widget calendar(CalendarHourLabelFormat format) {
+      return app(
+        Builder(
+          builder: (context) {
+            return Localizations.override(
+              context: context,
+              delegates: <LocalizationsDelegate<Object?>>[
+                ArmedTimesDelegate(strings),
+              ],
+              child: CalendarView<String>(
+                store: memory,
+                controller: controller,
+                clock: fixedClock,
+                editable: true,
+                hourLabelFormat: format,
+                onCreateRange: recorder.call,
+              ),
+            );
+          },
+        ),
+      );
+    }
+
+    await tester.pumpWidget(calendar(CalendarHourLabelFormat.twentyFourHour));
+    await tester.pumpAndSettle();
+    final col = weekColOf(tuesday);
+    final from = cellCenter(tester, weekRowOf(10 * 60), col);
+    final to = cellCenter(tester, weekRowOf(12 * 60), col);
+    final gesture = await tester.startGesture(
+      from,
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+    await tester.pump();
+    await gesture.moveTo(to);
+    await tester.pump();
+
+    strings.armed = true;
+    await tester.pumpWidget(calendar(CalendarHourLabelFormat.twelveHour));
+    strings.armed = false;
+    // Setup sanity: the grid's build threw, and its element shows an
+    // ErrorWidget in place of its subtree, the board's included.
+    expect(tester.takeException(), isA<LabelFailure>());
+    final grid = find.byWidgetPredicate((widget) {
+      return widget is TimedGrid;
+    });
+    expect(
+      find.descendant(of: grid, matching: find.byType(ErrorWidget)),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: grid,
+        matching: find.byWidgetPredicate((widget) {
+          return widget is Board;
+        }),
+      ),
+      findsNothing,
+    );
+
+    await gesture.up();
+    expect(recorder.reports, hasLength(1));
+    final details = recorder.reports.single.details;
+    expect(
+      details.range,
+      CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 12, 15)),
+    );
+    expect(details.userChoseLength, isTrue);
+    expect(
+      details.globalRect,
+      rectMoreOrLessEquals(
+        Rect.fromLTWH(to.dx, to.dy, 0.0, 0.0),
+        epsilon: 0.01,
+      ),
+    );
+    await tester.pumpAndSettle();
   });
 }

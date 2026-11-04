@@ -20,6 +20,7 @@ import '../presentation/calendar_defaults.dart';
 import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import 'answer_builder.dart';
+import 'create_details.dart';
 import 'entry_split.dart';
 import 'move_request.dart';
 import 'pinch_zoom.dart';
@@ -701,11 +702,19 @@ class TimedGrid<T> extends StatefulWidget {
   /// Reports a tap on a block that is not pending, with its entry's id.
   final ValueChanged<String> onOpenEntry;
 
-  /// Opens the create flow for the range a create gesture on empty cells
-  /// picked, and completes when it closes. A failure of the function,
-  /// whether it throws within the call or its future fails, is not caught:
-  /// a host that handles one passes a function that does.
-  final Future<void> Function(CalendarCreateRange range) onCreate;
+  /// Opens the create flow for a create gesture on empty cells, and
+  /// completes when it closes: the details give the range the gesture
+  /// picked, whether the user chose its length, a range from one cell to
+  /// another, and the rect, in global logical pixels, of the cells the
+  /// grid marks for it in the column where the gesture ended, read from
+  /// the board when the create is reported
+  /// ([BoardController.globalRectOfCell]); where the board gives none,
+  /// with no board laid out, as after a build of the grid threw while a
+  /// create range ran, the empty rect at the pointer where the gesture was
+  /// let go. A failure of the function, whether it throws within the call
+  /// or its future fails, is not caught: a host that handles one passes a
+  /// function that does.
+  final Future<void> Function(CalendarCreateDetails details) onCreate;
 
   /// Takes each move or resize a gesture lands, and completes once the
   /// host has written it or let it go. Until then the grid shows the
@@ -4219,7 +4228,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final global = details.globalPosition;
     final strip = _stripCellAt(global);
     if (strip != null) {
-      _create(strip, strip, _stripRangeOver(strip.col, strip.col), strip: true);
+      _create(
+        strip,
+        strip,
+        _stripRangeOver(strip.col, strip.col),
+        point: global,
+        strip: true,
+      );
       return;
     }
     final cell = _bodyCellAt(global);
@@ -4237,21 +4252,32 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (range == null) {
       return;
     }
-    _create(cell, cell, range);
+    _create(cell, cell, range, point: global);
   }
 
   /// Reports [range] through [TimedGrid.onCreate], marking until the
   /// create flow closes the range from the slot of [anchor] to that of
   /// [focus], or for a range across the strip, [strip], the strip cells of
-  /// its days, on whichever days the grid shows meanwhile. A throw within
-  /// the call ends the mark as a failure of the future does, and is left
-  /// uncaught in the zone as that failure is.
+  /// its days, on whichever days the grid shows meanwhile. The report says
+  /// the user chose the length where [focus] is not [anchor], and gives the
+  /// rect of [_createRectOf], read before the mark, or where that is null
+  /// the empty rect at [point], the pointer's global position at the
+  /// release. A throw within the call ends the mark as a failure of the
+  /// future does, and is left uncaught in the zone as that failure is.
   void _create(
     ({int row, int col}) anchor,
     ({int row, int col}) focus,
     CalendarCreateRange range, {
+    required Offset point,
     bool strip = false,
   }) {
+    final details = CalendarCreateDetails(
+      range: range,
+      globalRect:
+          _createRectOf(anchor, focus, strip: strip) ??
+          Rect.fromLTWH(point.dx, point.dy, 0.0, 0.0),
+      userChoseLength: focus != anchor,
+    );
     final create = ++_creates;
     setState(() {
       if (strip) {
@@ -4264,7 +4290,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     });
     _updateStripMark();
     Future<void>.sync(() {
-      return widget.onCreate(range);
+      return widget.onCreate(details);
     }).whenComplete(() {
       if (mounted && create == _creates) {
         setState(() {
@@ -4274,6 +4300,42 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _updateStripMark();
       }
     });
+  }
+
+  /// The global rect of the cells a create from [anchor] to [focus] marks
+  /// in [focus]'s column, as the board paints them
+  /// ([BoardController.globalRectOfCell]): for a range across the strip
+  /// ([strip]), [focus]'s strip cell; for one over the slots, the slots of
+  /// its piece on [focus]'s day ([_wallSpanOfCells]), held to the hours,
+  /// from the first one's top to the last one's bottom. Null where the
+  /// board gives no rect for them, as with no board laid out.
+  Rect? _createRectOf(
+    ({int row, int col}) anchor,
+    ({int row, int col}) focus, {
+    required bool strip,
+  }) {
+    if (strip) {
+      return _board.globalRectOfCell(focus.row, focus.col);
+    }
+    final hours = _tracks.hours;
+    // The span holds [focus]'s own slot, so its day holds a piece, whose
+    // ends are slot edges.
+    final piece = CalendarDates.pieceOn(
+      _wallSpanOfCells(anchor, focus),
+      _tracks.dayAt(focus.col),
+    )!;
+    final first = _board.globalRectOfCell(
+      _tracks.rowOf(math.max(piece.start, hours.start)),
+      focus.col,
+    );
+    final last = _board.globalRectOfCell(
+      _tracks.rowOf(math.min(piece.end, hours.end)) - 1,
+      focus.col,
+    );
+    if (first == null || last == null) {
+      return null;
+    }
+    return first.expandToInclude(last);
   }
 
   /// The all-day range a create across the strip from the column [anchor]
@@ -4634,7 +4696,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (created == null) {
       return;
     }
-    _create(anchor, focus, created, strip: range.strip);
+    _create(anchor, focus, created, point: range.point, strip: range.strip);
   }
 
   /// Refills the running create range's limits at a new [_calendarNow]

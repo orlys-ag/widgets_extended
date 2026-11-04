@@ -99,9 +99,11 @@ The contract of `Fenwick`, the axes, spans and the start rule, `SpanIndex`, `Ove
   lifetime is the bit's, and every span mutator touching the dragged key
   cancels the drag BEFORE mutating. `cellAt` and `itemAt` take a GLOBAL
   point, convert it through the registered port's `globalToPaintLocal`
-  and answer the port's own `cellAt` and `itemAt`, null with no port or
-  one not laid out; the controller restates neither query. The ordered
-  `dispose` script asserts the
+  and answer the port's own `cellAt` and `itemAt`, and
+  `globalRectOfCell` answers the port's own `rectOfCell` with its corners
+  converted to GLOBAL through the port's `paintLocalToGlobal`, each null
+  with no port or one not laid out; the controller restates none of these
+  queries. The ordered `dispose` script asserts the
   listener lists are empty first (a mounted board still subscribed means
   something is about to read a disposed controller), then runs the
   orchestrator (tickers before the vsync dies), then the animation

@@ -14,6 +14,7 @@ import '../../scheduling/scheduling.dart';
 import '../presentation/calendar_builders.dart';
 import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
+import '../views/create_details.dart';
 import '../views/day_list.dart';
 import '../views/month_board.dart';
 import '../views/month_picker.dart';
@@ -390,14 +391,19 @@ class CalendarView<T> extends StatefulWidget {
   /// nothing.
   final ValueChanged<CalendarEntryTapDetails<T>>? onEntryTap;
 
-  /// A create the calendar's gestures picked, in edit mode: the range a
-  /// gesture picked in Week or Day, which stays marked until the future
-  /// completes; a gap's first free slot in Agenda, the add button's; and a
-  /// day's first free slot in Month, a long press's. Null reports nothing,
-  /// and the marked range clears at once. A failure of the function,
-  /// whether it throws within the call or its future fails, is not caught:
-  /// a host that handles one passes a function that does.
-  final Future<void> Function(CalendarCreateRange range)? onCreateRange;
+  /// A create the calendar's gestures picked, in edit mode, as a
+  /// [CalendarCreateDetails]: its range, the range a gesture picked in Week
+  /// or Day, which stays marked until the future completes, a gap's first
+  /// free slot in Agenda, the add button's, and a day's first free slot in
+  /// Month, a long press's; where its mark is on screen when it is
+  /// reported, in global logical pixels
+  /// ([CalendarCreateDetails.globalRect]); and whether the user chose its
+  /// length ([CalendarCreateDetails.userChoseLength]), which only a drag in
+  /// Week or Day does. Null reports nothing, and the marked range clears at
+  /// once. A failure of the function, whether it throws within the call or
+  /// its future fails, is not caught: a host that handles one passes a
+  /// function that does.
+  final Future<void> Function(CalendarCreateDetails details)? onCreateRange;
 
   /// A move or a resize the gestures landed in Week or Day, in edit mode,
   /// whose entry shows at the requested times, pending, until the future
@@ -1322,12 +1328,12 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     );
   }
 
-  Future<void> _createRange(CalendarCreateRange range) {
+  Future<void> _createRange(CalendarCreateDetails details) {
     final onCreateRange = widget.onCreateRange;
     if (onCreateRange == null) {
       return Future<void>.value();
     }
-    return onCreateRange(range);
+    return onCreateRange(details);
   }
 
   void _requestEdit(String id) {
@@ -1346,14 +1352,15 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     }
   }
 
-  /// Month's long press on [day], selecting it first when it is a day of
-  /// the shown month; a day of another month leaves the selection and the
-  /// month as they are.
-  void _createOn(DateTime day) {
+  /// Month's long press on [day], whose cell lies at [globalRect],
+  /// selecting it first when it is a day of the shown month; a day of
+  /// another month leaves the selection and the month as they are. Returns
+  /// what [_openCreateFlow] returns.
+  Future<void>? _createOn(DateTime day, Rect globalRect) {
     if (_grid.contains(day)) {
       _select(day);
     }
-    _openCreateFlow(day);
+    return _openCreateFlow(day, globalRect);
   }
 
   /// Reports a create on [day] at the first slot of the hours, from the
@@ -1365,9 +1372,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// over an entry, refused or not, which asks [_policy] nothing
   /// ([CalendarEditRules.firstSlot]): each one whose times the clock reads,
   /// in that start's occurrence where [day]'s clock repeats its time, so
-  /// none starts before it. Where it leaves no such slot in the hours,
-  /// reports [CalendarView.onCreateRefused] instead.
-  void _openCreateFlow(DateTime day) {
+  /// none starts before it, with [globalRect], the day cell's, as its rect
+  /// and returning [_createRange]'s future. Where it leaves no such slot in
+  /// the hours, reports [CalendarView.onCreateRefused] instead and returns
+  /// null.
+  Future<void>? _openCreateFlow(DateTime day, Rect globalRect) {
     final rules = _takeRules();
     final start = rules.earliestStartOn(day, _now.value);
     final shown = widget.store.entriesOn(day).map((shown) {
@@ -1377,9 +1386,15 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
         rules.firstSlot(start, clearOf: shown) ?? rules.firstSlot(start);
     if (slot == null) {
       widget.onCreateRefused?.call(day);
-      return;
+      return null;
     }
-    _createRange(CalendarCreateRange(start: slot.start, end: slot.end));
+    return _createRange(
+      CalendarCreateDetails(
+        range: CalendarCreateRange(start: slot.start, end: slot.end),
+        globalRect: globalRect,
+        userChoseLength: false,
+      ),
+    );
   }
 
   CalendarHeaderDetails _headerDetails() {
