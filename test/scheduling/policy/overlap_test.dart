@@ -207,32 +207,31 @@ void main() {
       DateTime(2026, 4, 21, 9, 30),
       DateTime(2026, 4, 21, 10, 30),
     );
-    final pairs =
-        <(CalendarOverlapCandidate<String>, CalendarEntry<String>)>[
-          (
-            CalendarOverlapCandidate<String>(
-              start: nine.start,
-              end: nine.end,
-              entry: nine,
-            ),
-            half,
-          ),
-          (
-            CalendarOverlapCandidate<String>(
-              start: late.start,
-              end: late.end,
-              entry: late,
-            ),
-            early,
-          ),
-          (
-            CalendarOverlapCandidate<String>(
-              start: DateTime(2026, 4, 21),
-              end: DateTime(2026, 4, 21, 0, 15),
-            ),
-            late,
-          ),
-        ];
+    final pairs = <(CalendarOverlapCandidate<String>, CalendarEntry<String>)>[
+      (
+        CalendarOverlapCandidate<String>(
+          start: nine.start,
+          end: nine.end,
+          entry: nine,
+        ),
+        half,
+      ),
+      (
+        CalendarOverlapCandidate<String>(
+          start: late.start,
+          end: late.end,
+          entry: late,
+        ),
+        early,
+      ),
+      (
+        CalendarOverlapCandidate<String>(
+          start: DateTime(2026, 4, 21),
+          end: DateTime(2026, 4, 21, 0, 15),
+        ),
+        late,
+      ),
+    ];
     for (final (candidate, other) in pairs) {
       // Setup sanity: the pair shares time.
       expect(

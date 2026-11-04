@@ -32,6 +32,7 @@ export '../scheduling/scheduling.dart'
         CalendarLoadStatus,
         CalendarMonthGrid,
         CalendarNow,
+        CalendarOverlapCandidate,
         CalendarResizeEdges,
         CalendarShownEntry,
         CalendarSourceChange,

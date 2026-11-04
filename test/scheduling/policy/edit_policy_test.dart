@@ -743,12 +743,10 @@ void main() {
         overlaps: false,
         refused: const <String>{"X"},
       );
-      final mixed = CalendarEditPolicy<String>.all(
-        <CalendarEditPolicy<String>>[
-          const UnrestrictedEditPolicy<String>(),
-          refusingX,
-        ],
-      );
+      final mixed = CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+        const UnrestrictedEditPolicy<String>(),
+        refusingX,
+      ]);
       expect(mixed.mayOverlap(candidate, x), isFalse);
       expect(mixed.mayOverlap(candidate, y), isTrue);
 
@@ -800,10 +798,9 @@ void main() {
       expect(lax.mayOverlap(candidate, x), isFalse);
       log.clear();
       expect(
-        CalendarEditPolicy<String>.all(<_Answering>[lax]).mayOverlap(
-          candidate,
-          x,
-        ),
+        CalendarEditPolicy<String>.all(<_Answering>[
+          lax,
+        ]).mayOverlap(candidate, x),
         isTrue,
       );
       expect(log, <String>["lax.allowsOverlaps"]);

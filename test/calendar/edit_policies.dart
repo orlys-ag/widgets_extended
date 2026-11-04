@@ -120,7 +120,10 @@ final class PairRecordingPolicy<T> extends CalendarEditPolicy<T> {
   }
 
   @override
-  bool mayOverlap(CalendarOverlapCandidate<T> candidate, CalendarEntry<T> other) {
+  bool mayOverlap(
+    CalendarOverlapCandidate<T> candidate,
+    CalendarEntry<T> other,
+  ) {
     asked.add((candidate: candidate, other: other, gate: debugDropGateCount));
     return allows(candidate, other);
   }

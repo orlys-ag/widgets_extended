@@ -661,11 +661,13 @@ class DayList<T> extends StatefulWidget {
   /// The add button of a gap was pressed: an item of one slot of
   /// [slotMinutes] from the gap's first time the policy's earliest start
   /// on its day leaves free, or the first slot after it whose times the
-  /// clock reads and that no shown entry shares time with
-  /// ([CalendarEditRules.firstSlot]), in that earliest start's occurrence
-  /// where the day's clock repeats its time, so it starts at the earliest
-  /// start or after. On a day whose clock repeats a stretch, an entry can
-  /// hold time in a gap it is not listed beside.
+  /// clock reads and that shares time with no shown entry the policy does
+  /// not let it share ([CalendarEditRules.firstSlot]: every entry where
+  /// [CalendarEditPolicy.allowsOverlaps] is true, and otherwise each
+  /// [CalendarEditPolicy.mayOverlap] refuses), in that earliest start's
+  /// occurrence where the day's clock repeats its time, so it starts at
+  /// the earliest start or after. On a day whose clock repeats a stretch,
+  /// an entry can hold time in a gap it is not listed beside.
   final void Function(CalendarCreateRange range) onCreateRange;
 
   final void Function(String id) onEdit;

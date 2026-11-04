@@ -119,6 +119,68 @@ enum CalendarResizeEdges {
   }
 }
 
+/// The candidates [CalendarOverlapCandidate]'s constructor has built, in a
+/// debug build; tests read differences.
+int debugOverlapCandidateCount = 0;
+
+/// Adds one to [debugOverlapCandidateCount] in a debug build.
+void noteOverlapCandidate() {
+  assert(() {
+    debugOverlapCandidateCount++;
+    return true;
+  }());
+}
+
+/// A change [CalendarEditPolicy.mayOverlap] is asked about: the times it
+/// gives, [start] to [end], and the [entry] it changes, none for a create.
+///
+/// Compared and hashed by [start], [end] and [entry].
+@immutable
+final class CalendarOverlapCandidate<T> {
+  /// The change of [entry], or with none a create, to the times [start] to
+  /// [end]. It checks neither time.
+  CalendarOverlapCandidate({
+    required this.start,
+    required this.end,
+    this.entry,
+  }) {
+    noteOverlapCandidate();
+  }
+
+  /// The start of the times asked about: those of the change.
+  final DateTime start;
+
+  /// The end of the times asked about: those of the change.
+  final DateTime end;
+
+  /// The entry a move or a resize changes, as stored, with its payload;
+  /// null for a create.
+  final CalendarEntry<T>? entry;
+
+  @override
+  bool operator ==(Object other) {
+    return other is CalendarOverlapCandidate<T> &&
+        other.start == start &&
+        other.end == end &&
+        other.entry == entry;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(start, end, entry);
+  }
+
+  @override
+  String toString() {
+    return "CalendarOverlapCandidate("
+        "${CalendarDates.isoDate(start)} "
+        "${CalendarDates.isoTime(CalendarDates.minuteOfDay(start))} "
+        "to ${CalendarDates.isoDate(end)} "
+        "${CalendarDates.isoTime(CalendarDates.minuteOfDay(end))}, "
+        "${entry ?? "a create"})";
+  }
+}
+
 /// The limits on what may change of a calendar's entries, and where a new
 /// entry may start: each answer asked of an entry, a change or a day, at
 /// the time [CalendarNow] gives.
@@ -131,7 +193,10 @@ enum CalendarResizeEdges {
 /// error. A subclass with fields compares them in `==` and `hashCode`.
 ///
 /// The views ask it in edit mode only, and read [dayLimit] and
-/// [allowsOverlaps] each time they take a policy. An answer that throws in
+/// [allowsOverlaps] each time they take a policy. They ask [mayOverlap]
+/// only where [allowsOverlaps] is false, and a per-pair ask through
+/// [mayOverlap]'s default, or through [CalendarEditPolicy.all], reads
+/// [allowsOverlaps] again. An answer that throws in
 /// a drag's gates, which the views ask during a drag and inside their
 /// pointer handlers, is reported through [FlutterError.reportError] and
 /// refuses; one that throws in a build, a press or a tap goes through; and
@@ -148,6 +213,8 @@ abstract base class CalendarEditPolicy<T> {
   /// A policy that allows only what each of [policies] allows, each answer
   /// the strictest of theirs: [mayMove], [mayEdit], [mayDelete],
   /// [admitsChange] and [allowsOverlaps] are true where every one's is;
+  /// [mayOverlap] is true where every one's is, a policy whose
+  /// [allowsOverlaps] is true allowing every pair and not being asked;
   /// [resizableEdges] are the edges every one gives; [earliestStartOn] is
   /// the latest instant they give, and null where any gives null; and
   /// [dayLimit] is the least limit they give, and null where none gives
@@ -226,8 +293,35 @@ abstract base class CalendarEditPolicy<T> {
   /// bar within the all-day strip. A [NoOverlapsPolicy] combined with
   /// other policies ([CalendarEditPolicy.all]) makes it false for them.
   /// True here.
+  ///
+  /// It is the fast path of [mayOverlap]: where it is true nothing asks
+  /// [mayOverlap], and where it is false `CalendarEditRules.firstSlot`
+  /// asks [mayOverlap] about each entry it is given that shares a slot's
+  /// time.
   bool get allowsOverlaps {
     return true;
+  }
+
+  /// Whether the change [candidate] gives may share time with [other]:
+  /// true lets the two share it. Here it answers [allowsOverlaps], so a
+  /// policy that overrides only [allowsOverlaps], to false, refuses every
+  /// pair it is asked about.
+  ///
+  /// It is asked only where [allowsOverlaps] is false, and only about a
+  /// timed [other] that shares time with the candidate's times
+  /// ([NoOverlapsPolicy.rangeSharesTime] of [CalendarOverlapCandidate.start]
+  /// and [CalendarOverlapCandidate.end]) and that is not the entry the
+  /// candidate changes ([CalendarOverlapCandidate.entry]).
+  /// `CalendarEditRules.firstSlot` asks it about each entry it is given
+  /// that shares a slot's time, with a candidate of the slot's times and no
+  /// entry, and takes no slot that shares time with one it refuses. One
+  /// test of a change can ask about one pair more than once, so the answer
+  /// is a question, as every answer of the policy is.
+  bool mayOverlap(
+    CalendarOverlapCandidate<T> candidate,
+    CalendarEntry<T> other,
+  ) {
+    return allowsOverlaps;
   }
 }
 
@@ -471,6 +565,19 @@ final class _AllEditPolicies<T> extends CalendarEditPolicy<T> {
   bool get allowsOverlaps {
     for (final policy in policies) {
       if (!policy.allowsOverlaps) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  bool mayOverlap(
+    CalendarOverlapCandidate<T> candidate,
+    CalendarEntry<T> other,
+  ) {
+    for (final policy in policies) {
+      if (!policy.allowsOverlaps && !policy.mayOverlap(candidate, other)) {
         return false;
       }
     }

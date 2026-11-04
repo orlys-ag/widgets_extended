@@ -122,13 +122,17 @@ final class CalendarEntryTapDetails<T> {
 ///   tap on a chip reports the entry, and a tap anywhere else on a day
 ///   opens that day in Day where [views] lists Day, and otherwise selects
 ///   it. In edit mode a long press on a day reports a create through
-///   [onCreateRange] at the day's first free slot from the earliest start
-///   [editPolicy] gives it ([CalendarEditPolicy.earliestStartOn]), or
-///   where none is free, at its first slot from that start, over an
-///   entry, selecting the day when it is in the month; or, where that
-///   start leaves no slot of the store's hours that day whose start and
-///   end the day's clock both read, as where the clock skips the start or
-///   the end of each, [onCreateRefused].
+///   [onCreateRange] at the day's first slot from the earliest start
+///   [editPolicy] gives it ([CalendarEditPolicy.earliestStartOn]) that is
+///   free of the entries that block it: each entry sharing its time where
+///   [CalendarEditPolicy.allowsOverlaps] is true, and otherwise each one
+///   [CalendarEditPolicy.mayOverlap] does not let the create share. Where
+///   none is free it reports one at the day's first slot from that start,
+///   over an entry, which may be one the policy refuses. It selects the
+///   day when it is in the month; or, where that start leaves no slot of
+///   the store's hours that day whose start and end the day's clock both
+///   read, as where the clock skips the start or the end of each, it
+///   reports [onCreateRefused].
 ///
 /// An entry runs from its start to its end ([CalendarEntry]): Week and Day
 /// draw a timed entry as one block per shown day it covers, at its exact
@@ -287,11 +291,12 @@ class CalendarView<T> extends StatefulWidget {
   /// over free ones, the blocks sharing a day's time side by side; where
   /// it is false none gives times that another timed entry shares, and a
   /// move dropped onto another entry's time lands at the nearest free time
-  /// or goes back. Under either answer Agenda's add buttons create at a
-  /// free slot, and Month's long press does where one is left. The
-  /// calendar checks no write of the host's, and [store] refuses none for
-  /// sharing time: a host whose data forbids it refuses the write in its
-  /// data source.
+  /// or goes back. Agenda's add buttons create at a slot free of every
+  /// entry where it is true, and where it is false free of each entry
+  /// [CalendarEditPolicy.mayOverlap] does not let the create share; Month's
+  /// long press does too where such a slot is left. The calendar checks no
+  /// write of the host's, and [store] refuses none for sharing time: a host
+  /// whose data forbids it refuses the write in its data source.
   ///
   /// A policy not `==` to the last one given cancels a move or a resize in
   /// flight, which then requests nothing, and ends a create range in flight,
@@ -1344,8 +1349,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
 
   /// Reports a create on [day] at the first slot of the hours, from the
   /// earliest start [_policy] gives it ([CalendarEditPolicy.earliestStartOn]),
-  /// that shares no time with an entry the store shows on it, or where
-  /// none is free, at the first slot of the hours from that start
+  /// that shares no time with an entry the store shows on it that blocks it
+  /// (every one where [_policy]'s [CalendarEditPolicy.allowsOverlaps] is
+  /// true, and otherwise each its [CalendarEditPolicy.mayOverlap] refuses),
+  /// or where none is free, at the first slot of the hours from that start,
+  /// over an entry, refused or not, which asks [_policy] nothing
   /// ([CalendarEditRules.firstSlot]): each one whose times the clock reads,
   /// in that start's occurrence where [day]'s clock repeats its time, so
   /// none starts before it. Where it leaves no such slot in the hours,

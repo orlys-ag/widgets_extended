@@ -124,10 +124,13 @@ final class CalendarEarliestStart {
 /// nothing more.
 ///
 /// It reads [CalendarEditPolicy.dayLimit] and
-/// [CalendarEditPolicy.allowsOverlaps] once, when it is made, so no answer
-/// asks them. It holds no entries: an answer that tests entries takes
-/// them, and whether a change shares time with another entry is the
-/// view's to test, from what it shows, where [allowsOverlaps] is false.
+/// [CalendarEditPolicy.allowsOverlaps] once, when it is made, and no answer
+/// of its own reads them again, while [firstSlot] asks
+/// [CalendarEditPolicy.mayOverlap] where [allowsOverlaps] is false, whose
+/// default answers [CalendarEditPolicy.allowsOverlaps]. It holds no
+/// entries: an answer that tests entries takes them, and whether a change
+/// shares time with another entry is the view's to test, from what it
+/// shows, where [allowsOverlaps] is false.
 ///
 /// A `CalendarView` and its views make their rules of its `editPolicy`,
 /// or an [UnrestrictedEditPolicy] where that is null, its store's hours,
@@ -320,10 +323,19 @@ final class CalendarEditRules<T> {
   /// [start]'s first slot minute ([CalendarEarliestStart.firstSlotMinute]),
   /// the first slot ending by [until], or with none the hours' end, whose
   /// start and end the day's clock reads, each in [start]'s occurrence
-  /// ([CalendarEarliestStart.occurrence]), and that shares no time
-  /// ([NoOverlapsPolicy.rangeSharesTime]) with any of [clearOf]; null where
-  /// none does, as on a day [start] closes. [from] and [until] are minutes of
-  /// the day.
+  /// ([CalendarEarliestStart.occurrence]), and that no entry of [clearOf]
+  /// sharing its time ([NoOverlapsPolicy.rangeSharesTime]) blocks; null
+  /// where none does, as on a day [start] closes. [from] and [until] are
+  /// minutes of the day.
+  ///
+  /// Where [allowsOverlaps] is true every entry of [clearOf] that shares a
+  /// slot's time blocks the slot, unasked. Where it is false one blocks it
+  /// only where [policy] does not let the slot share its time
+  /// ([CalendarEditPolicy.mayOverlap]), asked about each such entry in
+  /// turn, up to the first it refuses, with a candidate of the slot's times
+  /// and no entry, built once per slot one shares. So under a policy that
+  /// does not override [CalendarEditPolicy.mayOverlap], whose default then
+  /// answers false, every such entry blocks it too.
   ///
   /// A slot is [slotMinutes] of wall-clock time
   /// ([CalendarDates.timeAtWallMinute]), so on a day whose clock repeats a
@@ -343,8 +355,19 @@ final class CalendarEditRules<T> {
       slotMinutes,
       occurrence: start.occurrence,
       isFree: (slotStart, slotEnd) {
+        CalendarOverlapCandidate<T>? candidate;
         for (final other in clearOf) {
-          if (NoOverlapsPolicy.rangeSharesTime(slotStart, slotEnd, other)) {
+          if (!NoOverlapsPolicy.rangeSharesTime(slotStart, slotEnd, other)) {
+            continue;
+          }
+          if (allowsOverlaps) {
+            return false;
+          }
+          candidate ??= CalendarOverlapCandidate<T>(
+            start: slotStart,
+            end: slotEnd,
+          );
+          if (!policy.mayOverlap(candidate, other)) {
             return false;
           }
         }

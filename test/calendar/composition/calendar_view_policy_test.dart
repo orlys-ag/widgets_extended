@@ -1858,7 +1858,7 @@ void main() {
             ask.candidate.start,
             ask.candidate.end,
             ask.candidate.entry,
-            ask.other.id,
+            ask.other.id!,
           ),
       ];
     }
@@ -1899,12 +1899,7 @@ void main() {
     );
     expect(pairs(), <(DateTime, DateTime, CalendarEntry<String>?, String)>[
       for (var minute = 0; minute < CalendarDates.minutesPerDay; minute += 15)
-        (
-          at(thursday, 0, minute),
-          at(thursday, 0, minute + 15),
-          null,
-          "busy-w",
-        ),
+        (at(thursday, 0, minute), at(thursday, 0, minute + 15), null, "busy-w"),
     ]);
 
     final allowing = PairRecordingPolicy<String>(
