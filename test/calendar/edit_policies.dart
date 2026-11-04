@@ -87,6 +87,15 @@ final class CountingEditPolicy<T> extends CalendarEditPolicy<T> {
     _note("allowsOverlaps");
     return inner.allowsOverlaps;
   }
+
+  @override
+  bool mayOverlap(
+    CalendarOverlapCandidate<T> candidate,
+    CalendarEntry<T> other,
+  ) {
+    _note("mayOverlap");
+    return inner.mayOverlap(candidate, other);
+  }
 }
 
 /// One ask of a [PairRecordingPolicy]: the [candidate] and the [other]

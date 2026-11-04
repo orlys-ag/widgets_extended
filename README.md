@@ -452,7 +452,10 @@ it is, `NoOverlapsPolicy` keeps Week's and Day's moves, resizes and
 creates off other timed entries' times, `DayLimitPolicy` caps the days a
 range covers, and `CalendarEditPolicy.all` combines them. A policy of
 your own extends `CalendarEditPolicy`, in a class you declare `final` or
-`base`.
+`base`. Where its `allowsOverlaps` is false, its `mayOverlap` may still let
+a change share time with some entries: the views ask it about each timed
+entry a change would share time with, given a `CalendarOverlapCandidate`
+of the change's times and the entry it changes.
 
 **Look and words.** A `CalendarThemeData` holds every colour, text style,
 motion and icon the views draw. Give it through a `CalendarTheme`, or in a

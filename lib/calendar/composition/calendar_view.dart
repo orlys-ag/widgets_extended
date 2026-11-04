@@ -289,9 +289,18 @@ class CalendarView<T> extends StatefulWidget {
   /// Day's moves, resizes and creates may give an entry times another
   /// entry shares: where it is true they go over other entries' times as
   /// over free ones, the blocks sharing a day's time side by side; where
-  /// it is false none gives times that another timed entry shares, and a
-  /// move dropped onto another entry's time lands at the nearest free time
-  /// or goes back. Agenda's add buttons create at a slot free of every
+  /// it is false none gives times that another timed entry shares unless
+  /// [CalendarEditPolicy.mayOverlap] lets the change share them. A move
+  /// dropped where the policy refuses lands at the nearest time no entry
+  /// shares, or goes back, and a resize it refuses stops at the first entry
+  /// in its way, allowed or not. A move or a resize asks about the times it
+  /// would give, with the stored entry, and a slot press about the slot's
+  /// times, with no entry. A create drag's range is not picked when it
+  /// asks, at its start, at a store notify and at a new minute, so it asks
+  /// about a candidate with no entry over the days the grid shows: a
+  /// policy that answers from the candidate's times answers about those
+  /// days, and its refusal holds the range at that entry. Agenda's add
+  /// buttons create at a slot free of every
   /// entry where it is true, and where it is false free of each entry
   /// [CalendarEditPolicy.mayOverlap] does not let the create share; Month's
   /// long press does too where such a slot is left. The calendar checks no

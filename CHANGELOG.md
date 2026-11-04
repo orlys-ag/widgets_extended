@@ -66,6 +66,24 @@ there. These helpers become public: `CalendarDates.addMonths`,
 month occupies over the weekdays a `CalendarWeekdaySet` shows.
 `CalendarDates.nextShownDay` throws an `ArgumentError` naming `direction`, in
 every build, for a direction of 0.
+- Added `CalendarEditPolicy.mayOverlap`, which answers whether a change may
+share time with one other entry, and `CalendarOverlapCandidate`, the change
+it is asked about: its start, its end and the entry it changes, none for a
+create. The views ask it only where `allowsOverlaps` is false, and only
+about timed entries that share the change's times, and it defaults to
+`allowsOverlaps`, so a policy that overrides only `allowsOverlaps` refuses
+every pair; `CalendarEditPolicy.all` refuses where any policy that limits
+overlaps refuses. Week's and Day's moves, resizes, slot presses and create
+drags go over the times only of the entries it allows: a move it refuses
+lands at the nearest time no entry shares, or goes back, a resize it
+refuses stops at the first entry in its way, and a create drag, whose range
+is not picked when it asks, asks about a candidate with no entry over the
+days the grid shows. Agenda's add buttons create at the first slot that
+shares no time with an entry it refuses (`CalendarEditRules.firstSlot`),
+and Month's long press does too where such a slot is left. A throw of
+`mayOverlap` is reported as the policy's other answers' are, and one while
+a create range reads its entries again, at a store notify or a new minute,
+ends the range.
 - On a day whose clock skips its midnight hour, as Cuba's does in March,
 Week and Day draw an entry from the day's start, 01:00, from the 01:00 row,
 and a create, move or resize that lands in the skipped rows requests
