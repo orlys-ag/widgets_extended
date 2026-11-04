@@ -89,6 +89,11 @@ void main() {
         calendar.CalendarNow,
         widgets_extended.CalendarNow,
       ],
+      "CalendarOverlapCandidate": <Object>[
+        scheduling.CalendarOverlapCandidate,
+        calendar.CalendarOverlapCandidate,
+        widgets_extended.CalendarOverlapCandidate,
+      ],
       "CalendarResizeEdges": <Object>[
         scheduling.CalendarResizeEdges,
         calendar.CalendarResizeEdges,
@@ -175,7 +180,7 @@ void main() {
         widgets_extended.MemoryCalendarStore,
       ],
     };
-    expect(names, hasLength(32));
+    expect(names, hasLength(33));
     for (final MapEntry(key: name, value: values) in names.entries) {
       expect(values[1], values[0], reason: "calendar: $name");
       expect(values[2], values[0], reason: "package: $name");

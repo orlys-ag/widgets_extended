@@ -1,7 +1,8 @@
 /// The edit policy: the permissive answers a policy overriding nothing
 /// gives, the unrestricted policy's equality, the time a policy answers
-/// at, the policy of all of several, the day limit policy, and the
-/// policy forbidding overlaps.
+/// at, the policy of all of several, the day limit policy, the policy
+/// forbidding overlaps, and the per-pair answer on overlaps with the
+/// candidate it takes.
 library;
 
 import 'dart:ui';
@@ -9,6 +10,7 @@ import 'dart:ui';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
+import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
 
 import '../dst_days.dart';
 
@@ -45,10 +47,21 @@ final class _Plain extends CalendarEditPolicy<String> {
   const _Plain();
 }
 
+/// A policy that overrides only [allowsOverlaps], to false.
+final class _Forbidding extends CalendarEditPolicy<String> {
+  const _Forbidding();
+
+  @override
+  bool get allowsOverlaps {
+    return false;
+  }
+}
+
 /// A policy giving the answers it is made with, recording each ask in
 /// [log] as its [name] and the member's, and the kind of each
 /// [admitsChange] ask in [kinds], where given, as its [name] and "all-day"
-/// or "timed". Compared by identity.
+/// or "timed". Its [mayOverlap] refuses the other entries whose ids
+/// [refused] holds, whatever [overlaps] is. Compared by identity.
 final class _Answering extends CalendarEditPolicy<String> {
   const _Answering(
     this.name,
@@ -62,6 +75,7 @@ final class _Answering extends CalendarEditPolicy<String> {
     this.limit,
     this.overlaps = true,
     this.kinds,
+    this.refused = const <String>{},
   });
 
   final String name;
@@ -78,6 +92,7 @@ final class _Answering extends CalendarEditPolicy<String> {
   final int? limit;
   final bool overlaps;
   final List<String>? kinds;
+  final Set<String> refused;
 
   static DateTime? _dayItself(DateTime day) {
     return day;
@@ -140,6 +155,15 @@ final class _Answering extends CalendarEditPolicy<String> {
     log.add("$name.allowsOverlaps");
     return overlaps;
   }
+
+  @override
+  bool mayOverlap(
+    CalendarOverlapCandidate<String> candidate,
+    CalendarEntry<String> other,
+  ) {
+    log.add("$name.mayOverlap");
+    return !refused.contains(other.id);
+  }
 }
 
 /// A policy whose move answer throws a [StateError].
@@ -200,6 +224,127 @@ void main() {
     expect(built.hashCode, constant.hashCode);
     expect(constant.allowsOverlaps, isTrue);
     expect(constant.dayLimit, isNull);
+  });
+
+  test("EP20 a policy that does not override the per-pair answer gives its "
+      "answer on overlaps for a pair that shares time: the unrestricted "
+      "policy, the history lock and the day limit allow it, and one "
+      "overriding only the answer on overlaps, to false, refuses it", () {
+    final booked = entryOf("booked", at(tuesday, 9), at(tuesday, 10));
+    final moved = entryOf("moved", at(tuesday, 8), at(tuesday, 9));
+    final candidates = <CalendarOverlapCandidate<String>>[
+      CalendarOverlapCandidate<String>(
+        start: at(tuesday, 9, 30),
+        end: at(tuesday, 10, 30),
+        entry: moved,
+      ),
+      CalendarOverlapCandidate<String>(
+        start: at(tuesday, 9, 30),
+        end: at(tuesday, 9, 45),
+      ),
+    ];
+    for (final candidate in candidates) {
+      // Setup sanity: the pair shares time.
+      expect(
+        NoOverlapsPolicy.rangeSharesTime(
+          candidate.start,
+          candidate.end,
+          booked,
+        ),
+        isTrue,
+      );
+      for (final policy in <CalendarEditPolicy<String>>[
+        const UnrestrictedEditPolicy<String>(),
+        const HistoryLockPolicy<String>(),
+        const HistoryLockPolicy<String>(lockEarlierToday: true),
+        DayLimitPolicy<String>(2),
+      ]) {
+        expect(
+          policy.mayOverlap(candidate, booked),
+          isTrue,
+          reason: "$policy, $candidate",
+        );
+      }
+      expect(
+        const _Forbidding().mayOverlap(candidate, booked),
+        isFalse,
+        reason: "$candidate",
+      );
+    }
+  });
+
+  test("EP22 a candidate holds its times and the entry it changes, with its "
+      "payload, and none for a create; equal candidates are equal with "
+      "equal hash codes; and each one built counts once in a debug "
+      "build", () {
+    final moved = CalendarEntry<String>(
+      id: "moved",
+      start: at(tuesday, 8),
+      end: at(tuesday, 9),
+      title: "moved",
+      color: const Color(0xFF336699),
+      payload: "tentative",
+    );
+    final before = debugOverlapCandidateCount;
+    final move = CalendarOverlapCandidate<String>(
+      start: at(tuesday, 9),
+      end: at(tuesday, 10),
+      entry: moved,
+    );
+    final create = CalendarOverlapCandidate<String>(
+      start: at(tuesday, 9),
+      end: at(tuesday, 10),
+    );
+    expect(debugOverlapCandidateCount - before, 2);
+    expect(move.start, at(tuesday, 9));
+    expect(move.end, at(tuesday, 10));
+    expect(move.entry, same(moved));
+    expect(move.entry!.payload, "tentative");
+    expect(create.entry, isNull);
+
+    CalendarOverlapCandidate<String> movedAgain() {
+      return CalendarOverlapCandidate<String>(
+        start: at(tuesday, 9),
+        end: at(tuesday, 10),
+        entry: CalendarEntry<String>(
+          id: "moved",
+          start: at(tuesday, 8),
+          end: at(tuesday, 9),
+          title: "moved",
+          color: const Color(0xFF336699),
+          payload: "tentative",
+        ),
+      );
+    }
+
+    final again = movedAgain();
+    expect(debugOverlapCandidateCount - before, 3);
+    // Setup sanity: equal entries, not the same one.
+    expect(identical(again.entry, moved), isFalse);
+    expect(again, move);
+    expect(again.hashCode, move.hashCode);
+    final createAgain = CalendarOverlapCandidate<String>(
+      start: at(tuesday, 9),
+      end: at(tuesday, 10),
+    );
+    expect(createAgain, create);
+    expect(createAgain.hashCode, create.hashCode);
+    expect(create, isNot(move));
+    expect(move, isNot(create));
+    expect(
+      CalendarOverlapCandidate<String>(
+        start: at(tuesday, 9, 15),
+        end: at(tuesday, 10),
+      ),
+      isNot(create),
+    );
+    expect(
+      CalendarOverlapCandidate<String>(
+        start: at(tuesday, 9),
+        end: at(tuesday, 10, 15),
+      ),
+      isNot(create),
+    );
   });
 
   test("EP3 a CalendarNow takes today to its midnight, rounds the time of "
@@ -580,6 +725,88 @@ void main() {
         isTrue,
       );
       expect(kinds, <String>["a all-day", "b all-day", "a timed", "b timed"]);
+    });
+
+    test("EP21 lets a pair share time only where every policy that limits "
+        "overlaps does: it asks them in order, reading each one's answer on "
+        "overlaps, up to the first refusal, and never asks one whose answer "
+        "on overlaps is true", () {
+      final x = entryOf("X", at(tuesday, 9), at(tuesday, 10));
+      final y = entryOf("Y", at(tuesday, 9), at(tuesday, 10));
+      final candidate = CalendarOverlapCandidate<String>(
+        start: at(tuesday, 9, 30),
+        end: at(tuesday, 9, 45),
+      );
+      final refusingX = _Answering(
+        "refusing",
+        log,
+        overlaps: false,
+        refused: const <String>{"X"},
+      );
+      final mixed = CalendarEditPolicy<String>.all(
+        <CalendarEditPolicy<String>>[
+          const UnrestrictedEditPolicy<String>(),
+          refusingX,
+        ],
+      );
+      expect(mixed.mayOverlap(candidate, x), isFalse);
+      expect(mixed.mayOverlap(candidate, y), isTrue);
+
+      expect(
+        CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+          const NoOverlapsPolicy<String>(),
+          const UnrestrictedEditPolicy<String>(),
+        ]).mayOverlap(candidate, y),
+        isFalse,
+      );
+      expect(
+        CalendarEditPolicy<String>.all(
+          const <CalendarEditPolicy<String>>[],
+        ).mayOverlap(candidate, x),
+        isTrue,
+      );
+
+      final ordered = CalendarEditPolicy<String>.all(<_Answering>[
+        _Answering("first", log, overlaps: false),
+        _Answering(
+          "second",
+          log,
+          overlaps: false,
+          refused: const <String>{"X"},
+        ),
+        _Answering("third", log, overlaps: false),
+      ]);
+      log.clear();
+      expect(ordered.mayOverlap(candidate, x), isFalse);
+      expect(log, <String>[
+        "first.allowsOverlaps",
+        "first.mayOverlap",
+        "second.allowsOverlaps",
+        "second.mayOverlap",
+      ]);
+      log.clear();
+      expect(ordered.mayOverlap(candidate, y), isTrue);
+      expect(log, <String>[
+        "first.allowsOverlaps",
+        "first.mayOverlap",
+        "second.allowsOverlaps",
+        "second.mayOverlap",
+        "third.allowsOverlaps",
+        "third.mayOverlap",
+      ]);
+
+      final lax = _Answering("lax", log, refused: const <String>{"X"});
+      // Setup sanity: asked alone, it refuses X.
+      expect(lax.mayOverlap(candidate, x), isFalse);
+      log.clear();
+      expect(
+        CalendarEditPolicy<String>.all(<_Answering>[lax]).mayOverlap(
+          candidate,
+          x,
+        ),
+        isTrue,
+      );
+      expect(log, <String>["lax.allowsOverlaps"]);
     });
   });
 

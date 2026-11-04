@@ -1,6 +1,7 @@
 /// The edit rules: where a new entry may start on a day, the first slot a
-/// create takes, the times a change may take, the day limit, and what
-/// making and updating the rules asks of their policy.
+/// create takes and the pairs it asks about, the times a change may take,
+/// the day limit, and what making and updating the rules asks of their
+/// policy.
 library;
 
 import 'dart:ui' show Color;
@@ -82,6 +83,37 @@ final class _Asking extends CalendarEditPolicy<String> {
   bool get allowsOverlaps {
     _note("allowsOverlaps");
     return _allowsOverlaps;
+  }
+}
+
+/// One pair a [_Pairing] policy was asked about.
+typedef _Pair = ({
+  CalendarOverlapCandidate<String> candidate,
+  CalendarEntry<String> other,
+});
+
+/// A policy whose answer on overlaps is [overlaps], letting a pair share
+/// time where the other entry's payload starts with "tentative", that
+/// records each pair it is asked about in [asked]. Compared by identity.
+final class _Pairing extends CalendarEditPolicy<String> {
+  _Pairing({this.overlaps = false});
+
+  final bool overlaps;
+
+  final List<_Pair> asked = <_Pair>[];
+
+  @override
+  bool get allowsOverlaps {
+    return overlaps;
+  }
+
+  @override
+  bool mayOverlap(
+    CalendarOverlapCandidate<String> candidate,
+    CalendarEntry<String> other,
+  ) {
+    asked.add((candidate: candidate, other: other));
+    return other.payload.startsWith("tentative");
   }
 }
 
@@ -186,6 +218,96 @@ void main() {
     ];
     expect(rules.firstSlot(start, clearOf: busy), isNull);
     expect(rules.firstSlot(start), slot(tuesday, at(tuesday, 0, 15)));
+  });
+
+  test("ER15 under a policy that limits overlaps the first slot is the "
+      "earliest whose sharing entries the policy lets it share: it asks "
+      "about each entry sharing a slot's time, up to the first refusal, "
+      "with one candidate of the slot's times and no entry per slot", () {
+    final policy = _Pairing();
+    final rules = CalendarEditRules<String>(
+      policy: policy,
+      hours: office,
+      slotMinutes: 15,
+    );
+    final start = CalendarEarliestStart(tuesday, tuesday);
+    final tentativeFirst = <CalendarEntry<String>>[
+      entryOf("tentative", at(tuesday, 8), at(tuesday, 9)),
+      entryOf("busy", at(tuesday, 9), at(tuesday, 10)),
+    ];
+    var before = debugOverlapCandidateCount;
+    expect(
+      rules.firstSlot(start, clearOf: tentativeFirst),
+      slot(at(tuesday, 8), at(tuesday, 8, 15)),
+    );
+    expect(debugOverlapCandidateCount - before, 1);
+    expect(
+      policy.asked.map((pair) {
+        return (pair.candidate, pair.other.id);
+      }),
+      <(CalendarOverlapCandidate<String>, String)>[
+        (
+          CalendarOverlapCandidate<String>(
+            start: at(tuesday, 8),
+            end: at(tuesday, 8, 15),
+          ),
+          "tentative",
+        ),
+      ],
+    );
+
+    policy.asked.clear();
+    final busyFirst = <CalendarEntry<String>>[
+      entryOf("busy", at(tuesday, 8), at(tuesday, 9)),
+      entryOf("tentative", at(tuesday, 9), at(tuesday, 9, 30)),
+    ];
+    before = debugOverlapCandidateCount;
+    expect(
+      rules.firstSlot(start, clearOf: busyFirst),
+      slot(at(tuesday, 9), at(tuesday, 9, 15)),
+    );
+    expect(debugOverlapCandidateCount - before, 5);
+    expect(
+      policy.asked.map((pair) {
+        return (
+          pair.candidate.start,
+          pair.candidate.end,
+          pair.candidate.entry,
+          pair.other.id,
+        );
+      }),
+      <(DateTime, DateTime, CalendarEntry<String>?, String)>[
+        (at(tuesday, 8), at(tuesday, 8, 15), null, "busy"),
+        (at(tuesday, 8, 15), at(tuesday, 8, 30), null, "busy"),
+        (at(tuesday, 8, 30), at(tuesday, 8, 45), null, "busy"),
+        (at(tuesday, 8, 45), at(tuesday, 9), null, "busy"),
+        (at(tuesday, 9), at(tuesday, 9, 15), null, "tentative"),
+      ],
+    );
+  });
+
+  test("ER16 under a policy that allows overlaps the first slot is clear "
+      "of every given entry, asking nothing per pair and building no "
+      "candidate", () {
+    final policy = _Pairing(overlaps: true);
+    final rules = CalendarEditRules<String>(
+      policy: policy,
+      hours: CalendarDayHours.allDay,
+      slotMinutes: 15,
+    );
+    final before = debugOverlapCandidateCount;
+    expect(
+      rules.firstSlot(
+        CalendarEarliestStart(tuesday, tuesday),
+        clearOf: <CalendarEntry<String>>[
+          entryOf("tentative-one", tuesday, at(tuesday, 1)),
+          entryOf("tentative-two", at(tuesday, 1, 15), at(tuesday, 2)),
+        ],
+      ),
+      slot(at(tuesday, 1), at(tuesday, 1, 15)),
+    );
+    expect(policy.asked, isEmpty);
+    expect(debugOverlapCandidateCount, before);
   });
 
   test("ER3 a day free only in the hours' last slot gets that slot", () {

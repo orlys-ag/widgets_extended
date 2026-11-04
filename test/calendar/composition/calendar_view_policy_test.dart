@@ -1,8 +1,8 @@
 /// The calendar's edit policy: what each answer limits in Week, Day, Month
 /// and Agenda, a policy change and a new minute during a gesture, a create
 /// range's earliest start as the minute moves, an answer that throws, a
-/// day limit under 1, and Month's long press under store hours off the
-/// slot grid.
+/// day limit under 1, Month's long press under store hours off the slot
+/// grid, and the per-pair answer on overlaps in Month and Agenda.
 library;
 
 import 'package:flutter/gestures.dart';
@@ -1816,6 +1816,160 @@ void main() {
         );
       });
     }
+  });
+
+  testWidgets("PV15 Month's long press under a per-pair policy creates at "
+      "the day's first slot whose sharing entries the policy lets it share, "
+      "asking only about the entries sharing each slot's time; asks "
+      "nothing where overlaps are allowed; and creates over an entry where "
+      "the policy leaves no slot free", (tester) async {
+    final policy = PairRecordingPolicy<String>(allows: tentativePair);
+    final host = Host(
+      storeOf(<CalendarEntry<String>>[
+        entryOf("tentative", tuesday, at(tuesday, 1)),
+        entryOf("busy", wednesday, at(wednesday, 1)),
+        entryOf("busy-w", thursday, friday),
+      ]),
+      view: CalendarViewKind.month,
+      day: tuesday,
+      time: at(monday, 8),
+      policy: policy,
+    );
+    await host.pump(tester);
+
+    /// The pairs [policy] was asked about since the last clear, each as its
+    /// candidate's times and entry and the other entry's id, after
+    /// checking that each pair shares time.
+    List<(DateTime, DateTime, CalendarEntry<String>?, String)> pairs() {
+      for (final ask in policy.asked) {
+        expect(
+          NoOverlapsPolicy.rangeSharesTime(
+            ask.candidate.start,
+            ask.candidate.end,
+            ask.other,
+          ),
+          isTrue,
+          reason: "${ask.candidate}, ${ask.other.id}",
+        );
+      }
+      return <(DateTime, DateTime, CalendarEntry<String>?, String)>[
+        for (final ask in policy.asked)
+          (
+            ask.candidate.start,
+            ask.candidate.end,
+            ask.candidate.entry,
+            ask.other.id,
+          ),
+      ];
+    }
+
+    await tester.longPress(find.byKey(monthStripKey(tuesday)));
+    await tester.pumpAndSettle();
+    expect(host.creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: tuesday, end: at(tuesday, 0, 15)),
+    ]);
+    expect(pairs(), <(DateTime, DateTime, CalendarEntry<String>?, String)>[
+      (tuesday, at(tuesday, 0, 15), null, "tentative"),
+    ]);
+
+    policy.asked.clear();
+    await tester.longPress(find.byKey(monthStripKey(wednesday)));
+    await tester.pumpAndSettle();
+    expect(host.creates, hasLength(2));
+    expect(
+      host.creates.last,
+      CalendarCreateRange(start: at(wednesday, 1), end: at(wednesday, 1, 15)),
+    );
+    expect(pairs(), <(DateTime, DateTime, CalendarEntry<String>?, String)>[
+      (wednesday, at(wednesday, 0, 15), null, "busy"),
+      (at(wednesday, 0, 15), at(wednesday, 0, 30), null, "busy"),
+      (at(wednesday, 0, 30), at(wednesday, 0, 45), null, "busy"),
+      (at(wednesday, 0, 45), at(wednesday, 1), null, "busy"),
+    ]);
+
+    // Every slot of Thursday shares "busy-w"'s time, and the policy refuses
+    // each.
+    policy.asked.clear();
+    await tester.longPress(find.byKey(monthStripKey(thursday)));
+    await tester.pumpAndSettle();
+    expect(host.creates, hasLength(3));
+    expect(
+      host.creates.last,
+      CalendarCreateRange(start: thursday, end: at(thursday, 0, 15)),
+    );
+    expect(pairs(), <(DateTime, DateTime, CalendarEntry<String>?, String)>[
+      for (var minute = 0; minute < CalendarDates.minutesPerDay; minute += 15)
+        (
+          at(thursday, 0, minute),
+          at(thursday, 0, minute + 15),
+          null,
+          "busy-w",
+        ),
+    ]);
+
+    final allowing = PairRecordingPolicy<String>(
+      allows: tentativePair,
+      overlaps: true,
+    );
+    host.policy.value = allowing;
+    await tester.pumpAndSettle();
+    final before = debugOverlapCandidateCount;
+    await tester.longPress(find.byKey(monthStripKey(tuesday)));
+    await tester.pumpAndSettle();
+    // Setup sanity: the long press searched the slots, "tentative"
+    // blocking its own.
+    expect(host.creates, hasLength(4));
+    expect(
+      host.creates.last,
+      CalendarCreateRange(start: at(tuesday, 1), end: at(tuesday, 1, 15)),
+    );
+    expect(allowing.asked, isEmpty);
+    expect(debugOverlapCandidateCount, before);
+  });
+
+  testWidgets("PV16 Agenda's add under a per-pair policy creates at the "
+      "gap's first slot without asking about either neighbour, neither "
+      "sharing its time, and asks nothing and builds no candidate where "
+      "overlaps are allowed", (tester) async {
+    final policy = PairRecordingPolicy<String>(allows: tentativePair);
+    final host = Host(
+      storeOf(<CalendarEntry<String>>[
+        entryOf("busy-a", at(tuesday, 9), at(tuesday, 10)),
+        entryOf("busy-b", at(tuesday, 11), at(tuesday, 12)),
+      ]),
+      view: CalendarViewKind.agenda,
+      day: tuesday,
+      time: at(monday, 8),
+      policy: policy,
+    );
+    await host.pump(tester);
+    final add = find.descendant(
+      of: find.byKey(dayListGapKey(tuesday, 10 * 60)),
+      matching: find.text("add 600"),
+    );
+    await tester.tap(add);
+    await tester.pumpAndSettle();
+    expect(host.creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 10, 15)),
+    ]);
+    expect(policy.asked, isEmpty);
+
+    final before = debugOverlapCandidateCount;
+    final allowing = PairRecordingPolicy<String>(
+      allows: tentativePair,
+      overlaps: true,
+    );
+    host.policy.value = allowing;
+    await tester.pumpAndSettle();
+    await tester.tap(add);
+    await tester.pumpAndSettle();
+    expect(host.creates, hasLength(2));
+    expect(
+      host.creates.last,
+      CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 10, 15)),
+    );
+    expect(allowing.asked, isEmpty);
+    expect(debugOverlapCandidateCount, before);
   });
 
   testWidgets("RC17 Month's long press after a set of store hours off the "

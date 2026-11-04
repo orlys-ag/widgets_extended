@@ -1,6 +1,6 @@
 /// The overlap rule over instants: half-open start-to-end intervals that
 /// intersect, across midnight too, and all-day entries that share time
-/// with nothing.
+/// with nothing; and the policy forbidding overlaps refusing each pair.
 library;
 
 import 'dart:ui' show Color;
@@ -179,6 +179,71 @@ void main() {
         NoOverlapsPolicy.entriesShareTime(timed, allDay),
         isFalse,
         reason: timed.id,
+      );
+    }
+  });
+
+  test("OV6 the policy forbidding overlaps refuses each pair that shares "
+      "time: timed with timed, across midnight, a move's candidate and a "
+      "create's", () {
+    const policy = NoOverlapsPolicy<String>();
+    final late = entryOf(
+      "late",
+      DateTime(2026, 4, 20, 23),
+      DateTime(2026, 4, 21, 1),
+    );
+    final early = entryOf(
+      "early",
+      DateTime(2026, 4, 21, 0, 30),
+      DateTime(2026, 4, 21, 1, 30),
+    );
+    final nine = entryOf(
+      "nine",
+      DateTime(2026, 4, 21, 9),
+      DateTime(2026, 4, 21, 10),
+    );
+    final half = entryOf(
+      "half",
+      DateTime(2026, 4, 21, 9, 30),
+      DateTime(2026, 4, 21, 10, 30),
+    );
+    final pairs =
+        <(CalendarOverlapCandidate<String>, CalendarEntry<String>)>[
+          (
+            CalendarOverlapCandidate<String>(
+              start: nine.start,
+              end: nine.end,
+              entry: nine,
+            ),
+            half,
+          ),
+          (
+            CalendarOverlapCandidate<String>(
+              start: late.start,
+              end: late.end,
+              entry: late,
+            ),
+            early,
+          ),
+          (
+            CalendarOverlapCandidate<String>(
+              start: DateTime(2026, 4, 21),
+              end: DateTime(2026, 4, 21, 0, 15),
+            ),
+            late,
+          ),
+        ];
+    for (final (candidate, other) in pairs) {
+      // Setup sanity: the pair shares time.
+      expect(
+        NoOverlapsPolicy.rangeSharesTime(candidate.start, candidate.end, other),
+        isTrue,
+        reason: "$candidate, ${other.id}",
+      );
+      expect(
+        policy.mayOverlap(candidate, other),
+        isFalse,
+        reason: "$candidate, ${other.id}",
       );
     }
   });
