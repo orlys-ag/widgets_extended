@@ -1213,7 +1213,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// before the first. Cleared by a store notify, a new store and new
   /// tracks' first day or day count, and kept across builds, layouts and
   /// drags.
-  GridOverlapIndex? _offRange;
+  GridOverlapIndex<T>? _offRange;
 
   /// What the all-day strip's cells show. The cell builder runs only when
   /// the board rebuilds a cell, so the strip cells listen to this.
@@ -2782,9 +2782,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// [lastDay] cover, [_offRange], having read first the days among them it has
   /// not: one [CalendarStore.entriesBetween] before the range and one after it
   /// at most, each wholly outside the range.
-  GridOverlapIndex _offRangeOver(int firstDay, int lastDay) {
+  GridOverlapIndex<T> _offRangeOver(int firstDay, int lastDay) {
     final tracks = _tracks;
-    final index = _offRange ??= GridOverlapIndex(
+    final index = _offRange ??= GridOverlapIndex<T>(
       readFrom: tracks.firstDay,
       readTo: tracks.lastDay,
     );
