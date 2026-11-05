@@ -26,6 +26,7 @@ import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
+import '../../scheduling/dst_days.dart';
 import '../edit_policies.dart';
 import '../recording_errors.dart';
 
@@ -1821,8 +1822,9 @@ void main() {
   });
 
   testWidgets("PV15 Month's long press under a per-pair policy creates at "
-      "the day's first slot whose sharing entries the policy lets it share, "
-      "asking only about the entries sharing each slot's time; asks "
+      "the day's first slot no entry shares, past an earlier one whose "
+      "sharing entries the policy lets it share, asking only about the "
+      "entries sharing each slot's time until it holds such a slot; asks "
       "nothing where overlaps are allowed; and creates over an entry where "
       "the policy leaves no slot free", (tester) async {
     final policy = PairRecordingPolicy<String>(allows: tentativePair);
@@ -1868,7 +1870,7 @@ void main() {
     await tester.longPress(find.byKey(monthStripKey(tuesday)));
     await tester.pumpAndSettle();
     expect(host.creates, <CalendarCreateRange>[
-      CalendarCreateRange(start: tuesday, end: at(tuesday, 0, 15)),
+      CalendarCreateRange(start: at(tuesday, 1), end: at(tuesday, 1, 15)),
     ]);
     expect(pairs(), <(DateTime, DateTime, CalendarEntry<String>?, String)>[
       (tuesday, at(tuesday, 0, 15), null, "tentative"),
@@ -2367,6 +2369,67 @@ void main() {
       );
     }
   });
+
+  group(
+    "on the day whose clock repeats its midnight",
+    skip: repeatedMidnightSkip,
+    () {
+      testWidgets("PV25 Agenda's add under a per-pair policy takes the "
+          "gap's first slot no entry shares, past an earlier one that an "
+          "entry listed before the gap holds and the policy lets the create "
+          "share, asking about no slot after that one", (tester) async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final dayBefore = DateTime(day.year, day.month, day.day - 1);
+        final policy = PairRecordingPolicy<String>(allows: tentativePair);
+        final host = Host(
+          storeOf(<CalendarEntry<String>>[
+            entryOf(
+              "tentative-late",
+              at(dayBefore, 23),
+              laterMidnight.add(const Duration(minutes: 30)),
+            ),
+          ]),
+          view: CalendarViewKind.agenda,
+          day: day,
+          time: at(dayBefore, 8),
+          policy: policy,
+        );
+        await host.pump(tester);
+        // Setup sanity: Agenda lists the entry to 00:30, so its gap runs
+        // from there.
+        final gap = find.byKey(dayListGapKey(day, 30));
+        expect(gap, findsOneWidget);
+        await tester.tap(
+          find.descendant(of: gap, matching: find.text("add 60")),
+        );
+        await tester.pumpAndSettle();
+        expect(host.creates, <CalendarCreateRange>[
+          CalendarCreateRange(start: at(day, 1), end: at(day, 1, 15)),
+        ]);
+        expect(policy.asked, isNotEmpty);
+        expect(
+          <(String?, DateTime, DateTime, CalendarEntry<String>?)>{
+            for (final ask in policy.asked)
+              (
+                ask.other.id,
+                ask.candidate.start,
+                ask.candidate.end,
+                ask.candidate.entry,
+              ),
+          },
+          <(String?, DateTime, DateTime, CalendarEntry<String>?)>{
+            (
+              "tentative-late",
+              day.add(const Duration(minutes: 30)),
+              day.add(const Duration(minutes: 45)),
+              null,
+            ),
+          },
+        );
+      });
+    },
+  );
 
   testWidgets("PV22 in Day under a per-pair policy a refused resize stops "
       "its end at the first entry in its way that the policy refuses, past "

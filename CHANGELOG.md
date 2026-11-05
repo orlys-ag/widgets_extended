@@ -88,11 +88,12 @@ change of the slot under the pointer, at a store notify and at a new
 minute, about the range a release would report; it holds the range short
 of the entry it refuses nearest the slot it started on, or to that slot
 alone where that entry shares its time, and asks again about the held range.
-Agenda's add buttons create at the first slot that shares no time with an
-entry it refuses (`CalendarEditRules.firstSlot`), and Month's long press
-does too where such a slot is left. A throw of `mayOverlap` is reported as
-the policy's other answers' are, and one while a create range tests its
-range, at a pointer move, a store notify or a new minute, ends the range.
+Agenda's add buttons and Month's long press create at the first slot no
+entry shares, or where none is, at the first sharing time only with entries
+it allows (`CalendarEditRules.firstSlot`), Month's where such a slot is left.
+A throw of `mayOverlap` is reported as the policy's other answers' are, and
+one while a create range tests its range, at a pointer move, a store notify
+or a new minute, ends the range.
 - `CalendarView.onCreateRange` takes a `CalendarCreateDetails`: the `range` a
 create gesture picked; the `globalRect`, in global logical pixels, that the
 create's mark covers on screen when it is reported, which in Week and Day is

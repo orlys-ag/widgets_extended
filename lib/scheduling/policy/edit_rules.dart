@@ -323,19 +323,22 @@ final class CalendarEditRules<T> {
   /// [start]'s first slot minute ([CalendarEarliestStart.firstSlotMinute]),
   /// the first slot ending by [until], or with none the hours' end, whose
   /// start and end the day's clock reads, each in [start]'s occurrence
-  /// ([CalendarEarliestStart.occurrence]), and that no entry of [clearOf]
-  /// sharing its time ([NoOverlapsPolicy.rangeSharesTime]) blocks; null
-  /// where none does, as on a day [start] closes. [from] and [until] are
-  /// minutes of the day.
+  /// ([CalendarEarliestStart.occurrence]), that the entries of [clearOf]
+  /// sharing its time ([NoOverlapsPolicy.rangeSharesTime]) leave it, as the
+  /// next paragraph gives; null where none is, as on a day [start] closes.
+  /// [from] and [until] are minutes of the day.
   ///
   /// Where [allowsOverlaps] is true every entry of [clearOf] that shares a
-  /// slot's time blocks the slot, unasked. Where it is false one blocks it
-  /// only where [policy] does not let the slot share its time
-  /// ([CalendarEditPolicy.mayOverlap]), asked about each such entry in
-  /// turn, up to the first it refuses, with a candidate of the slot's times
-  /// and no entry, built once per slot one shares. So under a policy that
-  /// does not override [CalendarEditPolicy.mayOverlap], whose default then
-  /// answers false, every such entry blocks it too.
+  /// slot's time blocks the slot, unasked. Where it is false the slot is the
+  /// first that no entry of [clearOf] shares, where one is; where none is,
+  /// the first whose sharing entries [policy] all lets it share
+  /// ([CalendarEditPolicy.mayOverlap]); and null where neither is. It asks
+  /// about the entries sharing a slot's time in turn, up to the first it
+  /// refuses, with one candidate of the slot's times and no entry per slot
+  /// it asks about, and asks nothing once it holds a slot whose sharing
+  /// entries the policy all allows. So under a policy that does not
+  /// override [CalendarEditPolicy.mayOverlap], whose default then answers
+  /// false, every such entry blocks the slot too.
   ///
   /// A slot is [slotMinutes] of wall-clock time
   /// ([CalendarDates.timeAtWallMinute]), so on a day whose clock repeats a
@@ -348,7 +351,10 @@ final class CalendarEditRules<T> {
     int? from,
     int? until,
   }) {
-    return firstReadableSlot(
+    // The first slot whose sharing entries the policy all allows, which the
+    // scan holds while it looks on for a slot no entry shares.
+    ({DateTime start, DateTime end})? held;
+    final free = firstReadableSlot(
       start.day,
       math.max(from ?? hours.start, start.firstSlotMinute(slotMinutes)),
       until ?? hours.end,
@@ -360,7 +366,7 @@ final class CalendarEditRules<T> {
           if (!NoOverlapsPolicy.rangeSharesTime(slotStart, slotEnd, other)) {
             continue;
           }
-          if (allowsOverlaps) {
+          if (allowsOverlaps || held != null) {
             return false;
           }
           candidate ??= CalendarOverlapCandidate<T>(
@@ -371,9 +377,14 @@ final class CalendarEditRules<T> {
             return false;
           }
         }
+        if (candidate != null) {
+          held = (start: slotStart, end: slotEnd);
+          return false;
+        }
         return true;
       },
     );
+    return free ?? held;
   }
 
   @override

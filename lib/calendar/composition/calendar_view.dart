@@ -125,14 +125,14 @@ final class CalendarEntryTapDetails<T> {
 ///   opens that day in Day where [views] lists Day, and otherwise selects
 ///   it. In edit mode a long press on a day reports a create through
 ///   [onCreateRange] at the day's first slot from the earliest start
-///   [editPolicy] gives it ([CalendarEditPolicy.earliestStartOn]) that is
-///   free of the entries that block it: each entry sharing its time where
-///   [CalendarEditPolicy.allowsOverlaps] is true, and otherwise each one
-///   [CalendarEditPolicy.mayOverlap] does not let the create share. Where
-///   none is free it reports one at the day's first slot from that start,
-///   over an entry, which may be one the policy refuses, and marks the day
-///   until the create's future completes or a later create moves the
-///   mark. It selects the day when it is in the month; or, where that
+///   [editPolicy] gives it ([CalendarEditPolicy.earliestStartOn]) that no
+///   entry shares, or, where [CalendarEditPolicy.allowsOverlaps] is false
+///   and none is, at the first whose sharing entries
+///   [CalendarEditPolicy.mayOverlap] all lets the create share. Where
+///   neither is left it reports one at the day's first slot from that
+///   start, over an entry, which may be one the policy refuses, and marks
+///   the day until the create's future completes or a later create moves
+///   the mark. It selects the day when it is in the month; or, where that
 ///   start leaves no slot of the store's hours that day whose start and
 ///   end the day's clock both read, as where the clock skips the start or
 ///   the end of each, it reports [onCreateRefused] and marks nothing.
@@ -306,12 +306,13 @@ class CalendarView<T> extends StatefulWidget {
   /// slot under the pointer, at a store notify and at a new minute; a
   /// refusal holds the range short of the refused entry nearest the slot it
   /// started on, or to that slot alone where the entry shares its time.
-  /// Agenda's add buttons create at a slot free of every entry where it
-  /// is true, and where it is false free of each entry
-  /// [CalendarEditPolicy.mayOverlap] does not let the create share; Month's
-  /// long press does too where such a slot is left. The calendar checks no
-  /// write of the host's, and [store] refuses none for sharing time: a host
-  /// whose data forbids it refuses the write in its data source.
+  /// Agenda's add buttons create at the first slot free of every entry where
+  /// it is true, and where it is false at the first slot no entry shares, or
+  /// where none does, the first sharing time only with entries
+  /// [CalendarEditPolicy.mayOverlap] lets the create share; Month's long
+  /// press does too where such a slot is left. The calendar checks no write
+  /// of the host's, and [store] refuses none for sharing time: a host whose
+  /// data forbids it refuses the write in its data source.
   ///
   /// A policy not `==` to the last one given cancels a move or a resize in
   /// flight, which then requests nothing, and ends a create range in flight,
@@ -1373,19 +1374,19 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     return _openCreateFlow(day, globalRect);
   }
 
-  /// Reports a create on [day] at the first slot of the hours, from the
-  /// earliest start [_policy] gives it ([CalendarEditPolicy.earliestStartOn]),
-  /// that shares no time with an entry the store shows on it that blocks it
-  /// (every one where [_policy]'s [CalendarEditPolicy.allowsOverlaps] is
-  /// true, and otherwise each its [CalendarEditPolicy.mayOverlap] refuses),
-  /// or where none is free, at the first slot of the hours from that start,
-  /// over an entry, refused or not, which asks [_policy] nothing
-  /// ([CalendarEditRules.firstSlot]): each one whose times the clock reads,
-  /// in that start's occurrence where [day]'s clock repeats its time, so
-  /// none starts before it, with [globalRect], the day cell's, as its rect
-  /// and returning [_createRange]'s future. Where it leaves no such slot in
-  /// the hours, reports [CalendarView.onCreateRefused] instead and returns
-  /// null.
+  /// Reports a create on [day], from the earliest start [_policy] gives it
+  /// ([CalendarEditPolicy.earliestStartOn]), at the slot
+  /// [CalendarEditRules.firstSlot] gives over the entries the store shows
+  /// on it: the first no entry shares, or, where [_policy]'s
+  /// [CalendarEditPolicy.allowsOverlaps] is false and none is, the first
+  /// sharing time only with entries its [CalendarEditPolicy.mayOverlap]
+  /// allows; or where it gives none, at the first slot of the hours from
+  /// that start, over an entry, refused or not, which asks [_policy]
+  /// nothing. Each is a slot whose times the clock reads, in that start's
+  /// occurrence where [day]'s clock repeats its time, so none starts before
+  /// it. It takes [globalRect], the day cell's, as its rect and returns
+  /// [_createRange]'s future. Where it leaves no such slot in the hours, it
+  /// reports [CalendarView.onCreateRefused] instead and returns null.
   Future<void>? _openCreateFlow(DateTime day, Rect globalRect) {
     final rules = _takeRules();
     final start = rules.earliestStartOn(day, _now.value);

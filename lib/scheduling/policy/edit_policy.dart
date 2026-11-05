@@ -226,10 +226,11 @@ abstract base class CalendarEditPolicy<T> {
   /// [mayOverlap] is true where every one's is, a policy whose
   /// [allowsOverlaps] is true allowing every pair and not being asked;
   /// [refusesEveryOverlap] is true where that of any one whose
-  /// [allowsOverlaps] is false is; [resizableEdges] are the edges every one gives; [earliestStartOn] is
-  /// the latest instant they give, and null where any gives null; and
-  /// [dayLimit] is the least limit they give, and null where none gives
-  /// one. With no policies it limits nothing.
+  /// [allowsOverlaps] is false is; [resizableEdges] are the edges every
+  /// one gives; [earliestStartOn] is the latest instant they give, and
+  /// null where any gives null; and [dayLimit] is the least limit they
+  /// give, and null where none gives one. With no policies it limits
+  /// nothing.
   ///
   /// It asks [policies] in their order and stops once an answer settles
   /// its own: at a refusal, at a policy that refuses every overlap, at no
@@ -353,9 +354,10 @@ abstract base class CalendarEditPolicy<T> {
   /// candidate changes ([CalendarOverlapCandidate.entry]). Its askers:
   ///
   /// - `CalendarEditRules.firstSlot`, which Agenda's add buttons and
-  ///   Month's long press take, asks about each entry it is given that
-  ///   shares a slot's time, with a candidate of the slot's times and no
-  ///   entry, and takes no slot that shares time with one it refuses.
+  ///   Month's long press take, takes the first slot no entry it is given
+  ///   shares, and where none is, asks about each entry sharing a slot's
+  ///   time, with a candidate of the slot's times and no entry, and takes
+  ///   the first slot that shares time with none it refuses.
   /// - Week's and Day's moves and resizes, a bar dropped on the slots and
   ///   an end handle dragged into a later day ask, at each placement they
   ///   test, about each entry sharing the times the change would give,
