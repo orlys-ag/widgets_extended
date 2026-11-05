@@ -83,7 +83,10 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   app animation listener can still end the session synchronously inside
   `_resolve` or the commit snap, so `startDrag`, `updateDrag` and
   `endDrag` re-check
-  `identical(_session, session)` after those calls and return. Every
+  `identical(_session, session)` after those calls and return, as
+  `_resolve` does after its gate ask and after the fit, so a session a
+  predicate ended gets no target and no preview, and `_askKept` answers
+  an ended session null without asking. Every
   predicate is asked through `askCanDrag` or `askCanDropAt`, which report
   a throw and answer it as a refusal (`askCanDropAt` answers null, which
   also skips the nudge). A COMMIT releases the make-room preview by

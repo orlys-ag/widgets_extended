@@ -361,6 +361,8 @@ void main() {
     // Setup sanity: the predicate wrote, which ended the drag.
     expect(wrote, isTrue);
     expect(run.controller.isDragging("m"), isFalse);
+    expect(run.asked.last, _rows(4), reason: "nothing asked after the write");
+    expect(run.drag.currentTarget, isNull);
     final asked = run.asked.length;
     run.lift(const Offset(20.0, 20.0));
     await run.moveTo(tester, const Offset(20.0, 180.0));

@@ -1193,6 +1193,11 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // keeps the refusal it had: the predicate is asked again only after
     // a change that clears the record, as it is for any placement.
     final answer = samePlacement ? false : _askKept(session, target.span);
+    // A predicate that ended the session while it was asked leaves no
+    // target and no preview for it: the teardown released both.
+    if (!identical(_session, session)) {
+      return;
+    }
     _lastDropAnswer = answer;
     if (answer != true) {
       // A throw, answered null, is a refusal with no nudge: the nudge is
@@ -1200,6 +1205,9 @@ class BoardDragController<TKey> extends ChangeNotifier {
       final fitted = answer == false
           ? _fitRefusal(session, target, windows, lean)
           : null;
+      if (!identical(_session, session)) {
+        return;
+      }
       if (fitted == null) {
         if (_currentTarget != null) {
           _currentTarget = null;
@@ -1587,12 +1595,16 @@ class BoardDragController<TKey> extends ChangeNotifier {
   /// asking nothing, so through a drag each placement is asked about once
   /// while the board and the config stay the same. The answer is written
   /// into the map taken before the ask, so one whose ask a clear
-  /// interrupted lands in the dropped map, and one asked for a session a
-  /// predicate ended lands in that session's; neither is read again.
+  /// interrupted lands in the dropped map. Once [session] has ended, as a
+  /// predicate that mutates the board can end it, it asks nothing and
+  /// answers null, a refusal with no nudge.
   bool? _askKept(_DragSession<TKey> session, BoardSpan span) {
     final config = this.config;
     if (!(config.dropFit?.offersOverlaps ?? false)) {
       return askCanDropAt(config, session.key, span);
+    }
+    if (!identical(_session, session)) {
+      return null;
     }
     final answers = session.fitAnswers ??= <BoardSpan, bool?>{};
     if (answers.containsKey(span)) {
