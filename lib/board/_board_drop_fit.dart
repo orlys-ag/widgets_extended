@@ -298,8 +298,10 @@ class BoardDropFitter {
   /// distance cannot swap between two resolves and flicker the preview.
   ///
   /// TWO COSTS, and only one is app code: every candidate pays a
-  /// rectangle test against [obstacles], while only a FREE candidate
-  /// reaches [accepts], and the walk stops at the first admitted.
+  /// rectangle test against [obstacles] and only a FREE candidate reaches
+  /// [accepts], or under [BoardDropFit.offersOverlaps] every candidate
+  /// reaches it, with no rectangle test; the walk stops at the first
+  /// admitted.
   static BoardSpan? nearestFit({
     required BoardSpan box,
     required BoardDropFit policy,
@@ -404,8 +406,9 @@ class BoardDropFitter {
       return a.dCol.compareTo(b.dCol);
     });
 
+    final offersOverlaps = policy.offersOverlaps;
     for (final candidate in candidates) {
-      if (meetsAny(candidate.span, obstacles)) {
+      if (!offersOverlaps && meetsAny(candidate.span, obstacles)) {
         continue;
       }
       if (!accepts(candidate.span)) {
@@ -505,7 +508,8 @@ class BoardDropFitter {
   /// trailing edge, at or after its end for a leading one), and the
   /// lifted edge, whose span is [lift] itself. They are tried nearest the
   /// refused edge first, so the item keeps as much of the drag as holds
-  /// it clear of those obstacles and [accepts] admits. The flush edges
+  /// it clear of those obstacles, or with [offersOverlaps] whatever it
+  /// meets, and [accepts] admits. The flush edges
   /// make that the whole drag: the edge nearest the pointer that holds
   /// the span clear is flush against the obstacle that stops it one
   /// quantum further on.
@@ -516,6 +520,7 @@ class BoardDropFitter {
     required BoardSnap snap,
     required List<BoardSpan> obstacles,
     required bool Function(BoardSpan candidate) accepts,
+    bool offersOverlaps = false,
   }) {
     assert(kind != BoardDragKind.move, "clampedResize: a move has no edge.");
     final axis =
@@ -571,7 +576,8 @@ class BoardDropFitter {
       });
     for (final edge in ordered) {
       final candidate = _withEdge(refused, axis, leading, edge, held);
-      if (meetsAny(candidate, inWay) || !accepts(candidate)) {
+      if ((!offersOverlaps && meetsAny(candidate, inWay)) ||
+          !accepts(candidate)) {
         continue;
       }
       return candidate;

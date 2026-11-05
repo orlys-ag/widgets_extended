@@ -110,9 +110,10 @@ typedef BoardSemanticsActionsBuilder<TKey> =
       Map<CustomSemanticsAction, VoidCallback> builtIn,
     );
 
-/// When and how far a refused move may slide onto nearby free space, and
-/// whether a refused resize stops at the item in its way
-/// ([clampResizes]).
+/// When and how far a refused move may slide to a nearby placement, free
+/// of other items or, with [offersOverlaps], any placement
+/// [BoardDragConfig.canDropAt] admits, and whether a refused resize stops
+/// at an item in its way ([clampResizes]).
 ///
 /// It acts ONLY on a refusal, so it does nothing at all without a
 /// [BoardDragConfig.canDropAt] that issues one: the board has no opinion
@@ -140,18 +141,24 @@ typedef BoardSemanticsActionsBuilder<TKey> =
 /// up to the radius, the placements flush against another item: the
 /// first clear of an item's far side, and the last ending before its
 /// near side. The nearest placement on that grid holding the box clear of
-/// every other item is always among them, so the slide reaches that
-/// placement wherever it lies within the radius; [BoardDragConfig.canDropAt]
-/// is asked about free placements only, nearest first.
+/// every other item is always among them, and so is the nearest one clear
+/// of every item of any given set, so the slide reaches either wherever it
+/// lies within the radius. Without [offersOverlaps],
+/// [BoardDragConfig.canDropAt] is asked about the placements clear of
+/// every other item, nearest first; with it, about each placement in the
+/// same order until one is admitted, so where the app refuses a placement
+/// for the items it meets, the slide reaches the nearest one it admits.
 @immutable
 class BoardDropFit {
   /// Creates a fit policy. The defaults help a box that is at least half
-  /// free, search one track on each axis, and leave resizes refused.
+  /// free, search one track on each axis, leave resizes refused, and ask
+  /// about free placements only.
   const BoardDropFit({
     this.minFreeFraction = 0.5,
     this.rowRadius = 1.0,
     this.colRadius = 1.0,
     this.clampResizes = false,
+    this.offersOverlaps = false,
   }) : assert(minFreeFraction >= 0.0 && minFreeFraction <= 1.0),
        assert(rowRadius >= 0.0),
        assert(colRadius >= 0.0);
@@ -203,17 +210,43 @@ class BoardDropFit {
   /// the start of the drag does not; an item the two already shared does
   /// not stop the edge. The edge then takes the placement nearest the
   /// pointer, between where the drag started and where it was refused,
-  /// that holds the span clear of those items and that
-  /// [BoardDragConfig.canDropAt] admits, on the snap's grid: the edge
-  /// flush against the first such item, a placement up to four grid steps
-  /// back from the refused edge, or the edge where the drag started, which
-  /// reports the span unchanged. The stopped span is the drag's target, so
-  /// the preview shows it and a release reports it through
-  /// [BoardDragConfig.onItemResized].
+  /// that holds the span clear of those items, or with [offersOverlaps]
+  /// whatever it meets, and that [BoardDragConfig.canDropAt] admits, on
+  /// the snap's grid: the edge flush against an item in its way, a
+  /// placement up to four grid steps back from the refused edge, or the
+  /// edge where the drag started, which reports the span unchanged. So
+  /// without [offersOverlaps] the edge stops flush against the first item
+  /// in its way, and with it, where the app refuses a span for the items
+  /// it meets, against the first of them it refuses. The stopped span is
+  /// the drag's target, so the preview shows it and a release reports it
+  /// through [BoardDragConfig.onItemResized].
   ///
   /// [minFreeFraction] and the radii govern moves only: a stopped edge
   /// never leaves the stretch the drag itself swept.
   final bool clampResizes;
+
+  /// Whether a refused move's slide and a refused resize's stop
+  /// ([clampResizes]) ask [BoardDragConfig.canDropAt] about the placements
+  /// that meet other items too, rather than passing them by.
+  ///
+  /// Off, they ask only about placements that hold the box clear of every
+  /// other item, for an app that refuses every overlap. On, they try the
+  /// same placements in the same order, nearest first, and ask about each
+  /// until one is admitted, for an app that lets an item share some items'
+  /// cells and not others'. A move then lands at the nearest placement the
+  /// app admits, which may meet the items it allows, and a resize stops its
+  /// dragged edge at the first item in its way that it refuses. Through a
+  /// drag, while the board and the drag config stay the same,
+  /// [BoardDragConfig.canDropAt] is asked about each placement once and its
+  /// answer kept: a new lean, or a new refused placement, asks only about
+  /// placements the drag has not asked about, and a structural change, a
+  /// new config or the drag's end drops the kept answers. So an answer that
+  /// reads state the board cannot see is asked again only once the app
+  /// assigns a new config, as it is for the placement the pointer rests on.
+  /// The release still asks about the target it reports. The gate's terms
+  /// do not change: the refused box must meet an item, and
+  /// [minFreeFraction] measures the region's share free of every item.
+  final bool offersOverlaps;
 }
 
 /// The tracks a drag keeps an item inside: on each axis a half-open range
@@ -345,20 +378,26 @@ class BoardDragConfig<TKey> {
   final bool Function(TKey key)? canDrag;
 
   /// Whether the item [key] may land on [span]. Asked for every target
-  /// the drag resolves to, again after every structural change to the
+  /// the drag resolves to, except, under [BoardDropFit.offersOverlaps],
+  /// one it has asked about since the lift, the last structural change or
+  /// the last new config, again after every structural change to the
   /// board while the drag runs (so an occupant leaving or arriving under
   /// a resting pointer is answered for), and again at the drop; a refused
-  /// target shows no gap and commits nothing. A predicate that reads
-  /// state the board cannot see is asked again when a new config is
-  /// assigned. A question, which must not mutate; one that throws
-  /// refuses, with no [dropFit] nudge, and the throw is reported (see the
-  /// class doc).
+  /// target shows no gap and commits nothing. Under
+  /// [BoardDropFit.offersOverlaps] the drag keeps each answer, a target's
+  /// and those of [dropFit]'s candidates alike, until a structural change,
+  /// a new config or its end. A predicate that reads state the board
+  /// cannot see is asked again when a new config is assigned. A question,
+  /// which must not mutate; one that throws refuses, with no [dropFit]
+  /// nudge, and the throw is reported (see the class doc).
   final bool Function(TKey key, BoardSpan span)? canDropAt;
 
-  /// Whether a move [canDropAt] refuses may slide onto nearby free
-  /// space, and how far, and whether a refused resize stops at the item
-  /// in its way. Null, the default, refuses as before; see
-  /// [BoardDropFit], which still fires only on a [canDropAt] refusal.
+  /// Whether a move [canDropAt] refuses may slide to a nearby placement,
+  /// free of other items or, with [BoardDropFit.offersOverlaps], any
+  /// placement [canDropAt] admits, and how far, and whether a refused
+  /// resize stops at an item in its way. Null, the default, refuses as
+  /// before; see [BoardDropFit], which still fires only on a [canDropAt]
+  /// refusal.
   final BoardDropFit? dropFit;
 
   /// The tracks a drag keeps the item [key] inside, or null, the default,

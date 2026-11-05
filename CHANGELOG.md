@@ -453,6 +453,13 @@ finger across a refused cell.
 - Added `BoardDropFit.clampResizes`, off by default: a resize `canDropAt`
 refuses for running into another item stops its dragged edge at that item,
 nearest the pointer, instead of going back.
+- Added `BoardDropFit.offersOverlaps`, off by default. A refused move's slide
+and a refused resize's stop ask `canDropAt` about the placements that meet
+other items too, nearest first, so an app that lets an item share some items'
+cells lands it at the nearest placement it admits. Through a drag, while the
+board and the drag config stay the same, `canDropAt` is asked about each
+placement once and its answer kept; a structural change, a new config or the
+drag's end drops the kept answers.
 - Added `BoardDragConfig.boundsOf` and `BoardDragBounds`: the rows and columns
 a drag keeps an item inside. A move or a resize dragged past them stops at their
 edge, as it does at the lattice's, so its target stays the placement at the

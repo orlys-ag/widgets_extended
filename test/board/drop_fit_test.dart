@@ -18,6 +18,7 @@ import 'package:widgets_extended/board/_board_axis.dart';
 import 'package:widgets_extended/board/_board_drop_fit.dart';
 import 'package:widgets_extended/board/_board_span.dart';
 import 'package:widgets_extended/board/board_config.dart';
+import 'package:widgets_extended/board/board_drag_controller.dart';
 
 bool _always(BoardSpan span) {
   return true;
@@ -361,5 +362,104 @@ void main() {
       ),
       isNull,
     );
+  });
+
+  // One row of seven columns: "m" refused at column 3, which an item
+  // holds, as does column 2; the app refuses only a span meeting column 3.
+  test("BF1 offersOverlaps is off by default; on, the fit asks about the "
+      "placements meeting an obstacle too, in the same order, and lands on "
+      "the nearest the app admits", () {
+    expect(const BoardDropFit().offersOverlaps, isFalse);
+    List<int> fit(bool offers, bool Function(BoardSpan span) admits) {
+      final asked = <int>[];
+      final answer = BoardDropFitter.nearestFit(
+        box: const BoardSpan(rowStart: 0, colStart: 3),
+        policy: BoardDropFit(
+          minFreeFraction: 0.0,
+          rowRadius: 0.0,
+          colRadius: 1.0,
+          offersOverlaps: offers,
+        ),
+        snap: const BoardSnap.track(),
+        rowAxis: UniformAxis(1, 10.0),
+        colAxis: UniformAxis(7, 10.0),
+        rowWindow: (min: 0.0, max: 0.0),
+        colWindow: (min: 0.0, max: 6.0),
+        obstacles: const <BoardSpan>[
+          BoardSpan(rowStart: 0, colStart: 3),
+          BoardSpan(rowStart: 0, colStart: 2),
+        ],
+        accepts: (span) {
+          asked.add(span.colStart);
+          return admits(span);
+        },
+      );
+      return <int>[answer?.colStart ?? -1, ...asked];
+    }
+
+    bool unlessThree(BoardSpan span) {
+      return span.colStart != 3;
+    }
+
+    bool none(BoardSpan span) {
+      return false;
+    }
+
+    expect(fit(false, unlessThree), <int>[4, 4], reason: "off");
+    expect(fit(true, unlessThree), <int>[2, 2], reason: "on");
+    final off = fit(false, none).sublist(1);
+    final on = fit(true, none).sublist(1);
+    // Setup sanity: on, the fit asked about a placement meeting an
+    // obstacle.
+    expect(on, contains(2));
+    expect(off, <int>[
+      for (final col in on)
+        if (col != 2 && col != 3) col,
+    ]);
+  });
+
+  // A one-column item over rows 0 and 1 with its end refused in row 5,
+  // past items at rows 2 and 4; the app refuses only a span meeting row 4.
+  test("BF2 under offersOverlaps a refused resize asks about the edges "
+      "meeting an item in its way too, in the same order, and stops at the "
+      "first the app admits", () {
+    List<double> clamp(bool offers, bool Function(BoardSpan span) admits) {
+      final asked = <double>[];
+      final answer = BoardDropFitter.clampedResize(
+        lift: const BoardSpan(rowStart: 0, colStart: 0, rowSpan: 2),
+        refused: const BoardSpan(rowStart: 0, colStart: 0, rowSpan: 6),
+        kind: BoardDragKind.resizeRowEnd,
+        snap: const BoardSnap.track(),
+        obstacles: const <BoardSpan>[
+          BoardSpan(rowStart: 2, colStart: 0),
+          BoardSpan(rowStart: 4, colStart: 0),
+        ],
+        accepts: (span) {
+          asked.add(span.endTrackOn(Axis.vertical));
+          return admits(span);
+        },
+        offersOverlaps: offers,
+      );
+      return <double>[answer?.endTrackOn(Axis.vertical) ?? -1.0, ...asked];
+    }
+
+    bool unlessFour(BoardSpan span) {
+      return span.endTrackOn(Axis.vertical) <= 4.0;
+    }
+
+    bool none(BoardSpan span) {
+      return false;
+    }
+
+    expect(clamp(false, unlessFour).first, 2.0, reason: "off");
+    expect(clamp(true, unlessFour).first, 4.0, reason: "on");
+    final off = clamp(false, none).sublist(1);
+    final on = clamp(true, none).sublist(1);
+    // Setup sanity: on, the clamp asked about an edge meeting an item.
+    expect(on, contains(3.0));
+    expect(off, <double>[
+      for (final edge in on)
+        if (edge <= 2.0) edge,
+    ]);
   });
 }
