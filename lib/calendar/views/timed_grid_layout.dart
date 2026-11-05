@@ -407,11 +407,12 @@ void noteOverlapIndexBuild() {
 }
 
 /// Timed entries by their instants, which [sharesTime] searches in
-/// O(log n) with no allocation: their ids, and their starts and their ends
-/// as [DateTime.microsecondsSinceEpoch], each list sorted ascending on its
-/// own by the first search after an [addAll] that added an entry
-/// ([_build]). [visitSharing] walks the same entries, held by start,
-/// visiting each one that shares a range's time. For the index of the
+/// O(log n) with no allocation once they are sorted: their ids, and their
+/// starts and their ends as [DateTime.microsecondsSinceEpoch], each list
+/// sorted ascending on its own by the first search after an [addAll] that
+/// added an entry, which pays the O(n log n) sort ([_build]).
+/// [visitSharing] walks the same entries, held by start, visiting each one
+/// that shares a range's time. For the index of the
 /// days outside a grid's range, [readFrom] and [readTo] are the
 /// [CalendarDates.dayNumber]s of the days it has read: from [readFrom] to
 /// the day before the range, and from the day after the range to [readTo],
@@ -443,8 +444,9 @@ class GridOverlapIndex<T> {
   bool _built = true;
 
   /// Adds the timed entries of [shown] whose ids it does not hold, in O(n)
-  /// for the n entries of [shown]. The lists are sorted at the next search
-  /// ([_build]), so an index no search reads sorts nothing.
+  /// for the n entries of [shown], and leaves them unsorted: the next
+  /// search sorts the lists ([_build]), so an index no search reads sorts
+  /// nothing.
   void addAll(Iterable<CalendarShownEntry<T>> shown) {
     for (final item in shown) {
       final entry = item.entry;
@@ -458,13 +460,11 @@ class GridOverlapIndex<T> {
     }
   }
 
-  /// Sorts each list again and builds the subtree ends again where an
-  /// [addAll] added an entry since the last build, in O(n log n), counting
-  /// one ([noteOverlapIndexBuild]); otherwise does nothing.
+  /// Sorts each list again and builds the subtree ends again over every
+  /// held entry, in O(n log n), sets [_built] and counts one
+  /// ([noteOverlapIndexBuild]). [sharesTime] and [visitSharing] run it
+  /// first where [_built] is false.
   void _build() {
-    if (_built) {
-      return;
-    }
     _built = true;
     noteOverlapIndexBuild();
     starts.sort();
@@ -516,7 +516,9 @@ class GridOverlapIndex<T> {
     DateTime end,
   ) {
     assert((id == null) == (own == null));
-    _build();
+    if (!_built) {
+      _build();
+    }
     final count =
         _countBelow(starts, end.microsecondsSinceEpoch) -
         _countBelow(ends, start.microsecondsSinceEpoch + 1);

@@ -4893,18 +4893,19 @@ void main() {
     });
 
     testWidgets("OP22 the overlap index of the entries outside the hours "
-        "sorts them at its first search: under a policy that allows overlaps "
-        "a store notify and a move sort nothing, and under one that forbids "
-        "them a move sorts them once, and once more after a store notify "
-        "adds an entry", (tester) async {
+        "sorts them at its first search after a split: under a policy that "
+        "allows overlaps a store notify and a move sort nothing, and under "
+        "one that forbids them the pump sorts them once, a move then "
+        "nothing, and a store notify that adds an entry, with the move after "
+        "it, once", (tester) async {
       final shown = Shown.week(
         monday,
         hours: CalendarDayHours(8 * 60, 18 * 60),
       );
 
       /// "free" lifted and moved toward Tuesday's slot at [hour] in ten
-      /// pointer moves, a frame after each, then let go and settled.
-      Future<void> moveFree(int hour) async {
+      /// pointer moves, a frame after each, still held.
+      Future<TestGesture> moveFree(int hour) async {
         final from = tester.getCenter(blockFinder("free", tuesday));
         final to = slotRect(tester, shown, tuesday, hour * 60).center;
         final gesture = await lift(tester, from);
@@ -4912,8 +4913,7 @@ void main() {
           await gesture.moveTo(Offset.lerp(from, to, i / 10)!);
           await tester.pump();
         }
-        await gesture.up();
-        await tester.pumpAndSettle();
+        return gesture;
       }
 
       MoveRecordingStore storeOfTuesday() {
@@ -4924,7 +4924,7 @@ void main() {
       }
 
       var store = storeOfTuesday();
-      var builds = debugOverlapIndexBuildCount;
+      final builds = debugOverlapIndexBuildCount;
       await Harness(
         store,
         shown,
@@ -4933,32 +4933,57 @@ void main() {
       await store.create(entryOf("night", at(tuesday, 21), at(tuesday, 22)));
       await tester.pumpAndSettle();
       var gates = debugDropGateCount;
-      await moveFree(10);
+      var gesture = await moveFree(10);
+      await gesture.up();
+      await tester.pumpAndSettle();
       // Setup sanity: the move reached the gate.
       expect(debugDropGateCount, greaterThan(gates));
       expect(debugOverlapIndexBuildCount, builds, reason: "overlaps allowed");
 
+      // What the pump, a move, and a store notify with the move after it
+      // each add to the build count.
+      final added = <int>[];
       store = storeOfTuesday();
-      builds = debugOverlapIndexBuildCount;
+      gates = debugDropGateCount;
+      var before = debugOverlapIndexBuildCount;
       await Harness(
         store,
         shown,
         editPolicy: const NoOverlapsPolicy<String>(),
       ).pump(tester);
-      expect(debugOverlapIndexBuildCount, builds, reason: "the pump");
+      // Setup sanity: "free"'s semantics moves asked the gate.
+      expect(debugDropGateCount, greaterThan(gates), reason: "the pump");
+      added.add(debugOverlapIndexBuildCount - before);
+
       gates = debugDropGateCount;
-      await moveFree(10);
+      before = debugOverlapIndexBuildCount;
+      gesture = await moveFree(10);
       // Setup sanity: the move asked the gate at least twice.
-      expect(debugDropGateCount, greaterThanOrEqualTo(gates + 2));
-      expect(debugOverlapIndexBuildCount, builds + 1, reason: "the move");
+      expect(
+        debugDropGateCount,
+        greaterThanOrEqualTo(gates + 2),
+        reason: "the move",
+      );
+      added.add(debugOverlapIndexBuildCount - before);
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      gates = debugDropGateCount;
+      before = debugOverlapIndexBuildCount;
       await store.create(entryOf("night", at(tuesday, 21), at(tuesday, 22)));
       await tester.pumpAndSettle();
-      await moveFree(16);
+      gesture = await moveFree(16);
+      // Setup sanity: the move after the notify asked the gate at least
+      // twice.
       expect(
-        debugOverlapIndexBuildCount,
-        builds + 2,
+        debugDropGateCount,
+        greaterThanOrEqualTo(gates + 2),
         reason: "the move after a notify",
       );
+      added.add(debugOverlapIndexBuildCount - before);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(added, <int>[1, 0, 1]);
     });
   });
 
