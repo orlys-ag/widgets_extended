@@ -381,7 +381,7 @@ class GridHiddenCounts {
   }
 }
 
-/// The nodes [GridOverlapIndex.refusesOverlap] has visited, in a debug
+/// The nodes [GridOverlapIndex.visitSharing] has visited, in a debug
 /// build; tests read differences.
 int debugOverlapIndexVisitCount = 0;
 
@@ -393,12 +393,26 @@ void noteOverlapIndexVisit() {
   }());
 }
 
+/// The sorts of its held entries [GridOverlapIndex] has run, with their
+/// subtree ends, in a debug build: one at the first search after an
+/// [GridOverlapIndex.addAll] that added an entry. Tests read differences.
+int debugOverlapIndexBuildCount = 0;
+
+/// Adds one to [debugOverlapIndexBuildCount] in a debug build.
+void noteOverlapIndexBuild() {
+  assert(() {
+    debugOverlapIndexBuildCount++;
+    return true;
+  }());
+}
+
 /// Timed entries by their instants, which [sharesTime] searches in
 /// O(log n) with no allocation: their ids, and their starts and their ends
 /// as [DateTime.microsecondsSinceEpoch], each list sorted ascending on its
-/// own. [refusesOverlap] searches the same entries, held by start, for one
-/// a policy does not let a change share. For the index of the days outside
-/// a grid's range, [readFrom] and [readTo] are the
+/// own by the first search after an [addAll] that added an entry
+/// ([_build]). [visitSharing] walks the same entries, held by start,
+/// visiting each one that shares a range's time. For the index of the
+/// days outside a grid's range, [readFrom] and [readTo] are the
 /// [CalendarDates.dayNumber]s of the days it has read: from [readFrom] to
 /// the day before the range, and from the day after the range to [readTo],
 /// each run empty while its end is the range's own day.
@@ -423,10 +437,15 @@ class GridOverlapIndex<T> {
   final List<int> _endAt = <int>[];
   final List<int> _reach = <int>[];
 
-  /// Adds the timed entries of [shown] whose ids it does not hold, sorts
-  /// each list again and builds the subtree ends again: O(n log n).
+  /// Whether [starts], [ends], [_held] and the lists aligned with it are
+  /// sorted and built over every held entry: false from an [addAll] that
+  /// added an entry until the next search runs [_build].
+  bool _built = true;
+
+  /// Adds the timed entries of [shown] whose ids it does not hold, in O(n)
+  /// for the n entries of [shown]. The lists are sorted at the next search
+  /// ([_build]), so an index no search reads sorts nothing.
   void addAll(Iterable<CalendarShownEntry<T>> shown) {
-    var added = false;
     for (final item in shown) {
       final entry = item.entry;
       if (entry.isAllDay || !ids.add(item.id)) {
@@ -435,26 +454,35 @@ class GridOverlapIndex<T> {
       starts.add(entry.start.microsecondsSinceEpoch);
       ends.add(entry.end.microsecondsSinceEpoch);
       _held.add((id: item.id, entry: entry));
-      added = true;
+      _built = false;
     }
-    if (added) {
-      starts.sort();
-      ends.sort();
-      _held.sort((a, b) {
-        final order = a.entry.start.compareTo(b.entry.start);
-        return order != 0 ? order : a.id.compareTo(b.id);
-      });
-      _startAt.clear();
-      _endAt.clear();
-      for (final held in _held) {
-        _startAt.add(held.entry.start.microsecondsSinceEpoch);
-        _endAt.add(held.entry.end.microsecondsSinceEpoch);
-      }
-      _reach
-        ..clear()
-        ..addAll(_endAt);
-      _buildReach(0, _held.length);
+  }
+
+  /// Sorts each list again and builds the subtree ends again where an
+  /// [addAll] added an entry since the last build, in O(n log n), counting
+  /// one ([noteOverlapIndexBuild]); otherwise does nothing.
+  void _build() {
+    if (_built) {
+      return;
     }
+    _built = true;
+    noteOverlapIndexBuild();
+    starts.sort();
+    ends.sort();
+    _held.sort((a, b) {
+      final order = a.entry.start.compareTo(b.entry.start);
+      return order != 0 ? order : a.id.compareTo(b.id);
+    });
+    _startAt.clear();
+    _endAt.clear();
+    for (final held in _held) {
+      _startAt.add(held.entry.start.microsecondsSinceEpoch);
+      _endAt.add(held.entry.end.microsecondsSinceEpoch);
+    }
+    _reach
+      ..clear()
+      ..addAll(_endAt);
+    _buildReach(0, _held.length);
   }
 
   /// Sets [_reach] over the implicit subtree of the non-empty `[lo, hi)`
@@ -473,73 +501,77 @@ class GridOverlapIndex<T> {
   }
 
   /// Whether an entry it holds other than [id], whose stored entry is
-  /// [own], shares time with the range from [start] to [end]. The entries
-  /// sharing time with it are those starting before [end] less those
-  /// ending at [start] or before, every entry ending after it starts:
-  /// none answers false and two or more true, and one is [id]'s only
-  /// where it holds [id] and [own] shares time with the range, so [ids]
-  /// is hashed only there.
+  /// [own], shares time with the range from [start] to [end]; with no [id]
+  /// and no [own], whether any entry it holds does. [id] and [own] are both
+  /// given or both null. The entries sharing time with the range are those
+  /// starting before [end] less those ending at [start] or before, every
+  /// entry ending after it starts: none answers false and two or more
+  /// true, and one is [id]'s only where it holds [id] and [own] shares time
+  /// with the range, so [ids] is hashed only there. It sorts the lists
+  /// first where an addition left them unsorted ([_build]).
   bool sharesTime(
-    String id,
-    CalendarEntry<T> own,
+    String? id,
+    CalendarEntry<T>? own,
     DateTime start,
     DateTime end,
   ) {
+    assert((id == null) == (own == null));
+    _build();
     final count =
         _countBelow(starts, end.microsecondsSinceEpoch) -
         _countBelow(ends, start.microsecondsSinceEpoch + 1);
     if (count <= 0) {
       return false;
     }
-    if (count >= 2) {
+    if (count >= 2 || id == null || own == null) {
       return true;
     }
     return !ids.contains(id) ||
         !NoOverlapsPolicy.timesOverlap(own.start, own.end, start, end);
   }
 
-  /// Whether an entry it holds other than [id], whose stored entry is
-  /// [own], shares time with [candidate]'s times and is one [policy] does
-  /// not let [candidate] share them ([CalendarEditPolicy.mayOverlap]).
+  /// Calls [visit] with each entry it holds other than [id], whose stored
+  /// entry is [own], that shares time with the range from [start] to
+  /// [end], in start order, up to the first for which [visit] returns
+  /// true, and returns whether one did; with no [id] and no [own], with
+  /// each entry it holds sharing that time. [id] and [own] are both given
+  /// or both null.
   ///
   /// It answers false at once where [sharesTime] does, and otherwise walks
   /// the entries' implicit interval tree, allocating nothing: it leaves a
   /// subtree whose greatest end is at the range's start or before, and the
   /// node and the subtree after it where the node starts at the range's end
-  /// or after, and asks [policy] about each entry sharing the range's time,
-  /// other than [id]'s, in start order, up to the first it refuses. Each
-  /// node it visits counts one ([noteOverlapIndexVisit]): at most
-  /// `1 + 2 * (k + 1) * (h + 1)` of them, `h` being `floor(log2(n))` and
-  /// `k` the entries it reaches that share the range's time, [id]'s
-  /// included, so O((m + 1) log n) where it asks about m entries.
-  bool refusesOverlap(
-    String id,
-    CalendarEntry<T> own,
-    CalendarOverlapCandidate<T> candidate,
-    CalendarEditPolicy<T> policy,
+  /// or after. Each node it visits counts one ([noteOverlapIndexVisit]): at
+  /// most `1 + 2 * (k + 1) * (h + 1)` of them, `h` being `floor(log2(n))`
+  /// and `k` the entries it reaches that share the range's time, [id]'s
+  /// included, so O((m + 1) log n) where it visits m entries.
+  bool visitSharing(
+    String? id,
+    CalendarEntry<T>? own,
+    DateTime start,
+    DateTime end,
+    bool Function(CalendarEntry<T> other) visit,
   ) {
-    if (!sharesTime(id, own, candidate.start, candidate.end)) {
+    if (!sharesTime(id, own, start, end)) {
       return false;
     }
-    return _refusesIn(
+    return _visitIn(
       0,
       _held.length,
       id,
-      candidate,
-      policy,
-      candidate.start.microsecondsSinceEpoch,
-      candidate.end.microsecondsSinceEpoch,
+      visit,
+      start.microsecondsSinceEpoch,
+      end.microsecondsSinceEpoch,
     );
   }
 
-  /// [refusesOverlap]'s walk of the implicit subtree of `[lo, hi)`, for the
+  /// [visitSharing]'s walk of the implicit subtree of `[lo, hi)`, for the
   /// range from [start] to [end], in microseconds.
-  bool _refusesIn(
+  bool _visitIn(
     int lo,
     int hi,
-    String id,
-    CalendarOverlapCandidate<T> candidate,
-    CalendarEditPolicy<T> policy,
+    String? id,
+    bool Function(CalendarEntry<T> other) visit,
     int start,
     int end,
   ) {
@@ -551,19 +583,17 @@ class GridOverlapIndex<T> {
     if (_reach[mid] <= start) {
       return false;
     }
-    if (_refusesIn(lo, mid, id, candidate, policy, start, end)) {
+    if (_visitIn(lo, mid, id, visit, start, end)) {
       return true;
     }
     if (_startAt[mid] >= end) {
       return false;
     }
     final held = _held[mid];
-    if (_endAt[mid] > start &&
-        held.id != id &&
-        !policy.mayOverlap(candidate, held.entry)) {
+    if (_endAt[mid] > start && held.id != id && visit(held.entry)) {
       return true;
     }
-    return _refusesIn(mid + 1, hi, id, candidate, policy, start, end);
+    return _visitIn(mid + 1, hi, id, visit, start, end);
   }
 
   /// How many of the ascending [values] are less than [bound], by binary

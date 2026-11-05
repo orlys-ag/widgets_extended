@@ -20,6 +20,7 @@ import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart'
     show DayList, dayListGapKey;
+import 'package:widgets_extended/calendar/views/entry_split.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
@@ -2151,6 +2152,121 @@ void main() {
     expect(host.creates, <CalendarCreateRange>[
       CalendarCreateRange(start: at(tuesday, 14, 15), end: at(tuesday, 15, 30)),
     ]);
+  });
+
+  testWidgets("PV24 under NoOverlapsPolicy, alone or in "
+      "CalendarEditPolicy.all, a refused move in Week lands on the free day "
+      "beside it and a refused resize in Day stops at the first entry in its "
+      "way, asking the drop gate as often as a fit that passes by every "
+      "placement meeting an entry", (tester) async {
+    final policies = <String, CalendarEditPolicy<String> Function()>{
+      "NoOverlapsPolicy": () {
+        return const NoOverlapsPolicy<String>();
+      },
+      "all": () {
+        return CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+          const NoOverlapsPolicy<String>(),
+          const HistoryLockPolicy<String>(),
+        ]);
+      },
+    };
+    for (final MapEntry(key: name, value: policyOf) in policies.entries) {
+      // (a) "m" moved from Thursday onto Tuesday's 12:00, every hour of
+      // which an entry holds.
+      var requests = <CalendarMoveRequest<String>>[];
+      var host = Host(
+        storeOf(<CalendarEntry<String>>[
+          for (var hour = 0; hour < 24; hour++)
+            entryOf("t$hour", at(tuesday, hour), at(tuesday, hour + 1)),
+          entryOf("m", at(thursday, 12), at(thursday, 13)),
+        ]),
+        view: CalendarViewKind.week,
+        day: tuesday,
+        time: at(monday, 8),
+        policy: policyOf(),
+        onMoveRequest: (request) async {
+          requests.add(request);
+        },
+      );
+      await host.pump(tester);
+      // Setup sanity: a placement four slot rows from the refused one on
+      // Tuesday lies nearer than one on Monday or Wednesday.
+      final slot = tester.getRect(blockFinder("t12", tuesday));
+      final rowHeight = slotRect(tester, tuesday, 12 * 60).height;
+      expect(slot.width, greaterThan(4 * rowHeight), reason: name);
+      final from = tester.getCenter(blockFinder("m"));
+      final to =
+          from +
+          (slotCenter(tester, tuesday, 12 * 60) -
+              slotCenter(tester, thursday, 12 * 60));
+      var gates = debugDropGateCount;
+      var gesture = await liftTo(tester, from, to);
+      for (var i = 0; i < 4; i++) {
+        await gesture.moveTo(to + Offset(0.0, i.isEven ? -3.0 : 0.0));
+        await tester.pump();
+      }
+      await gesture.up();
+      final moveGates = debugDropGateCount - gates;
+      await tester.pumpAndSettle();
+      // Setup sanity: the move landed beside Tuesday, so the fit ran.
+      expect(
+        <DateTime>[monday, wednesday],
+        contains(CalendarDates.dateOnly(requests.single.requested.start)),
+        reason: name,
+      );
+      expect(
+        (
+          requests.single.requested.start,
+          requests.single.requested.end,
+          moveGates,
+        ),
+        (at(monday, 12), at(monday, 13), 9),
+        reason: "$name, move",
+      );
+
+      // (b) "a"'s end dragged past "b" and "c" to 11:30.
+      requests = <CalendarMoveRequest<String>>[];
+      host = Host(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("a", at(tuesday, 8), at(tuesday, 9)),
+          entryOf("b", at(tuesday, 10), at(tuesday, 11)),
+          entryOf("c", at(tuesday, 11), at(tuesday, 12)),
+        ]),
+        view: CalendarViewKind.day,
+        day: tuesday,
+        time: at(monday, 8),
+        policy: policyOf(),
+        onMoveRequest: (request) async {
+          requests.add(request);
+        },
+      );
+      await host.pump(tester);
+      await select(tester, blockFinder("a"));
+      final block = tester.getRect(blockFinder("a"));
+      final edge = Offset(block.center.dx, block.bottom - 2.0);
+      final end = Offset(
+        edge.dx,
+        slotRect(tester, tuesday, 11 * 60 + 15, week: false).bottom - 2.0,
+      );
+      gates = debugDropGateCount;
+      gesture = await tester.startGesture(edge);
+      await gesture.moveTo(Offset.lerp(edge, end, 0.5)!);
+      await tester.pump();
+      await gesture.moveTo(end);
+      await tester.pump();
+      await gesture.up();
+      final resizeGates = debugDropGateCount - gates;
+      await tester.pumpAndSettle();
+      expect(
+        (
+          requests.single.requested.start,
+          requests.single.requested.end,
+          resizeGates,
+        ),
+        (at(tuesday, 8), at(tuesday, 10), 6),
+        reason: "$name, resize",
+      );
+    }
   });
 
   testWidgets("RC17 Month's long press after a set of store hours off the "

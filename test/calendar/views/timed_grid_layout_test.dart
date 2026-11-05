@@ -431,11 +431,14 @@ void main() {
         end: query.end,
       );
       final visitsBefore = debugOverlapIndexVisitCount;
-      final answer = index.refusesOverlap(
+      final answer = index.visitSharing(
         query.id,
         query.own,
-        candidate,
-        policy,
+        candidate.start,
+        candidate.end,
+        (other) {
+          return !policy.mayOverlap(candidate, other);
+        },
       );
       final visits = debugOverlapIndexVisitCount - visitsBefore;
       final reason = "${query.id} ${query.start} to ${query.end}";
@@ -480,7 +483,14 @@ void main() {
         refusing ? const <String>{"b1000"} : const <String>{},
       );
       final visitsBefore = debugOverlapIndexVisitCount;
-      expect(packed.refusesOverlap("new", elsewhere, inside, policy), refusing);
+      expect(
+        packed.visitSharing("new", elsewhere, inside.start, inside.end, (
+          other,
+        ) {
+          return !policy.mayOverlap(inside, other);
+        }),
+        refusing,
+      );
       expect(policy.asked, <String>["b1000"]);
       // log2(1024) is 10: 1 + 2 * (1 + 2) * (10 + 1).
       expect(

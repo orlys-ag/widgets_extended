@@ -2818,7 +2818,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// piece and an indexed time, once for each. The walk, as many columns as
   /// the range covers, and at most two searches of O((m + 1) log n), m
   /// being the indexed entries sharing the times that each reaches
-  /// ([GridOverlapIndex.refusesOverlap]); a store read only for days
+  /// ([GridOverlapIndex.visitSharing]); a store read only for days
   /// outside the range no check since the last clearing of [_offRange]
   /// covered.
   bool _meetsOtherEntry(
@@ -2836,7 +2836,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (_meetsPiece(id, candidate, firstDay, lastDay)) {
       return true;
     }
-    if (_layout.loose?.refusesOverlap(id, own, candidate, policy) ?? false) {
+    bool refuses(CalendarEntry<T> other) {
+      return !policy.mayOverlap(candidate, other);
+    }
+
+    final start = candidate.start;
+    final end = candidate.end;
+    if (_layout.loose?.visitSharing(id, own, start, end, refuses) ?? false) {
       return true;
     }
     if (firstDay >= tracks.firstDay && lastDay <= tracks.lastDay) {
@@ -2845,7 +2851,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return _offRangeOver(
       firstDay,
       lastDay,
-    ).refusesOverlap(id, own, candidate, policy);
+    ).visitSharing(id, own, start, end, refuses);
   }
 
   /// The index of the timed entries the store shows on the days outside
