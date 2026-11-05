@@ -134,7 +134,9 @@ void noteOverlapCandidate() {
 /// A change [CalendarEditPolicy.mayOverlap] is asked about: the times it
 /// gives, [start] to [end], and the [entry] it changes, none for a create.
 ///
-/// Compared and hashed by [start], [end] and [entry].
+/// Compared and hashed by [start], [end] and [entry]. Its constructor is
+/// not const because it counts each candidate built, in a debug build
+/// (`noteOverlapCandidate`).
 @immutable
 final class CalendarOverlapCandidate<T> {
   /// The change of [entry], or with none a create, to the times [start] to

@@ -2614,15 +2614,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (_allowsOverlaps) {
       return true;
     }
-    return !_meetsOtherEntry(
-      key.id,
-      entry,
-      CalendarOverlapCandidate<T>(
-        start: times.start,
-        end: times.end,
-        entry: entry,
-      ),
-    );
+    return !_meetsOtherEntry(key.id, entry, times.start, times.end);
   }
 
   /// Whether [edges] let [entry] take [start] and [end]: each of its times
@@ -2805,44 +2797,96 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return (start: start, end: end);
   }
 
-  /// Whether [candidate]'s timed range, the change of the entry [id],
-  /// whose entry is [own], shares time with a timed entry other than [id]
-  /// that the store shows on the days the range covers, shown or not
-  /// ([NoOverlapsPolicy.rangeSharesTime]), and that [_policy] does not let
-  /// it share ([CalendarEditPolicy.mayOverlap]): a board piece in the rows
-  /// the range covers on the shown columns, one of the entries those rows
-  /// can miss that the split indexes ([TimedGridLayout.loose]), and, for a
-  /// range with a day outside the tracks' range, one the store shows there
-  /// ([_offRangeOver]). Asks the policy about each such entry, up to the
-  /// first it refuses, an entry with a piece on several columns, or both a
-  /// piece and an indexed time, once for each. The walk, as many columns as
-  /// the range covers, and at most two searches of O((m + 1) log n), m
-  /// being the indexed entries sharing the times that each reaches
-  /// ([GridOverlapIndex.visitSharing]); a store read only for days
-  /// outside the range no check since the last clearing of [_offRange]
-  /// covered.
+  /// Whether the timed range from [start] to [end], the change of the
+  /// entry [id], whose entry is [own], shares time with a timed entry
+  /// other than [id] that the store shows on the days the range covers,
+  /// shown or not ([NoOverlapsPolicy.rangeSharesTime]), and that [_policy]
+  /// does not let it share ([CalendarEditPolicy.mayOverlap]), by
+  /// [_visitSharing]'s walk, which visits an entry with a piece on several
+  /// columns, or both a piece and an indexed time, once for each. Asks the
+  /// policy about each entry visited, up to the first it refuses, with one
+  /// candidate of the times and [own], built at the first ask, so a range
+  /// no entry shares builds none.
   bool _meetsOtherEntry(
     String id,
     CalendarEntry<T> own,
-    CalendarOverlapCandidate<T> candidate,
+    DateTime start,
+    DateTime end,
   ) {
-    final firstDay = CalendarDates.dayNumber(candidate.start);
-    final lastDay = CalendarDates.lastDayNumberOf(
-      candidate.start,
-      candidate.end,
-    );
-    final tracks = _tracks;
     final policy = _policy;
-    if (_meetsPiece(id, candidate, firstDay, lastDay)) {
-      return true;
-    }
-    bool refuses(CalendarEntry<T> other) {
-      return !policy.mayOverlap(candidate, other);
-    }
+    CalendarOverlapCandidate<T>? candidate;
+    return _visitSharing(id, own, start, end, (other) {
+      final asked = candidate ??= CalendarOverlapCandidate<T>(
+        start: start,
+        end: end,
+        entry: own,
+      );
+      return !policy.mayOverlap(asked, other);
+    });
+  }
 
-    final start = candidate.start;
-    final end = candidate.end;
-    if (_layout.loose?.visitSharing(id, own, start, end, refuses) ?? false) {
+  /// Calls [visit] with each timed entry other than [id], whose entry is
+  /// [own], or with any where both are null, that the store shows on the
+  /// days the range from [start] to [end] covers, shown or not, and that
+  /// shares the range's time ([NoOverlapsPolicy.rangeSharesTime]), up to
+  /// the first for which [visit] returns true, and returns whether one did.
+  /// It reads, in this order, the board pieces in the rows the range covers
+  /// on the shown columns of its days, one board query per column
+  /// ([noteOverlapQuery]); the entries those rows can miss that the split
+  /// indexes ([TimedGridLayout.loose]); and, for a range with a day outside
+  /// the tracks' range, the ones the store shows there ([_offRangeOver]).
+  /// An entry with a piece on several columns, or both a piece and an
+  /// indexed time, is visited once for each. The walk, as many columns as
+  /// the range covers, and at most two searches of O((m + 1) log n), m
+  /// being the indexed entries sharing the times that each reaches
+  /// ([GridOverlapIndex.visitSharing]); a store read only for days outside
+  /// the range no check since the last clearing of [_offRange] covered.
+  bool _visitSharing(
+    String? id,
+    CalendarEntry<T>? own,
+    DateTime start,
+    DateTime end,
+    bool Function(CalendarEntry<T> other) visit,
+  ) {
+    final tracks = _tracks;
+    final firstDay = CalendarDates.dayNumber(start);
+    final lastDay = CalendarDates.lastDayNumberOf(start, end);
+    final first = tracks.firstColumnFrom(firstDay);
+    final last = tracks.lastColumnUpTo(lastDay);
+    final span = CalendarDates.wallSpanOf(start, end);
+    for (var column = first; column <= last; column++) {
+      final piece = CalendarDates.pieceOn(span, tracks.dayAt(column));
+      if (piece == null) {
+        continue;
+      }
+      final shown = pieceSpanOf(tracks, column, piece.start, piece.end);
+      if (shown == null) {
+        continue;
+      }
+      noteOverlapQuery();
+      final others = _board.itemsIn(
+        shown.rowStart,
+        (shown.endTrackOn(Axis.vertical) - precisionErrorTolerance).ceil(),
+        column,
+        column + 1,
+      );
+      for (final other in others) {
+        if (other.id == id) {
+          continue;
+        }
+        final occupant = _board.itemOf(other);
+        if (occupant != null &&
+            NoOverlapsPolicy.rangeSharesTime(
+              start,
+              end,
+              occupant.shown.entry,
+            ) &&
+            visit(occupant.shown.entry)) {
+          return true;
+        }
+      }
+    }
+    if (_layout.loose?.visitSharing(id, own, start, end, visit) ?? false) {
       return true;
     }
     if (firstDay >= tracks.firstDay && lastDay <= tracks.lastDay) {
@@ -2851,7 +2895,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return _offRangeOver(
       firstDay,
       lastDay,
-    ).visitSharing(id, own, start, end, refuses);
+    ).visitSharing(id, own, start, end, visit);
   }
 
   /// The index of the timed entries the store shows on the days outside
@@ -2884,56 +2928,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       index.readTo = lastDay;
     }
     return index;
-  }
-
-  /// Whether a board piece of an entry other than [id] in the rows
-  /// [candidate]'s range covers on the shown columns of its days, the
-  /// [CalendarDates.dayNumber]s [firstDay] to [lastDay], shares time with it
-  /// and is one [_policy] does not let it share
-  /// ([CalendarEditPolicy.mayOverlap]), asked after the time test.
-  bool _meetsPiece(
-    String id,
-    CalendarOverlapCandidate<T> candidate,
-    int firstDay,
-    int lastDay,
-  ) {
-    final start = candidate.start;
-    final end = candidate.end;
-    final first = _tracks.firstColumnFrom(firstDay);
-    final last = _tracks.lastColumnUpTo(lastDay);
-    final span = CalendarDates.wallSpanOf(start, end);
-    for (var column = first; column <= last; column++) {
-      final piece = CalendarDates.pieceOn(span, _tracks.dayAt(column));
-      if (piece == null) {
-        continue;
-      }
-      final shown = pieceSpanOf(_tracks, column, piece.start, piece.end);
-      if (shown == null) {
-        continue;
-      }
-      final others = _board.itemsIn(
-        shown.rowStart,
-        (shown.endTrackOn(Axis.vertical) - precisionErrorTolerance).ceil(),
-        column,
-        column + 1,
-      );
-      for (final other in others) {
-        if (other.id == id) {
-          continue;
-        }
-        final occupant = _board.itemOf(other);
-        if (occupant != null &&
-            NoOverlapsPolicy.rangeSharesTime(
-              start,
-              end,
-              occupant.shown.entry,
-            ) &&
-            !_policy.mayOverlap(candidate, occupant.shown.entry)) {
-          return true;
-        }
-      }
-    }
-    return false;
   }
 
   /// The start and end a drag of [piece] of [entry] from [from] to [to],
@@ -3370,11 +3364,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     if (!_allowsOverlaps) {
       try {
-        if (_meetsOtherEntry(
-          key.id,
-          entry,
-          CalendarOverlapCandidate<T>(start: start, end: end, entry: entry),
-        )) {
+        if (_meetsOtherEntry(key.id, entry, start, end)) {
           return null;
         }
       } catch (exception, stack) {
@@ -3431,11 +3421,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     if (!_allowsOverlaps) {
       try {
-        if (_meetsOtherEntry(
-          key.id,
-          entry,
-          CalendarOverlapCandidate<T>(start: start, end: end, entry: entry),
-        )) {
+        if (_meetsOtherEntry(key.id, entry, start, end)) {
           return null;
         }
       } catch (exception, stack) {
@@ -3460,14 +3446,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// Whether [candidate]'s range shares time with a timed entry other than
-  /// [id], or with any where [id] is null, that the store shows on the days
-  /// the range covers, shown columns or not
-  /// ([NoOverlapsPolicy.rangeSharesTime]), and that [_policy] does not let
-  /// it share ([CalendarEditPolicy.mayOverlap]), asked after the time test.
-  bool _sharesShownTime(String? id, CalendarOverlapCandidate<T> candidate) {
-    final start = candidate.start;
-    final end = candidate.end;
+  /// Calls [visit] with each timed entry other than [id], or with any
+  /// where [id] is null, that the store shows on the days the range from
+  /// [start] to [end] covers, shown columns or not, and that shares the
+  /// range's time ([NoOverlapsPolicy.rangeSharesTime]), up to the first for
+  /// which [visit] returns true, and returns whether one did.
+  bool _sharesShownTime(
+    String? id,
+    DateTime start,
+    DateTime end,
+    bool Function(CalendarEntry<T> other) visit,
+  ) {
     final shown = _shownBetween(
       CalendarDates.dateOfDayNumber(CalendarDates.dayNumber(start)),
       CalendarDates.dateOfDayNumber(CalendarDates.lastDayNumberOf(start, end)),
@@ -3475,7 +3464,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     for (final other in shown) {
       if (other.id != id &&
           NoOverlapsPolicy.rangeSharesTime(start, end, other.entry) &&
-          !_policy.mayOverlap(candidate, other.entry)) {
+          visit(other.entry)) {
         return true;
       }
     }
@@ -3947,45 +3936,52 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ([CalendarEditPolicy.mayOverlap]) shares time with: no board piece in
   /// [cell]'s row and column, as one from 09:10 does with the 09:00 slot,
   /// and on a day whose clock reads a stretch twice, no entry the store
-  /// shows, whose block may lie on other rows ([_sharesShownTime]). Builds
-  /// one candidate of the slot's times and no entry, and asks the policy
-  /// about each entry sharing them, up to the first it refuses. A press and
-  /// a create range's anchor placement ([_placeRangeAnchor]) both test it.
+  /// shows, whose block may lie on other rows ([_sharesShownTime]). Asks
+  /// the policy about each entry sharing the slot's times, up to the first
+  /// it refuses, with one candidate of those times and no entry, built at
+  /// the first ask, so a slot no entry shares builds none. A press and a
+  /// create range's anchor placement ([_placeRangeAnchor]) both test it.
   bool _slotIsFree(({int row, int col}) cell, CalendarCreateRange slot) {
     if (_allowsOverlaps) {
       return true;
     }
-    final candidate = CalendarOverlapCandidate<T>(
-      start: slot.start,
-      end: slot.end,
-    );
-    return !_slotMeetsEntry(cell, candidate) &&
+    final policy = _policy;
+    final start = slot.start;
+    final end = slot.end;
+    CalendarOverlapCandidate<T>? candidate;
+    bool refuses(CalendarEntry<T> other) {
+      final asked = candidate ??= CalendarOverlapCandidate<T>(
+        start: start,
+        end: end,
+      );
+      return !policy.mayOverlap(asked, other);
+    }
+
+    return !_slotMeetsEntry(cell, start, end, refuses) &&
         // A block lies on the rows of its wall minutes
         // ([CalendarDates.wallSpanOf]), which order as its instants do except
         // where the clock reads a stretch twice; only there can it hold the
         // slot from other rows.
         (!_tracks.repeatsStretchAt(cell.col) ||
-            !_sharesShownTime(null, candidate));
+            !_sharesShownTime(null, start, end, refuses));
   }
 
-  /// Whether a board piece in [cell]'s row and column shares time with
-  /// [candidate]'s range, the cell's slot, and is one [_policy] does not
-  /// let it share ([CalendarEditPolicy.mayOverlap]), asked after the time
-  /// test.
+  /// Calls [visit] with the entry of each board piece in [cell]'s row and
+  /// column that shares time with the range from [start] to [end], the
+  /// cell's slot ([NoOverlapsPolicy.rangeSharesTime]), up to the first for
+  /// which [visit] returns true, and returns whether one did.
   bool _slotMeetsEntry(
     ({int row, int col}) cell,
-    CalendarOverlapCandidate<T> candidate,
+    DateTime start,
+    DateTime end,
+    bool Function(CalendarEntry<T> other) visit,
   ) {
     final keys = _board.itemsIn(cell.row, cell.row + 1, cell.col, cell.col + 1);
     for (final key in keys) {
       final shape = _board.itemOf(key);
       if (shape != null &&
-          NoOverlapsPolicy.rangeSharesTime(
-            candidate.start,
-            candidate.end,
-            shape.shown.entry,
-          ) &&
-          !_policy.mayOverlap(candidate, shape.shown.entry)) {
+          NoOverlapsPolicy.rangeSharesTime(start, end, shape.shown.entry) &&
+          visit(shape.shown.entry)) {
         return true;
       }
     }

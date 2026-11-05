@@ -406,6 +406,20 @@ void noteOverlapIndexBuild() {
   }());
 }
 
+/// The searches the timed grid's overlap tests have run, in a debug build:
+/// each board query of the rows a test covers on one column
+/// (`_TimedGridState._visitSharing`) and each
+/// [GridOverlapIndex.visitSharing] counts one. Tests read differences.
+int debugOverlapQueryCount = 0;
+
+/// Adds one to [debugOverlapQueryCount] in a debug build.
+void noteOverlapQuery() {
+  assert(() {
+    debugOverlapQueryCount++;
+    return true;
+  }());
+}
+
 /// Timed entries by their instants, which [sharesTime] searches in
 /// O(log n) with no allocation once they are sorted: their ids, and their
 /// starts and their ends as [DateTime.microsecondsSinceEpoch], each list
@@ -543,9 +557,10 @@ class GridOverlapIndex<T> {
   /// the entries' implicit interval tree, allocating nothing: it leaves a
   /// subtree whose greatest end is at the range's start or before, and the
   /// node and the subtree after it where the node starts at the range's end
-  /// or after. Each node it visits counts one ([noteOverlapIndexVisit]): at
-  /// most `1 + 2 * (k + 1) * (h + 1)` of them, `h` being `floor(log2(n))`
-  /// and `k` the entries it reaches that share the range's time, [id]'s
+  /// or after. Each call counts one search ([noteOverlapQuery]), and each
+  /// node it visits one ([noteOverlapIndexVisit]): at most
+  /// `1 + 2 * (k + 1) * (h + 1)` of them, `h` being `floor(log2(n))` and
+  /// `k` the entries it reaches that share the range's time, [id]'s
   /// included, so O((m + 1) log n) where it visits m entries.
   bool visitSharing(
     String? id,
@@ -554,6 +569,7 @@ class GridOverlapIndex<T> {
     DateTime end,
     bool Function(CalendarEntry<T> other) visit,
   ) {
+    noteOverlapQuery();
     if (!sharesTime(id, own, start, end)) {
       return false;
     }

@@ -4623,11 +4623,10 @@ void main() {
     });
 
     testWidgets("OP10 where overlaps are forbidden, among 200 packed "
-        "entries each gate call builds one candidate at most, the pairs one "
-        "gate call asks about carry that one candidate, and a create range "
-        "builds two at most and asks nothing while its pointer moves", (
-      tester,
-    ) async {
+        "entries each gate call that asks builds one candidate, and one that "
+        "asks nothing builds none, the pairs one gate call asks about carry "
+        "that one candidate, and a create range builds two at most and asks "
+        "nothing while its pointer moves", (tester) async {
       final shown = Shown.week(monday);
       for (final allowsAll in const <bool>[false, true]) {
         for (final name in const <String>["move", "start", "end", "bar"]) {
@@ -4645,10 +4644,15 @@ void main() {
           ).pump(tester);
           final built = debugOverlapCandidateCount;
           final gates = debugDropGateCount;
+          final asks = policy.asked.length;
           await packedGestures(tester, shown)[name]!();
           final reason = "$name, allows every pair: $allowsAll";
           final candidates = debugOverlapCandidateCount - built;
-          expect(candidates, greaterThan(0), reason: reason);
+          // The gate calls that asked, each told apart by its gate count.
+          final asking = policy.asked.skip(asks).map((ask) {
+            return ask.gate;
+          }).toSet();
+          expect(candidates, asking.length, reason: reason);
           expect(
             candidates,
             lessThanOrEqualTo(debugDropGateCount - gates),
@@ -4889,6 +4893,35 @@ void main() {
           if (other == "tentative-n")
             entryOf("busy-a", at(tuesday, 16), at(wednesday, 9, 15)),
         ], reason: other);
+      }
+    });
+
+    testWidgets("OP21 under NoOverlapsPolicy a move, a resize of either "
+        "edge, a bar landing and a press over times no entry shares build no "
+        "candidate", (tester) async {
+      final shown = Shown.week(monday);
+      for (final name in const <String>["move", "start", "end", "bar", "tap"]) {
+        final harness = Harness(
+          packedStore(0),
+          shown,
+          editPolicy: CountingEditPolicy<String>(
+            const NoOverlapsPolicy<String>(),
+          ),
+        );
+        await harness.pump(tester);
+        final built = debugOverlapCandidateCount;
+        final gates = debugDropGateCount;
+        if (name == "tap") {
+          await tester.tapAt(slotRect(tester, shown, tuesday, 10 * 60).center);
+          await tester.pumpAndSettle();
+          // Setup sanity: the press created.
+          expect(harness.creates, hasLength(1), reason: name);
+        } else {
+          await packedGestures(tester, shown)[name]!();
+          // Setup sanity: the pointer path reached a gate.
+          expect(debugDropGateCount, greaterThan(gates), reason: name);
+        }
+        expect(debugOverlapCandidateCount, built, reason: name);
       }
     });
 
