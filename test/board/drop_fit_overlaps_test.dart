@@ -44,9 +44,9 @@ BoardSpan _rows(int row, [int rows = 1]) {
 }
 
 /// A pumped board of one 40px column of [rowCount] 40px rows holding
-/// [items], and a drag controller over it under [fit] whose drop gate is
-/// [canDropAt], given the board's controller, recording each span it is
-/// asked about in [asked].
+/// [items], and a drag controller over it under [fit], where given, whose
+/// drop gate is [canDropAt], given the board's controller, recording each
+/// span it is asked about in [asked].
 class _Run {
   _Run._(
     this.controller,
@@ -78,7 +78,7 @@ class _Run {
     WidgetTester tester, {
     required int rowCount,
     required Map<String, BoardSpan> items,
-    required BoardDropFit fit,
+    required BoardDropFit? fit,
     required bool Function(
       BoardController<String, _Item> controller,
       String key,
@@ -395,5 +395,41 @@ void main() {
     expect(run.asked.sublist(before), contains(_rows(4)), reason: "part 2");
     run.drag.endDrag(cancel: true);
     await tester.pump();
+  });
+
+  testWidgets("BO5 without offersOverlaps a drag whose drop gate ends it "
+      "while asked resolves no further: under a fit with the option off a "
+      "refused placement's fit asks about no candidate, and under no fit an "
+      "admitted placement is not the target", (tester) async {
+    for (final refuses in const <bool>[true, false]) {
+      final reason = refuses ? "refused, fit off" : "admitted, no fit";
+      // The predicate writes "m"'s own span at its first ask about row 4,
+      // which ends the session through the mutation cancel, and answers
+      // that ask with `!refuses`.
+      var wrote = false;
+      final run = await _Run.pump(
+        tester,
+        rowCount: 10,
+        items: <String, BoardSpan>{"m": _rows(0), "o": _rows(3, 4)},
+        fit: refuses ? _fit(offersOverlaps: false) : null,
+        canDropAt: (controller, key, span) {
+          if (!wrote && span == _rows(4)) {
+            wrote = true;
+            controller.moveItem("m", controller.spanOf("m")!);
+            return !refuses;
+          }
+          return !_meets(controller, "o", span);
+        },
+      );
+      run.lift(const Offset(20.0, 20.0));
+      await run.moveTo(tester, const Offset(20.0, 180.0));
+      // Setup sanity: the predicate wrote, which ended the drag.
+      expect(wrote, isTrue, reason: reason);
+      expect(run.controller.isDragging("m"), isFalse, reason: reason);
+      if (refuses) {
+        expect(run.asked.last, _rows(4), reason: reason);
+      }
+      expect(run.drag.currentTarget, isNull, reason: reason);
+    }
   });
 }

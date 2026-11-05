@@ -467,6 +467,11 @@ cells lands it at the nearest placement it admits. Through a drag, while the
 board and the drag config stay the same, `canDropAt` is asked about each
 placement once and its answer kept; a structural change, a new config or the
 drag's end drops the kept answers.
+- A drag that its `canDropAt` ends while asked, by changing the board, which
+`BoardDragConfig.canDropAt` must not do, resolves no further, with
+`BoardDropFit.offersOverlaps` off or on: it takes no target and no make-room
+preview, and its `BoardDropFit` asks about no candidate. It used to take the
+placement asked about, or the candidate its fit found, after it had ended.
 - Added `BoardDragConfig.boundsOf` and `BoardDragBounds`: the rows and columns
 a drag keeps an item inside. A move or a resize dragged past them stops at their
 edge, as it does at the lattice's, so its target stays the placement at the
