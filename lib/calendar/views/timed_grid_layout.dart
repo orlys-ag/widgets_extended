@@ -420,6 +420,20 @@ void noteOverlapQuery() {
   }());
 }
 
+/// The wall-minute bounds a create range's overlap tests have worked out
+/// from the key of the refused entry nearest the range's anchor, in a
+/// debug build: at most one per test (`_TimedGridState._rangeBoundOf`).
+/// Tests read differences.
+int debugRangeBoundCount = 0;
+
+/// Adds one to [debugRangeBoundCount] in a debug build.
+void noteRangeBound() {
+  assert(() {
+    debugRangeBoundCount++;
+    return true;
+  }());
+}
+
 /// Timed entries by their instants, which [sharesTime] searches in
 /// O(log n) with no allocation once they are sorted: their ids, and their
 /// starts and their ends as [DateTime.microsecondsSinceEpoch], each list

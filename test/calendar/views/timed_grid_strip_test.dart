@@ -439,9 +439,9 @@ class HeldSource implements CalendarDataSource<String> {
 /// unless [onCreate] takes them, and [opened] each entry it opens,
 /// [onMoveRequest] takes each move and
 /// resize it lands, and [onZoom] each zoom a pinch reports, which the grid
-/// does not show. The grid writes times in [hourLabelFormat]. [editable],
-/// [first], [hours] and [slotMinutes] start as given, and [rebuild]
-/// builds the grid again with them. The grid's policy is [editPolicy]
+/// does not show. The grid writes times in [hourLabelFormat]. [store],
+/// [editable], [first], [hours] and [slotMinutes] start as given, and
+/// [rebuild] builds the grid again with them. The grid's policy is [editPolicy]
 /// where it is given, and otherwise the one [lockPast],
 /// [lockEarlierToday], [maxDayCount] and [allowsOverlaps] make
 /// ([policy]).
@@ -471,7 +471,7 @@ class Harness {
        hours = shown.hours,
        slotMinutes = shown.slotMinutes;
 
-  final CalendarStore<String> store;
+  CalendarStore<String> store;
   final Shown shown;
   final int? maxDayCount;
   final bool lockPast;
@@ -4514,9 +4514,9 @@ void main() {
     });
 
     testWidgets("OP7 in Week a create range is held at an entry beside its "
-        "anchor only where the policy does not let a create over the grid's "
-        "days share its time, asking no entry past the first that holds it, "
-        "and a store notify asks about the entries it reads again", (
+        "anchor only where the policy does not let the range a release "
+        "would report share its time, asking about the entries that range "
+        "shares, and a store notify asks about that range again", (
       tester,
     ) async {
       final shown = Shown.week(monday);
@@ -4543,11 +4543,15 @@ void main() {
             end: id == "tentative" ? at(tuesday, 12, 15) : at(tuesday, 10),
           ),
         ], reason: id);
-        expect(askedIds(policy), <String>[id], reason: id);
+        expect(askedIds(policy), isNotEmpty, reason: id);
         for (final ask in policy.asked) {
+          expect(<String>[id, "busy-late"], contains(ask.other.id), reason: id);
           expect(
             (ask.candidate.start, ask.candidate.end, ask.candidate.entry),
-            (monday, nextMonday, null),
+            anyOf(
+              (at(tuesday, 8), at(tuesday, 10, 15), null),
+              (at(tuesday, 8), at(tuesday, 12, 15), null),
+            ),
             reason: id,
           );
         }
@@ -4576,13 +4580,27 @@ void main() {
           slotsRect(tester, shown, tuesday, 8 * 60, 10 * 60).deflate(1.0),
         ),
       ]);
-      expect(askedIds(policy), <String>["busy"]);
+      final asked = policy.asked.length;
+      expect(askedIds(policy), everyElement("busy"));
+      expect(asked, greaterThan(0));
       await store.requestDelete("busy");
       await store.create(
         entryOf("tentative-n", at(tuesday, 10, 30), at(tuesday, 11)),
       );
       await tester.pump();
-      expect(askedIds(policy), <String>["busy", "tentative-n"]);
+      expect(
+        policy.asked.sublist(asked).map((ask) {
+          return (
+            ask.other.id,
+            ask.candidate.entry,
+            ask.candidate.start,
+            ask.candidate.end,
+          );
+        }),
+        <(String?, CalendarEntry<String>?, DateTime, DateTime)>[
+          ("tentative-n", null, at(tuesday, 8), at(tuesday, 12, 15)),
+        ],
+      );
       await gesture.moveTo(twelve.center + const Offset(0.0, 2.0));
       await tester.pump();
       await gesture.up();
@@ -4625,8 +4643,9 @@ void main() {
     testWidgets("OP10 where overlaps are forbidden, among 200 packed "
         "entries each gate call that asks builds one candidate, and one that "
         "asks nothing builds none, the pairs one gate call asks about carry "
-        "that one candidate, and a create range builds two at most and asks "
-        "nothing while its pointer moves", (tester) async {
+        "that one candidate, and a create range asks nothing at its start "
+        "and builds at each move the candidates it asks with, each asking "
+        "about an entry once", (tester) async {
       final shown = Shown.week(monday);
       for (final allowsAll in const <bool>[false, true]) {
         for (final name in const <String>["move", "start", "end", "bar"]) {
@@ -4679,23 +4698,53 @@ void main() {
       final policy = pairPolicy();
       final harness = Harness(packedStore(200), shown, editPolicy: policy);
       await harness.pump(tester);
-      final built = debugOverlapCandidateCount;
-      var begun = 0;
+      var asked = policy.asked.length;
+      var built = debugOverlapCandidateCount;
+      var moves = 0;
+      void expectBuiltAsAsked(String reason) {
+        final asks = policy.asked.sublist(asked);
+        final candidates = Set<CalendarOverlapCandidate<String>>.identity();
+        for (final ask in asks) {
+          candidates.add(ask.candidate);
+        }
+        expect(
+          debugOverlapCandidateCount - built,
+          candidates.length,
+          reason: reason,
+        );
+        for (final candidate in candidates) {
+          final others = <String?>[
+            for (final ask in asks)
+              if (identical(ask.candidate, candidate)) ask.other.id,
+          ];
+          expect(others.toSet(), hasLength(others.length), reason: reason);
+        }
+        asked = policy.asked.length;
+        built = debugOverlapCandidateCount;
+      }
+
       await packedCreateDrag(
         tester,
         shown,
         begun: () {
-          begun = policy.asked.length;
+          expect(
+            policy.asked.sublist(asked).where((ask) {
+              return ask.candidate.entry == null;
+            }),
+            isEmpty,
+            reason: "the start",
+          );
+          asked = policy.asked.length;
+          built = debugOverlapCandidateCount;
         },
-        held: () {
-          expect(policy.asked, hasLength(begun));
+        moved: () {
+          moves++;
+          expectBuiltAsAsked("move $moves");
         },
       );
-      // Setup sanity: the range began beside the packed entries, asked
-      // about them, and was let go.
-      expect(begun, greaterThan(0));
+      // Setup sanity: every move was checked, and the range was let go.
+      expect(moves, 10);
       expect(harness.creates, hasLength(1));
-      expect(debugOverlapCandidateCount - built, lessThanOrEqualTo(2));
     });
 
     testWidgets("OP11 a per-pair answer that throws is reported: a bar's "
@@ -5017,6 +5066,782 @@ void main() {
       await gesture.up();
       await tester.pumpAndSettle();
       expect(added, <int>[1, 0, 1]);
+    });
+
+    testWidgets("OP17 in Week a create range tests the range a release "
+        "would report at each cell it reaches, holds it short of the entry "
+        "nearest its anchor that the policy refuses, toward later or earlier "
+        "slots and across days, and asks about the held range again", (
+      tester,
+    ) async {
+      final shown = Shown.week(monday);
+      final cases =
+          <
+            String,
+            ({
+              List<CalendarEntry<String>> entries,
+              List<(DateTime, DateTime)> path,
+              CalendarCreateRange created,
+              List<(DateTime, DateTime)> tested,
+            })
+          >{
+            "later, held": (
+              entries: <CalendarEntry<String>>[
+                entryOf("busy", at(tuesday, 10), at(tuesday, 11)),
+              ],
+              path: <(DateTime, DateTime)>[
+                (tuesday, at(tuesday, 8)),
+                (tuesday, at(tuesday, 12)),
+              ],
+              created: CalendarCreateRange(
+                start: at(tuesday, 8),
+                end: at(tuesday, 10),
+              ),
+              tested: <(DateTime, DateTime)>[
+                (at(tuesday, 8), at(tuesday, 10, 15)),
+                (at(tuesday, 8), at(tuesday, 12, 15)),
+                (at(tuesday, 8), at(tuesday, 10)),
+              ],
+            ),
+            "later, not held": (
+              entries: <CalendarEntry<String>>[
+                entryOf("tentative", at(tuesday, 10), at(tuesday, 11)),
+              ],
+              path: <(DateTime, DateTime)>[
+                (tuesday, at(tuesday, 8)),
+                (tuesday, at(tuesday, 12)),
+              ],
+              created: CalendarCreateRange(
+                start: at(tuesday, 8),
+                end: at(tuesday, 12, 15),
+              ),
+              tested: <(DateTime, DateTime)>[
+                (at(tuesday, 8), at(tuesday, 10, 15)),
+                (at(tuesday, 8), at(tuesday, 12, 15)),
+              ],
+            ),
+            "earlier, held": (
+              entries: <CalendarEntry<String>>[
+                entryOf("busy", at(tuesday, 9), at(tuesday, 10)),
+              ],
+              path: <(DateTime, DateTime)>[
+                (tuesday, at(tuesday, 12)),
+                (tuesday, at(tuesday, 8)),
+              ],
+              created: CalendarCreateRange(
+                start: at(tuesday, 10),
+                end: at(tuesday, 12, 15),
+              ),
+              tested: <(DateTime, DateTime)>[
+                (at(tuesday, 10), at(tuesday, 12, 15)),
+                (at(tuesday, 8), at(tuesday, 12, 15)),
+              ],
+            ),
+            "earlier, not held": (
+              entries: <CalendarEntry<String>>[
+                entryOf("tentative", at(tuesday, 9), at(tuesday, 10)),
+              ],
+              path: <(DateTime, DateTime)>[
+                (tuesday, at(tuesday, 12)),
+                (tuesday, at(tuesday, 8)),
+              ],
+              created: CalendarCreateRange(
+                start: at(tuesday, 8),
+                end: at(tuesday, 12, 15),
+              ),
+              tested: <(DateTime, DateTime)>[
+                (at(tuesday, 10), at(tuesday, 12, 15)),
+                (at(tuesday, 8), at(tuesday, 12, 15)),
+              ],
+            ),
+            "across days": (
+              entries: <CalendarEntry<String>>[
+                entryOf("tentative", at(monday, 10), at(monday, 10, 30)),
+                entryOf("busy", at(monday, 20), at(monday, 21)),
+              ],
+              path: <(DateTime, DateTime)>[
+                (monday, at(monday, 9)),
+                (monday, at(monday, 12)),
+                (monday, at(monday, 15)),
+                (tuesday, at(tuesday, 12)),
+              ],
+              created: CalendarCreateRange(
+                start: at(monday, 9),
+                end: at(monday, 20),
+              ),
+              tested: <(DateTime, DateTime)>[
+                (at(monday, 9), at(monday, 12, 15)),
+                (at(monday, 9), at(monday, 15, 15)),
+                (at(monday, 9), at(tuesday, 12, 15)),
+                (at(monday, 9), at(monday, 20)),
+              ],
+            ),
+          };
+      for (final MapEntry(key: name, value: run) in cases.entries) {
+        final policy = pairPolicy();
+        final harness = Harness(
+          storeOf(run.entries),
+          shown,
+          editPolicy: policy,
+        );
+        await harness.pump(tester);
+        Offset pointOf((DateTime, DateTime) cell) {
+          final (day, time) = cell;
+          return slotRect(
+            tester,
+            shown,
+            day,
+            CalendarDates.minuteOfDay(time),
+          ).center;
+        }
+
+        final gesture = await tester.startGesture(
+          pointOf(run.path.first),
+          kind: PointerDeviceKind.mouse,
+        );
+        if (run.path.length == 2) {
+          await gesture.moveTo(
+            Offset.lerp(pointOf(run.path.first), pointOf(run.path.last), 0.5)!,
+          );
+          await tester.pump();
+        }
+        for (final cell in run.path.skip(1)) {
+          await gesture.moveTo(pointOf(cell));
+          await tester.pump();
+        }
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(harness.creates, <CalendarCreateRange>[
+          run.created,
+        ], reason: name);
+        for (final ask in policy.asked) {
+          expect(ask.candidate.entry, isNull, reason: name);
+          expect(
+            run.tested,
+            contains((ask.candidate.start, ask.candidate.end)),
+            reason: name,
+          );
+          expect(
+            (ask.candidate.start, ask.candidate.end),
+            isNot((monday, nextMonday)),
+            reason: name,
+          );
+        }
+        expectSitePairs(policy);
+        expectRangeAsked(policy, run.entries, run.created);
+      }
+    });
+
+    testWidgets("OP18 in Day a create range is held short of the refused "
+        "entry nearest its anchor, past an entry the policy allows, and to "
+        "its anchor's slot where the refused entry shares that slot, asking "
+        "about each range it tests", (tester) async {
+      final shown = Shown.day(tuesday);
+      final cases =
+          <
+            String,
+            ({
+              PairRecordingPolicy<String> Function() policy,
+              List<CalendarEntry<String>> entries,
+              int from,
+              int to,
+              CalendarCreateRange created,
+              List<(DateTime, DateTime)> tested,
+              List<(String, DateTime, DateTime)> asked,
+            })
+          >{
+            "later, held": (
+              policy: pairPolicy,
+              entries: <CalendarEntry<String>>[
+                entryOf("busy", at(tuesday, 10), at(tuesday, 11)),
+              ],
+              from: 8 * 60,
+              to: 12 * 60,
+              created: CalendarCreateRange(
+                start: at(tuesday, 8),
+                end: at(tuesday, 10),
+              ),
+              tested: <(DateTime, DateTime)>[
+                (at(tuesday, 8), at(tuesday, 10, 15)),
+                (at(tuesday, 8), at(tuesday, 12, 15)),
+                (at(tuesday, 8), at(tuesday, 10)),
+              ],
+              asked: <(String, DateTime, DateTime)>[],
+            ),
+            "earlier, held past an allowed entry": (
+              policy: pairPolicy,
+              entries: <CalendarEntry<String>>[
+                entryOf("busy", at(tuesday, 8, 30), at(tuesday, 9)),
+                entryOf("tentative", at(tuesday, 10), at(tuesday, 10, 30)),
+              ],
+              from: 12 * 60,
+              to: 8 * 60,
+              created: CalendarCreateRange(
+                start: at(tuesday, 9),
+                end: at(tuesday, 12, 15),
+              ),
+              tested: <(DateTime, DateTime)>[
+                (at(tuesday, 10), at(tuesday, 12, 15)),
+                (at(tuesday, 8), at(tuesday, 12, 15)),
+                (at(tuesday, 9), at(tuesday, 12, 15)),
+              ],
+              asked: <(String, DateTime, DateTime)>[
+                ("tentative", at(tuesday, 9), at(tuesday, 12, 15)),
+              ],
+            ),
+            "later, not held": (
+              policy: pairPolicy,
+              entries: <CalendarEntry<String>>[
+                entryOf("tentative", at(tuesday, 10), at(tuesday, 11)),
+              ],
+              from: 8 * 60,
+              to: 12 * 60,
+              created: CalendarCreateRange(
+                start: at(tuesday, 8),
+                end: at(tuesday, 12, 15),
+              ),
+              tested: <(DateTime, DateTime)>[
+                (at(tuesday, 8), at(tuesday, 10, 15)),
+                (at(tuesday, 8), at(tuesday, 12, 15)),
+              ],
+              asked: <(String, DateTime, DateTime)>[],
+            ),
+            "earlier, not held": (
+              policy: pairPolicy,
+              entries: <CalendarEntry<String>>[
+                entryOf("tentative", at(tuesday, 9), at(tuesday, 10)),
+              ],
+              from: 12 * 60,
+              to: 8 * 60,
+              created: CalendarCreateRange(
+                start: at(tuesday, 8),
+                end: at(tuesday, 12, 15),
+              ),
+              tested: <(DateTime, DateTime)>[
+                (at(tuesday, 10), at(tuesday, 12, 15)),
+                (at(tuesday, 8), at(tuesday, 12, 15)),
+              ],
+              asked: <(String, DateTime, DateTime)>[
+                ("tentative", at(tuesday, 8), at(tuesday, 12, 15)),
+              ],
+            ),
+            "held at the anchor, later": (
+              policy: longPolicy,
+              entries: <CalendarEntry<String>>[
+                entryOf("long", at(tuesday, 7), at(tuesday, 13)),
+                entryOf("side", at(tuesday, 11), at(tuesday, 11, 30)),
+              ],
+              from: 8 * 60,
+              to: 10 * 60,
+              created: CalendarCreateRange(
+                start: at(tuesday, 8),
+                end: at(tuesday, 8, 15),
+              ),
+              tested: <(DateTime, DateTime)>[
+                (at(tuesday, 8), at(tuesday, 9, 15)),
+                (at(tuesday, 8), at(tuesday, 10, 15)),
+                (at(tuesday, 8), at(tuesday, 8, 15)),
+              ],
+              asked: <(String, DateTime, DateTime)>[
+                ("long", at(tuesday, 8), at(tuesday, 10, 15)),
+                ("long", at(tuesday, 8), at(tuesday, 8, 15)),
+              ],
+            ),
+            "held at the anchor, earlier": (
+              policy: longPolicy,
+              entries: <CalendarEntry<String>>[
+                entryOf("long", at(tuesday, 7), at(tuesday, 13)),
+                entryOf("side", at(tuesday, 11), at(tuesday, 11, 30)),
+              ],
+              from: 12 * 60,
+              to: 10 * 60,
+              created: CalendarCreateRange(
+                start: at(tuesday, 12),
+                end: at(tuesday, 12, 15),
+              ),
+              tested: <(DateTime, DateTime)>[
+                (at(tuesday, 11), at(tuesday, 12, 15)),
+                (at(tuesday, 10), at(tuesday, 12, 15)),
+                (at(tuesday, 12), at(tuesday, 12, 15)),
+              ],
+              asked: <(String, DateTime, DateTime)>[
+                ("long", at(tuesday, 10), at(tuesday, 12, 15)),
+                ("long", at(tuesday, 12), at(tuesday, 12, 15)),
+              ],
+            ),
+          };
+      for (final MapEntry(key: name, value: run) in cases.entries) {
+        final policy = run.policy();
+        final harness = Harness(
+          storeOf(run.entries),
+          shown,
+          editPolicy: policy,
+        );
+        await harness.pump(tester);
+        // "side" shares time with "long", which so takes the left half of
+        // the column: a press on the right half of a slot it covers lies on
+        // no block.
+        final beside = identical(run.policy, longPolicy);
+        Offset pointAt(int minute) {
+          final slot = slotRect(tester, shown, tuesday, minute);
+          return beside
+              ? Offset(slot.left + slot.width * 0.75, slot.center.dy)
+              : slot.center;
+        }
+
+        final from = pointAt(run.from);
+        final gesture = await tester.startGesture(
+          from,
+          kind: PointerDeviceKind.mouse,
+        );
+        final to = pointAt(run.to);
+        await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+        await tester.pump();
+        await gesture.moveTo(to);
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+        if (beside) {
+          // Setup sanity: the press, which asks first of the asks with no
+          // entry, was admitted, the slot's candidate allowed.
+          final first = policy.asked.firstWhere((ask) {
+            return ask.candidate.entry == null;
+          });
+          expect(
+            (first.candidate.start, first.candidate.end),
+            (at(tuesday, 0, run.from), at(tuesday, 0, run.from + 15)),
+            reason: name,
+          );
+          expect(policy.allows(first.candidate, first.other), isTrue);
+        }
+        expect(harness.creates, <CalendarCreateRange>[
+          run.created,
+        ], reason: name);
+        for (final ask in policy.asked) {
+          if (ask.candidate.entry != null) {
+            // The semantic moves of "long" and "side", which share time,
+            // ask about each other.
+            expect(beside, isTrue, reason: name);
+            continue;
+          }
+          expect(
+            run.tested,
+            contains((ask.candidate.start, ask.candidate.end)),
+            reason: name,
+          );
+        }
+        for (final (id, start, end) in run.asked) {
+          expect(
+            policy.asked.any((ask) {
+              return ask.other.id == id &&
+                  ask.candidate.start == start &&
+                  ask.candidate.end == end;
+            }),
+            isTrue,
+            reason: "$name: $id with $start to $end",
+          );
+        }
+        expectSitePairs(policy);
+        expectRangeAsked(policy, run.entries, run.created);
+      }
+    });
+
+    testWidgets("OP19 in Week a create range dragged up past 61 refused "
+        "entries tests two ranges per cell change, asking each entry it "
+        "shares once and working out one bound, in four searches, asks "
+        "nothing on a move inside the cell it tested toward, and reads no "
+        "store entries", (tester) async {
+      final shown = Shown.week(
+        monday,
+        hours: CalendarDayHours(8 * 60, 18 * 60),
+      );
+      final policy = pairPolicy();
+      final shared = <CalendarEntry<String>>[
+        for (var i = 0; i < 4; i++)
+          entryOf("s$i", at(monday, 20), at(tuesday, 12, 30)),
+        entryOf("s4", at(monday, 20), at(tuesday, 16, 45)),
+      ];
+      final store = storeOf(<CalendarEntry<String>>[
+        for (var i = 0; i < 200; i++)
+          entryOf("p$i", at(tuesday, 0, 5 * i), at(tuesday, 0, 5 * i + 5)),
+        entryOf("free", at(tuesday, 18), at(tuesday, 19)),
+        allDayOf("bar", monday),
+        ...shared,
+      ]);
+      final harness = Harness(store, shown, editPolicy: policy);
+      await harness.pump(tester);
+      final reads = store.reads.length;
+      final from = slotRect(tester, shown, tuesday, 17 * 60).center;
+      final start = slotRect(tester, shown, tuesday, 16 * 60 + 45).center;
+      final to = slotRect(tester, shown, tuesday, 12 * 60).center;
+      final gesture = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveTo(start);
+      await tester.pump();
+      final controller = boardOf(tester).controller;
+      for (var step = 1; step <= 10; step++) {
+        final reason = "step $step";
+        final asked = policy.asked.length;
+        final built = debugOverlapCandidateCount;
+        final queries = debugOverlapQueryCount;
+        final visits = debugOverlapIndexVisitCount;
+        final bounds = debugRangeBoundCount;
+        final point = Offset.lerp(start, to, step / 10)!;
+        await gesture.moveTo(point);
+        await tester.pump();
+        final asks = policy.asked.sublist(asked);
+        final candidates = Set<CalendarOverlapCandidate<String>>.identity();
+        for (final ask in asks) {
+          candidates.add(ask.candidate);
+        }
+        // Setup sanity: the step asked, and about "s4".
+        expect(asks, isNotEmpty, reason: reason);
+        expect(
+          asks.map((ask) {
+            return ask.other.id;
+          }),
+          contains("s4"),
+          reason: reason,
+        );
+        expect(
+          debugOverlapCandidateCount - built,
+          lessThanOrEqualTo(2),
+          reason: reason,
+        );
+        expect(debugRangeBoundCount - bounds, 1, reason: reason);
+        expect(
+          candidates,
+          hasLength(debugOverlapCandidateCount - built),
+          reason: reason,
+        );
+        DateTime? previous;
+        for (final candidate in candidates) {
+          final others = <String>[
+            for (final ask in asks)
+              if (identical(ask.candidate, candidate)) ask.other.id!,
+          ];
+          expect(others.toSet(), hasLength(others.length), reason: reason);
+          for (final ask in asks) {
+            if (identical(ask.candidate, candidate)) {
+              expect(
+                NoOverlapsPolicy.rangeSharesTime(
+                  candidate.start,
+                  candidate.end,
+                  ask.other,
+                ),
+                isTrue,
+                reason: reason,
+              );
+            }
+          }
+          expect(candidate.entry, isNull, reason: reason);
+          expect(candidate.end, at(tuesday, 17, 15), reason: reason);
+          expect(
+            CalendarDates.minuteOfDay(candidate.start) % 15,
+            0,
+            reason: reason,
+          );
+          expect(
+            candidate.start.isBefore(at(tuesday, 12)) ||
+                candidate.start.isAfter(at(tuesday, 16, 45)),
+            isFalse,
+            reason: reason,
+          );
+          if (previous != null) {
+            expect(candidate.start.isAfter(previous), isTrue, reason: reason);
+          }
+          previous = candidate.start;
+        }
+        expect(debugOverlapQueryCount - queries, 4, reason: reason);
+        final stepVisits = debugOverlapIndexVisitCount - visits;
+        // log2(102) is 6: 1 + 2 * (5 + 1) * (6 + 1).
+        expect(stepVisits, lessThanOrEqualTo(85), reason: reason);
+        if (step == 10) {
+          // Setup sanity: the last step's range shares every indexed
+          // "s" entry, and its index search visited nodes.
+          for (final entry in shared) {
+            expect(
+              NoOverlapsPolicy.rangeSharesTime(
+                candidates.first.start,
+                candidates.first.end,
+                entry,
+              ),
+              isTrue,
+              reason: entry.id,
+            );
+          }
+          expect(stepVisits, greaterThan(0));
+        }
+
+        // A move inside the cell the step reached.
+        final cell = controller.cellAt(point);
+        final nudge = controller.cellAt(point + const Offset(0.0, 1.0)) == cell
+            ? const Offset(0.0, 1.0)
+            : const Offset(0.0, -1.0);
+        final counts = (
+          policy.asked.length,
+          debugOverlapCandidateCount,
+          debugOverlapQueryCount,
+          debugOverlapIndexVisitCount,
+          debugRangeBoundCount,
+        );
+        await gesture.moveTo(point + nudge);
+        await tester.pump();
+        // Setup sanity: the move stayed in that cell.
+        expect(controller.cellAt(point + nudge), cell, reason: reason);
+        expect(
+          (
+            policy.asked.length,
+            debugOverlapCandidateCount,
+            debugOverlapQueryCount,
+            debugOverlapIndexVisitCount,
+            debugRangeBoundCount,
+          ),
+          counts,
+          reason: "a move inside $reason's cell",
+        );
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(store.reads, hasLength(reads));
+      // Setup sanity: the release created once.
+      expect(harness.creates, hasLength(1));
+    });
+
+    testWidgets("OP20 a per-pair answer that throws while a create range "
+        "tests its range at a pointer move is reported and ends the range, "
+        "which creates nothing", (tester) async {
+      final shown = Shown.week(monday);
+      await recordingErrors((errors) async {
+        var armed = false;
+        final policy = PairRecordingPolicy<String>(
+          allows: (candidate, other) {
+            if (armed) {
+              throw const PairFailure();
+            }
+            return tentativePair(candidate, other);
+          },
+        );
+        final harness = Harness(
+          storeOf(<CalendarEntry<String>>[
+            entryOf("busy", at(tuesday, 10), at(tuesday, 11)),
+          ]),
+          shown,
+          editPolicy: policy,
+        );
+        await harness.pump(tester);
+        final from = slotRect(tester, shown, tuesday, 8 * 60).center;
+        final gesture = await tester.startGesture(
+          from,
+          kind: PointerDeviceKind.mouse,
+        );
+        await gesture.moveTo(slotRect(tester, shown, tuesday, 9 * 60).center);
+        await tester.pump();
+        // Setup sanity: the range is marked.
+        expect(strokedRects(tester), isNotEmpty);
+        armed = true;
+        await gesture.moveTo(slotRect(tester, shown, tuesday, 12 * 60).center);
+        await tester.pump();
+        expect(
+          errors.map((error) {
+            return (error.library, error.exception is PairFailure);
+          }),
+          <(String?, bool)>[("widgets_extended calendar", true)],
+        );
+        expect(strokedRects(tester), isEmpty);
+        expect(find.byType(ErrorWidget), findsNothing);
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(harness.creates, isEmpty);
+      });
+    });
+
+    testWidgets("OP25 a new minute tests a held create range's range again "
+        "with no pointer move: the range a release there would report", (
+      tester,
+    ) async {
+      final shown = Shown.week(monday);
+      var armed = false;
+      final policy = PairRecordingPolicy<String>(
+        allows: (candidate, other) {
+          return !armed;
+        },
+      );
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("tentative", at(tuesday, 10), at(tuesday, 11)),
+        ]),
+        shown,
+        editPolicy: policy,
+      );
+      await harness.pump(tester);
+      final from = slotRect(tester, shown, tuesday, 8 * 60).center;
+      final twelve = slotRect(tester, shown, tuesday, 12 * 60).center;
+      final gesture = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveTo(Offset.lerp(from, twelve, 0.5)!);
+      await tester.pump();
+      await gesture.moveTo(twelve);
+      await tester.pump();
+      // Setup sanity: the range runs to 12:15.
+      expect(strokedRects(tester), <Matcher>[
+        nearRect(
+          slotsRect(tester, shown, tuesday, 8 * 60, 12 * 60 + 15).deflate(1.0),
+        ),
+      ]);
+      final asked = policy.asked.length;
+      armed = true;
+      harness.now.value = CalendarNow(
+        time: at(harness.today, 9, 1),
+        today: harness.today,
+      );
+      await tester.pump();
+      expect(
+        policy.asked.sublist(asked).map((ask) {
+          return (
+            ask.other.id,
+            ask.candidate.entry,
+            ask.candidate.start,
+            ask.candidate.end,
+          );
+        }),
+        <(String?, CalendarEntry<String>?, DateTime, DateTime)>[
+          ("tentative", null, at(tuesday, 8), at(tuesday, 12, 15)),
+        ],
+      );
+      expect(strokedRects(tester), <Matcher>[
+        nearRect(
+          slotsRect(tester, shown, tuesday, 8 * 60, 10 * 60).deflate(1.0),
+        ),
+      ]);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: at(tuesday, 8), end: at(tuesday, 10)),
+      ]);
+    });
+
+    testWidgets("OP27 a reload during a create range that changes whether "
+        "the policy allows overlaps places the range again by the answer it "
+        "reads: from allowed, it is held at the entry the policy refuses; "
+        "to allowed, it is released and a later cell asks nothing", (
+      tester,
+    ) async {
+      final shown = Shown.week(monday);
+      for (final allowedFirst in const <bool>[true, false]) {
+        final reason = "allowed first: $allowedFirst";
+        switchedOverlaps = allowedFirst;
+        final policy = SwitchedOverlapsPolicy();
+        final harness = Harness(
+          storeOf(<CalendarEntry<String>>[
+            entryOf("busy", at(tuesday, 10), at(tuesday, 11)),
+          ]),
+          shown,
+          editPolicy: policy,
+        );
+        await harness.pump(tester);
+        final from = slotRect(tester, shown, tuesday, 8 * 60).center;
+        final twelve = slotRect(tester, shown, tuesday, 12 * 60).center;
+        final gesture = await tester.startGesture(
+          from,
+          kind: PointerDeviceKind.mouse,
+        );
+        await gesture.moveTo(Offset.lerp(from, twelve, 0.5)!);
+        await tester.pump();
+        await gesture.moveTo(twelve);
+        await tester.pump();
+        final full = nearRect(
+          slotsRect(tester, shown, tuesday, 8 * 60, 12 * 60 + 15).deflate(1.0),
+        );
+        final held = nearRect(
+          slotsRect(tester, shown, tuesday, 8 * 60, 10 * 60).deflate(1.0),
+        );
+        // Setup sanity: the range runs as the policy first answers.
+        expect(strokedRects(tester), <Matcher>[
+          allowedFirst ? full : held,
+        ], reason: reason);
+        switchedOverlaps = !allowedFirst;
+        final asked = policy.asked.length;
+        final reassembled = tester.binding.reassembleApplication();
+        await tester.pump();
+        await reassembled;
+        if (allowedFirst) {
+          expect(
+            policy.asked.sublist(asked).map((candidate) {
+              return (candidate.entry, candidate.start, candidate.end);
+            }),
+            contains((null, at(tuesday, 8), at(tuesday, 12, 15))),
+            reason: reason,
+          );
+          expect(strokedRects(tester), <Matcher>[held], reason: reason);
+        } else {
+          expect(strokedRects(tester), <Matcher>[full], reason: reason);
+          await gesture.moveTo(
+            slotRect(tester, shown, tuesday, 13 * 60).center,
+          );
+          await tester.pump();
+          expect(policy.asked, hasLength(asked), reason: reason);
+        }
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(harness.creates, <CalendarCreateRange>[
+          CalendarCreateRange(
+            start: at(tuesday, 8),
+            end: allowedFirst ? at(tuesday, 10) : at(tuesday, 13, 15),
+          ),
+        ], reason: reason);
+      }
+    });
+
+    testWidgets("OP28 a new store a build gives during a create range "
+        "places the range again on that store's entries", (tester) async {
+      final shown = Shown.week(monday);
+      final policy = pairPolicy();
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("tentative", at(tuesday, 10), at(tuesday, 11)),
+        ]),
+        shown,
+        editPolicy: policy,
+      );
+      await harness.pump(tester);
+      final from = slotRect(tester, shown, tuesday, 8 * 60).center;
+      final twelve = slotRect(tester, shown, tuesday, 12 * 60).center;
+      final gesture = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveTo(Offset.lerp(from, twelve, 0.5)!);
+      await tester.pump();
+      await gesture.moveTo(twelve);
+      await tester.pump();
+      // Setup sanity: the range runs to 12:15.
+      expect(strokedRects(tester), <Matcher>[
+        nearRect(
+          slotsRect(tester, shown, tuesday, 8 * 60, 12 * 60 + 15).deflate(1.0),
+        ),
+      ]);
+      final busy = entryOf("busy", at(tuesday, 10), at(tuesday, 11));
+      harness.store = storeOf(<CalendarEntry<String>>[busy]);
+      await harness.rebuild(tester);
+      await tester.pump();
+      expectRangeAsked(policy, <CalendarEntry<String>>[
+        busy,
+      ], CalendarCreateRange(start: at(tuesday, 8), end: at(tuesday, 12, 15)));
+      expect(strokedRects(tester), <Matcher>[
+        nearRect(
+          slotsRect(tester, shown, tuesday, 8 * 60, 10 * 60).deflate(1.0),
+        ),
+      ]);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: at(tuesday, 8), end: at(tuesday, 10)),
+      ]);
     });
   });
 
@@ -6395,7 +7220,9 @@ void main() {
       testWidgets("OP14 in Day under a one-day limit and the lock of "
           "earlier today at the second 23:05, a create range from the 23:15 "
           "row to the 23:30 row passes an entry of the second pass where the "
-          "policy lets a create over the day share its time", (tester) async {
+          "policy lets the range to the 23:30 row share its time", (
+        tester,
+      ) async {
         final day = longDayStart;
         expectRepeatedLastHour(day);
         final hours = CalendarDayHours(8 * 60, 23 * 60 + 45);
@@ -6434,8 +7261,10 @@ void main() {
             policy.asked.where((ask) {
               return ask.other.id == id &&
                   ask.candidate.entry == null &&
-                  ask.candidate.start == day &&
-                  ask.candidate.end == CalendarDates.addDays(day, 1);
+                  ask.candidate.start ==
+                      laterLastHour.add(const Duration(minutes: 15)) &&
+                  ask.candidate.end ==
+                      laterLastHour.add(const Duration(minutes: 45));
             }),
             isNotEmpty,
             reason: id,
@@ -6453,8 +7282,8 @@ void main() {
 
       testWidgets("OP15 in Day a create range from the 23:45 row up to the "
           "22:00 row passes an entry of the second pass where the policy "
-          "lets a create over the day share its time, and where it does not "
-          "is held at the 23:00 row", (tester) async {
+          "lets the create share its time, and where it does not is held at "
+          "the 23:00 row", (tester) async {
         final day = longDayStart;
         expectRepeatedLastHour(day);
         final shown = Shown.day(day);
@@ -6496,11 +7325,9 @@ void main() {
 
       testWidgets("OP16 in Week under the lock of earlier today at the "
           "second 23:05, a create range from the next day's 10:00 row back to "
-          "the day's 23:15 row passes an entry of the first pass where the "
-          "policy lets a create over the grid's days share its time, and "
-          "where it does not is held at the next day's 08:00 row", (
-        tester,
-      ) async {
+          "the day's 23:15 row runs from the second pass, so it passes an "
+          "entry of the first pass whatever the policy answers, asking "
+          "nothing about it", (tester) async {
         final day = longDayStart;
         expectRepeatedLastHour(day);
         final hours = CalendarDayHours(8 * 60, 23 * 60 + 45);
@@ -6535,16 +7362,12 @@ void main() {
             slotRect(tester, shown, next, 10 * 60).center,
             slotRect(tester, shown, day, 23 * 60 + 15).center,
           );
-          expectSitePairs(policy);
-          expect(askedIds(policy), contains(id), reason: id);
+          expect(askedIds(policy), isEmpty, reason: id);
           expect(harness.creates, <CalendarCreateRange>[
-            if (id == "tentative-x")
-              CalendarCreateRange(
-                start: laterLastHour.add(const Duration(minutes: 15)),
-                end: at(next, 10, 15),
-              )
-            else
-              CalendarCreateRange(start: at(next, 8), end: at(next, 10, 15)),
+            CalendarCreateRange(
+              start: laterLastHour.add(const Duration(minutes: 15)),
+              end: at(next, 10, 15),
+            ),
           ], reason: id);
         }
       });
@@ -6657,6 +7480,69 @@ RenderObject itemBoxOf(WidgetTester tester, Finder finder) {
 /// [overlaps].
 PairRecordingPolicy<String> pairPolicy({bool overlaps = false}) {
   return PairRecordingPolicy<String>(allows: tentativePair, overlaps: overlaps);
+}
+
+/// A [PairRecordingPolicy] that refuses "long" only for a candidate longer
+/// than a 15-minute slot, and allows every other pair.
+PairRecordingPolicy<String> longPolicy() {
+  return PairRecordingPolicy<String>(
+    allows: (candidate, other) {
+      return other.id != "long" ||
+          candidate.end.difference(candidate.start) <=
+              const Duration(minutes: 15);
+    },
+  );
+}
+
+/// What [SwitchedOverlapsPolicy.allowsOverlaps] answers, which a test sets
+/// to stand for a reload that changes what the getter answers.
+bool switchedOverlaps = false;
+
+/// Refuses every pair it is asked about, recording each candidate in
+/// [asked], and answers [allowsOverlaps] with [switchedOverlaps].
+final class SwitchedOverlapsPolicy extends CalendarEditPolicy<String> {
+  final List<CalendarOverlapCandidate<String>> asked =
+      <CalendarOverlapCandidate<String>>[];
+
+  @override
+  bool get allowsOverlaps {
+    return switchedOverlaps;
+  }
+
+  @override
+  bool mayOverlap(
+    CalendarOverlapCandidate<String> candidate,
+    CalendarEntry<String> other,
+  ) {
+    asked.add(candidate);
+    return false;
+  }
+}
+
+/// Checks that [policy] asked about each timed entry of [entries] that
+/// shares [range]'s time with a candidate of [range]'s start and end and
+/// no entry.
+void expectRangeAsked(
+  PairRecordingPolicy<String> policy,
+  List<CalendarEntry<String>> entries,
+  CalendarCreateRange range,
+) {
+  for (final entry in entries) {
+    if (entry.isAllDay ||
+        !NoOverlapsPolicy.rangeSharesTime(range.start, range.end, entry)) {
+      continue;
+    }
+    expect(
+      policy.asked.any((ask) {
+        return ask.other.id == entry.id &&
+            ask.candidate.entry == null &&
+            ask.candidate.start == range.start &&
+            ask.candidate.end == range.end;
+      }),
+      isTrue,
+      reason: "${entry.id} with ${range.start} to ${range.end}",
+    );
+  }
 }
 
 /// The ids of the other entries [policy] was asked about, in order.
@@ -6830,12 +7716,14 @@ Map<String, Future<void> Function()> packedGestures(
 /// A mouse press on Tuesday's 17:00 slot, below [packedStore]'s packed
 /// entries, moved to the 16:45 slot, which begins the range, then dragged
 /// up toward the 12:00 slot in ten pointer moves, a frame after each move,
-/// let go and settled; [begun] runs after the range begins and [held]
-/// after the ten moves, before the release.
+/// let go and settled; [begun] runs after the range begins, [moved] after
+/// each of the ten moves' frames, and [held] after the ten moves, before
+/// the release.
 Future<void> packedCreateDrag(
   WidgetTester tester,
   Shown shown, {
   void Function()? begun,
+  void Function()? moved,
   void Function()? held,
 }) async {
   final from = slotRect(tester, shown, tuesday, 17 * 60).center;
@@ -6851,6 +7739,7 @@ Future<void> packedCreateDrag(
   for (var i = 1; i <= 10; i++) {
     await gesture.moveTo(Offset.lerp(start, to, i / 10)!);
     await tester.pump();
+    moved?.call();
   }
   held?.call();
   await gesture.up();

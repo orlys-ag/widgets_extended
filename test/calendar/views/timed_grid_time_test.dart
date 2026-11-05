@@ -1045,8 +1045,9 @@ void main() {
     ]);
   });
 
-  testWidgets("TR8 a create drag across 10 slots reads the store's entries "
-      "once", (tester) async {
+  testWidgets("TR8 a create drag across 10 slots reads no store entries", (
+    tester,
+  ) async {
     final shown = Shown.week(monday);
     final store = storeOf(<CalendarEntry<String>>[
       entryOf("task", at(tuesday, 15), at(tuesday, 16)),
@@ -1069,7 +1070,7 @@ void main() {
     expect(harness.creates, <CalendarCreateRange>[
       CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 12, 45)),
     ]);
-    expect(store.betweenCalls - calls, 1);
+    expect(store.betweenCalls - calls, 0);
   });
 
   testWidgets("TR9 a create drag from Tuesday 10:00 reaches up to the end of "

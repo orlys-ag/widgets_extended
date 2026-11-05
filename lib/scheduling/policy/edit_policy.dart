@@ -149,16 +149,12 @@ final class CalendarOverlapCandidate<T> {
     noteOverlapCandidate();
   }
 
-  /// The start of the times asked about: those of the change, or for a
-  /// change still being picked, of a span holding every time it may reach,
-  /// which each asker gives, such as a create drag in Week and Day, which
-  /// asks about the grid's days.
+  /// The start of the times the change gives; for a create drag in Week
+  /// and Day, of the range a release would report.
   final DateTime start;
 
-  /// The end of the times asked about: those of the change, or for a
-  /// change still being picked, of a span holding every time it may reach,
-  /// which each asker gives, such as a create drag in Week and Day, which
-  /// asks about the grid's days.
+  /// The end of the times the change gives; for a create drag in Week and
+  /// Day, of the range a release would report.
   final DateTime end;
 
   /// The entry a move or a resize changes, as stored, with its payload;
@@ -207,10 +203,13 @@ final class CalendarOverlapCandidate<T> {
 /// [allowsOverlaps] again. An answer that throws in a drag's gates, which
 /// the views ask during a drag and inside their pointer handlers, is
 /// reported through [FlutterError.reportError] and refuses; one that
-/// throws in a build, a press or a tap goes through; and one that throws
-/// where a new minute or a store notify asks again what a view shows is
-/// reported through [FlutterError.reportError], the view showing what the
-/// last answer gave, or for a create range in flight, ending it. A view
+/// throws in a build, a press or a tap goes through; one that throws where
+/// a new minute or a store notify asks again what a view shows is reported
+/// through [FlutterError.reportError], the view showing what the last
+/// answer gave; and one that throws while a create drag in Week or Day
+/// tests its range, at a change of the slot under its pointer, a store
+/// notify or a new minute, is reported through [FlutterError.reportError]
+/// and ends the drag. A view
 /// given a policy not `==` to the last cancels a move, a resize or a
 /// create range in flight, so a host's policy defines value equality, or
 /// is kept as one instance across builds.
@@ -335,11 +334,13 @@ abstract base class CalendarEditPolicy<T> {
   /// - Their slot presses ask with a candidate of the slot's times and no
   ///   entry, and start no create on a slot sharing time with one it
   ///   refuses.
-  /// - Their create drags, whose range is not picked when they ask, at its
-  ///   start, at a store notify and at a new minute, ask about each entry
-  ///   that would hold the range, with a candidate of no entry over the
-  ///   grid's days, a span holding every range the drag may report; a
-  ///   refusal holds the range at that entry.
+  /// - Their create drags ask, at each change of the slot under the
+  ///   pointer, at a store notify and at a new minute, about each entry
+  ///   sharing the time of the range a release there would report, with a
+  ///   candidate of that range and no entry; a refusal holds the range
+  ///   short of the refused entry nearest the slot it started on, or to
+  ///   that slot alone where the entry shares its time, and the held range
+  ///   is asked about again.
   ///
   /// One test of a change can ask about one pair more than once, so the
   /// answer is a question, as every answer of the policy is.

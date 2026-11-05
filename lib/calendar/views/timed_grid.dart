@@ -550,8 +550,10 @@ CalendarCreateRange? _createRangeOf(
 /// where the policy refuses lands at the nearest time no entry shares that
 /// shows, on that day or the day before or after it, and goes back where
 /// there is none; a resize the policy refuses stops its dragged edge at the
-/// first entry in its way, allowed or not; and a create's range stops at
-/// the entries the policy does not let it share. While a drag runs, a label
+/// first entry in its way, allowed or not; and a create's range stops short
+/// of the entry nearest the slot it started on that the policy does not let
+/// the range share, or keeps that slot alone where the entry shares its
+/// time. While a drag runs, a label
 /// over the grid names the days and times a release would give, or that a
 /// move has nowhere to land, and a move outlines the times it would land
 /// on.
@@ -750,24 +752,25 @@ class TimedGrid<T> extends StatefulWidget {
   /// share time with another timed entry the store shows on the days they
   /// cover, whether the grid shows those days or not, that
   /// [CalendarEditPolicy.mayOverlap] does not let the change share, and a
-  /// create range stops at the entries beside the slot it starts on that it
-  /// does not let the create share. A move or a resize asks about the times
-  /// it would give, with the stored entry, and a slot press about the
-  /// slot's times, with no entry. A create range is not picked when it
-  /// asks, at its start, at a store notify and at a new minute, so it asks
-  /// about a candidate with no entry over the grid's days, from [firstDay]
-  /// to the start of the day after the last column's: a policy that answers
-  /// from the candidate's times answers about those days, and its refusal
-  /// holds the range at that entry. A new policy cancels a move or a resize
-  /// in flight and ends a create range in flight.
+  /// create range stops short of the entries it does not let the range
+  /// share, or keeps the slot it started on alone where such an entry
+  /// shares that slot's time. A move or a resize asks about the times it
+  /// would give, with the stored entry, a slot press about the slot's
+  /// times, with no entry, and a create range about the range a release
+  /// would report, with no entry, at each change of the cell under its
+  /// pointer, at a store notify and at a new minute; a refusal holds the
+  /// range short of the refused entry nearest the slot it started on, or
+  /// to that slot alone where the entry shares its time, and the
+  /// held range is asked about again. A new policy cancels a move or a
+  /// resize in flight and ends a create range in flight.
   ///
   /// An answer that throws in a crossing's landing or an end handle's
   /// later day, which the grid asks inside its pointer handlers, is
   /// reported and refuses, as the board's drop gate does
   /// ([BoardDragConfig.canDropAt]); one that throws while a create range
-  /// reads its entries again, at a store notify or a new minute, is
-  /// reported and ends the range, which then creates nothing; and one that
-  /// throws in a build, a press or a tap goes through.
+  /// tests its range, at a pointer move, a store notify or a new minute,
+  /// is reported and ends the range, which then creates nothing; and one
+  /// that throws in a build, a press or a tap goes through.
   final CalendarEditPolicy<T>? editPolicy;
 
   /// The weekdays whose days the grid shows. At least one day of the range
@@ -888,12 +891,14 @@ final class _Pinching extends _GridMode {
 /// cell under the pointer while content scrolls beneath it; and it reads
 /// that cell through the board's controller then
 /// ([BoardController.cellAt]), so a board built anew under it is read.
-/// Where the grid's policy forbids overlaps, a range over the slots reads
-/// the entries that hold it once, when it begins, and again on a store
-/// notify ([_TimedGridState._readRangeConflicts]).
+/// Where the grid's policy forbids overlaps,
+/// a range over the slots tests the range a release would report at each
+/// change of the cell under the pointer, at a store notify and at a new
+/// minute ([_TimedGridState._reach]).
 final class _Ranging extends _GridMode {
   _Ranging({required this.anchor, required this.point, required this.strip})
     : focus = anchor,
+      target = anchor,
       occurrences = List<DateTime?>.filled(anchor.col, null),
       firstFrom = List<int>.filled(anchor.col, 0),
       stripFrom = List<int>.filled(anchor.col, 0);
@@ -911,6 +916,13 @@ final class _Ranging extends _GridMode {
   /// the header, the gutter or past the lattice; for one across the strip
   /// the anchor's row in the column of the strip cell last under it.
   ({int row, int col}) focus;
+
+  /// The cell the range was last tested toward, which [focus] stops short
+  /// of where a limit or an entry holds the range: the cell under the
+  /// pointer at its last change ([_TimedGridState._refocusRange]) or at the
+  /// last placement ([_TimedGridState._placeRangeAnchor]), and [anchor] at
+  /// the start.
+  ({int row, int col}) target;
 
   /// Where the pointer is, in global coordinates.
   Offset point;
@@ -941,17 +953,21 @@ final class _Ranging extends _GridMode {
   /// does.
   final List<int> stripFrom;
 
-  /// The wall minute of the earliest start after [anchor]'s slot of the
-  /// entries that hold the range, which a range reaching later may not
-  /// pass, or null. An entry the policy lets share the candidate of the
-  /// grid's days ([_TimedGridState._conflictsAround]) sets it not.
-  int? nextStart;
-
-  /// The wall minute of the latest end before [anchor]'s slot of the
-  /// entries that hold the range, which a range reaching earlier may not
-  /// pass, or null. An entry the policy lets share the candidate of the
-  /// grid's days ([_TimedGridState._conflictsAround]) sets it not.
-  int? previousEnd;
+  /// The instants of [anchor]'s slot in its column's occurrence
+  /// ([occurrences]), and where the slot ends with the first pass of a
+  /// stretch the clock repeats, that stretch's second pass, which a range
+  /// from an earlier start to the slot's end runs past, with the first-pass
+  /// instant of the stretch's start; the range's overlap tests read them
+  /// ([_TimedGridState._rangeBoundOf]). Null for a range across the strip,
+  /// where the grid's policy allows overlaps, and where the clock skips
+  /// the slot's start or end, so that no test runs
+  /// ([_TimedGridState._readRangeSlot]).
+  ({
+    DateTime start,
+    DateTime end,
+    ({DateTime start, DateTime end, DateTime stretchStart})? secondPass,
+  })?
+  anchorSlot;
 }
 
 /// The drag the board runs on [key], from the board's report of its start
@@ -1653,10 +1669,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       // split, placed again on the moved slot rows.
       _placeLayout(disable: true);
     }
-    // After the sync, so the slot test of the range's anchor reads the
-    // pieces of the store this build gives.
+    // After the sync, so the slot test of the range's anchor and the test
+    // of its range read the pieces of the store this build gives.
     if (nowTaken) {
       _refillRange();
+    } else if (storeChanged || rangeChanged) {
+      _placeRangeAgain();
     }
   }
 
@@ -1773,6 +1791,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     // A reload can change what a getter of the policy held answers, which
     // stays `==` to itself and so is not taken again by an update.
     _takePolicy();
+    // A create range in flight reads its limits and its anchor's slot
+    // again by the answers the reload gives, and tests its range again.
+    _refillRange();
   }
 
   /// Reads the styles of the theme above the grid; on new ones, makes both
@@ -2171,14 +2192,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// for this grid clears the selection: the grid's owner, which moved it,
   /// builds the grid on the days of its new range next. The entries of
   /// the days outside the range are read again when a check next needs
-  /// them ([_offRange]), a create range in flight reads the entries it is
-  /// held by again, a refused one places its anchor again on the entries
-  /// the sync placed ([_placeRangeAnchor]), and where the policy forbids
+  /// them ([_offRange]), a create range in flight places its anchor again
+  /// on the entries the sync placed and tests the range a release there
+  /// would report ([_placeRangeAgain]), and where the policy forbids
   /// overlaps a drag the board runs asks its gates again
-  /// ([_askDragAgain]). Where the policy's answer throws while the range
-  /// reads its entries again, which asks [CalendarEditPolicy.mayOverlap],
-  /// the throw is reported ([_reportPolicyThrow]) and the range is
-  /// detached and cleared, so it creates nothing.
+  /// ([_askDragAgain]).
   void _handleStore() {
     final showedRange = _showsRange;
     _noteRange();
@@ -2187,20 +2205,28 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     _offRange = null;
     _sync();
+    _placeRangeAgain();
+    _askDragAgain();
+    setState(() {});
+  }
+
+  /// Places the running create range again on the entries as they stand
+  /// ([_placeRangeAnchor]), which tests its range where the policy forbids
+  /// overlaps ([_reach]). A throw of the policy's answer is reported
+  /// ([_reportPolicyThrow]) and the range is detached and cleared, so it
+  /// creates nothing. Nothing where no create range runs.
+  void _placeRangeAgain() {
     final range = _range;
+    if (range == null) {
+      return;
+    }
     try {
-      if (range != null && range.refused) {
-        _placeRangeAnchor(range);
-      } else if (range != null) {
-        _readRangeConflicts(range);
-      }
+      _placeRangeAnchor(range);
     } catch (exception, stack) {
       _reportPolicyThrow(exception, stack);
       setState(_detachRange);
       _updateStripMark();
     }
-    _askDragAgain();
-    setState(() {});
   }
 
   /// Hands [request] to [TimedGrid.onMoveRequest], or with none writes it
@@ -2836,24 +2862,34 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// indexes ([TimedGridLayout.loose]); and, for a range with a day outside
   /// the tracks' range, the ones the store shows there ([_offRangeOver]).
   /// An entry with a piece on several columns, or both a piece and an
-  /// indexed time, is visited once for each. The walk, as many columns as
-  /// the range covers, and at most two searches of O((m + 1) log n), m
-  /// being the indexed entries sharing the times that each reaches
-  /// ([GridOverlapIndex.visitSharing]); a store read only for days outside
-  /// the range no check since the last clearing of [_offRange] covered.
+  /// indexed time, is visited once for each, unless [once] holds: then a
+  /// piece is visited only on the first column the walk reads or where it
+  /// holds its entry's start ([GridPiece.first]), and not where the loose
+  /// index holds its entry ([GridOverlapIndex.ids]), which visits it, so
+  /// each entry is visited once. An entry the split leaves off that index
+  /// has a piece on each shown day it covers, so its first piece in the
+  /// walk lies on the first column read or holds its start. The walk, as
+  /// many columns as the range covers, and at most two searches of
+  /// O((m + 1) log n), m being the indexed entries sharing the times that
+  /// each reaches ([GridOverlapIndex.visitSharing]); a store read only for
+  /// days outside the range no check since the last clearing of
+  /// [_offRange] covered.
   bool _visitSharing(
     String? id,
     CalendarEntry<T>? own,
     DateTime start,
     DateTime end,
-    bool Function(CalendarEntry<T> other) visit,
-  ) {
+    bool Function(CalendarEntry<T> other) visit, {
+    bool once = false,
+  }) {
     final tracks = _tracks;
+    final loose = _layout.loose;
     final firstDay = CalendarDates.dayNumber(start);
     final lastDay = CalendarDates.lastDayNumberOf(start, end);
     final first = tracks.firstColumnFrom(firstDay);
     final last = tracks.lastColumnUpTo(lastDay);
     final span = CalendarDates.wallSpanOf(start, end);
+    var read = false;
     for (var column = first; column <= last; column++) {
       final piece = CalendarDates.pieceOn(span, tracks.dayAt(column));
       if (piece == null) {
@@ -2870,23 +2906,31 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         column,
         column + 1,
       );
+      final firstRead = !read;
+      read = true;
       for (final other in others) {
         if (other.id == id) {
           continue;
         }
         final occupant = _board.itemOf(other);
-        if (occupant != null &&
-            NoOverlapsPolicy.rangeSharesTime(
-              start,
-              end,
-              occupant.shown.entry,
-            ) &&
-            visit(occupant.shown.entry)) {
+        if (occupant == null ||
+            (once &&
+                !firstRead &&
+                occupant is GridPiece<T> &&
+                !occupant.first)) {
+          continue;
+        }
+        final entry = occupant.shown.entry;
+        if (!NoOverlapsPolicy.rangeSharesTime(start, end, entry) ||
+            (once && (loose?.ids.contains(other.id) ?? false))) {
+          continue;
+        }
+        if (visit(entry)) {
           return true;
         }
       }
     }
-    if (_layout.loose?.visitSharing(id, own, start, end, visit) ?? false) {
+    if (loose?.visitSharing(id, own, start, end, visit) ?? false) {
       return true;
     }
     if (firstDay >= tracks.firstDay && lastDay <= tracks.lastDay) {
@@ -4369,7 +4413,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       strip: strip != null,
     );
     _readRangeLimit(range);
-    _readRangeConflicts(range);
+    _readRangeSlot(range);
     setState(() {
       _mode = range;
     });
@@ -4417,24 +4461,54 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// Reads the entries next to [range]'s anchor's slot that hold it, in
-  /// the occurrence of its column's earliest start, into
-  /// [_Ranging.nextStart] and [_Ranging.previousEnd]. A range across the
-  /// strip, of all-day days, is held by none, and so is any range where
-  /// the grid's policy allows overlaps.
-  void _readRangeConflicts(_Ranging range) {
+  /// Reads [range]'s anchor's slot into [_Ranging.anchorSlot], in the
+  /// occurrence of its column's earliest start ([_Ranging.occurrences]): its
+  /// start and end, and where its end, as a range from its start, is the
+  /// instant the clock goes back, so the slot ends with the first pass of a
+  /// stretch the clock repeats, that stretch's second pass and the
+  /// first-pass instant of its start. Null for a range across the strip,
+  /// where the grid's policy allows overlaps, and where the clock skips the
+  /// slot's start or end. Reads no entry and asks the policy nothing: the
+  /// press that began the range admitted the slot ([_slotIsFree]).
+  void _readRangeSlot(_Ranging range) {
+    range.anchorSlot = null;
     if (range.strip || _allowsOverlaps) {
-      range.nextStart = null;
-      range.previousEnd = null;
       return;
     }
     final anchor = range.anchor;
-    final conflicts = _conflictsAround(
-      anchor,
-      range.occurrences[anchor.col - 1],
+    final occurrence = range.occurrences[anchor.col - 1];
+    final wall = slotWallMinuteOf(_tracks, anchor);
+    final start = CalendarDates.timeAtWallMinute(wall, from: occurrence);
+    if (start == null) {
+      return;
+    }
+    final endWall = wall + _tracks.slotMinutes;
+    final end = CalendarDates.rangeEndAtWallMinute(
+      start,
+      endWall,
+      from: occurrence,
     );
-    range.nextStart = conflicts.next;
-    range.previousEnd = conflicts.previous;
+    if (end == null) {
+      return;
+    }
+    final passEnd = CalendarDates.endAtWallMinute(endWall, from: occurrence);
+    range.anchorSlot = (
+      start: start,
+      end: end,
+      secondPass: passEnd != null && passEnd.isAfter(end)
+          ? (
+              start: end,
+              end: passEnd,
+              // The first pass ends at the instant the clock goes back,
+              // which reads the stretch's start, a minute the clock reads
+              // twice.
+              stretchStart: CalendarDates.timeAtWallMinute(
+                CalendarDates.wallMinuteOf(end),
+                from: occurrence,
+              )!,
+            )
+          : null,
+    );
   }
 
   /// Moves [range]'s pointer by [delta], and its focus after it
@@ -4446,8 +4520,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Moves [range]'s focus toward the cell under its pointer, read at the
   /// grid's scroll offsets as they stand, as far as [_reach] takes it, or
-  /// for a range across the strip [_reachStrip]. Nothing where [range] is
-  /// not the running range.
+  /// for a range across the strip [_reachStrip], where that cell is not the
+  /// one it last moved toward ([_Ranging.target]): a pointer move inside
+  /// that cell does nothing, so a range held short of it tests nothing
+  /// again. A throw of the policy's answer while [_reach] tests the range
+  /// is reported ([_reportPolicyThrow]) and the range is detached and
+  /// cleared, so it creates nothing. Nothing where [range] is not the
+  /// running range.
   void _refocusRange(_Ranging range) {
     if (!mounted || !identical(_range, range)) {
       return;
@@ -4459,12 +4538,19 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     } else {
       cell = _bodyCellAt(range.point);
     }
-    if (cell == null || cell == range.focus) {
+    if (cell == null || cell == range.target) {
       return;
     }
-    final reached = range.strip
-        ? _reachStrip(range, cell)
-        : _reach(range, cell);
+    range.target = cell;
+    final ({int row, int col}) reached;
+    try {
+      reached = range.strip ? _reachStrip(range, cell) : _reach(range, cell);
+    } catch (exception, stack) {
+      _reportPolicyThrow(exception, stack);
+      setState(_detachRange);
+      _updateStripMark();
+      return;
+    }
     if (reached == range.focus) {
       return;
     }
@@ -4511,14 +4597,194 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return (row: anchor.row, col: col);
   }
 
-  /// The focus [range] reaches toward [focus], in wall-minute order of the
-  /// cells' slots: held at the last slot that does not pass the nearest
-  /// entry [range] read on either side of its anchor, for its start at the
-  /// earliest start its limits give the focus's column
-  /// ([_Ranging.firstFrom]), and at [CalendarEditRules.dayLimit]'s days
-  /// ([CalendarEditRules.heldToLimit]), however far past them [focus] lies.
-  /// Constant work per call: the entries and the limits were read before.
-  ({int row, int col}) _reach(_Ranging range, ({int row, int col}) focus) {
+  /// The focus [range] reaches toward [cell], in wall-minute order of the
+  /// cells' slots: held by its limits ([_reachLimits]), and then, where
+  /// [range] tests its range ([_Ranging.anchorSlot]), short of the entries
+  /// the grid's policy does not let the range a release there would report
+  /// share. Each test ([_rangeBoundOf]) is of that range from the focus
+  /// held so far ([_reportedRangeOf]); a bound it gives holds the focus at
+  /// the last slot toward later slots that ends by it, or the first toward
+  /// earlier ones that starts from it ([_lastCellEndingBy],
+  /// [_firstCellStartingFrom]), the anchor where none lies past it, and the
+  /// held range is tested again. Each held focus lies nearer the anchor, so
+  /// it tests at most once per cell between the anchor and [cell]; a test
+  /// that gives no bound, or one that does not move the focus, after which
+  /// the range is tested once more asking about every entry it shares,
+  /// ends it. So every entry sharing the range the focus marks has been
+  /// asked about with that range's times.
+  ({int row, int col}) _reach(_Ranging range, ({int row, int col}) cell) {
+    var focus = _reachLimits(range, cell);
+    if (range.anchorSlot == null) {
+      return focus;
+    }
+    final anchor = range.anchor;
+    final slotMinutes = _tracks.slotMinutes;
+    final later =
+        slotWallMinuteOf(_tracks, focus) >= slotWallMinuteOf(_tracks, anchor);
+    var exhaustive = focus == anchor;
+    while (true) {
+      final tested = _reportedRangeOf(range, focus);
+      if (tested == null) {
+        return focus;
+      }
+      final bound = _rangeBoundOf(
+        range,
+        tested,
+        later: later,
+        exhaustive: exhaustive,
+      );
+      if (bound == null) {
+        return focus;
+      }
+      final wall = slotWallMinuteOf(_tracks, focus);
+      final ({int row, int col}) held;
+      if (later) {
+        held = wall + slotMinutes > bound
+            ? _lastCellEndingBy(bound, anchor)
+            : focus;
+      } else {
+        held = wall < bound ? _firstCellStartingFrom(bound, anchor) : focus;
+      }
+      if (held == focus) {
+        _rangeBoundOf(range, tested, later: later, exhaustive: true);
+        return focus;
+      }
+      focus = held;
+      exhaustive = focus == anchor;
+    }
+  }
+
+  /// The wall minute that holds [range], whose focus lies on [later] slots
+  /// than its anchor's or earlier ones, short of the entries the grid's
+  /// policy does not let [tested] share, [tested] being the range a release
+  /// at that focus reports ([_reportedRangeOf]).
+  ///
+  /// It walks the entries sharing [tested]'s time, each once
+  /// ([_visitSharing]), and keys each by an instant it or the anchor's slot
+  /// ([_Ranging.anchorSlot]) holds: toward later slots its start; toward
+  /// earlier ones its end where it ends before the slot's end, else the
+  /// slot's end where it starts before that, and so shares the slot, and
+  /// else, as it then shares only the second pass of a stretch the clock
+  /// repeats, the first-pass instant of the stretch's start. The nearest key
+  /// is the earliest toward later slots and the latest toward earlier ones.
+  /// It asks [CalendarEditPolicy.mayOverlap] about an entry whose key is
+  /// nearer than that of the nearest one it has refused, with one candidate
+  /// of [tested]'s times and no entry, built at the first ask, and passes
+  /// by any other: an entry is asked about at most once, and nothing is
+  /// allocated per entry. A refused key that holds at the anchor, one before
+  /// the slot's end toward later slots or after its start toward earlier
+  /// ones, ends the walk, as no entry can hold the range nearer.
+  ///
+  /// Null where it refused none. Where the nearest refused key holds at the
+  /// anchor, the anchor slot's own edge in the walk's direction, its end
+  /// toward later slots and its start toward earlier ones, which holds the
+  /// focus at the anchor. Otherwise that key's wall minute as a range's end
+  /// from the slot's start or as a range's start, in the anchor column's
+  /// occurrence ([CalendarDates.lastWallMinuteNotAfter],
+  /// [CalendarDates.firstWallMinuteNotBefore]), worked out once per call
+  /// ([noteRangeBound]): those minutes do not fall as their instants rise,
+  /// so the nearest key gives the nearest bound. Where [exhaustive], it asks
+  /// about every entry sharing [tested]'s time, a refusal holding nothing,
+  /// and returns null.
+  int? _rangeBoundOf(
+    _Ranging range,
+    CalendarCreateRange tested, {
+    required bool later,
+    required bool exhaustive,
+  }) {
+    final slot = range.anchorSlot!;
+    final policy = _policy;
+    final start = tested.start;
+    final end = tested.end;
+    CalendarOverlapCandidate<T>? candidate;
+    DateTime? nearest;
+    var atAnchor = false;
+    _visitSharing(null, null, start, end, (other) {
+      final DateTime key;
+      if (later) {
+        key = other.start;
+      } else if (other.end.isBefore(slot.end)) {
+        key = other.end;
+      } else if (other.start.isBefore(slot.end)) {
+        key = slot.end;
+      } else {
+        key = slot.secondPass?.stretchStart ?? slot.end;
+      }
+      final known = nearest;
+      if (!exhaustive &&
+          known != null &&
+          !(later ? key.isBefore(known) : key.isAfter(known))) {
+        return false;
+      }
+      final asked = candidate ??= CalendarOverlapCandidate<T>(
+        start: start,
+        end: end,
+      );
+      if (policy.mayOverlap(asked, other) || exhaustive) {
+        return false;
+      }
+      nearest = key;
+      atAnchor = later ? key.isBefore(slot.end) : key.isAfter(slot.start);
+      return atAnchor;
+    }, once: true);
+    final key = nearest;
+    if (key == null) {
+      return null;
+    }
+    final anchorWall = slotWallMinuteOf(_tracks, range.anchor);
+    if (atAnchor) {
+      return later ? anchorWall + _tracks.slotMinutes : anchorWall;
+    }
+    noteRangeBound();
+    final occurrence = range.occurrences[range.anchor.col - 1];
+    return later
+        ? CalendarDates.lastWallMinuteNotAfter(
+            key,
+            from: occurrence,
+            start: slot.start,
+          )
+        : CalendarDates.firstWallMinuteNotBefore(key, from: occurrence);
+  }
+
+  /// The range a release of [range], a range over the slots, at [focus]
+  /// reports: its anchor's slot where [focus] is the anchor, and otherwise
+  /// the range between them ([createRangeOver]), each in the occurrence of
+  /// the earliest start of the day it starts on ([_Ranging.occurrences]);
+  /// null where that range has an end the clock skips.
+  CalendarCreateRange? _reportedRangeOf(
+    _Ranging range,
+    ({int row, int col}) focus,
+  ) {
+    final anchor = range.anchor;
+    if (focus == anchor) {
+      return createRangeAt(
+        _tracks,
+        anchor,
+        occurrence: range.occurrences[anchor.col - 1],
+      );
+    }
+    final first =
+        slotWallMinuteOf(_tracks, focus) < slotWallMinuteOf(_tracks, anchor)
+        ? focus
+        : anchor;
+    return createRangeOver(
+      _tracks,
+      anchor,
+      focus,
+      occurrence: range.occurrences[first.col - 1],
+    );
+  }
+
+  /// The focus [range] reaches toward [focus] by its limits, in wall-minute
+  /// order of the cells' slots: held, for its start, at the earliest start
+  /// its limits give the focus's column ([_Ranging.firstFrom]), and at
+  /// [CalendarEditRules.dayLimit]'s days ([CalendarEditRules.heldToLimit]),
+  /// however far past them [focus] lies. Constant work per call: the limits
+  /// were read before.
+  ({int row, int col}) _reachLimits(
+    _Ranging range,
+    ({int row, int col}) focus,
+  ) {
     final anchor = range.anchor;
     final anchorWall = slotWallMinuteOf(_tracks, anchor);
     final focusWall = slotWallMinuteOf(_tracks, focus);
@@ -4526,10 +4792,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       // A create's times keep the occurrence of the earliest start of the
       // day it starts on, as [createRangeOver] reads them.
       final occurrence = range.occurrences[anchor.col - 1];
-      final limit = range.nextStart;
-      if (limit != null && focusWall + _tracks.slotMinutes > limit) {
-        focus = _lastCellEndingBy(limit, anchor);
-      }
       final start = CalendarDates.timeAtWallMinute(
         anchorWall,
         from: occurrence,
@@ -4557,9 +4819,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
       return focus;
     }
-    final from = range.firstFrom[focus.col - 1];
-    final previous = range.previousEnd;
-    final earliest = previous == null ? from : math.max(previous, from);
+    final earliest = range.firstFrom[focus.col - 1];
     if (focusWall < earliest) {
       focus = _firstCellStartingFrom(earliest, anchor);
     }
@@ -4676,23 +4936,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       created = null;
     } else if (range.strip) {
       created = _stripRangeOver(anchor.col, focus.col);
-    } else if (focus == anchor) {
-      created = createRangeAt(
-        _tracks,
-        anchor,
-        occurrence: range.occurrences[anchor.col - 1],
-      );
     } else {
-      final first =
-          slotWallMinuteOf(_tracks, focus) < slotWallMinuteOf(_tracks, anchor)
-          ? focus
-          : anchor;
-      created = createRangeOver(
-        _tracks,
-        anchor,
-        focus,
-        occurrence: range.occurrences[first.col - 1],
-      );
+      created = _reportedRangeOf(range, focus);
     }
     _clearRange(range);
     if (created == null) {
@@ -4701,12 +4946,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _create(anchor, focus, created, point: range.point, strip: range.strip);
   }
 
-  /// Refills the running create range's limits at a new [_calendarNow]
-  /// ([_readRangeLimit]) and places its anchor by them
-  /// ([_placeRangeAnchor]), which asks [CalendarEditPolicy.mayOverlap]. A
-  /// throw of the policy in either is reported, and the range is detached
-  /// and cleared, so it creates nothing and no release reads limits two
-  /// minutes gave. Runs after the now mark and [_limits] are written.
+  /// Refills the running create range's limits ([_readRangeLimit]) at
+  /// [_calendarNow] and by the policy as they stand, at a new minute or a
+  /// reload, and places its anchor by them ([_placeRangeAnchor]), which
+  /// asks [CalendarEditPolicy.mayOverlap]. A throw of the policy in either
+  /// is reported, and the range is detached and cleared, so it creates
+  /// nothing and no release reads limits two minutes gave. At a new minute
+  /// it runs after the now mark and [_limits] are written.
   void _refillRange() {
     final range = _range;
     if (range == null) {
@@ -4731,10 +4977,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// start, where no slot of it from there is free, and for a range across
   /// the strip, the anchor stays and [_Ranging.refused] holds, so the
   /// grid marks no range and the release creates nothing, until a later
-  /// placement admits it. A range over the slots then reads its conflicts
-  /// again, and the focus is held again from the cell under the pointer,
-  /// so a release with no move after it reports the range held. The grid
-  /// builds again where the anchor, the focus or the refusal changed.
+  /// placement admits it. A range over the slots then reads its anchor's
+  /// slot again ([_readRangeSlot]), and the focus is held again from the
+  /// cell under the pointer, or with none from the cell it last moved
+  /// toward ([_Ranging.target]), testing the range a release there would
+  /// report ([_reach]), so a release with no move after it reports the
+  /// range held. The grid builds again where the anchor, the focus or the
+  /// refusal changed.
   void _placeRangeAnchor(_Ranging range) {
     final was = (
       anchor: range.anchor,
@@ -4758,10 +5007,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         range.anchor = free;
       }
     }
-    if (!range.strip) {
-      _readRangeConflicts(range);
-    }
-    var target = range.focus;
+    _readRangeSlot(range);
+    var target = range.target;
     if (range.strip) {
       final over = _stripCellAt(range.point);
       if (over != null) {
@@ -4770,6 +5017,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     } else {
       target = _bodyCellAt(range.point) ?? target;
     }
+    range.target = target;
     range.focus = range.strip
         ? _reachStrip(range, target)
         : _reach(range, target);
@@ -5004,118 +5252,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       start: math.min(from, to),
       end: math.max(from, to) + _tracks.slotMinutes,
     );
-  }
-
-  /// The wall minutes next to [anchor]'s slot that a create range from it
-  /// may not pass, in [occurrence]'s occurrence, which its times take
-  /// ([_reach]): the last at which a range from the slot's start ends not
-  /// after the earliest start after it
-  /// ([CalendarDates.lastWallMinuteNotAfter]), and the first not before the
-  /// latest end before the slot's end
-  /// ([CalendarDates.firstWallMinuteNotBefore]), among the timed entries the
-  /// store shows on the grid's days that hold the range; each null where
-  /// there is none.
-  ///
-  /// Where the slot is the last of the first pass of a stretch the clock
-  /// repeats, it ends with that pass, while a range to its end from a start
-  /// before the stretch ends after the second pass
-  /// ([CalendarDates.rangeEndAtWallMinute]); where an entry that holds the
-  /// range shares time with that second pass, the range's start may not
-  /// pass the stretch's start.
-  ///
-  /// The range is not picked yet, so [_policy] is asked about a candidate
-  /// with no entry over the grid's days, from [TimedGrid.firstDay] to the
-  /// start of the day after the last column's, which holds every range a
-  /// release from the slot reports ([createRangeOver]). An entry that would
-  /// move neither bound nor, beside the second pass, hold the start, holds
-  /// nothing and is not asked; one that would is asked once, after its time
-  /// test, and holds the range only where the policy does not let the
-  /// candidate share its time ([CalendarEditPolicy.mayOverlap]). One
-  /// candidate per call, and none per entry.
-  ({int? next, int? previous}) _conflictsAround(
-    ({int row, int col}) anchor,
-    DateTime? occurrence,
-  ) {
-    final wall = slotWallMinuteOf(_tracks, anchor);
-    final start = CalendarDates.timeAtWallMinute(wall, from: occurrence);
-    int? next;
-    int? previous;
-    if (start == null) {
-      return (next: next, previous: previous);
-    }
-    final endWall = wall + _tracks.slotMinutes;
-    final end = CalendarDates.rangeEndAtWallMinute(
-      start,
-      endWall,
-      from: occurrence,
-    );
-    if (end == null) {
-      return (next: next, previous: previous);
-    }
-    final passEnd = CalendarDates.endAtWallMinute(endWall, from: occurrence);
-    final secondPass = passEnd != null && passEnd.isAfter(end)
-        ? (start: end, end: passEnd)
-        : null;
-    var holdsInPass = false;
-    final candidate = CalendarOverlapCandidate<T>(
-      start: widget.firstDay,
-      end: CalendarDates.dateOfDayNumber(_tracks.lastDay + 1),
-    );
-    final policy = _policy;
-    for (final shown in _shownBetween(widget.firstDay, _lastDay)) {
-      final entry = shown.entry;
-      if (entry.isAllDay) {
-        continue;
-      }
-      final nextAt = entry.start.isAfter(start)
-          ? CalendarDates.lastWallMinuteNotAfter(
-              entry.start,
-              from: occurrence,
-              start: start,
-            )
-          : null;
-      final previousAt = entry.end.isBefore(end)
-          ? CalendarDates.firstWallMinuteNotBefore(entry.end, from: occurrence)
-          : null;
-      final inPass =
-          secondPass != null &&
-          NoOverlapsPolicy.rangeSharesTime(
-            secondPass.start,
-            secondPass.end,
-            entry,
-          );
-      final moves =
-          (nextAt != null && (next == null || nextAt < next)) ||
-          (previousAt != null && (previous == null || previousAt > previous)) ||
-          (inPass && !holdsInPass);
-      if (!moves ||
-          (NoOverlapsPolicy.rangeSharesTime(
-                candidate.start,
-                candidate.end,
-                entry,
-              ) &&
-              policy.mayOverlap(candidate, entry))) {
-        continue;
-      }
-      if (nextAt != null) {
-        next = next == null ? nextAt : math.min(next, nextAt);
-      }
-      if (previousAt != null) {
-        previous = previous == null
-            ? previousAt
-            : math.max(previous, previousAt);
-      }
-      if (inPass) {
-        holdsInPass = true;
-      }
-    }
-    if (holdsInPass) {
-      // The first pass ends at the instant the clock goes back, which
-      // reads the stretch's start.
-      final at = CalendarDates.wallMinuteOf(end);
-      previous = previous == null ? at : math.max(previous, at);
-    }
-    return (next: next, previous: previous);
   }
 
   /// The cover's content: what the failure builder draws for the grid's

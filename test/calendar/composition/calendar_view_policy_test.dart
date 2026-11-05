@@ -2077,8 +2077,8 @@ void main() {
 
   testWidgets("PV19 in Week under a per-pair policy a create range dragged "
       "across an entry reports the range dragged over where the policy lets "
-      "a create share the entry's time, and is held at the entry's start "
-      "where it does not", (tester) async {
+      "that range share the entry's time, and is held at the entry's start "
+      "where it does not, asking about the ranges it reaches", (tester) async {
     for (final id in const <String>["tentative", "busy"]) {
       final policy = PairRecordingPolicy<String>(allows: tentativePair);
       final host = Host(
@@ -2098,18 +2098,117 @@ void main() {
       );
       await gesture.up();
       await tester.pumpAndSettle();
-      // Setup sanity: the range asked the policy about the entry.
-      expect(
-        <String?>[for (final ask in policy.asked) ask.other.id],
-        <String>[id],
-        reason: id,
-      );
+      expect(policy.asked, isNotEmpty, reason: id);
+      for (final ask in policy.asked) {
+        expect(
+          (ask.other.id, ask.candidate.entry, ask.candidate.start),
+          (id, null, at(tuesday, 8)),
+          reason: id,
+        );
+        expect(
+          <DateTime>[at(tuesday, 10, 15), at(tuesday, 12, 15)],
+          contains(ask.candidate.end),
+          reason: id,
+        );
+      }
+      if (id == "tentative") {
+        expect(
+          policy.asked.any((ask) {
+            return ask.candidate.end == at(tuesday, 12, 15);
+          }),
+          isTrue,
+          reason: id,
+        );
+      }
       expect(host.creates, <CalendarCreateRange>[
         CalendarCreateRange(
           start: at(tuesday, 8),
           end: id == "tentative" ? at(tuesday, 12, 15) : at(tuesday, 10),
         ),
       ], reason: id);
+    }
+  });
+
+  testWidgets("PV21 in Week a create range is held by an answer that reads "
+      "the times of the range a release would report: an entry the policy "
+      "lets share only a range of more than a day holds the range, as does "
+      "one it refuses whatever the range", (tester) async {
+    final policy = PairRecordingPolicy<String>(
+      allows: (candidate, other) {
+        if (other.payload.startsWith("hard")) {
+          return false;
+        }
+        return candidate.end.difference(candidate.start) >
+            const Duration(days: 1);
+      },
+    );
+    final cases =
+        <
+          String,
+          ({
+            List<CalendarEntry<String>> entries,
+            List<(DateTime, int)> path,
+            CalendarCreateRange created,
+          })
+        >{
+          "within a day": (
+            entries: <CalendarEntry<String>>[
+              entryOf("plain", at(tuesday, 10), at(tuesday, 10, 30)),
+            ],
+            path: <(DateTime, int)>[(tuesday, 8 * 60), (tuesday, 12 * 60)],
+            created: CalendarCreateRange(
+              start: at(tuesday, 8),
+              end: at(tuesday, 10),
+            ),
+          ),
+          "across days": (
+            entries: <CalendarEntry<String>>[
+              entryOf("plain", at(monday, 10), at(monday, 10, 30)),
+              entryOf("hard", at(monday, 20), at(monday, 21)),
+            ],
+            path: <(DateTime, int)>[
+              (monday, 9 * 60),
+              (monday, 15 * 60),
+              (tuesday, 12 * 60),
+            ],
+            created: CalendarCreateRange(
+              start: at(monday, 9),
+              end: at(monday, 10),
+            ),
+          ),
+        };
+    for (final MapEntry(key: name, value: run) in cases.entries) {
+      final host = Host(
+        storeOf(run.entries),
+        view: CalendarViewKind.week,
+        day: tuesday,
+        time: at(monday, 8),
+        policy: policy,
+      );
+      await host.pump(tester);
+      final (firstDay, firstMinute) = run.path.first;
+      final gesture = await tester.startGesture(
+        slotCenter(tester, firstDay, firstMinute),
+        kind: PointerDeviceKind.mouse,
+      );
+      if (run.path.length == 2) {
+        final (lastDay, lastMinute) = run.path.last;
+        await gesture.moveTo(
+          Offset.lerp(
+            slotCenter(tester, firstDay, firstMinute),
+            slotCenter(tester, lastDay, lastMinute),
+            0.5,
+          )!,
+        );
+        await tester.pump();
+      }
+      for (final (day, minute) in run.path.skip(1)) {
+        await gesture.moveTo(slotCenter(tester, day, minute));
+        await tester.pump();
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(host.creates, <CalendarCreateRange>[run.created], reason: name);
     }
   });
 
