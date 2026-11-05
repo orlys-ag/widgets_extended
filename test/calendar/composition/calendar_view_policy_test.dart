@@ -2368,6 +2368,31 @@ void main() {
     }
   });
 
+  testWidgets("PV22 in Day under a per-pair policy a refused resize stops "
+      "its end at the first entry in its way that the policy refuses, past "
+      "one it allows, and a refused move lands at the nearest time whose "
+      "sharing entries it allows", (tester) async {
+    final requested = await landingRequests(tester, () {
+      return PairRecordingPolicy<String>(allows: tentativePair);
+    });
+    expect(requested, <(DateTime, DateTime)>[
+      (at(tuesday, 8), at(tuesday, 10, 30)),
+      (at(tuesday, 11), at(tuesday, 12)),
+    ]);
+  });
+
+  testWidgets("PV23 in Day under NoOverlapsPolicy PV22's refused resize "
+      "stops its end at the first entry in its way and its refused move "
+      "lands at the nearest time no entry shares", (tester) async {
+    final requested = await landingRequests(tester, () {
+      return const NoOverlapsPolicy<String>();
+    });
+    expect(requested, <(DateTime, DateTime)>[
+      (at(tuesday, 8), at(tuesday, 9, 30)),
+      (at(tuesday, 9, 30), at(tuesday, 10, 30)),
+    ]);
+  });
+
   testWidgets("RC17 Month's long press after a set of store hours off the "
       "grid and before the next build creates nothing and reports the "
       "rules' ArgumentError, and the build throws the store hours'", (
@@ -2403,6 +2428,90 @@ void main() {
     });
     await gesture.up();
   });
+}
+
+/// PV22's and PV23's gestures in Day on Tuesday, each under a policy
+/// [policyOf] makes, and the times each requests, resize first: busy-a,
+/// from 08:00 to 09:00, has its end dragged toward 10:45, past
+/// tentative-t, from 09:30 to 10:00, onto busy-b, from 10:30 to 11:00;
+/// then busy-a is moved onto 10:30, where busy-b, and tentative-t from
+/// 11:00 to 12:30, share its times. Each gesture asks the policy about
+/// busy-b, which its setup sanity checks for a [PairRecordingPolicy].
+Future<List<(DateTime, DateTime)>> landingRequests(
+  WidgetTester tester,
+  CalendarEditPolicy<String> Function() policyOf,
+) async {
+  final requested = <(DateTime, DateTime)>[];
+  Future<void> request(CalendarMoveRequest<String> request) async {
+    requested.add((request.requested.start, request.requested.end));
+  }
+
+  void expectAskedAboutBusyB(CalendarEditPolicy<String> policy, String reason) {
+    if (policy is PairRecordingPolicy<String>) {
+      expect(
+        policy.asked.where((ask) {
+          return ask.other.id == "busy-b" &&
+              ask.candidate.entry?.id == "busy-a";
+        }),
+        isNotEmpty,
+        reason: reason,
+      );
+    }
+  }
+
+  var policy = policyOf();
+  var host = Host(
+    storeOf(<CalendarEntry<String>>[
+      entryOf("busy-a", at(tuesday, 8), at(tuesday, 9)),
+      entryOf("tentative-t", at(tuesday, 9, 30), at(tuesday, 10)),
+      entryOf("busy-b", at(tuesday, 10, 30), at(tuesday, 11)),
+    ]),
+    view: CalendarViewKind.day,
+    day: tuesday,
+    time: at(monday, 8),
+    policy: policy,
+    onMoveRequest: request,
+  );
+  await host.pump(tester);
+  await select(tester, blockFinder("busy-a"));
+  final block = tester.getRect(blockFinder("busy-a"));
+  final edge = Offset(block.center.dx, block.bottom - 2.0);
+  final end = Offset(
+    edge.dx,
+    slotRect(tester, tuesday, 10 * 60 + 30, week: false).bottom - 2.0,
+  );
+  final gesture = await tester.startGesture(edge);
+  await gesture.moveTo(Offset.lerp(edge, end, 0.5)!);
+  await tester.pump();
+  await gesture.moveTo(end);
+  await tester.pump();
+  await gesture.up();
+  await tester.pumpAndSettle();
+  expectAskedAboutBusyB(policy, "resize");
+
+  policy = policyOf();
+  host = Host(
+    storeOf(<CalendarEntry<String>>[
+      entryOf("busy-a", at(tuesday, 8), at(tuesday, 9)),
+      entryOf("busy-b", at(tuesday, 10, 30), at(tuesday, 11)),
+      entryOf("tentative-t", at(tuesday, 11), at(tuesday, 12, 30)),
+    ]),
+    view: CalendarViewKind.day,
+    day: tuesday,
+    time: at(monday, 8),
+    policy: policy,
+    onMoveRequest: request,
+  );
+  await host.pump(tester);
+  final moving = await liftOnto(
+    tester,
+    blockFinder("busy-a"),
+    slotRect(tester, tuesday, 10 * 60 + 30, week: false),
+  );
+  await moving.up();
+  await tester.pumpAndSettle();
+  expectAskedAboutBusyB(policy, "move");
+  return requested;
 }
 
 /// The clock readings of [nows], each once.

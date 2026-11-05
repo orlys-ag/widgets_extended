@@ -440,11 +440,13 @@ class HeldSource implements CalendarDataSource<String> {
 /// [onMoveRequest] takes each move and
 /// resize it lands, and [onZoom] each zoom a pinch reports, which the grid
 /// does not show. The grid writes times in [hourLabelFormat]. [store],
-/// [editable], [first], [hours] and [slotMinutes] start as given, and
-/// [rebuild] builds the grid again with them. The grid's policy is [editPolicy]
+/// [editable], [first], [hours], [slotMinutes] and [editPolicy] start as
+/// given, and [rebuild] builds the grid again with them and with
+/// [givenNow]. The grid's policy is [editPolicy]
 /// where it is given, and otherwise the one [lockPast],
 /// [lockEarlierToday], [maxDayCount] and [allowsOverlaps] make
-/// ([policy]).
+/// ([policy]). Its clock is [givenNow] where it is set, and [now]
+/// otherwise.
 class Harness {
   Harness(
     this.store,
@@ -477,7 +479,7 @@ class Harness {
   final bool lockPast;
   final bool lockEarlierToday;
   final bool allowsOverlaps;
-  final CalendarEditPolicy<String>? editPolicy;
+  CalendarEditPolicy<String>? editPolicy;
   final double minSlotHeight;
   final double minDayWidth;
   final Size size;
@@ -500,6 +502,9 @@ class Harness {
   late final ValueNotifier<CalendarNow> now = ValueNotifier<CalendarNow>(
     CalendarNow(time: at(today, _nowHour), today: today),
   );
+
+  /// The clock the grid takes in place of [now] where it is set.
+  ValueListenable<CalendarNow>? givenNow;
 
   /// [editPolicy], or with none the history lock under [lockPast], with
   /// [lockEarlierToday], and the unrestricted policy otherwise, each
@@ -528,7 +533,7 @@ class Harness {
       firstDay: first,
       dayCount: shown.week ? 7 : 1,
       selectedDay: first,
-      now: now,
+      now: givenNow ?? now,
       onSelectDay: (day) {},
       onOpenEntry: opened.add,
       onCreate:
@@ -4874,9 +4879,9 @@ void main() {
     });
 
     testWidgets("OP12 in Day a resize the policy refuses stops at the first "
-        "entry in its way, though the policy lets it share that entry's "
-        "time, and a move it refuses lands at the nearest time no entry "
-        "shares", (tester) async {
+        "entry in its way that the policy refuses, past one it lets the "
+        "resize share, and a move it refuses lands at the nearest time whose "
+        "sharing entries it allows", (tester) async {
       final shown = Shown.day(tuesday);
       var policy = pairPolicy();
       var store = storeOf(<CalendarEntry<String>>[
@@ -4890,7 +4895,7 @@ void main() {
       expect(refusedAsk(policy, "busy-b"), isTrue);
       expectSitePairs(policy, changed: "busy-a");
       expect(store.moves, <CalendarEntry<String>>[
-        entryOf("busy-a", at(tuesday, 8), at(tuesday, 9, 30)),
+        entryOf("busy-a", at(tuesday, 8), at(tuesday, 10, 30)),
       ], reason: "resize");
 
       policy = pairPolicy();
@@ -4909,7 +4914,7 @@ void main() {
       expect(refusedAsk(policy, "busy-b"), isTrue);
       expectSitePairs(policy, changed: "busy-a");
       expect(store.moves, <CalendarEntry<String>>[
-        entryOf("busy-a", at(tuesday, 9, 30), at(tuesday, 10, 30)),
+        entryOf("busy-a", at(tuesday, 11), at(tuesday, 12)),
       ], reason: "move");
     });
 
@@ -5066,6 +5071,306 @@ void main() {
       await gesture.up();
       await tester.pumpAndSettle();
       expect(added, <int>[1, 0, 1]);
+    });
+
+    testWidgets("OP23 the grid asks whether a policy that forbids overlaps "
+        "refuses every one once, when it takes the policy, and not during a "
+        "drag, and never asks a policy that allows overlaps", (tester) async {
+      final shown = Shown.week(monday);
+      int asksOf(CountingEditPolicy<String> policy) {
+        return policy.asked.where((ask) {
+          return ask.name == "refusesEveryOverlap";
+        }).length;
+      }
+
+      final store = storeOf(<CalendarEntry<String>>[
+        entryOf("busy", at(tuesday, 10), at(tuesday, 11)),
+        entryOf("free", at(tuesday, 14), at(tuesday, 15)),
+      ]);
+      final first = CountingEditPolicy<String>(
+        const NoOverlapsPolicy<String>(),
+      );
+      final harness = Harness(store, shown, editPolicy: first);
+      await harness.pump(tester);
+      expect(asksOf(first), 1, reason: "the pump");
+
+      final gates = debugDropGateCount;
+      final from = tester.getRect(blockFinder("free", tuesday));
+      final slot = slotRect(tester, shown, tuesday, 10 * 60);
+      final onto =
+          from.center + (slot.topLeft - from.topLeft) + const Offset(0.0, 6.0);
+      final gesture = await lift(tester, from.center);
+      await gesture.moveTo(onto);
+      await tester.pump();
+      for (var i = 0; i < 4; i++) {
+        await gesture.moveTo(onto + Offset(0.0, i.isEven ? -3.0 : 0.0));
+        await tester.pump();
+      }
+      // Setup sanity: the move reached the gate.
+      expect(debugDropGateCount, greaterThan(gates));
+      await store.create(entryOf("wed", at(wednesday, 9), at(wednesday, 10)));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(asksOf(first), 1, reason: "the drag");
+
+      final second = CountingEditPolicy<String>(
+        const NoOverlapsPolicy<String>(),
+      );
+      harness.editPolicy = second;
+      await harness.rebuild(tester);
+      await tester.pumpAndSettle();
+      expect((asksOf(first), asksOf(second)), (1, 1), reason: "a new policy");
+
+      final unrestricted = CountingEditPolicy<String>(
+        const UnrestrictedEditPolicy<String>(),
+      );
+      await Harness(store, shown, editPolicy: unrestricted).pump(tester);
+      expect(asksOf(unrestricted), 0, reason: "overlaps allowed");
+    });
+
+    testWidgets("OP24 in Day under a per-pair policy a new minute, from "
+        "either clock, a reload and a store notify each give a drag's board a "
+        "new config, which drops the gate's kept answers, and under "
+        "NoOverlapsPolicy a new minute, from either clock, and a reload give "
+        "it none, nor do they under the per-pair policy for a bar's "
+        "drag", (tester) async {
+      final shown = Shown.day(tuesday);
+      for (final name in const <String>["per-pair", "NoOverlapsPolicy"]) {
+        final perPair = name == "per-pair";
+        final store = storeOf(<CalendarEntry<String>>[
+          entryOf("busy", at(tuesday, 10), at(tuesday, 11)),
+          entryOf("m", at(tuesday, 14), at(tuesday, 15)),
+        ]);
+        final harness = Harness(
+          store,
+          shown,
+          editPolicy: perPair ? pairPolicy() : const NoOverlapsPolicy<String>(),
+        );
+        await harness.pump(tester);
+        var gates = debugDropGateCount;
+        final reassembled = tester.binding.reassembleApplication();
+        await tester.pump();
+        await reassembled;
+        // What the block hosts' semantics moves ask when they all build.
+        final rebuilt = debugDropGateCount - gates;
+        // Setup sanity: the hosts' semantics moves asked the gate.
+        expect(rebuilt, greaterThan(0), reason: name);
+
+        gates = debugDropGateCount;
+        final from = tester.getRect(blockFinder("m", tuesday));
+        final slot = slotRect(tester, shown, tuesday, 10 * 60);
+        final onto =
+            from.center +
+            (slot.topLeft - from.topLeft) +
+            const Offset(0.0, 6.0);
+        final gesture = await lift(tester, from.center);
+        final lifted = debugDropGateCount;
+        await gesture.moveTo(onto);
+        await tester.pump();
+        // Setup sanity: the refusal asked the gate.
+        expect(debugDropGateCount, greaterThan(lifted), reason: name);
+        // What the lift and the refusal asked.
+        final refused = debugDropGateCount - gates;
+
+        gates = debugDropGateCount;
+        // Two new leans over the refused placement, inside it, on the side
+        // of its middle the lift leaned to.
+        await gesture.moveTo(onto - const Offset(0.0, 3.0));
+        await tester.pump();
+        await gesture.moveTo(onto);
+        await tester.pump();
+        if (perPair) {
+          expect(debugDropGateCount, gates, reason: "$name, the moves");
+        } else {
+          // Setup sanity: with no kept answers the fit ran at each lean.
+          expect(debugDropGateCount, greaterThan(gates), reason: name);
+        }
+
+        var minutes = 0;
+        CalendarNow later(int minute) {
+          final time = harness.now.value.time.add(Duration(minutes: minute));
+          return CalendarNow(time: time, today: tuesday);
+        }
+
+        final changes = <String, Future<void> Function()>{
+          "a new minute": () async {
+            harness.now.value = later(++minutes);
+            await tester.pump();
+          },
+          "a new clock": () async {
+            final given = ValueNotifier<CalendarNow>(later(++minutes));
+            addTearDown(given.dispose);
+            harness.givenNow = given;
+            await harness.rebuild(tester);
+          },
+          "a reload": () async {
+            final reassembled = tester.binding.reassembleApplication();
+            await tester.pump();
+            await reassembled;
+          },
+          if (perPair)
+            "a store notify": () async {
+              await store.create(
+                entryOf("wed", at(wednesday, 9), at(wednesday, 10)),
+              );
+              await tester.pump();
+            },
+        };
+        for (final MapEntry(key: change, value: run) in changes.entries) {
+          final reason = "$name, $change";
+          final config = boardOf(tester).drag;
+          gates = debugDropGateCount;
+          await run();
+          final added = debugDropGateCount - gates;
+          if (perPair) {
+            expect(
+              identical(boardOf(tester).drag, config),
+              isFalse,
+              reason: reason,
+            );
+            expect(added, greaterThan(rebuilt), reason: reason);
+            expect(added, lessThanOrEqualTo(rebuilt + refused), reason: reason);
+          } else {
+            expect(
+              identical(boardOf(tester).drag, config),
+              isTrue,
+              reason: reason,
+            );
+            if (change == "a new minute") {
+              expect(added, 0, reason: reason);
+            }
+          }
+        }
+        await gesture.up();
+        await tester.pumpAndSettle();
+        // Setup sanity: the release requested a move.
+        expect(
+          store.moves.map((entry) {
+            return entry.id;
+          }),
+          <String>["m"],
+          reason: name,
+        );
+      }
+
+      // A bar's drag, whose board keeps no answer under any policy.
+      final store = storeOf(<CalendarEntry<String>>[
+        entryOf("busy", at(tuesday, 10), at(tuesday, 11)),
+        allDayOf("bar", tuesday),
+      ]);
+      final harness = Harness(store, shown, editPolicy: pairPolicy());
+      await harness.pump(tester);
+      final gesture = await lift(tester, tester.getCenter(barFinder("bar")));
+      await tester.pump();
+      // Setup sanity: the bar lifted, and its board holds a config with no
+      // drop fit.
+      expect(find.byKey(liftedBlockKey), findsOneWidget);
+      expect(boardOf(tester).drag!.dropFit, isNull);
+      final config = boardOf(tester).drag;
+      CalendarNow later() {
+        final time = harness.now.value.time.add(const Duration(minutes: 1));
+        return CalendarNow(time: time, today: tuesday);
+      }
+
+      harness.now.value = later();
+      await tester.pump();
+      expect(
+        identical(boardOf(tester).drag, config),
+        isTrue,
+        reason: "bar, a new minute",
+      );
+      final given = ValueNotifier<CalendarNow>(later());
+      addTearDown(given.dispose);
+      harness.givenNow = given;
+      await harness.rebuild(tester);
+      expect(
+        identical(boardOf(tester).drag, config),
+        isTrue,
+        reason: "bar, a new clock",
+      );
+      final reassembled = tester.binding.reassembleApplication();
+      await tester.pump();
+      await reassembled;
+      expect(
+        identical(boardOf(tester).drag, config),
+        isTrue,
+        reason: "bar, a reload",
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets("OP26 in Day under a per-pair policy a refused move's fit "
+        "asks the gate about each placement nearer than the first it admits, "
+        "meeting entries or not, and each later refused placement only about "
+        "the placements the drag has not asked about", (tester) async {
+      final shown = Shown.day(tuesday);
+      final policy = pairPolicy();
+      final store = storeOf(<CalendarEntry<String>>[
+        for (var i = 0; i < 8; i++)
+          entryOf("b$i", at(tuesday, 8 + i), at(tuesday, 9 + i)),
+        entryOf("m", at(tuesday, 17), at(tuesday, 18)),
+      ]);
+      await Harness(store, shown, editPolicy: policy).pump(tester);
+
+      /// The gate calls about "m" among [asks], by the drop-gate count at
+      /// each, with the times of each one's candidate.
+      Map<int, (DateTime, DateTime)> callsOf(Iterable<PairAsk<String>> asks) {
+        return <int, (DateTime, DateTime)>{
+          for (final ask in asks)
+            if (ask.candidate.entry?.id == "m")
+              ask.gate: (ask.candidate.start, ask.candidate.end),
+        };
+      }
+
+      final from = tester.getRect(blockFinder("m", tuesday));
+      final slot = slotRect(tester, shown, tuesday, 13 * 60);
+      final gesture = await lift(tester, from.center);
+      final lifted = policy.asked.length;
+      var point =
+          from.center + (slot.topLeft - from.topLeft) + const Offset(0.0, 6.0);
+      final added = <int>[];
+      for (var i = 0; i <= 8; i++) {
+        final asked = policy.asked.length;
+        await gesture.moveTo(point);
+        await tester.pump();
+        added.add(callsOf(policy.asked.sublist(asked)).length);
+        point += Offset(0.0, slot.height);
+      }
+      final calls = callsOf(policy.asked.sublist(lifted));
+      await gesture.up();
+      await tester.pumpAndSettle();
+      // Setup sanity: each placement from 13:00 to 15:00 was asked about
+      // and refused, and the move landed after "b7".
+      for (var minute = 13 * 60; minute <= 15 * 60; minute += 15) {
+        final start = at(tuesday, minute ~/ 60, minute % 60);
+        final end = start.add(const Duration(hours: 1));
+        expect(
+          policy.asked.any((ask) {
+            return ask.candidate.entry?.id == "m" &&
+                ask.candidate.start == start &&
+                ask.candidate.end == end &&
+                !policy.allows(ask.candidate, ask.other);
+          }),
+          isTrue,
+          reason: "$start",
+        );
+      }
+      expect(store.moves, <CalendarEntry<String>>[
+        entryOf("m", at(tuesday, 16), at(tuesday, 17)),
+      ]);
+      expect(added.first, greaterThanOrEqualTo(10), reason: "13:00");
+      expect(
+        added.skip(1),
+        everyElement(lessThanOrEqualTo(2)),
+        reason: "$added",
+      );
+      expect(
+        calls.values.toSet(),
+        hasLength(calls.length),
+        reason: "${calls.values}",
+      );
     });
 
     testWidgets("OP17 in Week a create range tests the range a release "

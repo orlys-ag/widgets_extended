@@ -294,11 +294,14 @@ class CalendarView<T> extends StatefulWidget {
   /// over free ones, the blocks sharing a day's time side by side; where
   /// it is false none gives times that another timed entry shares unless
   /// [CalendarEditPolicy.mayOverlap] lets the change share them. A move
-  /// dropped where the policy refuses lands at the nearest time no entry
-  /// shares, or goes back, and a resize it refuses stops at the first entry
-  /// in its way, allowed or not. A move or a resize asks about the times it
-  /// would give, with the stored entry, a slot press about the slot's
-  /// times, with no entry, and a create drag about
+  /// dropped where the policy refuses lands at the nearest time whose
+  /// sharing entries the policy all allows, or where
+  /// [CalendarEditPolicy.refusesEveryOverlap] is true at the nearest time
+  /// no other entry's block covers, or goes back; and a resize it refuses
+  /// stops at the first entry in its way that the policy refuses. A move or
+  /// a resize asks about the times it would give, with the stored entry, a
+  /// slot press about the slot's times, with no entry, and a create drag
+  /// about
   /// the range a release would report, with no entry, at each change of the
   /// slot under the pointer, at a store notify and at a new minute; a
   /// refusal holds the range short of the refused entry nearest the slot it

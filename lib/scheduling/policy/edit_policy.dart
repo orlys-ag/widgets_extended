@@ -197,7 +197,9 @@ final class CalendarOverlapCandidate<T> {
 /// error. A subclass with fields compares them in `==` and `hashCode`.
 ///
 /// The views ask it in edit mode only, and read [dayLimit] and
-/// [allowsOverlaps] each time they take a policy. They ask [mayOverlap]
+/// [allowsOverlaps], and Week and Day [refusesEveryOverlap] where
+/// [allowsOverlaps] is false, each time they take a policy. They ask
+/// [mayOverlap]
 /// only where [allowsOverlaps] is false, and a per-pair ask through
 /// [mayOverlap]'s default, or through [CalendarEditPolicy.all], reads
 /// [allowsOverlaps] again. An answer that throws in a drag's gates, which
@@ -223,14 +225,16 @@ abstract base class CalendarEditPolicy<T> {
   /// [admitsChange] and [allowsOverlaps] are true where every one's is;
   /// [mayOverlap] is true where every one's is, a policy whose
   /// [allowsOverlaps] is true allowing every pair and not being asked;
-  /// [resizableEdges] are the edges every one gives; [earliestStartOn] is
+  /// [refusesEveryOverlap] is true where that of any one whose
+  /// [allowsOverlaps] is false is; [resizableEdges] are the edges every one gives; [earliestStartOn] is
   /// the latest instant they give, and null where any gives null; and
   /// [dayLimit] is the least limit they give, and null where none gives
   /// one. With no policies it limits nothing.
   ///
   /// It asks [policies] in their order and stops once an answer settles
-  /// its own: at a refusal, at no edge left that every policy asked gives,
-  /// or at a null earliest start; so a later policy is not asked. An
+  /// its own: at a refusal, at a policy that refuses every overlap, at no
+  /// edge left that every policy asked gives, or at a null earliest start;
+  /// so a later policy is not asked. An
   /// answer that throws throws out of it. It holds a copy of [policies], and
   /// compares equal to another of the same type argument and of equal
   /// policies in the same order.
@@ -296,19 +300,45 @@ abstract base class CalendarEditPolicy<T> {
   /// and Day's moves, resizes and creates. Where it is true they go over
   /// other entries' times as over free ones; where it is false no move or
   /// resize gives a timed entry times another timed entry shares unless
-  /// [mayOverlap] lets the two share them. A move dropped where the policy
-  /// refuses lands at the nearest time no entry shares, or goes back, and
-  /// a resize it refuses stops at the first entry in its way, allowed or
-  /// not. An all-day entry shares time with none, so neither answer limits
-  /// a bar within the all-day strip. A [NoOverlapsPolicy] combined with
-  /// other policies ([CalendarEditPolicy.all]) makes it false for them.
-  /// True here.
+  /// [mayOverlap] lets the two share them. A move dropped where the
+  /// policy refuses lands at the nearest time
+  /// whose sharing entries [mayOverlap] all allows, or where
+  /// [refusesEveryOverlap] is true at the nearest time no other entry's
+  /// block covers, or goes back; and a resize it refuses stops its dragged
+  /// edge at the first entry in its way that [mayOverlap] refuses. An
+  /// all-day entry shares time with none, so neither answer limits a bar
+  /// within the all-day strip. A [NoOverlapsPolicy] combined with other
+  /// policies ([CalendarEditPolicy.all]) makes it false for them. True
+  /// here.
   ///
   /// It is the fast path of [mayOverlap]: where it is true nothing asks
   /// [mayOverlap], and where it is false the askers [mayOverlap] names ask
   /// it about each entry sharing the times of a change.
   bool get allowsOverlaps {
     return true;
+  }
+
+  /// Whether [mayOverlap] refuses every pair it is asked about, where
+  /// [allowsOverlaps] is false: true states that no change may share time
+  /// with any timed entry. False here, which is correct for every policy,
+  /// so a policy that overrides [mayOverlap] and not this getter is asked
+  /// about each pair. A [NoOverlapsPolicy] answers true, and
+  /// [CalendarEditPolicy.all] answers true where one of its policies whose
+  /// [allowsOverlaps] is false does.
+  ///
+  /// Week and Day read it each time they take a policy whose
+  /// [allowsOverlaps] is false, never per pair. Where it is false, a move
+  /// dropped where the policy refuses tries the nearest times first,
+  /// whether entries share them or not, and a resize it refuses tries each
+  /// stop of its dragged edge in turn, asking about each; where it is true
+  /// they pass by every time another entry's block covers, asking nothing
+  /// about it. So a policy whose [mayOverlap] refuses every pair, such as
+  /// one that overrides only [allowsOverlaps], to false, answers true to
+  /// spare those asks. A policy that answers true while [mayOverlap]
+  /// allows some pair lands its refused moves and resizes farther than
+  /// [mayOverlap] requires, and never on times it refuses.
+  bool get refusesEveryOverlap {
+    return false;
   }
 
   /// Whether the change [candidate] gives may share time with [other]:
@@ -419,7 +449,8 @@ final class DayLimitPolicy<T> extends CalendarEditPolicy<T> {
 }
 
 /// A policy that forbids only overlaps, answering false to
-/// [allowsOverlaps], and allows everything else: combined with other
+/// [allowsOverlaps] and true to [refusesEveryOverlap], and allows
+/// everything else: combined with other
 /// policies ([CalendarEditPolicy.all]), it forbids overlaps under them.
 ///
 /// Two compare equal where their runtime types are the same.
@@ -472,6 +503,13 @@ final class NoOverlapsPolicy<T> extends CalendarEditPolicy<T> {
   @override
   bool get allowsOverlaps {
     return false;
+  }
+
+  /// True: [mayOverlap], which this policy does not override, answers
+  /// [allowsOverlaps], false, for every pair.
+  @override
+  bool get refusesEveryOverlap {
+    return true;
   }
 
   @override
@@ -596,6 +634,16 @@ final class _AllEditPolicies<T> extends CalendarEditPolicy<T> {
       }
     }
     return true;
+  }
+
+  @override
+  bool get refusesEveryOverlap {
+    for (final policy in policies) {
+      if (!policy.allowsOverlaps && policy.refusesEveryOverlap) {
+        return true;
+      }
+    }
+    return false;
   }
 
   @override

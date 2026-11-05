@@ -89,6 +89,12 @@ final class CountingEditPolicy<T> extends CalendarEditPolicy<T> {
   }
 
   @override
+  bool get refusesEveryOverlap {
+    _note("refusesEveryOverlap");
+    return inner.refusesEveryOverlap;
+  }
+
+  @override
   bool mayOverlap(
     CalendarOverlapCandidate<T> candidate,
     CalendarEntry<T> other,

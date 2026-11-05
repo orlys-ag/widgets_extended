@@ -1,8 +1,8 @@
 /// The edit policy: the permissive answers a policy overriding nothing
 /// gives, the unrestricted policy's equality, the time a policy answers
 /// at, the policy of all of several, the day limit policy, the policy
-/// forbidding overlaps, and the per-pair answer on overlaps with the
-/// candidate it takes.
+/// forbidding overlaps, the per-pair answer on overlaps with the
+/// candidate it takes, and which policies refuse every overlap.
 library;
 
 import 'dart:ui';
@@ -61,7 +61,9 @@ final class _Forbidding extends CalendarEditPolicy<String> {
 /// [log] as its [name] and the member's, and the kind of each
 /// [admitsChange] ask in [kinds], where given, as its [name] and "all-day"
 /// or "timed". Its [mayOverlap] refuses the other entries whose ids
-/// [refused] holds, whatever [overlaps] is. Compared by identity.
+/// [refused] holds, whatever [overlaps] is, and its [refusesEveryOverlap]
+/// answers [refusesEvery], whatever [mayOverlap] answers. Compared by
+/// identity.
 final class _Answering extends CalendarEditPolicy<String> {
   const _Answering(
     this.name,
@@ -76,6 +78,7 @@ final class _Answering extends CalendarEditPolicy<String> {
     this.overlaps = true,
     this.kinds,
     this.refused = const <String>{},
+    this.refusesEvery = false,
   });
 
   final String name;
@@ -93,6 +96,7 @@ final class _Answering extends CalendarEditPolicy<String> {
   final bool overlaps;
   final List<String>? kinds;
   final Set<String> refused;
+  final bool refusesEvery;
 
   static DateTime? _dayItself(DateTime day) {
     return day;
@@ -154,6 +158,12 @@ final class _Answering extends CalendarEditPolicy<String> {
   bool get allowsOverlaps {
     log.add("$name.allowsOverlaps");
     return overlaps;
+  }
+
+  @override
+  bool get refusesEveryOverlap {
+    log.add("$name.refusesEveryOverlap");
+    return refusesEvery;
   }
 
   @override
@@ -930,5 +940,89 @@ void main() {
       expect(NoOverlapsPolicy.entriesShareTime(nine, ten), isFalse);
       expect(NoOverlapsPolicy.entriesShareTime(allDay, nine), isFalse);
     });
+  });
+
+  test("EP23 only the policy forbidding overlaps refuses every overlap, and "
+      "the policy of all of several does where one of its policies whose "
+      "answer on overlaps is false does, asking none after it", () {
+    final log = <String>[];
+    final single = <String, CalendarEditPolicy<String>>{
+      "plain": const _Plain(),
+      "forbidding": const _Forbidding(),
+      "unrestricted": const UnrestrictedEditPolicy<String>(),
+      "day limit": DayLimitPolicy<String>(1),
+      "lock": const HistoryLockPolicy<String>(),
+      "lock of earlier today": const HistoryLockPolicy<String>(
+        lockEarlierToday: true,
+      ),
+      "no overlaps": const NoOverlapsPolicy<String>(),
+    };
+    expect(
+      <String, bool>{
+        for (final MapEntry(key: name, value: policy) in single.entries)
+          name: policy.refusesEveryOverlap,
+      },
+      <String, bool>{
+        "plain": false,
+        "forbidding": false,
+        "unrestricted": false,
+        "day limit": false,
+        "lock": false,
+        "lock of earlier today": false,
+        "no overlaps": true,
+      },
+    );
+
+    CalendarEditPolicy<String> all(List<CalendarEditPolicy<String>> policies) {
+      return CalendarEditPolicy<String>.all(policies);
+    }
+
+    expect(
+      all(<CalendarEditPolicy<String>>[
+        const NoOverlapsPolicy<String>(),
+        const HistoryLockPolicy<String>(),
+      ]).refusesEveryOverlap,
+      isTrue,
+      reason: "no overlaps, then the lock",
+    );
+    expect(
+      all(<CalendarEditPolicy<String>>[
+        const HistoryLockPolicy<String>(),
+        const NoOverlapsPolicy<String>(),
+      ]).refusesEveryOverlap,
+      isTrue,
+      reason: "the lock, then no overlaps",
+    );
+    expect(
+      all(const <CalendarEditPolicy<String>>[]).refusesEveryOverlap,
+      isFalse,
+      reason: "none",
+    );
+    expect(
+      all(<CalendarEditPolicy<String>>[
+        const HistoryLockPolicy<String>(),
+        DayLimitPolicy<String>(1),
+      ]).refusesEveryOverlap,
+      isFalse,
+      reason: "the lock, then a day limit",
+    );
+    expect(
+      all(<CalendarEditPolicy<String>>[
+        _Answering("a", log, refusesEvery: true),
+        _Answering("b", log, overlaps: false),
+      ]).refusesEveryOverlap,
+      isFalse,
+      reason: "one allowing overlaps that claims to refuse every one",
+    );
+    log.clear();
+    expect(
+      all(<CalendarEditPolicy<String>>[
+        _Answering("a", log, overlaps: false, refusesEvery: true),
+        _Answering("b", log),
+      ]).refusesEveryOverlap,
+      isTrue,
+      reason: "one forbidding overlaps that refuses every one",
+    );
+    expect(log, isNot(contains("b.refusesEveryOverlap")));
   });
 }

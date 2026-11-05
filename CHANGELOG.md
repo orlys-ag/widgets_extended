@@ -75,9 +75,15 @@ about timed entries that share the change's times, and it defaults to
 `allowsOverlaps`, so a policy that overrides only `allowsOverlaps` refuses
 every pair; `CalendarEditPolicy.all` refuses where any policy that limits
 overlaps refuses. Week's and Day's moves, resizes, slot presses and create
-drags go over the times only of the entries it allows: a move it refuses
-lands at the nearest time no entry shares, or goes back, and a resize it
-refuses stops at the first entry in its way. A create drag asks, at each
+drags go over the times only of the entries it allows. A move it refuses
+lands at the nearest time whose sharing entries it all allows, or goes back,
+and a resize it refuses stops its dragged edge at the first entry in its way
+that it refuses.
+Added `CalendarEditPolicy.refusesEveryOverlap`, false by default, true for
+`NoOverlapsPolicy` and for `CalendarEditPolicy.all` over one: a policy that
+answers true states that `mayOverlap` refuses every pair, and its refused
+moves and resizes in Week and Day look for their landing only among the
+times no other entry's block covers. A create drag asks, at each
 change of the slot under the pointer, at a store notify and at a new
 minute, about the range a release would report; it holds the range short
 of the entry it refuses nearest the slot it started on, or to that slot
