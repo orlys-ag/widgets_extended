@@ -965,8 +965,8 @@ final class _Ranging extends _GridMode {
   /// from an earlier start to the slot's end runs past, with the first-pass
   /// instant of the stretch's start; the range's overlap tests read them
   /// ([_TimedGridState._rangeBoundOf]). Null for a range across the strip,
-  /// where the grid's policy allows overlaps, and where the clock skips
-  /// the slot's start or end, so that no test runs
+  /// where the grid's policy allows overlaps, while [refused] holds, and
+  /// where the clock skips the slot's start or end, so that no test runs
   /// ([_TimedGridState._readRangeSlot]).
   ({
     DateTime start,
@@ -4552,12 +4552,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// instant the clock goes back, so the slot ends with the first pass of a
   /// stretch the clock repeats, that stretch's second pass and the
   /// first-pass instant of its start. Null for a range across the strip,
-  /// where the grid's policy allows overlaps, and where the clock skips the
-  /// slot's start or end. Reads no entry and asks the policy nothing: the
-  /// press that began the range admitted the slot ([_slotIsFree]).
+  /// where the grid's policy allows overlaps, while [range] is refused
+  /// ([_Ranging.refused]), as it reports no range, and where the clock
+  /// skips the slot's start or end. Reads no entry and asks the policy
+  /// nothing: the press that began the range admitted the slot
+  /// ([_slotIsFree]).
   void _readRangeSlot(_Ranging range) {
     range.anchorSlot = null;
-    if (range.strip || _allowsOverlaps) {
+    if (range.strip || range.refused || _allowsOverlaps) {
       return;
     }
     final anchor = range.anchor;

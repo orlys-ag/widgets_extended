@@ -6173,6 +6173,81 @@ void main() {
         CalendarCreateRange(start: at(tuesday, 8), end: at(tuesday, 10)),
       ]);
     });
+
+    testWidgets("OP29 in Day a create range that a new minute refuses, the "
+        "history lock giving its day no start, tests no range while it is "
+        "refused: that minute, a move onto another slot and a store notify "
+        "ask the policy nothing", (tester) async {
+      final shown = Shown.day(monday);
+      final pairs = PairRecordingPolicy<String>(
+        allows: (candidate, other) {
+          return false;
+        },
+      );
+      final store = storeOf(<CalendarEntry<String>>[
+        entryOf("busy", at(monday, 14, 15), at(monday, 15)),
+      ]);
+      final harness = Harness(
+        store,
+        shown,
+        editPolicy: CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+          const HistoryLockPolicy<String>(),
+          pairs,
+        ]),
+        today: monday,
+      );
+      await harness.pump(tester);
+      final from = slotRect(tester, shown, monday, 14 * 60).center;
+      final over = slotRect(tester, shown, monday, 14 * 60 + 30).center;
+      final gesture = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveTo(Offset.lerp(from, over, 0.5)!);
+      await tester.pump();
+      await gesture.moveTo(over);
+      await tester.pump();
+      // Setup sanity: the range asked about "busy" and is held short of it.
+      expect(
+        pairs.asked.map((ask) {
+          return ask.other.id;
+        }),
+        contains("busy"),
+      );
+      expect(strokedRects(tester), <Matcher>[
+        nearRect(
+          slotsRect(tester, shown, monday, 14 * 60, 14 * 60 + 15).deflate(1.0),
+        ),
+      ]);
+      final asks = <String, int>{};
+      var asked = pairs.asked.length;
+      void count(String change) {
+        asks[change] = pairs.asked.length - asked;
+        asked = pairs.asked.length;
+      }
+
+      // The history lock gives a day before today no start.
+      harness.now.value = CalendarNow(time: at(tuesday, 9), today: tuesday);
+      await tester.pump();
+      count("a new minute");
+      // Setup sanity: the range is refused, so the grid marks none.
+      expect(strokedRects(tester), isEmpty);
+      await gesture.moveTo(
+        slotRect(tester, shown, monday, 14 * 60 + 45).center,
+      );
+      await tester.pump();
+      count("a move onto another slot");
+      await store.create(entryOf("later", at(tuesday, 18), at(tuesday, 19)));
+      await tester.pump();
+      count("a store notify");
+      expect(asks, <String, int>{
+        "a new minute": 0,
+        "a move onto another slot": 0,
+        "a store notify": 0,
+      });
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
   });
 
   testWidgets("MR1 with onMoveRequest each move and resize a gesture lands "
