@@ -300,19 +300,18 @@ class CalendarView<T> extends StatefulWidget {
   /// no other entry's block covers, or goes back; and a resize it refuses
   /// stops at the first entry in its way that the policy refuses. A move or
   /// a resize asks about the times it would give, with the stored entry, a
-  /// slot press about the slot's times, with no entry, and a create drag
-  /// about
+  /// slot press about the slot's times, with no entry, and a create drag about
   /// the range a release would report, with no entry, at each change of the
-  /// slot under the pointer, at a store notify and at a new minute; a
-  /// refusal holds the range short of the refused entry nearest the slot it
-  /// started on, or to that slot alone where the entry shares its time.
-  /// Agenda's add buttons create at the first slot free of every entry where
-  /// it is true, and where it is false at the first slot no entry shares, or
-  /// where none does, the first sharing time only with entries
-  /// [CalendarEditPolicy.mayOverlap] lets the create share; Month's long
-  /// press does too where such a slot is left. The calendar checks no write
-  /// of the host's, and [store] refuses none for sharing time: a host whose
-  /// data forbids it refuses the write in its data source.
+  /// slot under the pointer, at a store notify and at a new minute; a refusal
+  /// holds the range short of the refused entry nearest the slot it started on,
+  /// or to that slot alone where the entry shares its time. Agenda's add
+  /// buttons create at the first slot free of every entry where it is true, and
+  /// where it is false at the first slot no entry shares, or where none does,
+  /// the first sharing time only with entries [CalendarEditPolicy.mayOverlap]
+  /// lets the create share; Month's long press does too where such a slot is
+  /// left. The calendar checks no write of the host's, and [store] refuses none
+  /// for sharing time: a host whose data forbids it refuses the write in its
+  /// data source.
   ///
   /// A policy not `==` to the last one given cancels a move or a resize in
   /// flight, which then requests nothing, and ends a create range in flight,

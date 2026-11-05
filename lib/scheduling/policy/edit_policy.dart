@@ -199,22 +199,20 @@ final class CalendarOverlapCandidate<T> {
 /// The views ask it in edit mode only, and read [dayLimit] and
 /// [allowsOverlaps], and Week and Day [refusesEveryOverlap] where
 /// [allowsOverlaps] is false, each time they take a policy. They ask
-/// [mayOverlap]
-/// only where [allowsOverlaps] is false, and a per-pair ask through
-/// [mayOverlap]'s default, or through [CalendarEditPolicy.all], reads
-/// [allowsOverlaps] again. An answer that throws in a drag's gates, which
-/// the views ask during a drag and inside their pointer handlers, is
-/// reported through [FlutterError.reportError] and refuses; one that
-/// throws in a build, a press or a tap goes through; one that throws where
-/// a new minute or a store notify asks again what a view shows is reported
-/// through [FlutterError.reportError], the view showing what the last
-/// answer gave; and one that throws while a create drag in Week or Day
-/// tests its range, at a change of the slot under its pointer, a store
-/// notify or a new minute, is reported through [FlutterError.reportError]
-/// and ends the drag. A view
-/// given a policy not `==` to the last cancels a move, a resize or a
-/// create range in flight, so a host's policy defines value equality, or
-/// is kept as one instance across builds.
+/// [mayOverlap] only where [allowsOverlaps] is false, and a per-pair ask
+/// through [mayOverlap]'s default, or through [CalendarEditPolicy.all], reads
+/// [allowsOverlaps] again. An answer that throws in a drag's gates, which the
+/// views ask during a drag and inside their pointer handlers, is reported
+/// through [FlutterError.reportError] and refuses; one that throws in a build,
+/// a press or a tap goes through; one that throws where a new minute or a store
+/// notify asks again what a view shows is reported through
+/// [FlutterError.reportError], the view showing what the last answer gave; and
+/// one that throws while a create drag in Week or Day tests its range, at a
+/// change of the slot under its pointer, a store notify or a new minute, is
+/// reported through [FlutterError.reportError] and ends the drag. A view given
+/// a policy not `==` to the last cancels a move, a resize or a create range in
+/// flight, so a host's policy defines value equality, or is kept as one
+/// instance across builds.
 @immutable
 abstract base class CalendarEditPolicy<T> {
   /// Const, so a subclass can be const.
