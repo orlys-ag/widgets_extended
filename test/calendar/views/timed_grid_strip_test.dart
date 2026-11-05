@@ -5376,9 +5376,8 @@ void main() {
     testWidgets("OP17 in Week a create range tests the range a release "
         "would report at each cell it reaches, holds it short of the entry "
         "nearest its anchor that the policy refuses, toward later or earlier "
-        "slots and across days, and asks about the held range again", (
-      tester,
-    ) async {
+        "slots and across days, asks about the held range again, and asks "
+        "nothing on a move inside a cell it reached", (tester) async {
       final shown = Shown.week(monday);
       final cases =
           <
@@ -5505,14 +5504,32 @@ void main() {
           kind: PointerDeviceKind.mouse,
         );
         if (run.path.length == 2) {
-          await gesture.moveTo(
-            Offset.lerp(pointOf(run.path.first), pointOf(run.path.last), 0.5)!,
-          );
+          final middle = Offset.lerp(
+            pointOf(run.path.first),
+            pointOf(run.path.last),
+            0.5,
+          )!;
+          await gesture.moveTo(middle);
           await tester.pump();
+          await expectNothingAskedInsideCell(
+            tester,
+            gesture,
+            middle,
+            policy,
+            reason: name,
+          );
         }
         for (final cell in run.path.skip(1)) {
-          await gesture.moveTo(pointOf(cell));
+          final point = pointOf(cell);
+          await gesture.moveTo(point);
           await tester.pump();
+          await expectNothingAskedInsideCell(
+            tester,
+            gesture,
+            point,
+            policy,
+            reason: name,
+          );
         }
         await gesture.up();
         await tester.pumpAndSettle();
@@ -5540,7 +5557,8 @@ void main() {
     testWidgets("OP18 in Day a create range is held short of the refused "
         "entry nearest its anchor, past an entry the policy allows, and to "
         "its anchor's slot where the refused entry shares that slot, asking "
-        "about each range it tests", (tester) async {
+        "about each range it tests and nothing on a move inside a cell it "
+        "reached", (tester) async {
       final shown = Shown.day(tuesday);
       final cases =
           <
@@ -5700,10 +5718,17 @@ void main() {
           kind: PointerDeviceKind.mouse,
         );
         final to = pointAt(run.to);
-        await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
-        await tester.pump();
-        await gesture.moveTo(to);
-        await tester.pump();
+        for (final point in <Offset>[Offset.lerp(from, to, 0.5)!, to]) {
+          await gesture.moveTo(point);
+          await tester.pump();
+          await expectNothingAskedInsideCell(
+            tester,
+            gesture,
+            point,
+            policy,
+            reason: name,
+          );
+        }
         await gesture.up();
         await tester.pumpAndSettle();
         if (beside) {
@@ -7848,6 +7873,41 @@ void expectRangeAsked(
       reason: "${entry.id} with ${range.start} to ${range.end}",
     );
   }
+}
+
+/// Moves [gesture]'s pointer, which lies at [point], 1 px up or down
+/// inside the board cell under [point], a frame after it, and checks that
+/// the move asked [policy] nothing and built no candidate
+/// ([debugOverlapCandidateCount]), [reason] naming the case.
+Future<void> expectNothingAskedInsideCell(
+  WidgetTester tester,
+  TestGesture gesture,
+  Offset point,
+  PairRecordingPolicy<String> policy, {
+  required String reason,
+}) async {
+  final controller = boardOf(tester).controller;
+  final cell = controller.cellAt(point);
+  // Setup sanity: a cell lies under the pointer, and the move stays in it.
+  expect(cell, isNotNull, reason: reason);
+  final nudge = controller.cellAt(point + const Offset(0.0, 1.0)) == cell
+      ? const Offset(0.0, 1.0)
+      : const Offset(0.0, -1.0);
+  final asked = policy.asked.length;
+  final built = debugOverlapCandidateCount;
+  await gesture.moveTo(point + nudge);
+  await tester.pump();
+  expect(controller.cellAt(point + nudge), cell, reason: reason);
+  expect(
+    policy.asked.length,
+    asked,
+    reason: "$reason: a move inside $cell asked",
+  );
+  expect(
+    debugOverlapCandidateCount,
+    built,
+    reason: "$reason: a move inside $cell built a candidate",
+  );
 }
 
 /// The ids of the other entries [policy] was asked about, in order.
