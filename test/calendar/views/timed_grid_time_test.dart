@@ -86,10 +86,10 @@ class Shown {
   }
 
   /// The rows above the first slot of an editable grid with no bar: the
-  /// day header in Week, the all-day strip's one empty row and the room
-  /// above the slots.
+  /// day header in Week, the room above the all-day strip, the strip's one
+  /// empty row and the room above the slots.
   int get editLeadingRows {
-    return (week ? 1 : 0) + 1 + 1;
+    return (week ? 1 : 0) + 1 + 1 + 1;
   }
 
   /// The row of the slot starting at [minute].

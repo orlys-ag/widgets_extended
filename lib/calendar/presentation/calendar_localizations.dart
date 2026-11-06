@@ -89,7 +89,7 @@ abstract base class CalendarLocalizations {
     required bool isAllDay,
   });
 
-  /// The times of an all-day entry, and the label beside the first row of
+  /// The times of an all-day entry, and the label on the top edge of
   /// Week's and Day's all-day strip.
   String get allDay;
 
@@ -118,7 +118,8 @@ abstract base class CalendarLocalizations {
   String hiddenEntries(int count);
 
   /// The visible count of [count] entries more than fit: the timed grid's
-  /// rows outside the hours, and Month's days.
+  /// rows outside the hours, Month's days and the days of Week's and Day's
+  /// collapsed all-day strip.
   String moreCount(int count);
 
   /// The visible count of [count] entries a Month day leaves out before
@@ -129,7 +130,7 @@ abstract base class CalendarLocalizations {
   /// hours.
   String laterCount(int count);
 
-  /// What a screen reader hears for the pill counting [count] all-day
+  /// What a screen reader hears for the chip counting [count] all-day
   /// entries the collapsed all-day strip hides on a day.
   String allDayMore(int count);
 

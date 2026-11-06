@@ -110,10 +110,16 @@ class Shown {
   final CalendarDayHours hours;
   final int slotMinutes;
 
-  /// The row of the all-day strip's first row: under the day header in
-  /// Week, the grid's top row in Day.
+  /// The row of the all-day strip's first row of the grid shown now: under
+  /// the day header in Week, and under the room above the strip where it
+  /// has rows. The rows above the room above the slots, less the header's,
+  /// are that room and the strip's rows, or none.
   int get stripStart {
-    return week ? 1 : 0;
+    final grid = gridNow();
+    final header = week ? 1 : 0;
+    final strip =
+        rowCountNow() - grid.hours.slotCountOf(grid.slotMinutes) - 2 - header;
+    return header + (strip > 0 ? 1 : 0);
   }
 
   /// The row of the first slot of the grid shown now: its board's row
@@ -319,6 +325,18 @@ List<double> lineHeightsOf(WidgetTester tester) {
   return <double>[
     for (final line in canvas.lines)
       if (line.from.dy == line.to.dy) line.from.dy,
+  ];
+}
+
+/// Where the grid's background draws its lines along the day columns, in
+/// the viewport's paint space.
+List<double> lineLeftsOf(WidgetTester tester) {
+  final viewport = viewportOf(tester);
+  final canvas = RecordingCanvas();
+  viewport.background!.paint(canvas, viewport);
+  return <double>[
+    for (final line in canvas.lines)
+      if (line.from.dx == line.to.dx) line.from.dx,
   ];
 }
 
@@ -1249,9 +1267,12 @@ Future<TestGesture> holdLateEndOverWednesday(WidgetTester tester) async {
 const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
 
 void main() {
-  testWidgets("TS1 the strip lies under the header, or at the grid's top in "
-      "Day, and above the first slot, and its bars keep their rects while "
-      "the hours scroll", (tester) async {
+  testWidgets("TS1 the strip lies under a room as tall as the one above the "
+      "first slot, on the surface and ruled along the strip's top edge, "
+      "which lies under the header, or at the grid's top in Day, and above "
+      "the first slot, and its bars keep their rects while the hours "
+      "scroll", (tester) async {
+    final theme = CalendarThemeData();
     for (final shown in bothGrids()) {
       final store = storeOf(<CalendarEntry<String>>[allDayOf("off", tuesday)]);
       await Harness(store, shown, size: const Size(800.0, 600.0)).pump(tester);
@@ -1259,7 +1280,23 @@ void main() {
       final top = shown.week
           ? tester.getRect(find.byKey(dayHeaderKey(tuesday))).bottom
           : tester.getTopLeft(find.byType(TimedGrid<String>)).dy;
-      expect(cell.top, moreOrLessEquals(top), reason: shown.name);
+      final margin = cellRect(tester, shown.firstSlotRow - 1, 1);
+      expect(
+        cell.top,
+        moreOrLessEquals(top + margin.height),
+        reason: shown.name,
+      );
+      expect(
+        decorationOver(
+          tester,
+          Rect.fromLTRB(cell.left, top, cell.right, cell.top),
+        ),
+        BoxDecoration(
+          color: theme.surface,
+          border: Border(bottom: BorderSide(color: theme.outline)),
+        ),
+        reason: shown.name,
+      );
       final bar = tester.getRect(barFinder("off"));
       expect(bar, nearRect(cell), reason: shown.name);
       final viewport = viewportOf(tester);
@@ -1318,13 +1355,15 @@ void main() {
     }
   });
 
-  testWidgets("TS4 a day needing five rows shows 3 and a \"+2\" pill", (
-    tester,
-  ) async {
+  testWidgets("TS4 a day needing five rows shows 3 and, in the fourth row, "
+      "a \"+2 more\" chip in Month's look in a bar's place, on that day "
+      "alone", (tester) async {
+    final theme = CalendarThemeData();
     for (final shown in bothGrids()) {
       final store = storeOf(<CalendarEntry<String>>[
         for (final id in const <String>["a", "b", "c", "d", "e"])
           allDayOf(id, tuesday),
+        allDayOf("w", wednesday),
       ]);
       await Harness(store, shown).pump(tester);
       for (final (index, id) in const <String>["a", "b", "c"].indexed) {
@@ -1338,7 +1377,7 @@ void main() {
       expect(barFinder("e"), findsNothing, reason: shown.name);
       final more = find.byKey(allDayMoreKey(tuesday));
       expect(
-        find.descendant(of: more, matching: find.text("+2")),
+        find.descendant(of: more, matching: find.text("+2 more")),
         findsOneWidget,
         reason: shown.name,
       );
@@ -1347,12 +1386,55 @@ void main() {
         moreOrLessEquals(stripRect(tester, shown, tuesday, 3).center.dy),
         reason: shown.name,
       );
+      final chip = find
+          .descendant(of: more, matching: find.byType(DecoratedBox))
+          .first;
+      expect(
+        tester.getRect(chip),
+        rectMoreOrLessEquals(stripRect(tester, shown, tuesday, 3).deflate(1.0)),
+        reason: shown.name,
+      );
+      // In the place of bar a's chip, three rows down.
+      final bar = tester.getRect(
+        find
+            .descendant(of: barFinder("a"), matching: find.byType(ClipRRect))
+            .first,
+      );
+      final down =
+          stripRect(tester, shown, tuesday, 3).top -
+          stripRect(tester, shown, tuesday).top;
+      expect(
+        tester.getRect(chip),
+        rectMoreOrLessEquals(bar.shift(Offset(0.0, down))),
+        reason: shown.name,
+      );
+      expect(
+        tester.widget<DecoratedBox>(chip).decoration,
+        BoxDecoration(
+          color: theme.notice,
+          borderRadius: BorderRadius.circular(4.0),
+        ),
+        reason: shown.name,
+      );
+      final label = tester
+          .widget<RichText>(
+            find.descendant(of: more, matching: find.byType(RichText)),
+          )
+          .text
+          .style!;
+      expect(label.color, theme.onNotice, reason: shown.name);
+      expect(label.fontSize, theme.monthMoreStyle.fontSize, reason: shown.name);
+      expect(
+        find.byKey(allDayMoreKey(wednesday)),
+        findsNothing,
+        reason: shown.name,
+      );
       // Three rows and the count row lie above the slots.
       expect(shown.firstSlotRow, shown.stripStart + 4 + 1, reason: shown.name);
     }
   });
 
-  testWidgets("TS5 a tap on the pill shows every row", (tester) async {
+  testWidgets("TS5 a tap on the chip shows every row", (tester) async {
     final semantics = tester.ensureSemantics();
     for (final shown in bothGrids()) {
       final store = storeOf(<CalendarEntry<String>>[
@@ -1402,8 +1484,8 @@ void main() {
       await tester.tap(find.byKey(allDayMoreKey(tuesday)));
       await tester.pumpAndSettle();
       final less = find.byKey(allDayLessKey);
-      // In the second strip row's gutter cell, under the label in the
-      // first's.
+      // In the second strip row's gutter cell, under the label on the
+      // strip's top edge.
       expect(
         tester.getRect(less).center.dy,
         moreOrLessEquals(stripRect(tester, shown, tuesday, 1).center.dy),
@@ -1411,7 +1493,7 @@ void main() {
       );
       expect(
         tester.getRect(find.text(english.allDay)).center.dy,
-        moreOrLessEquals(stripRect(tester, shown, tuesday).center.dy),
+        moreOrLessEquals(stripRect(tester, shown, tuesday).top),
         reason: shown.name,
       );
       expect(
@@ -1442,8 +1524,8 @@ void main() {
 
   testWidgets("TS7 with no all-day entry in range, outside edit mode no "
       "strip cell is built and the slots start under the header and the "
-      "room, and in edit mode the strip's one row lies there, the slots "
-      "lower by its height", (tester) async {
+      "room, and in edit mode the room above the strip and the strip's one "
+      "row lie there, the slots lower by their heights", (tester) async {
     for (final shown in bothGrids()) {
       final store = storeOf(<CalendarEntry<String>>[
         entryOf("timed", at(tuesday, 10), at(tuesday, 11)),
@@ -1463,10 +1545,10 @@ void main() {
       await harness.rebuild(tester);
       await tester.pumpAndSettle();
       final cell = tester.getRect(find.byKey(allDayCellKey(tuesday)));
-      expect(cell.top, moreOrLessEquals(top), reason: shown.name);
+      expect(cell.top, moreOrLessEquals(top + room.height), reason: shown.name);
       expect(
         firstSlotRect(tester, shown, tuesday).top,
-        moreOrLessEquals(viewing + cell.height),
+        moreOrLessEquals(viewing + room.height + cell.height),
         reason: shown.name,
       );
       // The block moved with its slot.
@@ -1722,12 +1804,10 @@ void main() {
     });
   });
 
-  testWidgets("TS14 the gutter cell beside the strip's first row reads "
-      "\"All day\", 6 px inside the gutter's right edge and centred on the "
-      "row, and a screen reader hears it: beside a bar out of edit mode and "
-      "beside edit mode's empty row; with no strip no cell reads it", (
-    tester,
-  ) async {
+  testWidgets("TS14 over the gutter the strip reads \"All day\" centred on "
+      "its top edge, 6 px inside the gutter's right edge, and a screen "
+      "reader hears it: over a bar's row out of edit mode and over edit "
+      "mode's empty row; with no strip nothing reads it", (tester) async {
     final semantics = tester.ensureSemantics();
     final label = find.text(english.allDay);
     for (final shown in bothGrids()) {
@@ -1742,7 +1822,7 @@ void main() {
       );
       expect(
         tester.getRect(label).center.dy,
-        moreOrLessEquals(gutter.center.dy),
+        moreOrLessEquals(gutter.top),
         reason: shown.name,
       );
       expect(
@@ -1760,7 +1840,7 @@ void main() {
       await harness.pump(tester);
       expect(
         tester.getRect(label).center.dy,
-        moreOrLessEquals(cellRect(tester, shown.stripStart, 0).center.dy),
+        moreOrLessEquals(cellRect(tester, shown.stripStart, 0).top),
         reason: shown.name,
       );
       harness.editable = false;
@@ -1962,6 +2042,100 @@ void main() {
       weekend,
       weekend,
     ]);
+  });
+
+  testWidgets("TS18 a day needing four rows shows all four, with no count "
+      "row and no chip", (tester) async {
+    for (final shown in bothGrids()) {
+      final store = storeOf(<CalendarEntry<String>>[
+        for (final id in const <String>["a", "b", "c", "d"])
+          allDayOf(id, tuesday),
+      ]);
+      await Harness(store, shown).pump(tester);
+      for (final (index, id) in const <String>["a", "b", "c", "d"].indexed) {
+        expect(
+          tester.getRect(barFinder(id)),
+          nearRect(stripRect(tester, shown, tuesday, index)),
+          reason: "${shown.name} $id",
+        );
+      }
+      expect(
+        find.byKey(allDayMoreKey(tuesday)),
+        findsNothing,
+        reason: shown.name,
+      );
+    }
+  });
+
+  testWidgets("TS19 an expanded strip whose rows drop to four shows no Less "
+      "pill", (tester) async {
+    for (final shown in bothGrids()) {
+      final store = storeOf(<CalendarEntry<String>>[
+        for (final id in const <String>["a", "b", "c", "d", "e"])
+          allDayOf(id, tuesday),
+      ]);
+      await Harness(store, shown).pump(tester);
+      await tester.tap(find.byKey(allDayMoreKey(tuesday)));
+      await tester.pumpAndSettle();
+      // Setup sanity: expanded at five rows, the strip collapses.
+      expect(find.byKey(allDayLessKey), findsOneWidget, reason: shown.name);
+      await store.requestDelete("e");
+      await tester.pumpAndSettle();
+      expect(find.byKey(allDayLessKey), findsNothing, reason: shown.name);
+    }
+  });
+
+  testWidgets("TS20 every rule along a day's left edge lies inside its "
+      "column, the first day's included: the slots' lines half their width "
+      "inside, and the strip's, the margin's and the before-hours row's "
+      "cells ruled along their left edge", (tester) async {
+    final theme = CalendarThemeData();
+    final rule = BorderSide(color: theme.outline);
+    for (final shown in bothGrids()) {
+      final first = shown.week ? monday : tuesday;
+      await Harness(
+        storeOf(<CalendarEntry<String>>[allDayOf("off", tuesday)]),
+        shown,
+      ).pump(tester);
+      final viewport = viewportOf(tester);
+      final columns = shown.week ? 7 : 1;
+      expect(lineLeftsOf(tester), <double>[
+        for (var col = 1; col <= columns; col++)
+          viewport.rectOfCell(shown.firstSlotRow, col)!.left + 0.5,
+      ], reason: shown.name);
+      final strip =
+          tester
+                  .widget<DecoratedBox>(find.byKey(allDayCellKey(first)))
+                  .decoration
+              as BoxDecoration;
+      expect((strip.border! as Border).left, rule, reason: shown.name);
+      final margin = decorationOver(
+        tester,
+        cellRect(tester, shown.firstSlotRow - 1, 1),
+      );
+      expect((margin!.border! as Border).left, rule, reason: shown.name);
+    }
+    final late = CalendarDayHours(8 * 60, CalendarDates.minutesPerDay);
+    for (final shown in bothGrids(hours: late)) {
+      final first = shown.week ? monday : tuesday;
+      await Harness(
+        storeOf(<CalendarEntry<String>>[
+          allDayOf("off", tuesday),
+          entryOf("early", at(tuesday, 6), at(tuesday, 7)),
+        ], hours: late),
+        shown,
+      ).pump(tester);
+      final notice =
+          tester
+                  .widget<DecoratedBox>(find.byKey(hiddenAboveKey(first)))
+                  .decoration
+              as BoxDecoration;
+      expect(
+        (notice.border! as Border).left,
+        BorderSide(color: theme.noticeOutline),
+        reason: shown.name,
+      );
+    }
   });
 
   testWidgets("TX1 a bar moved two columns writes days two later", (
@@ -2844,9 +3018,9 @@ void main() {
           await tester.pump();
         }
         final band = boardOf(tester).controller.rows.frozenStart;
-        // Setup sanity: the band holds the header, every strip row and the
-        // strip's margin.
-        expect(band, 1 + perDay + 1, reason: "$perDay a day");
+        // Setup sanity: the band holds the header, the room above the
+        // strip, every strip row and the strip's margin.
+        expect(band, 1 + 1 + perDay + 1, reason: "$perDay a day");
         final gesture = await liftTo(
           tester,
           tester.getCenter(blockFinder("q", tuesday)),
@@ -3634,16 +3808,18 @@ void main() {
       expectTimes(wide, "trip", wednesday, saturday);
     });
 
-    testWidgets("a one-day bar dropped on a day whose three shown strip rows "
-        "hold bars lands under that day's \"+1\" pill", (tester) async {
+    testWidgets("a one-day bar dropped on a day whose four shown strip rows "
+        "hold bars lands under that day's \"+2 more\" chip", (tester) async {
       final shown = Shown.week(monday);
       final store = storeOf(<CalendarEntry<String>>[
         allDayOf("z", monday),
-        for (final id in const <String>["b", "c", "d"]) allDayOf(id, tuesday),
+        for (final id in const <String>["b", "c", "d", "e"])
+          allDayOf(id, tuesday),
       ]);
       await Harness(store, shown).pump(tester);
-      // Setup sanity: three rows and no count.
-      expect(shown.firstSlotRow, shown.stripStart + 3 + 1);
+      // Setup sanity: four rows and no count.
+      expect(find.byKey(allDayMoreKey(tuesday)), findsNothing);
+      expect(shown.firstSlotRow, shown.stripStart + 4 + 1);
       await dragTo(
         tester,
         tester.getCenter(barFinder("z")),
@@ -3654,7 +3830,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(allDayMoreKey(tuesday)),
-          matching: find.text("+1"),
+          matching: find.text("+2 more"),
         ),
         findsOneWidget,
       );
