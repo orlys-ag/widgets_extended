@@ -1289,6 +1289,22 @@ Future<TestGesture> foldBy(WidgetTester tester, double distance) async {
 
 const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
 
+/// The timed grid's cell at the top of its scrolled part, in the first day
+/// column that shows there.
+({int row, int col}) topCellOf(WidgetTester tester) {
+  final viewport = gridViewport(tester);
+  final region = viewport.scrolledRegion;
+  return viewport.cellAt(Offset(region.left + 1.0, region.top + 0.5))!;
+}
+
+/// How far below the top edge of the timed grid's scrolled part the top of
+/// [cell] lies.
+double belowTopOf(WidgetTester tester, ({int row, int col}) cell) {
+  final viewport = gridViewport(tester);
+  return viewport.rectOfCell(cell.row, cell.col)!.top -
+      viewport.scrolledRegion.top;
+}
+
 void main() {
   test("the sentinels' values differ from Harbor's, the built-in ones and "
       "each other's", () {
@@ -2240,13 +2256,11 @@ void main() {
     final gesture = await tester.startGesture(tester.getCenter(block));
     await tester.pump(kLongPressTimeout + kPressTimeout);
     await tester.pump();
-    final before = viewport.verticalPosition!.pixels;
-    expect(before, greaterThan(6.5));
+    expect(viewport.verticalPosition!.pixels, greaterThan(6.5));
+    final top = topCellOf(tester);
+    final below = belowTopOf(tester, top);
     await installTheme(tester, api, sentinelB);
-    expect(
-      gridViewport(tester).verticalPosition!.pixels,
-      moreOrLessEquals(before + 0.5),
-    );
+    expect(belowTopOf(tester, top), moreOrLessEquals(below));
     await gesture.up();
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
@@ -3561,10 +3575,12 @@ void main() {
         await pickMode(tester, mode);
       }
       final grid = mode == "Day" || mode == "Week";
-      var before = 0.0;
+      ({int row, int col})? top;
+      var below = 0.0;
       if (grid) {
-        before = gridViewport(tester).verticalPosition!.pixels;
-        expect(before, greaterThan(6.5));
+        expect(gridViewport(tester).verticalPosition!.pixels, greaterThan(6.5));
+        top = topCellOf(tester);
+        below = belowTopOf(tester, top);
       }
       await installTheme(tester, api, b);
       if (grid) {
@@ -3576,11 +3592,7 @@ void main() {
         }
         expectBlockTitles(tester, b);
         await labelsOf(tester, b);
-        expect(
-          gridViewport(tester).verticalPosition!.pixels,
-          moreOrLessEquals(before + 0.5),
-          reason: mode,
-        );
+        expect(belowTopOf(tester, top!), moreOrLessEquals(below), reason: mode);
       }
       if (mode == "Month") {
         final background = paintGridBackground(tester);

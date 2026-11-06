@@ -202,21 +202,27 @@ class _GridStyles {
     ];
   }
 
-  /// A strip cell's fill and rules, in the first day column or another,
-  /// and in the strip's last row or another: one rule parts each day from
-  /// the one before, and one parts the last row from the hours.
+  /// A strip cell's fill and rules, for each [_DayFill], in the first day
+  /// column or another, and in the strip's last row or another: the fill
+  /// of the day's column below, one rule parting each day from the one
+  /// before, and one parting the last row from the hours.
   static List<BoxDecoration> _stripCellsOf(CalendarThemeData theme) {
     final edge = BorderSide(color: theme.outline);
     return <BoxDecoration>[
-      for (final first in const <bool>[true, false])
-        for (final last in const <bool>[true, false])
-          BoxDecoration(
-            color: theme.surface,
-            border: Border(
-              left: first ? BorderSide.none : edge,
-              bottom: last ? edge : BorderSide.none,
+      for (final fill in _DayFill.values)
+        for (final first in const <bool>[true, false])
+          for (final last in const <bool>[true, false])
+            BoxDecoration(
+              color: switch (fill) {
+                _DayFill.surface => theme.surface,
+                _DayFill.background => theme.background,
+                _DayFill.tint => theme.primaryTint,
+              },
+              border: Border(
+                left: first ? BorderSide.none : edge,
+                bottom: last ? edge : BorderSide.none,
+              ),
             ),
-          ),
     ];
   }
 
@@ -278,11 +284,32 @@ class _GridStyles {
     return _noticeCells[(above ? 0 : 2) + (first ? 0 : 1)];
   }
 
-  /// The fill and rules of a strip cell in the [first] day column or
-  /// another, in the strip's [last] row or another.
-  BoxDecoration stripCell({required bool first, required bool last}) {
-    return _stripCells[(first ? 0 : 2) + (last ? 0 : 1)];
+  /// The fill and rules of a strip cell of a day column [fill] fills, in
+  /// the [first] day column or another, in the strip's [last] row or
+  /// another.
+  BoxDecoration stripCell({
+    required _DayFill fill,
+    required bool first,
+    required bool last,
+  }) {
+    return _stripCells[fill.index * 4 + (first ? 0 : 2) + (last ? 0 : 1)];
   }
+}
+
+/// How a day column is filled, from the day header down: today's with the
+/// theme's tint, a Saturday's and a Sunday's with its background, and every
+/// other with its surface.
+enum _DayFill { surface, background, tint }
+
+/// The fill of [tracks]' day column [col] where [today] is today.
+_DayFill _dayFillOf(GridTracks tracks, int col, DateTime today) {
+  if (col == tracks.columnOf(CalendarDates.dayNumber(today))) {
+    return _DayFill.tint;
+  }
+  if (CalendarDates.weekdayColumnOfDay(tracks.dayAt(col)) >= 5) {
+    return _DayFill.background;
+  }
+  return _DayFill.surface;
 }
 
 /// The key of the day header cell showing [day].
@@ -509,10 +536,17 @@ CalendarCreateRange? _createRangeOf(
 /// in edit mode. Over the gutter its first row reads
 /// [CalendarLocalizations.allDay] in the hour labels' style, against the
 /// gutter's right edge as they are, scaled down where it does not fit the
-/// gutter, which it never widens. Each bar's content is what [chipBuilder]
-/// draws, told which of its ends continue past the shown days. A tap on a
-/// bar that is not pending reports [onOpenEntry] with its entry's id, in
-/// edit mode and out of it.
+/// gutter, which it never widens. Each day's strip cells are filled as its
+/// column below them is: today's with the theme's tint, a Saturday's and a
+/// Sunday's with its background. While the strip has rows and no row
+/// counting entries before the hours lies under it, the room above the
+/// first slot stays under the strip as its margin, the hours scrolling
+/// beneath, and the rule parting the strip from the hours runs along the
+/// margin's bottom edge, where the first slot's line lies with the hours
+/// at their top. Each bar's content is what [chipBuilder] draws, told
+/// which of its ends continue past the shown days. A tap on a bar that is
+/// not pending reports [onOpenEntry] with its entry's id, in edit mode and
+/// out of it.
 ///
 /// In edit mode, which [editable] turns on, a long press on any block of
 /// an entry lifts the entry to move and selects its blocks; a tap anywhere
@@ -569,7 +603,9 @@ CalendarCreateRange? _createRangeOf(
 /// its first day and its right grip its last, where it does not continue past
 /// them; on one column it takes neither. Dropped with the pointer over a slot,
 /// or over the row above the first slot, a bar's entry becomes a timed one an
-/// hour long from that slot's start, in the occurrence of the earliest start
+/// hour long from that slot's start, the row above standing for the first
+/// slot, or as the strip's margin for the slot showing right under it, in the
+/// occurrence of the earliest start
 /// [editPolicy] gives the day where its clock repeats that time, marked by the
 /// landing outline while the pointer is there; and a block dropped with the
 /// pointer over a day's strip cell makes its entry all-day on that day, the
@@ -581,7 +617,8 @@ CalendarCreateRange? _createRangeOf(
 /// hour, and the start and the end of the hours, has a label centred on its
 /// line in the hour gutter, in [hourLabelFormat], which a room above the first
 /// slot and below the last, or the gutter beside a row counting entries outside
-/// the hours, keeps whole. A piece reaching past the hours shows its part
+/// the hours or beside the strip's margin, keeps whole. A piece reaching past
+/// the hours shows its part
 /// inside them, and an entry whose start or end the hours do not hold
 /// ([CalendarDayHours.holdsTimes]) takes no move or resize: only an edit
 /// outside the grid changes it. A piece wholly outside them has no block. While
@@ -1063,13 +1100,15 @@ final class _Dragging extends _GridMode {
   }
 }
 
-/// What the all-day strip's cells show: the days of [tracks]; whether the
+/// What the all-day strip's cells show: the days of [tracks], filled as
+/// their columns are where [today] is today ([_dayFillOf]); whether the
 /// strip is collapsed with a count row, [counted]; the bars each day column
 /// hides below the third row, `below[c - 1]` for column `c`; and whether
 /// the strip is expanded past three rows, so its second row's gutter cell
 /// holds the pill collapsing it, [collapsible].
 typedef _StripState = ({
   GridTracks tracks,
+  DateTime today,
   bool counted,
   List<int> below,
   bool collapsible,
@@ -1553,10 +1592,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _tracks.rowOf(_openingMinuteOf(_tracks, widget.now.value.time)),
         1,
       );
-      // The jump put the opening line on the top edge; the label centred
-      // on it needs the room above it that the first line has.
+      // The jump put the opening line on the frozen rows' edge; the label
+      // centred on it needs the room above it that the first line has,
+      // which a room frozen under the strip already is.
       final vertical = _positionOf(_verticalScroll);
-      if (vertical != null) {
+      if (vertical != null && !_roomFrozen) {
         vertical.jumpTo(
           math.max(vertical.minScrollExtent, vertical.pixels - _labelRoom),
         );
@@ -1658,6 +1698,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final nowTaken = now != _calendarNow;
     if (nowTaken) {
       _calendarNow = now;
+      _noteStripToday();
     }
     // Compared first, so a build that changes none of them, as each pinch
     // update's is, makes no limits.
@@ -1936,9 +1977,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// The slots of the hours, [_slotHeight] each, under the frozen day
   /// header where the grid shows one and the all-day strip's
   /// [_stripRows], [_allDayRowHeight] each, frozen with it. Above the slots
-  /// a row of [_labelRoom], or the frozen row counting the entries before
-  /// the hours where [_notices] has one, and below them a row of
-  /// [_labelRoom] or the frozen row counting those after.
+  /// a row of [_labelRoom], frozen under the strip where it has rows
+  /// ([_roomFrozen]), or the frozen row counting the entries before the
+  /// hours where [_notices] has one, and below them a row of [_labelRoom]
+  /// or the frozen row counting those after.
   BoardAxisConfig _rowsConfig() {
     return BoardAxisConfig(
       axis: ExplicitAxis(<double>[
@@ -1948,9 +1990,24 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         ...List<double>.filled(_tracks.rowCount, _slotHeight),
         _edgeBelow,
       ]),
-      frozenStart: _stripStart + _stripRows + (_notices.above ? 1 : 0),
+      frozenStart: _stripStart + _stripRows + (_aboveFrozen ? 1 : 0),
       frozenEnd: _notices.below ? 1 : 0,
     );
+  }
+
+  /// Whether the room above the first slot stays under the all-day strip
+  /// as the hours scroll, as the strip's margin: while the strip has rows
+  /// and no row counting the entries before the hours takes the room's
+  /// place.
+  bool get _roomFrozen {
+    return _stripRows > 0 && !_notices.above;
+  }
+
+  /// Whether the row above the first slot is frozen: the room under the
+  /// strip ([_roomFrozen]) or the row counting the entries before the
+  /// hours.
+  bool get _aboveFrozen {
+    return _roomFrozen || _notices.above;
   }
 
   /// The all-day strip's first row: under the day header where the grid
@@ -2000,9 +2057,27 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return barRows;
   }
 
+  /// Gives the strip cells [_calendarNow]'s today, and the rest of what
+  /// they show as it is: new tracks reach them only with the sync that
+  /// places items on those tracks.
+  void _noteStripToday() {
+    final state = _strip.value;
+    if (state.today == _calendarNow.today) {
+      return;
+    }
+    _strip.value = (
+      tracks: state.tracks,
+      today: _calendarNow.today,
+      counted: state.counted,
+      below: state.below,
+      collapsible: state.collapsible,
+    );
+  }
+
   _StripState _stripStateOf() {
     return (
       tracks: _tracks,
+      today: _calendarNow.today,
       counted: _stripCounted,
       below: _layout.below,
       collapsible: _stripExpanded && _layout.barRows > collapsedStripRows,
@@ -2071,12 +2146,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// The height of the frozen rows above the slots: the day header, the
-  /// all-day strip and the row counting the entries before the hours,
-  /// each where the grid shows it.
+  /// all-day strip, and the row counting the entries before the hours or
+  /// the room frozen under the strip, each where the grid shows it.
   double get _leadingExtent {
     return _headerExtent +
         _stripExtent +
-        (_notices.above ? _noticeHeight : 0.0);
+        (_notices.above ? _noticeHeight : (_roomFrozen ? _rowRoom : 0.0));
   }
 
   /// The row counting the entries before the hours, or null where
@@ -3374,14 +3449,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _updateStripMark();
       return;
     }
-    var slotRow = -1;
-    if (col >= 1) {
-      if (row >= _tracks.firstSlotRow && row <= _tracks.lastSlotRow) {
-        slotRow = row;
-      } else if (row == _tracks.firstSlotRow - 1) {
-        slotRow = _tracks.firstSlotRow;
-      }
-    }
+    final slotRow = col >= 1 ? _barSlotRowOf(row) : -1;
     final column = slotRow == -1 ? -1 : col;
     if (column == drag.column && slotRow == drag.row) {
       return;
@@ -3393,6 +3461,26 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
           ? null
           : _barLandingOf(drag.key, column, slotRow);
     });
+  }
+
+  /// The slot row a bar over the board row [row] lands on, or -1 for none:
+  /// a slot's own; over the row above the first slot, the first slot, but
+  /// where that row is the room frozen under the strip ([_roomFrozen]),
+  /// the slot showing right under it, the hours scrolling beneath it.
+  int _barSlotRowOf(int row) {
+    if (row >= _tracks.firstSlotRow && row <= _tracks.lastSlotRow) {
+      return row;
+    }
+    if (row != _tracks.firstSlotRow - 1) {
+      return -1;
+    }
+    if (_roomFrozen) {
+      final under = _rowAt(_leadingExtent);
+      if (under >= _tracks.firstSlotRow && under <= _tracks.lastSlotRow) {
+        return under;
+      }
+    }
+    return _tracks.firstSlotRow;
   }
 
   /// Whether [row] and [col] name a slot in a day column later than the
@@ -3688,11 +3776,13 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     } else if (!_verticalScroll.hasClients) {
       return -1;
     } else {
+      // From the first slot's top. A frozen row above it lies in
+      // [_leadingExtent]; a scrolled room is its first [_rowRoom].
       var content = y + _verticalScroll.position.pixels - _leadingExtent;
-      if (!_notices.above) {
+      if (!_aboveFrozen) {
         content -= _rowRoom;
       }
-      if (content < (_notices.above ? 0.0 : -_rowRoom)) {
+      if (content < (_aboveFrozen ? 0.0 : -_rowRoom)) {
         row = -1;
       } else if (content < 0.0) {
         row = _tracks.firstSlotRow - 1;
@@ -3963,6 +4053,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         selectedDay: widget.selectedDay,
         today: now.today,
       );
+      _noteStripToday();
     }
     if (widget.editable) {
       _limits.value = _limitsOf();
@@ -4286,16 +4377,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         }
         write = _stripLandingOf(drag.key, col);
       } else {
-        if (col < 1 ||
-            row < _tracks.firstSlotRow - 1 ||
-            row > _tracks.lastSlotRow) {
+        final slotRow = col >= 1 ? _barSlotRowOf(row) : -1;
+        if (slotRow == -1) {
           return;
         }
-        write = _barLandingOf(
-          drag.key,
-          col,
-          math.max(row, _tracks.firstSlotRow),
-        );
+        write = _barLandingOf(drag.key, col, slotRow);
       }
       drag.spent = true;
     } else {
@@ -5186,9 +5272,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         mark: _stripMark,
         column: cell.col,
         row: row,
-        last: row == _stripRows - 1,
+        // A room frozen under the strip carries the rule above the hours.
+        last: row == _stripRows - 1 && !_roomFrozen,
         onExpand: _expandStrip,
       );
+    }
+    if (_roomFrozen && cell.row == _tracks.firstSlotRow - 1) {
+      // The foreground paints the first slot's label over the gutter.
+      if (cell.col == 0) {
+        return const _GutterCell();
+      }
+      return _StripMargin(strip: _strip, column: cell.col);
     }
     final above = cell.row == _rowAbove;
     if (above || cell.row == _rowBelow) {
@@ -5431,6 +5525,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
                     ? _creating
                     : _wallSpanOfCells(slotRange.anchor, slotRange.focus)),
             landing: _outlineOf(landing),
+            ruledAbove: _aboveFrozen,
           ),
           foreground: _GridForegroundPainter(
             styles: styles,
@@ -5438,7 +5533,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             labels: _hourLabels,
             labelsVersion: _hourLabels.version,
             now: _nowMark,
-            reachAbove: _notices.above ? _noticeHeight : 0.0,
+            reachAbove: _notices.above
+                ? _noticeHeight
+                : (_roomFrozen ? _labelRoom : 0.0),
             reachBelow: _notices.below ? _noticeHeight : 0.0,
           ),
           drag: widget.editable
@@ -6240,9 +6337,10 @@ class _NoticeCell extends StatelessWidget {
   }
 }
 
-/// A day column's cell in a row of the all-day strip: the surface, with a
-/// rule between days and one under the strip's last row, [last], tinted and
-/// edged in the primary colour while [mark] covers its column. The first
+/// A day column's cell in a row of the all-day strip: filled as its column
+/// is ([_dayFillOf]), with a rule between days and one under the strip's
+/// last row where [last], tinted and edged in the primary colour while
+/// [mark] covers its column. The first
 /// row's cell carries [allDayCellKey]. In the collapsed strip's count row,
 /// while the day hides bars, a "+N" pill counting them ([allDayMoreKey]),
 /// which a screen reader hears as [CalendarLocalizations.allDayMore] and a
@@ -6288,7 +6386,11 @@ class _StripCell extends StatelessWidget {
         final decoration =
             marked != null && column >= marked.first && column <= marked.last
             ? styles.stripMarked
-            : styles.stripCell(first: column == 1, last: last);
+            : styles.stripCell(
+                fill: _dayFillOf(tracks, column, state.today),
+                first: column == 1,
+                last: last,
+              );
         final count = state.counted && row == collapsedStripRows
             ? state.below[column - 1]
             : 0;
@@ -6312,6 +6414,43 @@ class _StripCell extends StatelessWidget {
                     ),
                   ),
                 ),
+        );
+      },
+    );
+  }
+}
+
+/// A day column's cell in the room frozen under the all-day strip, its
+/// margin: filled as its column is ([_dayFillOf]), with a rule between days
+/// and the rule above the hours. Opaque, so the hours scrolling beneath it
+/// do not show.
+class _StripMargin extends StatelessWidget {
+  const _StripMargin({required this.strip, required this.column});
+
+  final ValueListenable<_StripState> strip;
+
+  /// The board column of the cell, which [GridTracks.dayAt] reads.
+  final int column;
+
+  @override
+  Widget build(BuildContext context) {
+    final styles = _GridStyles.of(context);
+    return ValueListenableBuilder<_StripState>(
+      valueListenable: strip,
+      builder: (context, state, child) {
+        // As in a strip cell, until the board drops a column the new
+        // tracks no longer have.
+        final tracks = state.tracks;
+        if (column > tracks.columnCount) {
+          return const SizedBox.shrink();
+        }
+        return DecoratedBox(
+          decoration: styles.stripCell(
+            fill: _dayFillOf(tracks, column, state.today),
+            first: column == 1,
+            last: true,
+          ),
+          child: const SizedBox.expand(),
         );
       },
     );
@@ -6469,9 +6608,10 @@ class _LoadOverlay extends StatelessWidget {
 /// would land on, each filled like today's column and edged in the primary
 /// colour so it shows over that column too, one rect per day column it
 /// covers; and a line at the top of each slot row, under the last one and
-/// at the left of each day column, across the slots. The room above and
-/// below the slots shows the body alone. Every paint it draws with is
-/// [styles]', made once per theme.
+/// at the left of each day column, across the slots, but for a slot's top
+/// line touching the scrolled region's top edge where [ruledAbove]. The
+/// room above and below the slots shows the body alone. Every paint it
+/// draws with is [styles]', made once per theme.
 class _TimedGridPainter extends BoardBackgroundPainter {
   const _TimedGridPainter({
     required this.styles,
@@ -6479,11 +6619,16 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     required this.today,
     required this.range,
     required this.landing,
+    required this.ruledAbove,
   });
 
   final _GridStyles styles;
   final GridTracks tracks;
   final DateTime today;
+
+  /// Whether a frozen row above the slots draws the rule along the
+  /// scrolled region's top edge, so a slot's line there would thicken it.
+  final bool ruledAbove;
 
   /// The wall minutes ([CalendarDates.wallMinuteOf]) of the create range, or of
   /// the range an end handle dragged into a later day gives, or null.
@@ -6513,15 +6658,15 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     }
     final first = geometry.visibleCellRect(slotFirst, firstCol);
     final last = geometry.visibleCellRect(slotLast, lastCol);
-    final todayColumn = tracks.columnOf(CalendarDates.dayNumber(today));
     for (var col = firstCol; col <= lastCol; col++) {
       final Paint fill;
-      if (col == todayColumn) {
-        fill = styles.tintPaint;
-      } else if (CalendarDates.weekdayColumnOfDay(tracks.dayAt(col)) >= 5) {
-        fill = styles.backgroundPaint;
-      } else {
-        continue;
+      switch (_dayFillOf(tracks, col, today)) {
+        case _DayFill.surface:
+          continue;
+        case _DayFill.background:
+          fill = styles.backgroundPaint;
+        case _DayFill.tint:
+          fill = styles.tintPaint;
       }
       final rect = geometry.visibleCellRect(slotFirst, col);
       canvas.drawRect(
@@ -6540,8 +6685,12 @@ class _TimedGridPainter extends BoardBackgroundPainter {
     // The top line of each slot that shows, and the bottom line of the
     // last slot where the room below it shows.
     final linePaint = styles.linePaint;
+    final edge = region.top + linePaint.strokeWidth / 2;
     for (var row = slotFirst; row <= math.min(lastRow, slotLast + 1); row++) {
       final y = geometry.visibleCellRect(row, firstCol).top;
+      if (ruledAbove && y < edge) {
+        continue;
+      }
       canvas.drawLine(Offset(first.left, y), Offset(last.right, y), linePaint);
     }
     for (var col = firstCol; col <= lastCol; col++) {
@@ -6609,7 +6758,8 @@ class _TimedGridPainter extends BoardBackgroundPainter {
         old.tracks != tracks ||
         old.today != today ||
         old.range != range ||
-        old.landing != landing;
+        old.landing != landing ||
+        old.ruledAbove != ruledAbove;
   }
 }
 
@@ -6620,10 +6770,11 @@ class _TimedGridPainter extends BoardBackgroundPainter {
 /// the end of the hours, centred on its line and right-aligned in the
 /// gutter. The grid's room above its first slot and below its last holds
 /// the halves of the first and the last label past those lines, or where
-/// a frozen row counting items outside the hours takes a room's place, the
-/// gutter beside that row, which [reachAbove] and [reachBelow] measure: a
-/// label shows whole there while its line shows, and sinks into the row's
-/// edge as its line scrolls beneath the row. The labels are clipped to the
+/// a frozen row takes a room's place, the room frozen under the all-day
+/// strip or a row counting items outside the hours, the gutter beside that
+/// row, which [reachAbove] and [reachBelow] measure: a label shows whole
+/// there while its line shows, and sinks into the row's edge as its line
+/// scrolls beneath the row. The labels are clipped to the
 /// gutter below the day header, and a label taller than a slot still shows
 /// whole, because no gutter cell paints over the foreground. The line
 /// runs across [now]'s column at its minute, with a dot at its left end,

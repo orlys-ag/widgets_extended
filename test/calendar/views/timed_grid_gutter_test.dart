@@ -676,4 +676,31 @@ void main() {
     expect(short.right - left, moreOrLessEquals(66.0));
     expect(short.width, moreOrLessEquals(36.0));
   });
+
+  testWidgets("GF13 beside the all-day strip's margin the opening hour's "
+      "label shows whole, its line on the margin's bottom edge", (
+    tester,
+  ) async {
+    final harness = Harness(
+      entries: <CalendarEntry<String>>[
+        CalendarEntry<String>(
+          id: "off",
+          start: tuesday,
+          end: DateTime(2026, 4, 22),
+          title: "off",
+          color: const Color(0xFF336699),
+          payload: "off",
+          isAllDay: true,
+        ),
+      ],
+    )..hours = CalendarDayHours.allDay;
+    await harness.pump(tester);
+    final edge = viewportOf(tester).frozenInsetOf(Axis.vertical);
+    final onEdge = labelsOf(tester).where((label) {
+      return (label.ink.center.dy - edge).abs() < 1.0;
+    }).toList();
+    // Setup sanity: the grid opened with a labelled line on the edge.
+    expect(onEdge, hasLength(1));
+    expect(onEdge.single.clip.top, lessThanOrEqualTo(onEdge.single.ink.top));
+  });
 }
