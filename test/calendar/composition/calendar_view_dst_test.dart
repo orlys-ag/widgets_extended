@@ -112,10 +112,11 @@ Future<List<CalendarCreateRange>> pumpCalendar(
   return creates;
 }
 
-/// The add button of Agenda's gap on [day] from [start].
-Finder addIn(DateTime day, int start) {
+/// The add button of Agenda's gap on [day] from [start], the later of two
+/// times that read it where [later].
+Finder addIn(DateTime day, int start, {bool later = false}) {
   return find.descendant(
-    of: find.byKey(dayListGapKey(day, start)),
+    of: find.byKey(dayListGapKey(day, start, later: later)),
     matching: find.textContaining("add "),
   );
 }
@@ -304,7 +305,7 @@ void main() {
     });
 
     testWidgets("CV37 Agenda's add after an entry from 00:00 to the second "
-        "01:15 creates at 02:00, the first slot that entry leaves free", (
+        "01:15 creates at the second 01:15, where that entry ends", (
       tester,
     ) async {
       final day = longDayStart;
@@ -316,13 +317,14 @@ void main() {
         entries: <CalendarEntry<String>>[folds()],
         lock: false,
       );
-      expect(find.text("add 75"), findsNothing);
-      await tester.tap(addIn(day, 75));
+      final add = addIn(day, 75, later: true);
+      expect(add, findsOneWidget);
+      await tester.tap(add);
       await tester.pumpAndSettle();
       expect(creates, <CalendarCreateRange>[
         CalendarCreateRange(
-          start: day.add(const Duration(minutes: 180)),
-          end: day.add(const Duration(minutes: 195)),
+          start: day.add(const Duration(minutes: 135)),
+          end: day.add(const Duration(minutes: 150)),
         ),
       ]);
     });

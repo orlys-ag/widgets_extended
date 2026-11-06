@@ -144,6 +144,17 @@ after its start to the day's 24:00, where its block holds its end grip.
 an end in a repeated hour whose wall time is not after the start's where
 Week and Day draw it, so such an entry lies inside hours that start in the
 repeated hour.
+- On a day whose clock repeats a stretch, Agenda's gap rows and its marker of
+the current time follow time itself rather than the minutes the clock reads.
+A gap row runs from where the entries before it end to where the next one
+starts, so free time between an entry in the stretch's first pass and one in
+its second has its row, and the row after an entry starts where that entry
+ends, in the pass it ends in; hours whose start or end falls inside the
+stretch leave out the part of each pass the clock reads outside them. A gap's
+add creates inside the gap, and one across the instant the clock goes back
+takes its first free slot before that instant, or where none is, after it.
+The marker shows once, on the row that holds the current instant. The rows'
+times read the clock as before.
 - `package:widgets_extended/widgets_extended.dart` exports the calendar,
 so an app that also imports a library declaring one of its names, as
 `syncfusion_flutter_calendar` declares `CalendarController`,
