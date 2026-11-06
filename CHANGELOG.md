@@ -160,6 +160,15 @@ row reads `CalendarLocalizations.allDay`, "All day" in English, in the hour
 labels' style, scaled down where it does not fit the gutter, which it does
 not widen. The "Less" pill that collapses an expanded strip lies in the
 gutter's cell below it.
+- In Week and Day, the all-day strip and the hours read as one grid. Each
+day's strip cells take the fill of its column below, today's tint and the
+weekend's background. While the strip has rows, the room above the first
+slot that keeps the first hour label whole stays under the strip as its
+margin rather than scrolling with the hours, and the rule parting the strip
+from the hours runs along its bottom edge: with the hours at their top that
+rule is the first slot's line, and the grid opens with the opening hour's
+line on it, its label whole beside the margin. A bar dropped on the margin
+becomes timed from the slot showing right under it.
 - `package:widgets_extended/widgets_extended.dart` exports the calendar,
 so an app that also imports a library declaring one of its names, as
 `syncfusion_flutter_calendar` declares `CalendarController`,

@@ -250,11 +250,13 @@ void main() {
     expect(find.byTooltip("Previous day"), findsOneWidget);
     expect(find.byTooltip("Next day"), findsOneWidget);
 
-    // 08:00's line sits the room for its label below the grid's top.
+    // 08:00's line sits on the scrolled part's top, the bottom edge of the
+    // margin edit mode's all-day row keeps under it, beside which its
+    // label shows whole.
     final grid = gridViewport(tester);
     expect(
       grid.rectOfCell(dayRowOf(8 * 60), dayColumn)!.top,
-      near(grid.scrolledRegion.top + labelRoom(tester)),
+      near(grid.scrolledRegion.top),
     );
     // One day column, from the gutter to the body's right edge.
     expect(cellRect(tester, dayRowOf(9 * 60), dayColumn).right, near(390.0));
@@ -559,10 +561,11 @@ void main() {
       cellRect(tester, first, dayColumn).topLeft - block.topLeft,
     );
     await tester.pump();
-    // At the top of the grid's scrolled part, under the all-day row.
+    // At the top of the grid's scrolled part, under the all-day row and
+    // the margin it keeps.
     expect(
       tester.getRect(find.byKey(landingLabelKey)).top,
-      near(tester.getRect(find.byKey(allDayCellKey(today))).bottom + 8.0),
+      near(grid.localToGlobal(grid.scrolledRegion.topLeft).dy + 8.0),
     );
     await gesture.up();
     await tester.pump();

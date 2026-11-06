@@ -233,11 +233,13 @@ Finder allBars() {
   });
 }
 
-/// Whether [day]'s cell in the strip's first row is marked.
+/// Whether [day]'s cell in the strip's first row is marked: edged in the
+/// primary colour, which no unmarked cell is. Its tint alone does not
+/// tell, as today's column has the same fill.
 bool isMarked(WidgetTester tester, DateTime day) {
   final box = tester.widget<DecoratedBox>(find.byKey(allDayCellKey(day)));
-  return (box.decoration as BoxDecoration).color ==
-      CalendarThemeData().primaryTint;
+  final border = (box.decoration as BoxDecoration).border;
+  return border is Border && border.top.color == CalendarThemeData().primary;
 }
 
 /// The days of [days] whose strip cell in the first row is marked.
@@ -260,14 +262,21 @@ String? landingText(WidgetTester tester) {
   return tester.widget<Text>(label).data;
 }
 
-/// A canvas that records the rects drawn on it with their paints. Every
-/// other call is ignored.
+/// A canvas that records the rects drawn on it with their paints, and the
+/// lines drawn on it. Every other call is ignored.
 class RecordingCanvas implements Canvas {
   final List<({Rect rect, Paint paint})> rects = <({Rect rect, Paint paint})>[];
+
+  final List<({Offset from, Offset to})> lines = <({Offset from, Offset to})>[];
 
   @override
   void drawRect(Rect rect, Paint paint) {
     rects.add((rect: rect, paint: paint));
+  }
+
+  @override
+  void drawLine(Offset p1, Offset p2, Paint paint) {
+    lines.add((from: p1, to: p2));
   }
 
   @override
@@ -299,6 +308,40 @@ List<Rect> strokedRects(WidgetTester tester) {
     for (final record in canvas.rects)
       if (record.paint.style == PaintingStyle.stroke) record.rect,
   ];
+}
+
+/// Where the grid's background draws its lines across the slots, in the
+/// viewport's paint space.
+List<double> lineHeightsOf(WidgetTester tester) {
+  final viewport = viewportOf(tester);
+  final canvas = RecordingCanvas();
+  viewport.background!.paint(canvas, viewport);
+  return <double>[
+    for (final line in canvas.lines)
+      if (line.from.dy == line.to.dy) line.from.dy,
+  ];
+}
+
+/// The decoration of the [DecoratedBox] the grid builds over [rect], a
+/// global rect, to half a pixel, or null where it builds none there.
+BoxDecoration? decorationOver(WidgetTester tester, Rect rect) {
+  for (final element in find.byType(DecoratedBox).evaluate()) {
+    final box = element.renderObject;
+    if (box is! RenderBox || !box.hasSize) {
+      continue;
+    }
+    final at = box.localToGlobal(Offset.zero) & box.size;
+    if ((at.left - rect.left).abs() < 0.5 &&
+        (at.top - rect.top).abs() < 0.5 &&
+        (at.right - rect.right).abs() < 0.5 &&
+        (at.bottom - rect.bottom).abs() < 0.5) {
+      final decoration = (element.widget as DecoratedBox).decoration;
+      if (decoration is BoxDecoration) {
+        return decoration;
+      }
+    }
+  }
+  return null;
 }
 
 /// The union, in the viewport's paint space, of the cells of the slots of
@@ -1728,6 +1771,199 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets("TS15 while the strip has rows the room above the first slot "
+      "stays under it as its margin: the grid opens with the opening hour's "
+      "line on the margin's bottom edge, which carries the rule above the "
+      "hours in place of the strip's last row and no slot line, and the "
+      "margin keeps its rect as the hours scroll; with no strip the room "
+      "scrolls with them", (tester) async {
+    for (final shown in bothGrids()) {
+      final store = storeOf(<CalendarEntry<String>>[allDayOf("off", tuesday)]);
+      await Harness(
+        store,
+        shown,
+        editable: false,
+        size: const Size(800.0, 600.0),
+      ).pump(tester);
+      final strip = stripRect(tester, shown, tuesday);
+      final col = shown.colOf(tuesday);
+      final margin = cellRect(tester, shown.firstSlotRow - 1, col);
+      expect(margin.top, moreOrLessEquals(strip.bottom), reason: shown.name);
+      expect(
+        slotRect(tester, shown, tuesday, 8 * 60).top,
+        moreOrLessEquals(margin.bottom),
+        reason: shown.name,
+      );
+      final last =
+          tester
+                  .widget<DecoratedBox>(find.byKey(allDayCellKey(tuesday)))
+                  .decoration
+              as BoxDecoration;
+      expect(
+        (last.border! as Border).bottom,
+        BorderSide.none,
+        reason: shown.name,
+      );
+      expect(
+        (decorationOver(tester, margin)!.border! as Border).bottom.color,
+        CalendarThemeData().outline,
+        reason: shown.name,
+      );
+      final edge = margin.bottom - globalOf(tester, Offset.zero).dy;
+      expect(
+        lineHeightsOf(tester).where((y) {
+          return (y - edge).abs() < 1.0;
+        }),
+        isEmpty,
+        reason: shown.name,
+      );
+      final vertical = viewportOf(tester).verticalPosition!;
+      vertical.jumpTo(vertical.pixels + 100.0);
+      await tester.pump();
+      expect(
+        cellRect(tester, shown.firstSlotRow - 1, col),
+        margin,
+        reason: shown.name,
+      );
+    }
+    for (final shown in bothGrids()) {
+      final store = storeOf(<CalendarEntry<String>>[
+        entryOf("timed", at(tuesday, 10), at(tuesday, 11)),
+      ]);
+      await Harness(
+        store,
+        shown,
+        editable: false,
+        size: const Size(800.0, 600.0),
+      ).pump(tester);
+      final room = cellRect(tester, shown.firstSlotRow - 1, 1);
+      final vertical = viewportOf(tester).verticalPosition!;
+      vertical.jumpTo(vertical.pixels + 100.0);
+      await tester.pump();
+      expect(
+        cellRect(tester, shown.firstSlotRow - 1, 1).top,
+        moreOrLessEquals(room.top - 100.0),
+        reason: shown.name,
+      );
+    }
+  });
+
+  testWidgets("TS16 a bar dropped on the strip's margin becomes timed from "
+      "the slot showing right under it, 08:00 to 09:00 where the grid "
+      "opens, which the landing label names", (tester) async {
+    for (final shown in bothGrids()) {
+      final store = storeOf(<CalendarEntry<String>>[allDayOf("off", tuesday)]);
+      await Harness(store, shown, size: const Size(800.0, 600.0)).pump(tester);
+      final strip = stripRect(tester, shown, tuesday);
+      final gesture = await liftTo(
+        tester,
+        tester.getCenter(barFinder("off")),
+        // Inside the margin, under Tuesday's strip cell.
+        Offset(strip.center.dx, strip.bottom + 3.0),
+      );
+      expect(
+        landingText(tester),
+        english.landing(
+          at(tuesday, 8),
+          at(tuesday, 9),
+          DateTime(2026, 1, 5),
+          CalendarHourLabelFormat.twentyFourHour,
+          isAllDay: false,
+        ),
+        reason: shown.name,
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expectTimes(
+        store,
+        "off",
+        at(tuesday, 8),
+        at(tuesday, 9),
+        reason: shown.name,
+      );
+    }
+  });
+
+  testWidgets("TS17 each day's strip cells and margin are filled as its "
+      "column is: today's with the tint, Saturday's and Sunday's with the "
+      "background and the rest with the surface, and a new today moves the "
+      "tint", (tester) async {
+    final theme = CalendarThemeData();
+    final surface = theme.surface;
+    final weekend = theme.background;
+    final tint = theme.primaryTint;
+    final shown = Shown.week(monday);
+    final days = <DateTime>[
+      for (var i = 0; i < 7; i++) CalendarDates.addDays(monday, i),
+    ];
+    final harness = Harness(
+      storeOf(<CalendarEntry<String>>[allDayOf("off", tuesday)]),
+      shown,
+      editable: false,
+      today: wednesday,
+    );
+    await harness.pump(tester);
+    List<Color?> stripFills() {
+      return <Color?>[
+        for (final day in days)
+          (tester
+                      .widget<DecoratedBox>(find.byKey(allDayCellKey(day)))
+                      .decoration
+                  as BoxDecoration)
+              .color,
+      ];
+    }
+
+    List<Color?> marginFills() {
+      return <Color?>[
+        for (final day in days)
+          decorationOver(
+            tester,
+            cellRect(tester, shown.firstSlotRow - 1, shown.colOf(day)),
+          )?.color,
+      ];
+    }
+
+    expect(stripFills(), <Color?>[
+      surface,
+      surface,
+      tint,
+      surface,
+      surface,
+      weekend,
+      weekend,
+    ]);
+    expect(marginFills(), <Color?>[
+      surface,
+      surface,
+      tint,
+      surface,
+      surface,
+      weekend,
+      weekend,
+    ]);
+    harness.now.value = CalendarNow(time: at(thursday, 9), today: thursday);
+    await tester.pump();
+    expect(stripFills(), <Color?>[
+      surface,
+      surface,
+      surface,
+      tint,
+      surface,
+      weekend,
+      weekend,
+    ]);
+    expect(marginFills(), <Color?>[
+      surface,
+      surface,
+      surface,
+      tint,
+      surface,
+      weekend,
+      weekend,
+    ]);
+  });
+
   testWidgets("TX1 a bar moved two columns writes days two later", (
     tester,
   ) async {
@@ -2608,8 +2844,9 @@ void main() {
           await tester.pump();
         }
         final band = boardOf(tester).controller.rows.frozenStart;
-        // Setup sanity: the band holds the header and every strip row.
-        expect(band, 1 + perDay, reason: "$perDay a day");
+        // Setup sanity: the band holds the header, every strip row and the
+        // strip's margin.
+        expect(band, 1 + perDay + 1, reason: "$perDay a day");
         final gesture = await liftTo(
           tester,
           tester.getCenter(blockFinder("q", tuesday)),
