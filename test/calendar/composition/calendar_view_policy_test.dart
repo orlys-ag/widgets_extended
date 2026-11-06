@@ -2374,10 +2374,10 @@ void main() {
     "on the day whose clock repeats its midnight",
     skip: repeatedMidnightSkip,
     () {
-      testWidgets("PV25 Agenda's add under a per-pair policy takes the "
-          "gap's first slot no entry shares, past an earlier one that an "
-          "entry listed before the gap holds and the policy lets the create "
-          "share, asking about no slot after that one", (tester) async {
+      testWidgets("PV25 Agenda's gap after an entry ending at the second "
+          "00:30 runs from there, and its add under a per-pair policy creates "
+          "there, asking the policy about no entry, as none shares that "
+          "slot", (tester) async {
         final day = longDayStart;
         expectRepeatedMidnight(day);
         final dayBefore = DateTime(day.year, day.month, day.day - 1);
@@ -2396,37 +2396,20 @@ void main() {
           policy: policy,
         );
         await host.pump(tester);
-        // Setup sanity: Agenda lists the entry to 00:30, so its gap runs
-        // from there.
-        final gap = find.byKey(dayListGapKey(day, 30));
+        // The entry ends at the second 00:30, which starts the gap.
+        final gap = find.byKey(dayListGapKey(day, 30, later: true));
         expect(gap, findsOneWidget);
         await tester.tap(
-          find.descendant(of: gap, matching: find.text("add 60")),
+          find.descendant(of: gap, matching: find.text("add 30")),
         );
         await tester.pumpAndSettle();
         expect(host.creates, <CalendarCreateRange>[
-          CalendarCreateRange(start: at(day, 1), end: at(day, 1, 15)),
+          CalendarCreateRange(
+            start: laterMidnight.add(const Duration(minutes: 30)),
+            end: laterMidnight.add(const Duration(minutes: 45)),
+          ),
         ]);
-        expect(policy.asked, isNotEmpty);
-        expect(
-          <(String?, DateTime, DateTime, CalendarEntry<String>?)>{
-            for (final ask in policy.asked)
-              (
-                ask.other.id,
-                ask.candidate.start,
-                ask.candidate.end,
-                ask.candidate.entry,
-              ),
-          },
-          <(String?, DateTime, DateTime, CalendarEntry<String>?)>{
-            (
-              "tentative-late",
-              day.add(const Duration(minutes: 30)),
-              day.add(const Duration(minutes: 45)),
-              null,
-            ),
-          },
-        );
+        expect(policy.asked, isEmpty);
       });
     },
   );

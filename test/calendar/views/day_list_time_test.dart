@@ -1,8 +1,10 @@
 /// Agenda's day list on start and end: a timed entry listed under each day
 /// it covers with that day's part of it, all-day entries above the timed
 /// ones, the local zone's DST days listed once, the history lock read on
-/// start and end, a gap shorter than a slot offering no add button, and the
-/// slot an add button creates.
+/// start and end, a gap shorter than a slot offering no add button, the
+/// slot an add button creates, and on a day whose clock repeats a stretch,
+/// the gap rows, their adds and the marker of the current time in the order
+/// of their instants.
 library;
 
 import 'package:flutter/material.dart';
@@ -88,21 +90,23 @@ MemoryCalendarStore<String> storeOf(List<CalendarEntry<String>> entries) {
 }
 
 /// Pumps the day list over [store] on [day], with [editPolicy] and slots of
-/// [slotMinutes], in edit mode unless not [editable]; [cards] records the
-/// details each card is built with, [creates] each create an add button
-/// reports, and an add button reads "add" and its minute.
-Future<void> pumpList(
+/// [slotMinutes], in edit mode unless not [editable], at the time [time],
+/// or [day]'s 09:00 where null; [cards] records the details each card is
+/// built with, [creates] each create an add button reports, and an add
+/// button reads "add" and its minute. Returns the list's clock.
+Future<ValueNotifier<CalendarNow>> pumpList(
   WidgetTester tester,
   CalendarStore<String> store,
   DateTime day, {
   CalendarEditPolicy<String>? editPolicy,
   bool editable = true,
   int slotMinutes = 15,
+  DateTime? time,
   Map<String, List<CalendarCardDetails>>? cards,
   List<CalendarCreateRange>? creates,
 }) async {
   final now = ValueNotifier<CalendarNow>(
-    CalendarNow(time: at(day, 9), today: day),
+    CalendarNow(time: time ?? at(day, 9), today: day),
   );
   addTearDown(now.dispose);
   tester.view.devicePixelRatio = 1.0;
@@ -143,6 +147,20 @@ Future<void> pumpList(
     ),
   );
   await tester.pumpAndSettle();
+  return now;
+}
+
+/// The add button's text in the dashed row keyed [key].
+Finder addUnder(Key key) {
+  return find.descendant(
+    of: find.byKey(key),
+    matching: find.textContaining("add "),
+  );
+}
+
+/// The top of what [finder] finds, in global logical pixels.
+double topOf(WidgetTester tester, Finder finder) {
+  return tester.getTopLeft(finder).dy;
 }
 
 void main() {
@@ -460,6 +478,259 @@ void main() {
           entryOf("late", at(before, 23), laterMidnight),
         ]);
         expect(rowsOf(store, day), <Object>[("late", 0, 60, false)]);
+      });
+
+      /// "Y" from the first 00:40 to 00:50 and "X" from the second 00:10 to
+      /// 00:30, which the clock reads before Y's times.
+      List<CalendarEntry<String>> passes() {
+        final day = longDayStart;
+        return <CalendarEntry<String>>[
+          entryOf(
+            "Y",
+            day.add(const Duration(minutes: 40)),
+            day.add(const Duration(minutes: 50)),
+          ),
+          entryOf(
+            "X",
+            laterMidnight.add(const Duration(minutes: 10)),
+            laterMidnight.add(const Duration(minutes: 30)),
+          ),
+        ];
+      }
+
+      testWidgets("AG13 an entry in each pass of the repeated hour has a gap "
+          "row before it and after it, in the order of their instants: from "
+          "00:00, from the first 00:50 across the clock change, and from the "
+          "second 00:30", (tester) async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final store = storeOf(passes());
+        expect(rowsOf(store, day, editable: true), <Object>[
+          (0, 40),
+          ("Y", 40, 50, false),
+          (50, 10),
+          ("X", 10, 30, false),
+          (30, 1440),
+        ]);
+
+        await pumpList(tester, store, day);
+        final across = find.byKey(dayListGapKey(day, 50));
+        expect(
+          find.descendant(of: across, matching: find.text("00:50")),
+          findsOneWidget,
+        );
+        expect(
+          topOf(tester, find.byKey(entryCardKey("Y"))),
+          lessThan(topOf(tester, across)),
+        );
+        expect(
+          topOf(tester, across),
+          lessThan(topOf(tester, find.byKey(entryCardKey("X")))),
+        );
+        // The gap after X reads the second 00:30, where X ends.
+        final after = find.text("00:30");
+        expect(after, findsOneWidget);
+        expect(
+          topOf(tester, find.byKey(entryCardKey("X"))),
+          lessThan(topOf(tester, after)),
+        );
+      });
+
+      testWidgets("AG14 a gap's add takes the first free slot in its own "
+          "pass: across the clock change from the first 00:50 the second "
+          "00:00, and after an entry in the second pass the second 00:30", (
+        tester,
+      ) async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final creates = <CalendarCreateRange>[];
+        // "early" ends at the first 00:50, whose pass has no slot left, and
+        // "late" holds the second 00:30 to 00:40.
+        await pumpList(
+          tester,
+          storeOf(<CalendarEntry<String>>[
+            entryOf(
+              "early",
+              day.add(const Duration(minutes: 20)),
+              day.add(const Duration(minutes: 50)),
+            ),
+            entryOf(
+              "late",
+              laterMidnight.add(const Duration(minutes: 30)),
+              laterMidnight.add(const Duration(minutes: 40)),
+            ),
+          ]),
+          day,
+          creates: creates,
+        );
+        final across = addUnder(dayListGapKey(day, 50));
+        expect(across, findsOneWidget);
+        await tester.tap(across);
+        await tester.pumpAndSettle();
+        expect(creates, <CalendarCreateRange>[
+          CalendarCreateRange(
+            start: laterMidnight,
+            end: laterMidnight.add(const Duration(minutes: 15)),
+          ),
+        ]);
+
+        creates.clear();
+        await pumpList(tester, storeOf(passes()), day, creates: creates);
+        // The add after X, the only one the list shows at minute 30.
+        final after = find.text("add 30");
+        expect(after, findsOneWidget);
+        expect(
+          topOf(tester, find.byKey(entryCardKey("X"))),
+          lessThan(topOf(tester, after)),
+        );
+        await tester.tap(after);
+        await tester.pumpAndSettle();
+        expect(creates, <CalendarCreateRange>[
+          CalendarCreateRange(
+            start: laterMidnight.add(const Duration(minutes: 30)),
+            end: laterMidnight.add(const Duration(minutes: 45)),
+          ),
+        ]);
+      });
+
+      testWidgets("AG15 the marker of the current time shows once: at the "
+          "first 00:20 under the gap from 00:00, and at the second 00:20 "
+          "across X, from the second 00:10 to 00:30", (tester) async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final now = await pumpList(
+          tester,
+          storeOf(passes()),
+          day,
+          time: day.add(const Duration(minutes: 20)),
+        );
+        final marker = find.byKey(dayListNowKey);
+        expect(marker, findsOneWidget);
+        final line = tester.getCenter(marker).dy;
+        expect(
+          line,
+          greaterThan(
+            tester.getBottomLeft(find.byKey(dayListGapKey(day, 0))).dy,
+          ),
+        );
+        expect(line, lessThan(topOf(tester, find.byKey(entryCardKey("Y")))));
+
+        now.value = CalendarNow(
+          time: laterMidnight.add(const Duration(minutes: 20)),
+          today: day,
+        );
+        await tester.pump();
+        expect(marker, findsOneWidget);
+        final card = tester.getRect(find.byKey(entryCardKey("X")));
+        final across = tester.getCenter(marker).dy;
+        expect(across, greaterThan(card.top));
+        expect(across, lessThan(card.bottom));
+      });
+
+      testWidgets("AG16 in hours from 00:30, an entry from the second 00:10 "
+          "to 00:40 leaves the first 00:30 to the clock change a gap, and no "
+          "gap holds the second 00:00 to 00:30", (tester) async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final store = storeOf(<CalendarEntry<String>>[
+          entryOf(
+            "X",
+            laterMidnight.add(const Duration(minutes: 10)),
+            laterMidnight.add(const Duration(minutes: 40)),
+          ),
+        ]);
+        expect(
+          rowsOf(store, day, hours: CalendarDayHours(30, 1440), editable: true),
+          <Object>[(30, 60), ("X", 10, 40, false), (40, 1440)],
+        );
+      });
+
+      testWidgets("AG18 a gap from the first 00:30 and one from the second "
+          "00:30 are two rows, each with its own key and its add in its own "
+          "pass", (tester) async {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final store = storeOf(<CalendarEntry<String>>[
+          entryOf("A", day, day.add(const Duration(minutes: 30))),
+          entryOf("B", day.add(const Duration(minutes: 45)), laterMidnight),
+          entryOf(
+            "C",
+            laterMidnight,
+            laterMidnight.add(const Duration(minutes: 30)),
+          ),
+        ]);
+        expect(rowsOf(store, day, editable: true), <Object>[
+          ("A", 0, 30, false),
+          (30, 45),
+          ("B", 45, 60, false),
+          ("C", 0, 30, false),
+          (30, 1440),
+        ]);
+        final creates = <CalendarCreateRange>[];
+        await pumpList(tester, store, day, creates: creates);
+        final first = addUnder(dayListGapKey(day, 30));
+        final second = addUnder(dayListGapKey(day, 30, later: true));
+        expect(first, findsOneWidget);
+        expect(second, findsOneWidget);
+        await tester.tap(first);
+        await tester.pumpAndSettle();
+        await tester.tap(second);
+        await tester.pumpAndSettle();
+        expect(creates, <CalendarCreateRange>[
+          CalendarCreateRange(
+            start: day.add(const Duration(minutes: 30)),
+            end: day.add(const Duration(minutes: 45)),
+          ),
+          CalendarCreateRange(
+            start: laterMidnight.add(const Duration(minutes: 30)),
+            end: laterMidnight.add(const Duration(minutes: 45)),
+          ),
+        ]);
+      });
+    },
+  );
+
+  group(
+    "on the day whose clock repeats its last hour",
+    skip: repeatedLastHourSkip,
+    () {
+      testWidgets("AG17 between an entry in the first 23:00 hour and one in "
+          "the second, the gap runs from the first 23:20 to the second 23:30, "
+          "and its add takes the first 23:20", (tester) async {
+        final day = longDayStart;
+        expectRepeatedLastHour(day);
+        final store = storeOf(<CalendarEntry<String>>[
+          entryOf(
+            "first",
+            laterLastHour.subtract(const Duration(minutes: 50)),
+            laterLastHour.subtract(const Duration(minutes: 40)),
+          ),
+          entryOf(
+            "second",
+            laterLastHour.add(const Duration(minutes: 30)),
+            laterLastHour.add(const Duration(minutes: 40)),
+          ),
+        ]);
+        // Setup sanity: the gap between them reads 23:20 to 23:30.
+        expect(rowsOf(store, day, editable: true), <Object>[
+          (0, 1390),
+          ("first", 1390, 1400, false),
+          (1400, 1410),
+          ("second", 1410, 1420, false),
+          (1420, 1440),
+        ]);
+        final creates = <CalendarCreateRange>[];
+        await pumpList(tester, store, day, creates: creates);
+        final add = addUnder(dayListGapKey(day, 1400));
+        expect(add, findsOneWidget);
+        await tester.tap(add);
+        await tester.pumpAndSettle();
+        expect(creates, <CalendarCreateRange>[
+          CalendarCreateRange(
+            start: laterLastHour.subtract(const Duration(minutes: 40)),
+            end: laterLastHour.subtract(const Duration(minutes: 25)),
+          ),
+        ]);
       });
     },
   );

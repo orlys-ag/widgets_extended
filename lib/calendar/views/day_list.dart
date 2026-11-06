@@ -209,10 +209,14 @@ ValueKey<String> dayListHeaderKey(DateTime day) {
   return ValueKey<String>("day-list-header-${CalendarDates.isoDate(day)}");
 }
 
-/// The key of [day]'s dashed row of the gap that starts [start] minutes
-/// after midnight.
-ValueKey<String> dayListGapKey(DateTime day, int start) {
-  return ValueKey<String>("day-list-gap-$start@${CalendarDates.isoDate(day)}");
+/// The key of [day]'s dashed row of the gap that starts where its clock
+/// reads [start] minutes after midnight, at the later of the two instants
+/// that read it where [later] ([DayListGap.later]).
+ValueKey<String> dayListGapKey(DateTime day, int start, {bool later = false}) {
+  final pass = later ? "-later" : "";
+  return ValueKey<String>(
+    "day-list-gap-$start$pass@${CalendarDates.isoDate(day)}",
+  );
 }
 
 /// The key of the chip naming the length of the item [id], under its
@@ -241,6 +245,157 @@ ValueKey<String> dayListLoadingKey(DateTime day) {
 /// The key of the row saying [day] could not be read.
 ValueKey<String> dayListFailedKey(DateTime day) {
   return ValueKey<String>("day-list-failed-${CalendarDates.isoDate(day)}");
+}
+
+/// How the times of [day] order. An unfolded minute of the day is the
+/// minute its clock reads up to the instant the clock goes back, [fold],
+/// and from that instant on the minute its clock reads plus the length of
+/// the stretch it reads twice, [repeated], so unfolded minutes rise with
+/// time. On a day whose clock repeats no stretch, an unfolded minute is the
+/// minute the clock reads.
+@immutable
+final class DayListClock {
+  const DayListClock._(this.day, this._next, this.fold, this.repeated);
+
+  /// The clock of [day], a day start. On a day whose clock repeats a
+  /// stretch, finds the instant it goes back by bisecting the day's minutes
+  /// on [DateTime.timeZoneOffset], which falls once in the day.
+  factory DayListClock.of(DateTime day) {
+    final next = CalendarDates.addDays(day, 1);
+    final repeated = CalendarDates.repeatedStretchOf(day).inMinutes;
+    if (repeated == 0) {
+      return DayListClock._(day, next, null, 0);
+    }
+    final offset = day.timeZoneOffset;
+    // The day's start keeps its offset, and the next day's start has the
+    // fallen one.
+    var kept = 0;
+    var fallen = next.difference(day).inMinutes;
+    while (fallen - kept > 1) {
+      final middle = (kept + fallen) ~/ 2;
+      if (day.add(Duration(minutes: middle)).timeZoneOffset == offset) {
+        kept = middle;
+      } else {
+        fallen = middle;
+      }
+    }
+    return DayListClock._(
+      day,
+      next,
+      day.add(Duration(minutes: fallen)),
+      repeated,
+    );
+  }
+
+  final DateTime day;
+  final DateTime _next;
+
+  /// The instant the clock goes back, which starts the second pass of the
+  /// stretch it reads twice; null where it does not go back.
+  final DateTime? fold;
+
+  /// The minutes of the stretch the clock reads twice, 0 where none.
+  final int repeated;
+
+  /// The unfolded minute of [fold], where the first pass ends; meaningless
+  /// where [fold] is null.
+  int get foldMinute {
+    final fold = this.fold;
+    return fold == null ? 0 : CalendarDates.minuteOfDay(fold) + repeated;
+  }
+
+  /// The unfolded minute the day ends at.
+  int get endMinute {
+    return CalendarDates.minutesPerDay + repeated;
+  }
+
+  /// The unfolded minute of [time], a time on [day].
+  int minuteOf(DateTime time) {
+    final fold = this.fold;
+    final unfolded = fold != null && !time.isBefore(fold) ? repeated : 0;
+    return CalendarDates.minuteOfDay(time) + unfolded;
+  }
+
+  /// The unfolded minute a part on [day] of a range from [start] starts
+  /// at: 0 for a [start] before [day], as [CalendarDates.pieceOn] clips it.
+  int startOf(DateTime start) {
+    return start.isBefore(day) ? 0 : minuteOf(start);
+  }
+
+  /// The unfolded minute a part on [day] of a range to [end] ends at:
+  /// [endMinute] for an [end] at the next day's start or after it.
+  int endOf(DateTime end) {
+    return end.isBefore(_next) ? minuteOf(end) : endMinute;
+  }
+
+  /// The minute the clock reads at the unfolded minute [unfolded] as a
+  /// start: the second pass's, from [foldMinute] on.
+  int clockMinuteOf(int unfolded) {
+    return fold == null || unfolded < foldMinute
+        ? unfolded
+        : unfolded - repeated;
+  }
+
+  /// The minute the clock reads at the unfolded minute [unfolded] as an
+  /// end: the first pass's up to [foldMinute], where it ends at the end of
+  /// the stretch, as a range from the first pass ending there reads
+  /// ([CalendarDates.rangeEndAtWallMinute]).
+  int clockEndMinuteOf(int unfolded) {
+    return fold == null || unfolded <= foldMinute
+        ? unfolded
+        : unfolded - repeated;
+  }
+
+  /// Whether the unfolded minute [unfolded] lies in the second pass of the
+  /// stretch the clock reads twice, so its time is the later of two.
+  bool readsLater(int unfolded) {
+    return fold != null &&
+        unfolded >= foldMinute &&
+        unfolded < foldMinute + repeated;
+  }
+
+  /// The runs of unfolded minutes, in order, whose times the clock reads
+  /// inside [hours]: one, or two where an end of [hours] falls inside the
+  /// stretch the clock reads twice, which leaves a part of one pass out.
+  List<({int start, int end})> hoursRunsOf(CalendarDayHours hours) {
+    if (fold == null) {
+      return <({int start, int end})>[(start: hours.start, end: hours.end)];
+    }
+    final first = (start: hours.start, end: math.min(hours.end, foldMinute));
+    final second = (
+      start: math.max(hours.start + repeated, foldMinute),
+      end: hours.end + repeated,
+    );
+    if (first.start >= first.end) {
+      return <({int start, int end})>[second];
+    }
+    if (second.start >= second.end) {
+      return <({int start, int end})>[first];
+    }
+    if (first.end == second.start) {
+      return <({int start, int end})>[(start: first.start, end: second.end)];
+    }
+    return <({int start, int end})>[first, second];
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is DayListClock &&
+        other.day == day &&
+        other.fold == fold &&
+        other.repeated == repeated;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(day, fold, repeated);
+  }
+
+  @override
+  String toString() {
+    return "DayListClock(${CalendarDates.isoDate(day)}, fold: $fold, "
+        "repeated: $repeated)";
+  }
 }
 
 /// One row of the day list, under or as the header of its [day].
@@ -371,32 +526,58 @@ final class DayListEntry<T> extends DayListRow {
   }
 }
 
-/// [day]'s dashed row of a gap: the minutes from [start] to [end], inside
-/// the calendar's hours, that no timed entry's piece covers.
+/// [day]'s dashed row of a gap: the unfolded minutes ([DayListClock]) from
+/// [unfoldedStart] to [unfoldedEnd], whose times the clock reads inside the
+/// calendar's hours, that no timed entry covers.
 final class DayListGap extends DayListRow {
-  const DayListGap(super.day, this.start, this.end);
+  const DayListGap(super.day, this.clock, this.unfoldedStart, this.unfoldedEnd);
 
-  final int start;
+  /// [day]'s clock.
+  final DayListClock clock;
 
-  /// The minute the gap ends: the next item's start, or the hours' end.
-  final int end;
+  final int unfoldedStart;
+
+  /// Where the gap ends: the next timed entry's start, the instant the
+  /// clock goes back where the hours leave the start of its second pass
+  /// out, or the hours' end.
+  final int unfoldedEnd;
+
+  /// The minute the clock reads where the gap starts
+  /// ([DayListClock.clockMinuteOf]).
+  int get start {
+    return clock.clockMinuteOf(unfoldedStart);
+  }
+
+  /// The minute the clock reads where the gap ends
+  /// ([DayListClock.clockEndMinuteOf]).
+  int get end {
+    return clock.clockEndMinuteOf(unfoldedEnd);
+  }
+
+  /// Whether the gap starts at the later of two instants its clock reads
+  /// [start] at ([DayListClock.readsLater]).
+  bool get later {
+    return clock.readsLater(unfoldedStart);
+  }
 
   @override
   String get key {
-    return "gap-$start@${CalendarDates.isoDate(day)}";
+    final pass = later ? "-later" : "";
+    return "gap-$start$pass@${CalendarDates.isoDate(day)}";
   }
 
   @override
   bool operator ==(Object other) {
     return other is DayListGap &&
         other.day == day &&
-        other.start == start &&
-        other.end == end;
+        other.clock == clock &&
+        other.unfoldedStart == unfoldedStart &&
+        other.unfoldedEnd == unfoldedEnd;
   }
 
   @override
   int get hashCode {
-    return Object.hash(day, start, end);
+    return Object.hash(day, clock, unfoldedStart, unfoldedEnd);
   }
 
   @override
@@ -486,12 +667,14 @@ final class DayListFailed extends DayListRow {
 /// inside [hours] has no row: a [DayListHidden] after the all-day rows counts
 /// those before the hours, and one last those after them, as the timed
 /// grid counts the pieces it has no block for. Each other timed entry has
-/// its row, and where [editable], one gap row for each run of minutes in
-/// [hours] that none of their pieces covers, a piece covering the minutes
-/// from its start to before its end, before the row that ends the run or
-/// after the last one. So pieces that touch have no gap between them, and
-/// a day with no timed piece inside the hours has one gap row across
-/// them.
+/// its row, and where [editable], one gap row for each run of time whose
+/// clock reads inside [hours] that no timed entry covers, an entry covering
+/// the time from its start to before its end, before the row that ends the
+/// run or after the last one. So entries that touch have no gap between
+/// them, and a day with no timed entry inside the hours has one gap row
+/// across them. The runs are of unfolded minutes ([DayListClock]), which
+/// rise with time where the clock goes back: a run can cross the instant
+/// it goes back, and the part of a pass the hours leave out splits one.
 List<DayListRow> dayListRowsOf<T>(
   DateTime day,
   List<CalendarShownEntry<T>> entries,
@@ -501,10 +684,23 @@ List<DayListRow> dayListRowsOf<T>(
   final allDay = <DayListRow>[];
   final rows = <DayListRow>[];
   final number = CalendarDates.dayNumber(day);
+  final clock = DayListClock.of(day);
+  final runs = clock.hoursRunsOf(hours);
   var before = 0;
   var after = 0;
-  // The latest end among the pieces so far, or the hours' start.
-  var covered = hours.start;
+  // The latest unfolded end among the timed entries so far, or the hours'
+  // first unfolded minute.
+  var covered = runs.first.start;
+  void addGapsTo(int end) {
+    for (final run in runs) {
+      final start = math.max(covered, run.start);
+      final until = math.min(end, run.end);
+      if (start < until) {
+        rows.add(DayListGap(day, clock, start, until));
+      }
+    }
+  }
+
   for (final entry in entries) {
     final calendarEntry = entry.entry;
     final piece = CalendarDates.pieceOn(
@@ -518,6 +714,13 @@ List<DayListRow> dayListRowsOf<T>(
       allDay.add(DayListEntry<T>(day, entry, piece.start, piece.end, true));
       continue;
     }
+    // An entry with no row still covers its time, which a run of the
+    // hours holds where the clock reads part of it twice.
+    final start = clock.startOf(calendarEntry.start);
+    if (editable && start > covered) {
+      addGapsTo(start);
+    }
+    covered = math.max(covered, clock.endOf(calendarEntry.end));
     if (math.min(piece.end, hours.end) <= math.max(piece.start, hours.start)) {
       if (piece.start < hours.start) {
         before++;
@@ -526,14 +729,10 @@ List<DayListRow> dayListRowsOf<T>(
       }
       continue;
     }
-    if (editable && piece.start > covered) {
-      rows.add(DayListGap(day, covered, piece.start));
-    }
     rows.add(DayListEntry<T>(day, entry, piece.start, piece.end, false));
-    covered = math.max(covered, piece.end);
   }
-  if (editable && hours.end > covered) {
-    rows.add(DayListGap(day, covered, hours.end));
+  if (editable) {
+    addGapsTo(runs.last.end);
   }
   return <DayListRow>[
     ...allDay,
@@ -673,10 +872,11 @@ class DayList<T> extends StatefulWidget {
   /// clock reads that [CalendarEditRules.firstSlot] gives over the day's
   /// shown entries: the first no entry shares, or where none is and
   /// [CalendarEditPolicy.allowsOverlaps] is false, the first sharing time
-  /// only with entries [CalendarEditPolicy.mayOverlap] allows, in that
-  /// earliest start's occurrence where the day's clock repeats its time, so
-  /// it starts at the earliest start or after. On a day whose clock repeats
-  /// a stretch, an entry can hold time in a gap it is not listed beside.
+  /// only with entries [CalendarEditPolicy.mayOverlap] allows, so it starts
+  /// at the earliest start or after. The slot lies inside the gap, in the
+  /// pass of the gap's time where the day's clock reads it twice: a gap
+  /// across the instant the clock goes back takes the first such slot
+  /// before that instant, or where none is, the first after it.
   /// The details give that slot as their range, the gap's row, in global
   /// logical pixels when the button was pressed, as their rect, and false
   /// for whether the user chose the length. The list marks that row until
@@ -809,8 +1009,9 @@ class _DayListState<T> extends State<DayList<T>> {
   /// reports nothing.
   int _reveals = 0;
 
-  /// The [CalendarDates.dayNumber] and the start of the gap row whose add
-  /// button reported the latest create, while that create's future runs;
+  /// The [CalendarDates.dayNumber] and the unfolded start
+  /// ([DayListGap.unfoldedStart]) of the gap row whose add button reported
+  /// the latest create, while that create's future runs;
   /// each gap row listens and draws the mark while it names the row.
   final ValueNotifier<({int day, int start})?> _createMark =
       ValueNotifier<({int day, int start})?>(null);
@@ -1531,7 +1732,8 @@ class _DayListState<T> extends State<DayList<T>> {
     if (day != _nowDay) {
       return _AnimatedRows(rows: rows, builder: _buildDayRow);
     }
-    final spans = _NowSpan.spansOf(rows, widget.hours);
+    final clock = DayListClock.of(day);
+    final spans = _NowSpan.spansOf(rows, widget.hours, clock);
     return _AnimatedRows(
       rows: rows,
       builder: _buildDayRow,
@@ -1543,6 +1745,7 @@ class _DayListState<T> extends State<DayList<T>> {
         return _NowMarker(
           now: widget.now,
           span: span,
+          clock: clock,
           hours: widget.hours,
           format: widget.format,
         );
@@ -1550,37 +1753,71 @@ class _DayListState<T> extends State<DayList<T>> {
     );
   }
 
-  /// The slot the add of [day]'s gap from [start] to [end] takes: the
-  /// first free one in it from the policy's earliest start on [day], or
-  /// null where none is. A free slot whose times the clock reads must fit
-  /// the gap, so a gap shorter than a slot, as entries off the slot grid
-  /// can leave, or one the clock skips, offers no add.
-  ({DateTime start, DateTime end})? _gapAddOf(
-    DateTime day,
-    int start,
-    int end,
-  ) {
+  /// The slot the add of [gap] takes: the first free one in it from the
+  /// policy's earliest start on its day, or null where none is. A free slot
+  /// whose times the clock reads must fit the gap, so a gap shorter than a
+  /// slot, as entries off the slot grid can leave, or one the clock skips,
+  /// offers no add. [CalendarEditRules.firstSlot] reads the clock's minutes
+  /// in one pass, so a gap across the instant the clock goes back
+  /// ([DayListClock.fold]) asks it about the part before that instant, and
+  /// where that part has none, about the part after it.
+  ({DateTime start, DateTime end})? _gapAddOf(DayListGap gap) {
     final rules = _rules;
+    final day = gap.day;
     final earliest = rules.earliestStartOn(day, _calendarNow.value);
     final shown = widget.store.entriesOn(day).map((shown) {
       return shown.entry;
     });
-    return rules.firstSlot(earliest, clearOf: shown, from: start, until: end);
+    final clock = gap.clock;
+    final fold = clock.fold;
+    if (fold == null) {
+      return rules.firstSlot(
+        earliest,
+        clearOf: shown,
+        from: gap.unfoldedStart,
+        until: gap.unfoldedEnd,
+      );
+    }
+    final first = earliest.earliest;
+    if (gap.unfoldedStart < clock.foldMinute &&
+        (first == null || first.isBefore(fold))) {
+      final slot = rules.firstSlot(
+        earliest,
+        clearOf: shown,
+        from: gap.unfoldedStart,
+        until: math.min(gap.unfoldedEnd, clock.foldMinute),
+      );
+      if (slot != null) {
+        return slot;
+      }
+    }
+    if (gap.unfoldedEnd <= clock.foldMinute) {
+      return null;
+    }
+    // An occurrence at the fold or after it reads the stretch's times in
+    // their second pass ([CalendarEarliestStart.occurrence]).
+    return rules.firstSlot(
+      CalendarEarliestStart(
+        day,
+        first == null || !first.isBefore(fold) ? first : fold,
+      ),
+      clearOf: shown,
+      from: math.max(gap.unfoldedStart, clock.foldMinute) - clock.repeated,
+      until: gap.unfoldedEnd - clock.repeated,
+    );
   }
 
-  /// The dashed row of [day]'s gap from [start], whose add takes [add].
-  Widget _buildGap(
-    DateTime day,
-    int start,
-    ({DateTime start, DateTime end})? add,
-  ) {
+  /// The dashed row of [gap], whose add takes [add].
+  Widget _buildGap(DayListGap gap, ({DateTime start, DateTime end})? add) {
+    final day = gap.day;
+    final start = gap.start;
     final addMinute = add == null
         ? start
         : CalendarDates.wallMinuteOf(add.start) -
               CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay;
-    final mark = (day: CalendarDates.dayNumber(day), start: start);
+    final mark = (day: CalendarDates.dayNumber(day), start: gap.unfoldedStart);
     return _buildDashed(
-      key: dayListGapKey(day, start),
+      key: dayListGapKey(day, start, later: gap.later),
       mark: mark,
       label: _strings.formatTime(start, widget.format),
       day: day,
@@ -1621,17 +1858,17 @@ class _DayListState<T> extends State<DayList<T>> {
         return _padded(_buildEntryRow(row));
       case DayListEntry():
         throw ArgumentError.value(row, "row", "an item of another payload");
-      case DayListGap(:final day, :final start, :final end):
+      case DayListGap():
         // Built again at a new minute only where the slot its add takes
         // moves.
         return _padded(
           AnswerBuilder<({DateTime start, DateTime end})?>(
             listenables: <Listenable>[_calendarNow],
             answer: () {
-              return _gapAddOf(day, start, end);
+              return _gapAddOf(row);
             },
             builder: (context, add, child) {
-              return _buildGap(day, start, add);
+              return _buildGap(row, add);
             },
           ),
         );
@@ -2283,11 +2520,12 @@ enum _NowSide {
   above,
 }
 
-/// The minutes, from [from] up to [until], for which a row of a day's
-/// block holds the marker of the current time, the [piece]'s minutes inside
-/// the hours where the row is one, with whether it runs on [before] or
-/// [after] them, and whether the row is the block's [first], which also
-/// holds the marker for the minutes before [from].
+/// The unfolded minutes ([DayListClock]), from [from] up to [until], for
+/// which a row of a day's block holds the marker of the current time, the
+/// [piece]'s unfolded minutes inside the hours where the row is one, with
+/// whether it runs on [before] or [after] them, and whether the row is the
+/// block's [first], which also holds the marker for the minutes before
+/// [from].
 @immutable
 class _NowSpan {
   const _NowSpan({
@@ -2302,23 +2540,29 @@ class _NowSpan {
   final bool first;
   final ({int start, int end, bool before, bool after})? piece;
 
-  /// The span of each of a day's [rows] in [hours] by key: each row holds
-  /// the marker from its start to the next row's, the last one on past the
-  /// end of the day. A banner of the pieces before the hours starts before
-  /// any minute, and one of those after them after every minute. Only rows
-  /// with a start take part, which an all-day row has not.
+  /// The span of each of a day's [rows] in [hours] by key, in the unfolded
+  /// minutes of the day's [clock]: each row holds the marker from its start
+  /// to the next row's, the last one on past the end of the day. A banner
+  /// of the pieces before the hours starts before any minute, and one of
+  /// those after them after every minute. Only rows with a start take part,
+  /// which an all-day row has not.
   static Map<String, _NowSpan> spansOf(
     List<DayListRow> rows,
     CalendarDayHours hours,
+    DayListClock clock,
   ) {
+    final runs = clock.hoursRunsOf(hours);
+    final hoursStart = runs.first.start;
+    final hoursEnd = runs.last.end;
+    final past = clock.endMinute + 1;
     final starts = <(DayListRow, int)>[];
     for (final row in rows) {
       final start = switch (row) {
         DayListHidden(above: true) => -1,
-        DayListHidden(above: false) => CalendarDates.minutesPerDay + 1,
+        DayListHidden(above: false) => past,
         DayListEntry(allDay: true) => null,
-        DayListEntry(:final start) => start,
-        DayListGap(:final start) => start,
+        DayListEntry(:final entry) => clock.startOf(entry.entry.start),
+        DayListGap(:final unfoldedStart) => unfoldedStart,
         _ => null,
       };
       if (start != null) {
@@ -2329,14 +2573,12 @@ class _NowSpan {
       for (var i = 0; i < starts.length; i++)
         starts[i].$1.key: _NowSpan(
           from: starts[i].$2,
-          until: i + 1 < starts.length
-              ? starts[i + 1].$2
-              : CalendarDates.minutesPerDay + 1,
+          until: i + 1 < starts.length ? starts[i + 1].$2 : past,
           first: i == 0,
           piece: switch (starts[i].$1) {
-            DayListEntry(:final start, :final end) => (
-              start: math.max(start, hours.start),
-              end: math.min(end, hours.end),
+            DayListEntry(:final entry, :final start, :final end) => (
+              start: math.max(starts[i].$2, hoursStart),
+              end: math.min(clock.endOf(entry.entry.end), hoursEnd),
               before: start < hours.start,
               after: end > hours.end,
             ),
@@ -2384,19 +2626,22 @@ class _NowSpan {
 }
 
 /// The marker of [now] over a row of its day's block, where the row's
-/// [span] holds it and the [hours] hold its minute, the end of the hours
-/// included as the timed grid includes it; nothing otherwise. It follows
-/// [now] itself, takes no pointer and is not heard.
+/// [span] holds its unfolded minute on the day's [clock] and the [hours]
+/// hold the minute its clock reads, the end of the hours included as the
+/// timed grid includes it; nothing otherwise. It follows [now] itself,
+/// takes no pointer and is not heard.
 class _NowMarker extends StatelessWidget {
   const _NowMarker({
     required this.now,
     required this.span,
+    required this.clock,
     required this.hours,
     required this.format,
   });
 
   final ValueListenable<CalendarNow> now;
   final _NowSpan span;
+  final DayListClock clock;
   final CalendarDayHours hours;
   final CalendarHourLabelFormat format;
 
@@ -2410,7 +2655,7 @@ class _NowMarker extends StatelessWidget {
         if (minute < hours.start || minute > hours.end) {
           return const SizedBox.shrink();
         }
-        final place = span.placeOf(minute);
+        final place = span.placeOf(clock.minuteOf(time));
         if (place == null) {
           return const SizedBox.shrink();
         }
