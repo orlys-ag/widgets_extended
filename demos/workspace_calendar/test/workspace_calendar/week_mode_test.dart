@@ -1726,14 +1726,16 @@ void main() {
       return line.from!.dx == line.to!.dx;
     }).toList();
     expect(verticalLines, hasLength(shown.length));
+    // Each 1 px line lies half its width inside its column's left edge.
     for (final line in verticalLines) {
       final x = line.from!.dx;
       expect(
         shown.any((col) {
-          return (viewport.visibleCellRect(viewport.firstVisibleRow, col).left -
+          return (viewport.visibleCellRect(viewport.firstVisibleRow, col).left +
+                      0.5 -
                       x)
                   .abs() <
-              0.5;
+              0.25;
         }),
         isTrue,
       );

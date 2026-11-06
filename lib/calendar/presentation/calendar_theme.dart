@@ -457,7 +457,8 @@ final class CalendarThemeData with Diagnosticable {
   final Color error;
 
   /// The fill of the rows, banners and strips that count entries outside
-  /// the hours, and of Month's "+N more".
+  /// the hours, and of the "+N more" of Month and of Week's and Day's
+  /// all-day strip.
   final Color notice;
 
   /// The edges of those rows and banners.
@@ -574,7 +575,8 @@ final class CalendarThemeData with Diagnosticable {
   /// draws in [onPrimary] when selected, and in [primary] on today.
   final TextStyle monthDayNumberMarkedStyle;
 
-  /// Month's "+N more". Its colour is not used: it draws in [onNotice].
+  /// The "+N more" of Month and of Week's and Day's all-day strip. Its
+  /// colour is not used: it draws in [onNotice].
   final TextStyle monthMoreStyle;
 
   /// A chip's title, in Month and in Week's and Day's all-day strip. Its

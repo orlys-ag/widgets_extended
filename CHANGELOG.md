@@ -155,14 +155,23 @@ add creates inside the gap, and one across the instant the clock goes back
 takes its first free slot before that instant, or where none is, after it.
 The marker shows once, on the row that holds the current instant. The rows'
 times read the clock as before.
-- In Week and Day, the hour gutter's cell beside the all-day strip's first
-row reads `CalendarLocalizations.allDay`, "All day" in English, in the hour
-labels' style, scaled down where it does not fit the gutter, which it does
-not widen. The "Less" pill that collapses an expanded strip lies in the
-gutter's cell below it.
+- In Week and Day, a rule runs along the all-day strip's top edge, under a
+room as tall as the one the hour labels have above the first slot, and on
+that edge the hour gutter reads `CalendarLocalizations.allDay`, "All day" in
+English, centred on it as the hour labels are on their lines, in their
+style, scaled down where it does not fit the gutter, which it does not
+widen. The "Less" pill that collapses an expanded strip lies in the
+gutter's cell beside the strip's second row.
+- In Week and Day, the all-day strip collapses only past four rows, to three
+rows and a count row, so a day needing four shows them all. In the count
+row each day that hides bars, and no other, shows a "+N more" chip in the
+look of Month's, in a bar's place, a tap on which shows every row.
 - In Week and Day, the all-day strip and the hours read as one grid. Each
 day's strip cells take the fill of its column below, today's tint and the
-weekend's background. While the strip has rows, the room above the first
+weekend's background, and the rule along each day's left edge, the first
+day's beside the gutter included, lies inside its column from the strip's
+top edge down, through the hours and the rows counting the entries outside
+them in one line. While the strip has rows, the room above the first
 slot that keeps the first hour label whole stays under the strip as its
 margin rather than scrolling with the hours, and the rule parting the strip
 from the hours runs along its bottom edge: with the hours at their top that

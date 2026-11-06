@@ -264,6 +264,14 @@ int dayRowOf(int minute) {
   return gridRowOf(minute);
 }
 
+/// Week's grid row of its all-day strip's first row, under the day header
+/// and the room above the strip.
+const int weekStripRow = 2;
+
+/// Day's grid row of its all-day strip's first row, under the room above
+/// the strip.
+const int dayStripRow = 1;
+
 /// Week's grid column of [day], Monday's being 1.
 int weekColOf(DateTime day) {
   return 1 + CalendarDates.weekdayColumnOfDay(CalendarDates.dayNumber(day));
@@ -2553,7 +2561,8 @@ void main() {
     await tester.pumpWidget(calendar(empty));
     await tester.pumpAndSettle();
 
-    // Week. The strip's row lies under the day header.
+    // Week. The strip's row lies under the day header and the room above
+    // the strip.
     final tuesdayCol = weekColOf(tuesday);
     final wednesdayCol = weekColOf(wednesday);
     await mouseDrag(
@@ -2576,8 +2585,8 @@ void main() {
     );
     await mouseDrag(
       tester,
-      cellCenter(tester, 1, tuesdayCol),
-      cellCenter(tester, 1, weekColOf(friday)),
+      cellCenter(tester, weekStripRow, tuesdayCol),
+      cellCenter(tester, weekStripRow, weekColOf(friday)),
     );
     expectCreate(
       CalendarCreateRange(start: tuesday, end: saturday, isAllDay: true),
@@ -2606,14 +2615,14 @@ void main() {
       CalendarCreateRange(start: at(wednesday, 16), end: at(wednesday, 16, 15)),
       chose: false,
     );
-    await tester.tapAt(cellCenter(tester, 1, wednesdayCol));
+    await tester.tapAt(cellCenter(tester, weekStripRow, wednesdayCol));
     await tester.pumpAndSettle();
     expectCreate(
       CalendarCreateRange(start: wednesday, end: thursday, isAllDay: true),
       chose: false,
     );
 
-    // Day, whose strip is its top row.
+    // Day, whose strip lies under the room at its top.
     controller.view = CalendarViewKind.day;
     await tester.pumpAndSettle();
     await mouseDrag(
@@ -2642,7 +2651,7 @@ void main() {
       CalendarCreateRange(start: at(tuesday, 16), end: at(tuesday, 16, 15)),
       chose: false,
     );
-    await tester.tapAt(cellCenter(tester, 0, 1));
+    await tester.tapAt(cellCenter(tester, dayStripRow, 1));
     await tester.pumpAndSettle();
     expectCreate(
       CalendarCreateRange(start: tuesday, end: wednesday, isAllDay: true),
@@ -2831,14 +2840,14 @@ void main() {
       expectRect(recorder, 2);
 
       // 4. A strip drag from Tuesday to Friday, in the strip's row under
-      // the day header.
+      // the day header and the room above the strip.
       recorder.expected = () {
-        return gridRowsRect(tester, 1, 1, fridayCol);
+        return gridRowsRect(tester, weekStripRow, weekStripRow, fridayCol);
       };
       await mouseDrag(
         tester,
-        cellCenter(tester, 1, tuesdayCol),
-        cellCenter(tester, 1, fridayCol),
+        cellCenter(tester, weekStripRow, tuesdayCol),
+        cellCenter(tester, weekStripRow, fridayCol),
       );
       expectRect(recorder, 3);
     });
@@ -2904,11 +2913,11 @@ void main() {
       );
       expectRect(recorder, 0);
 
-      // 7. A tap on the strip, Day's top row.
+      // 7. A tap on the strip, under the room at Day's top.
       recorder.expected = () {
-        return gridRowsRect(tester, 0, 0, 1);
+        return gridRowsRect(tester, dayStripRow, dayStripRow, 1);
       };
-      await tester.tapAt(cellCenter(tester, 0, 1));
+      await tester.tapAt(cellCenter(tester, dayStripRow, 1));
       await tester.pumpAndSettle();
       expectRect(recorder, 1);
     });
