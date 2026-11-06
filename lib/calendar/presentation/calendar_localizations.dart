@@ -89,7 +89,8 @@ abstract base class CalendarLocalizations {
     required bool isAllDay,
   });
 
-  /// The times of an all-day entry.
+  /// The times of an all-day entry, and the label beside the first row of
+  /// Week's and Day's all-day strip.
   String get allDay;
 
   /// [minutes] as Agenda writes an entry's length.

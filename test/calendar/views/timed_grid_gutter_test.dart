@@ -1,7 +1,7 @@
 /// The timed grid's hour gutter: the width it takes for the hour labels,
 /// how the labels lie in it, on one line, on two or shrunk, what makes it
-/// fit them again, and the grid's pinch and drags beside a gutter wider
-/// than its least.
+/// fit them again, the grid's pinch and drags beside a gutter wider than
+/// its least, and the all-day strip's label in it.
 library;
 
 import 'dart:math' as math;
@@ -36,6 +36,18 @@ final class _Times extends DefaultCalendarLocalizations {
   @override
   String formatTime(int minute, CalendarHourLabelFormat format) {
     return write(minute);
+  }
+}
+
+/// English, but for [CalendarLocalizations.allDay], which is [text].
+final class _AllDay extends DefaultCalendarLocalizations {
+  const _AllDay(this.text);
+
+  final String text;
+
+  @override
+  String get allDay {
+    return text;
   }
 }
 
@@ -621,5 +633,47 @@ void main() {
       }).toSet(),
       <int>{1},
     );
+  });
+
+  testWidgets("GF12 the all-day strip's label takes the hour labels' style; "
+      "one wider than the gutter shrinks to fit 6 px inside each of its "
+      "edges, leaving it as wide as the hour labels make it, and one that "
+      "fits keeps its size 6 px inside the right edge", (tester) async {
+    final harness = Harness(
+      entries: <CalendarEntry<String>>[
+        CalendarEntry<String>(
+          id: "off",
+          start: tuesday,
+          end: DateTime(2026, 4, 22),
+          title: "off",
+          color: const Color(0xFF336699),
+          payload: "off",
+          isAllDay: true,
+        ),
+      ],
+    )..labelStyle = const TextStyle(fontSize: 12.0, height: 1.0);
+    await harness.pump(tester);
+    final label = find.text(const DefaultCalendarLocalizations().allDay);
+    final style = tester
+        .widget<RichText>(
+          find.descendant(of: label, matching: find.byType(RichText)),
+        )
+        .text
+        .style!;
+    expect(style.fontSize, 12.0);
+    expect(style.color, CalendarThemeData().textSecondary);
+    // At 12 px, "08:00" and the rest are 60 px, and "All day" is 84 px.
+    expect(gutterOf(tester), 72.0);
+    final left = viewportOf(tester).localToGlobal(Offset.zero).dx;
+    final rect = tester.getRect(label);
+    expect(rect.left - left, moreOrLessEquals(6.0));
+    expect(rect.right - left, moreOrLessEquals(66.0));
+
+    // At 12 px, "abc" is 36 px.
+    harness.strings = const _AllDay("abc");
+    await harness.rebuild(tester);
+    final short = tester.getRect(find.text("abc"));
+    expect(short.right - left, moreOrLessEquals(66.0));
+    expect(short.width, moreOrLessEquals(36.0));
   });
 }
