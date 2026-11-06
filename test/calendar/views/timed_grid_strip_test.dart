@@ -1,9 +1,9 @@
-/// The timed grid's all-day strip: its bars, rows, count and expansion, the
-/// gestures on bars within the strip, the crossings of a bar into the
-/// slots, of a block into the strip and of Week's end handle into a later
-/// day with their live marks, the create ranges across the strip, the
-/// landing label's times in the grid's hour format, and each site's asks of
-/// a per-pair answer on overlaps.
+/// The timed grid's all-day strip: its bars, rows, label, count and
+/// expansion, the gestures on bars within the strip, the crossings of a bar
+/// into the slots, of a block into the strip and of Week's end handle into
+/// a later day with their live marks, the create ranges across the strip,
+/// the landing label's times in the grid's hour format, and each site's
+/// asks of a per-pair answer on overlaps.
 library;
 
 import 'dart:async';
@@ -1359,9 +1359,15 @@ void main() {
       await tester.tap(find.byKey(allDayMoreKey(tuesday)));
       await tester.pumpAndSettle();
       final less = find.byKey(allDayLessKey);
-      // In the first strip row's gutter cell.
+      // In the second strip row's gutter cell, under the label in the
+      // first's.
       expect(
         tester.getRect(less).center.dy,
+        moreOrLessEquals(stripRect(tester, shown, tuesday, 1).center.dy),
+        reason: shown.name,
+      );
+      expect(
+        tester.getRect(find.text(english.allDay)).center.dy,
         moreOrLessEquals(stripRect(tester, shown, tuesday).center.dy),
         reason: shown.name,
       );
@@ -1671,6 +1677,55 @@ void main() {
         expect(store.moves, isEmpty, reason: shown.name);
       }
     });
+  });
+
+  testWidgets("TS14 the gutter cell beside the strip's first row reads "
+      "\"All day\", 6 px inside the gutter's right edge and centred on the "
+      "row, and a screen reader hears it: beside a bar out of edit mode and "
+      "beside edit mode's empty row; with no strip no cell reads it", (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final label = find.text(english.allDay);
+    for (final shown in bothGrids()) {
+      final store = storeOf(<CalendarEntry<String>>[allDayOf("off", tuesday)]);
+      await Harness(store, shown, editable: false).pump(tester);
+      expect(label, findsOneWidget, reason: shown.name);
+      final gutter = cellRect(tester, shown.stripStart, 0);
+      expect(
+        tester.getRect(label).right,
+        moreOrLessEquals(gutter.right - 6.0),
+        reason: shown.name,
+      );
+      expect(
+        tester.getRect(label).center.dy,
+        moreOrLessEquals(gutter.center.dy),
+        reason: shown.name,
+      );
+      expect(
+        find.bySemanticsLabel(english.allDay),
+        findsOneWidget,
+        reason: shown.name,
+      );
+
+      final harness = Harness(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("timed", at(tuesday, 10), at(tuesday, 11)),
+        ]),
+        shown,
+      );
+      await harness.pump(tester);
+      expect(
+        tester.getRect(label).center.dy,
+        moreOrLessEquals(cellRect(tester, shown.stripStart, 0).center.dy),
+        reason: shown.name,
+      );
+      harness.editable = false;
+      await harness.rebuild(tester);
+      await tester.pumpAndSettle();
+      expect(label, findsNothing, reason: shown.name);
+    }
+    semantics.dispose();
   });
 
   testWidgets("TX1 a bar moved two columns writes days two later", (

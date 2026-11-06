@@ -503,13 +503,16 @@ CalendarCreateRange? _createRangeOf(
 /// covers, and the bars sharing a day in rows of their own. Past three
 /// rows the strip shows three and, in a fourth, a "+N" pill on each day
 /// counting its bars below the third, a tap on which shows every row; a
-/// [CalendarLocalizations.showLess] pill in the strip's first row over the
+/// [CalendarLocalizations.showLess] pill in the strip's second row over the
 /// gutter then collapses it again, and new days collapse it. With no
 /// all-day entry on a shown day the strip has no rows, and one empty row
-/// in edit mode. Each bar's content is what [chipBuilder] draws, told
-/// which of its ends continue past the shown days. A tap on a bar that
-/// is not pending reports [onOpenEntry] with its entry's id, in edit
-/// mode and out of it.
+/// in edit mode. Over the gutter its first row reads
+/// [CalendarLocalizations.allDay] in the hour labels' style, against the
+/// gutter's right edge as they are, scaled down where it does not fit the
+/// gutter, which it never widens. Each bar's content is what [chipBuilder]
+/// draws, told which of its ends continue past the shown days. A tap on a
+/// bar that is not pending reports [onOpenEntry] with its entry's id, in
+/// edit mode and out of it.
 ///
 /// In edit mode, which [editable] turns on, a long press on any block of
 /// an entry lifts the entry to move and selects its blocks; a tap anywhere
@@ -1063,7 +1066,7 @@ final class _Dragging extends _GridMode {
 /// What the all-day strip's cells show: the days of [tracks]; whether the
 /// strip is collapsed with a count row, [counted]; the bars each day column
 /// hides below the third row, `below[c - 1]` for column `c`; and whether
-/// the strip is expanded past three rows, so its first row's gutter cell
+/// the strip is expanded past three rows, so its second row's gutter cell
 /// holds the pill collapsing it, [collapsible].
 typedef _StripState = ({
   GridTracks tracks,
@@ -5171,7 +5174,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       final row = cell.row - _stripStart;
       if (cell.col == 0) {
         if (row == 0) {
-          return _StripCorner(strip: _strip, onCollapse: _collapseStrip);
+          return const _StripLabel();
+        }
+        if (row == 1) {
+          return _StripCollapse(strip: _strip, onCollapse: _collapseStrip);
         }
         return const _GutterCell();
       }
@@ -6313,12 +6319,42 @@ class _StripCell extends StatelessWidget {
 }
 
 /// The all-day strip's first row over the gutter: the surface, holding
+/// [CalendarLocalizations.allDay] in the hour labels' style,
+/// [_HourLabels.inset] inside the gutter's right edge as they are and
+/// centred on the row, on one line scaled down to fit where it is wider
+/// than the gutter less [_HourLabels.inset] on each side or taller than
+/// the row.
+class _StripLabel extends StatelessWidget {
+  const _StripLabel();
+
+  @override
+  Widget build(BuildContext context) {
+    final styles = _GridStyles.of(context);
+    return ColoredBox(
+      color: styles.theme.surface,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: _HourLabels.inset),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerRight,
+          child: Text(
+            CalendarLocalizations.of(context).allDay,
+            maxLines: 1,
+            style: styles.hourLabel,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The all-day strip's second row over the gutter: the surface, holding
 /// while the strip is expanded past three rows a
 /// [CalendarLocalizations.showLess] pill ([allDayLessKey]), which a screen
 /// reader hears as [CalendarLocalizations.allDayLess] and a tap on which
 /// reports [onCollapse].
-class _StripCorner extends StatelessWidget {
-  const _StripCorner({required this.strip, required this.onCollapse});
+class _StripCollapse extends StatelessWidget {
+  const _StripCollapse({required this.strip, required this.onCollapse});
 
   final ValueListenable<_StripState> strip;
   final VoidCallback onCollapse;

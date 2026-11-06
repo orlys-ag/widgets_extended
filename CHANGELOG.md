@@ -155,6 +155,11 @@ add creates inside the gap, and one across the instant the clock goes back
 takes its first free slot before that instant, or where none is, after it.
 The marker shows once, on the row that holds the current instant. The rows'
 times read the clock as before.
+- In Week and Day, the hour gutter's cell beside the all-day strip's first
+row reads `CalendarLocalizations.allDay`, "All day" in English, in the hour
+labels' style, scaled down where it does not fit the gutter, which it does
+not widen. The "Less" pill that collapses an expanded strip lies in the
+gutter's cell below it.
 - `package:widgets_extended/widgets_extended.dart` exports the calendar,
 so an app that also imports a library declaring one of its names, as
 `syncfusion_flutter_calendar` declares `CalendarController`,
