@@ -891,6 +891,10 @@ function failed(at, reason) {
 
 const isFailing = f => FAILING_SEVERITIES.includes(f.severity) && FAILING_KINDS.includes(f.kind)
 const unique = list => [...new Set(list)]
+// Whether a builder's report of a repro, `reported`, names the repro `name`
+// as a whole word: a report that adds the test's file or where it ran names
+// it, and one of a longer name does not.
+const namesRepro = (reported, name) => new RegExp('(^|[^A-Za-z0-9_])' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^A-Za-z0-9_])').test(reported)
 const uniqueLenses = list => list.filter((l, i) => l && list.findIndex(x => x?.key === l.key) === i)
 // The prompts number the acceptance criteria from 1, and the extractor and the
 // reviewer name each by its number: the entries each criterion has, and the
@@ -1555,7 +1559,7 @@ function buildPrompt(problems) {
   // What earlier dispatches settled is listed as done, so a builder that takes
   // over runs no repro, mutation or carried finding a second time.
   const split = (list, done) => [list.filter(x => !done(x)), list.filter(done)]
-  const [reprosLeft, reprosDone] = split(steps.repros, t => build.repros.includes(t))
+  const [reprosLeft, reprosDone] = split(steps.repros, t => build.repros.some(x => namesRepro(x, t)))
   const [pinsLeft, pinsDone] = split(steps.pins, p => mutationProblem(p) === null)
   const [carriedLeft, carriedDone] = split(steps.carried, c => build.addressed.includes(c.id))
   // The extractor places each carried finding; its text lives only in the run
@@ -1610,7 +1614,7 @@ function buildPrompt(problems) {
     `3. After the last step, one mutation per pin listed to mutate: record the code site file's SHA-256, break the rule there, run the pin's test and observe it fail, restore the file, record the SHA-256 again. A test that stays green is a blocking finding: the rule is unpinned.`,
     `4. Then run every final-scope gate whose condition matches the files changed since the base commit.`,
     `A failure that shows the plan wrong stops you: report it in blocking_findings, with your last committed step in last_step. A minor slip you fix within its step and list in discoveries.`,
-    `Report via StructuredOutput: stopped (true only if that check stopped you); precondition (what that check found); branch; approval_recorded; plan_checks (each plan check by name, with passed and a note); repros (each repro you ran on the base commit: test, failed_on_base); steps (EVERY step of the list: n, status built or kept, signal_passed, gates you ran with name and passed, changed_files, commit); carried (each carried finding listed to address: id, addressed, and evidence, the test or check that shows it, or the confirmed reason it is obsolete); mutations (each mutation you made: decision, test, test_failed, sha_before, sha_after); final_gates; changed_files (git diff --name-only ${baseRef}..${buildBranch}); complete (true only after the final gates); last_step; blocking_findings; discoveries.`,
+    `Report via StructuredOutput: stopped (true only if that check stopped you); precondition (what that check found); branch; approval_recorded; plan_checks (each plan check by name, with passed and a note); repros (each repro you ran on the base commit: test, its name exactly as step 0 gives it, and failed_on_base); steps (EVERY step of the list: n, status built or kept, signal_passed, gates you ran with name and passed, changed_files, commit); carried (each carried finding listed to address: id, addressed, and evidence, the test or check that shows it, or the confirmed reason it is obsolete); mutations (each mutation you made: decision, test, test_failed, sha_before, sha_after); final_gates; changed_files (git diff --name-only ${baseRef}..${buildBranch}); complete (true only after the final gates); last_step; blocking_findings; discoveries.`,
   ].filter(Boolean).join('\n')
 }
 
@@ -1650,7 +1654,7 @@ function mergeBuild(r) {
 function buildProblems(r, verifiedBefore) {
   const problems = []
   for (const t of steps.repros) {
-    if (!build.repros.includes(t)) {
+    if (!build.repros.some(x => namesRepro(x, t))) {
       problems.push(`repro ${t} is not recorded failing on the base commit`)
     }
   }

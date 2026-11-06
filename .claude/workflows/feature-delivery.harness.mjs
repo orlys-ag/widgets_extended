@@ -650,6 +650,20 @@ const T1 = [
     expect(twice.result?.status === 'failed' && twice.result?.phase === 'build' && /io-tests/.test(twice.result?.reason ?? ''), `twice: ${twice.result?.status}, ${twice.result?.reason}`)
   }],
 
+  ['T1ka', 'a repro reported under its name with its file or where it ran is recorded, and one under a longer name is not', async ({ expect }) => {
+    const named = suffix => (n, p, ctx) => {
+      const b = buildResult(ctx)
+      return { ...b, repros: b.repros.map(x => ({ ...x, test: `${x.test}${suffix}` })) }
+    }
+    const decorated = await run({ respond: respondWith({ build: named(' (tests/repro.test.ts), run on the base commit') }) })
+    expect(decorated.result?.status === 'accepted' && !decorated.labels.includes('build-2'), `a repro named with its file: ${decorated.result?.status}, ${decorated.result?.reason}, labels ${decorated.labels.join(' ')}`)
+    const longer = await run({ respond: respondWith({ build: named('_extra') }) })
+    expect(/repro test_repro is not recorded/.test(longer.prompt('build-2') ?? ''), 'a repro reported under a longer name was recorded')
+    const handover = await run({ respond: respondWith({ build: (n, p, ctx) => ({ ...named(' (tests/repro.test.ts)')(n, p, ctx), complete: false, final_gates: [] }) }) })
+    const b2 = handover.prompt('build-2') ?? ''
+    expect(/which you do not run again: test_repro\./.test(b2) && !/Commit them first/.test(b2), 'a builder after a handover is sent to run a repro recorded with its file again')
+  }],
+
   ['T1l', 'a stop on a precondition ends the run at the build, a described check without a stop does not, and the resumed run continues it', async ({ expect }) => {
     const note = 'The clean-tree check printed nothing.'
     const noted = await run({ respond: respondWith({ build: (n, p, ctx) => buildResult(ctx, { precondition: note }), accept: (n, prompt) => review(prompt, 'partial'), fix: (n, p, ctx) => ({ ...defaultFor('fix', p, ctx), precondition: note }) }) })
