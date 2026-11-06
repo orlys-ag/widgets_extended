@@ -75,16 +75,23 @@ about timed entries that share the change's times, and it defaults to
 `allowsOverlaps`, so a policy that overrides only `allowsOverlaps` refuses
 every pair; `CalendarEditPolicy.all` refuses where any policy that limits
 overlaps refuses. Week's and Day's moves, resizes, slot presses and create
-drags go over the times only of the entries it allows: a move it refuses
-lands at the nearest time no entry shares, or goes back, a resize it
-refuses stops at the first entry in its way, and a create drag, whose range
-is not picked when it asks, asks about a candidate with no entry over the
-days the grid shows. Agenda's add buttons create at the first slot that
-shares no time with an entry it refuses (`CalendarEditRules.firstSlot`),
-and Month's long press does too where such a slot is left. A throw of
-`mayOverlap` is reported as the policy's other answers' are, and one while
-a create range reads its entries again, at a store notify or a new minute,
-ends the range.
+drags go over the times only of the entries it allows. A move it refuses
+lands at the nearest time whose sharing entries it all allows, or goes back,
+and a resize it refuses stops its dragged edge at the first entry in its way
+that it refuses. Added `CalendarEditPolicy.refusesEveryOverlap`, false by
+default, true for `NoOverlapsPolicy` and for `CalendarEditPolicy.all` over one:
+a policy that answers true states that `mayOverlap` refuses every pair, and its
+refused moves and resizes in Week and Day look for their landing only among the
+times no other entry's block covers. A create drag asks, at each change of the
+slot under the pointer, at a store notify and at a new minute, about the range a
+release would report; it holds the range short of the entry it refuses nearest
+the slot it started on, or to that slot alone where that entry shares its time,
+and asks again about the held range. Agenda's add buttons and Month's long press
+create at the first slot no entry shares, or where none is, at the first sharing
+time only with entries it allows (`CalendarEditRules.firstSlot`), Month's where
+such a slot is left. A throw of `mayOverlap` is reported as the policy's other
+answers' are, and one while a create range tests its range, at a pointer move, a
+store notify or a new minute, ends the range.
 - `CalendarView.onCreateRange` takes a `CalendarCreateDetails`: the `range` a
 create gesture picked; the `globalRect`, in global logical pixels, that the
 create's mark covers on screen when it is reported, which in Week and Day is
@@ -451,6 +458,18 @@ finger across a refused cell.
 - Added `BoardDropFit.clampResizes`, off by default: a resize `canDropAt`
 refuses for running into another item stops its dragged edge at that item,
 nearest the pointer, instead of going back.
+- Added `BoardDropFit.offersOverlaps`, off by default. A refused move's slide
+and a refused resize's stop ask `canDropAt` about the placements that meet
+other items too, nearest first, so an app that lets an item share some items'
+cells lands it at the nearest placement it admits. Through a drag, while the
+board and the drag config stay the same, `canDropAt` is asked about each
+placement once and its answer kept; a structural change, a new config or the
+drag's end drops the kept answers.
+- A drag that its `canDropAt` ends while asked, by changing the board, which
+`BoardDragConfig.canDropAt` must not do, resolves no further, with
+`BoardDropFit.offersOverlaps` off or on: it takes no target and no make-room
+preview, and its `BoardDropFit` asks about no candidate. It used to take the
+placement asked about, or the candidate its fit found, after it had ended.
 - Added `BoardDragConfig.boundsOf` and `BoardDragBounds`: the rows and columns
 a drag keeps an item inside. A move or a resize dragged past them stops at their
 edge, as it does at the lattice's, so its target stays the placement at the

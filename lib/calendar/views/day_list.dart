@@ -670,19 +670,19 @@ class DayList<T> extends StatefulWidget {
   /// The add button of a gap was pressed: an item of one slot of
   /// [slotMinutes] from the gap's first time the policy's earliest start
   /// on its day leaves free, or the first slot after it whose times the
-  /// clock reads and that shares time with no shown entry the policy does
-  /// not let it share ([CalendarEditRules.firstSlot]: every entry where
-  /// [CalendarEditPolicy.allowsOverlaps] is true, and otherwise each
-  /// [CalendarEditPolicy.mayOverlap] refuses), in that earliest start's
-  /// occurrence where the day's clock repeats its time, so it starts at
-  /// the earliest start or after. On a day whose clock repeats a stretch,
-  /// an entry can hold time in a gap it is not listed beside. The details
-  /// give that slot as their range, the gap's row, in global logical pixels
-  /// when the button was pressed, as their rect, and false for whether the
-  /// user chose the length. The list marks that row until the function's
-  /// future completes, whether it fails or the function throws within the
-  /// call, while no later add has moved the mark to its own row; a failure
-  /// is left uncaught in the zone the press ran in.
+  /// clock reads that [CalendarEditRules.firstSlot] gives over the day's
+  /// shown entries: the first no entry shares, or where none is and
+  /// [CalendarEditPolicy.allowsOverlaps] is false, the first sharing time
+  /// only with entries [CalendarEditPolicy.mayOverlap] allows, in that
+  /// earliest start's occurrence where the day's clock repeats its time, so
+  /// it starts at the earliest start or after. On a day whose clock repeats
+  /// a stretch, an entry can hold time in a gap it is not listed beside.
+  /// The details give that slot as their range, the gap's row, in global
+  /// logical pixels when the button was pressed, as their rect, and false
+  /// for whether the user chose the length. The list marks that row until
+  /// the function's future completes, whether it fails or the function
+  /// throws within the call, while no later add has moved the mark to its
+  /// own row; a failure is left uncaught in the zone the press ran in.
   final Future<void> Function(CalendarCreateDetails details) onCreateRange;
 
   final void Function(String id) onEdit;

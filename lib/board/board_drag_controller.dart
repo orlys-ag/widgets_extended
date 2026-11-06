@@ -104,6 +104,14 @@ class _DragSession<TKey> {
 
   ScrollPosition? verticalSubscription;
   ScrollPosition? horizontalSubscription;
+
+  /// The drop gate's answers by span in track space, kept under
+  /// [BoardDropFit.offersOverlaps] (`BoardDragController._askKept`): null
+  /// until the first kept answer, then one entry per placement asked, a
+  /// throw's null included. Set to null where the resolver's early-out
+  /// record clears, by the config setter and the structural handler, and
+  /// released with the session.
+  Map<BoardSpan, bool?>? fitAnswers;
 }
 
 /// Whether [config] lets [key] start a drag: true with no predicate,
@@ -244,10 +252,12 @@ class BoardDragController<TKey> extends ChangeNotifier {
     }
     // The resolver's early-out compares against the last span it
     // returned; cleared, the post-frame resolve re-runs the gate and the
-    // scan even when the pointer's placement has not moved.
+    // scan even when the pointer's placement has not moved. The answers
+    // the drag kept go with it, as the new config may answer otherwise.
     _lastResolvedSpan = null;
     _lastResolvedWindows = null;
     _heldResizeSample = null;
+    session.fitAnswers = null;
     _scheduleResolve();
   }
 
@@ -1182,9 +1192,12 @@ class BoardDragController<TKey> extends ChangeNotifier {
     // answer from it leaves the arm exactly as it was. The same placement
     // keeps the refusal it had: the predicate is asked again only after
     // a change that clears the record, as it is for any placement.
-    final answer = samePlacement
-        ? false
-        : askCanDropAt(config, session.key, target.span);
+    final answer = samePlacement ? false : _askKept(session, target.span);
+    // A predicate that ended the session while it was asked leaves no
+    // target and no preview for it: the teardown released both.
+    if (!identical(_session, session)) {
+      return;
+    }
     _lastDropAnswer = answer;
     if (answer != true) {
       // A throw, answered null, is a refusal with no nudge: the nudge is
@@ -1192,6 +1205,9 @@ class BoardDragController<TKey> extends ChangeNotifier {
       final fitted = answer == false
           ? _fitRefusal(session, target, windows, lean)
           : null;
+      if (!identical(_session, session)) {
+        return;
+      }
       if (fitted == null) {
         if (_currentTarget != null) {
           _currentTarget = null;
@@ -1454,7 +1470,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       return null;
     }
     if (onto != box) {
-      final admitted = askCanDropAt(config, session.key, onto);
+      final admitted = _askKept(session, onto);
       if (admitted == true) {
         return BoardDropTarget(span: onto, kind: refused.kind);
       }
@@ -1517,7 +1533,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
       colAxis: colAxis,
       obstacles: obstacles,
       accepts: (candidate) {
-        return askCanDropAt(config, session.key, candidate) == true;
+        return _askKept(session, candidate) == true;
       },
       rowWindow: windows.rows,
       colWindow: windows.cols,
@@ -1560,13 +1576,43 @@ class BoardDragController<TKey> extends ChangeNotifier {
       snap: config.snap,
       obstacles: _obstaclesIn(session, region),
       accepts: (candidate) {
-        return askCanDropAt(config, session.key, candidate) == true;
+        return _askKept(session, candidate) == true;
       },
+      offersOverlaps: config.dropFit!.offersOverlaps,
     );
     if (clamped == null) {
       return null;
     }
     return BoardDropTarget(span: clamped, kind: refused.kind);
+  }
+
+  /// Whether [config] lets [session]'s item land on [span], as
+  /// [askCanDropAt] answers, for the asks of a drag but the release's:
+  /// [_resolve]'s of a new placement, [_fitRefusal]'s of the box moved
+  /// onto the lattice and of its candidates, and [_clampRefusedResize]'s.
+  /// Under [BoardDropFit.offersOverlaps] it keeps each answer by span in
+  /// [_DragSession.fitAnswers] and answers a span it holds from there,
+  /// asking nothing, so through a drag each placement is asked about once
+  /// while the board and the config stay the same. The answer is written
+  /// into the map taken before the ask, so one whose ask a clear
+  /// interrupted lands in the dropped map. Once [session] has ended, as a
+  /// predicate that mutates the board can end it, it asks nothing and
+  /// answers null, a refusal with no nudge.
+  bool? _askKept(_DragSession<TKey> session, BoardSpan span) {
+    final config = this.config;
+    if (!(config.dropFit?.offersOverlaps ?? false)) {
+      return askCanDropAt(config, session.key, span);
+    }
+    if (!identical(_session, session)) {
+      return null;
+    }
+    final answers = session.fitAnswers ??= <BoardSpan, bool?>{};
+    if (answers.containsKey(span)) {
+      return answers[span];
+    }
+    final answer = askCanDropAt(config, session.key, span);
+    answers[span] = answer;
+    return answer;
   }
 
   /// The SEARCH REGION: on each axis, [BoardDropFitter.searchRangeOn] of
@@ -1719,6 +1765,7 @@ class BoardDragController<TKey> extends ChangeNotifier {
     _lastResolvedSpan = null;
     _lastResolvedWindows = null;
     _heldResizeSample = null;
+    _session?.fitAnswers = null;
     _scheduleResolve();
   }
 

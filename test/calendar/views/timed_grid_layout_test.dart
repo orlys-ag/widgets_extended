@@ -431,11 +431,14 @@ void main() {
         end: query.end,
       );
       final visitsBefore = debugOverlapIndexVisitCount;
-      final answer = index.refusesOverlap(
+      final answer = index.visitSharing(
         query.id,
         query.own,
-        candidate,
-        policy,
+        candidate.start,
+        candidate.end,
+        (other) {
+          return !policy.mayOverlap(candidate, other);
+        },
       );
       final visits = debugOverlapIndexVisitCount - visitsBefore;
       final reason = "${query.id} ${query.start} to ${query.end}";
@@ -480,7 +483,14 @@ void main() {
         refusing ? const <String>{"b1000"} : const <String>{},
       );
       final visitsBefore = debugOverlapIndexVisitCount;
-      expect(packed.refusesOverlap("new", elsewhere, inside, policy), refusing);
+      expect(
+        packed.visitSharing("new", elsewhere, inside.start, inside.end, (
+          other,
+        ) {
+          return !policy.mayOverlap(inside, other);
+        }),
+        refusing,
+      );
       expect(policy.asked, <String>["b1000"]);
       // log2(1024) is 10: 1 + 2 * (1 + 2) * (10 + 1).
       expect(
@@ -489,6 +499,68 @@ void main() {
         reason: "refusing: $refusing",
       );
     }
+  });
+
+  test("GL11 the overlap index sorts its entries at its first search after "
+      "an addition of a new entry, and not at the split, a later search or "
+      "an addition of entries it holds", () {
+    bool none(CalendarEntry<String> other) {
+      return false;
+    }
+
+    final tracks = workweek(firstOffset: 1, dayCount: 1);
+    final early = shownOf("early", at(tuesday, 6), at(tuesday, 7));
+    final late = shownOf("late", at(tuesday, 19), at(tuesday, 20));
+    final builds = debugOverlapIndexBuildCount;
+    final layout = TimedGridLayout<String>.of(<CalendarShownEntry<String>>[
+      early,
+      late,
+      shownOf("inside", at(tuesday, 10), at(tuesday, 11)),
+    ], tracks);
+    final index = layout.loose!;
+    // Setup sanity: the split indexes the entries outside the hours.
+    expect(index.ids, <String>{"early", "late"});
+    expect(debugOverlapIndexBuildCount, builds, reason: "the split");
+
+    final visited = <String>[];
+    expect(
+      index.visitSharing(null, null, at(tuesday, 6, 30), at(tuesday, 19, 30), (
+        other,
+      ) {
+        visited.add(other.id!);
+        return false;
+      }),
+      isFalse,
+    );
+    expect(visited, <String>["early", "late"]);
+    expect(debugOverlapIndexBuildCount, builds + 1, reason: "the first");
+
+    index.visitSharing(null, null, at(tuesday, 6), at(tuesday, 7), none);
+    index.sharesTime(null, null, at(tuesday, 19), at(tuesday, 20));
+    expect(debugOverlapIndexBuildCount, builds + 1, reason: "a later search");
+
+    index.addAll(<CalendarShownEntry<String>>[
+      shownOf("night", at(tuesday, 21), at(tuesday, 22)),
+    ]);
+    expect(debugOverlapIndexBuildCount, builds + 1, reason: "a new entry");
+    expect(
+      index.sharesTime(null, null, at(tuesday, 21), at(tuesday, 21, 30)),
+      isTrue,
+    );
+    expect(
+      debugOverlapIndexBuildCount,
+      builds + 2,
+      reason: "the search after a new entry",
+    );
+
+    index.addAll(<CalendarShownEntry<String>>[early, late]);
+    expect(debugOverlapIndexBuildCount, builds + 2, reason: "held entries");
+    index.visitSharing(null, null, at(tuesday, 6), at(tuesday, 22), none);
+    expect(
+      debugOverlapIndexBuildCount,
+      builds + 2,
+      reason: "the search after held entries",
+    );
   });
 
   group(

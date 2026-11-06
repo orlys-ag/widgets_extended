@@ -83,7 +83,10 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   app animation listener can still end the session synchronously inside
   `_resolve` or the commit snap, so `startDrag`, `updateDrag` and
   `endDrag` re-check
-  `identical(_session, session)` after those calls and return. Every
+  `identical(_session, session)` after those calls and return, as
+  `_resolve` does after its gate ask and after the fit, so a session a
+  predicate ended gets no target and no preview, and `_askKept` answers
+  an ended session null without asking. Every
   predicate is asked through `askCanDrag` or `askCanDropAt`, which report
   a throw and answer it as a refusal (`askCanDropAt` answers null, which
   also skips the nudge). A COMMIT releases the make-room preview by
@@ -200,8 +203,16 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   line do not change it. `_resolve` records both beside the span for its
   early-out, comparing the lean only after a refusal, the one answer it
   can change, and hands them to the drop fit: over the same refused
-  placement a new lean re-runs the fit without asking the gate again,
-  and a fit landing on the current target notifies nothing. The windows
+  placement a new lean re-runs the fit without asking the gate again;
+  under `BoardDropFit.offersOverlaps` the drag keeps each answer of the
+  gate's ask of a new placement, the fit's and the clamp's by span in the
+  session (`fitAnswers`, `_askKept`), each written into the map taken
+  before its ask, which the config setter and the structural handler drop
+  where they clear the record and the teardown drops with the session, so
+  a new lean or a new refused placement asks only about placements the
+  drag has not asked about, an answer whose ask a clear interrupted is not
+  kept, and the release still asks about its target, and a fit landing on
+  the current target notifies nothing. The windows
   and the paths live in
   `_board_span.dart` beside the start rule, and `quantumOn` is
   non-private because the drop-fit search steps by the grid the windows
@@ -209,7 +220,9 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   A refusal is where `_board_drop_fit.dart` gets its one chance, and only
   under a `BoardDragConfig.dropFit` policy: when `canDropAt` refuses a
   move, the board slides the placement to the nearest one holding the
-  whole box clear. A box lying wholly at or past the lattice's end on
+  whole box clear, or under `BoardDropFit.offersOverlaps`
+  the nearest the app admits, clear or not. A box lying wholly at or past
+  the lattice's end on
   either axis is first moved onto the lattice, before the gate and
   whatever the radii (`ontoLattice`: its start clamped into the window
   `resolveMove` returned for that axis, floored as the resolver floors a
@@ -264,10 +277,13 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   (`clampedResize`): items the stored span already meets are not in the
   way, the gate is the first term alone over the rest, and the dragged
   edge takes, nearest the refused edge first, the first candidate
-  between the stored edge and the refused one that holds the span clear
-  and `canDropAt` admits: up to four quanta back, flush against each
-  item in the way on the snap's grid, or the stored edge, which is the
-  stored span. The radii and `minFreeFraction` govern moves only; the
+  between the stored edge and the refused one that holds the span clear,
+  or under `offersOverlaps` any, and `canDropAt` admits: up to four quanta
+  back, flush against each item in the way on the snap's grid, or the
+  stored edge, which is the stored span.
+  The option changes only which candidates reach `canDropAt`: the scan
+  builds the same candidates in the same order, and the gate's terms stay.
+  The radii and `minFreeFraction` govern moves only; the
   gather is one `itemsIn` over the refused span's whole tracks, which
   hold every candidate. `BoardAutoScroller` (internal) integrates
   two-axis edge-zone velocities, measured from the port's
