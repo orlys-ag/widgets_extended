@@ -2,7 +2,8 @@
 /// of the day it changes, a new policy the cards whose answers it changes,
 /// and a scroll none it had built; while a change to what every row reads,
 /// as a new builder, format or theme, builds them all, and a day's rows
-/// follow the store's writes and reads of that day.
+/// follow the store's writes and reads of that day. And a day the parent
+/// selects while a scroll runs, which the list reveals and keeps.
 library;
 
 import 'package:flutter/material.dart';
@@ -710,4 +711,80 @@ void main() {
     expect(textUnder(header, title), findsOneWidget);
     expect(host.cards[idOn(tuesday, 0)]!.onEdit, isNull);
   });
+
+  testWidgets("DR8 a day the parent selects while a drag, or the fling "
+      "after one, scrolls the list is revealed at the list's top and stays "
+      "selected, and the list reports no top day after the selection", (
+    tester,
+  ) async {
+    final target = CalendarDates.addDays(tuesday, 40);
+    for (final fling in <bool>[false, true]) {
+      final reason = fling ? "a fling" : "a drag";
+      final store = ReadsStore(entries: threeADay(tuesday, 60));
+      final host = ListHost(store, day: tuesday, time: at(tuesday, 8));
+      await host.pump(tester);
+      final list = find.byType(DayList<String>);
+      final listTop = tester.getTopLeft(list).dy;
+      final position = tester
+          .state<ScrollableState>(
+            find.descendant(of: list, matching: find.byType(Scrollable)),
+          )
+          .position;
+      TestGesture? finger;
+      if (fling) {
+        await tester.fling(list, const Offset(0.0, -300.0), 8000.0);
+        for (var i = 0; i < 4; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+      } else {
+        finger = await tester.startGesture(tester.getCenter(list));
+        await finger.moveBy(const Offset(0.0, -500.0));
+      }
+      // Setup sanity: the scroll runs as the parent selects.
+      expect(position.isScrollingNotifier.value, isTrue, reason: reason);
+      final reported = host.topDays.length;
+      final last = reported == 0 ? tuesday : host.topDays.last;
+      host.selectedDay = target;
+      host.rebuild();
+      await tester.pump(const Duration(milliseconds: 16));
+      // Setup sanity: in the frame of the selection the scroll shows a day
+      // other than the last one reported, which a top day check scheduled
+      // in that frame before the selection would report.
+      expect(
+        dayAtTopOf(tester, listTop),
+        allOf(isNotNull, isNot(last)),
+        reason: reason,
+      );
+      await tester.pumpAndSettle();
+      await finger?.up();
+      await tester.pumpAndSettle();
+      expect(host.selectedDay, target, reason: reason);
+      expect(
+        tester
+            .getTopLeft(
+              find.byKey(dayListHeaderKey(target), skipOffstage: false),
+            )
+            .dy,
+        moreOrLessEquals(listTop),
+        reason: reason,
+      );
+      expect(host.topDays.sublist(reported), isEmpty, reason: reason);
+    }
+  });
+}
+
+/// The day whose block holds the point 1 px under the list's top edge,
+/// [listTop], as the list reads its top day: the latest day of the 60
+/// from [tuesday] whose header the tree has built at or above that point.
+DateTime? dayAtTopOf(WidgetTester tester, double listTop) {
+  DateTime? found;
+  for (var d = 0; d < 60; d++) {
+    final day = CalendarDates.addDays(tuesday, d);
+    final header = find.byKey(dayListHeaderKey(day), skipOffstage: false);
+    if (header.evaluate().isNotEmpty &&
+        tester.getTopLeft(header).dy <= listTop + 1.0) {
+      found = day;
+    }
+  }
+  return found;
 }
