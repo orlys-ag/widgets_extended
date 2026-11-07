@@ -391,6 +391,10 @@ in view. Each move scrolls only as far as the new cell needs. Escape cancels a
 live drag. `Board.focusNode` and `Board.autofocus` are new.
 - Added `BoardController.revealCell`, which scrolls the least that shows a
 cell between the frozen bands, and not at all when it already shows.
+- Added `BoardController.landSwappedAxisAt`. A new axis instance keeps the
+track at the scrolled region's leading edge; a landing has the next layout
+put the track it names at the distance it names from the viewport's leading
+edge instead, as a host that maps its tracks across the change needs.
 - `addItem`, `moveItem`, `resizeItem` and `setItems` now throw an
 `ArgumentError` in release builds too for a span that breaks one of
 `BoardSpan`'s rules (a NaN or out-of-range fraction, a negative start, no

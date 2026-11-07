@@ -678,6 +678,21 @@ extension BoardControllerInternals<TKey, TItem>
     _sampleWithoutOwnPreview = sampleWithoutOwnPreview;
   }
 
+  /// Takes the landing [BoardController.landSwappedAxisAt] left for [axis]
+  /// and clears it: the axis instance it was given for, its track and its
+  /// distance from the viewport's leading edge. The render object's
+  /// layout head takes both axes' at every layout.
+  ({BoardAxis axis, double track, double? at})? takeAxisLanding(Axis axis) {
+    if (axis == Axis.vertical) {
+      final landing = _rowLanding;
+      _rowLanding = null;
+      return landing;
+    }
+    final landing = _columnLanding;
+    _columnLanding = null;
+    return landing;
+  }
+
   /// Clears the registration [attachRenderPort] made, the port and its
   /// sampler, and ONLY when the registered port IS [port].
   ///

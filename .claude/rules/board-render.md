@@ -57,12 +57,18 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   instance under the same controller has the track-space coordinate at
   the scrolled region's leading edge put back there by one `correctBy`
   at the next layout's head, clamped into the new scroll range (a
-  controller swap is a new model and anchors nothing), and, where the
+  controller swap is a new model and anchors nothing), or, where the
+  controller holds a LANDING for that instance (`landSwappedAxisAt`,
+  one per axis, naming the instance the axis config held at the call,
+  which every layout head takes and clears whether or not it uses it),
+  the track the landing names put at its distance from the viewport's
+  leading edge instead, clamped the same way; and, where the
   content axis's instance changes while the own data (see the point
   mapping's OWN-FREE mode below) stands under a key naming the old
   instance, the OWN-FREE TARGET, the same steps over the old instance's
   own-free lattice from the own-free scroll offset, whose difference
-  from the painted target becomes the new instance's `S`; obtain-to-retain retention plus the drag pin's
+  from the anchor's painted target becomes the new instance's `S`, which
+  a landing keeps, moving the offset as a jump does; obtain-to-retain retention plus the drag pin's
   per-layout vicinity derivation; PINNED ITEMS: an item whose span
   lies wholly inside a frozen band on an axis (`BoardControllerInternals.pinOfId`,
   the one site of the rule, reading a laned item on the lane axis by its

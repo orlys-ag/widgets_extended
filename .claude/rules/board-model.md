@@ -103,7 +103,10 @@ The contract of `Fenwick`, the axes, spans and the start rule, `SpanIndex`, `Ove
   `globalRectOfCell` answers the port's own `rectOfCell` with its corners
   converted to GLOBAL through the port's `paintLocalToGlobal`, each null
   with no port or one not laid out; the controller restates none of these
-  queries. The ordered `dispose` script asserts the
+  queries. `landSwappedAxisAt` records one landing per axis, naming the
+  axis instance the config holds at the call, for the render's zoom
+  anchor (`board-render.md`), whose next layout head takes it through
+  `takeAxisLanding`. The ordered `dispose` script asserts the
   listener lists are empty first (a mounted board still subscribed means
   something is about to read a disposed controller), then runs the
   orchestrator (tickers before the vsync dies), then the animation
