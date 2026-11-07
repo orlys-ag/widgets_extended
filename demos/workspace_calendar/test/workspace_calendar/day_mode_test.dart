@@ -623,15 +623,16 @@ void main() {
     final gutterRight = grid.visibleCellRect(1, 0).right;
 
     // 08:00 to 19:00 on the top lines of rows 1 to 45, then 20:00 on the
-    // last slot's bottom line.
+    // last slot's bottom line, each line 1 px tall in the pixel row above
+    // its edge.
     final labels = paintGridForeground(tester).paragraphs;
     expect(labels, hasLength(13));
     for (var hour = 0; hour < 12; hour++) {
       final label = labels[hour];
-      final line = grid.rectOfCell(1 + hour * 4, dayColumn)!.top;
+      final line = grid.rectOfCell(1 + hour * 4, dayColumn)!.top - 0.5;
       expect(
         label.offset.dy + label.paragraph.height / 2,
-        near(line),
+        moreOrLessEquals(line, epsilon: 0.25),
         reason: "label $hour",
       );
       expect(
@@ -643,15 +644,22 @@ void main() {
     final end = labels.last;
     expect(
       end.offset.dy + end.paragraph.height / 2,
-      near(grid.rectOfCell(48, dayColumn)!.bottom),
+      moreOrLessEquals(
+        grid.rectOfCell(48, dayColumn)!.bottom - 0.5,
+        epsilon: 0.25,
+      ),
     );
     expect(
       end.offset.dx + end.paragraph.maxIntrinsicWidth,
       near(gutterRight - 6.0),
     );
-    // The first and the last lie inside the grid, 2 px from its edges.
-    expect(labels.first.offset.dy, near(2.0));
-    expect(end.offset.dy + end.paragraph.height, near(grid.size.height - 2.0));
+    // The first and the last lie inside the grid, 2 px from its edges but
+    // for the half pixel their lines lie above their edges.
+    expect(labels.first.offset.dy, moreOrLessEquals(1.5, epsilon: 0.25));
+    expect(
+      end.offset.dy + end.paragraph.height,
+      moreOrLessEquals(grid.size.height - 2.5, epsilon: 0.25),
+    );
     // Clipped to the gutter, from the top of the scrolled region to its
     // bottom.
     final region = grid.scrolledRegion;
@@ -696,9 +704,11 @@ void main() {
     final nineRow = dayRowOf(9 * 60);
     final nine = grid.rectOfCell(nineRow, 1)!;
     expect(nine.height, near(4.0));
+    // Each label is centred on its line, in the pixel row above its edge.
     final label = paintGridForeground(tester).paragraphs.singleWhere((label) {
-      return (label.offset.dy + label.paragraph.height / 2 - nine.top).abs() <
-          0.5;
+      return (label.offset.dy + label.paragraph.height / 2 - (nine.top - 0.5))
+              .abs() <
+          0.25;
     });
     final half = label.paragraph.height / 2;
     // The labels shrink to fit the widest gutter, and the test font draws
@@ -723,7 +733,7 @@ void main() {
     expect(grid.firstVisibleRow, nineRow + 1);
     expect(
       paintGridForeground(tester).paragraphs.where((label) {
-        return (label.offset.dy - (-above - half)).abs() < 0.5;
+        return (label.offset.dy - (-above - 0.5 - half)).abs() < 0.25;
       }),
       hasLength(1),
     );
@@ -738,7 +748,7 @@ void main() {
     expect(grid.lastVisibleRow, noonRow - 1);
     expect(
       paintGridForeground(tester).paragraphs.where((label) {
-        return (label.offset.dy - (height + 3.0 - half)).abs() < 0.5;
+        return (label.offset.dy - (height + 3.0 - 0.5 - half)).abs() < 0.25;
       }),
       hasLength(1),
     );
@@ -754,13 +764,14 @@ void main() {
     expect(grid.lastVisibleRow, 15);
     final labels = paintGridForeground(tester).paragraphs;
     // 08:30 on row 1, 09:00, 10:00 and 11:00 on rows 3, 7 and 11, then
-    // 12:00 on the last slot's bottom line.
+    // 12:00 on the last slot's bottom line, each line 1 px tall in the
+    // pixel row above its edge.
     expect(labels, hasLength(5));
     for (final (index, row) in <int>[1, 3, 7, 11].indexed) {
       final label = labels[index];
       expect(
         label.offset.dy + label.paragraph.height / 2,
-        near(grid.rectOfCell(row, 1)!.top),
+        moreOrLessEquals(grid.rectOfCell(row, 1)!.top - 0.5, epsilon: 0.25),
         reason: "row $row",
       );
     }
@@ -836,8 +847,9 @@ void main() {
         if (line.from!.dy == line.to!.dy) line.from!.dy,
     ];
     expect(rows, hasLength(25));
-    expect(rows.first, near(firstTop));
-    expect(rows.last, near(lastBottom));
+    // Each 1 px line lies in the pixel row above its row's top.
+    expect(rows.first, moreOrLessEquals(firstTop - 0.5, epsilon: 0.25));
+    expect(rows.last, moreOrLessEquals(lastBottom - 0.5, epsilon: 0.25));
     for (final line in canvas.lines) {
       if (line.from!.dx == line.to!.dx) {
         expect(line.from!.dy, near(firstTop));
@@ -1055,13 +1067,21 @@ void main() {
       return paintGridForeground(tester).clips;
     }
 
-    // At the top 08:00's line is the region's top edge, so its label may
-    // reach half its height above it, beside the row there, and as far
-    // below the bottom edge, past which the end's label reaches.
+    // At the top 08:00's line is the region's top edge, drawn in the pixel
+    // row above it, so its label, centred on it, may reach half its height
+    // and that half pixel above the edge, beside the row there, and half
+    // its height less that half pixel below the bottom edge, past which
+    // the end's label reaches.
     expect(region.top, 24.0);
     expect(region.bottom, grid.size.height - 24.0);
-    expect(clips().first.top, near(region.top - half));
-    expect(clips().first.bottom, near(region.bottom + half));
+    expect(
+      clips().first.top,
+      moreOrLessEquals(region.top - half - 0.5, epsilon: 0.25),
+    );
+    expect(
+      clips().first.bottom,
+      moreOrLessEquals(region.bottom + half - 0.5, epsilon: 0.25),
+    );
     expect(clips().first.left, 0.0);
     expect(clips().first.right, grid.frozenInsetOf(Axis.horizontal));
 
@@ -1070,7 +1090,10 @@ void main() {
     final vertical = grid.verticalPosition!;
     vertical.jumpTo(3.0);
     await tester.pump();
-    expect(clips().first.top, near(region.top - half + 3.0));
+    expect(
+      clips().first.top,
+      moreOrLessEquals(region.top - half - 0.5 + 3.0, epsilon: 0.25),
+    );
 
     // Past half a label, it reaches nothing past the edge.
     vertical.jumpTo(half + 1.0);
@@ -1078,10 +1101,14 @@ void main() {
     expect(clips().first.top, near(region.top));
 
     // At the bottom the end's label, 14:00's, reaches below the bottom
-    // edge as 08:00's did above the top.
+    // edge as 08:00's did above the top, centred on the rule the row there
+    // draws in the pixel row under the edge.
     vertical.jumpTo(vertical.maxScrollExtent);
     await tester.pump();
-    expect(clips().last.bottom, near(region.bottom + half));
+    expect(
+      clips().last.bottom,
+      moreOrLessEquals(region.bottom + half + 0.5, epsilon: 0.25),
+    );
   });
 
   testWidgets("D19 Day opens with its days folded into the strip; the pull "

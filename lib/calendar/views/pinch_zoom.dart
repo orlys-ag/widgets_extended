@@ -245,13 +245,10 @@ double trackFractionAt(BoardAxis axis, double offset) {
 /// viewport's leading edge, under the [band] its frozen leading tracks
 /// take, keeps that place.
 ///
-/// The board's zoom anchor, at the head of a layout that finds a new axis
-/// instance, puts the lattice point at the scrolled region's leading edge
-/// under [old], read at the offset it finds, back at that edge under
-/// [next]. The offset set here is the one whose leading edge under [old]
-/// holds the point that edge must hold under [next] for [focal] to stay,
-/// clamped as the board clamps into the new scroll range. Both axes have
-/// [band] for their leading band, which a point over it is moved off.
+/// The offset the board's next layout ends at is the one that puts the
+/// point [focal] showed under [old] back under [focal] under [next]
+/// ([scrollAcrossAxisSwap]). Both axes have [band] for their leading band,
+/// which a point over it is moved off.
 void holdFocalAcrossAxisSwap(
   ScrollPosition position, {
   required BoardAxis old,
@@ -267,14 +264,44 @@ void holdFocalAcrossAxisSwap(
   }
   final at = math.max(focal, band);
   final point = trackFractionAt(old, position.pixels + at);
-  final maxTarget = math.max(
-    0.0,
-    next.totalExtent - position.viewportDimension,
+  scrollAcrossAxisSwap(
+    position,
+    old: old,
+    oldBand: band,
+    next: next,
+    nextBand: band,
+    viewportExtent: position.viewportDimension,
+    target: next.offsetOfFraction(point) - at,
   );
-  final target = (next.offsetOfFraction(point) - at).clamp(0.0, maxTarget);
+}
+
+/// Sets [position]'s offset for the board's next layout, which lays out
+/// [next] in place of [old] in a viewport [viewportExtent] long, so that
+/// the layout ends at the offset [target], clamped as the board clamps
+/// into the new scroll range.
+///
+/// The board's zoom anchor, at the head of a layout that finds a new axis
+/// instance, puts the fractional track at the scrolled region's leading
+/// edge under [old] and its leading band [oldBand], read at the offset it
+/// finds, at that edge under [next] and [nextBand]. The offset set here is
+/// the one whose leading edge under [old] holds the track that edge holds
+/// at [target] under [next].
+void scrollAcrossAxisSwap(
+  ScrollPosition position, {
+  required BoardAxis old,
+  required double oldBand,
+  required BoardAxis next,
+  required double nextBand,
+  required double viewportExtent,
+  required double target,
+}) {
+  if (!position.hasPixels || old.trackCount == 0 || next.trackCount == 0) {
+    return;
+  }
+  final maxTarget = math.max(0.0, next.totalExtent - viewportExtent);
   final lead = trackFractionAt(
     next,
-    target + band,
+    target.clamp(0.0, maxTarget) + nextBand,
   ).clamp(0.0, old.trackCount.toDouble());
-  position.correctPixels(old.offsetOfFraction(lead) - band);
+  position.correctPixels(old.offsetOfFraction(lead) - oldBand);
 }

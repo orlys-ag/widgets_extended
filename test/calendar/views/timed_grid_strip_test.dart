@@ -113,7 +113,7 @@ class Shown {
   /// The row of the all-day strip's first row of the grid shown now: under
   /// the day header in Week, and under the room above the strip where it
   /// has rows. The rows above the room above the slots, less the header's,
-  /// are that room and the strip's rows, or none.
+  /// are the room above the strip and the strip's rows, or none.
   int get stripStart {
     final grid = gridNow();
     final header = week ? 1 : 0;
@@ -275,14 +275,21 @@ class RecordingCanvas implements Canvas {
 
   final List<({Offset from, Offset to})> lines = <({Offset from, Offset to})>[];
 
+  /// The records of [rects] and [lines] in the order they were drawn.
+  final List<Object> order = <Object>[];
+
   @override
   void drawRect(Rect rect, Paint paint) {
-    rects.add((rect: rect, paint: paint));
+    final record = (rect: rect, paint: paint);
+    rects.add(record);
+    order.add(record);
   }
 
   @override
   void drawLine(Offset p1, Offset p2, Paint paint) {
-    lines.add((from: p1, to: p2));
+    final record = (from: p1, to: p2);
+    lines.add(record);
+    order.add(record);
   }
 
   @override
@@ -338,6 +345,24 @@ List<double> lineLeftsOf(WidgetTester tester) {
     for (final line in canvas.lines)
       if (line.from.dx == line.to.dx) line.from.dx,
   ];
+}
+
+/// The time at the hours' top of the grid shown now, in slots from its
+/// first slot, with the vertical scroll at [pixels] or where it is: the
+/// scrolled region's top edge where the row above the first slot is
+/// frozen, and otherwise the room's height under it, where the grid opens
+/// with its opening line. Reads the rows the board has now; the room's
+/// height is the row's under the slots, which counts no entries in the
+/// tests that call this.
+double hoursTopOf(WidgetTester tester, Shown shown, {double? pixels}) {
+  final rows = boardOf(tester).controller.rows;
+  final axis = rows.axis;
+  final first = shown.firstSlotRow;
+  final room = axis.extentOf(axis.trackCount - 1);
+  final top = rows.frozenStart == first ? 0.0 : room;
+  final band = axis.offsetOfFraction(rows.frozenStart.toDouble());
+  final scroll = pixels ?? viewportOf(tester).verticalPosition!.pixels;
+  return trackFractionAt(axis, scroll + band + top) - first;
 }
 
 /// The decoration of the [DecoratedBox] the grid builds over [rect], a
@@ -500,7 +525,8 @@ class HeldSource implements CalendarDataSource<String> {
 /// unless [onCreate] takes them, and [opened] each entry it opens,
 /// [onMoveRequest] takes each move and
 /// resize it lands, and [onZoom] each zoom a pinch reports, which the grid
-/// does not show. The grid writes times in [hourLabelFormat]. [store],
+/// does not show. The grid writes times in [hourLabelFormat], under
+/// [theme] where it is given. [store],
 /// [editable], [first], [hours], [slotMinutes] and [editPolicy] start as
 /// given, and [rebuild] builds the grid again with them and with
 /// [givenNow]. The grid's policy is [editPolicy]
@@ -526,6 +552,7 @@ class Harness {
     this.onZoom,
     this.blockBuilder,
     this.hourLabelFormat = CalendarHourLabelFormat.twentyFourHour,
+    this.theme,
     DateTime? today,
     int nowHour = 9,
   }) : today = today ?? DateTime(2026, 1, 5),
@@ -551,6 +578,7 @@ class Harness {
   final void Function(double minSlotHeight, double minDayWidth)? onZoom;
   final CalendarBlockBuilder<String>? blockBuilder;
   final CalendarHourLabelFormat hourLabelFormat;
+  final CalendarThemeData? theme;
 
   bool editable;
   DateTime first;
@@ -587,6 +615,12 @@ class Harness {
     ]);
   }
 
+  /// [grid] under [theme] where it is given.
+  Widget themed() {
+    final theme = this.theme;
+    return theme == null ? grid() : CalendarTheme(data: theme, child: grid());
+  }
+
   TimedGrid<String> grid() {
     return TimedGrid<String>(
       key: ObjectKey(this),
@@ -621,14 +655,14 @@ class Harness {
     tester.view.physicalSize = size;
     addTearDown(tester.view.reset);
     addTearDown(now.dispose);
-    await tester.pumpWidget(MaterialApp(home: grid()));
+    await tester.pumpWidget(MaterialApp(home: themed()));
     await tester.pumpAndSettle();
   }
 
   /// Builds the grid again with the fields as they are now, and pumps one
   /// frame.
   Future<void> rebuild(WidgetTester tester) async {
-    await tester.pumpWidget(MaterialApp(home: grid()));
+    await tester.pumpWidget(MaterialApp(home: themed()));
   }
 }
 
@@ -1358,14 +1392,17 @@ void main() {
   testWidgets("TS4 a day needing five rows shows 3 and, in the fourth row, "
       "a \"+2 more\" chip in Month's look in a bar's place, on that day "
       "alone", (tester) async {
-    final theme = CalendarThemeData();
+    // A size Month's "+N more" alone has, which the chip's text takes.
+    final theme = CalendarThemeData(
+      monthMoreStyle: const TextStyle(fontSize: 14.5),
+    );
     for (final shown in bothGrids()) {
       final store = storeOf(<CalendarEntry<String>>[
         for (final id in const <String>["a", "b", "c", "d", "e"])
           allDayOf(id, tuesday),
         allDayOf("w", wednesday),
       ]);
-      await Harness(store, shown).pump(tester);
+      await Harness(store, shown, theme: theme).pump(tester);
       for (final (index, id) in const <String>["a", "b", "c"].indexed) {
         expect(
           tester.getRect(barFinder(id)),
@@ -1423,12 +1460,10 @@ void main() {
           .text
           .style!;
       expect(label.color, theme.onNotice, reason: shown.name);
-      expect(label.fontSize, theme.monthMoreStyle.fontSize, reason: shown.name);
-      expect(
-        find.byKey(allDayMoreKey(wednesday)),
-        findsNothing,
-        reason: shown.name,
-      );
+      expect(label.fontSize, 14.5, reason: shown.name);
+      if (shown.week) {
+        expect(find.byKey(allDayMoreKey(wednesday)), findsNothing);
+      }
       // Three rows and the count row lie above the slots.
       expect(shown.firstSlotRow, shown.stripStart + 4 + 1, reason: shown.name);
     }
@@ -1485,7 +1520,7 @@ void main() {
       await tester.pumpAndSettle();
       final less = find.byKey(allDayLessKey);
       // In the second strip row's gutter cell, under the label on the
-      // strip's top edge.
+      // rule along the strip's top edge, in the pixel row above it.
       expect(
         tester.getRect(less).center.dy,
         moreOrLessEquals(stripRect(tester, shown, tuesday, 1).center.dy),
@@ -1493,7 +1528,7 @@ void main() {
       );
       expect(
         tester.getRect(find.text(english.allDay)).center.dy,
-        moreOrLessEquals(stripRect(tester, shown, tuesday).top),
+        moreOrLessEquals(stripRect(tester, shown, tuesday).top - 0.5),
         reason: shown.name,
       );
       expect(
@@ -1682,8 +1717,8 @@ void main() {
   });
 
   testWidgets("TS12 with more strip rows than the grid's height holds, "
-      "expanded, the Less pill in the first strip row's gutter is hit and "
-      "collapses the strip to 3 rows", (tester) async {
+      "expanded, the Less pill in the strip's gutter is hit and collapses "
+      "the strip to three rows and its count row", (tester) async {
     for (final shown in bothGrids()) {
       final store = storeOf(<CalendarEntry<String>>[
         for (var i = 0; i < 20; i++) allDayOf("e${i + 10}", tuesday),
@@ -1805,7 +1840,8 @@ void main() {
   });
 
   testWidgets("TS14 over the gutter the strip reads \"All day\" centred on "
-      "its top edge, 6 px inside the gutter's right edge, and a screen "
+      "the rule along its top edge, in the pixel row above it, 6 px inside "
+      "the gutter's right edge, and a screen "
       "reader hears it: over a bar's row out of edit mode and over edit "
       "mode's empty row; with no strip nothing reads it", (tester) async {
     final semantics = tester.ensureSemantics();
@@ -1822,7 +1858,7 @@ void main() {
       );
       expect(
         tester.getRect(label).center.dy,
-        moreOrLessEquals(gutter.top),
+        moreOrLessEquals(gutter.top - 0.5),
         reason: shown.name,
       );
       expect(
@@ -1840,7 +1876,7 @@ void main() {
       await harness.pump(tester);
       expect(
         tester.getRect(label).center.dy,
-        moreOrLessEquals(cellRect(tester, shown.stripStart, 0).top),
+        moreOrLessEquals(cellRect(tester, shown.stripStart, 0).top - 0.5),
         reason: shown.name,
       );
       harness.editable = false;
@@ -1929,38 +1965,61 @@ void main() {
   });
 
   testWidgets("TS16 a bar dropped on the strip's margin becomes timed from "
-      "the slot showing right under it, 08:00 to 09:00 where the grid "
-      "opens, which the landing label names", (tester) async {
+      "the slot showing right under it, which the landing label names: "
+      "08:00 to 09:00 where the grid opens, and 10:00 to 11:00 once the "
+      "hours scroll 10:00 under it", (tester) async {
     for (final shown in bothGrids()) {
-      final store = storeOf(<CalendarEntry<String>>[allDayOf("off", tuesday)]);
-      await Harness(store, shown, size: const Size(800.0, 600.0)).pump(tester);
-      final strip = stripRect(tester, shown, tuesday);
-      final gesture = await liftTo(
-        tester,
-        tester.getCenter(barFinder("off")),
-        // Inside the margin, under Tuesday's strip cell.
-        Offset(strip.center.dx, strip.bottom + 3.0),
-      );
-      expect(
-        landingText(tester),
-        english.landing(
-          at(tuesday, 8),
-          at(tuesday, 9),
-          DateTime(2026, 1, 5),
-          CalendarHourLabelFormat.twentyFourHour,
-          isAllDay: false,
-        ),
-        reason: shown.name,
-      );
-      await gesture.up();
-      await tester.pumpAndSettle();
-      expectTimes(
-        store,
-        "off",
-        at(tuesday, 8),
-        at(tuesday, 9),
-        reason: shown.name,
-      );
+      for (final hour in const <int>[8, 10]) {
+        final reason = "${shown.name} $hour:00";
+        final store = storeOf(<CalendarEntry<String>>[
+          allDayOf("off", tuesday),
+        ]);
+        await Harness(
+          store,
+          shown,
+          size: const Size(800.0, 600.0),
+        ).pump(tester);
+        if (hour != 8) {
+          final viewport = viewportOf(tester);
+          final vertical = viewport.verticalPosition!;
+          // 2 px past the slot's top, so the slot under the margin's edge
+          // is that slot whatever the rounding.
+          vertical.jumpTo(
+            vertical.pixels +
+                viewport.rectOfCell(shown.rowOf(hour * 60), 1)!.top -
+                viewport.scrolledRegion.top +
+                2.0,
+          );
+          await tester.pump();
+        }
+        final strip = stripRect(tester, shown, tuesday);
+        final gesture = await liftTo(
+          tester,
+          tester.getCenter(barFinder("off")),
+          // Inside the margin, under Tuesday's strip cell.
+          Offset(strip.center.dx, strip.bottom + 3.0),
+        );
+        expect(
+          landingText(tester),
+          english.landing(
+            at(tuesday, hour),
+            at(tuesday, hour + 1),
+            DateTime(2026, 1, 5),
+            CalendarHourLabelFormat.twentyFourHour,
+            isAllDay: false,
+          ),
+          reason: reason,
+        );
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expectTimes(
+          store,
+          "off",
+          at(tuesday, hour),
+          at(tuesday, hour + 1),
+          reason: reason,
+        );
+      }
     }
   });
 
@@ -2136,6 +2195,621 @@ void main() {
         reason: shown.name,
       );
     }
+  });
+
+  testWidgets("TS21 turning edit mode on or off, which gives the empty strip "
+      "its row or takes it, keeps the time at the hours' top", (tester) async {
+    for (final shown in bothGrids()) {
+      for (final editable in <bool>[false, true]) {
+        final reason = "${shown.name} from editable $editable";
+        final harness = Harness(
+          storeOf(<CalendarEntry<String>>[]),
+          shown,
+          editable: editable,
+          size: const Size(800.0, 600.0),
+        );
+        await harness.pump(tester);
+        viewportOf(tester).verticalPosition!.jumpTo(300.0);
+        await tester.pump();
+        final rows = rowCountNow();
+        final top = hoursTopOf(tester, shown);
+        harness.editable = !editable;
+        await harness.rebuild(tester);
+        // Setup sanity: the room above the strip and its row came or went.
+        expect(rowCountNow(), rows + (editable ? -2 : 2), reason: reason);
+        expect(
+          hoursTopOf(tester, shown),
+          moreOrLessEquals(top, epsilon: 1e-6),
+          reason: reason,
+        );
+      }
+    }
+  });
+
+  testWidgets("TS22 a store adding strip rows keeps the time at the hours' "
+      "top: a first bar, a second on its day, and two more in one frame", (
+    tester,
+  ) async {
+    for (final shown in bothGrids()) {
+      final store = storeOf(<CalendarEntry<String>>[]);
+      await Harness(
+        store,
+        shown,
+        editable: false,
+        size: const Size(800.0, 600.0),
+      ).pump(tester);
+      viewportOf(tester).verticalPosition!.jumpTo(300.0);
+      await tester.pump();
+      final top = hoursTopOf(tester, shown);
+      var rows = rowCountNow();
+      store.entries = <CalendarEntry<String>>[allDayOf("a", tuesday)];
+      await tester.pump();
+      // Setup sanity: the room above the strip and its row came.
+      expect(rowCountNow(), rows + 2, reason: shown.name);
+      expect(
+        hoursTopOf(tester, shown),
+        moreOrLessEquals(top, epsilon: 1e-6),
+        reason: "${shown.name} first",
+      );
+      rows = rowCountNow();
+      var before = hoursTopOf(tester, shown);
+      store.entries = <CalendarEntry<String>>[
+        ...store.entries,
+        allDayOf("b", tuesday),
+      ];
+      await tester.pump();
+      // Setup sanity: one row more.
+      expect(rowCountNow(), rows + 1, reason: shown.name);
+      expect(
+        hoursTopOf(tester, shown),
+        moreOrLessEquals(before, epsilon: 1e-6),
+        reason: "${shown.name} second",
+      );
+      rows = rowCountNow();
+      before = hoursTopOf(tester, shown);
+      store.entries = <CalendarEntry<String>>[
+        ...store.entries,
+        allDayOf("c", tuesday),
+      ];
+      store.entries = <CalendarEntry<String>>[
+        ...store.entries,
+        allDayOf("d", tuesday),
+      ];
+      await tester.pump();
+      // Setup sanity: two rows more, from two notifies in one frame.
+      expect(rowCountNow(), rows + 2, reason: shown.name);
+      expect(
+        hoursTopOf(tester, shown),
+        moreOrLessEquals(before, epsilon: 1e-6),
+        reason: "${shown.name} two in a frame",
+      );
+    }
+  });
+
+  testWidgets("TS23 expanding and collapsing the strip keep the time at the "
+      "hours' top", (tester) async {
+    for (final shown in bothGrids()) {
+      await Harness(
+        storeOf(<CalendarEntry<String>>[
+          for (final id in const <String>["a", "b", "c", "d", "e"])
+            allDayOf(id, tuesday),
+        ]),
+        shown,
+        size: const Size(800.0, 600.0),
+      ).pump(tester);
+      viewportOf(tester).verticalPosition!.jumpTo(300.0);
+      await tester.pump();
+      final top = hoursTopOf(tester, shown);
+      final rows = rowCountNow();
+      await tester.tap(find.byKey(allDayMoreKey(tuesday)));
+      await tester.pumpAndSettle();
+      // Setup sanity: the fifth row shows in place of the count row.
+      expect(rowCountNow(), rows + 1, reason: shown.name);
+      expect(
+        hoursTopOf(tester, shown),
+        moreOrLessEquals(top, epsilon: 1e-6),
+        reason: "${shown.name} expanded",
+      );
+      final expanded = hoursTopOf(tester, shown);
+      await tester.tap(find.byKey(allDayLessKey));
+      await tester.pumpAndSettle();
+      // Setup sanity: collapsed again.
+      expect(rowCountNow(), rows, reason: shown.name);
+      expect(
+        hoursTopOf(tester, shown),
+        moreOrLessEquals(expanded, epsilon: 1e-6),
+        reason: "${shown.name} collapsed",
+      );
+    }
+  });
+
+  testWidgets("TS24 over a caching store whose read lands with a bar after "
+      "the grid opened, the opening line moves onto the margin's bottom "
+      "edge", (tester) async {
+    for (final shown in bothGrids()) {
+      final source = HeldSource(
+        <CalendarEntry<String>>[allDayOf("a", tuesday)],
+        held: <DateTime>[tuesday],
+      );
+      final store = CachingCalendarStore<String>(dataSource: source);
+      addTearDown(store.dispose);
+      store.show(monday, sunday);
+      final harness = Harness(
+        store,
+        shown,
+        editable: false,
+        size: const Size(800.0, 600.0),
+      );
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = harness.size;
+      addTearDown(tester.view.reset);
+      addTearDown(harness.now.dispose);
+      await tester.pumpWidget(MaterialApp(home: harness.grid()));
+      await tester.pump();
+      // Setup sanity: the read has not landed, the strip has no rows, and
+      // the opening jump put a slot's top under the scrolled room.
+      expect(source.reads, isNotEmpty, reason: shown.name);
+      expect(shown.stripStart, shown.week ? 1 : 0, reason: shown.name);
+      final opened = hoursTopOf(tester, shown);
+      expect(opened, greaterThan(0.0), reason: shown.name);
+      expect(opened, moreOrLessEquals(opened.roundToDouble()));
+      source.release(monday, sunday);
+      await tester.pump();
+      await tester.pump();
+      // Setup sanity: the bar landed and gave the strip a row.
+      expect(barFinder("a"), findsOneWidget, reason: shown.name);
+      final margin = cellRect(tester, shown.firstSlotRow - 1, 1);
+      final opening = shown.firstSlotRow + opened.round();
+      expect(
+        cellRect(tester, opening, 1).top,
+        moreOrLessEquals(margin.bottom),
+        reason: shown.name,
+      );
+      await tester.pumpWidget(const SizedBox());
+    }
+  });
+
+  testWidgets("TS25 a row counting the entries before the hours, coming or "
+      "going, keeps the time at the hours' top", (tester) async {
+    final late = CalendarDayHours(8 * 60, CalendarDates.minutesPerDay);
+    for (final shown in bothGrids(hours: late)) {
+      final store = storeOf(<CalendarEntry<String>>[
+        entryOf("early", at(tuesday, 9), at(tuesday, 10)),
+      ], hours: late);
+      await Harness(
+        store,
+        shown,
+        editable: false,
+        size: const Size(800.0, 600.0),
+      ).pump(tester);
+      viewportOf(tester).verticalPosition!.jumpTo(200.0);
+      await tester.pump();
+      final top = hoursTopOf(tester, shown);
+      store.entries = <CalendarEntry<String>>[
+        entryOf("early", at(tuesday, 6), at(tuesday, 7)),
+      ];
+      await tester.pump();
+      // Setup sanity: the row came.
+      expect(
+        find.byKey(hiddenAboveKey(tuesday)),
+        findsOneWidget,
+        reason: shown.name,
+      );
+      expect(
+        hoursTopOf(tester, shown),
+        moreOrLessEquals(top, epsilon: 1e-6),
+        reason: "${shown.name} came",
+      );
+      final came = hoursTopOf(tester, shown);
+      store.entries = <CalendarEntry<String>>[
+        entryOf("early", at(tuesday, 9), at(tuesday, 10)),
+      ];
+      await tester.pump();
+      // Setup sanity: the row went.
+      expect(
+        find.byKey(hiddenAboveKey(tuesday)),
+        findsNothing,
+        reason: shown.name,
+      );
+      expect(
+        hoursTopOf(tester, shown),
+        moreOrLessEquals(came, epsilon: 1e-6),
+        reason: "${shown.name} went",
+      );
+    }
+  });
+
+  testWidgets("TS26 a store adding a strip row while a scroll animation "
+      "runs keeps the time at the hours' top that the animation's next "
+      "frame gives, in that frame", (tester) async {
+    for (final shown in bothGrids()) {
+      final store = storeOf(<CalendarEntry<String>>[]);
+      await Harness(
+        store,
+        shown,
+        editable: false,
+        size: const Size(800.0, 600.0),
+      ).pump(tester);
+      final vertical = viewportOf(tester).verticalPosition!;
+      vertical.jumpTo(100.0);
+      await tester.pump();
+      unawaited(
+        vertical.animateTo(
+          300.0,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.linear,
+        ),
+      );
+      await tester.pump();
+      final from = vertical.pixels;
+      await tester.pump(const Duration(milliseconds: 50));
+      final step = vertical.pixels - from;
+      // Setup sanity: the animation runs.
+      expect(step, greaterThan(0.0), reason: shown.name);
+      final top = hoursTopOf(tester, shown, pixels: vertical.pixels + step);
+      final rows = rowCountNow();
+      store.entries = <CalendarEntry<String>>[allDayOf("a", tuesday)];
+      await tester.pump(const Duration(milliseconds: 50));
+      // Setup sanity: the strip's rows came in that frame.
+      expect(rowCountNow(), rows + 2, reason: shown.name);
+      expect(
+        hoursTopOf(tester, shown),
+        moreOrLessEquals(top, epsilon: 1e-6),
+        reason: shown.name,
+      );
+      await tester.pumpAndSettle();
+    }
+  });
+
+  testWidgets("TS27 each slot's line lies in the pixel row above its top, "
+      "as the frozen rows above the hours draw their rules", (tester) async {
+    for (final shown in bothGrids()) {
+      await Harness(
+        storeOf(<CalendarEntry<String>>[]),
+        shown,
+        editable: false,
+        size: const Size(800.0, 600.0),
+      ).pump(tester);
+      viewportOf(tester).verticalPosition!.jumpTo(100.0);
+      await tester.pump();
+      final viewport = viewportOf(tester);
+      final tops = <double>{
+        for (
+          var row = shown.firstSlotRow;
+          row <= shown.firstSlotRow + gridNow().hours.slotCountOf(15);
+          row++
+        )
+          ?viewport.rectOfCell(row, 1)?.top,
+      };
+      final lines = lineHeightsOf(tester);
+      // Setup sanity: lines are drawn.
+      expect(lines, isNotEmpty, reason: shown.name);
+      for (final y in lines) {
+        expect(tops, contains(y + 0.5), reason: "${shown.name} $y");
+      }
+    }
+  });
+
+  testWidgets("TS28 under the frozen row counting the entries before the "
+      "hours, no slot line is drawn within a line's width of the scrolled "
+      "region's top", (tester) async {
+    final late = CalendarDayHours(8 * 60, CalendarDates.minutesPerDay);
+    for (final shown in bothGrids(hours: late)) {
+      await Harness(
+        storeOf(<CalendarEntry<String>>[
+          entryOf("early", at(tuesday, 6), at(tuesday, 7)),
+        ], hours: late),
+        shown,
+        editable: false,
+        size: const Size(800.0, 600.0),
+      ).pump(tester);
+      final viewport = viewportOf(tester);
+      final vertical = viewport.verticalPosition!;
+      final region = viewport.scrolledRegion;
+      final row = shown.rowOf(10 * 60);
+      final rowTop = viewport.rectOfCell(row, 1)!.top + vertical.pixels;
+      vertical.jumpTo(rowTop - region.top - 0.5);
+      await tester.pump();
+      // Setup sanity: the row's top lies half a pixel under the region's
+      // top, under the row counting the entries before the hours.
+      expect(
+        viewport.rectOfCell(row, 1)!.top,
+        moreOrLessEquals(region.top + 0.5),
+        reason: shown.name,
+      );
+      expect(
+        find.byKey(hiddenAboveKey(tuesday)),
+        findsOneWidget,
+        reason: shown.name,
+      );
+      expect(
+        lineHeightsOf(tester).where((y) {
+          return (y - region.top).abs() < 1.0;
+        }),
+        isEmpty,
+        reason: shown.name,
+      );
+    }
+  });
+
+  testWidgets("TS29 a marked range paints its fill under the slots' lines "
+      "and its edge over them", (tester) async {
+    for (final shown in bothGrids()) {
+      await Harness(
+        storeOf(<CalendarEntry<String>>[]),
+        shown,
+        size: const Size(800.0, 600.0),
+      ).pump(tester);
+      final from = slotRect(tester, shown, tuesday, 10 * 60).center;
+      final to = slotRect(tester, shown, tuesday, 11 * 60).center;
+      final gesture = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+      await tester.pump();
+      await gesture.moveTo(to);
+      await tester.pump();
+      final viewport = viewportOf(tester);
+      final canvas = RecordingCanvas();
+      viewport.background!.paint(canvas, viewport);
+      final edge = canvas.order.indexWhere((call) {
+        return call is ({Rect rect, Paint paint}) &&
+            call.paint.style == PaintingStyle.stroke;
+      });
+      // Setup sanity: the range is marked.
+      expect(edge, isNot(-1), reason: shown.name);
+      final edgeRect = (canvas.order[edge] as ({Rect rect, Paint paint})).rect;
+      final fill = canvas.order.indexWhere((call) {
+        return call is ({Rect rect, Paint paint}) &&
+            call.paint.style == PaintingStyle.fill &&
+            call.rect == edgeRect.inflate(1.0);
+      });
+      final lines = <int>[
+        for (final (index, call) in canvas.order.indexed)
+          if (call is ({Offset from, Offset to})) index,
+      ];
+      expect(fill, isNot(-1), reason: shown.name);
+      expect(fill, lessThan(lines.first), reason: shown.name);
+      expect(edge, greaterThan(lines.last), reason: shown.name);
+      await gesture.up();
+      await tester.pumpAndSettle();
+    }
+  });
+
+  testWidgets("TS30 under a row counting the entries before the hours the "
+      "grid opens with the opening hour's line on that row's bottom edge", (
+    tester,
+  ) async {
+    final late = CalendarDayHours(8 * 60, CalendarDates.minutesPerDay);
+    for (final shown in bothGrids(hours: late)) {
+      for (final editable in const <bool>[false, true]) {
+        final reason = "${shown.name} editable $editable";
+        await Harness(
+          storeOf(<CalendarEntry<String>>[
+            entryOf("early", at(tuesday, 6), at(tuesday, 7)),
+          ], hours: late),
+          shown,
+          editable: editable,
+          size: const Size(800.0, 600.0),
+          today: tuesday,
+          nowHour: 12,
+        ).pump(tester);
+        // Setup sanity: the row counts the early entry above the slots, and
+        // the grid opened scrolled, at 11:00, an hour before the time.
+        expect(
+          find.byKey(hiddenAboveKey(tuesday)),
+          findsOneWidget,
+          reason: reason,
+        );
+        final notice = tester.getRect(find.byKey(hiddenAboveKey(tuesday)));
+        expect(
+          viewportOf(tester).verticalPosition!.pixels,
+          greaterThan(0.0),
+          reason: reason,
+        );
+        expect(
+          slotRect(tester, shown, tuesday, 11 * 60).top,
+          moreOrLessEquals(notice.bottom),
+          reason: reason,
+        );
+      }
+    }
+  });
+
+  testWidgets("TS31 after a pinch update whose zoom the host does not take "
+      "a frame comes, and a store adding strip rows after it keeps the time "
+      "at the hours' top, the fingers still down", (tester) async {
+    for (final shown in bothGrids()) {
+      final store = storeOf(<CalendarEntry<String>>[]);
+      final zooms = <double>[];
+      await Harness(
+        store,
+        shown,
+        editable: false,
+        size: const Size(800.0, 600.0),
+        onZoom: (minSlotHeight, minDayWidth) {
+          zooms.add(minSlotHeight);
+        },
+      ).pump(tester);
+      final focal = cellRect(tester, shown.rowOf(12 * 60), 0).center;
+      final fingers = <TestGesture>[
+        await tester.startGesture(focal - const Offset(0.0, 30.0)),
+        await tester.startGesture(focal + const Offset(0.0, 30.0)),
+      ];
+      for (var i = 0; i < 3; i++) {
+        await fingers.first.moveBy(const Offset(0.0, -6.0));
+        await fingers.last.moveBy(const Offset(0.0, 6.0));
+        await tester.pump();
+      }
+      // Setup sanity: the pinch zoomed, and no frame waits.
+      expect(zooms, isNotEmpty, reason: shown.name);
+      expect(tester.binding.hasScheduledFrame, isFalse, reason: shown.name);
+      final count = zooms.length;
+      await fingers.first.moveBy(const Offset(0.0, -6.0));
+      await fingers.last.moveBy(const Offset(0.0, 6.0));
+      // Setup sanity: the pinch zoomed again.
+      expect(zooms.length, greaterThan(count), reason: shown.name);
+      // A frame comes, in which the grid forgets the pinch's focal, though
+      // the host builds nothing.
+      expect(tester.binding.hasScheduledFrame, isTrue, reason: shown.name);
+      await tester.pump();
+      final top = hoursTopOf(tester, shown);
+      final rows = rowCountNow();
+      store.entries = <CalendarEntry<String>>[allDayOf("a", tuesday)];
+      await tester.pump();
+      // Setup sanity: the strip's rows came.
+      expect(rowCountNow(), rows + 2, reason: shown.name);
+      expect(
+        hoursTopOf(tester, shown),
+        moreOrLessEquals(top, epsilon: 1e-6),
+        reason: shown.name,
+      );
+      for (final finger in fingers) {
+        await finger.up();
+      }
+      await tester.pumpAndSettle();
+    }
+  });
+
+  testWidgets("TX35 in Week a bar let go with the pointer over a day's strip "
+      "cell, over that day's header or past the grid's top moves to that "
+      "day wherever its proxy's top lies, and one let go over the room "
+      "below the hours or under the grid stays", (tester) async {
+    final office = CalendarDayHours(8 * 60, 18 * 60);
+    final shown = Shown.week(monday, hours: office);
+    final col = shown.colOf(wednesday);
+    // Lifts Monday's bar at [grab] of its cell, moves the pointer to [to]
+    // of that grab, runs [sanity] on the pointer and the grab there, lets
+    // go, and returns the store.
+    Future<MoveRecordingStore> release(
+      String reason,
+      Offset Function(Rect cell) grab,
+      Offset Function(Offset grab) to, {
+      void Function(Offset pointer, Offset grab)? sanity,
+    }) async {
+      final store = storeOf(<CalendarEntry<String>>[
+        allDayOf("off", monday),
+      ], hours: office);
+      await Harness(store, shown).pump(tester);
+      final cell = stripRect(tester, shown, monday);
+      final offset = grab(cell);
+      final pointer = to(offset);
+      final gesture = await liftTo(tester, cell.topLeft + offset, pointer);
+      // Setup sanity: the bar lifted.
+      expect(find.byKey(liftedBlockKey), findsOneWidget, reason: reason);
+      sanity?.call(pointer, offset);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      return store;
+    }
+
+    Offset centre(Rect cell) {
+      return Offset(cell.width / 2, cell.height / 2);
+    }
+
+    for (final (name, fraction) in const <(String, double)>[
+      ("into the room", 0.25),
+      ("over the room's top", -0.25),
+    ]) {
+      final store = await release(
+        name,
+        centre,
+        (grab) {
+          final room = cellRect(tester, shown.stripStart - 1, col);
+          return Offset(
+            room.left + grab.dx,
+            room.top + fraction * room.height + grab.dy,
+          );
+        },
+        sanity: (pointer, grab) {
+          final room = cellRect(tester, shown.stripStart - 1, col);
+          final strip = stripRect(tester, shown, wednesday);
+          final top = pointer.dy - grab.dy;
+          // Setup sanity: the pointer lies over the strip, and the proxy's
+          // top nearer the room's top than the strip's.
+          expect(strip.contains(pointer), isTrue, reason: name);
+          expect(
+            (top - room.top).abs(),
+            lessThan((top - strip.top).abs()),
+            reason: name,
+          );
+        },
+      );
+      expectTimes(store, "off", wednesday, thursday, reason: name);
+    }
+    final low = await release(
+      "low in the strip",
+      (cell) {
+        return Offset(cell.width / 2, 2.0);
+      },
+      (grab) {
+        final strip = stripRect(tester, shown, wednesday);
+        return Offset(strip.left + grab.dx, strip.bottom - 4.0 + grab.dy);
+      },
+      sanity: (pointer, grab) {
+        final strip = stripRect(tester, shown, wednesday);
+        final top = pointer.dy - grab.dy;
+        // Setup sanity: the pointer lies over the strip, and the proxy's
+        // top nearer the strip's bottom than its top.
+        expect(strip.contains(pointer), isTrue);
+        expect((top - strip.bottom).abs(), lessThan((top - strip.top).abs()));
+      },
+    );
+    expectTimes(low, "off", wednesday, thursday, reason: "low in the strip");
+    final header = await release("over the header", centre, (grab) {
+      return cellRect(tester, 0, col).center;
+    });
+    expectTimes(header, "off", wednesday, thursday, reason: "over the header");
+    final past = await release(
+      "past the top",
+      centre,
+      (grab) {
+        return Offset(cellRect(tester, 0, col).center.dx, -10.0);
+      },
+      sanity: (pointer, grab) {
+        // Setup sanity: the pointer lies above the grid.
+        expect(viewportOf(tester).globalToLocal(pointer).dy, lessThan(0.0));
+      },
+    );
+    expectTimes(past, "off", wednesday, thursday, reason: "past the top");
+    final below = await release(
+      "below the hours",
+      centre,
+      (grab) {
+        return cellRect(
+          tester,
+          shown.firstSlotRow + office.slotCountOf(15),
+          col,
+        ).center;
+      },
+      sanity: (pointer, grab) {
+        final viewport = viewportOf(tester);
+        // Setup sanity: the room below the hours shows under the pointer.
+        expect(
+          viewport.scrolledRegion.contains(viewport.globalToLocal(pointer)),
+          isTrue,
+        );
+      },
+    );
+    expectTimes(below, "off", monday, tuesday, reason: "below the hours");
+    final under = await release(
+      "under the grid",
+      centre,
+      (grab) {
+        final cell = cellRect(tester, 0, col);
+        return Offset(cell.center.dx, viewportOf(tester).size.height + 30.0);
+      },
+      sanity: (pointer, grab) {
+        final viewport = viewportOf(tester);
+        // Setup sanity: the pointer lies under the grid.
+        expect(
+          viewport.globalToLocal(pointer).dy,
+          greaterThan(viewport.size.height),
+        );
+      },
+    );
+    expectTimes(under, "off", monday, tuesday, reason: "under the grid");
   });
 
   testWidgets("TX1 a bar moved two columns writes days two later", (
@@ -3844,8 +4518,9 @@ void main() {
       "one whose centre is over the band, and one of a slot more, drop on "
       "the landing's last one", (tester) async {
     for (final shown in bothGrids()) {
-      // The day header in Week, and the strip's one empty row.
-      final band = shown.week ? 2 : 1;
+      // The day header in Week, the room above the strip, the strip's one
+      // empty row and the margin under it.
+      final band = shown.week ? 4 : 3;
       for (final (slots, centreOver) in <(int, bool)>[
         (band, true),
         (band, false),
@@ -3858,9 +4533,17 @@ void main() {
         await Harness(
           store,
           shown,
-          minSlotHeight: 40.0,
+          minSlotHeight: 20.0,
           size: const Size(800.0, 600.0),
         ).pump(tester);
+        // Setup sanity: the leading band holds [band] rows, the strip's
+        // empty row and the margin under it among them.
+        expect(
+          boardOf(tester).controller.rows.frozenStart,
+          band,
+          reason: reason,
+        );
+        expect(band, shown.stripStart + 2, reason: reason);
         var viewport = viewportOf(tester);
         final position = viewport.verticalPosition!;
         final col = shown.colOf(tuesday);
@@ -3871,7 +4554,7 @@ void main() {
               edge,
         );
         await tester.pump();
-        // Setup sanity: 10:00's row top lies at the band's edge, 1,600 px
+        // Setup sanity: 10:00's row top lies at the band's edge, 800 px
         // below 00:00's.
         expect(
           viewport.rectOfCell(shown.rowOf(10 * 60), col)!.top,
@@ -3881,7 +4564,7 @@ void main() {
         expect(
           viewport.rectOfCell(shown.rowOf(10 * 60), col)!.top -
               viewport.rectOfCell(shown.rowOf(0), col)!.top,
-          moreOrLessEquals(1600.0),
+          moreOrLessEquals(800.0),
           reason: reason,
         );
         final block = tester.getRect(blockFinder("meet", tuesday));

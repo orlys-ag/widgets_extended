@@ -537,28 +537,28 @@ CalendarCreateRange? _createRangeOf(
 /// covers, and the bars sharing a day in rows of their own. Past four
 /// rows the strip shows three and, in a fourth, a "+N more" chip in
 /// Month's look on each day that has bars below the third, counting them,
-/// a tap on which shows every row; a
+/// a tap on which, or on its cell, shows every row; a
 /// [CalendarLocalizations.showLess] pill in the strip's second row over the
 /// gutter then collapses it again, and new days collapse it. With no
 /// all-day entry on a shown day the strip has no rows, and one empty row
 /// in edit mode. A rule runs along the strip's top edge across the days,
 /// under a room as tall as the one the hour labels have above the first
 /// slot, and on that edge over the gutter the strip reads
-/// [CalendarLocalizations.allDay] in the hour labels' style, centred on it
-/// as they are on their lines and against the gutter's right edge as they
-/// are, scaled down where it does not fit the gutter, which it never
-/// widens. Each day's strip cells are filled as its column below them is:
-/// today's with the theme's tint, a Saturday's and a Sunday's with its
-/// background, and every rule along a day's left edge lies inside its
-/// column, from the strip's top edge down. While the strip has rows and no
-/// row counting entries before the hours lies under it, the room above the
-/// first slot stays under the strip as its margin, the hours scrolling
-/// beneath, and the rule parting the strip from the hours runs along the
-/// margin's bottom edge, where the first slot's line lies with the hours
-/// at their top. Each bar's content is what [chipBuilder] draws, told
-/// which of its ends continue past the shown days. A tap on a bar that is
-/// not pending reports [onOpenEntry] with its entry's id, in edit mode and
-/// out of it.
+/// [CalendarLocalizations.allDay] in the hour labels' style, centred on
+/// that rule as they are on their lines and against the gutter's right
+/// edge as they are, scaled down where it does not fit the gutter, which
+/// it never widens. Each day's strip cells are filled as its column below
+/// them is: today's with the theme's tint, a Saturday's and a Sunday's
+/// with its background, and every rule along a day's left edge lies
+/// inside its column, from the strip's top edge down. While the strip has
+/// rows and no row counting entries before the hours lies under it, the
+/// room above the first slot stays under the strip as its margin, the
+/// hours scrolling beneath, and the rule parting the strip from the hours
+/// runs along the margin's bottom edge, where the first slot's line lies
+/// with the hours at their top. Each bar's content is what [chipBuilder]
+/// draws, told which of its ends continue past the shown days. A tap on a
+/// bar that is not pending reports [onOpenEntry] with its entry's id, in
+/// edit mode and out of it.
 ///
 /// In edit mode, which [editable] turns on, a long press on any block of
 /// an entry lifts the entry to move and selects its blocks; a tap anywhere
@@ -1134,6 +1134,19 @@ typedef _StripMark = ({int first, int last});
 /// and its minute after midnight.
 typedef _NowMark = ({int column, int minute});
 
+/// The rows the grid hands its board, as [_TimedGridState._holdRows]
+/// reads them: the [config], the height of its leading band, its first
+/// slot row, how far under that band the hours' top lies, and the hours
+/// and slot length its slots step through.
+typedef _HandedRows = ({
+  BoardAxisConfig config,
+  double band,
+  int firstSlotRow,
+  double top,
+  CalendarDayHours hours,
+  int slotMinutes,
+});
+
 /// What the blocks and bars ask in edit mode: [policy], at [now].
 @immutable
 class _EditLimits<T> {
@@ -1167,8 +1180,24 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Where the fingers of the pinch that last reported a zoom met, in the
   /// board's coordinates ([_boardBox]), until the next fit of the axes
-  /// holds the lattice there ([_holdPinchFocal]).
+  /// holds the lattice there ([_holdPinchFocal]), or until the frame after
+  /// the update that took it is done ([_forgetPinchFocalAfterFrame]).
   Offset? _pinchFocal;
+
+  /// The vertical part of [_pinchFocal], from the fit of the axes that
+  /// took it until the layout builder holds the rows there ([_holdRows]),
+  /// or until the frame after the update that took it is done
+  /// ([_forgetPinchFocalAfterFrame]).
+  double? _rowFocal;
+
+  /// How many focals the pinches have taken, so a frame callback forgets
+  /// only the last ([_forgetPinchFocalAfterFrame]).
+  int _pinchFocalCount = 0;
+
+  /// The rows the layout builder last handed the board ([_holdRows]),
+  /// which the board's next layout reads as the rows it laid out last;
+  /// null before the builder's first run.
+  _HandedRows? _handedRows;
 
   final ScrollHolder _scrollHold = ScrollHolder();
 
@@ -1607,9 +1636,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       );
       // The jump put the opening line on the frozen rows' edge; the label
       // centred on it needs the room above it that the first line has,
-      // which a room frozen under the strip already is.
+      // which a frozen row above the slots gives it: the room frozen under
+      // the strip, or the row counting the entries before the hours, which
+      // the labels reach into ([_GridForegroundPainter.reachAbove]).
       final vertical = _positionOf(_verticalScroll);
-      if (vertical != null && !_roomFrozen) {
+      if (vertical != null && !_aboveFrozen) {
         vertical.jumpTo(
           math.max(vertical.minScrollExtent, vertical.pixels - _labelRoom),
         );
@@ -2235,7 +2266,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// the format.
   void _fitAxes(Size size) {
     _size = size;
-    final oldRows = _board.rows;
     final oldColumns = _board.columns;
     final gutter = _hourLabels.gutter;
     final dayWidth = math.max(
@@ -2272,28 +2302,98 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _slotHeight = slotHeight;
       _replaceRows();
     }
-    _holdPinchFocal(oldRows, oldColumns);
+    _holdPinchFocal(oldColumns);
   }
 
-  /// Keeps the lattice point under [_pinchFocal] there across the axes
-  /// that replaced [oldRows] and [oldColumns] ([holdFocalAcrossAxisSwap]),
-  /// and clears it.
-  void _holdPinchFocal(BoardAxisConfig oldRows, BoardAxisConfig oldColumns) {
+  /// The rows [_board] has, as [_holdRows] reads them. The hours' top lies
+  /// at the band's edge where the row above the first slot is frozen, and
+  /// the room's height under it where the room scrolls with the slots:
+  /// where the grid opens with its opening line ([initState]).
+  _HandedRows _handedRowsNow() {
+    return (
+      config: _board.rows,
+      band: _leadingExtent,
+      firstSlotRow: _tracks.firstSlotRow,
+      top: _aboveFrozen ? 0.0 : _rowRoom,
+      hours: _tracks.hours,
+      slotMinutes: _tracks.slotMinutes,
+    );
+  }
+
+  /// Keeps the time at the hours' top ([_handedRowsNow]), or for a pinch
+  /// at its focal ([_rowFocal]), across rows the board has not laid out
+  /// yet in a viewport [viewportHeight] tall, and notes the rows it hands
+  /// the board.
+  ///
+  /// The board keeps the fractional track at the scrolled region's top
+  /// across a new rows axis ([RenderBoardViewport]), reading it against
+  /// the rows it laid out last, so rows coming or going above the slots,
+  /// the strip's or the room above it, would move the hours under it.
+  /// This sets the scroll offset that anchor lands from
+  /// ([scrollAcrossAxisSwap]), mapping the track by the slot it lies in.
+  /// It runs in the layout builder, after the frame's scroll activities
+  /// have moved the offset and right before the board lays out, so it
+  /// reads the offset the board will, and the rows it last handed over
+  /// are the ones the board laid out last: every path that replaces the
+  /// rows rebuilds the grid, which runs the builder again. New hours, a
+  /// new slot length, and rows whose slots alone change their height
+  /// outside a pinch keep the board's own anchor, which keeps the track at
+  /// the scrolled region's top: for slots that only change their height,
+  /// the time there.
+  void _holdRows(double viewportHeight) {
+    final handed = _handedRows;
+    final next = _handedRowsNow();
+    _handedRows = next;
+    final focal = _rowFocal;
+    _rowFocal = null;
+    final position = _positionOf(_verticalScroll);
+    if (handed == null ||
+        identical(handed.config.axis, next.config.axis) ||
+        position == null ||
+        !position.hasPixels ||
+        handed.hours != next.hours ||
+        handed.slotMinutes != next.slotMinutes ||
+        (focal == null &&
+            handed.firstSlotRow == next.firstSlotRow &&
+            handed.band == next.band &&
+            handed.top == next.top)) {
+      return;
+    }
+    final old = handed.config.axis;
+    final axis = next.config.axis;
+    final from = focal == null
+        ? handed.band + handed.top
+        : math.max(focal, handed.band);
+    final to = focal == null
+        ? next.band + next.top
+        : math.max(focal, next.band);
+    final track =
+        trackFractionAt(old, position.pixels + from) -
+        handed.firstSlotRow +
+        next.firstSlotRow;
+    scrollAcrossAxisSwap(
+      position,
+      old: old,
+      oldBand: handed.band,
+      next: axis,
+      nextBand: next.band,
+      viewportExtent: viewportHeight,
+      target:
+          axis.offsetOfFraction(track.clamp(0.0, axis.trackCount.toDouble())) -
+          to,
+    );
+  }
+
+  /// Keeps the lattice point under [_pinchFocal] there across the columns
+  /// that replaced [oldColumns] ([holdFocalAcrossAxisSwap]), leaves its
+  /// vertical part to [_holdRows] in [_rowFocal], and clears it.
+  void _holdPinchFocal(BoardAxisConfig oldColumns) {
     final focal = _pinchFocal;
     if (focal == null) {
       return;
     }
     _pinchFocal = null;
-    final vertical = _positionOf(_verticalScroll);
-    if (vertical != null && !identical(oldRows.axis, _board.rows.axis)) {
-      holdFocalAcrossAxisSwap(
-        vertical,
-        old: oldRows.axis,
-        next: _board.rows.axis,
-        band: _leadingExtent,
-        focal: focal.dy,
-      );
-    }
+    _rowFocal = focal.dy;
     final horizontal = _positionOf(_horizontalScroll);
     if (horizontal != null &&
         !identical(oldColumns.axis, _board.columns.axis)) {
@@ -2349,7 +2449,31 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return;
     }
     _pinchFocal = box.globalToLocal(update.focal);
+    _forgetPinchFocalAfterFrame();
     onZoom(slot, day);
+  }
+
+  /// Forgets [_pinchFocal] and [_rowFocal] once the next frame is done,
+  /// unless a later update took a focal meanwhile. A host that takes the
+  /// zoom rebuilds the grid in that frame, whose fit of the axes takes the
+  /// focal ([_holdPinchFocal]) and whose layout holds the rows there
+  /// ([_holdRows]). One that does not leaves the focal untaken, and the
+  /// forget keeps it from the next change of the rows, which then holds
+  /// the hours' top rather than where the fingers met. An update delivered
+  /// among a frame's post-frame callbacks, as the pointer resampler
+  /// delivers one ([GestureBinding.resamplingEnabled]), is taken in the
+  /// frame after, and a callback it adds then runs after that frame
+  /// ([SchedulerBinding.addPostFrameCallback]), so each update adds its
+  /// own and only the last one's forgets.
+  void _forgetPinchFocalAfterFrame() {
+    final focal = ++_pinchFocalCount;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (focal == _pinchFocalCount) {
+        _pinchFocal = null;
+        _rowFocal = null;
+      }
+    });
+    SchedulerBinding.instance.ensureVisualUpdate();
   }
 
   void _endPinch() {
@@ -2765,13 +2889,32 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// The rows a drag stays inside: the slot rows of [_tracks]. They bind a
-  /// block's drag; a bar lies in
-  /// the strip's rows, which they do not hold, so they bind nothing for it
-  /// ([BoardDragConfig.boundsOf]).
+  /// The rows a drag stays inside ([BoardDragConfig.boundsOf]), which hold
+  /// the span it starts from and so bind it. A block's are the slot rows
+  /// of [_tracks]. A bar's start at the strip's first row, and end with
+  /// the strip while its drag pointer lies over the strip or above it, so
+  /// the board judges the move by its days whatever row the proxy's top
+  /// rounds to, the room above the strip and the margin under it
+  /// included; they end with the lattice once the pointer lies under the
+  /// strip, where the placement follows the proxy into rows
+  /// [_canDropBar] refuses and the crossing's release decides
+  /// ([_releaseCross]). The board asks for each pointer move after
+  /// [_handlePointerMove] has noted it in [_Dragging.at].
   BoardDragBounds _boundsOf(GridKey key) {
+    if (!key.isBar) {
+      return BoardDragBounds(
+        rows: (start: _tracks.firstSlotRow, end: _tracks.lastSlotRow + 1),
+      );
+    }
+    final drag = _drag;
+    final at = drag != null && drag.key == key ? drag.at : null;
+    final under =
+        at != null && at.dy >= _headerExtent + _stripRoom + _stripExtent;
     return BoardDragBounds(
-      rows: (start: _tracks.firstSlotRow, end: _tracks.lastSlotRow + 1),
+      rows: (
+        start: _stripStart,
+        end: under ? _tracks.lastSlotRow + 2 : _stripStart + _stripRows,
+      ),
     );
   }
 
@@ -5616,13 +5759,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return LayoutBuilder(
       builder: (context, constraints) {
         _fitAxes(constraints.biggest);
+        _holdRows(constraints.biggest.height);
         return Stack(
           children: <Widget>[
             Positioned.fill(child: board),
             if (_stripRows > 0)
               Positioned(
                 left: 0.0,
-                top: _headerExtent,
+                // Centred on the rule the room above the strip draws in
+                // its last pixel row, as an hour label is on its line.
+                top: _headerExtent - styles.linePaint.strokeWidth / 2,
                 width: _gutterWidth,
                 height: 2 * _stripRoom,
                 child: const _StripLabel(),
@@ -6537,12 +6683,13 @@ class _StripTop extends StatelessWidget {
 }
 
 /// The all-day strip's label over the gutter, laid over the board in a box
-/// as wide as the gutter and centred on the strip's top edge, as an hour
-/// label is on its line: [CalendarLocalizations.allDay] in the hour
-/// labels' style, [_HourLabels.inset] inside the gutter's right edge as
-/// they are, on one line scaled down to fit where it is wider than the
-/// gutter less [_HourLabels.inset] on each side or taller than the box. It
-/// takes no press, so the gutter cells under it take theirs.
+/// as wide as the gutter and centred on the rule along the strip's top
+/// edge, in the pixel row above it, as an hour label is on its line:
+/// [CalendarLocalizations.allDay] in the hour labels' style,
+/// [_HourLabels.inset] inside the gutter's right edge as they are, on one
+/// line scaled down to fit where it is wider than the gutter less
+/// [_HourLabels.inset] on each side or taller than the box. It takes no
+/// press, so the gutter cells under it take theirs.
 class _StripLabel extends StatelessWidget {
   const _StripLabel();
 
@@ -6716,10 +6863,12 @@ class _LoadOverlay extends StatelessWidget {
 /// range being dragged, or whose create flow is open, and the times a move
 /// would land on, each filled like today's column and edged in the primary
 /// colour so it shows over that column too, one rect per day column it
-/// covers; and a line at the top of each slot row, under the last one and
-/// along the left edge of each day column, inside it, across the slots, but
-/// for a slot's top line touching the scrolled region's top edge where
-/// [ruledAbove]. The room above and below the slots shows the body alone.
+/// covers, its edges drawn over the lines; and a line at the top of each
+/// slot row and under the last one, in the pixel row above that edge, and
+/// along the left edge of each day column, inside it, across the slots,
+/// but for a slot's top line reaching above the scrolled region's top edge
+/// where [ruledAbove]. The room above and below the slots shows the body
+/// alone.
 /// Every paint it draws with is [styles]', made once per theme.
 class _TimedGridPainter extends BoardBackgroundPainter {
   const _TimedGridPainter({
@@ -6736,7 +6885,8 @@ class _TimedGridPainter extends BoardBackgroundPainter {
   final DateTime today;
 
   /// Whether a frozen row above the slots draws the rule along the
-  /// scrolled region's top edge, so a slot's line there would thicken it.
+  /// scrolled region's top edge, so a slot's line reaching into it would
+  /// thicken it.
   final bool ruledAbove;
 
   /// The wall minutes ([CalendarDates.wallMinuteOf]) of the create range, or of
@@ -6784,40 +6934,48 @@ class _TimedGridPainter extends BoardBackgroundPainter {
       );
     }
     final range = this.range;
-    if (range != null) {
-      _paintMarked(canvas, geometry, range, slotFirst, slotLast);
-    }
     final landing = this.landing;
-    if (landing != null) {
-      _paintMarked(canvas, geometry, landing, slotFirst, slotLast);
+    final marked = <Rect>[
+      if (range != null) ..._markedRects(geometry, range, slotFirst, slotLast),
+      if (landing != null)
+        ..._markedRects(geometry, landing, slotFirst, slotLast),
+    ];
+    for (final rect in marked) {
+      canvas.drawRect(rect, styles.tintPaint);
     }
     // The top line of each slot that shows, and the bottom line of the
-    // last slot where the room below it shows.
+    // last slot where the room below it shows, each in the pixel row
+    // above its row's top, as the frozen rows above the slots draw their
+    // rules inside them; none whose stroke reaches above the region's top
+    // where a frozen row's rule runs along it.
     final linePaint = styles.linePaint;
-    final edge = region.top + linePaint.strokeWidth / 2;
+    final stroke = linePaint.strokeWidth;
     for (var row = slotFirst; row <= math.min(lastRow, slotLast + 1); row++) {
-      final y = geometry.visibleCellRect(row, firstCol).top;
-      if (ruledAbove && y < edge) {
+      final top = geometry.visibleCellRect(row, firstCol).top;
+      if (ruledAbove && top < region.top + stroke) {
         continue;
       }
+      final y = top - stroke / 2;
       canvas.drawLine(Offset(first.left, y), Offset(last.right, y), linePaint);
     }
     // Inside each day column, as the strip's and the notice rows' cells
     // draw their day rules, so the rules run on straight across them.
-    final inside = linePaint.strokeWidth / 2;
     for (var col = firstCol; col <= lastCol; col++) {
-      final x = geometry.visibleCellRect(slotFirst, col).left + inside;
+      final x = geometry.visibleCellRect(slotFirst, col).left + stroke / 2;
       canvas.drawLine(Offset(x, first.top), Offset(x, last.bottom), linePaint);
+    }
+    // Over the lines, so a line on a range's end leaves its edge whole.
+    for (final rect in marked) {
+      canvas.drawRect(rect.deflate(1.0), styles.markEdgePaint);
     }
     canvas.restore();
   }
 
-  /// Fills, in each visible day column, the part of [marked], wall
+  /// The rect, in each visible day column, of the part of [marked], wall
   /// minutes, on that column's day that shows in the visible slot rows
   /// [slotFirst] to [slotLast], each minute as far into its slot's row as
-  /// it lies into the slot, and edges it.
-  void _paintMarked(
-    Canvas canvas,
+  /// it lies into the slot.
+  List<Rect> _markedRects(
     BoardGeometryView geometry,
     ({int start, int end}) marked,
     int slotFirst,
@@ -6838,6 +6996,7 @@ class _TimedGridPainter extends BoardBackgroundPainter {
       return rect.top + fraction * rect.height;
     }
 
+    final rects = <Rect>[];
     for (
       var col = math.max(1, geometry.firstVisibleCol);
       col <= geometry.lastVisibleCol;
@@ -6853,15 +7012,11 @@ class _TimedGridPainter extends BoardBackgroundPainter {
         continue;
       }
       final cell = geometry.visibleCellRect(slotFirst, col);
-      final rect = Rect.fromLTRB(
-        cell.left,
-        yOf(start, col),
-        cell.right,
-        yOf(end, col),
+      rects.add(
+        Rect.fromLTRB(cell.left, yOf(start, col), cell.right, yOf(end, col)),
       );
-      canvas.drawRect(rect, styles.tintPaint);
-      canvas.drawRect(rect.deflate(1.0), styles.markEdgePaint);
     }
+    return rects;
   }
 
   @override
@@ -6879,14 +7034,17 @@ class _TimedGridPainter extends BoardBackgroundPainter {
 /// gutter, and the line marking the current time.
 ///
 /// A label names the start of the hours, each whole hour after it, and
-/// the end of the hours, centred on its line and right-aligned in the
-/// gutter. The grid's room above its first slot and below its last holds
-/// the halves of the first and the last label past those lines, or where
-/// a frozen row takes a room's place, the room frozen under the all-day
-/// strip or a row counting items outside the hours, the gutter beside that
-/// row, which [reachAbove] and [reachBelow] measure: a label shows whole
-/// there while its line shows, and sinks into the row's edge as its line
-/// scrolls beneath the row. The labels are clipped to the
+/// the end of the hours, centred on its line as drawn and right-aligned in
+/// the gutter: the line in the pixel row above the slots' edge, as the
+/// slots' lines and the frozen rows above them draw it, and for the end
+/// beside a frozen row below the slots, that row's rule in the pixel row
+/// under the edge. The grid's room above its first slot and below its
+/// last holds the halves of the first and the last label past those
+/// lines, or where a frozen row takes a room's place, the room frozen
+/// under the all-day strip or a row counting items outside the hours, the
+/// gutter beside that row, which [reachAbove] and [reachBelow] measure: a
+/// label shows whole there while its line shows, and sinks into the row's
+/// edge as its line scrolls beneath the row. The labels are clipped to the
 /// gutter below the day header, and a label taller than a slot still shows
 /// whole, because no gutter cell paints over the foreground. The line
 /// runs across [now]'s column at its minute, with a dot at its left end,
@@ -6933,7 +7091,8 @@ class _GridForegroundPainter extends BoardForegroundPainter {
   final double reachAbove;
 
   /// How far below the scrolled region the labels may paint, as
-  /// [reachAbove].
+  /// [reachAbove]. Where it is not 0, the frozen row there draws the end's
+  /// line inside it.
   final double reachBelow;
 
   @override
@@ -6960,20 +7119,26 @@ class _GridForegroundPainter extends BoardForegroundPainter {
       return first.top + (row - firstRow) * slot;
     }
 
+    // A label is centred on its line as drawn, [offset] from the line's
+    // edge, the half pixel [rule] either side of it.
+    final rule = styles.linePaint.strokeWidth / 2;
     final half = labels.height / 2;
     // A label is clipped to the gutter of the scrolled region, and past
-    // its top edge by half its height less how far its line lies above
-    // that edge, up to [reachAbove], and past its bottom edge likewise. So
-    // it shows whole beside a frozen row while its line shows, and sinks
-    // into the row's edge as its line scrolls beneath the row.
-    void paintOn(int minute, double line) {
+    // the region's top edge by half the label's height, plus the signed
+    // distance its centre lies above its line's edge, less how far that
+    // edge lies above the region's, if it does, clamped from 0 to
+    // [reachAbove]; past the bottom edge likewise, the distances taken
+    // below and the reach clamped from 0 to [reachBelow]. So it shows
+    // whole beside a frozen row while its line shows, and sinks into the
+    // row's edge as its line scrolls beneath the row.
+    void paintOn(int minute, double line, double offset) {
       final label = labels.of(minute);
       final own = label.height / 2;
-      final above = (own - math.max(0.0, region.top - line)).clamp(
+      final above = (own - offset - math.max(0.0, region.top - line)).clamp(
         0.0,
         reachAbove,
       );
-      final below = (own - math.max(0.0, line - region.bottom)).clamp(
+      final below = (own + offset - math.max(0.0, line - region.bottom)).clamp(
         0.0,
         reachBelow,
       );
@@ -6986,23 +7151,24 @@ class _GridForegroundPainter extends BoardForegroundPainter {
           region.bottom + below,
         ),
       );
-      _paintLabel(canvas, label, first.right, line - own);
+      _paintLabel(canvas, label, first.right, line + offset - own);
       canvas.restore();
     }
 
     // A line just past the visible slots still shows the half of its
-    // label on this side of it.
-    final reach = slot > 0.0 ? (half / slot).ceil() : 0;
+    // label on this side of it, and the half pixel its centre lies off
+    // the line's edge.
+    final reach = slot > 0.0 ? ((half + rule) / slot).ceil() : 0;
     final from = math.max(tracks.firstSlotRow, firstRow - reach);
     final to = math.min(tracks.lastSlotRow, lastRow + reach);
     for (var row = from; row <= to; row++) {
       if (labelsRow(tracks, row)) {
-        paintOn(tracks.minuteAt(row), lineOf(row));
+        paintOn(tracks.minuteAt(row), lineOf(row), -rule);
       }
     }
     final end = lineOf(tracks.lastSlotRow + 1);
-    if (end - half < region.bottom && end + half > region.top) {
-      paintOn(tracks.hours.end, end);
+    if (end - half - rule < region.bottom && end + half + rule > region.top) {
+      paintOn(tracks.hours.end, end, reachBelow > 0.0 ? rule : -rule);
     }
   }
 

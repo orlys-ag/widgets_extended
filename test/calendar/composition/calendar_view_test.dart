@@ -2975,15 +2975,9 @@ void main() {
       final recorder = CreateRecorder();
       await tester.pumpWidget(calendar(memory, controller, recorder));
       await tester.pumpAndSettle();
-      // Setup sanity: the row above the first slot is the notice's, which
-      // the band of frozen rows takes in, where the room it replaces lies
-      // outside the band.
-      final board = tester.widget<Board<GridKey, Object?>>(
-        find.byWidgetPredicate((widget) {
-          return widget is Board<GridKey, Object?>;
-        }),
-      );
-      expect(board.controller.rows.frozenStart, weekRowOf(8 * 60));
+      // Setup sanity: a row above the first slot counts the entry before
+      // the hours, in place of the margin under the strip.
+      expect(find.byKey(hiddenAboveKey(tuesday)), findsOneWidget);
       final col = weekColOf(tuesday);
       recorder.expected = () {
         return gridRowsRect(

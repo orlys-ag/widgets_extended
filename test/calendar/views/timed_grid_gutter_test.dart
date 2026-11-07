@@ -51,6 +51,26 @@ final class _AllDay extends DefaultCalendarLocalizations {
   }
 }
 
+/// English, but for the times of day, which [write] writes, and
+/// [CalendarLocalizations.allDay], which is [allDayText].
+final class _TimesAndAllDay extends DefaultCalendarLocalizations {
+  const _TimesAndAllDay(this.write, this.allDayText);
+
+  final String Function(int minute) write;
+
+  final String allDayText;
+
+  @override
+  String formatTime(int minute, CalendarHourLabelFormat format) {
+    return write(minute);
+  }
+
+  @override
+  String get allDay {
+    return allDayText;
+  }
+}
+
 class _TimesDelegate extends LocalizationsDelegate<CalendarLocalizations> {
   const _TimesDelegate(this.strings);
 
@@ -268,6 +288,12 @@ double lineAbove(WidgetTester tester, int row) {
   return viewportOf(tester).rectOfCell(row, 1)!.top;
 }
 
+/// The middle of the 1 px rule drawn along [lineAbove], in the pixel row
+/// above that line.
+double ruleAbove(WidgetTester tester, int row) {
+  return lineAbove(tester, row) - 0.5;
+}
+
 void main() {
   testWidgets("GF1 labels wider than the least gutter's room with no break "
       "in them widen the gutter to the widest and 6 px on each side, and "
@@ -336,8 +362,8 @@ void main() {
       <double>{50.0},
     );
     // The first slot is row 2, under the day header and the room.
-    expect(labels[0].ink.center.dy, lineAbove(tester, 2));
-    expect(labels[2].ink.center.dy, lineAbove(tester, 10));
+    expect(labels[0].ink.center.dy, ruleAbove(tester, 2));
+    expect(labels[2].ink.center.dy, ruleAbove(tester, 10));
     expect(viewportOf(tester).rectOfCell(1, 1)!.height, 22.0 / 2 + 2.0);
   });
 
@@ -561,7 +587,8 @@ void main() {
 
   testWidgets("GF9 beside a row counting entries outside the hours, a "
       "one-line label among two-line ones reaches past the row's edge by "
-      "half its own height", (tester) async {
+      "half its own height and the half pixel its line lies above that "
+      "edge", (tester) async {
     final harness =
         Harness(
             entries: <CalendarEntry<String>>[
@@ -588,8 +615,166 @@ void main() {
       }),
       contains(2),
     );
-    expect(labels.first.ink.center.dy, region.top);
-    expect(labels.first.clip.top, region.top - 11.0 / 2);
+    // Centred on the row's rule, in the pixel row above the edge, and
+    // whole beside the row.
+    expect(labels.first.ink.center.dy, region.top - 0.5);
+    expect(labels.first.clip.top, region.top - 0.5 - 11.0 / 2);
+  });
+
+  testWidgets("GF15 beside a frozen row counting the entries after the "
+      "hours, the end's label is centred on that row's rule, in the pixel "
+      "row under the hours' end, and shows whole", (tester) async {
+    final harness = Harness(
+      entries: <CalendarEntry<String>>[
+        CalendarEntry<String>(
+          id: "late",
+          start: DateTime(2026, 4, 21, 13),
+          end: DateTime(2026, 4, 21, 14),
+          title: "late",
+          color: const Color(0xFF336699),
+          payload: "late",
+        ),
+      ],
+    );
+    await harness.pump(tester);
+    final region = viewportOf(tester).scrolledRegion;
+    final end = labelsOf(tester).last;
+    // Setup sanity: the grid holds the hours whole, their end on the
+    // region's bottom edge, where the frozen row lies.
+    expect(viewportOf(tester).verticalPosition!.maxScrollExtent, 0.0);
+    expect(
+      lineAbove(tester, 2 + harness.hours.slotCountOf(15)),
+      moreOrLessEquals(region.bottom),
+    );
+    expect(end.ink.center.dy, moreOrLessEquals(region.bottom + 0.5));
+    expect(end.clip.bottom, greaterThanOrEqualTo(end.ink.bottom));
+  });
+
+  testWidgets("GF16 a pinch update delivered among a frame's post-frame "
+      "callbacks, as the pointer resampler delivers one, keeps the time "
+      "under the fingers in the frame the grid takes its zoom in", (
+    tester,
+  ) async {
+    final harness = Harness()
+      ..hours = CalendarDayHours.allDay
+      ..zooms = true;
+    await harness.pump(tester);
+    viewportOf(tester).verticalPosition!.jumpTo(300.0);
+    await tester.pump();
+    // The fraction of a row the rows lay under the global [y].
+    double rowAt(double y) {
+      final viewport = viewportOf(tester);
+      return trackFractionAt(
+        viewport.controller.rows.axis,
+        viewport.verticalPosition!.pixels +
+            viewport.globalToLocal(Offset(0.0, y)).dy,
+      );
+    }
+
+    // The gutter, where no press creates.
+    final focal = Offset(gutterOf(tester) / 2, 300.0);
+    final top = await tester.startGesture(
+      focal - const Offset(0.0, 30.0),
+      pointer: 41,
+    );
+    final bottom = await tester.startGesture(
+      focal + const Offset(0.0, 30.0),
+      pointer: 42,
+    );
+    for (var i = 0; i < 3; i++) {
+      await top.moveBy(const Offset(0.0, -6.0));
+      await bottom.moveBy(const Offset(0.0, 6.0));
+      await tester.pump();
+    }
+    // Setup sanity: the pinch zoomed the grid.
+    expect(harness.minSlotHeight, greaterThan(defaultMinSlotHeight));
+    final held = rowAt(focal.dy);
+    var delivered = false;
+    tester.binding.addPostFrameCallback((_) {
+      delivered = true;
+      for (final (pointer, dy) in const <(int, double)>[
+        (41, -60.0),
+        (42, 60.0),
+      ]) {
+        tester.binding.handlePointerEventForSource(
+          PointerMoveEvent(
+            pointer: pointer,
+            position: focal + Offset(0.0, dy),
+            delta: Offset(0.0, dy.sign * 6.0),
+            buttons: kPrimaryButton,
+          ),
+          source: TestBindingEventSource.test,
+        );
+      }
+    });
+    // An update while no frame runs, whose frame runs the callback above
+    // among its post-frame callbacks before the grid's own.
+    await top.moveBy(const Offset(0.0, -6.0));
+    await bottom.moveBy(const Offset(0.0, 6.0));
+    final once = harness.minSlotHeight;
+    await tester.pump();
+    // Setup sanity: the callback's update came and zoomed the grid again.
+    expect(delivered, isTrue);
+    expect(harness.minSlotHeight, greaterThan(once));
+    await tester.pump();
+    expect(rowAt(focal.dy), moreOrLessEquals(held, epsilon: 1e-6));
+    await top.up();
+    await bottom.up();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("GF17 a label whose line lies past the region's bottom edge "
+      "by less than half the label and the half pixel its line lies above "
+      "that line's edge shows the sliver of it above the edge, whether it "
+      "names an hour or the end of the hours", (tester) async {
+    // 10-minute slots of 5.75 px, half a one-line label and a quarter
+    // pixel, overflow the view, so the grid scrolls on its least slots.
+    final harness = Harness()
+      ..hours = CalendarDayHours.allDay
+      ..slotMinutes = 10
+      ..minSlotHeight = 5.75;
+    await harness.pump(tester);
+    final viewport = viewportOf(tester);
+    final vertical = viewport.verticalPosition!;
+    final region = viewport.scrolledRegion;
+    final half = labelsOf(tester).first.ink.height / 2;
+    // Setup sanity: every label is one line 11 px tall, and the slots keep
+    // their least height.
+    expect(
+      labelsOf(tester).map((label) {
+        return label.lines;
+      }).toSet(),
+      <int>{1},
+    );
+    expect(half, 11.0 / 2);
+    expect(viewport.rectOfCell(2, 1)!.height, 5.75);
+
+    // Scrolls [row]'s top line [past] the region's bottom edge.
+    Future<double> lineAt(int row, double past) async {
+      vertical.jumpTo(
+        vertical.pixels + lineAbove(tester, row) - (region.bottom + past),
+      );
+      await tester.pump();
+      return lineAbove(tester, row);
+    }
+
+    // 12:00's line, on the top of row 74, under the day header, the room
+    // and 72 slots, with the slot above it starting past the edge too.
+    final noon = await lineAt(74, half + 0.375);
+    // Setup sanity: no slot that shows holds the line's label.
+    expect(lineAbove(tester, 73), greaterThan(region.bottom));
+    final noonLabel = labelsOf(tester).last;
+    expect(noonLabel.ink.center.dy, moreOrLessEquals(noon - 0.5));
+    expect(noonLabel.ink.top, lessThan(noonLabel.clip.bottom));
+    // The end's line, on the top of the room under the 144 slots, with no
+    // row counting entries below it.
+    final end = await lineAt(146, half + 0.25);
+    // Setup sanity: the scroll took the line more than half a label past
+    // the edge.
+    expect(end - region.bottom, greaterThan(half));
+    final endLabel = labelsOf(tester).last;
+    expect(endLabel.ink.center.dy, moreOrLessEquals(end - 0.5));
+    expect(endLabel.ink.top, lessThan(endLabel.clip.bottom));
   });
 
   testWidgets("GF10 each line of a two-line label ends 6 px inside the "
@@ -675,6 +860,29 @@ void main() {
     final short = tester.getRect(find.text("abc"));
     expect(short.right - left, moreOrLessEquals(66.0));
     expect(short.width, moreOrLessEquals(36.0));
+  });
+
+  testWidgets("GF14 the all-day strip's label taller than its box, which "
+      "hour labels shrunk to fit the widest gutter make short, is scaled "
+      "down to the box's height", (tester) async {
+    final harness = Harness()
+      ..editable = true
+      ..strings = _TimesAndAllDay((minute) {
+        return "${minute ~/ 60}".padLeft(20, "0");
+      }, "A");
+    await harness.pump(tester);
+    final label = find.text("A");
+    final box = tester.getRect(
+      find.ancestor(of: label, matching: find.byType(FittedBox)),
+    );
+    // The size the label's paragraph laid itself out at, before the box
+    // scales it.
+    final own = tester.getSize(
+      find.descendant(of: label, matching: find.byType(RichText)),
+    );
+    // Setup sanity: the label's line is taller than its box.
+    expect(own.height, greaterThan(box.height + 1.0));
+    expect(tester.getRect(label).height, moreOrLessEquals(box.height));
   });
 
   testWidgets("GF13 beside the all-day strip's margin the opening hour's "
