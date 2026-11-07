@@ -999,14 +999,16 @@ class _DayListState<T> extends State<DayList<T>> {
   late DateTime _topDay = widget.selectedDay;
 
   /// Whether the scroll under way began with a drag, a fling after it
-  /// included: only such a scroll reports top days.
+  /// included: only such a scroll reports top days. A reveal clears it,
+  /// its scroll taking over without an end of the drag's ([_reveal]).
   bool _dragScrolling = false;
 
   /// Whether a frame will look for a new top day.
   bool _topDayCheckScheduled = false;
 
-  /// Counts the reveals started, so a top day check scheduled before one
-  /// reports nothing.
+  /// Counts the reveals started and the selections that will start one, so
+  /// a top day check, or a reveal's landing, scheduled before either does
+  /// nothing.
   int _reveals = 0;
 
   /// The [CalendarDates.dayNumber] and the unfolded start
@@ -1140,6 +1142,11 @@ class _DayListState<T> extends State<DayList<T>> {
     }
     final day = widget.selectedDay;
     if (day != oldWidget.selectedDay && day != _topDay) {
+      // A top day check scheduled before this build, as the tick of a
+      // fling under way in this frame schedules one, runs before the
+      // reveal's callback below, and would report the day the scroll
+      // shows over the one selected.
+      _reveals++;
       // After the frame, once the tree has laid out what this build gives
       // it.
       SchedulerBinding.instance.addPostFrameCallback((_) {
@@ -1308,6 +1315,12 @@ class _DayListState<T> extends State<DayList<T>> {
   /// motion, or at once where its duration is zero, or re-centres the list
   /// on it when it is too near or past either end of the days.
   Future<void> _reveal(DateTime day) async {
+    // A reveal's scroll that takes over a drag's, or its fling, replaces
+    // that scroll's activity with no end or start between them
+    // ([ScrollPosition.beginActivity]), so it is no longer a drag's; and a
+    // top day check scheduled before it reports nothing.
+    _dragScrolling = false;
+    final reveals = ++_reveals;
     final number = CalendarDates.dayNumber(day);
     final tree = _tree;
     if (tree == null ||
@@ -1322,7 +1335,6 @@ class _DayListState<T> extends State<DayList<T>> {
     }
     final from = CalendarDates.dayNumber(_topDay);
     _topDay = day;
-    final reveals = ++_reveals;
     final key = DayListHeader.headerKeyOf(day);
     final theme = _styles.theme;
     final landed = await tree.animateScrollToKey(

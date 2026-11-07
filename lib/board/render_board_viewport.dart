@@ -917,11 +917,16 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// the new one, by a `correctBy` the pass loop's `applyContentDimensions`
   /// then settles, as it settles the content axis's corrections. Not on a
   /// controller swap, a new model rather than a zoom, and not for a config
-  /// that keeps its axis instance.
+  /// that keeps its axis instance. A landing the controller holds for the
+  /// new instance ([BoardController.landSwappedAxisAt]) names the offset
+  /// in place of the anchor's; every layout takes both axes' landings, so
+  /// one this layout does not use is dropped.
   void _anchorSwappedAxes() {
     _ownShiftAtSwap = null;
     final rows = _controller.rows;
     final columns = _controller.columns;
+    final rowLanding = _controller.takeAxisLanding(Axis.vertical);
+    final columnLanding = _controller.takeAxisLanding(Axis.horizontal);
     if (identical(_laidOutController, _controller)) {
       final oldRows = _laidOutRows;
       if (oldRows != null && !identical(oldRows.axis, rows.axis)) {
@@ -930,6 +935,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           oldRows,
           rows,
           viewportDimension.height,
+          identical(rowLanding?.axis, rows.axis) ? rowLanding : null,
         );
       }
       final oldColumns = _laidOutColumns;
@@ -939,6 +945,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
           oldColumns,
           columns,
           viewportDimension.width,
+          identical(columnLanding?.axis, columns.axis) ? columnLanding : null,
         );
       }
     }
@@ -951,12 +958,16 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// direction agnostic: the band sits at the content's leading edge
   /// whichever way the axis paints. The target is clamped into the new
   /// axis's scroll range, the one [_applyContentDimensions] applies, so a
-  /// lattice that shrank past the anchor ends scrolled to its end.
+  /// lattice that shrank past the anchor ends scrolled to its end. A
+  /// [landing] moves the offset from the anchor's target to its own as a
+  /// jump would, the own scroll shift keeping the difference of the
+  /// anchor's two targets.
   void _anchorSwappedAxis(
     ViewportOffset offset,
     BoardAxisConfig old,
     BoardAxisConfig next,
     double viewportExtent,
+    ({BoardAxis axis, double track, double? at})? landing,
   ) {
     final oldAxis = old.axis;
     final newAxis = next.axis;
@@ -1010,7 +1021,14 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       );
       _ownShiftAtSwap = target - ownTarget;
     }
-    final correction = target - offset.pixels;
+    final landed = landing == null
+        ? target
+        : (newAxis.offsetOfFraction(
+                    landing.track.clamp(0.0, newAxis.trackCount.toDouble()),
+                  ) -
+                  (landing.at ?? newBand))
+              .clamp(0.0, maxTarget);
+    final correction = landed - offset.pixels;
     if (correction.abs() >= precisionErrorTolerance) {
       offset.correctBy(correction);
     }

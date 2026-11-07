@@ -166,6 +166,12 @@ gutter's cell beside the strip's second row.
 rows and a count row, so a day needing four shows them all. In the count
 row each day that hides bars, and no other, shows a "+N more" chip in the
 look of Month's, in a bar's place, a tap on which shows every row.
+- In Week and Day, an expanded all-day strip whose rows would take more
+than half the grid's height keeps the most that fit there, and never fewer
+than four, under the day header, with a rule along the last; its other
+rows scroll with the hours. Expanding it shows them under the kept rows,
+and collapsing it brings back the time at the hours' top before the
+expand.
 - In Week and Day, the all-day strip and the hours read as one grid. Each
 day's strip cells take the fill of its column below, today's tint and the
 weekend's background, and the rule along each day's left edge, the first
@@ -192,7 +198,15 @@ the grid moves to that day.
 the rows above them change: when edit mode gives the empty strip its row
 or takes it, a store's write or a read adds or removes strip rows, the
 strip expands or collapses, or a row counting the entries before the
-hours comes or goes.
+hours comes or goes; and when the slot length or the hours change, a time
+before the new hours giving their start, and one past them the end of the
+scroll.
+- In Week and Day, leaving edit mode ends the gestures that edit: a move or
+a resize under way writes nothing, a create range under way reports
+nothing, and a tap or a touch hold pressed in edit mode creates nothing.
+- In Agenda, a day selected while a drag or a fling scrolls the list is
+revealed at the list's top and stays selected, rather than giving way to
+the day the scroll shows.
 - `package:widgets_extended/widgets_extended.dart` exports the calendar,
 so an app that also imports a library declaring one of its names, as
 `syncfusion_flutter_calendar` declares `CalendarController`,
@@ -391,6 +405,10 @@ in view. Each move scrolls only as far as the new cell needs. Escape cancels a
 live drag. `Board.focusNode` and `Board.autofocus` are new.
 - Added `BoardController.revealCell`, which scrolls the least that shows a
 cell between the frozen bands, and not at all when it already shows.
+- Added `BoardController.landSwappedAxisAt`. A new axis instance keeps the
+track at the scrolled region's leading edge; a landing has the next layout
+put the track it names at the distance it names from the viewport's leading
+edge instead, as a host that maps its tracks across the change needs.
 - `addItem`, `moveItem`, `resizeItem` and `setItems` now throw an
 `ArgumentError` in release builds too for a span that breaks one of
 `BoardSpan`'s rules (a NaN or out-of-range fraction, a negative start, no

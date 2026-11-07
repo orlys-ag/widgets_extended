@@ -262,6 +262,12 @@ class BoardController<TKey, TItem> {
   int _resizeShiftFloorRow = 0;
   int _resizeShiftFloorCol = 0;
 
+  /// The landings [landSwappedAxisAt] left for the next layout, per axis:
+  /// the axis instance each was given for, its track and its distance
+  /// from the viewport's leading edge.
+  ({BoardAxis axis, double track, double? at})? _rowLanding;
+  ({BoardAxis axis, double track, double? at})? _columnLanding;
+
   bool _disposed = false;
 
   /// The row axis config. Assigning a new one re-derives the primary and
@@ -1197,6 +1203,39 @@ class BoardController<TKey, TItem> {
       col,
       avoidFrozenTracks: avoidFrozenTracks,
     );
+  }
+
+  /// Has the board's next layout put the track-space coordinate [track] of
+  /// the [axis] config set now at [at] logical pixels from the viewport's
+  /// leading edge, the edge the axis's first track lies toward, or at the
+  /// end of its leading frozen band where [at] is null.
+  ///
+  /// A layout that finds a new axis instance in [rows] or [columns] under
+  /// the controller it laid out last keeps the coordinate at the scrolled
+  /// region's leading edge there, the track holding its place across a
+  /// zoom. A landing replaces that coordinate where the layout's new
+  /// instance is the one [axis]'s config holds at this call: [track] is
+  /// clamped into the new lattice, and the offset into the new scroll
+  /// range. The next layout takes the landing whether or not it uses it,
+  /// so one that finds no new instance on [axis], or another one, or this
+  /// controller new to the board, drops it; a later call for [axis]
+  /// replaces it.
+  ///
+  /// The landing corrects that layout's offset as the anchor does rather
+  /// than scrolling, so an [animateScrollToCell] in flight on [axis] goes
+  /// on to its cell.
+  void landSwappedAxisAt(Axis axis, double track, {double? at}) {
+    _assertNotDisposed();
+    assert(track.isFinite, "The track to land at must be finite: $track");
+    assert(
+      at == null || at.isFinite,
+      "The distance to land the track at must be finite: $at",
+    );
+    if (axis == Axis.vertical) {
+      _rowLanding = (axis: _rows.axis, track: track, at: at);
+    } else {
+      _columnLanding = (axis: _columns.axis, track: track, at: at);
+    }
   }
 
   /// The extent of the LEADING frozen band on [axis], measured from the

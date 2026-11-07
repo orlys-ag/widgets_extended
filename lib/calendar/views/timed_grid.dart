@@ -35,6 +35,12 @@ const double _noticeHeight = 24.0;
 /// The height of one row of the all-day strip.
 const double _allDayRowHeight = 22.0;
 
+/// The share of the grid's height that the day header, the room above the
+/// all-day strip and the strip's frozen rows keep within where an expanded
+/// strip's rows would take more ([_TimedGridState._frozenStripRows]). The
+/// row above the slots, frozen under a strip frozen whole, is not counted.
+const double _frozenStripShare = 0.5;
+
 /// The time the grid opens scrolled to when it does not show the clock's
 /// day, where its hours hold it.
 const int _openingMinute = 8 * 60;
@@ -787,7 +793,12 @@ class TimedGrid<T> extends StatefulWidget {
 
   /// Whether the grid is in edit mode: its blocks move and resize, and its
   /// empty slots take a create gesture, as [editPolicy] lets them. Out of
-  /// it the grid is read-only, and asks [editPolicy] nothing.
+  /// it the grid is read-only, and asks [editPolicy] nothing. Leaving it
+  /// ends the gestures that edit: a move or a resize under way writes
+  /// nothing, a create range under way reports nothing, and a tap or a
+  /// touch hold pressed in it creates nothing, the held finger scrolling
+  /// the grid; a create flow already reported keeps its range marked until
+  /// it closes.
   final bool editable;
 
   /// What the gestures may change in edit mode ([CalendarEditPolicy]);
@@ -1136,8 +1147,9 @@ typedef _NowMark = ({int column, int minute});
 
 /// The rows the grid hands its board, as [_TimedGridState._holdRows]
 /// reads them: the [config], the height of its leading band, its first
-/// slot row, how far under that band the hours' top lies, and the hours
-/// and slot length its slots step through.
+/// slot row, how far under that band the hours' top lies, the hours and
+/// slot length its slots step through, and the all-day strip's first row
+/// and its row count.
 typedef _HandedRows = ({
   BoardAxisConfig config,
   double band,
@@ -1145,6 +1157,8 @@ typedef _HandedRows = ({
   double top,
   CalendarDayHours hours,
   int slotMinutes,
+  int stripStart,
+  int stripRows,
 });
 
 /// What the blocks and bars ask in edit mode: [policy], at [now].
@@ -1513,6 +1527,28 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   late int _rowStripRows = _stripRows;
   late CalendarHourLabelFormat _rowFormat = widget.hourLabelFormat;
 
+  /// The strip rows the rows the board has keep frozen
+  /// ([_frozenStripRows]), which the readers of the band take, as they
+  /// take [_rowRoom], because a build measures [_labelRoom] before
+  /// [_fitAxes] decides again.
+  late int _rowFrozenStripRows = _stripRows;
+
+  /// The minute of the day at the hours' top before the expand that left
+  /// part of the strip scrolling ([_expandStrip]), which the collapse that
+  /// freezes it whole again lands back there ([_collapseStrip]); null once
+  /// the rows freeze the strip whole for any other reason ([_replaceRows]).
+  double? _minuteBeforeExpand;
+
+  /// Whether the next fit of the rows lands the board at the top of the
+  /// lattice: set by an expand that leaves part of the strip scrolling,
+  /// so its rows past the band show under it ([_holdRows]).
+  bool _revealStrip = false;
+
+  /// The minute of the day the next fit of the rows lands at the hours'
+  /// top in place of holding the one there ([_holdRows]): set by a
+  /// collapse from [_minuteBeforeExpand].
+  double? _landMinute;
+
   /// The room above the first slot and below the last: half the tallest
   /// hour label and the gap beside it, so the labels centred on the first
   /// and the last line show whole. Each build sets it from the labels'
@@ -1542,10 +1578,15 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// The create gestures. They live here rather than in the board, and are
   /// armed only for a press on an empty body cell, so a press on a block
-  /// leaves the arena to the block's own move and resize gestures.
-  late final TapGestureRecognizer _tap;
-  late final ImmediateMultiDragGestureRecognizer _immediateRange;
-  late final DelayedMultiDragGestureRecognizer _delayedRange;
+  /// leaves the arena to the block's own move and resize gestures. Made
+  /// anew on leaving edit mode ([_resetCreateGestures]).
+  late TapGestureRecognizer _tap;
+  late ImmediateMultiDragGestureRecognizer _immediateRange;
+  late DelayedMultiDragGestureRecognizer _delayedRange;
+
+  /// The device's gesture settings as [didChangeDependencies] last read
+  /// them, which the create gestures take.
+  DeviceGestureSettings? _gestureSettings;
 
   /// Set when the grid's scroll ends and cleared by the next microtask. A
   /// touch down on a flinging grid ends the fling before the listener
@@ -1592,28 +1633,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _calendarNow = widget.now.value;
     _limits = ValueNotifier<_EditLimits<T>?>(_limitsOf());
     _pinch.holding.addListener(_handleHolding);
-    _tap = TapGestureRecognizer(debugOwner: this)..onTapUp = _handleTapUp;
-    // Each pointer kind goes to one range recognizer. A precise pointer
-    // starts a range once it passes its hit slop, before the scrollable's
-    // pan reaches its own, and the pan never takes a mouse. Touch starts
-    // one only after a hold: the delayed recognizer rejects a pointer that
-    // moves first, leaving the drag to the scrollable.
-    _immediateRange = ImmediateMultiDragGestureRecognizer(
-      debugOwner: this,
-      supportedDevices: const <PointerDeviceKind>{
-        PointerDeviceKind.mouse,
-        PointerDeviceKind.stylus,
-        PointerDeviceKind.invertedStylus,
-        PointerDeviceKind.trackpad,
-      },
-    )..onStart = _beginRange;
-    _delayedRange = DelayedMultiDragGestureRecognizer(
-      debugOwner: this,
-      supportedDevices: const <PointerDeviceKind>{
-        PointerDeviceKind.touch,
-        PointerDeviceKind.unknown,
-      },
-    )..onStart = _beginRange;
+    _makeCreateGestures();
     _board = BoardController<GridKey, GridShape<T>>(
       vsync: this,
       rows: _rowsConfig(),
@@ -1638,7 +1658,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       // centred on it needs the room above it that the first line has,
       // which a frozen row above the slots gives it: the room frozen under
       // the strip, or the row counting the entries before the hours, which
-      // the labels reach into ([_GridForegroundPainter.reachAbove]).
+      // the labels reach into ([_GridForegroundPainter._reachAboveOf]).
       final vertical = _positionOf(_verticalScroll);
       if (vertical != null && !_aboveFrozen) {
         vertical.jumpTo(
@@ -1663,8 +1683,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     final policy = widget.editPolicy ?? _unrestricted;
     final policyChanged = policy != _policy;
-    if (policyChanged) {
-      _cancelForNewPolicy();
+    final leftEditMode = oldWidget.editable && !widget.editable;
+    if (policyChanged || leftEditMode) {
+      _cancelEdits();
+    }
+    if (leftEditMode) {
+      _resetCreateGestures();
     }
     _rules = _rules.updated(
       policy: policy,
@@ -1861,16 +1885,67 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _updateStripMark();
   }
 
-  /// Ends the gestures a new policy would answer otherwise, writing
-  /// nothing: cancels the board's drag ([_cancelBoardDrag]), keeping its
-  /// [_Dragging.lifted], so the [_handleDragEnd] the cancel queues puts a
-  /// lifted entry's other pieces back, and detaches a create range. The
-  /// range a create flow marks stays, as its range is reported already.
-  /// Runs before [_tracks] is replaced.
-  void _cancelForNewPolicy() {
+  /// Ends the gestures that edit, writing nothing, for a new policy, which
+  /// would answer them otherwise, and on leaving edit mode: cancels the
+  /// board's drag ([_cancelBoardDrag]), keeping its [_Dragging.lifted], so
+  /// the [_handleDragEnd] the cancel queues puts a lifted entry's other
+  /// pieces back, and detaches a create range. The range a create flow
+  /// marks stays, as its range is reported already. Runs before [_tracks]
+  /// is replaced, and before the strip's rows change, whose crossing read
+  /// then finds no drag pointer.
+  void _cancelEdits() {
     _cancelBoardDrag();
     _detachRange();
     _updateStripMark();
+  }
+
+  /// Makes the create gestures, with the device's gesture settings as
+  /// [didChangeDependencies] last read them.
+  void _makeCreateGestures() {
+    _tap = TapGestureRecognizer(debugOwner: this)
+      ..onTapUp = _handleTapUp
+      ..gestureSettings = _gestureSettings;
+    // Each pointer kind goes to one range recognizer. A precise pointer
+    // starts a range once it passes its hit slop, before the scrollable's
+    // pan reaches its own, and the pan never takes a mouse. Touch starts
+    // one only after a hold: the delayed recognizer rejects a pointer that
+    // moves first, leaving the drag to the scrollable.
+    _immediateRange =
+        ImmediateMultiDragGestureRecognizer(
+            debugOwner: this,
+            supportedDevices: const <PointerDeviceKind>{
+              PointerDeviceKind.mouse,
+              PointerDeviceKind.stylus,
+              PointerDeviceKind.invertedStylus,
+              PointerDeviceKind.trackpad,
+            },
+          )
+          ..onStart = _beginRange
+          ..gestureSettings = _gestureSettings;
+    _delayedRange =
+        DelayedMultiDragGestureRecognizer(
+            debugOwner: this,
+            supportedDevices: const <PointerDeviceKind>{
+              PointerDeviceKind.touch,
+              PointerDeviceKind.unknown,
+            },
+          )
+          ..onStart = _beginRange
+          ..gestureSettings = _gestureSettings;
+  }
+
+  /// Disposes the create gestures and makes them anew. A disposed
+  /// recognizer rejects each pointer it holds in that pointer's arena
+  /// ([OneSequenceGestureRecognizer.dispose],
+  /// [MultiDragGestureRecognizer.dispose]), so a tap or a touch hold
+  /// pressed in edit mode creates nothing once edit mode ends, and a held
+  /// finger is left to the scrollable; a range already begun is detached
+  /// by [_cancelEdits]. Runs on leaving edit mode.
+  void _resetCreateGestures() {
+    _tap.dispose();
+    _immediateRange.dispose();
+    _delayedRange.dispose();
+    _makeCreateGestures();
   }
 
   /// Detaches the create range in flight, which then reports nothing, and
@@ -1936,6 +2011,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   void didChangeDependencies() {
     super.didChangeDependencies();
     final settings = MediaQuery.maybeGestureSettingsOf(context);
+    _gestureSettings = settings;
     _tap.gestureSettings = settings;
     _immediateRange.gestureSettings = settings;
     _delayedRange.gestureSettings = settings;
@@ -2024,13 +2100,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// The slots of the hours, [_slotHeight] each, under the frozen day
   /// header where the grid shows one and the all-day strip's
-  /// [_stripRows], [_allDayRowHeight] each, frozen with it under a row of
-  /// [_labelRoom] where it has some, which holds the top half of the
-  /// strip's label ([_StripLabel]). Above the slots a row of [_labelRoom],
-  /// frozen under the strip where it has rows ([_roomFrozen]), or the
-  /// frozen row counting the entries before the hours where [_notices] has
-  /// one, and below them a row of [_labelRoom] or the frozen row counting
-  /// those after.
+  /// [_stripRows], [_allDayRowHeight] each, under a row of [_labelRoom]
+  /// where it has some, which holds the top half of the strip's label
+  /// ([_StripLabel]); that row and the strip's first [_rowFrozenStripRows]
+  /// are frozen with the header. Above the slots a row of [_labelRoom],
+  /// frozen under the strip where it has rows ([_roomFrozen]), or the row
+  /// counting the entries before the hours where [_notices] has one,
+  /// frozen unless strip rows scroll above it ([_aboveFrozen]), and below
+  /// them a row of [_labelRoom] or the frozen row counting those after.
   BoardAxisConfig _rowsConfig() {
     return BoardAxisConfig(
       axis: ExplicitAxis(<double>[
@@ -2041,24 +2118,49 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         ...List<double>.filled(_tracks.rowCount, _slotHeight),
         _edgeBelow,
       ]),
-      frozenStart: _stripStart + _stripRows + (_aboveFrozen ? 1 : 0),
+      frozenStart: _stripStart + _rowFrozenStripRows + (_aboveFrozen ? 1 : 0),
       frozenEnd: _notices.below ? 1 : 0,
     );
   }
 
+  /// The strip rows to freeze under the day header: each, where they and
+  /// the rows above them fit [_frozenStripShare] of the grid's height, as
+  /// they do before the grid knows its size; and otherwise the most that
+  /// fit it, and never fewer than the collapsed strip's three and its
+  /// count row, so a collapsed strip stays frozen whole. The rows past
+  /// them, and the row above the slots, scroll with the hours.
+  int get _frozenStripRows {
+    final size = _size;
+    if (size == null || _stripRows <= collapsedStripRows + 1) {
+      return _stripRows;
+    }
+    final fit =
+        ((size.height * _frozenStripShare - _headerExtent - _labelRoom) /
+                _allDayRowHeight)
+            .floor();
+    return math.min(_stripRows, math.max(collapsedStripRows + 1, fit));
+  }
+
+  /// Whether some of the strip's rows scroll with the hours, under the
+  /// ones the band keeps ([_rowFrozenStripRows]).
+  bool get _stripPartial {
+    return _rowFrozenStripRows < _stripRows;
+  }
+
   /// Whether the room above the first slot stays under the all-day strip
-  /// as the hours scroll, as the strip's margin: while the strip has rows
-  /// and no row counting the entries before the hours takes the room's
-  /// place.
+  /// as the hours scroll, as the strip's margin: while the strip has rows,
+  /// each frozen, and no row counting the entries before the hours takes
+  /// the room's place.
   bool get _roomFrozen {
-    return _stripRows > 0 && !_notices.above;
+    return _stripRows > 0 && !_notices.above && !_stripPartial;
   }
 
   /// Whether the row above the first slot is frozen: the room under the
-  /// strip ([_roomFrozen]) or the row counting the entries before the
-  /// hours.
+  /// strip ([_roomFrozen]), or the row counting the entries before the
+  /// hours where no strip row scrolls above it, a band being a run of
+  /// rows from the top.
   bool get _aboveFrozen {
-    return _roomFrozen || _notices.above;
+    return _roomFrozen || (_notices.above && !_stripPartial);
   }
 
   /// The all-day strip's first row: under the day header where the grid
@@ -2183,7 +2285,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Gives the board the rows [_rowsConfig] makes, and notes what they
-  /// were made for.
+  /// were made for. Rows that freeze the strip whole drop the minute an
+  /// expand kept ([_minuteBeforeExpand]).
   void _replaceRows() {
     _rowHours = _tracks.hours;
     _rowSlotMinutes = _tracks.slotMinutes;
@@ -2191,6 +2294,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _rowNotices = _notices;
     _rowStripRows = _stripRows;
     _rowFormat = widget.hourLabelFormat;
+    _rowFrozenStripRows = _frozenStripRows;
+    if (!_stripPartial) {
+      _minuteBeforeExpand = null;
+    }
     _board.rows = _rowsConfig();
   }
 
@@ -2211,14 +2318,35 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// The height of the frozen rows above the slots: the day header, the
-  /// room above the all-day strip and the strip, and the row counting the
-  /// entries before the hours or the room frozen under the strip, each
-  /// where the grid shows it.
+  /// room above the all-day strip and the strip's frozen rows, and the
+  /// row counting the entries before the hours or the room frozen under
+  /// the strip, each where the grid shows it frozen.
   double get _leadingExtent {
     return _headerExtent +
         _stripRoom +
-        _stripExtent +
-        (_notices.above ? _noticeHeight : (_roomFrozen ? _rowRoom : 0.0));
+        _rowFrozenStripRows * _allDayRowHeight +
+        (_aboveFrozen ? _aboveRowExtent : 0.0);
+  }
+
+  /// The height of the row above the slots as the rows the board has lay
+  /// it out: the row counting the entries before the hours, or the room.
+  double get _aboveRowExtent {
+    return _notices.above ? _noticeHeight : _rowRoom;
+  }
+
+  /// Where the strip's last row ends in the viewport's paint space: under
+  /// the band where it keeps every strip row, and otherwise where the
+  /// scrolled rows end at the vertical scroll offset, or the band's edge
+  /// where they lie under it.
+  double get _stripBottom {
+    final whole = _headerExtent + _stripRoom + _stripExtent;
+    if (!_stripPartial || !_verticalScroll.hasClients) {
+      return whole;
+    }
+    return math.max(
+      _leadingExtent,
+      whole - _verticalScroll.position.pixels,
+    );
   }
 
   /// The row counting the entries before the hours, or null where
@@ -2298,6 +2426,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _labelRoom != _rowRoom ||
         _notices != _rowNotices ||
         _stripRows != _rowStripRows ||
+        _frozenStripRows != _rowFrozenStripRows ||
         widget.hourLabelFormat != _rowFormat) {
       _slotHeight = slotHeight;
       _replaceRows();
@@ -2307,81 +2436,131 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// The rows [_board] has, as [_holdRows] reads them. The hours' top lies
   /// at the band's edge where the row above the first slot is frozen, and
-  /// the room's height under it where the room scrolls with the slots:
-  /// where the grid opens with its opening line ([initState]).
+  /// that row's height under it where it scrolls with the slots: where the
+  /// grid opens with its opening line ([initState]).
   _HandedRows _handedRowsNow() {
     return (
       config: _board.rows,
       band: _leadingExtent,
       firstSlotRow: _tracks.firstSlotRow,
-      top: _aboveFrozen ? 0.0 : _rowRoom,
+      top: _aboveFrozen ? 0.0 : _aboveRowExtent,
       hours: _tracks.hours,
       slotMinutes: _tracks.slotMinutes,
+      stripStart: _stripStart,
+      stripRows: _stripRows,
     );
   }
 
   /// Keeps the time at the hours' top ([_handedRowsNow]), or for a pinch
   /// at its focal ([_rowFocal]), across rows the board has not laid out
-  /// yet in a viewport [viewportHeight] tall, and notes the rows it hands
-  /// the board.
+  /// yet, and notes the rows it hands the board.
   ///
   /// The board keeps the fractional track at the scrolled region's top
   /// across a new rows axis ([RenderBoardViewport]), reading it against
   /// the rows it laid out last, so rows coming or going above the slots,
-  /// the strip's or the room above it, would move the hours under it.
-  /// This sets the scroll offset that anchor lands from
-  /// ([scrollAcrossAxisSwap]), mapping the track by the slot it lies in.
-  /// It runs in the layout builder, after the frame's scroll activities
-  /// have moved the offset and right before the board lays out, so it
-  /// reads the offset the board will, and the rows it last handed over
-  /// are the ones the board laid out last: every path that replaces the
-  /// rows rebuilds the grid, which runs the builder again. New hours, a
-  /// new slot length, and rows whose slots alone change their height
-  /// outside a pinch keep the board's own anchor, which keeps the track at
-  /// the scrolled region's top: for slots that only change their height,
-  /// the time there.
-  void _holdRows(double viewportHeight) {
+  /// the strip's or the room above it, new hours or a new slot length
+  /// would move the hours under it. This has the board's next layout put
+  /// the track of the new rows that shows what the old track showed
+  /// ([_rowAcross]) back there instead
+  /// ([BoardController.landSwappedAxisAt]). It runs in the layout builder,
+  /// after the frame's scroll activities have moved the offset and right
+  /// before the board lays out, so it reads the offset the board will, and
+  /// the rows it last handed over are the ones the board laid out last:
+  /// every path that replaces the rows rebuilds the grid, which runs the
+  /// builder again. Rows whose slots alone change their height outside a
+  /// pinch keep the board's own anchor, which keeps the track at the
+  /// scrolled region's top: for such rows, the time there. An expand that
+  /// leaves strip rows scrolling lands at the lattice's top instead
+  /// ([_revealStrip]), and the collapse after it at the minute the expand
+  /// kept ([_landMinute]).
+  void _holdRows() {
     final handed = _handedRows;
     final next = _handedRowsNow();
     _handedRows = next;
     final focal = _rowFocal;
     _rowFocal = null;
+    final reveal = _revealStrip;
+    _revealStrip = false;
+    final minute = _landMinute;
+    _landMinute = null;
     final position = _positionOf(_verticalScroll);
     if (handed == null ||
         identical(handed.config.axis, next.config.axis) ||
         position == null ||
-        !position.hasPixels ||
-        handed.hours != next.hours ||
-        handed.slotMinutes != next.slotMinutes ||
-        (focal == null &&
-            handed.firstSlotRow == next.firstSlotRow &&
-            handed.band == next.band &&
-            handed.top == next.top)) {
+        !position.hasPixels) {
       return;
     }
-    final old = handed.config.axis;
-    final axis = next.config.axis;
+    if (reveal) {
+      _board.landSwappedAxisAt(Axis.vertical, 0.0, at: 0.0);
+      return;
+    }
+    if (minute != null) {
+      final hours = next.hours;
+      _board.landSwappedAxisAt(
+        Axis.vertical,
+        next.firstSlotRow +
+            (minute.clamp(hours.start.toDouble(), hours.end.toDouble()) -
+                    hours.start) /
+                next.slotMinutes,
+        at: next.band + next.top,
+      );
+      return;
+    }
+    if (focal == null &&
+        handed.firstSlotRow == next.firstSlotRow &&
+        handed.band == next.band &&
+        handed.top == next.top &&
+        handed.hours == next.hours &&
+        handed.slotMinutes == next.slotMinutes) {
+      return;
+    }
     final from = focal == null
         ? handed.band + handed.top
         : math.max(focal, handed.band);
     final to = focal == null
         ? next.band + next.top
         : math.max(focal, next.band);
-    final track =
-        trackFractionAt(old, position.pixels + from) -
-        handed.firstSlotRow +
-        next.firstSlotRow;
-    scrollAcrossAxisSwap(
-      position,
-      old: old,
-      oldBand: handed.band,
-      next: axis,
-      nextBand: next.band,
-      viewportExtent: viewportHeight,
-      target:
-          axis.offsetOfFraction(track.clamp(0.0, axis.trackCount.toDouble())) -
-          to,
+    _board.landSwappedAxisAt(
+      Axis.vertical,
+      _rowAcross(
+        handed,
+        next,
+        trackFractionAt(handed.config.axis, position.pixels + from),
+      ),
+      at: to,
     );
+  }
+
+  /// The track of [next]'s rows that shows what the fractional [track] of
+  /// [handed]'s rows shows. A track on the slots, their end included, shows
+  /// a minute of the day, which maps to the same minute clamped into
+  /// [next]'s hours; a track on the all-day strip keeps its strip row,
+  /// clamped into [next]'s strip, so strip rows that scroll stay where
+  /// they show as rows come or go under them; any other track above the
+  /// slots keeps its distance from the first slot, and one past them its
+  /// distance from their end.
+  static double _rowAcross(_HandedRows handed, _HandedRows next, double track) {
+    final strip = handed.stripStart;
+    if (track >= strip && track < strip + handed.stripRows) {
+      return (track - strip + next.stripStart).clamp(
+        next.stripStart.toDouble(),
+        (next.stripStart + next.stripRows).toDouble(),
+      );
+    }
+    final first = handed.firstSlotRow;
+    final end = first + handed.hours.slotCountOf(handed.slotMinutes);
+    if (track < first) {
+      return track - first + next.firstSlotRow;
+    }
+    if (track > end) {
+      return track -
+          end +
+          next.firstSlotRow +
+          next.hours.slotCountOf(next.slotMinutes);
+    }
+    final minute = (handed.hours.start + (track - first) * handed.slotMinutes)
+        .clamp(next.hours.start.toDouble(), next.hours.end.toDouble());
+    return next.firstSlotRow + (minute - next.hours.start) / next.slotMinutes;
   }
 
   /// Keeps the lattice point under [_pinchFocal] there across the columns
@@ -2908,8 +3087,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     final drag = _drag;
     final at = drag != null && drag.key == key ? drag.at : null;
-    final under =
-        at != null && at.dy >= _headerExtent + _stripRoom + _stripExtent;
+    final under = at != null && at.dy >= _stripBottom;
     return BoardDragBounds(
       rows: (
         start: _stripStart,
@@ -3953,7 +4131,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       } else {
         top -= _headerExtent + _stripRoom;
         final strip = (top / _allDayRowHeight).floor();
-        row = strip < _stripRows
+        row = strip < _rowFrozenStripRows
             ? _stripStart + strip
             : _tracks.firstSlotRow - 1;
       }
@@ -3963,13 +4141,24 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return -1;
     } else {
       // From the first slot's top. A frozen row above it lies in
-      // [_leadingExtent]; a scrolled room is its first [_rowRoom].
-      var content = y + _verticalScroll.position.pixels - _leadingExtent;
-      if (!_aboveFrozen) {
-        content -= _rowRoom;
-      }
-      if (content < (_aboveFrozen ? 0.0 : -_rowRoom)) {
+      // [_leadingExtent]; scrolled strip rows and a scrolled row above
+      // the slots lie before it.
+      final scrolledStrip =
+          (_stripRows - _rowFrozenStripRows) * _allDayRowHeight;
+      final above = _aboveFrozen ? 0.0 : _aboveRowExtent;
+      final content =
+          y +
+          _verticalScroll.position.pixels -
+          _leadingExtent -
+          scrolledStrip -
+          above;
+      if (content < -scrolledStrip - above) {
         row = -1;
+      } else if (content < -above) {
+        row =
+            _stripStart +
+            _rowFrozenStripRows +
+            ((content + scrolledStrip + above) / _allDayRowHeight).floor();
       } else if (content < 0.0) {
         row = _tracks.firstSlotRow - 1;
       } else {
@@ -5462,8 +5651,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         mark: _stripMark,
         column: cell.col,
         row: row,
-        // A room frozen under the strip carries the rule above the hours.
-        last: row == _stripRows - 1 && !_roomFrozen,
+        // A room frozen under the strip carries the rule above the hours,
+        // and the band's last strip row the rule along the band's edge
+        // where strip rows scroll under it.
+        last:
+            (row == _stripRows - 1 && !_roomFrozen) ||
+            (_stripPartial && row == _rowFrozenStripRows - 1),
         onExpand: _expandStrip,
       );
     }
@@ -5554,11 +5747,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Shows every bar row of the collapsed strip, from a tap on a "+N more"
   /// chip or its cell: the kept split, placed again on the moved slot rows
-  /// with the bars of every row.
+  /// with the bars of every row. Where the band keeps only some of those
+  /// rows, the board lands at the top of the lattice, so the rest show
+  /// under it, and the minute at the hours' top is kept for the collapse.
   void _expandStrip() {
     if (_stripExpanded) {
       return;
     }
+    final minute = _minuteAtHoursTop();
     setState(() {
       _stripExpanded = true;
     });
@@ -5566,15 +5762,22 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (!_placementCurrent) {
       _placeLayout(disable: true);
     }
+    if (_stripPartial) {
+      _minuteBeforeExpand = minute;
+      _revealStrip = true;
+    }
   }
 
   /// Collapses the expanded strip to three rows and its count row, from a
   /// tap on the "Less" pill: the kept split, placed again with the bars of
-  /// those three rows.
+  /// those three rows. Where strip rows still scroll as the expand left
+  /// them, the minute at the hours' top the expand kept lands there again
+  /// ([_minuteBeforeExpand]).
   void _collapseStrip() {
     if (!_stripExpanded) {
       return;
     }
+    final minute = _stripPartial ? _minuteBeforeExpand : null;
     setState(() {
       _stripExpanded = false;
     });
@@ -5582,6 +5785,28 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (!_placementCurrent) {
       _placeLayout(disable: true);
     }
+    _landMinute = minute;
+  }
+
+  /// The minute of the day at the hours' top of the rows the board laid
+  /// out last ([_handedRows]) at the vertical scroll offset, or null where
+  /// no slot lies there or the board has not laid out.
+  double? _minuteAtHoursTop() {
+    final handed = _handedRows;
+    final position = _positionOf(_verticalScroll);
+    if (handed == null || position == null || !position.hasPixels) {
+      return null;
+    }
+    final slots =
+        trackFractionAt(
+          handed.config.axis,
+          position.pixels + handed.band + handed.top,
+        ) -
+        handed.firstSlotRow;
+    if (slots < 0.0 || slots > handed.hours.slotCountOf(handed.slotMinutes)) {
+      return null;
+    }
+    return handed.hours.start + slots * handed.slotMinutes;
   }
 
   Widget _buildPiece(GridPiece<T> piece, BoardSpan span) {
@@ -5719,7 +5944,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
                     ? _creating
                     : _wallSpanOfCells(slotRange.anchor, slotRange.focus)),
             landing: _outlineOf(landing),
-            ruledAbove: _aboveFrozen,
+            ruledAbove: _aboveFrozen || _stripPartial,
           ),
           foreground: _GridForegroundPainter(
             styles: styles,
@@ -5727,9 +5952,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             labels: _hourLabels,
             labelsVersion: _hourLabels.version,
             now: _nowMark,
-            reachAbove: _notices.above
-                ? _noticeHeight
-                : (_roomFrozen ? _labelRoom : 0.0),
             reachBelow: _notices.below ? _noticeHeight : 0.0,
           ),
           drag: widget.editable
@@ -5759,7 +5981,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return LayoutBuilder(
       builder: (context, constraints) {
         _fitAxes(constraints.biggest);
-        _holdRows(constraints.biggest.height);
+        _holdRows();
         return Stack(
           children: <Widget>[
             Positioned.fill(child: board),
@@ -7042,8 +7264,8 @@ class _TimedGridPainter extends BoardBackgroundPainter {
 /// last holds the halves of the first and the last label past those
 /// lines, or where a frozen row takes a room's place, the room frozen
 /// under the all-day strip or a row counting items outside the hours, the
-/// gutter beside that row, which [reachAbove] and [reachBelow] measure: a
-/// label shows whole there while its line shows, and sinks into the row's
+/// gutter beside that row, which [_reachAboveOf] and [reachBelow] measure:
+/// a label shows whole there while its line shows, and sinks into the row's
 /// edge as its line scrolls beneath the row. The labels are clipped to the
 /// gutter below the day header, and a label taller than a slot still shows
 /// whole, because no gutter cell paints over the foreground. The line
@@ -7059,7 +7281,6 @@ class _GridForegroundPainter extends BoardForegroundPainter {
     required this.labels,
     required this.labelsVersion,
     required this.now,
-    required this.reachAbove,
     required this.reachBelow,
   });
 
@@ -7086,13 +7307,23 @@ class _GridForegroundPainter extends BoardForegroundPainter {
   /// Where the line marking the current time sits, or null.
   final _NowMark? now;
 
-  /// How far above the scrolled region the labels may paint: the height
-  /// of the frozen row there, beside which the gutter is free, or 0.
-  final double reachAbove;
+  /// How far above the scrolled region the labels may paint at
+  /// [geometry]: the height of the row above the first slot where the
+  /// leading band holds it, beside which the gutter is free, or 0. Read
+  /// from the rows the board paints, so a new size that freezes that row
+  /// or lets it scroll ([_TimedGridState._stripPartial]), which no build
+  /// follows, reaches it.
+  double _reachAboveOf(BoardGeometryView geometry) {
+    final row = tracks.firstSlotRow - 1;
+    if (!geometry.frozenTracksOf(Axis.vertical).contains(row)) {
+      return 0.0;
+    }
+    return geometry.visibleCellRect(row, 0).height;
+  }
 
-  /// How far below the scrolled region the labels may paint, as
-  /// [reachAbove]. Where it is not 0, the frozen row there draws the end's
-  /// line inside it.
+  /// How far below the scrolled region the labels may paint: the height
+  /// of the frozen row there, beside which the gutter is free, or 0. Where
+  /// it is not 0, that row draws the end's line inside it.
   final double reachBelow;
 
   @override
@@ -7123,6 +7354,7 @@ class _GridForegroundPainter extends BoardForegroundPainter {
     // edge, the half pixel [rule] either side of it.
     final rule = styles.linePaint.strokeWidth / 2;
     final half = labels.height / 2;
+    final reachAbove = _reachAboveOf(geometry);
     // A label is clipped to the gutter of the scrolled region, and past
     // the region's top edge by half the label's height, plus the signed
     // distance its centre lies above its line's edge, less how far that
@@ -7210,7 +7442,6 @@ class _GridForegroundPainter extends BoardForegroundPainter {
         old.now != now ||
         !identical(old.labels, labels) ||
         old.labelsVersion != labelsVersion ||
-        old.reachAbove != reachAbove ||
         old.reachBelow != reachBelow;
   }
 }

@@ -526,6 +526,35 @@ void main() {
         moreOrLessEquals(34.8, epsilon: 1e-9),
       );
     });
+
+    testWidgets("(e) at a new axis instance a landing places, the shift "
+        "still the anchors' difference", (tester) async {
+      final (controller, viewport) = await _vacateAtEnd(tester, 130.0);
+      controller.beginOwnMakeRoomPreview();
+      _install(controller, _endTarget);
+      await tester.pump();
+      expect(viewport.verticalPosition!.pixels, 112.0);
+      controller.rows = BoardAxisConfig(
+        axis: LazyContentAxis(50, 10.0),
+        laneExtent: 18.0,
+        lanePadding: 4.0,
+      );
+      controller.landSwappedAxisAt(Axis.vertical, 5.0);
+      await tester.pump();
+      // Setup sanity: landed at row 5 of the new 10 px estimates.
+      expect(viewport.verticalPosition!.pixels, 50.0);
+      // The painted leading edge moved as a jump moves it, and the
+      // own-free one with it, 18 px further down as in (d).
+      const point = Offset(40.0, 236.0);
+      expect(
+        _ownFree(controller, viewport, point).painted,
+        moreOrLessEquals(30.4, epsilon: 1e-9),
+      );
+      expect(
+        _painted(viewport, point).painted,
+        moreOrLessEquals(28.6, epsilon: 1e-9),
+      );
+    });
   });
 
   testWidgets(
