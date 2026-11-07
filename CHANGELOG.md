@@ -158,8 +158,8 @@ times read the clock as before.
 - In Week and Day, a rule runs along the all-day strip's top edge, under a
 room as tall as the one the hour labels have above the first slot, and on
 that edge the hour gutter reads `CalendarLocalizations.allDay`, "All day" in
-English, centred on it as the hour labels are on their lines, in their
-style, scaled down where it does not fit the gutter, which it does not
+English, centred on that rule as the hour labels are on their lines, in
+their style, scaled down where it does not fit the gutter, which it does not
 widen. The "Less" pill that collapses an expanded strip lies in the
 gutter's cell beside the strip's second row.
 - In Week and Day, the all-day strip collapses only past four rows, to three
@@ -176,8 +176,23 @@ slot that keeps the first hour label whole stays under the strip as its
 margin rather than scrolling with the hours, and the rule parting the strip
 from the hours runs along its bottom edge: with the hours at their top that
 rule is the first slot's line, and the grid opens with the opening hour's
-line on it, its label whole beside the margin. A bar dropped on the margin
-becomes timed from the slot showing right under it.
+line on it, its label whole beside the margin; it does so on the edge of a
+row counting the entries before the hours too. A bar dropped on the margin
+becomes timed from the slot showing right under it. Each line across the
+hours lies in the pixel row above its slot's top, as the strip's and the
+margin's rules lie above theirs, the hour labels and the strip's label are
+centred on those lines as drawn, the label of the hours' end beside a row
+counting the entries after them on that row's rule, in the pixel row under
+the hours, and a marked range's edge is drawn over the lines.
+- In Week, a bar let go with the pointer over a day's strip cell moves to
+that day whatever row the bar's top reaches, the room above the strip or
+the margin under it included, and one let go over a day's header or above
+the grid moves to that day.
+- In Week and Day, the time at the top of the hours stays where it shows as
+the rows above them change: when edit mode gives the empty strip its row
+or takes it, a store's write or a read adds or removes strip rows, the
+strip expands or collapses, or a row counting the entries before the
+hours comes or goes.
 - `package:widgets_extended/widgets_extended.dart` exports the calendar,
 so an app that also imports a library declaring one of its names, as
 `syncfusion_flutter_calendar` declares `CalendarController`,

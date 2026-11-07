@@ -522,8 +522,9 @@ final class CalendarThemeData with Diagnosticable {
   /// The icon of the button that adds an entry in a gap.
   final IconData addEntryIcon;
 
-  /// The hour labels in Week's and Day's gutter. Its colour is not used:
-  /// they draw in [textSecondary].
+  /// The hour labels in Week's and Day's gutter, and the label of their
+  /// all-day strip over that gutter. Its colour is not used: they draw in
+  /// [textSecondary].
   final TextStyle hourLabelStyle;
 
   /// A day header's weekday. Its colour is not used: it draws in

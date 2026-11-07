@@ -2251,12 +2251,12 @@ void main() {
     final block = blockFinder("item-7");
     final center = viewport.globalToLocal(tester.getCenter(block));
     // Setup sanity: the block to lift shows, and the grid is scrolled into
-    // the slots, past A's label room.
+    // the hours.
     expect(region.contains(center), isTrue);
     final gesture = await tester.startGesture(tester.getCenter(block));
     await tester.pump(kLongPressTimeout + kPressTimeout);
     await tester.pump();
-    expect(viewport.verticalPosition!.pixels, greaterThan(6.5));
+    expect(viewport.verticalPosition!.pixels, greaterThan(0.0));
     final top = topCellOf(tester);
     final below = belowTopOf(tester, top);
     await installTheme(tester, api, sentinelB);
@@ -3578,7 +3578,12 @@ void main() {
       ({int row, int col})? top;
       var below = 0.0;
       if (grid) {
-        expect(gridViewport(tester).verticalPosition!.pixels, greaterThan(6.5));
+        // Setup sanity: the grid is scrolled into the hours.
+        expect(
+          gridViewport(tester).verticalPosition!.pixels,
+          greaterThan(0.0),
+          reason: mode,
+        );
         top = topCellOf(tester);
         below = belowTopOf(tester, top);
       }

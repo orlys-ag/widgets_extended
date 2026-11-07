@@ -2,10 +2,10 @@
 /// a month of 5,000 entries, 200 of them on one day, in a store that
 /// notifies as the calendar asks it for a new range, splits once per store
 /// write and per step and nothing for a create on a day it does not show,
-/// and a scroll, a pinch, a drag's moves, a pill and an edit-mode change
+/// and a scroll, a pinch, a drag's moves, a chip and an edit-mode change
 /// split nothing. Week places once per sync that splits, one that changes
 /// the all-day strip's rows too, nothing for a sync that keeps its split,
-/// and once per pill or edit-mode change of those rows.
+/// and once per chip or edit-mode change of those rows.
 library;
 
 import 'package:flutter/gestures.dart';
@@ -196,8 +196,9 @@ void main() {
   testWidgets("SP1 in Week a store write splits and places once, a create "
       "on a day Week does not show splits and places nothing, a "
       "next-week step splits and places once, ten frames of a scroll, "
-      "a pinch and a block's drag split and place nothing, and a \"+N\" "
-      "pill and an edit-mode change place once and split nothing; a write "
+      "a pinch and a block's drag split and place nothing, and a "
+      "\"+N more\" chip and an edit-mode change place once and split "
+      "nothing; a write "
       "and a step that change the strip's rows place no more", (tester) async {
     final editable = ValueNotifier<bool>(true);
     addTearDown(editable.dispose);
@@ -273,7 +274,7 @@ void main() {
     await tester.pumpAndSettle();
     // Setup sanity: the strip expanded.
     expect(find.byKey(allDayLessKey), findsOneWidget);
-    expect(counts(), (0, 1), reason: "a pill");
+    expect(counts(), (0, 1), reason: "a chip");
 
     var rows = rowCount();
     resetCounts();
