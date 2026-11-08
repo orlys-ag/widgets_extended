@@ -37,6 +37,7 @@ const Duration _frame = Duration(milliseconds: 16);
 Future<(BoardController<String, _Item>, RenderBoardViewport<String>)> _board(
   WidgetTester tester, {
   ScrollableDetails verticalDetails = const ScrollableDetails.vertical(),
+  ScrollViewKeyboardDismissBehavior? keyboardDismissBehavior,
 }) async {
   final controller = BoardController<String, _Item>(
     vsync: tester,
@@ -74,6 +75,7 @@ Future<(BoardController<String, _Item>, RenderBoardViewport<String>)> _board(
             child: Board<String, _Item>(
               controller: controller,
               verticalDetails: verticalDetails,
+              keyboardDismissBehavior: keyboardDismissBehavior,
               cellBuilder: (context, view) {
                 return const SizedBox(width: 40.0, height: 10.0);
               },
@@ -91,6 +93,11 @@ Future<(BoardController<String, _Item>, RenderBoardViewport<String>)> _board(
       .whereType<RenderBoardViewport<String>>()
       .single;
   return (controller, viewport);
+}
+
+/// The spring record of [position]'s physics, which the board installs.
+BoardSpringRecord _record(ScrollPosition position) {
+  return (position.physics as BoardScrollPhysics).record;
 }
 
 /// The runtime types of [physics] and of each of its parents, outermost
@@ -354,6 +361,133 @@ void main() {
       );
       expect(identical(rebuilt, viewport), isTrue);
       expect(identical(rebuilt.verticalPosition, position), isTrue);
+    },
+  );
+
+  testWidgets("a board wraps no simulation while no own preview stands", (
+    tester,
+  ) async {
+    final (controller, viewport) = await _board(tester);
+    final position = viewport.verticalPosition!;
+    position.jumpTo(150.0);
+    await tester.pumpAndSettle(_frame);
+    expect(_record(position).simulation, 0);
+    controller.beginOwnMakeRoomPreview();
+    controller.previewMakeRoomGap(
+      draggedKey: "d",
+      prospective: const BoardSpan(
+        rowStart: 36,
+        colStart: 0,
+        rowSpan: 4,
+        colSpan: 5,
+      ),
+    );
+    await tester.pump();
+    expect(_record(position).wraps, isTrue);
+    // The stored span: the preview closes.
+    controller.previewMakeRoomGap(
+      draggedKey: "d",
+      prospective: const BoardSpan(rowStart: 39, colStart: 0, colSpan: 5),
+    );
+    await tester.pump();
+    expect(_record(position).wraps, isFalse);
+    final simulation = _record(position).simulation;
+    position.jumpTo(150.0);
+    expect(_record(position).simulation, simulation);
+    await tester.pumpAndSettle(_frame);
+  });
+
+  testWidgets(
+    "a board whose render is replaced while its own preview stands wraps "
+    "nothing on the replaced render's account",
+    (tester) async {
+      final (controller, viewport) = await _board(tester);
+      final position = viewport.verticalPosition!;
+      position.jumpTo(150.0);
+      await tester.pumpAndSettle(_frame);
+      controller.beginOwnMakeRoomPreview();
+      controller.previewMakeRoomGap(
+        draggedKey: "d",
+        prospective: const BoardSpan(
+          rowStart: 36,
+          colStart: 0,
+          rowSpan: 4,
+          colSpan: 5,
+        ),
+      );
+      await tester.pump();
+      final record = _record(position);
+      expect(record.wraps, isTrue);
+      // The same board state on a second controller, the first's scope left
+      // open, under a scroll view that wraps its scrollable in a listener,
+      // which replaces the scrollable's subtree and the render with it.
+      final (_, replaced) = await _board(
+        tester,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      );
+      expect(identical(replaced, viewport), isFalse);
+      final replacedPosition = replaced.verticalPosition!;
+      expect(identical(_record(replacedPosition), record), isTrue);
+      expect(record.wraps, isFalse);
+      final simulation = record.simulation;
+      replacedPosition.jumpTo(150.0);
+      expect(record.simulation, simulation);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  // A board scrolled to its end at 130 whose own preview vacates row 39,
+  // which ends the range at 112, then given another rows config and a
+  // jump past the range with no pump between.
+  Future<void> wrapsAcross(
+    WidgetTester tester,
+    BoardAxisConfig Function(BoardAxis axis) rows,
+  ) async {
+    final (controller, viewport) = await _board(tester);
+    final position = viewport.verticalPosition!;
+    position.jumpTo(130.0);
+    await tester.pump();
+    controller.beginOwnMakeRoomPreview();
+    controller.previewMakeRoomGap(
+      draggedKey: "d",
+      prospective: const BoardSpan(
+        rowStart: 36,
+        colStart: 0,
+        rowSpan: 4,
+        colSpan: 5,
+      ),
+    );
+    await tester.pump();
+    final record = _record(position);
+    final simulation = record.simulation;
+    expect(record.wraps, isTrue);
+    controller.rows = rows(controller.rows.axis);
+    expect(record.wraps, isTrue);
+    position.jumpTo(150.0);
+    expect(record.simulation, simulation + 1);
+    await tester.pumpAndSettle(_frame);
+  }
+
+  testWidgets("a board keeps wrapping across a measurement reset while its own "
+      "preview stands", (tester) async {
+    // The same instance under another lane geometry, which resets its
+    // measurements.
+    await wrapsAcross(tester, (axis) {
+      return BoardAxisConfig(axis: axis, laneExtent: 20.0, lanePadding: 4.0);
+    });
+  });
+
+  testWidgets(
+    "a board keeps wrapping across an axis instance change while its own "
+    "preview stands",
+    (tester) async {
+      await wrapsAcross(tester, (axis) {
+        return BoardAxisConfig(
+          axis: LazyContentAxis(50, 10.0),
+          laneExtent: 18.0,
+          lanePadding: 4.0,
+        );
+      });
     },
   );
 }

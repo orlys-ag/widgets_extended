@@ -881,7 +881,6 @@ void main() {
       TargetPlatform.android,
       TargetPlatform.iOS,
     }),
-    skip: true,
     (tester) async {
       await jumpDuringSpringBack(tester);
     },
@@ -890,7 +889,6 @@ void main() {
   testWidgets(
     "another scroll during its preview's spring-back moves the own-free "
     "sample at once with a frozen leading row",
-    skip: true,
     (tester) async {
       await jumpDuringSpringBack(tester, frozenStart: 1);
     },
@@ -899,7 +897,6 @@ void main() {
   testWidgets(
     "an animateTo begun during its preview's spring-back moves the own-free "
     "sample with each tick",
-    skip: true,
     (tester) async {
       final (controller, viewport) = await _springBack(tester);
       final position = viewport.verticalPosition!;
@@ -932,7 +929,6 @@ void main() {
     testWidgets(
       "a wheel by ${dy.round()} during its preview's spring-back moves the "
       "own-free scroll offset with the pixels",
-      skip: true,
       (tester) async {
         final (controller, viewport) = await _springBack(tester);
         final position = viewport.verticalPosition!;
@@ -970,7 +966,6 @@ void main() {
       TargetPlatform.android,
       TargetPlatform.iOS,
     }),
-    skip: true,
     (tester) async {
       final (controller, viewport) = await _springBack(tester);
       final position = viewport.verticalPosition!;
@@ -978,7 +973,11 @@ void main() {
       void listener() {
         records.add((
           position.pixels,
-          _ownFree(controller, viewport, const Offset(40.0, 236.0)).scrollPixels,
+          _ownFree(
+            controller,
+            viewport,
+            const Offset(40.0, 236.0),
+          ).scrollPixels,
         ));
       }
 
@@ -1009,7 +1008,6 @@ void main() {
   testWidgets(
     "a scroll after a spring-back tick in the same frame leaves that tick's "
     "move to the spring-back",
-    skip: true,
     (tester) async {
       final (controller, viewport) = await _springBack(tester);
       final position = viewport.verticalPosition!;
@@ -1058,7 +1056,6 @@ void main() {
   testWidgets(
     "a jumpTo during a spring-back a live make-room vacate started moves "
     "the own-free scroll offset by the jump",
-    skip: true,
     (tester) async {
       final (controller, viewport) = await _springBack(
         tester,
@@ -1090,9 +1087,52 @@ void main() {
   );
 
   testWidgets(
+    "a spring-back restarted outside layout from its preview's overscroll "
+    "moves nothing",
+    (tester) async {
+      final (controller, viewport) = await _springBack(tester);
+      final position = viewport.verticalPosition!;
+      const point = Offset(40.0, 236.0);
+      for (var pump = 1; pump <= 3; pump++) {
+        await tester.pump(_frame);
+      }
+      // A press holds the spring-back and a lift with no move restarts it
+      // from where it stood, outside any layout.
+      final gesture = await tester.startGesture(
+        _global(tester, const Offset(140.0, 150.0)),
+      );
+      await gesture.up();
+      final layouts = viewport.debugPerformLayoutCount;
+      final held = position.pixels;
+      await tester.pump(_frame);
+      // The restarted spring-back's first tick moves nothing, so its first
+      // moving tick runs before any layout.
+      expect(viewport.debugPerformLayoutCount, layouts);
+      expect(position.pixels, held);
+      expect(_ownFree(controller, viewport, point).scrollPixels, _near(130.0));
+      var pumps = 1;
+      while (true) {
+        await tester.pump(_frame);
+        pumps += 1;
+        if (pumps == 2) {
+          expect(position.pixels, lessThan(held));
+        }
+        expect(
+          _ownFree(controller, viewport, point).scrollPixels,
+          _near(130.0),
+          reason: "pump $pumps, pixels ${position.pixels}",
+        );
+        if (position.pixels <= 112.0 || pumps == 60) {
+          break;
+        }
+      }
+      expect(position.pixels, 112.0);
+    },
+  );
+
+  testWidgets(
     "a jumpTo between a measurement reset and the next layout during its "
     "preview's spring-back moves the own-free scroll offset by the jump",
-    skip: true,
     (tester) async {
       final (controller, viewport) = await _springBack(tester);
       final position = viewport.verticalPosition!;
@@ -1142,7 +1182,6 @@ void main() {
   testWidgets(
     "a jumpTo between an axis instance change and the next layout during "
     "its preview's spring-back moves the own-free scroll offset by the jump",
-    skip: true,
     (tester) async {
       final (controller, viewport) = await _springBack(tester);
       final position = viewport.verticalPosition!;

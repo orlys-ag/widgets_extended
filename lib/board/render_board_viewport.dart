@@ -35,6 +35,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
 import '_board_axis.dart';
+import '_board_scroll_physics.dart';
 import '_board_span.dart';
 import 'board_animation_style.dart';
 import 'board_background.dart';
@@ -346,16 +347,18 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   Float64List? _ownStarts;
   int _ownCount = 0;
 
-  /// The OWN SCROLL SHIFT, the content axis's scroll offset minus the one
-  /// it would have without the scope's preview, and the RESIDUE, the
-  /// share of a spring-back that preview started which the shift takes as
-  /// the spring runs: [_ownResidue] spread over the pixels from
-  /// [_ownResidueFrom] to [_ownResidueTo]. Content-space lengths on the
-  /// content axis, written in layout only: by the pass correction's own
-  /// share, the layout head's reset ([_ownShiftAtSwap]) and its fold of
-  /// the residue, [_applyContentDimensions], and the CLOSING RULE after
-  /// the pass loop, which zeroes the shift once no own track and no
-  /// residue stands, so it stands only while some of the preview does.
+  /// The OWN SCROLL SHIFT, the part of the content axis's scroll offset
+  /// that the scope's preview's clamps, corrections and spring-backs
+  /// moved, which a scroll by anything else does not change, and the
+  /// RESIDUE, the share of a spring-back that preview started which the
+  /// shift takes as the spring runs: [_ownResidue] spread over the pixels
+  /// from [_ownResidueFrom] to [_ownResidueTo]. Content-space lengths on
+  /// the content axis, written by the pass correction's own share, the
+  /// layout head's reset ([_ownShiftAtSwap]) and its fold of the residue,
+  /// [_applyContentDimensions], the CLOSING RULE after the pass loop,
+  /// which zeroes the shift once no own track and no residue stands, so it
+  /// stands only while some of the preview does, and [_settleOwnSpring] at
+  /// the head of each layout and of the own-free sampler.
   double _ownScrollShift = 0.0;
   bool _hasOwnResidue = false;
   double _ownResidue = 0.0;
@@ -365,6 +368,28 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// The content axis's maximum scroll extent [_applyContentDimensions]
   /// passed last, which tells a clamp from a call that changed nothing.
   double? _lastContentMaxPassed;
+
+  /// The OWN-FREE MAXIMUM, the content axis's own-free total less the
+  /// viewport's extent, as the last [_applyContentDimensions] that found
+  /// the own data standing computed it. [_settleOwnSpring] divides a
+  /// spring-back by it beside [_lastContentMaxPassed], the maximum the
+  /// position still holds, and reads it only while the own data stands.
+  double _ownFreeMax = 0.0;
+
+  /// The LAST READ of the content position's spring record, written
+  /// together by [_settleOwnSpring] and by [_applyContentDimensions] after
+  /// its rule, and read by [_settleOwnSpring] alone: the pixels then
+  /// (`L`), the record's simulation taken as the running spring-back
+  /// (`A`, which the record's `watched` names too) and the record's
+  /// serial (`T`).
+  double _ownSpringPixels = 0.0;
+  int _ownSpringSimulation = 0;
+  int _ownSpringSerial = 0;
+
+  /// The gate this render registers on the content position's spring
+  /// record at the head of [_applyContentDimensions] while the own scroll
+  /// stands, and releases in [dispose].
+  late final _RenderSpringGate _springGate = _RenderSpringGate(this);
 
   /// The OWN-DATA KEY the own data was computed under: the scope's epoch,
   /// the controller, the content axis instance and that instance's
@@ -405,8 +430,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 
   /// Whether `layoutChildSequence` is running, written by it alone. Read
   /// by the cell surface's poke, which dirties layout outside one and
-  /// sets its flag alone inside one, and by [invalidateCellMeasurements],
-  /// which asserts on it.
+  /// sets its flag alone inside one, because the measure step has not yet
+  /// read the flag it sets; by [invalidateCellMeasurements], which asserts
+  /// on it; and by the own-free sampler, which settles the own spring-back
+  /// ([_settleOwnSpring]) outside one, a layout settling it at its head.
   bool _inLayout = false;
 
   /// Opt-in staleness check for the cell measurement cache, off by
@@ -884,9 +911,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
 
   @override
   void layoutChildSequence() {
-    // The one writer of the in-layout flag. Its reader is the cell
-    // surface's poke, which takes the flag-only arm inside a layout
-    // because the measure step has not yet read the flag it sets.
+    // The one writer of the in-layout flag, whose doc names its readers.
     _inLayout = true;
     _paintListsCurrent = false;
     try {
@@ -992,9 +1017,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     );
     if (_ownDataStandsOn(oldAxis)) {
       // The OWN-FREE TARGET: the same steps over the old instance's
-      // lattice without the own preview, from the scroll offset the board
-      // would have without it, so the own scroll shift the new instance
-      // starts from is the difference of the two targets.
+      // lattice without the own preview, from the own-free scroll offset,
+      // the scroll offset less the part that preview moved, so the own
+      // scroll shift the new instance starts from is the difference of the
+      // two targets.
       final axis = identical(offset, verticalOffset)
           ? Axis.vertical
           : Axis.horizontal;
@@ -1035,6 +1061,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   }
 
   void _layoutChildSequenceBody() {
+    // Before the zoom anchor reads the own-free scroll offset, and before
+    // any correction or the own data's layout head moves the pixels or
+    // folds the residue.
+    _settleOwnSpring();
     _anchorSwappedAxes();
     _obtainedThisLayout.clear();
     _builtNothing.clear();
@@ -1933,9 +1963,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       _ownCount = 0;
     }
     if (_hasOwnResidue) {
-      _ownScrollShift -=
-          _ownResidue * _residueProgressAt(_contentViewportOffset!.pixels);
-      _hasOwnResidue = false;
+      _foldOwnResidueAt(_contentViewportOffset!.pixels);
     }
     if (!laned) {
       return;
@@ -2191,13 +2219,127 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         _ownKeyResets == _measurementResetsOf(axisInstance);
   }
 
+  /// Whether the own scroll stands on [axis]: [_ownFreeOn] without the
+  /// key's content axis instance and its measurement resets, so on the
+  /// content-sized lane axis, while the own data holds an own track, a
+  /// residue or an own scroll shift farther than the tolerance from zero
+  /// under a key that names the current scope and the controller. The two
+  /// terms stay out because the own scroll outlives both changes: the next
+  /// layout head carries the shift and the residue across a measurement
+  /// reset of the same instance, and into a new instance's shift through
+  /// the zoom anchor's own-free target ([_anchorSwappedAxis]).
+  bool _ownScrollStandsOn(Axis axis) {
+    if (_ownCount == 0 &&
+        !_hasOwnResidue &&
+        _ownScrollShift.abs() <= precisionErrorTolerance) {
+      return false;
+    }
+    if (_contentAxis != axis || _controller.laneAxis != axis) {
+      return false;
+    }
+    return _ownKeyEpoch == _controller.makeRoomOwnPreviewEpoch &&
+        identical(_ownKeyController, _controller);
+  }
+
+  /// The spring record of [offset]'s physics, or null where [offset] is no
+  /// `ScrollPosition` or its physics is not the board's.
+  static BoardSpringRecord? _springRecordOf(ViewportOffset? offset) {
+    if (offset is ScrollPosition) {
+      final physics = offset.physics;
+      if (physics is BoardScrollPhysics) {
+        return physics.record;
+      }
+    }
+    return null;
+  }
+
+  /// Folds a standing residue into the own scroll shift at its progress at
+  /// [pixels], and drops it; does nothing where none stands.
+  void _foldOwnResidueAt(double pixels) {
+    if (!_hasOwnResidue) {
+      return;
+    }
+    _ownScrollShift -= _ownResidue * _residueProgressAt(pixels);
+    _hasOwnResidue = false;
+  }
+
+  /// Attributes the content position's moves since the LAST READ: a move
+  /// to a value the running spring-back yielded is that spring-back's,
+  /// which the residue reads, and any other is another writer's, which
+  /// folds the residue where the spring-back had come to and leaves the
+  /// shift, so the own-free scroll offset moves with it one for one.
+  ///
+  /// Runs while the own scroll stands on the content axis and its position
+  /// has pixels and a spring record ([_springRecordOf]), and returns at
+  /// once when neither the record's serial nor the pixels moved. A record
+  /// whose current simulation is not the one read last means that one no
+  /// longer runs: its residue folds at the last value it yielded since the
+  /// read, or at the read's pixels, and the dimension rule divides the new
+  /// one at its start ([_attributeOwnScroll] with no move), which arms a
+  /// residue for a start outside the range the position last took and
+  /// changes nothing inside it. The pixels are the spring-back's where they
+  /// are its last yield since the read, or its start while it has yielded
+  /// nothing but the value its controller reads as it starts, which sets
+  /// no pixels (`AnimationController.animateWith`).
+  void _settleOwnSpring() {
+    final axis = _contentAxis;
+    if (axis == null || !_ownScrollStandsOn(axis)) {
+      return;
+    }
+    final offset = _contentViewportOffset!;
+    if (!offset.hasPixels) {
+      return;
+    }
+    final record = _springRecordOf(offset);
+    if (record == null) {
+      return;
+    }
+    final pixels = offset.pixels;
+    if (record.serial == _ownSpringSerial && pixels == _ownSpringPixels) {
+      return;
+    }
+    final double place;
+    if (record.simulation != _ownSpringSimulation) {
+      _foldOwnResidueAt(
+        record.watchedLastSerial > _ownSpringSerial
+            ? record.watchedLast
+            : _ownSpringPixels,
+      );
+      _ownSpringSimulation = record.simulation;
+      record.watched = record.simulation;
+      final start = record.start;
+      _attributeOwnScroll(
+        start,
+        start,
+        _lastContentMaxPassed!,
+        _ownFreeMax,
+        false,
+      );
+      place = record.lastSerial > record.startSerial ? record.last : start;
+    } else {
+      place = record.lastSerial > _ownSpringSerial
+          ? record.last
+          : _ownSpringPixels;
+    }
+    final springs =
+        pixels == place ||
+        (pixels == record.start &&
+            record.lastSerial <= record.startSerial + 1);
+    if (!springs) {
+      _foldOwnResidueAt(place);
+    }
+    _ownSpringSerial = record.serial;
+    _ownSpringPixels = pixels;
+  }
+
   /// [axisInstance]'s measurement resets, zero for an axis that has none.
   static int _measurementResetsOf(BoardAxis? axisInstance) {
     return axisInstance is LazyContentAxis ? axisInstance.measurementResets : 0;
   }
 
-  /// The content axis's scroll offset without the scope's preview at the
-  /// live [pixels]: `pixels - S + R * f`, `f` the residue's progress.
+  /// The OWN-FREE SCROLL OFFSET at the live [pixels], the content axis's
+  /// scroll offset less the part the scope's preview moved:
+  /// `pixels - S + R * f`, `f` the residue's progress.
   double _ownFreePixelsAt(double pixels) {
     final free = pixels - _ownScrollShift;
     if (!_hasOwnResidue) {
@@ -3000,6 +3142,15 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     final before = ownStands && contentOffset != null && contentOffset.hasPixels
         ? contentOffset.pixels
         : null;
+    final record = before != null ? _springRecordOf(contentOffset) : null;
+    // Registered BEFORE the position calls: a spring-back the position
+    // begins inside them asks its physics, and so this gate, whether to
+    // wrap it.
+    if (record != null &&
+        !identical(record.gate, _springGate) &&
+        _ownScrollStandsOn(contentAxis!)) {
+      record.gate = _springGate;
+    }
     final verticalMax = math.max(
       0.0,
       _controller.rows.axis.totalExtent - extent.height,
@@ -3022,13 +3173,24 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       final changed = maxPassed != _lastContentMaxPassed;
       _lastContentMaxPassed = maxPassed;
       if (before != null) {
-        _attributeOwnScroll(
-          before,
-          contentOffset!.pixels,
-          maxPassed,
-          changed,
-          vertical ? extent.height : extent.width,
+        final ownMax = math.max(
+          0.0,
+          _contentAxisInstance!.totalExtent -
+              (_ownCount == 0 ? 0.0 : _ownPrefix![_ownCount]) -
+              (vertical ? extent.height : extent.width),
         );
+        _ownFreeMax = ownMax;
+        final pixels = contentOffset!.pixels;
+        _attributeOwnScroll(before, pixels, maxPassed, ownMax, changed);
+        // The rule has attributed this call's move and divided at its start
+        // a spring-back the position began inside it, so the last read is
+        // taken here.
+        _ownSpringPixels = pixels;
+        if (record != null) {
+          _ownSpringSimulation = record.simulation;
+          record.watched = record.simulation;
+          _ownSpringSerial = record.serial;
+        }
       }
     }
     return verticalAccepted && horizontalAccepted;
@@ -3037,9 +3199,9 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// The own scroll shift's share of one dimension change on the content
   /// axis, whose position took the maximum [maxPassed] ([changed] from the
   /// last call's) and moved from [pixelsBefore] to [pixelsAfter]. The
-  /// position without the scope's preview, `Q0 = pixelsBefore - S`, would
-  /// have clamped into its own maximum `M'`, the axis's own-free total less
-  /// [viewportExtent]. A position that ends inside `[0, maxPassed]` after a
+  /// own-free position, `Q0 = pixelsBefore - S`, would have clamped into
+  /// its own maximum [ownMax], `M'`, the axis's own-free total less the
+  /// viewport's extent. A position that ends inside `[0, maxPassed]` after a
   /// change of the maximum clamped or kept its pixels, and the shift takes
   /// the difference of the two moves. One that ends outside it did not
   /// enforce its boundary and springs back to the nearer bound outside
@@ -3051,16 +3213,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     double pixelsBefore,
     double pixelsAfter,
     double maxPassed,
+    double ownMax,
     bool changed,
-    double viewportExtent,
   ) {
     final free = pixelsBefore - _ownScrollShift;
-    final ownMax = math.max(
-      0.0,
-      _contentAxisInstance!.totalExtent -
-          (_ownCount == 0 ? 0.0 : _ownPrefix![_ownCount]) -
-          viewportExtent,
-    );
     final freeClamped = free.clamp(0.0, ownMax);
     if (pixelsAfter >= 0.0 && pixelsAfter <= maxPassed) {
       if (changed) {
@@ -3646,6 +3802,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     // retained exit survives both and its release stays reachable.
     _retainedExits.clear();
     _clipRectLayer.layer = null;
+    // A record this render registered on outlives it where the element
+    // tree replaces the render and keeps the board's state: released, the
+    // gate answers false, so the record wraps nothing on its account.
+    _springGate._render = null;
     super.dispose();
   }
 
@@ -4340,6 +4500,11 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     double? verticalPixels,
     double? horizontalPixels,
   ) {
+    // A scroll notifies inside its move, so a drag's resolve settles the
+    // own spring-back here at once; inside a layout its head has settled.
+    if (!_inLayout) {
+      _settleOwnSpring();
+    }
     if (!hasSize) {
       return null;
     }
@@ -4577,5 +4742,20 @@ class RenderBoardCellSurface extends RenderProxyBox {
     }
     node._requestRemeasure(top, buildsNothing: buildsNothing);
     _undelivered = false;
+  }
+}
+
+/// The gate a [RenderBoardViewport] registers on its content position's
+/// spring record: it answers, live, whether the render's own scroll stands
+/// on the axis, and false once the render is disposed.
+class _RenderSpringGate implements BoardSpringGate {
+  _RenderSpringGate(this._render);
+
+  RenderBoardViewport<Object?>? _render;
+
+  @override
+  bool wrapsSpringsOn(Axis axis) {
+    final render = _render;
+    return render != null && render._ownScrollStandsOn(axis);
   }
 }

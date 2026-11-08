@@ -40,7 +40,11 @@ class BoardSpringRecord {
   /// The axis whose physics records here.
   final Axis axis;
 
-  /// Answers whether this record wraps; with none it wraps nothing.
+  /// Answers whether this record wraps; with none it wraps nothing. The
+  /// board's render object registers its gate here in a layout while the
+  /// scroll a resize's own preview moved stands on the axis: the gate
+  /// answers, live, whether that scroll still stands, and false once the
+  /// render that registered it is disposed, which releases it.
   BoardSpringGate? gate;
 
   int simulation = 0;

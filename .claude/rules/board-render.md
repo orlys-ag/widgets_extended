@@ -140,17 +140,53 @@ The contract of `RenderBoardViewport`. The conventions every layer follows are i
   own-free evaluation of `_laneTermOf`, floored as the sizing step
   floors, and a literal zero to an unmarked one; after the pass loop an
   unmarked own track whose pass wrote zero is dropped. The OWN SCROLL
-  SHIFT `S` changes in layout only: by the change of the own deltas
-  between the leading band's end and the anchor at each pass, by the
-  fold of a standing RESIDUE at the layout head, and in
-  `_applyContentDimensions`, which attributes a clamp after a change of
-  the maximum and, where the position did not enforce its boundary, its
-  whole move now and a residue for the spring-back that follows outside
-  layout; the CLOSING RULE, after the pass loop and the drop, sets it to
-  zero once no own track and no residue stands, so a scroll the preview
-  left is the board's own once that preview has wholly closed, and with
-  no own track, residue or `S` a layout computes none of these rules,
-  the dimension rule only recording the maximum it passed. A changed
+  SHIFT `S` is the part of the content axis's scroll offset that the
+  scope's preview's clamps, corrections and spring-backs moved, which a
+  scroll by anything else does not change, and the OWN-FREE SCROLL
+  OFFSET `P - S + R * f` is the scroll offset less that part. Layout
+  changes it by the change of the own deltas between the leading band's
+  end and the anchor at each pass, by the fold of a standing RESIDUE at
+  the layout head, and in `_applyContentDimensions`, which attributes a
+  clamp after a change of the maximum and, where the position did not
+  enforce its boundary, its whole move now and a residue for the
+  spring-back that follows outside layout; the CLOSING RULE, after the
+  pass loop and the drop, sets it to zero once no own track and no
+  residue stands, so a scroll the preview left is the board's own once
+  that preview has wholly closed, and with no own track, residue or `S`
+  a layout computes none of these rules, the dimension rule only
+  recording the maximum it passed. The spring-back's moves are told from
+  every other writer's through the axis's `BoardSpringRecord`, which the
+  render reads off the content position's `physics`, the
+  `BoardScrollPhysics` `Board` installs outermost (`board-widget.md`),
+  with a type test; a position whose physics is another, or an offset
+  that is no `ScrollPosition`, keeps the reading at the live pixels.
+  While the OWN SCROLL STANDS (`_ownScrollStandsOn`, the own-free mode's
+  test without the key's content axis instance and measurement resets,
+  which the shift and the residue outlive through the layout head and
+  the zoom anchor) the render registers its `BoardSpringGate` on that
+  record at the head of `_applyContentDimensions`, before the position
+  calls, so a spring-back the position begins inside them is wrapped;
+  the gate answers that test live, and false once the render is
+  disposed, and the record wraps each simulation the physics creates
+  while its gate answers true, recording its start and each value it
+  yields. `_settleOwnSpring` attributes the content position's moves
+  since its LAST READ (the pixels `L`, the simulation `A` it took as the
+  spring-back and the record's serial `T`, which `_applyContentDimensions`
+  also takes after its rule while the own data stood at its head) at two
+  sites: the head of the own-free sampler outside layout, which a scroll
+  reaches at once because it notifies inside its move, and the first
+  statement of every layout, before the zoom anchor and every
+  correction. It runs while the own scroll stands and the position has
+  pixels and a record, and returns at once where neither the serial nor
+  the pixels moved: where the record's current simulation is not `A`, `A`
+  no longer runs, its residue folds at its last yield since the read or
+  else at `L`, and the dimension rule divides the new one at its start,
+  arming a residue only for a start outside the range; the pixels are
+  the spring-back's where they equal its last yield since the read (or
+  `L`), or its start while it has yielded only the value its controller
+  reads as it starts, and otherwise another writer moved them, which
+  folds the residue where the spring-back had come to and leaves `S`, so
+  the own-free scroll offset moves by that writer's move. A changed
   key resets the data and the residue at the layout head, and `S` to
   the zoom anchor's difference where it computed the
   own-free target and to zero elsewhere, except that a measurement reset

@@ -11,6 +11,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/_board_axis.dart';
+import 'package:widgets_extended/board/_board_scroll_physics.dart';
 import 'package:widgets_extended/board/_board_span.dart';
 import 'package:widgets_extended/board/board_animation_style.dart';
 import 'package:widgets_extended/board/board_config.dart';
@@ -23,6 +24,28 @@ class _Item {
   const _Item(this.key);
 
   final String key;
+}
+
+/// A vertical controller whose position ignores the physics the scrollable
+/// gives it, so the board's scroll physics never reaches it.
+class _UnwrappedController extends ScrollController {
+  @override
+  ScrollPosition createScrollPosition(
+    ScrollPhysics physics,
+    ScrollContext context,
+    ScrollPosition? oldPosition,
+  ) {
+    return ScrollPositionWithSingleContext(
+      physics: const ClampingScrollPhysics(
+        parent: RangeMaintainingScrollPhysics(),
+      ),
+      context: context,
+      initialPixels: initialScrollOffset,
+      keepScrollOffset: keepScrollOffset,
+      oldPosition: oldPosition,
+      debugLabel: debugLabel,
+    );
+  }
 }
 
 const Key _frameKey = ValueKey<String>("board-frame");
@@ -1495,7 +1518,6 @@ void main() {
   testWidgets(
     "another scroll during a spring-back its own vacate started moves a "
     "resize target at once",
-    skip: true,
     (tester) async {
       final controller = _rowsLaned(tester, rowCount: 40);
       _addDelaneItems(controller, row: 39);
@@ -1648,7 +1670,6 @@ void main() {
   testWidgets(
     "another scroll during its preview's spring-back moves the own-free "
     "sample at once on a horizontal content axis",
-    skip: true,
     (tester) async {
       final controller = _columnsLaned(tester, columnCount: 40);
       controller.addItem(
@@ -1777,6 +1798,105 @@ void main() {
       expect(startColumn(), 12.0);
       expect(endColumn(), 40.0);
       drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "a scroll into space its own preview added moves a resize target with "
+    "the content",
+    (tester) async {
+      final controller = _rowsLaned(tester, rowCount: 40);
+      controller.addItem(
+        const _Item("a"),
+        const BoardSpan(rowStart: 38, colStart: 0, colSpan: 4),
+      );
+      controller.addItem(
+        const _Item("d"),
+        const BoardSpan(rowStart: 37, colStart: 0, rowSpan: 2, colSpan: 5),
+      );
+      final viewport = await _mount(tester, controller);
+      final position = viewport.verticalPosition!;
+      position.jumpTo(100.0);
+      await tester.pump();
+      position.jumpTo(112.0);
+      await tester.pump();
+      final drag = _drag(
+        tester,
+        controller,
+        snap: const BoardSnap.fraction(0.25),
+      );
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.leading,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 259.0),
+      );
+      // The preview lanes `d` in row 38 beside `a`, which grows the row to
+      // 40 px and the scroll range to 130.
+      _move(tester, drag, const Offset(40.0, 270.0));
+      for (var pump = 1; pump <= 3; pump++) {
+        await tester.pump(_frame);
+      }
+      expect(_startRow(drag), 38.0);
+      expect(_endRow(drag), 39.0);
+      expect(_rowExtent(viewport, 38), 40.0);
+      expect(position.maxScrollExtent, 130.0);
+      position.jumpTo(130.0);
+      for (var pump = 0; pump <= 3; pump++) {
+        if (pump > 0) {
+          await tester.pump(_frame);
+        }
+        expect(_startRow(drag), 38.75, reason: "pump $pump");
+        expect(_endRow(drag), 39.0, reason: "pump $pump");
+      }
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "a scroll position whose physics the board does not wrap keeps the "
+    "reading at the live pixels",
+    (tester) async {
+      final controller = _rowsLaned(tester, rowCount: 40);
+      _addDelaneItems(controller, row: 39);
+      final scroll = _UnwrappedController();
+      addTearDown(scroll.dispose);
+      final viewport = await _mount(
+        tester,
+        controller,
+        verticalDetails: ScrollableDetails.vertical(controller: scroll),
+      );
+      final position = viewport.verticalPosition!;
+      expect(position.physics, isNot(isA<BoardScrollPhysics>()));
+      position.jumpTo(129.0);
+      await tester.pump();
+      controller.beginOwnMakeRoomPreview();
+      position.jumpTo(130.0);
+      controller.previewMakeRoomGap(
+        draggedKey: "d",
+        prospective: const BoardSpan(
+          rowStart: 36,
+          colStart: 0,
+          rowSpan: 4,
+          colSpan: 5,
+        ),
+      );
+      await tester.pump();
+      double painted() {
+        return controller
+            .trackSampleWithoutOwnPreview(viewport, const Offset(40.0, 236.0))!
+            .row
+            .painted;
+      }
+
+      expect(painted(), moreOrLessEquals(36.6, epsilon: 1e-9));
+      position.jumpTo(125.0);
+      expect(painted(), moreOrLessEquals(36.6, epsilon: 1e-9));
       await tester.pumpAndSettle(_frame);
     },
   );

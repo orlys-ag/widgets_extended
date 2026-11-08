@@ -717,9 +717,9 @@ extension BoardControllerInternals<TKey, TItem>
   /// otherwise, so a port that is not this board's, a test's fake
   /// included, samples the lattice as it paints. [verticalPixels] and
   /// [horizontalPixels] are as `trackSampleAt` takes them; where neither
-  /// names an offset the sample is read at the scroll offset the content
-  /// axis would have without that preview, which its `scrollPixels`
-  /// records.
+  /// names an offset the sample is read at the own-free scroll offset, the
+  /// content axis's scroll offset less the part that preview moved, which
+  /// its `scrollPixels` records.
   ({BoardAxisSample row, BoardAxisSample col})? trackSampleWithoutOwnPreview(
     BoardRenderPort<TKey> port,
     Offset local, {
