@@ -11,6 +11,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/_board_axis.dart';
+import 'package:widgets_extended/board/_board_scroll_physics.dart';
 import 'package:widgets_extended/board/_board_span.dart';
 import 'package:widgets_extended/board/board_animation_style.dart';
 import 'package:widgets_extended/board/board_config.dart';
@@ -23,6 +24,28 @@ class _Item {
   const _Item(this.key);
 
   final String key;
+}
+
+/// A vertical controller whose position ignores the physics the scrollable
+/// gives it, so the board's scroll physics never reaches it.
+class _UnwrappedController extends ScrollController {
+  @override
+  ScrollPosition createScrollPosition(
+    ScrollPhysics physics,
+    ScrollContext context,
+    ScrollPosition? oldPosition,
+  ) {
+    return ScrollPositionWithSingleContext(
+      physics: const ClampingScrollPhysics(
+        parent: RangeMaintainingScrollPhysics(),
+      ),
+      context: context,
+      initialPixels: initialScrollOffset,
+      keepScrollOffset: keepScrollOffset,
+      oldPosition: oldPosition,
+      debugLabel: debugLabel,
+    );
+  }
 }
 
 const Key _frameKey = ValueKey<String>("board-frame");
@@ -70,12 +93,15 @@ BoardController<String, _Item> _rowsLaned(
 
 /// The horizontal mirror of [_rowsLaned]: content-sized columns carrying
 /// the lanes, over seven 40 px rows.
-BoardController<String, _Item> _columnsLaned(WidgetTester tester) {
+BoardController<String, _Item> _columnsLaned(
+  WidgetTester tester, {
+  int columnCount = 6,
+}) {
   final controller = BoardController<String, _Item>(
     vsync: tester,
     rows: BoardAxisConfig(axis: UniformAxis(7, 40.0)),
     columns: BoardAxisConfig(
-      axis: LazyContentAxis(6, 80.0),
+      axis: LazyContentAxis(columnCount, 80.0),
       laneExtent: 18.0,
       lanePadding: 4.0,
     ),
@@ -153,6 +179,32 @@ BoardDragController<String> _drag(
     config: BoardDragConfig<String>(
       snap: snap,
       autoScrollEdgeZone: 0.0,
+      primaryResizeEdges: BoardResizeEdges.both,
+      onItemMoved: (key, span) {},
+      onItemResized: (key, span) {
+        controller.resizeItem(key, span);
+      },
+    ),
+  );
+  addTearDown(drag.dispose);
+  return drag;
+}
+
+/// [_drag] with an autoscroll edge zone of [edgeZone] and no ramp, so the
+/// autoscroller drives at the velocity the pointer's place asks for from
+/// its first tick.
+BoardDragController<String> _autoDrag(
+  WidgetTester tester,
+  BoardController<String, _Item> controller, {
+  required double edgeZone,
+}) {
+  final drag = BoardDragController<String>(
+    boardController: controller,
+    vsync: tester,
+    config: BoardDragConfig<String>(
+      snap: const BoardSnap.track(),
+      autoScrollEdgeZone: edgeZone,
+      autoScrollRampDuration: Duration.zero,
       primaryResizeEdges: BoardResizeEdges.both,
       onItemMoved: (key, span) {},
       onItemResized: (key, span) {
@@ -1457,4 +1509,424 @@ void main() {
       await tester.pumpAndSettle(_frame);
     },
   );
+
+  // The spring-back tests below run on forty rows with `a` and `d` laned
+  // in row 39, scrolled to 129, where a vacate of row 39 to 22 ends the
+  // rows at 412 and the scroll range at 112; or on the horizontal mirror,
+  // forty columns with `a` and `d` laned in column 39.
+
+  testWidgets(
+    "another scroll during a spring-back its own vacate started moves a "
+    "resize target at once",
+    (tester) async {
+      final controller = _rowsLaned(tester, rowCount: 40);
+      _addDelaneItems(controller, row: 39);
+      final viewport = await _mount(tester, controller);
+      final position = viewport.verticalPosition!;
+      position.jumpTo(129.0);
+      await tester.pump();
+      final drag = _drag(tester, controller);
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.leading,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 266.0),
+      );
+      position.jumpTo(130.0);
+      _move(tester, drag, const Offset(40.0, 236.0));
+      expect(
+        drag.currentTarget?.span,
+        const BoardSpan(rowStart: 36, colStart: 0, rowSpan: 4, colSpan: 5),
+      );
+      await tester.pump(_frame);
+      expect(position.pixels, greaterThan(112.0));
+      position.jumpTo(115.0);
+      const jumped = BoardSpan(
+        rowStart: 35,
+        colStart: 0,
+        rowSpan: 5,
+        colSpan: 5,
+      );
+      var pumps = 0;
+      var between = false;
+      while (true) {
+        expect(
+          drag.currentTarget?.span,
+          jumped,
+          reason: "pump $pumps, pixels ${position.pixels}",
+        );
+        if (position.pixels <= 112.0 || pumps == 60) {
+          break;
+        }
+        await tester.pump(_frame);
+        pumps += 1;
+        if (position.pixels > 112.0 && position.pixels < 115.0) {
+          between = true;
+        }
+      }
+      expect(position.pixels, 112.0);
+      expect(between, isTrue);
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "the autoscroller during a spring-back its own vacate started moves a "
+    "resize target by its step",
+    (tester) async {
+      final controller = _rowsLaned(tester, rowCount: 40);
+      _addDelaneItems(controller, row: 39);
+      final viewport = await _mount(tester, controller);
+      final position = viewport.verticalPosition!;
+      position.jumpTo(129.0);
+      await tester.pump();
+      final drag = _autoDrag(tester, controller, edgeZone: 20.0);
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.leading,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 266.0),
+      );
+      position.jumpTo(130.0);
+      // 10 px into the 20 px top zone: 600 px/s, 9.6 px a 16 ms tick.
+      _move(tester, drag, const Offset(40.0, 10.0));
+      expect(_startRow(drag), 14.0);
+      expect(_endRow(drag), 40.0);
+      await tester.pump(_frame);
+      expect(position.pixels, 130.0);
+      expect(position.maxScrollExtent, 112.0);
+      await tester.pump(_frame);
+      expect(position.pixels, moreOrLessEquals(120.4, epsilon: 1e-9));
+      expect(_startRow(drag), 13.0);
+      expect(_endRow(drag), 40.0);
+      await tester.pump(_frame);
+      expect(
+        controller
+            .trackSampleWithoutOwnPreview(viewport, const Offset(40.0, 10.0))!
+            .row
+            .scrollPixels,
+        moreOrLessEquals(110.8, epsilon: 1e-9),
+      );
+      expect(_startRow(drag), 12.0);
+      expect(_endRow(drag), 40.0);
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "the autoscroller drives no axis that has no room toward its step "
+    "during a spring-back",
+    (tester) async {
+      final controller = _rowsLaned(tester, rowCount: 40);
+      _addDelaneItems(controller, row: 35);
+      final viewport = await _mount(tester, controller);
+      final position = viewport.verticalPosition!;
+      position.jumpTo(129.0);
+      await tester.pump();
+      expect(viewport.rectOfItem("d"), const Rect.fromLTRB(0, 225, 200, 243));
+      final drag = _autoDrag(tester, controller, edgeZone: 20.0);
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.trailing,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 242.0),
+      );
+      position.jumpTo(129.5);
+      // In the bottom zone, toward the range's end, which the vacate of row
+      // 35 puts at 112, below the scroll offset.
+      _move(tester, drag, const Offset(40.0, 295.0));
+      expect(_endRow(drag), 40.0);
+      await tester.pump(_frame);
+      expect(position.pixels, 129.5);
+      expect(position.maxScrollExtent, 112.0);
+      await tester.pump(_frame);
+      expect(position.pixels, greaterThan(112.0));
+      expect(position.pixels, lessThan(129.5));
+      expect(
+        controller
+            .trackSampleWithoutOwnPreview(viewport, const Offset(40.0, 295.0))!
+            .row
+            .scrollPixels,
+        moreOrLessEquals(129.5, epsilon: 1e-9),
+      );
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "another scroll during its preview's spring-back moves the own-free "
+    "sample at once on a horizontal content axis",
+    (tester) async {
+      final controller = _columnsLaned(tester, columnCount: 40);
+      controller.addItem(
+        const _Item("a"),
+        const BoardSpan(rowStart: 0, colStart: 39, rowSpan: 4),
+      );
+      controller.addItem(
+        const _Item("d"),
+        const BoardSpan(rowStart: 0, colStart: 39, rowSpan: 5),
+      );
+      final viewport = await _mount(
+        tester,
+        controller,
+        width: 300.0,
+        height: 280.0,
+        cell: const Size(10.0, 40.0),
+      );
+      final position = viewport.horizontalPosition!;
+      position.jumpTo(129.0);
+      await tester.pump();
+      controller.beginOwnMakeRoomPreview();
+      position.jumpTo(130.0);
+      controller.previewMakeRoomGap(
+        draggedKey: "d",
+        prospective: const BoardSpan(
+          rowStart: 0,
+          colStart: 36,
+          rowSpan: 5,
+          colSpan: 4,
+        ),
+      );
+      await tester.pump();
+      double painted() {
+        return controller
+            .trackSampleWithoutOwnPreview(viewport, const Offset(236.0, 40.0))!
+            .col
+            .painted;
+      }
+
+      expect(painted(), moreOrLessEquals(36.6, epsilon: 1e-9));
+      expect(position.pixels, greaterThan(112.0));
+      position.jumpTo(125.0);
+      var pumps = 0;
+      var between = false;
+      while (true) {
+        expect(
+          painted(),
+          moreOrLessEquals(36.1, epsilon: 1e-9),
+          reason: "pump $pumps, pixels ${position.pixels}",
+        );
+        if (position.pixels <= 112.0 || pumps == 60) {
+          break;
+        }
+        await tester.pump(_frame);
+        pumps += 1;
+        if (position.pixels > 112.0 && position.pixels < 125.0) {
+          between = true;
+        }
+      }
+      expect(position.pixels, 112.0);
+      expect(between, isTrue);
+    },
+  );
+
+  testWidgets(
+    "the autoscroller during a spring-back its own vacate started moves a "
+    "resize target by its step on a horizontal content axis",
+    (tester) async {
+      final controller = _columnsLaned(tester, columnCount: 40);
+      controller.addItem(
+        const _Item("a"),
+        const BoardSpan(rowStart: 0, colStart: 39, rowSpan: 4),
+      );
+      controller.addItem(
+        const _Item("d"),
+        const BoardSpan(rowStart: 0, colStart: 39, rowSpan: 5),
+      );
+      final viewport = await _mount(
+        tester,
+        controller,
+        width: 300.0,
+        height: 280.0,
+        cell: const Size(10.0, 40.0),
+      );
+      final position = viewport.horizontalPosition!;
+      position.jumpTo(129.0);
+      await tester.pump();
+      final drag = _autoDrag(tester, controller, edgeZone: 20.0);
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.leading,
+        axis: Axis.horizontal,
+        local: const Offset(266.0, 40.0),
+      );
+      double startColumn() {
+        return drag.currentTarget!.span.startTrackOn(Axis.horizontal);
+      }
+
+      double endColumn() {
+        return drag.currentTarget!.span.endTrackOn(Axis.horizontal);
+      }
+
+      position.jumpTo(130.0);
+      _move(tester, drag, const Offset(10.0, 40.0));
+      expect(startColumn(), 14.0);
+      expect(endColumn(), 40.0);
+      await tester.pump(_frame);
+      expect(position.pixels, 130.0);
+      expect(position.maxScrollExtent, 112.0);
+      await tester.pump(_frame);
+      expect(position.pixels, moreOrLessEquals(120.4, epsilon: 1e-9));
+      expect(startColumn(), 13.0);
+      expect(endColumn(), 40.0);
+      await tester.pump(_frame);
+      expect(
+        controller
+            .trackSampleWithoutOwnPreview(viewport, const Offset(10.0, 40.0))!
+            .col
+            .scrollPixels,
+        moreOrLessEquals(110.8, epsilon: 1e-9),
+      );
+      expect(startColumn(), 12.0);
+      expect(endColumn(), 40.0);
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "a scroll into space its own preview added moves a resize target with "
+    "the content",
+    (tester) async {
+      final controller = _rowsLaned(tester, rowCount: 40);
+      controller.addItem(
+        const _Item("a"),
+        const BoardSpan(rowStart: 38, colStart: 0, colSpan: 4),
+      );
+      controller.addItem(
+        const _Item("d"),
+        const BoardSpan(rowStart: 37, colStart: 0, rowSpan: 2, colSpan: 5),
+      );
+      final viewport = await _mount(tester, controller);
+      final position = viewport.verticalPosition!;
+      position.jumpTo(100.0);
+      await tester.pump();
+      position.jumpTo(112.0);
+      await tester.pump();
+      final drag = _drag(
+        tester,
+        controller,
+        snap: const BoardSnap.fraction(0.25),
+      );
+      _lift(
+        tester,
+        drag,
+        viewport,
+        key: "d",
+        edge: BoardResizeEdges.leading,
+        axis: Axis.vertical,
+        local: const Offset(40.0, 259.0),
+      );
+      // The preview lanes `d` in row 38 beside `a`, which grows the row to
+      // 40 px and the scroll range to 130.
+      _move(tester, drag, const Offset(40.0, 270.0));
+      for (var pump = 1; pump <= 3; pump++) {
+        await tester.pump(_frame);
+      }
+      expect(_startRow(drag), 38.0);
+      expect(_endRow(drag), 39.0);
+      expect(_rowExtent(viewport, 38), 40.0);
+      expect(position.maxScrollExtent, 130.0);
+      position.jumpTo(130.0);
+      for (var pump = 0; pump <= 3; pump++) {
+        if (pump > 0) {
+          await tester.pump(_frame);
+        }
+        expect(_startRow(drag), 38.75, reason: "pump $pump");
+        expect(_endRow(drag), 39.0, reason: "pump $pump");
+      }
+      drag.endDrag(cancel: true);
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "a scroll position whose physics the board does not wrap keeps the "
+    "reading at the live pixels",
+    (tester) async {
+      final controller = _rowsLaned(tester, rowCount: 40);
+      _addDelaneItems(controller, row: 39);
+      final scroll = _UnwrappedController();
+      addTearDown(scroll.dispose);
+      final viewport = await _mount(
+        tester,
+        controller,
+        verticalDetails: ScrollableDetails.vertical(controller: scroll),
+      );
+      final position = viewport.verticalPosition!;
+      expect(position.physics, isNot(isA<BoardScrollPhysics>()));
+      position.jumpTo(129.0);
+      await tester.pump();
+      controller.beginOwnMakeRoomPreview();
+      position.jumpTo(130.0);
+      controller.previewMakeRoomGap(
+        draggedKey: "d",
+        prospective: const BoardSpan(
+          rowStart: 36,
+          colStart: 0,
+          rowSpan: 4,
+          colSpan: 5,
+        ),
+      );
+      await tester.pump();
+      double painted() {
+        return controller
+            .trackSampleWithoutOwnPreview(viewport, const Offset(40.0, 236.0))!
+            .row
+            .painted;
+      }
+
+      expect(painted(), moreOrLessEquals(36.6, epsilon: 1e-9));
+      position.jumpTo(125.0);
+      expect(painted(), moreOrLessEquals(36.6, epsilon: 1e-9));
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets("a move's autoscroller from an overscroll lands in the range", (
+    tester,
+  ) async {
+    final controller = _rowsLaned(tester, rowCount: 40);
+    _addDelaneItems(controller, row: 39);
+    final viewport = await _mount(tester, controller);
+    final position = viewport.verticalPosition!;
+    position.jumpTo(129.0);
+    await tester.pump();
+    final drag = _autoDrag(tester, controller, edgeZone: 20.0);
+    expect(
+      drag.startDrag(
+        key: "d",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, const Offset(100.0, 270.0)),
+      ),
+      isTrue,
+    );
+    await tester.pump(_frame);
+    // The removal shrinks row 39 under the scroll offset, and the pointer
+    // in the top zone drives the scroll toward the start.
+    position.jumpTo(130.0);
+    controller.removeItem("a");
+    _move(tester, drag, const Offset(100.0, 19.0));
+    await tester.pump(_frame);
+    expect(position.pixels, greaterThan(position.maxScrollExtent));
+    await tester.pump(_frame);
+    expect(position.pixels, position.maxScrollExtent);
+    drag.endDrag(cancel: true);
+    await tester.pumpAndSettle(_frame);
+  });
 }

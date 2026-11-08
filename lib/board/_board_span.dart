@@ -50,7 +50,8 @@ double snapToTrackEdge(double trackSpace) {
 /// the lattice as it would paint without that session's own make-room
 /// preview: its `painted` and every other coordinate are that lattice's,
 /// and its `scrollPixels` is the offset it was read at, the one asked for
-/// or the one the board would have without that preview.
+/// or the own-free one, the board's scroll offset less the part that
+/// preview moved.
 ///
 /// `painted`: the coordinate `BoardRenderPort.trackSpaceAt` answers on the
 /// axis, the integer track plus the fraction into it of the lattice that

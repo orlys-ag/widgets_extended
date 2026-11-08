@@ -292,7 +292,15 @@ The contract of the drag layer. The conventions every layer follows are in `boar
   `contentDeltaFromPaint`, and is evaluated at `startDrag` and per
   move; it runs only while some axis has room in the content direction
   its velocity drives, stopping its ticker at the extent and restarting
-  from the next evaluation, as Flutter's own edge autoscroller does. A
+  from the next evaluation, as Flutter's own edge autoscroller does.
+  Each tick jumps an axis by its step clamped into the scroll range,
+  except where the step may start from an OVERSCROLL: on an axis whose
+  position's physics is `BoardScrollPhysics` and whose spring record
+  wraps, read at each tick, the step is taken only while that axis has
+  room at the extent it drives toward and is clamped only at that
+  extent, as `EdgeDraggingAutoScroller` steps, so a step from an
+  overscroll neither lands on the range's end nor moves the scroll
+  offset against its direction. A
   session's scroller is built with `holdsLiftZones`, a range's without:
   its first evaluation, the lift's, HOLDS each edge whose zone the
   pointer lies in, and a held edge drives nothing until the pointer has

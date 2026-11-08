@@ -11,6 +11,7 @@
 /// 4 px padding, so one lane is 22 px and two are 40 px.
 library;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/_board_axis.dart';
@@ -228,6 +229,40 @@ _vacateAtEnd(
   viewport.verticalPosition!.jumpTo(pixels);
   await tester.pump();
   return (controller, viewport);
+}
+
+/// Forty rows with [_addDelaneItems]' items in row 39, scrolled to 129,
+/// then in one frame scrolled to 130 and given an own preview that vacates
+/// row 39 to 22, which ends the rows at 412 and the scroll range at 112,
+/// and pumped once: the layout leaves the scroll offset at 130 and begins
+/// its spring-back to 112, while the board without the preview would rest
+/// at 130.
+Future<(BoardController<String, _Item>, RenderBoardViewport<String>)>
+_springBack(
+  WidgetTester tester, {
+  int frozenStart = 0,
+  BoardAnimationStyle style = BoardAnimationStyle.disabled,
+}) async {
+  final controller = _rowsLaned(
+    tester,
+    rowCount: 40,
+    frozenStart: frozenStart,
+    style: style,
+  );
+  _addDelaneItems(controller, row: 39);
+  final viewport = await _mount(tester, controller);
+  final position = viewport.verticalPosition!;
+  position.jumpTo(129.0);
+  await tester.pump();
+  controller.beginOwnMakeRoomPreview();
+  position.jumpTo(130.0);
+  _install(controller, _rows(36, 4));
+  await tester.pump();
+  return (controller, viewport);
+}
+
+Offset _global(WidgetTester tester, Offset local) {
+  return tester.getRect(find.byKey(_frameKey)).topLeft + local;
 }
 
 void main() {
@@ -795,6 +830,382 @@ void main() {
         ).paintedExtended,
         _near(40.25),
       );
+    },
+  );
+
+  // The spring-back tests below run on [_springBack], whose preview leaves
+  // the scroll offset at 130 springing back to 112 while the board without
+  // it would rest at 130. At (40, 236) the own-free `painted` is
+  // `(Q + 236) / 10` for an own-free scroll offset `Q` between 100 and 140.
+
+  // A jump to 125 during [_springBack]'s spring-back, sampled at once and
+  // after each pump until the scroll offset reaches 112.
+  Future<void> jumpDuringSpringBack(
+    WidgetTester tester, {
+    int frozenStart = 0,
+  }) async {
+    final (controller, viewport) = await _springBack(
+      tester,
+      frozenStart: frozenStart,
+    );
+    final position = viewport.verticalPosition!;
+    const point = Offset(40.0, 236.0);
+    expect(_ownFree(controller, viewport, point).painted, _near(36.6));
+    expect(position.pixels, greaterThan(112.0));
+    position.jumpTo(125.0);
+    var pumps = 0;
+    var between = false;
+    while (true) {
+      expect(
+        _ownFree(controller, viewport, point).painted,
+        _near(36.1),
+        reason: "pump $pumps, pixels ${position.pixels}",
+      );
+      if (position.pixels <= 112.0 || pumps == 60) {
+        break;
+      }
+      await tester.pump(_frame);
+      pumps += 1;
+      if (position.pixels > 112.0 && position.pixels < 125.0) {
+        between = true;
+      }
+    }
+    expect(position.pixels, 112.0);
+    expect(between, isTrue);
+  }
+
+  testWidgets(
+    "another scroll during its preview's spring-back moves the own-free "
+    "sample at once",
+    variant: TargetPlatformVariant(<TargetPlatform>{
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+    }),
+    (tester) async {
+      await jumpDuringSpringBack(tester);
+    },
+  );
+
+  testWidgets(
+    "another scroll during its preview's spring-back moves the own-free "
+    "sample at once with a frozen leading row",
+    (tester) async {
+      await jumpDuringSpringBack(tester, frozenStart: 1);
+    },
+  );
+
+  testWidgets(
+    "an animateTo begun during its preview's spring-back moves the own-free "
+    "sample with each tick",
+    (tester) async {
+      final (controller, viewport) = await _springBack(tester);
+      final position = viewport.verticalPosition!;
+      const point = Offset(40.0, 236.0);
+      expect(position.pixels, 130.0);
+      position.animateTo(
+        100.0,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.linear,
+      );
+      var pumps = 0;
+      while (position.pixels > 100.0 && pumps < 60) {
+        await tester.pump(_frame);
+        pumps += 1;
+        expect(
+          _ownFree(controller, viewport, point).painted,
+          moreOrLessEquals(
+            36.6 - (130.0 - position.pixels) / 10.0,
+            epsilon: 1e-6,
+          ),
+          reason: "pump $pumps, pixels ${position.pixels}",
+        );
+      }
+      expect(position.pixels, 100.0);
+      expect(_ownFree(controller, viewport, point).painted, _near(33.6));
+    },
+  );
+
+  for (final dy in <double>[-30.0, -10.0, 10.0]) {
+    testWidgets(
+      "a wheel by ${dy.round()} during its preview's spring-back moves the "
+      "own-free scroll offset with the pixels",
+      (tester) async {
+        final (controller, viewport) = await _springBack(tester);
+        final position = viewport.verticalPosition!;
+        const point = Offset(40.0, 236.0);
+        expect(position.pixels, 130.0);
+        expect(position.maxScrollExtent, 112.0);
+        // The scrollable clamps a wheel's target into the range, so the
+        // events by -10 and by 10 both land on its end.
+        final expected = dy == -30.0 ? 100.0 : 112.0;
+        final pointer = TestPointer(1, PointerDeviceKind.mouse);
+        await tester.sendEventToBinding(pointer.hover(_global(tester, point)));
+        await tester.sendEventToBinding(pointer.scroll(Offset(0.0, dy)));
+        for (final when in <String>["at once", "after one pump"]) {
+          if (when != "at once") {
+            await tester.pump(_frame);
+          }
+          final sample = _ownFree(controller, viewport, point);
+          expect(position.pixels, expected, reason: when);
+          expect(sample.scrollPixels, _near(expected), reason: when);
+          expect(
+            sample.painted,
+            _near((expected + 236.0) / 10.0),
+            reason: when,
+          );
+        }
+        await tester.pumpAndSettle(_frame);
+      },
+    );
+  }
+
+  testWidgets(
+    "a second pointer during its preview's spring-back moves the own-free "
+    "scroll offset with each move",
+    variant: TargetPlatformVariant(<TargetPlatform>{
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+    }),
+    (tester) async {
+      final (controller, viewport) = await _springBack(tester);
+      final position = viewport.verticalPosition!;
+      final records = <(double, double)>[];
+      void listener() {
+        records.add((
+          position.pixels,
+          _ownFree(
+            controller,
+            viewport,
+            const Offset(40.0, 236.0),
+          ).scrollPixels,
+        ));
+      }
+
+      position.addListener(listener);
+      addTearDown(() {
+        position.removeListener(listener);
+      });
+      final gesture = await tester.startGesture(
+        _global(tester, const Offset(140.0, 150.0)),
+      );
+      for (var move = 1; move <= 5; move++) {
+        await gesture.moveBy(const Offset(0.0, 10.0));
+      }
+      expect(records, hasLength(5));
+      expect(records.last.$1, lessThan(112.0));
+      await gesture.up();
+      await tester.pumpAndSettle(_frame);
+      for (var index = 0; index < records.length; index++) {
+        expect(
+          records[index].$2,
+          _near(records[index].$1),
+          reason: "record $index",
+        );
+      }
+    },
+  );
+
+  testWidgets(
+    "a scroll after a spring-back tick in the same frame leaves that tick's "
+    "move to the spring-back",
+    (tester) async {
+      final (controller, viewport) = await _springBack(tester);
+      final position = viewport.verticalPosition!;
+      const point = Offset(40.0, 236.0);
+      double? before;
+      double? recorded;
+      // Started after the spring-back's activity, so the spring-back's
+      // ticker ticks first in each frame.
+      final ticker = tester.createTicker((elapsed) {
+        if (before == null && position.pixels < 130.0) {
+          final pixels = position.pixels;
+          before = pixels;
+          position.jumpTo(pixels - 3.0);
+          recorded = _ownFree(controller, viewport, point).scrollPixels;
+        }
+      });
+      ticker.start();
+      var previous = position.pixels;
+      var pumps = 0;
+      while (before == null && pumps < 4) {
+        previous = position.pixels;
+        await tester.pump(_frame);
+        pumps += 1;
+      }
+      expect(before, isNotNull);
+      expect(before, isNot(previous));
+      expect(recorded, _near(127.0));
+      pumps = 0;
+      while (true) {
+        expect(
+          _ownFree(controller, viewport, point).scrollPixels,
+          _near(127.0),
+          reason: "pump $pumps, pixels ${position.pixels}",
+        );
+        if (position.pixels <= 112.0 || pumps == 60) {
+          break;
+        }
+        await tester.pump(_frame);
+        pumps += 1;
+      }
+      expect(position.pixels, 112.0);
+      ticker.dispose();
+    },
+  );
+
+  testWidgets(
+    "a jumpTo during a spring-back a live make-room vacate started moves "
+    "the own-free scroll offset by the jump",
+    (tester) async {
+      final (controller, viewport) = await _springBack(
+        tester,
+        style: _animated,
+      );
+      final position = viewport.verticalPosition!;
+      const point = Offset(40.0, 236.0);
+      for (var pump = 1; pump <= 3; pump++) {
+        await tester.pump(_frame);
+      }
+      expect(position.pixels, position.maxScrollExtent);
+      position.jumpTo(position.maxScrollExtent - 1.0);
+      for (var pump = 1; pump <= 2; pump++) {
+        await tester.pump(_frame);
+        expect(
+          position.pixels,
+          greaterThan(position.maxScrollExtent),
+          reason: "pump $pump",
+        );
+      }
+      final q = _ownFree(controller, viewport, point).scrollPixels;
+      position.jumpTo(position.pixels - 0.25);
+      expect(
+        _ownFree(controller, viewport, point).scrollPixels,
+        _near(q - 0.25),
+      );
+      await tester.pumpAndSettle(_frame);
+    },
+  );
+
+  testWidgets(
+    "a spring-back restarted outside layout from its preview's overscroll "
+    "moves nothing",
+    (tester) async {
+      final (controller, viewport) = await _springBack(tester);
+      final position = viewport.verticalPosition!;
+      const point = Offset(40.0, 236.0);
+      for (var pump = 1; pump <= 3; pump++) {
+        await tester.pump(_frame);
+      }
+      // A press holds the spring-back and a lift with no move restarts it
+      // from where it stood, outside any layout.
+      final gesture = await tester.startGesture(
+        _global(tester, const Offset(140.0, 150.0)),
+      );
+      await gesture.up();
+      final layouts = viewport.debugPerformLayoutCount;
+      final held = position.pixels;
+      await tester.pump(_frame);
+      // The restarted spring-back's first tick moves nothing, so its first
+      // moving tick runs before any layout.
+      expect(viewport.debugPerformLayoutCount, layouts);
+      expect(position.pixels, held);
+      expect(_ownFree(controller, viewport, point).scrollPixels, _near(130.0));
+      var pumps = 1;
+      while (true) {
+        await tester.pump(_frame);
+        pumps += 1;
+        if (pumps == 2) {
+          expect(position.pixels, lessThan(held));
+        }
+        expect(
+          _ownFree(controller, viewport, point).scrollPixels,
+          _near(130.0),
+          reason: "pump $pumps, pixels ${position.pixels}",
+        );
+        if (position.pixels <= 112.0 || pumps == 60) {
+          break;
+        }
+      }
+      expect(position.pixels, 112.0);
+    },
+  );
+
+  testWidgets(
+    "a jumpTo between a measurement reset and the next layout during its "
+    "preview's spring-back moves the own-free scroll offset by the jump",
+    (tester) async {
+      final (controller, viewport) = await _springBack(tester);
+      final position = viewport.verticalPosition!;
+      const point = Offset(40.0, 236.0);
+      for (var pump = 1; pump <= 3; pump++) {
+        await tester.pump(_frame);
+      }
+      final p0 = position.pixels;
+      expect(_ownFree(controller, viewport, point).scrollPixels, _near(130.0));
+      // The same instance under another lane geometry, which resets its
+      // measurements. Row 39 then holds one 20 px lane under the preview,
+      // which, installed under the 18 px lanes and not sent again, leaves
+      // it at 26 px, 2 px past what a fresh install gives: the range ends
+      // at 116.
+      controller.rows = BoardAxisConfig(
+        axis: controller.rows.axis,
+        laneExtent: 20.0,
+        lanePadding: 4.0,
+      );
+      position.jumpTo(p0 - 2.0);
+      var pumps = 0;
+      var between = false;
+      while (true) {
+        await tester.pump(_frame);
+        pumps += 1;
+        if (pumps == 1) {
+          expect(position.pixels, p0 - 2.0);
+          expect(position.maxScrollExtent, 116.0);
+        }
+        expect(
+          _ownFree(controller, viewport, point).scrollPixels,
+          _near(128.0),
+          reason: "pump $pumps, pixels ${position.pixels}",
+        );
+        if (position.pixels > 116.0 && position.pixels < p0 - 2.0) {
+          between = true;
+        }
+        if (position.pixels <= 116.0 || pumps == 60) {
+          break;
+        }
+      }
+      expect(position.pixels, 116.0);
+      expect(between, isTrue);
+    },
+  );
+
+  testWidgets(
+    "a jumpTo between an axis instance change and the next layout during "
+    "its preview's spring-back moves the own-free scroll offset by the jump",
+    (tester) async {
+      final (controller, viewport) = await _springBack(tester);
+      final position = viewport.verticalPosition!;
+      const point = Offset(40.0, 236.0);
+      for (var pump = 1; pump <= 3; pump++) {
+        await tester.pump(_frame);
+      }
+      final p0 = position.pixels;
+      expect(_ownFree(controller, viewport, point).scrollPixels, _near(130.0));
+      // A new instance whose 10 px estimates are the rows' extents: 49
+      // rows of 10 px and row 39's 22 under the preview end the range at
+      // 212, which holds the jumped scroll offset.
+      controller.rows = _laned(LazyContentAxis(50, 10.0));
+      position.jumpTo(p0 - 2.0);
+      for (var pump = 1; pump <= 3; pump++) {
+        await tester.pump(_frame);
+        expect(position.pixels, p0 - 2.0, reason: "pump $pump");
+        expect(position.maxScrollExtent, 212.0, reason: "pump $pump");
+        expect(
+          _ownFree(controller, viewport, point).scrollPixels,
+          _near(128.0),
+          reason: "pump $pump",
+        );
+      }
     },
   );
 }

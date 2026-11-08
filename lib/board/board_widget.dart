@@ -19,6 +19,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter/gestures.dart';
 
 import '_board_axis.dart';
+import '_board_scroll_physics.dart';
 import '_board_span.dart';
 import 'board_background.dart';
 import 'board_config.dart';
@@ -53,8 +54,11 @@ import 'render_board_viewport.dart';
 class Board<TKey, TItem> extends StatefulWidget {
   /// Creates a board over [controller].
   ///
-  /// [verticalDetails] through [primary], and [scrollCacheExtent] through
-  /// [hitTestBehavior], are pass-throughs to `TwoDimensionalScrollView`
+  /// [verticalDetails] and [horizontalDetails] reach
+  /// `TwoDimensionalScrollView` with the board's scroll physics outermost
+  /// around the physics each gives. [mainAxis] through [primary], and
+  /// [scrollCacheExtent] through [hitTestBehavior], are pass-throughs to
+  /// `TwoDimensionalScrollView`
   /// (`widgets/two_dimensional_scroll_view.dart:57`), and [restorationId]
   /// to the `TwoDimensionalScrollable` it builds. [primary] is nullable
   /// with no default, matching the base
@@ -130,6 +134,15 @@ class Board<TKey, TItem> extends StatefulWidget {
   final bool addRepaintBoundaries;
 
   /// The vertical `Scrollable`'s configuration.
+  ///
+  /// The board installs its own scroll physics outermost, wrapping the
+  /// physics the app gives here as the `Scrollable` applies them, so the
+  /// vertical `ScrollPosition.physics` is the board's. It answers every
+  /// member as the physics it wraps. The board installs it for its life
+  /// and never changes a type in the physics chain, so the `Scrollable`
+  /// never replaces a scroll position on the board's account; it still
+  /// replaces one on its own triggers, such as a change of a type in the
+  /// physics given here.
   final ScrollableDetails verticalDetails;
 
   /// The horizontal `Scrollable`'s configuration.
@@ -137,6 +150,9 @@ class Board<TKey, TItem> extends StatefulWidget {
   /// The board reads no `Directionality`: its columns run the way this
   /// says, so a right-to-left board passes
   /// `ScrollableDetails.horizontal(reverse: true)`.
+  ///
+  /// The board installs its own scroll physics outermost here, as
+  /// [verticalDetails] says.
   final ScrollableDetails horizontalDetails;
 
   /// Which axis is the main one, which decides the framework's default
@@ -225,6 +241,29 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
 
   BoardDragController<TKey>? _dragController;
 
+  /// Each axis's spring record, for this state's life: the one the
+  /// axis's scroll physics records into ([_decorated]).
+  final BoardSpringRecord _verticalSprings = BoardSpringRecord(Axis.vertical);
+  final BoardSpringRecord _horizontalSprings = BoardSpringRecord(
+    Axis.horizontal,
+  );
+
+  /// The widget's details with the board's scroll physics outermost,
+  /// rebuilt only when the widget's details are not equal to the old
+  /// widget's. A position the scrollable replaces, after the app changes a
+  /// type in its physics, is created with a decorator on the same record.
+  late ScrollableDetails _verticalDetails;
+  late ScrollableDetails _horizontalDetails;
+
+  static ScrollableDetails _decorated(
+    ScrollableDetails given,
+    BoardSpringRecord record,
+  ) {
+    return given.copyWith(
+      physics: BoardScrollPhysics(record: record, parent: given.physics),
+    );
+  }
+
   /// The two relays every mounted host listens to, stable for this
   /// state's life; the controller subscriptions feeding them move on a
   /// swap. See [_BoardScope].
@@ -257,6 +296,11 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
   void initState() {
     super.initState();
     _delegate = _createDelegate();
+    _verticalDetails = _decorated(widget.verticalDetails, _verticalSprings);
+    _horizontalDetails = _decorated(
+      widget.horizontalDetails,
+      _horizontalSprings,
+    );
     if (widget.drag != null) {
       _dragController = BoardDragController<TKey>(
         boardController: widget.controller,
@@ -390,6 +434,15 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
     if (!identical(widget.controller, oldWidget.controller)) {
       _unsubscribe(oldWidget.controller);
       _subscribe(widget.controller);
+    }
+    if (widget.verticalDetails != oldWidget.verticalDetails) {
+      _verticalDetails = _decorated(widget.verticalDetails, _verticalSprings);
+    }
+    if (widget.horizontalDetails != oldWidget.horizontalDetails) {
+      _horizontalDetails = _decorated(
+        widget.horizontalDetails,
+        _horizontalSprings,
+      );
     }
     if (rehost ||
         !identical(widget.cellBuilder, oldWidget.cellBuilder) ||
@@ -583,8 +636,8 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
       selection: widget.selection,
       delegate: _delegate,
       mainAxis: widget.mainAxis,
-      verticalDetails: widget.verticalDetails,
-      horizontalDetails: widget.horizontalDetails,
+      verticalDetails: _verticalDetails,
+      horizontalDetails: _horizontalDetails,
       diagonalDragBehavior: widget.diagonalDragBehavior,
       clipBehavior: widget.clipBehavior,
       primary: widget.primary,
