@@ -138,8 +138,11 @@ class Board<TKey, TItem> extends StatefulWidget {
   /// The board installs its own scroll physics outermost, wrapping the
   /// physics the app gives here as the `Scrollable` applies them, so the
   /// vertical `ScrollPosition.physics` is the board's. It answers every
-  /// member as the physics it wraps, and the board keeps it, and so each
-  /// scroll position, for its life.
+  /// member as the physics it wraps. The board installs it for its life
+  /// and never changes a type in the physics chain, so the `Scrollable`
+  /// never replaces a scroll position on the board's account; it still
+  /// replaces one on its own triggers, such as a change of a type in the
+  /// physics given here.
   final ScrollableDetails verticalDetails;
 
   /// The horizontal `Scrollable`'s configuration.

@@ -1,7 +1,8 @@
 /// The scroll physics a board installs outermost around each axis's
 /// physics: it answers every member as the physics it wraps, it is the
 /// outermost physics of a board's scroll positions, and the board keeps
-/// it, and so each position, for its life.
+/// it for its life, so the scrollable replaces no position on the board's
+/// account.
 library;
 
 import 'package:flutter/material.dart';
