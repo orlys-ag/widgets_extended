@@ -1577,7 +1577,6 @@ void main() {
   testWidgets(
     "the autoscroller during a spring-back its own vacate started moves a "
     "resize target by its step",
-    skip: true,
     (tester) async {
       final controller = _rowsLaned(tester, rowCount: 40);
       _addDelaneItems(controller, row: 39);
@@ -1625,7 +1624,6 @@ void main() {
   testWidgets(
     "the autoscroller drives no axis that has no room toward its step "
     "during a spring-back",
-    skip: true,
     (tester) async {
       final controller = _rowsLaned(tester, rowCount: 40);
       _addDelaneItems(controller, row: 35);
@@ -1737,7 +1735,6 @@ void main() {
   testWidgets(
     "the autoscroller during a spring-back its own vacate started moves a "
     "resize target by its step on a horizontal content axis",
-    skip: true,
     (tester) async {
       final controller = _columnsLaned(tester, columnCount: 40);
       controller.addItem(
@@ -1900,4 +1897,36 @@ void main() {
       await tester.pumpAndSettle(_frame);
     },
   );
+
+  testWidgets("a move's autoscroller from an overscroll lands in the range", (
+    tester,
+  ) async {
+    final controller = _rowsLaned(tester, rowCount: 40);
+    _addDelaneItems(controller, row: 39);
+    final viewport = await _mount(tester, controller);
+    final position = viewport.verticalPosition!;
+    position.jumpTo(129.0);
+    await tester.pump();
+    final drag = _autoDrag(tester, controller, edgeZone: 20.0);
+    expect(
+      drag.startDrag(
+        key: "d",
+        renderPort: viewport,
+        pointerGlobal: _global(tester, const Offset(100.0, 270.0)),
+      ),
+      isTrue,
+    );
+    await tester.pump(_frame);
+    // The removal shrinks row 39 under the scroll offset, and the pointer
+    // in the top zone drives the scroll toward the start.
+    position.jumpTo(130.0);
+    controller.removeItem("a");
+    _move(tester, drag, const Offset(100.0, 19.0));
+    await tester.pump(_frame);
+    expect(position.pixels, greaterThan(position.maxScrollExtent));
+    await tester.pump(_frame);
+    expect(position.pixels, position.maxScrollExtent);
+    drag.endDrag(cancel: true);
+    await tester.pumpAndSettle(_frame);
+  });
 }

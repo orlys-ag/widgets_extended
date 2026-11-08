@@ -23,6 +23,7 @@ import 'package:flutter/widgets.dart';
 
 import '_board_drop_fit.dart';
 import '_board_drop_resolver.dart';
+import '_board_scroll_physics.dart';
 import '_board_span.dart';
 import 'board_config.dart';
 import 'board_controller.dart';
@@ -1864,6 +1865,12 @@ class _EdgeHold {
 /// most [maxVelocity] per [rampDuration] and taking a slower target, a
 /// reversal or a stop at once, so content never jumps from rest to a
 /// fast scroll.
+///
+/// On an axis whose position's spring record wraps, which it does while a
+/// resize's own preview stands there, a tick clamps its step only at the
+/// extent it drives toward and jumps no axis without room there, so a step
+/// from an overscroll moves the scroll offset by the step; on every other
+/// axis it clamps the step into the range.
 class BoardAutoScroller {
   BoardAutoScroller({
     required TickerProvider vsync,
@@ -1983,8 +1990,7 @@ class BoardAutoScroller {
     _verticalVelocity = verticalVelocity;
     _horizontalVelocity = horizontalVelocity;
     // A zone whose scroll is already at its end in the direction it
-    // drives starts nothing: the tick would clamp every step to where the
-    // position is.
+    // drives starts nothing: the tick would move nothing there.
     final active = _canAdvance();
     if (active && !_ticker.isActive) {
       _lastElapsed = Duration.zero;
@@ -2073,12 +2079,7 @@ class BoardAutoScroller {
         _verticalVelocity = 0.0;
         _verticalSpeed = 0.0;
       } else {
-        vertical.jumpTo(
-          (vertical.pixels + step.dy).clamp(
-            vertical.minScrollExtent,
-            vertical.maxScrollExtent,
-          ),
-        );
+        _drive(vertical, step.dy);
       }
     }
     final horizontal = _port.horizontalPosition;
@@ -2087,12 +2088,7 @@ class BoardAutoScroller {
         _horizontalVelocity = 0.0;
         _horizontalSpeed = 0.0;
       } else {
-        horizontal.jumpTo(
-          (horizontal.pixels + step.dx).clamp(
-            horizontal.minScrollExtent,
-            horizontal.maxScrollExtent,
-          ),
-        );
+        _drive(horizontal, step.dx);
       }
     }
     // Stopped once no axis can move, a zero velocity or a position at its
@@ -2117,6 +2113,40 @@ class BoardAutoScroller {
     );
     return _hasRoom(_port.verticalPosition, step.dy) ||
         _hasRoom(_port.horizontalPosition, step.dx);
+  }
+
+  /// Whether [position]'s step may start from an overscroll: while its
+  /// physics is the board's and its spring record wraps, read at each tick.
+  static bool _stepsFromOverscroll(ScrollPosition position) {
+    final physics = position.physics;
+    return physics is BoardScrollPhysics && physics.record.wraps;
+  }
+
+  /// Jumps [position] by the content-space [step]. Where it steps from an
+  /// overscroll ([_stepsFromOverscroll]) the jump is clamped only at the
+  /// extent the step drives toward, as Flutter's edge autoscroller steps
+  /// (`EdgeDraggingAutoScroller`), and made only while there is room
+  /// there, so a step from an overscroll neither lands on the range's end
+  /// nor moves the scroll offset against its direction; elsewhere the
+  /// step is clamped into the range.
+  static void _drive(ScrollPosition position, double step) {
+    if (_stepsFromOverscroll(position)) {
+      if (!_hasRoom(position, step)) {
+        return;
+      }
+      position.jumpTo(
+        step > 0.0
+            ? math.min(position.pixels + step, position.maxScrollExtent)
+            : math.max(position.pixels + step, position.minScrollExtent),
+      );
+      return;
+    }
+    position.jumpTo(
+      (position.pixels + step).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      ),
+    );
   }
 
   static bool _hasRoom(ScrollPosition? position, double step) {
