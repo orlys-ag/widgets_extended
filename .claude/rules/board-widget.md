@@ -1,6 +1,7 @@
 ---
 paths:
   - "lib/board/board_widget.dart"
+  - "lib/board/_board_scroll_physics.dart"
 ---
 
 # board architecture: widget
@@ -12,7 +13,20 @@ The contract of `Board`. The conventions every layer follows are in `board.md`.
   `restorationId` to the `TwoDimensionalScrollable`, which the base never
   forwards and which a scope outside the board cannot supply (the
   scrollable's own `RestorationScope` turns restoration off below a null
-  id); owns the delegate (cached, rebuilt
+  id), and the details it hands that scroll view carry
+  `BoardScrollPhysics` (`_board_scroll_physics.dart`) outermost around
+  the physics each of the widget's details gives, built in `initState`
+  and again only when the widget's details are not equal to the old
+  widget's, on one `BoardSpringRecord` per axis the state owns for its
+  life, so the types of a position's physics chain never change for the
+  board's sake and the scrollable never replaces a position for it; the
+  decorator answers every member as its parent, overriding only
+  `allowUserScrolling` and `allowImplicitScrolling`, which
+  `ScrollPhysics` answers without its parent, and
+  `createBallisticSimulation`, which hands back the parent's simulation,
+  wrapped while the record's gate answers true for its axis so that it
+  records into the record where it started and each value it yields;
+  owns the delegate (cached, rebuilt
   only when a builder identity changes, disposed when replaced), the
   per-cell and per-item HOSTS (`_BoardCellHost`, `_BoardItemBuildHost`),
   which show the delegate's builder output as `initial` and re-run the
