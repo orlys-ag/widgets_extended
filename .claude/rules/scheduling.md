@@ -12,7 +12,7 @@ Normative for `lib/scheduling/`, the scheduling module: the experimental schedul
 
 | Layer | Directory | Rule | Imports | Holds |
 |---|---|---|---|---|
-| Dates | `lib/scheduling/dates/` | `scheduling-dates.md` | Of Flutter, only `package:flutter/foundation.dart`; of the module, nothing outside this layer | `CalendarDates`, day numbers, wall minutes, month grids, weekday sets, day hours and the hour label format |
+| Dates | `lib/scheduling/dates/` | `scheduling-dates.md` | Of Flutter, only `package:flutter/foundation.dart`; of packages, `calendar_dates.dart` alone imports `package:timezone/timezone.dart` and re-exports its `Location` and `TZDateTime` to the layers above; of the module, nothing outside this layer | `CalendarDates`, day numbers, wall minutes, month grids, weekday sets, day hours and the hour label format |
 | Entries | `lib/scheduling/entries/` | `scheduling-entries.md` | `dart:ui` for `Color`, and of Flutter only `package:flutter/foundation.dart` | `CalendarEntry<T>`, `CalendarCreateRange` and the data-source contract |
 | Policy | `lib/scheduling/policy/` | `scheduling-policy.md` | Of Flutter, only `package:flutter/foundation.dart` | The overlap rule, the history lock, `CalendarEditPolicy`, `CalendarEditRules` |
 | Store | `lib/scheduling/store/` | `scheduling-store.md` | Of Flutter, only `package:flutter/foundation.dart` | `CalendarStore` and its two stores |

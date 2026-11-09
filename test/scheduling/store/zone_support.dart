@@ -152,30 +152,15 @@ tz.Location? zoneOfStore<T>(CalendarStore<T> store) {
 
 /// The first instant [zone]'s clock reads the day numbered [day].
 DateTime dayOfNumberIn(int day, tz.Location zone) {
-  return Function.apply(
-        CalendarDates.dateOfDayNumber,
-        <Object?>[day],
-        <Symbol, Object?>{#zone: zone},
-      )
-      as DateTime;
+  return CalendarDates.dateOfDayNumber(day, zone: zone);
 }
 
 /// [CalendarDates.timeAtWallMinute] on [zone]'s clock.
 DateTime? timeAtWallIn(int wall, tz.Location zone, {DateTime? from}) {
-  return Function.apply(
-        CalendarDates.timeAtWallMinute,
-        <Object?>[wall],
-        <Symbol, Object?>{#from: from, #zone: zone},
-      )
-      as DateTime?;
+  return CalendarDates.timeAtWallMinute(wall, from: from, zone: zone);
 }
 
 /// [CalendarDates.endAtWallMinute] on [zone]'s clock.
 DateTime? endAtWallIn(int wall, tz.Location zone, {DateTime? from}) {
-  return Function.apply(
-        CalendarDates.endAtWallMinute,
-        <Object?>[wall],
-        <Symbol, Object?>{#from: from, #zone: zone},
-      )
-      as DateTime?;
+  return CalendarDates.endAtWallMinute(wall, from: from, zone: zone);
 }

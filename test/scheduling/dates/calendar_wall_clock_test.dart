@@ -853,69 +853,65 @@ void main() {
       return CalendarDates.dayNumber(DateTime.utc(year, month, day));
     }
 
-    test(
-      "ZC1 the zone's helpers answer Havana's and Santiago's changes",
-      skip: true,
-      () {
-        final havana = tz.getLocation("America/Havana");
-        final santiago = tz.getLocation("America/Santiago");
-        final skipped = dayOfNumberIn(numberOf(2025, 3, 9), havana);
-        expect(skipped.day, 9);
-        expect(skipped.hour, 1);
-        expect(
-          skipped.millisecondsSinceEpoch,
-          DateTime.utc(2025, 3, 9, 5).millisecondsSinceEpoch,
-        );
-        final repeated = dayOfNumberIn(numberOf(2025, 11, 2), havana);
-        expect(repeated.hour, 0);
-        expect(
-          repeated.millisecondsSinceEpoch,
-          DateTime.utc(2025, 11, 2, 4).millisecondsSinceEpoch,
-        );
-        final santiagoNext = dayOfNumberIn(numberOf(2026, 4, 5), santiago);
-        expect(santiagoNext.hour, 0);
-        expect(
-          santiagoNext.millisecondsSinceEpoch,
-          DateTime.utc(2026, 4, 5, 4).millisecondsSinceEpoch,
-        );
+    test("ZC1 the zone's helpers answer Havana's and Santiago's changes", () {
+      final havana = tz.getLocation("America/Havana");
+      final santiago = tz.getLocation("America/Santiago");
+      final skipped = dayOfNumberIn(numberOf(2025, 3, 9), havana);
+      expect(skipped.day, 9);
+      expect(skipped.hour, 1);
+      expect(
+        skipped.millisecondsSinceEpoch,
+        DateTime.utc(2025, 3, 9, 5).millisecondsSinceEpoch,
+      );
+      final repeated = dayOfNumberIn(numberOf(2025, 11, 2), havana);
+      expect(repeated.hour, 0);
+      expect(
+        repeated.millisecondsSinceEpoch,
+        DateTime.utc(2025, 11, 2, 4).millisecondsSinceEpoch,
+      );
+      final santiagoNext = dayOfNumberIn(numberOf(2026, 4, 5), santiago);
+      expect(santiagoNext.hour, 0);
+      expect(
+        santiagoNext.millisecondsSinceEpoch,
+        DateTime.utc(2026, 4, 5, 4).millisecondsSinceEpoch,
+      );
 
-        expect(
-          CalendarDates.repeatedStretchOf(repeated),
-          const Duration(hours: 1),
-        );
-        expect(
-          CalendarDates.repeatedStretchOf(
-            dayOfNumberIn(numberOf(2026, 4, 4), santiago),
-          ),
-          const Duration(hours: 1),
-        );
-        expect(CalendarDates.repeatedStretchOf(skipped), Duration.zero);
+      expect(
+        CalendarDates.repeatedStretchOf(repeated),
+        const Duration(hours: 1),
+      );
+      expect(
+        CalendarDates.repeatedStretchOf(
+          dayOfNumberIn(numberOf(2026, 4, 4), santiago),
+        ),
+        const Duration(hours: 1),
+      );
+      expect(CalendarDates.repeatedStretchOf(skipped), Duration.zero);
 
-        final skippedWall =
-            numberOf(2025, 3, 9) * CalendarDates.minutesPerDay + 30;
-        expect(timeAtWallIn(skippedWall, havana), isNull);
-        final repeatedWall =
-            numberOf(2025, 11, 2) * CalendarDates.minutesPerDay + 30;
-        final earlier = timeAtWallIn(repeatedWall, havana)!;
-        expect(
-          earlier.millisecondsSinceEpoch,
-          DateTime.utc(2025, 11, 2, 4, 30).millisecondsSinceEpoch,
-        );
-        final secondPass = tz.TZDateTime.fromMillisecondsSinceEpoch(
-          havana,
-          DateTime.utc(2025, 11, 2, 5, 10).millisecondsSinceEpoch,
-        );
-        final later = timeAtWallIn(repeatedWall, havana, from: secondPass)!;
-        expect(
-          later.millisecondsSinceEpoch,
-          DateTime.utc(2025, 11, 2, 5, 30).millisecondsSinceEpoch,
-        );
-        expect(later, isA<tz.TZDateTime>());
-        expect((later as tz.TZDateTime).location, havana);
-      },
-    );
+      final skippedWall =
+          numberOf(2025, 3, 9) * CalendarDates.minutesPerDay + 30;
+      expect(timeAtWallIn(skippedWall, havana), isNull);
+      final repeatedWall =
+          numberOf(2025, 11, 2) * CalendarDates.minutesPerDay + 30;
+      final earlier = timeAtWallIn(repeatedWall, havana)!;
+      expect(
+        earlier.millisecondsSinceEpoch,
+        DateTime.utc(2025, 11, 2, 4, 30).millisecondsSinceEpoch,
+      );
+      final secondPass = tz.TZDateTime.fromMillisecondsSinceEpoch(
+        havana,
+        DateTime.utc(2025, 11, 2, 5, 10).millisecondsSinceEpoch,
+      );
+      final later = timeAtWallIn(repeatedWall, havana, from: secondPass)!;
+      expect(
+        later.millisecondsSinceEpoch,
+        DateTime.utc(2025, 11, 2, 5, 30).millisecondsSinceEpoch,
+      );
+      expect(later, isA<tz.TZDateTime>());
+      expect((later as tz.TZDateTime).location, havana);
+    });
 
-    test("ZC2 the zone's clock matches a brute-force scan", skip: true, () {
+    test("ZC2 the zone's clock matches a brute-force scan", () {
       final windowStart = DateTime.utc(2020).millisecondsSinceEpoch;
       final windowEnd = DateTime.utc(2026).millisecondsSinceEpoch;
       final apiaStart = DateTime.utc(2011, 12).millisecondsSinceEpoch;
@@ -1063,76 +1059,71 @@ void main() {
       expect(mismatches, isEmpty);
     });
 
-    test(
-      "ZC3 isDayStart and the day steps read the zone's clock",
-      skip: true,
-      () {
-        final havana = tz.getLocation("America/Havana");
-        tz.TZDateTime instant(DateTime utc) {
-          return tz.TZDateTime.fromMillisecondsSinceEpoch(
-            havana,
-            utc.millisecondsSinceEpoch,
-          );
-        }
-
-        final skipStart = instant(DateTime.utc(2025, 3, 9, 5));
-        final firstMidnight = instant(DateTime.utc(2025, 11, 2, 4));
-        final laterMidnight = instant(DateTime.utc(2025, 11, 2, 5));
-        // Setup sanity: the times read as the two days' clocks do.
-        expect(skipStart.hour, 1);
-        expect(firstMidnight.hour, 0);
-        expect(laterMidnight.hour, 0);
-
-        expect(CalendarDates.isDayStart(skipStart), isTrue);
-        expect(CalendarDates.isDayStart(firstMidnight), isTrue);
-        expect(CalendarDates.isDayStart(laterMidnight), isFalse);
-
-        final march8 = instant(DateTime.utc(2025, 3, 8, 12));
-        expect(
-          CalendarDates.addDays(march8, 1).millisecondsSinceEpoch,
-          skipStart.millisecondsSinceEpoch,
-        );
-        expect(CalendarDates.addDays(march8, 1), isA<tz.TZDateTime>());
-        final afternoon = instant(DateTime.utc(2025, 3, 9, 20));
-        expect(
-          CalendarDates.dateOnly(afternoon).millisecondsSinceEpoch,
-          skipStart.millisecondsSinceEpoch,
-        );
-        expect(
-          (CalendarDates.dateOnly(afternoon) as tz.TZDateTime).location,
+    test("ZC3 isDayStart and the day steps read the zone's clock", () {
+      final havana = tz.getLocation("America/Havana");
+      tz.TZDateTime instant(DateTime utc) {
+        return tz.TZDateTime.fromMillisecondsSinceEpoch(
           havana,
+          utc.millisecondsSinceEpoch,
         );
-        expect(
-          CalendarDates.dateOnly(laterMidnight).millisecondsSinceEpoch,
-          firstMidnight.millisecondsSinceEpoch,
-        );
-        expect(
-          CalendarDates.addMonths(
-            instant(DateTime.utc(2025, 2, 9, 12)),
-            1,
-          ).millisecondsSinceEpoch,
-          skipStart.millisecondsSinceEpoch,
-        );
+      }
 
-        // The minute-0 rules: a skipped midnight has no time of day, and
-        // as a range's end its 24:00 is the day's start.
-        final skipWall = numberOf(2025, 3, 9) * CalendarDates.minutesPerDay;
-        expect(timeAtWallIn(skipWall, havana), isNull);
-        expect(
-          endAtWallIn(skipWall, havana)!.millisecondsSinceEpoch,
-          skipStart.millisecondsSinceEpoch,
-        );
-        final repeatWall = numberOf(2025, 11, 2) * CalendarDates.minutesPerDay;
-        expect(
-          timeAtWallIn(repeatWall, havana)!.millisecondsSinceEpoch,
-          firstMidnight.millisecondsSinceEpoch,
-        );
-      },
-    );
+      final skipStart = instant(DateTime.utc(2025, 3, 9, 5));
+      final firstMidnight = instant(DateTime.utc(2025, 11, 2, 4));
+      final laterMidnight = instant(DateTime.utc(2025, 11, 2, 5));
+      // Setup sanity: the times read as the two days' clocks do.
+      expect(skipStart.hour, 1);
+      expect(firstMidnight.hour, 0);
+      expect(laterMidnight.hour, 0);
+
+      expect(CalendarDates.isDayStart(skipStart), isTrue);
+      expect(CalendarDates.isDayStart(firstMidnight), isTrue);
+      expect(CalendarDates.isDayStart(laterMidnight), isFalse);
+
+      final march8 = instant(DateTime.utc(2025, 3, 8, 12));
+      expect(
+        CalendarDates.addDays(march8, 1).millisecondsSinceEpoch,
+        skipStart.millisecondsSinceEpoch,
+      );
+      expect(CalendarDates.addDays(march8, 1), isA<tz.TZDateTime>());
+      final afternoon = instant(DateTime.utc(2025, 3, 9, 20));
+      expect(
+        CalendarDates.dateOnly(afternoon).millisecondsSinceEpoch,
+        skipStart.millisecondsSinceEpoch,
+      );
+      expect(
+        (CalendarDates.dateOnly(afternoon) as tz.TZDateTime).location,
+        havana,
+      );
+      expect(
+        CalendarDates.dateOnly(laterMidnight).millisecondsSinceEpoch,
+        firstMidnight.millisecondsSinceEpoch,
+      );
+      expect(
+        CalendarDates.addMonths(
+          instant(DateTime.utc(2025, 2, 9, 12)),
+          1,
+        ).millisecondsSinceEpoch,
+        skipStart.millisecondsSinceEpoch,
+      );
+
+      // The minute-0 rules: a skipped midnight has no time of day, and
+      // as a range's end its 24:00 is the day's start.
+      final skipWall = numberOf(2025, 3, 9) * CalendarDates.minutesPerDay;
+      expect(timeAtWallIn(skipWall, havana), isNull);
+      expect(
+        endAtWallIn(skipWall, havana)!.millisecondsSinceEpoch,
+        skipStart.millisecondsSinceEpoch,
+      );
+      final repeatWall = numberOf(2025, 11, 2) * CalendarDates.minutesPerDay;
+      expect(
+        timeAtWallIn(repeatWall, havana)!.millisecondsSinceEpoch,
+        firstMidnight.millisecondsSinceEpoch,
+      );
+    });
 
     test(
       "ZC4 each wall-minute helper asks the zone a fixed number of times",
-      skip: true,
       () {
         final zone = CountingLocation(tz.getLocation("America/Havana"));
         final tokyo = tz.getLocation("Asia/Tokyo");
@@ -1220,6 +1211,9 @@ void main() {
         });
         row("dateOfDayNumber(zone:)", 2, () {
           dayOfNumberIn(quietNumber, zone);
+        });
+        row("dayStartMillis", 1, () {
+          dayStartMillis(quietNumber, zone);
         });
         row("isLaterMidnight, not reading 00:00", 0, () {
           isLaterMidnight(quiet);
@@ -1329,11 +1323,15 @@ void main() {
         row("addDays, one change", 3, () {
           CalendarDates.addDays(repeat, 1);
         });
+        final monthBeforeRepeat = at(2025, 10, 2, 12);
         row("addMonths, one change", 3, () {
-          CalendarDates.addMonths(at(2025, 10, 2, 12), 1);
+          CalendarDates.addMonths(monthBeforeRepeat, 1);
         });
         row("dateOfDayNumber(zone:), one change", 3, () {
           dayOfNumberIn(repeatNumber, zone);
+        });
+        row("dayStartMillis, one change", 2, () {
+          dayStartMillis(repeatNumber, zone);
         });
         row("isLaterMidnight, the earlier 00:00", 2, () {
           isLaterMidnight(firstMidnight);

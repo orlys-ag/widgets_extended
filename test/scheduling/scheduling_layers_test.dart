@@ -137,9 +137,11 @@ String? forwardedCallOf(String body) {
 }
 
 void main() {
-  test("SY1 each file imports, of packages, only Flutter's foundation, of "
-      "dart:ui only Color, and nothing of the calendar, board, sliver_tree "
-      "or sectioned_sliver_list modules, nor the package barrel", () {
+  test("SY1 each file imports, of packages, only Flutter's foundation and, "
+      "in lib/scheduling/dates/calendar_dates.dart alone, "
+      "package:timezone/timezone.dart, of dart:ui only Color, and nothing of "
+      "the calendar, board, sliver_tree or sectioned_sliver_list modules, "
+      "nor the package barrel", () {
     const outside = <String>[
       "lib/calendar/",
       "lib/board/",
@@ -153,7 +155,15 @@ void main() {
           continue;
         }
         if (Uri.parse(uri).hasScheme) {
-          expect(uri, "package:flutter/foundation.dart", reason: path);
+          expect(
+            <String>{
+              "package:flutter/foundation.dart",
+              if (path == "lib/scheduling/dates/calendar_dates.dart")
+                "package:timezone/timezone.dart",
+            },
+            contains(uri),
+            reason: path,
+          );
           continue;
         }
         final target = Uri.parse(path).resolve(uri).path;
@@ -636,45 +646,41 @@ void main() {
       "endAtWallMinute": "_instantAtWallMinute",
     });
   });
-  test(
-    "SY10 only calendar_dates.dart imports package:timezone, and nothing "
-    "imports its data",
-    skip: true,
-    () {
-      const importer = "lib/scheduling/dates/calendar_dates.dart";
-      const barrels = <String>[
-        "lib/scheduling/scheduling.dart",
-        "lib/calendar/calendar.dart",
-        "lib/widgets_extended.dart",
-      ];
-      const timezoneUri = "package:timezone/timezone.dart";
-      final files = trackedDartFiles("lib");
-      expect(files, containsAll(<String>[importer, ...barrels]));
-      var imports = 0;
-      final foreign = RegExp(
-        r"package:timezone/(?:data/|browser\.dart|standalone\.dart)",
+  test("SY10 only calendar_dates.dart imports package:timezone, and nothing "
+      "imports its data", () {
+    const importer = "lib/scheduling/dates/calendar_dates.dart";
+    const barrels = <String>[
+      "lib/scheduling/scheduling.dart",
+      "lib/calendar/calendar.dart",
+      "lib/widgets_extended.dart",
+    ];
+    const timezoneUri = "package:timezone/timezone.dart";
+    final files = trackedDartFiles("lib");
+    expect(files, containsAll(<String>[importer, ...barrels]));
+    var imports = 0;
+    final foreign = RegExp(
+      r"package:timezone/(?:data/|browser\.dart|standalone\.dart)",
+    );
+    for (final path in files) {
+      final source = File(path).readAsStringSync();
+      final importing = directiveUris(source).contains(timezoneUri);
+      if (importing) {
+        imports++;
+        expect(path, importer);
+      }
+      expect(foreign.hasMatch(source), isFalse, reason: path);
+    }
+    expect(imports, 1);
+    for (final barrel in barrels) {
+      expect(
+        File(barrel).readAsStringSync(),
+        isNot(contains("package:timezone")),
+        reason: barrel,
       );
-      for (final path in files) {
-        final source = File(path).readAsStringSync();
-        final importing = directiveUris(source).contains(timezoneUri);
-        if (importing) {
-          imports++;
-          expect(path, importer);
-        }
-        expect(foreign.hasMatch(source), isFalse, reason: path);
-      }
-      expect(imports, 1);
-      for (final barrel in barrels) {
-        expect(
-          File(barrel).readAsStringSync(),
-          isNot(contains("package:timezone")),
-          reason: barrel,
-        );
-      }
-    },
-  );
+    }
+  });
 
-  test("SY11 a device-path helper keeps its body after its guard", skip: true, () {
+  test("SY11 a device-path helper keeps its body after its guard", () {
     const guards = <String, String>{
       "dateOnly": "if (date is TZDateTime) {",
       "addDays": "if (date is TZDateTime) {",
