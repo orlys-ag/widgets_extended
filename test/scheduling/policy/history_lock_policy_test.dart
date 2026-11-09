@@ -589,69 +589,80 @@ void main() {
   group("time zones", () {
     setUpAll(ensureZones);
 
-    test(
-      "HZ1 CalendarNow for a zone marks the zone's today and time",
-      skip: true,
-      () {
-        void expectIn(DateTime? time, tz.Location zone, int wall) {
-          expect(time, isA<tz.TZDateTime>());
-          expect((time as tz.TZDateTime).location, zone);
-          expect(CalendarDates.wallMinuteOf(time), wall);
-        }
+    test("HZ1 CalendarNow for a zone marks the zone's today and time", () {
+      void expectIn(DateTime? time, tz.Location zone, int wall) {
+        expect(time, isA<tz.TZDateTime>());
+        expect((time as tz.TZDateTime).location, zone);
+        expect(CalendarDates.wallMinuteOf(time), wall);
+      }
 
-        const perDay = CalendarDates.minutesPerDay;
-        final on = DateTime(2025, 7, 16, 10, 7, 30);
-        final zone = zoneFarFromDevice(on);
-        final time = tz.TZDateTime.from(on, zone);
-        final number = CalendarDates.dayNumber(time);
-        final now = CalendarNow(
-          time: time,
-          today: tz.TZDateTime(zone, time.year, time.month, time.day, 15),
-        );
-        expectIn(now.today, zone, number * perDay);
-        // Rounded up: 30 seconds past the minute reads the next.
-        expectIn(
-          now.timeOnToday,
-          zone,
-          number * perDay + time.hour * 60 + time.minute + 1,
-        );
-        expect(now.time, isA<tz.TZDateTime>());
+      const perDay = CalendarDates.minutesPerDay;
+      final on = DateTime(2025, 7, 16, 10, 7, 30);
+      final zone = zoneFarFromDevice(on);
+      final time = tz.TZDateTime.from(on, zone);
+      final number = CalendarDates.dayNumber(time);
+      final now = CalendarNow(
+        time: time,
+        today: tz.TZDateTime(zone, time.year, time.month, time.day, 15),
+      );
+      expectIn(now.today, zone, number * perDay);
+      // Rounded up: 30 seconds past the minute reads the next.
+      expectIn(
+        now.timeOnToday,
+        zone,
+        number * perDay + time.hour * 60 + time.minute + 1,
+      );
+      expect(now.time, isA<tz.TZDateTime>());
 
-        // A plain today names the zone's date, and marks the zone's day.
-        final plainToday = CalendarNow(
-          time: time,
-          today: DateTime(time.year, time.month, time.day),
-        );
-        expectIn(plainToday.today, zone, number * perDay);
-        expectIn(
-          plainToday.timeOnToday,
-          zone,
-          number * perDay + time.hour * 60 + time.minute + 1,
-        );
+      // A plain today names the zone's date, and marks the zone's day.
+      final plainToday = CalendarNow(
+        time: time,
+        today: DateTime(time.year, time.month, time.day),
+      );
+      expectIn(plainToday.today, zone, number * perDay);
+      expectIn(
+        plainToday.timeOnToday,
+        zone,
+        number * perDay + time.hour * 60 + time.minute + 1,
+      );
 
-        // A today whose clock skips the time's minute: the first minute after
-        // the skip, on the zone's clock.
-        final havana = tz.getLocation("America/Havana");
-        final skipNumber = CalendarDates.dayNumber(DateTime.utc(2025, 3, 9));
-        final skipped = CalendarNow(
-          time: tz.TZDateTime(havana, 2025, 3, 10, 0, 30),
-          today: tz.TZDateTime(havana, 2025, 3, 9),
-        );
-        expectIn(skipped.today, havana, skipNumber * perDay + 60);
-        expectIn(skipped.timeOnToday, havana, skipNumber * perDay + 60);
+      // A today whose clock skips the time's minute: the first minute after
+      // the skip, on the zone's clock.
+      final havana = tz.getLocation("America/Havana");
+      final skipNumber = CalendarDates.dayNumber(DateTime.utc(2025, 3, 9));
+      final skipped = CalendarNow(
+        time: tz.TZDateTime(havana, 2025, 3, 10, 0, 30),
+        today: tz.TZDateTime(havana, 2025, 3, 9),
+      );
+      expectIn(skipped.today, havana, skipNumber * perDay + 60);
+      expectIn(skipped.timeOnToday, havana, skipNumber * perDay + 60);
 
-        // A today other than the time's date: the time of day on it.
-        final otherNumber = CalendarDates.dayNumber(DateTime.utc(2025, 7, 20));
-        final other = CalendarNow(
-          time: tz.TZDateTime(havana, 2025, 7, 16, 14, 7, 20),
-          today: tz.TZDateTime(havana, 2025, 7, 20),
-        );
-        expectIn(other.today, havana, otherNumber * perDay);
-        expectIn(other.timeOnToday, havana, otherNumber * perDay + 14 * 60 + 8);
-      },
-    );
+      // A today other than the time's date: the time of day on it.
+      final otherNumber = CalendarDates.dayNumber(DateTime.utc(2025, 7, 20));
+      final other = CalendarNow(
+        time: tz.TZDateTime(havana, 2025, 7, 16, 14, 7, 20),
+        today: tz.TZDateTime(havana, 2025, 7, 20),
+      );
+      expectIn(other.today, havana, otherNumber * perDay);
+      expectIn(other.timeOnToday, havana, otherNumber * perDay + 14 * 60 + 8);
 
-    test("HZ2 HistoryLockPolicy locks by the zone's clock", skip: true, () {
+      // On today's own date a time in a repeated stretch keeps its
+      // occurrence.
+      final november = CalendarDates.dayNumber(DateTime.utc(2025, 11, 2));
+      final secondPass = tz.TZDateTime.fromMillisecondsSinceEpoch(
+        havana,
+        tz.TZDateTime(havana, 2025, 11, 2, 0, 30).millisecondsSinceEpoch +
+            const Duration(hours: 1).inMilliseconds,
+      );
+      final kept = CalendarNow(
+        time: secondPass,
+        today: tz.TZDateTime(havana, 2025, 11, 2),
+      );
+      expectIn(kept.timeOnToday, havana, november * perDay + 30);
+      expect(kept.timeOnToday.isAtSameMomentAs(secondPass), isTrue);
+    });
+
+    test("HZ2 HistoryLockPolicy locks by the zone's clock", () {
       final on = DateTime(2025, 7, 16, 10, 7);
       final zone = zoneFarFromDevice(on);
       final time = tz.TZDateTime.from(on, zone);
@@ -708,6 +719,47 @@ void main() {
         ),
         isFalse,
       );
+
+      // Zoned times at the instants of a plain entry keep them, whichever
+      // of the two carries the zone, for an entry ended and one in progress.
+      final atDevice = zoneAtDeviceOffset(DateTime(2026, 4, 20, 9));
+      tz.TZDateTime zonedOf(DateTime time) {
+        return tz.TZDateTime.from(time, atDevice);
+      }
+
+      final plainStarted = entryOf(
+        "plainStarted",
+        DateTime(2026, 4, 20, 9),
+        DateTime(2026, 4, 21, 12),
+      );
+      expect(
+        lock.admitsChange(
+          plainEnded,
+          zonedOf(plainEnded.start),
+          zonedOf(plainEnded.end),
+          plainNow,
+          isAllDay: false,
+        ),
+        isTrue,
+      );
+      expect(
+        lock.admitsChange(
+          plainStarted,
+          zonedOf(plainStarted.start),
+          zonedOf(plainStarted.end),
+          plainNow,
+          isAllDay: false,
+        ),
+        isTrue,
+      );
+      // A zoned day at the instant of a plain today is today.
+      const plainMinuteLock = HistoryLockPolicy<String>(lockEarlierToday: true);
+      final onPlainToday = plainMinuteLock.earliestStartOn(
+        zonedOf(plainNow.today),
+        plainNow,
+      );
+      expect(onPlainToday, isNotNull);
+      expect(onPlainToday!.isAtSameMomentAs(plainNow.timeOnToday), isTrue);
 
       // The boundary on the zone's today, its day start on a later date,
       // and none on an earlier one; a plain day names the date in the zone.

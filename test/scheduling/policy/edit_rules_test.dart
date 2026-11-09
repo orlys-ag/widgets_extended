@@ -964,7 +964,7 @@ void main() {
       expect(CalendarDates.wallMinuteOf(time), wall);
     }
 
-    test("EZ1 the edit rules answer on the zone's clock", skip: true, () {
+    test("EZ1 the edit rules answer on the zone's clock", () {
       final havana = tz.getLocation("America/Havana");
       final number = CalendarDates.dayNumber(DateTime.utc(2025, 11, 2));
       final limited = CalendarEditRules<String>(
@@ -1075,29 +1075,25 @@ void main() {
       expect(earliest.earliest, isA<tz.TZDateTime>());
     });
 
-    test(
-      "EZ2 an earliest start compares by instant where either carries a "
-      "zone, and a null only with a null",
-      skip: true,
-      () {
-        final day = DateTime(2025, 7, 16);
-        final at = DateTime(2025, 7, 16, 10, 30);
-        final zone = zoneAtDeviceOffset(at);
-        final plain = CalendarEarliestStart(day, at);
-        final zoned = CalendarEarliestStart(day, tz.TZDateTime.from(at, zone));
-        expect(plain == zoned, isTrue);
-        expect(zoned == plain, isTrue);
-        expect(zoned.hashCode, plain.hashCode);
+    test("EZ2 an earliest start compares by instant where either carries a "
+        "zone, and a null only with a null", () {
+      final day = DateTime(2025, 7, 16);
+      final at = DateTime(2025, 7, 16, 10, 30);
+      final zone = zoneAtDeviceOffset(at);
+      final plain = CalendarEarliestStart(day, at);
+      final zoned = CalendarEarliestStart(day, tz.TZDateTime.from(at, zone));
+      expect(plain == zoned, isTrue);
+      expect(zoned == plain, isTrue);
+      expect(zoned.hashCode, plain.hashCode);
 
-        final noneA = CalendarEarliestStart(day, null);
-        final noneB = CalendarEarliestStart(day, null);
-        expect(noneA == noneB, isTrue);
-        expect(noneA.hashCode, noneB.hashCode);
-        for (final other in <CalendarEarliestStart>[plain, zoned]) {
-          expect(noneA == other, isFalse);
-          expect(other == noneA, isFalse);
-        }
-      },
-    );
+      final noneA = CalendarEarliestStart(day, null);
+      final noneB = CalendarEarliestStart(day, null);
+      expect(noneA == noneB, isTrue);
+      expect(noneA.hashCode, noneB.hashCode);
+      for (final other in <CalendarEarliestStart>[plain, zoned]) {
+        expect(noneA == other, isFalse);
+        expect(other == noneA, isFalse);
+      }
+    });
   });
 }

@@ -16,26 +16,49 @@ import '../entries/calendar_entry.dart';
 @immutable
 final class CalendarNow {
   /// The time [time], a UTC time taken as its local time, the same
-  /// instant, with [today] taken to its local midnight.
+  /// instant, with [today] taken to its local midnight. A [time] that is a
+  /// `TZDateTime` keeps its zone, and [today]'s date is then that zone's
+  /// day start, whichever clock [today] carries.
   factory CalendarNow({required DateTime time, required DateTime today}) {
-    final local = time.toLocal();
-    final day = DateTime(today.year, today.month, today.day);
+    final zone = zoneOf(time);
+    final local = zone == null ? time.toLocal() : time;
+    final DateTime day;
+    if (zone == null) {
+      day = DateTime(today.year, today.month, today.day);
+    } else {
+      day = CalendarDates.dateOfDayNumber(
+        CalendarDates.dayNumber(today),
+        zone: zone,
+      );
+    }
     final into = Duration(
       seconds: local.second,
       milliseconds: local.millisecond,
       microseconds: local.microsecond,
     );
-    var onToday = CalendarDates.dateOnly(local) == day
-        ? local.subtract(into)
-        : DateTime(day.year, day.month, day.day, local.hour, local.minute);
+    final wall =
+        CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay +
+        CalendarDates.minuteOfDay(local);
+    DateTime onToday;
+    if (sameTime(CalendarDates.dateOnly(local), day)) {
+      onToday = local.subtract(into);
+    } else if (zone == null) {
+      onToday = DateTime(
+        day.year,
+        day.month,
+        day.day,
+        local.hour,
+        local.minute,
+      );
+    } else {
+      onToday = _firstReadingFrom(wall, zone);
+    }
     if (onToday.hour != local.hour || onToday.minute != local.minute) {
       // The constructor rolls a time today's clock skips past the skip by
-      // the clock's change. The first minute after the skip is the time
-      // of day's first reading, rounded up or not.
-      onToday = _firstReadingFrom(
-        CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay +
-            CalendarDates.minuteOfDay(local),
-      );
+      // the clock's change, and a zone's clock reads a later minute there.
+      // The first minute after the skip is the time of day's first reading,
+      // rounded up or not.
+      onToday = _firstReadingFrom(wall, zone);
     } else if (into > Duration.zero) {
       onToday = onToday.add(const Duration(minutes: 1));
     }
@@ -45,27 +68,27 @@ final class CalendarNow {
   const CalendarNow._(this.time, this.today, this.timeOnToday);
 
   /// The instant of the first wall minute from [wall]
-  /// ([CalendarDates.wallMinuteOf]) that the clock reads
-  /// ([CalendarDates.timeAtWallMinute]): [wall]'s own, or past a stretch the
-  /// clock skips, the first minute after it. Ends at the first minute after a
-  /// stretch the clock skips, which it reads.
-  static DateTime _firstReadingFrom(int wall) {
+  /// ([CalendarDates.wallMinuteOf]) that [zone]'s clock, or with none the
+  /// device's, reads ([CalendarDates.timeAtWallMinute]): [wall]'s own, or
+  /// past a stretch the clock skips, the first minute after it. Ends at the
+  /// first minute after a stretch the clock skips, which it reads.
+  static DateTime _firstReadingFrom(int wall, Location? zone) {
     var minute = wall;
-    var reading = CalendarDates.timeAtWallMinute(minute);
+    var reading = CalendarDates.timeAtWallMinute(minute, zone: zone);
     while (reading == null) {
       minute++;
-      reading = CalendarDates.timeAtWallMinute(minute);
+      reading = CalendarDates.timeAtWallMinute(minute, zone: zone);
     }
     return reading;
   }
 
-  /// The clock reading, a local time: one given in UTC is kept as its
-  /// local time, the same instant.
+  /// The clock reading, a local time, one given in UTC kept as its local
+  /// time, the same instant; a `TZDateTime` given keeps its zone.
   final DateTime time;
 
-  /// The local midnight of the day the calendar marks as today, read from
-  /// the given today's year, month and day, so a UTC today names the same
-  /// date.
+  /// The day the calendar marks as today, read from the given today's year,
+  /// month and day, so a UTC today names the same date: its local midnight,
+  /// or the day start of [time]'s zone where [time] carries one.
   final DateTime today;
 
   /// [time]'s time of day on [today], rounded up to a whole minute, since
@@ -78,7 +101,9 @@ final class CalendarNow {
 
   @override
   bool operator ==(Object other) {
-    return other is CalendarNow && other.time == time && other.today == today;
+    return other is CalendarNow &&
+        sameTime(other.time, time) &&
+        sameTime(other.today, today);
   }
 
   @override
@@ -164,8 +189,8 @@ final class CalendarOverlapCandidate<T> {
   @override
   bool operator ==(Object other) {
     return other is CalendarOverlapCandidate<T> &&
-        other.start == start &&
-        other.end == end &&
+        sameTime(other.start, start) &&
+        sameTime(other.end, end) &&
         other.entry == entry;
   }
 
@@ -227,8 +252,10 @@ abstract base class CalendarEditPolicy<T> {
   /// [allowsOverlaps] is false is; [resizableEdges] are the edges every
   /// one gives; [earliestStartOn] is the latest instant they give, and
   /// null where any gives null; and [dayLimit] is the least limit they
-  /// give, and null where none gives one. With no policies it limits
-  /// nothing.
+  /// give, and null where none gives one. A plain day given to
+  /// [earliestStartOn] under a `now` whose time carries a zone is read as
+  /// that date's day start in the zone, so with no policies it answers that
+  /// day start. With no policies it limits nothing.
   ///
   /// It asks [policies] in their order and stops once an answer settles
   /// its own: at a refusal, at a policy that refuses every overlap, at no
@@ -601,9 +628,10 @@ final class _AllEditPolicies<T> extends CalendarEditPolicy<T> {
 
   @override
   DateTime? earliestStartOn(DateTime day, CalendarNow now) {
+    final zoned = zonedDayOf(day, zoneOf(now.time));
     DateTime? latest;
     for (final policy in policies) {
-      final earliest = policy.earliestStartOn(day, now);
+      final earliest = policy.earliestStartOn(zoned, now);
       if (earliest == null) {
         return null;
       }
@@ -611,7 +639,7 @@ final class _AllEditPolicies<T> extends CalendarEditPolicy<T> {
         latest = earliest;
       }
     }
-    return latest ?? day;
+    return latest ?? zoned;
   }
 
   @override

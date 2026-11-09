@@ -1031,42 +1031,38 @@ void main() {
   group("time zones", () {
     setUpAll(ensureZones);
 
-    test(
-      "PE1 a CalendarNow and an overlap candidate compare by instant where "
-      "either carries a zone",
-      skip: true,
-      () {
-        final on = DateTime(2025, 7, 16, 10, 7);
-        final end = DateTime(2025, 7, 16, 11, 7);
-        final zone = zoneAtDeviceOffset(on);
-        final plainNow = CalendarNow(time: on, today: DateTime(2025, 7, 16));
-        final zonedNow = CalendarNow(
-          time: tz.TZDateTime.from(on, zone),
-          today: tz.TZDateTime.from(DateTime(2025, 7, 16), zone),
-        );
-        expect(plainNow == zonedNow, isTrue);
-        expect(zonedNow == plainNow, isTrue);
-        expect(zonedNow.hashCode, plainNow.hashCode);
+    test("PE1 a CalendarNow and an overlap candidate compare by instant where "
+        "either carries a zone", () {
+      final on = DateTime(2025, 7, 16, 10, 7);
+      final end = DateTime(2025, 7, 16, 11, 7);
+      final zone = zoneAtDeviceOffset(on);
+      final plainNow = CalendarNow(time: on, today: DateTime(2025, 7, 16));
+      final zonedNow = CalendarNow(
+        time: tz.TZDateTime.from(on, zone),
+        today: tz.TZDateTime.from(DateTime(2025, 7, 16), zone),
+      );
+      expect(plainNow == zonedNow, isTrue);
+      expect(zonedNow == plainNow, isTrue);
+      expect(zonedNow.hashCode, plainNow.hashCode);
 
-        final plainCandidate = CalendarOverlapCandidate<String>(
-          start: on,
-          end: end,
-        );
-        final zonedCandidate = CalendarOverlapCandidate<String>(
-          start: tz.TZDateTime.from(on, zone),
-          end: tz.TZDateTime.from(end, zone),
-        );
-        expect(plainCandidate == zonedCandidate, isTrue);
-        expect(zonedCandidate == plainCandidate, isTrue);
-        expect(zonedCandidate.hashCode, plainCandidate.hashCode);
+      final plainCandidate = CalendarOverlapCandidate<String>(
+        start: on,
+        end: end,
+      );
+      final zonedCandidate = CalendarOverlapCandidate<String>(
+        start: tz.TZDateTime.from(on, zone),
+        end: tz.TZDateTime.from(end, zone),
+      );
+      expect(plainCandidate == zonedCandidate, isTrue);
+      expect(zonedCandidate == plainCandidate, isTrue);
+      expect(zonedCandidate.hashCode, plainCandidate.hashCode);
 
-        final utcCandidate = CalendarOverlapCandidate<String>(
-          start: on.toUtc(),
-          end: end.toUtc(),
-        );
-        expect(utcCandidate == plainCandidate, isFalse);
-        expect(plainCandidate == utcCandidate, isFalse);
-      },
-    );
+      final utcCandidate = CalendarOverlapCandidate<String>(
+        start: on.toUtc(),
+        end: end.toUtc(),
+      );
+      expect(utcCandidate == plainCandidate, isFalse);
+      expect(plainCandidate == utcCandidate, isFalse);
+    });
   });
 }

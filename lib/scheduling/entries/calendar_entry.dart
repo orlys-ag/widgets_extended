@@ -12,21 +12,25 @@ import '../dates/calendar_dates.dart';
 
 /// One entry of a calendar, carrying a payload of the host's type [T].
 ///
-/// An entry runs from [start] to [end], an exclusive end, both local times
-/// on whole minutes. It is all-day where [isAllDay], which it stores: its
-/// [start] and [end] are then local midnights, dates rather than instants,
+/// An entry runs from [start] to [end], an exclusive end, both on whole
+/// minutes: local times, or `TZDateTime`s of the zone of a store given one.
+/// It is all-day where [isAllDay], which it stores: its [start] and [end]
+/// are then the starts of their days, the local midnights or the first
+/// instants the zone's clock reads those dates, dates rather than instants,
 /// so a day of 23 or 25 hours is one whole day. Every other entry is timed,
 /// whatever its times. It is immutable, and two entries are equal when
-/// every field is, the payload compared by its own `==`.
+/// every field is, the payload compared by its own `==` and times compared
+/// as instants where either carries a zone.
 @immutable
 final class CalendarEntry<T> {
   /// An entry from [start] to [end], all-day where [isAllDay].
   ///
   /// Throws an [ArgumentError], in every build, naming the first of these
   /// rules a time breaks, in this order: [start] and then [end] is a local
-  /// time, not UTC; [start] and then [end] has no second, millisecond or
-  /// microsecond; [end] is after [start]; and for an all-day entry, [start]
-  /// and then [end] is a local day start ([CalendarDates.isDayStart]).
+  /// time or a `TZDateTime`, not a plain UTC time; [start] and then [end]
+  /// has no second, millisecond or microsecond on its clock; [end] is after
+  /// [start]; and for an all-day entry, [start] and then [end] is the start
+  /// of its day on its clock ([CalendarDates.isDayStart]).
   CalendarEntry({
     this.id,
     required this.start,
@@ -36,15 +40,19 @@ final class CalendarEntry<T> {
     required this.payload,
     this.isAllDay = false,
   }) {
-    if (start.isUtc) {
+    if (start.isUtc && start is! TZDateTime) {
       throw ArgumentError.value(
         start,
         "start",
-        "An entry starts at a local time",
+        "An entry starts at a local or a zoned time",
       );
     }
-    if (end.isUtc) {
-      throw ArgumentError.value(end, "end", "An entry ends at a local time");
+    if (end.isUtc && end is! TZDateTime) {
+      throw ArgumentError.value(
+        end,
+        "end",
+        "An entry ends at a local or a zoned time",
+      );
     }
     if (start.second != 0 || start.millisecond != 0 || start.microsecond != 0) {
       throw ArgumentError.value(
@@ -67,14 +75,14 @@ final class CalendarEntry<T> {
       throw ArgumentError.value(
         start,
         "start",
-        "An all-day entry starts at a local day start",
+        "An all-day entry starts at the start of its day on its clock",
       );
     }
     if (isAllDay && !CalendarDates.isDayStart(end)) {
       throw ArgumentError.value(
         end,
         "end",
-        "An all-day entry ends at a local day start",
+        "An all-day entry ends at the start of its day on its clock",
       );
     }
   }
@@ -83,11 +91,11 @@ final class CalendarEntry<T> {
   /// holds yet. Every entry a store answers has one.
   final String? id;
 
-  /// When the entry starts, a local time.
+  /// When the entry starts, a local time or a `TZDateTime`.
   final DateTime start;
 
-  /// When the entry ends, a local time after [start]; the entry holds the
-  /// time up to it, not the minute it names.
+  /// When the entry ends, a local time or a `TZDateTime` after [start]; the
+  /// entry holds the time up to it, not the minute it names.
   final DateTime end;
 
   /// The entry's name, which the default builders draw and Month's chips
@@ -103,10 +111,11 @@ final class CalendarEntry<T> {
   final T payload;
 
   /// Whether the entry is all-day, stored as constructed: its [start] and
-  /// [end] are then local midnights, dates rather than instants, and its
-  /// [end], exclusive, is the midnight after its last day, so an entry over
-  /// April 21 runs from `DateTime(2026, 4, 21)` to `DateTime(2026, 4, 22)`.
-  /// False for a timed entry, whatever its times.
+  /// [end] are then the starts of their days on their clock, dates rather
+  /// than instants, and its [end], exclusive, is the start of the day after
+  /// its last day, so an entry over April 21 runs from
+  /// `DateTime(2026, 4, 21)` to `DateTime(2026, 4, 22)`. False for a timed
+  /// entry, whatever its times.
   final bool isAllDay;
 
   /// This entry with each field given replaced. A null argument keeps the
@@ -136,8 +145,8 @@ final class CalendarEntry<T> {
   bool operator ==(Object other) {
     return other is CalendarEntry<T> &&
         other.id == id &&
-        other.start == start &&
-        other.end == end &&
+        sameTime(other.start, start) &&
+        sameTime(other.end, end) &&
         other.isAllDay == isAllDay &&
         other.title == title &&
         other.color == color &&
@@ -165,7 +174,8 @@ final class CalendarEntry<T> {
 }
 
 /// The time a create gesture picked: one continuous range from [start] to
-/// [end], an exclusive end, both local times, all-day where [isAllDay].
+/// [end], an exclusive end, both local times or `TZDateTime`s, all-day where
+/// [isAllDay].
 @immutable
 final class CalendarCreateRange {
   /// The range from [start] to [end], all-day where [isAllDay], as the
@@ -174,23 +184,28 @@ final class CalendarCreateRange {
   /// Throws an [ArgumentError], in every build, naming the first of
   /// [CalendarEntry]'s rules its times break, in [CalendarEntry]'s order,
   /// so an entry of its times constructs: [start] and then [end] is a local
-  /// time, not UTC; [start] and then [end] has no second, millisecond or
-  /// microsecond; [end] is after [start]; and for an all-day range, [start]
-  /// and then [end] is a local day start ([CalendarDates.isDayStart]).
+  /// time or a `TZDateTime`, not a plain UTC time; [start] and then [end]
+  /// has no second, millisecond or microsecond on its clock; [end] is after
+  /// [start]; and for an all-day range, [start] and then [end] is the start
+  /// of its day on its clock ([CalendarDates.isDayStart]).
   CalendarCreateRange({
     required this.start,
     required this.end,
     this.isAllDay = false,
   }) {
-    if (start.isUtc) {
+    if (start.isUtc && start is! TZDateTime) {
       throw ArgumentError.value(
         start,
         "start",
-        "A range starts at a local time",
+        "A range starts at a local or a zoned time",
       );
     }
-    if (end.isUtc) {
-      throw ArgumentError.value(end, "end", "A range ends at a local time");
+    if (end.isUtc && end is! TZDateTime) {
+      throw ArgumentError.value(
+        end,
+        "end",
+        "A range ends at a local or a zoned time",
+      );
     }
     if (start.second != 0 || start.millisecond != 0 || start.microsecond != 0) {
       throw ArgumentError.value(
@@ -213,14 +228,14 @@ final class CalendarCreateRange {
       throw ArgumentError.value(
         start,
         "start",
-        "An all-day range starts at a local day start",
+        "An all-day range starts at the start of its day on its clock",
       );
     }
     if (isAllDay && !CalendarDates.isDayStart(end)) {
       throw ArgumentError.value(
         end,
         "end",
-        "An all-day range ends at a local day start",
+        "An all-day range ends at the start of its day on its clock",
       );
     }
   }
@@ -240,8 +255,8 @@ final class CalendarCreateRange {
   @override
   bool operator ==(Object other) {
     return other is CalendarCreateRange &&
-        other.start == start &&
-        other.end == end &&
+        sameTime(other.start, start) &&
+        sameTime(other.end, end) &&
         other.isAllDay == isAllDay;
   }
 
@@ -259,4 +274,86 @@ final class CalendarCreateRange {
         "${CalendarDates.isoTime(CalendarDates.minuteOfDay(end))}"
         "${isAllDay ? ", all day" : ""})";
   }
+}
+
+/// [entry] as a store given [zone] holds it: each time of a timed entry a
+/// `TZDateTime` of [zone] at its instant, and an all-day entry at [zone]'s
+/// day starts of the same dates. With no [zone], [deviceEntryOf]'s answer.
+/// A time already in that form is kept, and an entry none of whose times
+/// changes is answered itself.
+///
+/// Throws an [ArgumentError], naming `start` or `end` and the time, for a
+/// time of [zone] whose offset is not a whole number of minutes, and for
+/// an all-day date [zone]'s clock skips altogether.
+CalendarEntry<T> zonedEntryOf<T>(CalendarEntry<T> entry, Location? zone) {
+  if (zone == null) {
+    return deviceEntryOf(entry);
+  }
+  final start = _zonedTimeIn(entry.start, "start", zone, entry.isAllDay);
+  final end = _zonedTimeIn(entry.end, "end", zone, entry.isAllDay);
+  if (identical(start, entry.start) && identical(end, entry.end)) {
+    return entry;
+  }
+  return entry.copyWith(start: start, end: end);
+}
+
+/// [entry] in the form a data source takes: each time of a timed entry a
+/// plain local time at its instant, and an all-day entry's times the plain
+/// local midnights of the same dates. [entry] itself where neither time is
+/// a `TZDateTime`.
+CalendarEntry<T> deviceEntryOf<T>(CalendarEntry<T> entry) {
+  if (entry.start is! TZDateTime && entry.end is! TZDateTime) {
+    return entry;
+  }
+  if (entry.isAllDay) {
+    return entry.copyWith(
+      start: DateTime(entry.start.year, entry.start.month, entry.start.day),
+      end: DateTime(entry.end.year, entry.end.month, entry.end.day),
+    );
+  }
+  return entry.copyWith(
+    start: DateTime.fromMillisecondsSinceEpoch(
+      entry.start.millisecondsSinceEpoch,
+    ),
+    end: DateTime.fromMillisecondsSinceEpoch(entry.end.millisecondsSinceEpoch),
+  );
+}
+
+/// [time], named [name], as [zonedEntryOf] holds it: of an all-day entry,
+/// [zone]'s day start of its date, unless it is a `TZDateTime` of [zone],
+/// which the entry's constructor took as such a day start; of a timed one,
+/// [zonedTimeOf]'s.
+DateTime _zonedTimeIn(
+  DateTime time,
+  String name,
+  Location zone,
+  bool isAllDay,
+) {
+  final DateTime zoned;
+  if (time is TZDateTime && time.location == zone) {
+    zoned = time;
+  } else if (isAllDay) {
+    final number = CalendarDates.dayNumber(time);
+    zoned = CalendarDates.dateOfDayNumber(number, zone: zone);
+    // Where the clock skips the date whole, the day's start reads a later
+    // one.
+    if (CalendarDates.dayNumber(zoned) != number) {
+      throw ArgumentError.value(
+        time,
+        name,
+        "${zone.name}'s clock skips the date of this all-day time",
+      );
+    }
+  } else {
+    zoned = TZDateTime.from(time, zone);
+  }
+  if (zoned.timeZoneOffset.inMicroseconds % Duration.microsecondsPerMinute !=
+      0) {
+    throw ArgumentError.value(
+      time,
+      name,
+      "${zone.name}'s offset at this time is not a whole number of minutes",
+    );
+  }
+  return zoned;
 }

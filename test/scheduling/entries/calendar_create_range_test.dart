@@ -190,53 +190,49 @@ void main() {
   group("time zones", () {
     setUpAll(ensureZones);
 
-    test(
-      "ME2 a create range equals another at the same instants and takes a "
-      "tz.UTC time, not a plain UTC one",
-      skip: true,
-      () {
-        final start = DateTime(2025, 7, 16, 10);
-        final end = DateTime(2025, 7, 16, 11);
-        final zone = zoneAtDeviceOffset(start);
-        final plain = CalendarCreateRange(start: start, end: end);
-        for (final location in <tz.Location>[zone, tz.UTC]) {
-          final zoned = CalendarCreateRange(
-            start: tz.TZDateTime.from(start, location),
-            end: tz.TZDateTime.from(end, location),
-          );
-          expect(plain == zoned, isTrue, reason: location.name);
-          expect(zoned == plain, isTrue, reason: location.name);
-          expect(zoned.hashCode, plain.hashCode, reason: location.name);
-        }
-        expect(
-          () {
-            return CalendarCreateRange(start: start.toUtc(), end: end);
-          },
-          throwsA(
-            isA<ArgumentError>().having(
-              (error) {
-                return error.name;
-              },
-              "name",
-              "start",
-            ),
-          ),
+    test("ME2 a create range equals another at the same instants and takes a "
+        "tz.UTC time, not a plain UTC one", () {
+      final start = DateTime(2025, 7, 16, 10);
+      final end = DateTime(2025, 7, 16, 11);
+      final zone = zoneAtDeviceOffset(start);
+      final plain = CalendarCreateRange(start: start, end: end);
+      for (final location in <tz.Location>[zone, tz.UTC]) {
+        final zoned = CalendarCreateRange(
+          start: tz.TZDateTime.from(start, location),
+          end: tz.TZDateTime.from(end, location),
         );
-        expect(
-          () {
-            return CalendarCreateRange(start: start, end: end.toUtc());
-          },
-          throwsA(
-            isA<ArgumentError>().having(
-              (error) {
-                return error.name;
-              },
-              "name",
-              "end",
-            ),
+        expect(plain == zoned, isTrue, reason: location.name);
+        expect(zoned == plain, isTrue, reason: location.name);
+        expect(zoned.hashCode, plain.hashCode, reason: location.name);
+      }
+      expect(
+        () {
+          return CalendarCreateRange(start: start.toUtc(), end: end);
+        },
+        throwsA(
+          isA<ArgumentError>().having(
+            (error) {
+              return error.name;
+            },
+            "name",
+            "start",
           ),
-        );
-      },
-    );
+        ),
+      );
+      expect(
+        () {
+          return CalendarCreateRange(start: start, end: end.toUtc());
+        },
+        throwsA(
+          isA<ArgumentError>().having(
+            (error) {
+              return error.name;
+            },
+            "name",
+            "end",
+          ),
+        ),
+      );
+    });
   });
 }

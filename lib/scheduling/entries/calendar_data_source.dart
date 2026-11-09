@@ -7,13 +7,18 @@ import 'calendar_entry.dart';
 /// The host's store of entries, which a `CachingCalendarStore` reads by days
 /// and writes one entry at a time.
 ///
+/// A data source reads and writes on the device's clock: [read] is asked for
+/// device days, and every [CalendarEntry] it takes or answers holds plain
+/// local times, the local midnights of its dates where it is all-day,
+/// whatever zone the store above it reads in.
+///
 /// Each call completes with what the source stored, or fails with the
 /// source's own error, which reaches unchanged the caller of the store's
 /// write, or for a read the store's `loadError`.
 abstract interface class CalendarDataSource<T> {
-  /// Every entry with any part in the days from [first] to [last], both
-  /// inclusive, each once, each with its id: an entry ending at the start
-  /// of [first] has none there.
+  /// Every entry with any part in the device days from [first] to [last],
+  /// both inclusive, each once, each with its id, in plain local times: an
+  /// entry ending at the start of [first] has none there.
   Future<List<CalendarEntry<T>>> read(DateTime first, DateTime last);
 
   /// Stores [draft] and completes with the entry stored, under the id the
@@ -29,7 +34,8 @@ abstract interface class CalendarDataSource<T> {
 }
 
 /// A change at a data source, which a `CachingCalendarStore` given a stream
-/// of them applies to the entries it holds.
+/// of them applies to the entries it holds. Its days and times are on the
+/// device's clock, as the source's are.
 ///
 /// A stream of changes delivers them in the order the source made them, and
 /// sends a [CalendarAllChanged] after any stretch in which it may have
@@ -61,7 +67,7 @@ final class CalendarEntryRemoved<T> extends CalendarSourceChange<T> {
   final String id;
 }
 
-/// Any entry with a part in the days from [first] to [last], both
+/// Any entry with a part in the device days from [first] to [last], both
 /// inclusive, may have changed.
 final class CalendarDaysChanged<T> extends CalendarSourceChange<T> {
   /// The change of the days from [first] to [last].
