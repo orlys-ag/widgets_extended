@@ -10,8 +10,10 @@ The contract of `CalendarStore` and its two stores. The layer's imports are in `
 
 - **`CalendarStore`** is listenable, and answers the entries covering a
   range, the load state of the range the calendar shows, and writes.
-- **Hours.** The store holds the calendar's one copy of its hours, which
-  its writes must lie in; a set of other hours notifies.
+- **Hours and the zone.** The store holds the calendar's one copy of its
+  hours, which its writes must lie in, and the zone whose clock it reads
+  them on; a set of other hours notifies, and a set of another zone refiles
+  the entries and notifies once.
 - **Writes.** An entry has one write in flight at most, and a write on an
   entry that has one sends nothing and fails. Every write completes once
   the store's source, a data source or the store itself, has stored it,

@@ -106,17 +106,12 @@ MemoryCalendarStore<T> memoryStoreIn<T>(
   CalendarDayHours? hours,
   CalendarEntryChanged<T>? onChanged,
 }) {
-  return Function.apply(
-        MemoryCalendarStore<T>.new,
-        const <Object?>[],
-        <Symbol, Object?>{
-          #entries: entries,
-          #hours: hours ?? CalendarDayHours.allDay,
-          #onChanged: onChanged,
-          #zone: zone,
-        },
-      )
-      as MemoryCalendarStore<T>;
+  return MemoryCalendarStore<T>(
+    entries: entries,
+    hours: hours ?? CalendarDayHours.allDay,
+    onChanged: onChanged,
+    zone: zone,
+  );
 }
 
 /// A caching store in [zone], or on the device's clock with none, over
@@ -142,12 +137,12 @@ CachingCalendarStore<T> cachingStoreIn<T>(
 
 /// Sets [store]'s zone.
 void setStoreZone<T>(CalendarStore<T> store, tz.Location? zone) {
-  (store as dynamic).zone = zone;
+  store.zone = zone;
 }
 
 /// [store]'s zone, null for the device's clock.
 tz.Location? zoneOfStore<T>(CalendarStore<T> store) {
-  return (store as dynamic).zone as tz.Location?;
+  return store.zone;
 }
 
 /// The first instant [zone]'s clock reads the day numbered [day].

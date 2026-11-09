@@ -32,12 +32,15 @@ typedef CalendarEntryChanged<T> =
 /// changed through its writes and [entries], so [invalidate] and [refresh]
 /// do nothing either.
 base class MemoryCalendarStore<T> extends CalendarStore<T> {
-  /// A store holding [entries], each with an id no other has. Throws an
-  /// [ArgumentError] for an entry with no id or with a repeated one.
+  /// A store holding [entries], each with an id no other has, taken to the
+  /// store's zone where it has one. Throws an [ArgumentError] for an entry
+  /// with no id or with a repeated one, and for a time the zone cannot
+  /// represent.
   MemoryCalendarStore({
     Iterable<CalendarEntry<T>> entries = const <Never>[],
     this.onChanged,
     super.hours,
+    super.zone,
   }) {
     _fill(_checked(entries));
   }
@@ -48,9 +51,7 @@ base class MemoryCalendarStore<T> extends CalendarStore<T> {
   /// change by then.
   final CalendarEntryChanged<T>? onChanged;
 
-  final CalendarEntryIndex<T> _index = CalendarEntryIndex<T>(
-    opensEveryDay: true,
-  );
+  CalendarEntryIndex<T> _index = CalendarEntryIndex<T>(opensEveryDay: true);
 
   /// The number of the next `entry-<n>` id [create] gives a draft with
   /// none; it only counts up.
@@ -62,9 +63,10 @@ base class MemoryCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// Replaces every entry with [value], whose entries each have an id no
-  /// other has, and notifies once; calls no [onChanged]. Throws an
-  /// [ArgumentError], changing nothing, for an entry with no id or with a
-  /// repeated one.
+  /// other has, taken to the store's zone where it has one, and notifies
+  /// once; calls no [onChanged]. Throws an [ArgumentError], changing
+  /// nothing, for an entry with no id or with a repeated one, and for a time
+  /// the zone cannot represent.
   set entries(Iterable<CalendarEntry<T>> value) {
     final checked = _checked(value);
     _index.clear();
@@ -72,18 +74,20 @@ base class MemoryCalendarStore<T> extends CalendarStore<T> {
     notifyListeners();
   }
 
-  /// [entries] as a list, once each id is checked to be there and unique.
+  /// [entries] as a list in the store's zone, once each id is checked to
+  /// be there and unique.
   List<CalendarEntry<T>> _checked(Iterable<CalendarEntry<T>> entries) {
     final list = List<CalendarEntry<T>>.of(entries);
     final ids = <String>{};
-    for (final entry in list) {
-      final id = entry.id;
+    for (var i = 0; i < list.length; i++) {
+      final id = list[i].id;
       if (id == null) {
-        throw ArgumentError.value(entry, "entries", "An entry has no id.");
+        throw ArgumentError.value(list[i], "entries", "An entry has no id.");
       }
       if (!ids.add(id)) {
         throw ArgumentError.value(id, "entries", "Two entries share an id.");
       }
+      list[i] = zonedEntryOf(list[i], zone);
     }
     return list;
   }
@@ -189,18 +193,20 @@ base class MemoryCalendarStore<T> extends CalendarStore<T> {
     return _index.stored(id);
   }
 
-  /// Stores [draft] and completes with the stored entry: [draft] under its
-  /// own id, or, when it has none, under the next `entry-<n>` no held
-  /// entry has, counting from 1. Fails with a [CalendarHoursException] for
-  /// a draft outside [hours], and with an [ArgumentError] for one whose
-  /// own id a held entry has, changing nothing.
+  /// Stores [draft], taken to the store's zone where it has one, and
+  /// completes with the stored entry: [draft] under its own id, or, when it
+  /// has none, under the next `entry-<n>` no held entry has, counting from
+  /// 1. Fails with a [CalendarHoursException] for a draft outside [hours],
+  /// and with an [ArgumentError] for one whose own id a held entry has and
+  /// for a time the zone cannot represent, changing nothing.
   @override
   Future<CalendarEntry<T>> create(CalendarEntry<T> draft) async {
-    final refusal = hoursRefusalOf(draft);
+    final zoned = zonedEntryOf(draft, zone);
+    final refusal = hoursRefusalOf(zoned);
     if (refusal != null) {
       throw refusal;
     }
-    var id = draft.id;
+    var id = zoned.id;
     if (id != null && _index.stored(id) != null) {
       throw ArgumentError.value(id, "draft", "An entry has this id.");
     }
@@ -211,31 +217,34 @@ base class MemoryCalendarStore<T> extends CalendarStore<T> {
         id = next;
       }
     }
-    final created = draft.id == id ? draft : draft.copyWith(id: id);
+    final created = zoned.id == id ? zoned : zoned.copyWith(id: id);
     _apply(null, created);
     return created;
   }
 
-  /// Writes [entry] over the stored entry its id names and completes with
-  /// it. Fails with an [ArgumentError] for an entry with no id or an id no
-  /// entry has, and with a [CalendarHoursException] when [hoursRefusalOf]
-  /// refuses it, changing nothing.
+  /// Writes [entry], taken to the store's zone where it has one, over the
+  /// stored entry its id names and completes with it. Fails with an
+  /// [ArgumentError] for an entry with no id or an id no entry has and for a
+  /// time the zone cannot represent, and with a [CalendarHoursException]
+  /// when [hoursRefusalOf] refuses it, changing nothing.
   @override
   Future<CalendarEntry<T>> update(CalendarEntry<T> entry) async {
     final old = _storedFor(entry.id, "entry");
-    final refusal = hoursRefusalOf(entry);
+    final zoned = zonedEntryOf(entry, zone);
+    final refusal = hoursRefusalOf(zoned);
     if (refusal != null) {
       throw refusal;
     }
-    _apply(old, entry);
-    return entry;
+    _apply(old, zoned);
+    return zoned;
   }
 
-  /// Moves or resizes the stored entry to [requested] and completes with
-  /// it; a move onto another entry's time is applied. Fails with an
-  /// [ArgumentError] for an entry with no id or an id no entry has, and
-  /// with a [CalendarHoursException] when [hoursRefusalOf] refuses it,
-  /// changing nothing.
+  /// Moves or resizes the stored entry to [requested], taken to the store's
+  /// zone where it has one, and completes with it; a move onto another
+  /// entry's time is applied. Fails with an [ArgumentError] for an entry
+  /// with no id or an id no entry has and for a time the zone cannot
+  /// represent, and with a [CalendarHoursException] when [hoursRefusalOf]
+  /// refuses it, changing nothing.
   @override
   Future<CalendarEntry<T>> requestMove(CalendarEntry<T> requested) async {
     final id = requested.id;
@@ -246,12 +255,13 @@ base class MemoryCalendarStore<T> extends CalendarStore<T> {
     if (old == null) {
       throw ArgumentError.value(id, "id", "No entry.");
     }
-    final refusal = hoursRefusalOf(requested);
+    final zoned = zonedEntryOf(requested, zone);
+    final refusal = hoursRefusalOf(zoned);
     if (refusal != null) {
       throw refusal;
     }
-    _apply(old, requested);
-    return requested;
+    _apply(old, zoned);
+    return zoned;
   }
 
   /// Deletes the entry [id], and completes. Fails with an [ArgumentError],
@@ -265,6 +275,20 @@ base class MemoryCalendarStore<T> extends CalendarStore<T> {
     _index.forget(id);
     notifyListeners();
     _reportChange(old, null);
+  }
+
+  /// Puts the entries under [next]'s clock, refusing a time it cannot
+  /// represent before anything changes, and answers the function that puts
+  /// them in place and notifies.
+  @override
+  VoidCallback prepareZone(Location? next) {
+    final refiled = _index.refiled((entry) {
+      return zonedEntryOf(entry, next);
+    });
+    return () {
+      _index = refiled;
+      notifyListeners();
+    };
   }
 
   /// The stored entry [id] names; throws an [ArgumentError], named [name],

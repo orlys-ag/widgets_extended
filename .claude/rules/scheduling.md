@@ -39,7 +39,9 @@ Normative for `lib/scheduling/`, the scheduling module: the experimental schedul
   grow, such as item kinds, refusal reasons, resource kinds or recurrence
   rules, is a class hierarchy later code extends, never an enum or a sealed
   class, which can never gain a value or a subtype. A new ability of a data
-  source is a new interface.
+  source is a new interface. Package timezone's `Location` is the one foreign
+  type on the public surface, as a store's zone; no barrel shows it, so a
+  host imports `package:timezone` itself.
 - **The core's tests run on the core alone.** No file under
   `test/scheduling/dates/`, `entries/`, `policy/` or `store/`, nor
   `test/scheduling/dst_days.dart` or `test/scheduling/class_source.dart`,

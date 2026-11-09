@@ -42,8 +42,9 @@ Normative for `lib/scheduling/` and `lib/calendar/`, beside each module's own ru
 
 - **Entry**: one `CalendarEntry<T>`, carrying the host's payload `T`.
 - **All-day entry**: an entry whose `isAllDay` is true, which covers whole
-  local days from the local midnight of its start to that of its end, an
-  exclusive end; any other entry is timed, whatever its times.
+  civil days from the day start of its start to that of its end on its
+  store's clock, an exclusive end; any other entry is timed, whatever its
+  times.
 - **Pending write**: a write in flight on an entry, which marks the entry
   pending and takes no other write on it; `scheduling-store.md` gives what
   each write shows meanwhile.

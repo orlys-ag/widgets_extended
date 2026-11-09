@@ -582,7 +582,7 @@ void main() {
       );
     }
 
-    test("MZ1 tz.UTC and Etc/UTC can each be supplied", skip: true, () {
+    test("MZ1 tz.UTC and Etc/UTC can each be supplied", () {
       for (final zone in <tz.Location>[tz.UTC, tz.getLocation("Etc/UTC")]) {
         final entry = task("a", onDay, 600, 660);
         final store = memoryStoreIn<String>(
@@ -610,7 +610,7 @@ void main() {
       }
     });
 
-    test("MZ2 the memory store files on the zone's civil day", skip: true, () {
+    test("MZ2 the memory store files on the zone's civil day", () {
       final zone = zoneFarFromDevice(on);
       final entry = task("a", onDay, 600, 660);
       final store = memoryStoreIn<String>(
@@ -642,81 +642,76 @@ void main() {
       );
     });
 
-    test(
-      "MZ3 timed entries read back on the zone's clock with their "
-      "instants",
-      skip: true,
-      () async {
-        final zone = zoneFarFromDevice(on);
-        final other = tz.getLocation("Asia/Tokyo");
-        final start = on;
-        final end = on.add(const Duration(hours: 1));
-        final zoneDay = DateTime(
-          tz.TZDateTime.from(on, zone).year,
-          tz.TZDateTime.from(on, zone).month,
-          tz.TZDateTime.from(on, zone).day,
+    test("MZ3 timed entries read back on the zone's clock with their "
+        "instants", () async {
+      final zone = zoneFarFromDevice(on);
+      final other = tz.getLocation("Asia/Tokyo");
+      final start = on;
+      final end = on.add(const Duration(hours: 1));
+      final zoneDay = DateTime(
+        tz.TZDateTime.from(on, zone).year,
+        tz.TZDateTime.from(on, zone).month,
+        tz.TZDateTime.from(on, zone).day,
+      );
+      final forms = <String, (DateTime, DateTime)>{
+        "plain": (start, end),
+        "same zone": (
+          tz.TZDateTime.from(start, zone),
+          tz.TZDateTime.from(end, zone),
+        ),
+        "other zone": (
+          tz.TZDateTime.from(start, other),
+          tz.TZDateTime.from(end, other),
+        ),
+      };
+      for (final MapEntry(key: form, value: times) in forms.entries) {
+        printOnFailure(form);
+        final changes = <(CalendarEntry<String>?, CalendarEntry<String>?)>[];
+        final store = memoryStoreIn<String>(
+          zone,
+          entries: <CalendarEntry<String>>[
+            timesEntry("held", times.$1, times.$2),
+          ],
+          onChanged: (old, entry) {
+            changes.add((old, entry));
+          },
         );
-        final forms = <String, (DateTime, DateTime)>{
-          "plain": (start, end),
-          "same zone": (
-            tz.TZDateTime.from(start, zone),
-            tz.TZDateTime.from(end, zone),
-          ),
-          "other zone": (
-            tz.TZDateTime.from(start, other),
-            tz.TZDateTime.from(end, other),
-          ),
-        };
-        for (final MapEntry(key: form, value: times) in forms.entries) {
-          printOnFailure(form);
-          final changes = <(CalendarEntry<String>?, CalendarEntry<String>?)>[];
-          final store = memoryStoreIn<String>(
-            zone,
-            entries: <CalendarEntry<String>>[
-              timesEntry("held", times.$1, times.$2),
-            ],
-            onChanged: (old, entry) {
-              changes.add((old, entry));
-            },
-          );
-          addTearDown(store.dispose);
-          expectEntryInZone(store.storedEntry("held")!, zone, start, end);
-          expectEntryInZone(
-            store.entriesOn(zoneDay).single.entry,
-            zone,
-            start,
-            end,
-          );
-          expectEntryInZone(
-            store.entriesBetween(zoneDay, zoneDay).single.entry,
-            zone,
-            start,
-            end,
-          );
-          expectEntryInZone(store.entries.single, zone, start, end);
+        addTearDown(store.dispose);
+        expectEntryInZone(store.storedEntry("held")!, zone, start, end);
+        expectEntryInZone(
+          store.entriesOn(zoneDay).single.entry,
+          zone,
+          start,
+          end,
+        );
+        expectEntryInZone(
+          store.entriesBetween(zoneDay, zoneDay).single.entry,
+          zone,
+          start,
+          end,
+        );
+        expectEntryInZone(store.entries.single, zone, start, end);
 
-          final created = await store.create(
-            timesEntry("new", times.$1, times.$2),
-          );
-          expectEntryInZone(created, zone, start, end);
-          expectEntryInZone(changes.last.$2!, zone, start, end);
-          final updated = await store.update(
-            timesEntry("held", times.$1, times.$2, title: "Updated"),
-          );
-          expectEntryInZone(updated, zone, start, end);
-          expectEntryInZone(changes.last.$2!, zone, start, end);
-          final moved = await store.requestMove(
-            timesEntry("new", times.$1, times.$2, title: "Moved"),
-          );
-          expectEntryInZone(moved, zone, start, end);
-          expectEntryInZone(changes.last.$2!, zone, start, end);
-        }
-      },
-    );
+        final created = await store.create(
+          timesEntry("new", times.$1, times.$2),
+        );
+        expectEntryInZone(created, zone, start, end);
+        expectEntryInZone(changes.last.$2!, zone, start, end);
+        final updated = await store.update(
+          timesEntry("held", times.$1, times.$2, title: "Updated"),
+        );
+        expectEntryInZone(updated, zone, start, end);
+        expectEntryInZone(changes.last.$2!, zone, start, end);
+        final moved = await store.requestMove(
+          timesEntry("new", times.$1, times.$2, title: "Moved"),
+        );
+        expectEntryInZone(moved, zone, start, end);
+        expectEntryInZone(changes.last.$2!, zone, start, end);
+      }
+    });
 
     test(
       "MZ4 an all-day entry over Havana's 2025-11-02 stays on that date",
-      skip: true,
       () {
         final havana = tz.getLocation("America/Havana");
         final far = zoneFarFromDevice(on);
@@ -796,7 +791,7 @@ void main() {
       },
     );
 
-    test("MZ5 hours are on the zone's clock", skip: true, () async {
+    test("MZ5 hours are on the zone's clock", () async {
       final zone = zoneFarFromDevice(on);
       final hours = CalendarDayHours(9 * 60, 17 * 60);
       final zoned = tz.TZDateTime.from(on, zone);
@@ -817,6 +812,25 @@ void main() {
         store.create(timesEntry("out", wall(20), wall(21))),
         throwsA(isA<CalendarHoursException>()),
       );
+      // A time the hours hold only as the zone's clock reads it: the device's
+      // clock reads it outside them. (A device exactly 24 hours from the zone
+      // reads the same hours, so no such time exists there.)
+      final hoursOnlyInZone = <int>[
+        for (var hour = 9; hour < 16; hour++)
+          if (!hours.holdsTimes(
+            plainOf(wall(hour)),
+            plainOf(wall(hour + 1)),
+            isAllDay: false,
+          ))
+            hour,
+      ];
+      if (hoursOnlyInZone.isNotEmpty) {
+        final hour = hoursOnlyInZone.first;
+        final created = await store.create(
+          timesEntry("zone-only", wall(hour), wall(hour + 1)),
+        );
+        expect(created.id, "zone-only");
+      }
       // The zone's clock reads no hours value at any other wall time: the
       // plain instants of the held entry keep its times, not refused.
       final updated = await store.update(
@@ -830,73 +844,68 @@ void main() {
       expect(updated.title, "Renamed");
     });
 
-    test(
-      "MZ6 a zone change notifies once and refiles; an == zone notifies "
-      "nothing",
-      skip: true,
-      () {
-        final far = zoneFarFromDevice(on);
-        final etc = tz.getLocation("Etc/UTC");
-        // Setup sanity: the equal zone is another instance.
-        expect(etc, tz.UTC);
-        expect(identical(etc, tz.UTC), isFalse);
-        final entry = task("a", onDay, 600, 660);
-        final store = memoryStoreIn<String>(
-          null,
-          entries: <CalendarEntry<String>>[entry],
-        );
-        addTearDown(store.dispose);
-        var notifies = 0;
-        store.addListener(() {
-          notifies++;
-        });
-        DateTime dayIn(tz.Location zone) {
-          final time = tz.TZDateTime.from(entry.start, zone);
-          return DateTime(time.year, time.month, time.day);
-        }
+    test("MZ6 a zone change notifies once and refiles; an == zone notifies "
+        "nothing", () {
+      final far = zoneFarFromDevice(on);
+      final etc = tz.getLocation("Etc/UTC");
+      // Setup sanity: the equal zone is another instance.
+      expect(etc, tz.UTC);
+      expect(identical(etc, tz.UTC), isFalse);
+      final entry = task("a", onDay, 600, 660);
+      final store = memoryStoreIn<String>(
+        null,
+        entries: <CalendarEntry<String>>[entry],
+      );
+      addTearDown(store.dispose);
+      var notifies = 0;
+      store.addListener(() {
+        notifies++;
+      });
+      DateTime dayIn(tz.Location zone) {
+        final time = tz.TZDateTime.from(entry.start, zone);
+        return DateTime(time.year, time.month, time.day);
+      }
 
-        setStoreZone(store, far);
-        expect(notifies, 1);
-        expect(zoneOfStore(store), far);
-        expect(
-          store.entriesOn(dayIn(far)).map((shown) {
-            return shown.id;
-          }),
-          <String>["a"],
-        );
-        expectEntryInZone(store.storedEntry("a")!, far, entry.start, entry.end);
+      setStoreZone(store, far);
+      expect(notifies, 1);
+      expect(zoneOfStore(store), far);
+      expect(
+        store.entriesOn(dayIn(far)).map((shown) {
+          return shown.id;
+        }),
+        <String>["a"],
+      );
+      expectEntryInZone(store.storedEntry("a")!, far, entry.start, entry.end);
 
-        setStoreZone(store, tz.UTC);
-        expect(notifies, 2);
-        expectEntryInZone(
-          store.storedEntry("a")!,
-          tz.UTC,
-          entry.start,
-          entry.end,
-        );
+      setStoreZone(store, tz.UTC);
+      expect(notifies, 2);
+      expectEntryInZone(
+        store.storedEntry("a")!,
+        tz.UTC,
+        entry.start,
+        entry.end,
+      );
 
-        setStoreZone(store, etc);
-        expect(notifies, 2);
+      setStoreZone(store, etc);
+      expect(notifies, 2);
 
-        setStoreZone(store, null);
-        expect(notifies, 3);
-        expect(zoneOfStore(store), isNull);
-        final back = store.storedEntry("a")!;
-        expect(back.start, isNot(isA<tz.TZDateTime>()));
-        expect(back.start.isUtc, isFalse);
-        expect(back.start.isAtSameMomentAs(entry.start), isTrue);
-        expect(
-          store.entriesOn(onDay).map((shown) {
-            return shown.id;
-          }),
-          <String>["a"],
-        );
-      },
-    );
+      setStoreZone(store, null);
+      expect(notifies, 3);
+      expect(zoneOfStore(store), isNull);
+      final back = store.storedEntry("a")!;
+      expect(back.start, isNot(isA<tz.TZDateTime>()));
+      expect(back.start.isUtc, isFalse);
+      expect(back.start.isAtSameMomentAs(entry.start), isTrue);
+      expect(
+        store.entriesOn(onDay).map((shown) {
+          return shown.id;
+        }),
+        <String>["a"],
+      );
+    });
 
     test(
       "MZ7 a time the zone cannot represent fails only that operation",
-      skip: true,
       () async {
         final monrovia = tz.getLocation("Africa/Monrovia");
         final apia = tz.getLocation("Pacific/Apia");
@@ -991,65 +1000,61 @@ void main() {
       },
     );
 
-    test(
-      "MZ8 filing and a zone change ask a fixed number per entry",
-      skip: true,
-      () {
-        List<CalendarEntry<String>> timed(int count) {
-          return <CalendarEntry<String>>[
-            for (var i = 0; i < count; i++)
-              task(
-                "t$i",
-                DateTime(2025, 6, 1 + i % 60),
-                600 + i % 120,
-                720 + i % 120,
-              ),
-          ];
-        }
+    test("MZ8 filing and a zone change ask a fixed number per entry", () {
+      List<CalendarEntry<String>> timed(int count) {
+        return <CalendarEntry<String>>[
+          for (var i = 0; i < count; i++)
+            task(
+              "t$i",
+              DateTime(2025, 6, 1 + i % 60),
+              600 + i % 120,
+              720 + i % 120,
+            ),
+        ];
+      }
 
-        List<CalendarEntry<String>> allDay(int count) {
-          return <CalendarEntry<String>>[
-            for (var i = 0; i < count; i++)
-              timesEntry(
-                "d$i",
-                DateTime(2025, 6, 1 + i % 60),
-                DateTime(2025, 6, 2 + i % 60),
-                isAllDay: true,
-              ),
-          ];
-        }
+      List<CalendarEntry<String>> allDay(int count) {
+        return <CalendarEntry<String>>[
+          for (var i = 0; i < count; i++)
+            timesEntry(
+              "d$i",
+              DateTime(2025, 6, 1 + i % 60),
+              DateTime(2025, 6, 2 + i % 60),
+              isAllDay: true,
+            ),
+        ];
+      }
 
-        final zone = CountingLocation(tz.getLocation("America/Havana"));
-        final next = CountingLocation(tz.getLocation("Asia/Tokyo"));
-        for (final (entries, cost) in <(List<CalendarEntry<String>>, int)>[
-          (timed(5000), 3),
-          (allDay(5000), 7),
-        ]) {
-          zone.lookups = 0;
-          final store = memoryStoreIn<String>(zone, entries: entries);
-          addTearDown(store.dispose);
-          expect(zone.lookups, cost * entries.length);
+      final zone = CountingLocation(tz.getLocation("America/Havana"));
+      final next = CountingLocation(tz.getLocation("Asia/Tokyo"));
+      for (final (entries, cost) in <(List<CalendarEntry<String>>, int)>[
+        (timed(5000), 3),
+        (allDay(5000), 7),
+      ]) {
+        zone.lookups = 0;
+        final store = memoryStoreIn<String>(zone, entries: entries);
+        addTearDown(store.dispose);
+        expect(zone.lookups, cost * entries.length);
 
-          zone.lookups = 0;
-          store.entriesOn(DateTime(2025, 6, 10));
-          store.entriesBetween(DateTime(2025, 6, 1), DateTime(2025, 7, 30));
-          expect(zone.lookups, 0);
+        zone.lookups = 0;
+        store.entriesOn(DateTime(2025, 6, 10));
+        store.entriesBetween(DateTime(2025, 6, 1), DateTime(2025, 7, 30));
+        expect(zone.lookups, 0);
 
-          next.lookups = 0;
-          setStoreZone(store, next);
-          expect(next.lookups, cost * entries.length);
+        next.lookups = 0;
+        setStoreZone(store, next);
+        expect(next.lookups, cost * entries.length);
 
-          next.lookups = 0;
-          store.entriesOn(DateTime(2025, 6, 10));
-          store.entriesBetween(DateTime(2025, 6, 1), DateTime(2025, 7, 30));
-          expect(next.lookups, 0);
+        next.lookups = 0;
+        store.entriesOn(DateTime(2025, 6, 10));
+        store.entriesBetween(DateTime(2025, 6, 1), DateTime(2025, 7, 30));
+        expect(next.lookups, 0);
 
-          setStoreZone(store, zone);
-        }
-      },
-    );
+        setStoreZone(store, zone);
+      }
+    });
 
-    test("MZ9 a store with no zone keeps the device clock", skip: true, () {
+    test("MZ9 a store with no zone keeps the device clock", () {
       final plain = task("plain", onDay, 600, 660);
       final zone = zoneFarFromDevice(on);
       final zonedInput = timesEntry(
