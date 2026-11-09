@@ -7,9 +7,11 @@ import 'dart:io';
 import 'dart:ui' show Color;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 
 import '../class_source.dart';
+import '../store/zone_support.dart';
 
 /// [minute] minutes after [day]'s midnight.
 DateTime at(DateTime day, int minute) {
@@ -183,5 +185,58 @@ void main() {
     ]) {
       expect(declares(name), isFalse, reason: name);
     }
+  });
+
+  group("time zones", () {
+    setUpAll(ensureZones);
+
+    test(
+      "ME2 a create range equals another at the same instants and takes a "
+      "tz.UTC time, not a plain UTC one",
+      skip: true,
+      () {
+        final start = DateTime(2025, 7, 16, 10);
+        final end = DateTime(2025, 7, 16, 11);
+        final zone = zoneAtDeviceOffset(start);
+        final plain = CalendarCreateRange(start: start, end: end);
+        for (final location in <tz.Location>[zone, tz.UTC]) {
+          final zoned = CalendarCreateRange(
+            start: tz.TZDateTime.from(start, location),
+            end: tz.TZDateTime.from(end, location),
+          );
+          expect(plain == zoned, isTrue, reason: location.name);
+          expect(zoned == plain, isTrue, reason: location.name);
+          expect(zoned.hashCode, plain.hashCode, reason: location.name);
+        }
+        expect(
+          () {
+            return CalendarCreateRange(start: start.toUtc(), end: end);
+          },
+          throwsA(
+            isA<ArgumentError>().having(
+              (error) {
+                return error.name;
+              },
+              "name",
+              "start",
+            ),
+          ),
+        );
+        expect(
+          () {
+            return CalendarCreateRange(start: start, end: end.toUtc());
+          },
+          throwsA(
+            isA<ArgumentError>().having(
+              (error) {
+                return error.name;
+              },
+              "name",
+              "end",
+            ),
+          ),
+        );
+      },
+    );
   });
 }

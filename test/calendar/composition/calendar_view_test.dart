@@ -15,6 +15,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
+
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/composition/calendar_card.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
@@ -43,6 +44,7 @@ import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 
 import '../../scheduling/dst_days.dart';
+import '../../scheduling/store/zone_support.dart';
 import 'recording_store.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
@@ -3680,5 +3682,247 @@ void main() {
       expect(uncaught, isEmpty);
       expect(tester.takeException(), isNull);
     });
+  });
+  group("time zones", () {
+    setUpAll(ensureZones);
+
+    Matcher isStoreError() {
+      return isA<ArgumentError>().having(
+        (error) {
+          return error.name;
+        },
+        "name",
+        "store",
+      );
+    }
+
+    /// Takes the one exception the build reported, expects the zone's
+    /// [ArgumentError], and that no entry is drawn.
+    void expectRefused(WidgetTester tester) {
+      expect(tester.takeException(), isStoreError());
+      expect(find.byType(ErrorWidget), findsOneWidget);
+      expect(blockFinder("a"), findsNothing);
+    }
+
+    final zoneDate = DateTime(2026, 4, 21, 12);
+
+    testWidgets(
+      "CVZ1 a calendar built with a supplied zone reports an "
+      "ArgumentError",
+      skip: true,
+      (tester) async {
+        final zoned = memoryStoreIn<String>(
+          zoneFarFromDevice(zoneDate),
+          entries: <CalendarEntry<String>>[entryOf("a", tuesday, 600, 660)],
+        );
+        addTearDown(zoned.dispose);
+        final controller = CalendarController(
+          view: CalendarViewKind.week,
+          selectedDay: tuesday,
+        );
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(
+          app(
+            CalendarView<String>(
+              store: zoned,
+              controller: controller,
+              clock: fixedClock,
+            ),
+          ),
+        );
+        expectRefused(tester);
+      },
+    );
+
+    testWidgets("CVZ2 a zone given later reports the same error", skip: true, (
+      tester,
+    ) async {
+      useTallView(tester);
+      final zone = zoneFarFromDevice(zoneDate);
+
+      Future<void> arrange(
+        CalendarViewKind view,
+        Future<void> Function(MemoryCalendarStore<String> store) act,
+      ) async {
+        final store = memoryStoreIn<String>(
+          null,
+          entries: <CalendarEntry<String>>[
+            entryOf("a", tuesday, 10 * 60, 11 * 60),
+          ],
+        );
+        addTearDown(store.dispose);
+        final controller = CalendarController(view: view, selectedDay: tuesday);
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(
+          app(
+            CalendarView<String>(
+              store: store,
+              controller: controller,
+              clock: fixedClock,
+              editable: true,
+              onCreateRange: (details) async {},
+              onMoveRequest: (request) async {},
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await act(store);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+      }
+
+      // In Week, with a move's drag in flight.
+      await arrange(CalendarViewKind.week, (store) async {
+        expect(blockFinder("a", tuesday), findsOneWidget);
+        final gesture = await tester.startGesture(
+          tester.getCenter(blockFinder("a", tuesday)),
+        );
+        await tester.pump(kLongPressTimeout + kPressTimeout);
+        await gesture.moveBy(const Offset(0.0, 100.0));
+        await tester.pump();
+        setStoreZone(store, zone);
+        await tester.pump();
+        expect(tester.takeException(), isStoreError());
+        expect(find.byType(ErrorWidget), findsOneWidget);
+        await gesture.up();
+        await tester.pump();
+      });
+
+      // In Week, with a create range in flight.
+      await arrange(CalendarViewKind.week, (store) async {
+        final gesture = await tester.startGesture(
+          cellCenter(tester, weekRowOf(14 * 60), weekColOf(tuesday)),
+          kind: PointerDeviceKind.mouse,
+        );
+        await gesture.moveTo(
+          cellCenter(tester, weekRowOf(15 * 60), weekColOf(tuesday)),
+        );
+        await tester.pump();
+        setStoreZone(store, zone);
+        await tester.pump();
+        expect(tester.takeException(), isStoreError());
+        expect(find.byType(ErrorWidget), findsOneWidget);
+        await gesture.up();
+        await tester.pump();
+      });
+
+      // In Month.
+      await arrange(CalendarViewKind.month, (store) async {
+        setStoreZone(store, zone);
+        await tester.pump();
+        expect(tester.takeException(), isStoreError());
+        expect(find.byType(ErrorWidget), findsOneWidget);
+      });
+    });
+
+    testWidgets("CVZ3 a store with no zone builds", skip: true, (tester) async {
+      useTallView(tester);
+      final store = memoryStoreIn<String>(
+        null,
+        entries: <CalendarEntry<String>>[entryOf("a", tuesday, 600, 660)],
+      );
+      addTearDown(store.dispose);
+      final controller = CalendarController(
+        view: CalendarViewKind.week,
+        selectedDay: tuesday,
+      );
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            store: store,
+            controller: controller,
+            clock: fixedClock,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(ErrorWidget), findsNothing);
+      expect(blockFinder("a", tuesday), findsOneWidget);
+    });
+
+    testWidgets("CVZ4 clearing the zone brings the calendar back", skip: true, (
+      tester,
+    ) async {
+      useTallView(tester);
+      final zone = zoneFarFromDevice(zoneDate);
+
+      Future<void> arrange(
+        MemoryCalendarStore<String> store,
+        Future<void> Function() refuse,
+      ) async {
+        addTearDown(store.dispose);
+        final controller = CalendarController(
+          view: CalendarViewKind.week,
+          selectedDay: tuesday,
+        );
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(
+          app(
+            CalendarView<String>(
+              store: store,
+              controller: controller,
+              clock: fixedClock,
+            ),
+          ),
+        );
+        await refuse();
+        expectRefused(tester);
+        setStoreZone(store, null);
+        await tester.pump();
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.byType(ErrorWidget), findsNothing);
+        expect(blockFinder("a", tuesday), findsOneWidget);
+      }
+
+      // Built with the zone.
+      await arrange(
+        memoryStoreIn<String>(
+          zone,
+          entries: <CalendarEntry<String>>[
+            entryOf("a", tuesday, 10 * 60, 11 * 60),
+          ],
+        ),
+        () async {},
+      );
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+
+      // Given the zone later.
+      final later = memoryStoreIn<String>(
+        null,
+        entries: <CalendarEntry<String>>[
+          entryOf("a", tuesday, 10 * 60, 11 * 60),
+        ],
+      );
+      await arrange(later, () async {
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        setStoreZone(later, zone);
+        await tester.pump();
+      });
+    });
+
+    test(
+      "CVZ5 no assertion holds the store zone's throw, which runs in a "
+      "release build",
+      skip: true,
+      () {
+        const path = "lib/calendar/composition/calendar_view.dart";
+        final view = File(path).readAsStringSync();
+        for (final arguments in assertArguments(view)) {
+          expect(
+            arguments,
+            isNot(contains("_storeZoneError")),
+            reason: arguments,
+          );
+        }
+        final build = methodBody(view, "Widget build(BuildContext context)");
+        expect(RegExp(r"\b_storeZoneError\b").hasMatch(build), isTrue);
+      },
+    );
   });
 }

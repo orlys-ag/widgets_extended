@@ -3,10 +3,18 @@
 /// class that holds it.
 library;
 
+import 'dart:io';
+import 'dart:ui' show Color;
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/data/latest_all.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/calendar/calendar.dart' as calendar;
 import 'package:widgets_extended/scheduling/scheduling.dart' as scheduling;
+import 'package:widgets_extended/scheduling/scheduling.dart';
 import 'package:widgets_extended/widgets_extended.dart' as widgets_extended;
+
+import 'store/zone_support.dart';
 
 void main() {
   test("SB1 the calendar barrel and the package barrel show each name the "
@@ -231,4 +239,55 @@ void main() {
       scheduling.CalendarMonthGrid.of,
     ];
   });
+  test(
+    "RS1 the README's zone sample runs and is verbatim",
+    skip: true,
+    () async {
+      final readme = File("README.md").readAsStringSync();
+      final own = File(
+        "test/scheduling/scheduling_test.dart",
+      ).readAsStringSync();
+      const startMark = "// README zone sample:";
+      const endMark = "// End of the README zone sample.";
+      final from = own.indexOf(startMark) + startMark.length;
+      final to = own.indexOf(endMark, from);
+      // The statements between the two marks are the README's sample, each
+      // line less the indent of this test's body.
+      final sample = own
+          .substring(from, to)
+          .split("\n")
+          .map((line) {
+            return line.startsWith("    ") ? line.substring(4) : line;
+          })
+          .join("\n")
+          .trim();
+      final at = readme.indexOf(sample);
+      expect(at, isNot(-1), reason: "The README holds the sample verbatim.");
+      final after = readme.substring(at + sample.length);
+      expect(after, contains("tz.local"));
+      expect(after, contains("latest_10y"));
+
+      // README zone sample:
+      tz.initializeTimeZones();
+      final zone = tz.getLocation("America/Havana");
+      final store = memoryStoreIn<String>(zone);
+      await store.create(
+        CalendarEntry<String>(
+          id: "standup",
+          start: tz.TZDateTime(zone, 2026, 4, 21, 9),
+          end: tz.TZDateTime(zone, 2026, 4, 21, 10),
+          title: "Standup",
+          color: const Color(0xFF3366CC),
+          payload: "team",
+        ),
+      );
+      // End of the README zone sample.
+
+      addTearDown(store.dispose);
+      final held = store.entriesOn(DateTime(2026, 4, 21)).single.entry;
+      expect(held.start, isA<tz.TZDateTime>());
+      expect((held.start as tz.TZDateTime).location, zone);
+      expect(held.start.hour, 9);
+    },
+  );
 }

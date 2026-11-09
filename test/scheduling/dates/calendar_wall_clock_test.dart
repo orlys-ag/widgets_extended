@@ -7,9 +7,11 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 
 import '../dst_days.dart';
+import '../store/zone_support.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -842,4 +844,665 @@ void main() {
       });
     },
   );
+
+  group("the zone's clock", () {
+    setUpAll(ensureZones);
+
+    /// The day number of [year], [month] and [day].
+    int numberOf(int year, int month, int day) {
+      return CalendarDates.dayNumber(DateTime.utc(year, month, day));
+    }
+
+    test(
+      "ZC1 the zone's helpers answer Havana's and Santiago's changes",
+      skip: true,
+      () {
+        final havana = tz.getLocation("America/Havana");
+        final santiago = tz.getLocation("America/Santiago");
+        final skipped = dayOfNumberIn(numberOf(2025, 3, 9), havana);
+        expect(skipped.day, 9);
+        expect(skipped.hour, 1);
+        expect(
+          skipped.millisecondsSinceEpoch,
+          DateTime.utc(2025, 3, 9, 5).millisecondsSinceEpoch,
+        );
+        final repeated = dayOfNumberIn(numberOf(2025, 11, 2), havana);
+        expect(repeated.hour, 0);
+        expect(
+          repeated.millisecondsSinceEpoch,
+          DateTime.utc(2025, 11, 2, 4).millisecondsSinceEpoch,
+        );
+        final santiagoNext = dayOfNumberIn(numberOf(2026, 4, 5), santiago);
+        expect(santiagoNext.hour, 0);
+        expect(
+          santiagoNext.millisecondsSinceEpoch,
+          DateTime.utc(2026, 4, 5, 4).millisecondsSinceEpoch,
+        );
+
+        expect(
+          CalendarDates.repeatedStretchOf(repeated),
+          const Duration(hours: 1),
+        );
+        expect(
+          CalendarDates.repeatedStretchOf(
+            dayOfNumberIn(numberOf(2026, 4, 4), santiago),
+          ),
+          const Duration(hours: 1),
+        );
+        expect(CalendarDates.repeatedStretchOf(skipped), Duration.zero);
+
+        final skippedWall =
+            numberOf(2025, 3, 9) * CalendarDates.minutesPerDay + 30;
+        expect(timeAtWallIn(skippedWall, havana), isNull);
+        final repeatedWall =
+            numberOf(2025, 11, 2) * CalendarDates.minutesPerDay + 30;
+        final earlier = timeAtWallIn(repeatedWall, havana)!;
+        expect(
+          earlier.millisecondsSinceEpoch,
+          DateTime.utc(2025, 11, 2, 4, 30).millisecondsSinceEpoch,
+        );
+        final secondPass = tz.TZDateTime.fromMillisecondsSinceEpoch(
+          havana,
+          DateTime.utc(2025, 11, 2, 5, 10).millisecondsSinceEpoch,
+        );
+        final later = timeAtWallIn(repeatedWall, havana, from: secondPass)!;
+        expect(
+          later.millisecondsSinceEpoch,
+          DateTime.utc(2025, 11, 2, 5, 30).millisecondsSinceEpoch,
+        );
+        expect(later, isA<tz.TZDateTime>());
+        expect((later as tz.TZDateTime).location, havana);
+      },
+    );
+
+    test("ZC2 the zone's clock matches a brute-force scan", skip: true, () {
+      final windowStart = DateTime.utc(2020).millisecondsSinceEpoch;
+      final windowEnd = DateTime.utc(2026).millisecondsSinceEpoch;
+      final apiaStart = DateTime.utc(2011, 12).millisecondsSinceEpoch;
+      final apiaEnd = DateTime.utc(2012).millisecondsSinceEpoch;
+      const names = <String>[
+        "America/Havana",
+        "America/Santiago",
+        "Europe/London",
+        "Australia/Lord_Howe",
+        "Pacific/Apia",
+      ];
+      final tokyo = tz.getLocation("Asia/Tokyo");
+      final mismatches = <String>[];
+      void note(String what, Object? actual, Object? expected) {
+        if (actual != expected && mismatches.length < 20) {
+          mismatches.add("$what: $actual, expected $expected");
+        }
+      }
+
+      var scanned = 0;
+      for (final name in names) {
+        final zone = tz.getLocation(name);
+        for (var i = 1; i < zone.transitionAt.length; i++) {
+          final change = zone.transitionAt[i];
+          final inWindow =
+              (change >= windowStart && change < windowEnd) ||
+              (name == "Pacific/Apia" &&
+                  change >= apiaStart &&
+                  change < apiaEnd);
+          final before = zone.zones[zone.transitionZone[i - 1]];
+          final after = zone.zones[zone.transitionZone[i]];
+          if (!inWindow || before.offset == after.offset) {
+            continue;
+          }
+          scanned++;
+          final scan = _ZoneScan(zone, change);
+          final changeDay = CalendarDates.dayNumber(
+            tz.TZDateTime.fromMillisecondsSinceEpoch(zone, change),
+          );
+          final later = scan.laterOn(changeDay);
+          final firstWall = (changeDay - 1) * CalendarDates.minutesPerDay;
+          final lastWall = (changeDay + 2) * CalendarDates.minutesPerDay;
+          for (var wall = firstWall; wall < lastWall; wall++) {
+            note(
+              "$name $wall timeAt",
+              timeAtWallIn(wall, zone)?.millisecondsSinceEpoch,
+              scan.at(wall, null),
+            );
+            note(
+              "$name $wall endAt",
+              endAtWallIn(wall, zone)?.millisecondsSinceEpoch,
+              scan.endAt(wall, null),
+            );
+            if (later != null) {
+              note(
+                "$name $wall timeAt later",
+                timeAtWallIn(wall, zone, from: later)?.millisecondsSinceEpoch,
+                scan.at(wall, later),
+              );
+              note(
+                "$name $wall endAt later",
+                endAtWallIn(wall, zone, from: later)?.millisecondsSinceEpoch,
+                scan.endAt(wall, later),
+              );
+              if (wall % 15 == 0) {
+                final plain = DateTime.fromMillisecondsSinceEpoch(
+                  later.millisecondsSinceEpoch,
+                );
+                final other = tz.TZDateTime.from(later, tokyo);
+                note(
+                  "$name $wall timeAt plain from",
+                  timeAtWallIn(wall, zone, from: plain)?.millisecondsSinceEpoch,
+                  scan.at(wall, later),
+                );
+                note(
+                  "$name $wall timeAt other-zone from",
+                  timeAtWallIn(wall, zone, from: other)?.millisecondsSinceEpoch,
+                  scan.at(wall, later),
+                );
+              }
+            }
+          }
+
+          // The walks and a range's end, around the change.
+          for (
+            var instant = change - 6 * Duration.millisecondsPerHour;
+            instant < change + 6 * Duration.millisecondsPerHour;
+            instant += 7 * Duration.millisecondsPerMinute + 11000
+          ) {
+            final time = tz.TZDateTime.fromMillisecondsSinceEpoch(
+              zone,
+              instant,
+            );
+            note(
+              "$name $instant firstNotBefore",
+              CalendarDates.firstWallMinuteNotBefore(time),
+              scan.firstNotBefore(time, null),
+            );
+            note(
+              "$name $instant lastNotAfter",
+              CalendarDates.lastWallMinuteNotAfter(time),
+              scan.lastNotAfter(time, null, null),
+            );
+            if (later != null) {
+              note(
+                "$name $instant firstNotBefore later",
+                CalendarDates.firstWallMinuteNotBefore(time, from: later),
+                scan.firstNotBefore(time, later),
+              );
+              note(
+                "$name $instant lastNotAfter later",
+                CalendarDates.lastWallMinuteNotAfter(time, from: later),
+                scan.lastNotAfter(time, later, null),
+              );
+            }
+            final start = tz.TZDateTime.fromMillisecondsSinceEpoch(
+              zone,
+              instant - instant % Duration.millisecondsPerMinute,
+            );
+            note(
+              "$name $instant lastNotAfter from start",
+              CalendarDates.lastWallMinuteNotAfter(time, start: start),
+              scan.lastNotAfter(time, null, start),
+            );
+            final startWall = CalendarDates.wallMinuteOf(start);
+            for (
+              var wall = startWall + 15;
+              wall < startWall + 300;
+              wall += 15
+            ) {
+              note(
+                "$name $instant rangeEnd $wall",
+                CalendarDates.rangeEndAtWallMinute(
+                  start,
+                  wall,
+                )?.millisecondsSinceEpoch,
+                scan.rangeEndAt(start, wall, null),
+              );
+            }
+          }
+        }
+      }
+      // Setup sanity: the scan read every zone's changes.
+      expect(scanned, greaterThan(20));
+      expect(mismatches, isEmpty);
+    });
+
+    test(
+      "ZC3 isDayStart and the day steps read the zone's clock",
+      skip: true,
+      () {
+        final havana = tz.getLocation("America/Havana");
+        tz.TZDateTime instant(DateTime utc) {
+          return tz.TZDateTime.fromMillisecondsSinceEpoch(
+            havana,
+            utc.millisecondsSinceEpoch,
+          );
+        }
+
+        final skipStart = instant(DateTime.utc(2025, 3, 9, 5));
+        final firstMidnight = instant(DateTime.utc(2025, 11, 2, 4));
+        final laterMidnight = instant(DateTime.utc(2025, 11, 2, 5));
+        // Setup sanity: the times read as the two days' clocks do.
+        expect(skipStart.hour, 1);
+        expect(firstMidnight.hour, 0);
+        expect(laterMidnight.hour, 0);
+
+        expect(CalendarDates.isDayStart(skipStart), isTrue);
+        expect(CalendarDates.isDayStart(firstMidnight), isTrue);
+        expect(CalendarDates.isDayStart(laterMidnight), isFalse);
+
+        final march8 = instant(DateTime.utc(2025, 3, 8, 12));
+        expect(
+          CalendarDates.addDays(march8, 1).millisecondsSinceEpoch,
+          skipStart.millisecondsSinceEpoch,
+        );
+        expect(CalendarDates.addDays(march8, 1), isA<tz.TZDateTime>());
+        final afternoon = instant(DateTime.utc(2025, 3, 9, 20));
+        expect(
+          CalendarDates.dateOnly(afternoon).millisecondsSinceEpoch,
+          skipStart.millisecondsSinceEpoch,
+        );
+        expect(
+          (CalendarDates.dateOnly(afternoon) as tz.TZDateTime).location,
+          havana,
+        );
+        expect(
+          CalendarDates.dateOnly(laterMidnight).millisecondsSinceEpoch,
+          firstMidnight.millisecondsSinceEpoch,
+        );
+        expect(
+          CalendarDates.addMonths(
+            instant(DateTime.utc(2025, 2, 9, 12)),
+            1,
+          ).millisecondsSinceEpoch,
+          skipStart.millisecondsSinceEpoch,
+        );
+
+        // The minute-0 rules: a skipped midnight has no time of day, and
+        // as a range's end its 24:00 is the day's start.
+        final skipWall = numberOf(2025, 3, 9) * CalendarDates.minutesPerDay;
+        expect(timeAtWallIn(skipWall, havana), isNull);
+        expect(
+          endAtWallIn(skipWall, havana)!.millisecondsSinceEpoch,
+          skipStart.millisecondsSinceEpoch,
+        );
+        final repeatWall = numberOf(2025, 11, 2) * CalendarDates.minutesPerDay;
+        expect(
+          timeAtWallIn(repeatWall, havana)!.millisecondsSinceEpoch,
+          firstMidnight.millisecondsSinceEpoch,
+        );
+      },
+    );
+
+    test(
+      "ZC4 each wall-minute helper asks the zone a fixed number of times",
+      skip: true,
+      () {
+        final zone = CountingLocation(tz.getLocation("America/Havana"));
+        final tokyo = tz.getLocation("Asia/Tokyo");
+        tz.TZDateTime at(
+          int year,
+          int month,
+          int day, [
+          int hour = 0,
+          int minute = 0,
+        ]) {
+          return tz.TZDateTime(zone, year, month, day, hour, minute);
+        }
+
+        int count(void Function() call) {
+          zone.lookups = 0;
+          call();
+          return zone.lookups;
+        }
+
+        void row(String name, int expected, void Function() call) {
+          expect(count(call), expected, reason: name);
+        }
+
+        // A quiet day: no offset change within two days either side.
+        final quiet = at(2025, 7, 16, 10, 30);
+        final quietLater = at(2025, 7, 16, 11, 30);
+        final quietStart = at(2025, 7, 16);
+        final quietNext = at(2025, 7, 17);
+        final quietNumber = numberOf(2025, 7, 16);
+        final quietWall = quietNumber * CalendarDates.minutesPerDay + 600;
+        const span = (start: 1000, end: 2000);
+        row("dayNumber", 0, () {
+          CalendarDates.dayNumber(quiet);
+        });
+        row("minuteOfDay", 0, () {
+          CalendarDates.minuteOfDay(quiet);
+        });
+        row("wallMinuteOf", 0, () {
+          CalendarDates.wallMinuteOf(quiet);
+        });
+        row("pieceOn", 0, () {
+          CalendarDates.pieceOn(span, quietNumber);
+        });
+        row("isDayStart", 1, () {
+          CalendarDates.isDayStart(quiet);
+        });
+        row("isLaterOccurrence", 1, () {
+          CalendarDates.isLaterOccurrence(quiet);
+        });
+        row("repeatedStretchOf", 1, () {
+          CalendarDates.repeatedStretchOf(quiet);
+        });
+        row("firstWallMinuteNotBefore", 1, () {
+          CalendarDates.firstWallMinuteNotBefore(quiet);
+        });
+        row("lastWallMinuteNotAfter", 1, () {
+          CalendarDates.lastWallMinuteNotAfter(quiet);
+        });
+        row("endMinuteOfDay", 1, () {
+          CalendarDates.endMinuteOfDay(quiet);
+        });
+        row("endWallMinuteOf", 1, () {
+          CalendarDates.endWallMinuteOf(quiet);
+        });
+        row("lastDayNumberOf", 1, () {
+          CalendarDates.lastDayNumberOf(quiet, quietLater);
+        });
+        row("timeAtWallMinute(zone:)", 2, () {
+          timeAtWallIn(quietWall, zone);
+        });
+        row("endAtWallMinute(zone:)", 2, () {
+          endAtWallIn(quietWall, zone);
+        });
+        row("rangeEndAtWallMinute", 2, () {
+          CalendarDates.rangeEndAtWallMinute(quiet, quietWall + 90);
+        });
+        row("dateOnly", 2, () {
+          CalendarDates.dateOnly(quiet);
+        });
+        row("addDays", 2, () {
+          CalendarDates.addDays(quiet, 1);
+        });
+        row("addMonths", 2, () {
+          CalendarDates.addMonths(quiet, 1);
+        });
+        row("dateOfDayNumber(zone:)", 2, () {
+          dayOfNumberIn(quietNumber, zone);
+        });
+        row("isLaterMidnight, not reading 00:00", 0, () {
+          isLaterMidnight(quiet);
+        });
+        row("isLaterMidnight, a day start", 1, () {
+          isLaterMidnight(quietStart);
+        });
+        expect(isLaterMidnight(tz.TZDateTime(tz.UTC, 2025, 7, 16)), isFalse);
+        row("wallSpanOf, end not 00:00", 1, () {
+          CalendarDates.wallSpanOf(quiet, quietLater);
+        });
+        row("wallSpanOf, end a day start", 2, () {
+          CalendarDates.wallSpanOf(quiet, quietNext);
+        });
+        row("hoursEndMinuteOf, end a day start", 2, () {
+          hoursEndMinuteOf(quiet, quietNext);
+        });
+        row("hoursEndMinuteOf, end not after start", 2, () {
+          hoursEndMinuteOf(quietLater, quiet);
+        });
+        row("hoursEndMinuteOf, end not 00:00", 2, () {
+          hoursEndMinuteOf(quiet, quietLater);
+        });
+        row("firstReadableSlot, per slot", 4, () {
+          firstReadableSlot(
+            quietStart,
+            600,
+            630,
+            30,
+            isFree: (start, end) {
+              return false;
+            },
+          );
+        });
+        final fromTokyo = tz.TZDateTime.from(quiet, tokyo);
+        final withoutFrom = count(() {
+          timeAtWallIn(quietWall, zone);
+        });
+        final withFrom = count(() {
+          timeAtWallIn(quietWall, zone, from: fromTokyo);
+        });
+        expect(withFrom, withoutFrom + 1);
+
+        // A day of a clock change: exactly one change in its window.
+        tz.TZDateTime instant(DateTime utc) {
+          return tz.TZDateTime.fromMillisecondsSinceEpoch(
+            zone,
+            utc.millisecondsSinceEpoch,
+          );
+        }
+
+        final repeat = at(2025, 11, 2, 14);
+        final repeatLater = at(2025, 11, 2, 15);
+        final firstMidnight = instant(DateTime.utc(2025, 11, 2, 4));
+        final laterMidnight = instant(DateTime.utc(2025, 11, 2, 5));
+        final before = instant(DateTime.utc(2025, 11, 2, 2));
+        final repeatNumber = numberOf(2025, 11, 2);
+        final repeatWall = repeatNumber * CalendarDates.minutesPerDay + 600;
+        final skipNumber = numberOf(2025, 3, 9);
+        final skipped = skipNumber * CalendarDates.minutesPerDay + 30;
+        final skipDay = instant(DateTime.utc(2025, 3, 9, 5));
+        row("isDayStart, one change", 2, () {
+          CalendarDates.isDayStart(repeat);
+        });
+        row("isLaterOccurrence, one change", 2, () {
+          CalendarDates.isLaterOccurrence(repeat);
+        });
+        row("repeatedStretchOf, one change", 2, () {
+          CalendarDates.repeatedStretchOf(repeat);
+        });
+        row("firstWallMinuteNotBefore, one change", 2, () {
+          CalendarDates.firstWallMinuteNotBefore(repeat);
+        });
+        row("lastWallMinuteNotAfter, one change", 2, () {
+          CalendarDates.lastWallMinuteNotAfter(repeat);
+        });
+        row("endMinuteOfDay, one change", 2, () {
+          CalendarDates.endMinuteOfDay(repeat);
+        });
+        row("endWallMinuteOf, one change", 2, () {
+          CalendarDates.endWallMinuteOf(repeat);
+        });
+        row("lastDayNumberOf, one change", 2, () {
+          CalendarDates.lastDayNumberOf(repeat, repeatLater);
+        });
+        row("timeAtWallMinute(zone:), one change", 3, () {
+          timeAtWallIn(repeatWall, zone);
+        });
+        row("endAtWallMinute(zone:), one change", 3, () {
+          endAtWallIn(repeatWall, zone);
+        });
+        row("rangeEndAtWallMinute, one change", 3, () {
+          CalendarDates.rangeEndAtWallMinute(repeat, repeatWall + 300);
+        });
+        row("timeAtWallMinute(zone:), skipped", 2, () {
+          timeAtWallIn(skipped, zone);
+        });
+        row("endAtWallMinute(zone:), skipped", 2, () {
+          endAtWallIn(skipped, zone);
+        });
+        row("rangeEndAtWallMinute, skipped", 2, () {
+          CalendarDates.rangeEndAtWallMinute(skipDay, skipped);
+        });
+        row("dateOnly, one change", 3, () {
+          CalendarDates.dateOnly(repeat);
+        });
+        row("addDays, one change", 3, () {
+          CalendarDates.addDays(repeat, 1);
+        });
+        row("addMonths, one change", 3, () {
+          CalendarDates.addMonths(at(2025, 10, 2, 12), 1);
+        });
+        row("dateOfDayNumber(zone:), one change", 3, () {
+          dayOfNumberIn(repeatNumber, zone);
+        });
+        row("isLaterMidnight, the earlier 00:00", 2, () {
+          isLaterMidnight(firstMidnight);
+        });
+        row("isLaterMidnight, the later 00:00", 4, () {
+          isLaterMidnight(laterMidnight);
+        });
+        row("wallSpanOf, end not 00:00, one change", 2, () {
+          CalendarDates.wallSpanOf(repeat, repeatLater);
+        });
+        row("wallSpanOf, end a day start, one change", 4, () {
+          CalendarDates.wallSpanOf(before, firstMidnight);
+        });
+        row("wallSpanOf, end the later 00:00", 8, () {
+          CalendarDates.wallSpanOf(before, laterMidnight);
+        });
+        row("hoursEndMinuteOf, end a day start, one change", 4, () {
+          hoursEndMinuteOf(before, firstMidnight);
+        });
+        row("hoursEndMinuteOf, end the later 00:00", 10, () {
+          hoursEndMinuteOf(before, laterMidnight);
+        });
+        row("firstReadableSlot, per slot, one change", 6, () {
+          firstReadableSlot(
+            firstMidnight,
+            600,
+            630,
+            30,
+            isFree: (start, end) {
+              return false;
+            },
+          );
+        });
+        row("firstReadableSlot, start skipped", 2, () {
+          firstReadableSlot(
+            skipDay,
+            0,
+            30,
+            30,
+            isFree: (start, end) {
+              return false;
+            },
+          );
+        });
+      },
+    );
+  });
+}
+
+/// The zone's readings around one offset change, by a scan of its instants:
+/// what the zone's clock helpers are checked against.
+class _ZoneScan {
+  _ZoneScan(this.zone, this.change) {
+    final first = change - 4 * Duration.millisecondsPerDay;
+    final last = change + 4 * Duration.millisecondsPerDay;
+    for (
+      var instant = first - first % Duration.millisecondsPerMinute;
+      instant < last;
+      instant += Duration.millisecondsPerMinute
+    ) {
+      final time = tz.TZDateTime.fromMillisecondsSinceEpoch(zone, instant);
+      (byWall[CalendarDates.wallMinuteOf(time)] ??= <int>[]).add(instant);
+    }
+  }
+
+  final tz.Location zone;
+  final int change;
+
+  /// Each wall minute the scan read, with the instants reading it, in
+  /// ascending order.
+  final Map<int, List<int>> byWall = <int, List<int>>{};
+
+  /// A later occurrence on [day], where a clock repeats a stretch of it.
+  tz.TZDateTime? laterOn(int day) {
+    for (
+      var wall = day * CalendarDates.minutesPerDay;
+      wall < (day + 1) * CalendarDates.minutesPerDay;
+      wall++
+    ) {
+      final readings = byWall[wall];
+      if (readings != null && readings.length == 2) {
+        return tz.TZDateTime.fromMillisecondsSinceEpoch(zone, readings.last);
+      }
+    }
+    return null;
+  }
+
+  bool _isLater(tz.TZDateTime time) {
+    final whole =
+        time.millisecondsSinceEpoch -
+        time.second * Duration.millisecondsPerSecond -
+        time.millisecond;
+    return whole != byWall[CalendarDates.wallMinuteOf(time)]?.first;
+  }
+
+  /// Whether [from] picks the later occurrence on [wall]'s day.
+  bool _laterFrom(int wall, DateTime? from) {
+    if (from == null) {
+      return false;
+    }
+    final inZone = tz.TZDateTime.from(from, zone);
+    return CalendarDates.dayNumber(inZone) ==
+            wall ~/ CalendarDates.minutesPerDay &&
+        _isLater(inZone);
+  }
+
+  int? at(int wall, DateTime? from) {
+    final readings = byWall[wall];
+    if (readings == null) {
+      return null;
+    }
+    return _laterFrom(wall, from) ? readings.last : readings.first;
+  }
+
+  int _firstInstantOf(int day) {
+    for (var wall = day * CalendarDates.minutesPerDay; ; wall++) {
+      final readings = byWall[wall];
+      if (readings != null) {
+        return readings.first;
+      }
+    }
+  }
+
+  int? endAt(int wall, DateTime? from) {
+    final reading = at(wall, from);
+    if (reading != null || wall % CalendarDates.minutesPerDay != 0) {
+      return reading;
+    }
+    return _firstInstantOf(wall ~/ CalendarDates.minutesPerDay);
+  }
+
+  int? rangeEndAt(tz.TZDateTime start, int wall, DateTime? from) {
+    final before = tz.TZDateTime.fromMillisecondsSinceEpoch(
+      zone,
+      change - Duration.millisecondsPerMinute,
+    ).timeZoneOffset.inMilliseconds;
+    final after = tz.TZDateTime.fromMillisecondsSinceEpoch(
+      zone,
+      change,
+    ).timeZoneOffset.inMilliseconds;
+    final startMs = start.millisecondsSinceEpoch;
+    if (before > after &&
+        startMs >= change - (before - after) &&
+        startMs < change &&
+        wall == (change + before) ~/ Duration.millisecondsPerMinute) {
+      return change;
+    }
+    return endAt(wall, from);
+  }
+
+  int firstNotBefore(tz.TZDateTime time, DateTime? from) {
+    final ms = time.millisecondsSinceEpoch;
+    for (var wall = CalendarDates.wallMinuteOf(time) - 130; ; wall++) {
+      final reading = at(wall, from);
+      if (reading != null && reading >= ms) {
+        return wall;
+      }
+    }
+  }
+
+  int lastNotAfter(tz.TZDateTime time, DateTime? from, tz.TZDateTime? start) {
+    final ms = time.millisecondsSinceEpoch;
+    for (var wall = CalendarDates.endWallMinuteOf(time) + 130; ; wall--) {
+      final reading = start == null
+          ? endAt(wall, from)
+          : rangeEndAt(start, wall, from);
+      if (reading != null && reading <= ms) {
+        return wall;
+      }
+    }
+  }
 }

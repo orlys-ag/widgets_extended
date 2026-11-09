@@ -7,12 +7,14 @@ library;
 import 'dart:ui' show Color;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/policy/edit_rules.dart';
 
 import '../dst_days.dart';
+import '../store/zone_support.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 
@@ -951,4 +953,151 @@ void main() {
       });
     },
   );
+
+  group("time zones", () {
+    setUpAll(ensureZones);
+
+    /// [time] as a [tz.TZDateTime] of [zone] reading [wall].
+    void expectAtWall(DateTime? time, tz.Location zone, int wall) {
+      expect(time, isA<tz.TZDateTime>());
+      expect((time as tz.TZDateTime).location, zone);
+      expect(CalendarDates.wallMinuteOf(time), wall);
+    }
+
+    test("EZ1 the edit rules answer on the zone's clock", skip: true, () {
+      final havana = tz.getLocation("America/Havana");
+      final number = CalendarDates.dayNumber(DateTime.utc(2025, 11, 2));
+      final limited = CalendarEditRules<String>(
+        policy: DayLimitPolicy<String>(2),
+        hours: CalendarDayHours(480, 1080),
+        slotMinutes: 30,
+      );
+      final start = tz.TZDateTime(havana, 2025, 11, 1, 10);
+      final end = tz.TZDateTime(havana, 2025, 11, 5, 11);
+      const perDay = CalendarDates.minutesPerDay;
+      final firstDay = CalendarDates.dayNumber(start);
+      final lastDay = firstDay + 1;
+      // The held times of a timed range: the hours' end on the limit's last
+      // day, and the hours' start on the first day that keeps the limit.
+      final timedAtEnd = limited.heldToLimit(
+        start,
+        end,
+        atEnd: true,
+        isAllDay: false,
+      )!;
+      expectAtWall(timedAtEnd.end, havana, lastDay * perDay + 1080);
+      final endDay = CalendarDates.lastDayNumberOf(start, end);
+      final timedAtStart = limited.heldToLimit(
+        start,
+        end,
+        atEnd: false,
+        isAllDay: false,
+      )!;
+      expectAtWall(timedAtStart.start, havana, (endDay - 1) * perDay + 480);
+      // An all-day range is held at day starts, whose wall minutes are 0
+      // of their days on this clock, 2025-11-02's included.
+      final allDayStart = tz.TZDateTime(havana, 2025, 11, 1);
+      final allDayEnd = tz.TZDateTime(havana, 2025, 11, 5);
+      final allDayAtEnd = limited.heldToLimit(
+        allDayStart,
+        allDayEnd,
+        atEnd: true,
+        isAllDay: true,
+      )!;
+      expectAtWall(allDayAtEnd.end, havana, (lastDay + 1) * perDay);
+      final allDayAtStart = limited.heldToLimit(
+        allDayStart,
+        allDayEnd,
+        atEnd: false,
+        isAllDay: true,
+      )!;
+      expectAtWall(
+        allDayAtStart.start,
+        havana,
+        (CalendarDates.lastDayNumberOf(allDayStart, allDayEnd) - 1) * perDay,
+      );
+
+      final rules = rulesOf(
+        hours: CalendarDayHours(480, 1080),
+        slotMinutes: 30,
+      );
+      final zonedDay = dayOfNumberIn(number, havana);
+      final plainDay = DateTime(2025, 11, 2);
+      final afterStart = tz.TZDateTime(havana, 2025, 11, 2, 9, 10);
+      final notAfterStart = tz.TZDateTime(havana, 2025, 11, 1, 23);
+      for (final day in <DateTime>[zonedDay, plainDay]) {
+        final late = CalendarEarliestStart(day, afterStart);
+        // The plain day reads as the zone's day start of its date.
+        expect(late.day, isA<tz.TZDateTime>());
+        expect(
+          late.day.millisecondsSinceEpoch,
+          zonedDay.millisecondsSinceEpoch,
+        );
+        expect(late.closesDay, isFalse);
+        expect(late.admitsDayStart, isFalse);
+        expect(late.firstWallMinute, number * perDay + 550);
+        final lateSlot = rules.firstSlot(late)!;
+        expectAtWall(lateSlot.start, havana, number * perDay + 570);
+        expectAtWall(lateSlot.end, havana, number * perDay + 600);
+
+        final early = CalendarEarliestStart(day, notAfterStart);
+        expect(early.occurrence, isNull);
+        expect(early.closesDay, isFalse);
+        expect(early.admitsDayStart, isTrue);
+        expect(early.firstWallMinute, number * perDay);
+        final earlySlot = rules.firstSlot(early)!;
+        expectAtWall(earlySlot.start, havana, number * perDay + 480);
+        expectAtWall(earlySlot.end, havana, number * perDay + 510);
+      }
+
+      // A zoned day with a plain earliest holds the earliest in the day's
+      // zone.
+      final fromPlain = CalendarEarliestStart(
+        zonedDay,
+        DateTime.fromMillisecondsSinceEpoch(afterStart.millisecondsSinceEpoch),
+      );
+      expect(fromPlain.earliest, isA<tz.TZDateTime>());
+      expect((fromPlain.earliest as tz.TZDateTime).location, havana);
+      final plainSlot = rules.firstSlot(fromPlain)!;
+      expectAtWall(plainSlot.start, havana, number * perDay + 570);
+
+      // A plain day under a zoned now reads as the zone's day start.
+      final now = CalendarNow(
+        time: tz.TZDateTime(havana, 2025, 11, 2, 9, 10),
+        today: tz.TZDateTime(havana, 2025, 11, 2),
+      );
+      final earliest = rules.earliestStartOn(plainDay, now);
+      expect(earliest.day, isA<tz.TZDateTime>());
+      expect(
+        earliest.day.millisecondsSinceEpoch,
+        zonedDay.millisecondsSinceEpoch,
+      );
+      expect(earliest.earliest, isA<tz.TZDateTime>());
+    });
+
+    test(
+      "EZ2 an earliest start compares by instant where either carries a "
+      "zone, and a null only with a null",
+      skip: true,
+      () {
+        final day = DateTime(2025, 7, 16);
+        final at = DateTime(2025, 7, 16, 10, 30);
+        final zone = zoneAtDeviceOffset(at);
+        final plain = CalendarEarliestStart(day, at);
+        final zoned = CalendarEarliestStart(day, tz.TZDateTime.from(at, zone));
+        expect(plain == zoned, isTrue);
+        expect(zoned == plain, isTrue);
+        expect(zoned.hashCode, plain.hashCode);
+
+        final noneA = CalendarEarliestStart(day, null);
+        final noneB = CalendarEarliestStart(day, null);
+        expect(noneA == noneB, isTrue);
+        expect(noneA.hashCode, noneB.hashCode);
+        for (final other in <CalendarEarliestStart>[plain, zoned]) {
+          expect(noneA == other, isFalse);
+          expect(other == noneA, isFalse);
+        }
+      },
+    );
+  });
 }
