@@ -42,6 +42,7 @@ export '../scheduling/scheduling.dart'
         CalendarWritePendingException,
         DayLimitPolicy,
         HistoryLockPolicy,
+        Location,
         MemoryCalendarStore,
         NoOverlapsPolicy,
         UnrestrictedEditPolicy,

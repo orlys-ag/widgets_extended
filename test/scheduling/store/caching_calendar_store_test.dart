@@ -4297,6 +4297,7 @@ void main() {
   });
 
   _zoneTests();
+  _readAheadTests();
 }
 
 /// The caching store under a supplied zone.
@@ -6129,6 +6130,172 @@ void _zoneTests() {
         expect(numberOf(again.first!), firstExpected);
         expect(numberOf(again.last!), lastExpected);
       }
+    });
+  });
+}
+
+/// The days a show and a retry read beside the shown range, and a zone
+/// change over them.
+void _readAheadTests() {
+  group("the read-ahead", () {
+    setUpAll(ensureZones);
+
+    /// The reads [source] received, each as its first and last day number.
+    List<(int, int)> readSpans(FakeDataSource source) {
+      return <(int, int)>[
+        for (final call in source.calls)
+          if (call.method == SourceMethod.read)
+            (
+              CalendarDates.dayNumber(call.first!),
+              CalendarDates.dayNumber(call.last!),
+            ),
+      ];
+    }
+
+    /// The day number of 2026-04-[day], or of a later month's day past 30.
+    int april(int day) {
+      return CalendarDates.dayNumber(DateTime.utc(2026, 4, day));
+    }
+
+    /// Answers every read [source] holds unanswered with no entry.
+    Future<void> answerReads(FakeDataSource source) async {
+      for (final call in source.calls) {
+        if (call.method == SourceMethod.read && !call.completer.isCompleted) {
+          call.succeed(const <CalendarEntry<String>>[]);
+        }
+      }
+      await settle();
+    }
+
+    test("RA1 a show reads the read-ahead's unread days on each side of the "
+        "range in its own read, and with none the range alone", () async {
+      final source = FakeDataSource();
+      final store = CachingCalendarStore<String>(
+        dataSource: source,
+        readAhead: 2,
+      );
+      addTearDown(store.dispose);
+      store.show(weekFirst, weekLast);
+      expect(readSpans(source), <(int, int)>[(april(18), april(28))]);
+      await answerReads(source);
+      expect(store.status, CalendarLoadStatus.ready);
+      store.show(DateTime(2026, 4, 27), DateTime(2026, 5, 3));
+      expect(readSpans(source), <(int, int)>[
+        (april(18), april(28)),
+        (april(29), april(35)),
+      ]);
+
+      final plainSource = FakeDataSource();
+      final plain = CachingCalendarStore<String>(dataSource: plainSource);
+      addTearDown(plain.dispose);
+      plain.show(weekFirst, weekLast);
+      await answerReads(plainSource);
+      plain.show(DateTime(2026, 4, 27), DateTime(2026, 5, 3));
+      expect(readSpans(plainSource), <(int, int)>[
+        (april(20), april(26)),
+        (april(27), april(33)),
+      ]);
+    });
+
+    test("RA2 a negative read-ahead throws an ArgumentError naming it, and "
+        "the read-ahead is 0 unless given", () {
+      expect(
+        () {
+          CachingCalendarStore<String>(
+            dataSource: FakeDataSource(),
+            readAhead: -1,
+          );
+        },
+        throwsA(
+          isA<ArgumentError>().having(
+            (error) {
+              return error.name;
+            },
+            "name",
+            "readAhead",
+          ),
+        ),
+      );
+      final plain = CachingCalendarStore<String>(dataSource: FakeDataSource());
+      addTearDown(plain.dispose);
+      expect(plain.readAhead, 0);
+      final ahead = CachingCalendarStore<String>(
+        dataSource: FakeDataSource(),
+        readAhead: 2,
+      );
+      addTearDown(ahead.dispose);
+      expect(ahead.readAhead, 2);
+    });
+
+    test("RA3 a retry after the first show's read failed reads the range and "
+        "its read-ahead again in one read", () async {
+      final source = FakeDataSource();
+      final store = CachingCalendarStore<String>(
+        dataSource: source,
+        readAhead: 2,
+      );
+      addTearDown(store.dispose);
+      store.show(weekFirst, weekLast);
+      source.calls.single.fail();
+      await settle();
+      expect(store.status, CalendarLoadStatus.failed);
+      expect(store.readFailed(DateTime(2026, 4, 18)), isTrue);
+      store.retry();
+      expect(readSpans(source), <(int, int)>[
+        (april(18), april(28)),
+        (april(18), april(28)),
+      ]);
+      expect(store.readFailed(DateTime(2026, 4, 18)), isFalse);
+      expect(store.status, CalendarLoadStatus.loading);
+    });
+
+    test("RA4 a change between zones 26 hours apart keeps the shown week "
+        "read under a read-ahead of 2, and leaves its first days unread "
+        "with none", () async {
+      final west = tz.getLocation("Etc/GMT+12");
+      final east = tz.getLocation("Etc/GMT-14");
+
+      Future<CachingCalendarStore<String>> shownIn(
+        tz.Location zone,
+        int readAhead,
+      ) async {
+        final source = FakeDataSource();
+        final store = CachingCalendarStore<String>(
+          dataSource: source,
+          zone: zone,
+          readAhead: readAhead,
+        );
+        addTearDown(store.dispose);
+        store.show(weekFirst, weekLast);
+        await answerReads(source);
+        expect(store.status, CalendarLoadStatus.ready);
+        return store;
+      }
+
+      List<DateTime> weekDays() {
+        return <DateTime>[
+          for (var day = april(20); day <= april(26); day++)
+            CalendarDates.dateOfDayNumber(day),
+        ];
+      }
+
+      final ahead = await shownIn(west, 2);
+      setStoreZone(ahead, east);
+      expect(ahead.status, CalendarLoadStatus.ready);
+      for (final day in weekDays()) {
+        expect(ahead.isRead(day), isTrue, reason: "$day");
+      }
+
+      final plain = await shownIn(west, 0);
+      setStoreZone(plain, east);
+      expect(plain.status, CalendarLoadStatus.loading);
+      expect(plain.isRead(DateTime(2026, 4, 20)), isFalse);
+      expect(plain.isRead(DateTime(2026, 4, 21)), isFalse);
+      expect(plain.isRead(DateTime(2026, 4, 22)), isTrue);
+
+      final back = await shownIn(east, 2);
+      setStoreZone(back, west);
+      expect(back.status, CalendarLoadStatus.ready);
     });
   });
 }

@@ -19,7 +19,8 @@ export 'dates/calendar_dates.dart'
         CalendarDayHours,
         CalendarHourLabelFormat,
         CalendarMonthGrid,
-        CalendarWeekdaySet;
+        CalendarWeekdaySet,
+        Location;
 export 'entries/calendar_data_source.dart'
     show
         CalendarAllChanged,

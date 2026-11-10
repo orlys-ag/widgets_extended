@@ -129,7 +129,13 @@ class _Day {
 ///
 /// A day once read stays read, except that a zone change re-keys the read
 /// days to those its earlier reads fully cover under the new zone, each read
-/// again in the background. [invalidate], [refresh] and the changes the
+/// again in the background. Given a [readAhead], a [show] and a [retry]
+/// also read the unread days that many days before the shown range and
+/// after it, in the same read, while [status] and [loadError] follow the
+/// shown range alone. A host whose users switch zones sets a [readAhead] of
+/// 2, which keeps the shown days read across a change between any two
+/// zones once the store's reads have answered, the last zone change's
+/// re-reads included. [invalidate], [refresh] and the changes the
 /// source announces take a read day's entries to have changed: the day
 /// still shows what the store holds, and is read again in the background,
 /// at once where the shown range holds it and otherwise once a [show] or a
@@ -188,15 +194,39 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// is applied without a read, a [CalendarDaysChanged] is an [invalidate]
   /// of its days, or with a zone of the zone days its device days touch,
   /// and a [CalendarAllChanged], or an error on the stream, is an
-  /// [invalidate] of every day.
+  /// [invalidate] of every day. A [show] and a [retry] also read the
+  /// [readAhead] days on each side of the shown range.
+  ///
+  /// Throws an [ArgumentError] naming `readAhead`, in every build, for a
+  /// negative [readAhead].
   CachingCalendarStore({
     required CalendarDataSource<T> dataSource,
     Stream<CalendarSourceChange<T>>? changes,
     super.hours,
     super.zone,
+    this.readAhead = 0,
   }) : _dataSource = dataSource {
+    if (readAhead < 0) {
+      throw ArgumentError.value(
+        readAhead,
+        "readAhead",
+        "A read-ahead is a count of days, 0 or more.",
+      );
+    }
     _changes = changes?.listen(_applyChange, onError: _changesFailed);
   }
+
+  /// The days a [show] and a [retry] also read before the shown range's
+  /// first day and after its last, in the read each sends for the range,
+  /// so a range's neighbours are read before a move of the range or a zone
+  /// change brings them into it. 0 reads the shown range alone.
+  ///
+  /// The read-ahead's days take no part in [status] and [loadError], which
+  /// follow the shown range alone. A host whose users switch zones sets 2,
+  /// which keeps the shown days read across a change between any two zones
+  /// once the store's reads have answered, the last zone change's re-reads
+  /// included.
+  final int readAhead;
 
   final CalendarDataSource<T> _dataSource;
 
@@ -305,6 +335,11 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// failed where such a read failed and left a day of it unread with no
   /// read asked for since in flight. Showing the range already shown
   /// changes nothing, and so does a show after [dispose].
+  ///
+  /// The unread days the [readAhead] adds on each side of the range are
+  /// read as the range's own: in the read the show sends, which a read in
+  /// flight replaces only where it covers them too, and their [readFailed]
+  /// marks end with the range's. [status] follows the range alone.
   @override
   void show(DateTime first, DateTime last) {
     final firstDay = CalendarDates.dayNumber(first);
@@ -389,6 +424,10 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// it ended, leaving [status] and [loadError] as they were, notifies
   /// nothing. Throws an [ArgumentError] where one of [first] and [last] is
   /// given without the other. Does nothing after [dispose].
+  ///
+  /// The shown range's part takes in the [readAhead] days on each side of
+  /// it: their marks end, and they are read, with the range's; the given
+  /// days take none.
   @override
   void retry([DateTime? first, DateTime? last]) {
     if ((first == null) != (last == null)) {
@@ -403,8 +442,10 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
       final shownLast = _shownLast;
       ({int first, int last})? shownSpan;
       if (shownFirst != null && shownLast != null) {
-        shownSpan = _retrySpan(shownFirst, shownLast);
-        _endFailed(shownFirst, shownLast, ended);
+        final aheadFirst = shownFirst - readAhead;
+        final aheadLast = shownLast + readAhead;
+        shownSpan = _retrySpan(aheadFirst, aheadLast);
+        _endFailed(aheadFirst, aheadLast, ended);
       }
       ({int first, int last})? givenSpan;
       if (first != null && last != null) {
@@ -537,10 +578,11 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     return done.future;
   }
 
-  /// The first to the last unread day of the shown range, or null when
-  /// every day of it is read.
+  /// The first to the last unread day of the shown range and of the
+  /// [readAhead] days on each side of it, or null when every day of them
+  /// is read.
   ({int first, int last})? _unreadSpan() {
-    return _unreadSpanOf(_shownFirst!, _shownLast!);
+    return _unreadSpanOf(_shownFirst! - readAhead, _shownLast! + readAhead);
   }
 
   /// The first to the last unread day from [firstDay] to [lastDay], or
@@ -783,9 +825,9 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     return null;
   }
 
-  /// Sends a read of the shown range's [unread] days and its changed days,
-  /// as one span, which a [show] asked for, so it ends the [readFailed]
-  /// marks over that span.
+  /// Sends a read of the [unread] days of the shown range and its
+  /// [readAhead], and of the range's changed days, as one span, which a
+  /// [show] asked for, so it ends the [readFailed] marks over that span.
   void _readShown(({int first, int last}) unread) {
     final changed = _changedSpanOf(_shownFirst!, _shownLast!);
     final first = changed == null

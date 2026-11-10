@@ -176,8 +176,7 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
 
   /// The zone whose clock this store reads its days, times and hours on, or
   /// null for the device's: its filing, its reads and writes, the hours and
-  /// the history lock read that clock. A host imports package:timezone and
-  /// loads its zone data itself.
+  /// the history lock read that clock. A host loads its zone data itself.
   ///
   /// Setting a zone not `==` to this one refiles the store's entries under
   /// the new zone within the setter and notifies the listeners once, and
@@ -224,6 +223,12 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
   /// of their own though a read is on the way, as [retry] does, and the
   /// others with one read from the first to the last of them, or with none
   /// where one read on the way covers them all.
+  ///
+  /// A store that reads ahead of the shown range, as a caching store given
+  /// a read-ahead does, reads the unread days beside the range too, and
+  /// ends their [readFailed] marks with the range's, in the same read; a
+  /// read on the way then covers the days to read only where it covers
+  /// the read-ahead's days as well.
   void show(DateTime first, DateTime last);
 
   /// Ends the [readFailed] marks of the shown range's days and, where
@@ -233,6 +238,11 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
   /// others with one read from the first to the last of them, or with none
   /// where one read on the way covers them all. Throws an [ArgumentError]
   /// where one of [first] and [last] is given without the other.
+  ///
+  /// A store that reads ahead of the shown range, as [show] does, ends the
+  /// marks of the read-ahead's days and reads them with the shown range's,
+  /// in the same read; a read on the way then covers the days to read only
+  /// where it covers the read-ahead's days as well.
   void retry([DateTime? first, DateTime? last]);
 
   /// Reads the unread days from [first] to [last], both inclusive,

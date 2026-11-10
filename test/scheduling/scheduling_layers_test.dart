@@ -34,7 +34,7 @@ List<String> schedulingFiles() {
   return files;
 }
 
-/// The 31 helpers [CalendarDates] offers as public statics.
+/// The 33 helpers [CalendarDates] offers as public statics.
 const Set<String> calendarDatesStatics = <String>{
   "defaultSlotMinutes",
   "slotMinuteChoices",
@@ -50,6 +50,8 @@ const Set<String> calendarDatesStatics = <String>{
   "nextShownDay",
   "shownDaysOfWeek",
   "dateOfDayNumber",
+  "inZone",
+  "loadedZones",
   "isDayStart",
   "minuteOfDay",
   "endMinuteOfDay",
@@ -224,6 +226,7 @@ void main() {
           "CalendarHourLabelFormat",
           "CalendarMonthGrid",
           "CalendarWeekdaySet",
+          "Location",
         },
         "lib/scheduling/entries/calendar_data_source.dart": <String>{
           "CalendarAllChanged",
@@ -354,9 +357,20 @@ void main() {
         }
       }
     }
-    // Every name the barrel shows has a declaration the scan reads, and
-    // the scan reads a class of each kind.
-    expect(shown.difference(declared), isEmpty);
+    // The names the dates layer re-exports from package:timezone, which
+    // the barrel shows and the module does not declare.
+    const datesPath = "lib/scheduling/dates/calendar_dates.dart";
+    final foreign = <String>{
+      for (final export in exportsOf(
+        File(datesPath).readAsStringSync(),
+        datesPath,
+      ))
+        if (export.path == "timezone/timezone.dart") ...export.shown!,
+    };
+    expect(foreign, contains("Location"));
+    // Every other name the barrel shows has a declaration the scan reads,
+    // and the scan reads a class of each kind.
+    expect(shown.difference(foreign).difference(declared), isEmpty);
     expect(
       kindOf.keys,
       containsAll(<String>{
@@ -488,6 +502,10 @@ void main() {
           path: "lib/scheduling/entries/calendar_entry.dart",
           name: "CalendarCreateRange",
         ),
+        (
+          path: "lib/scheduling/store/caching_calendar_store.dart",
+          name: "CachingCalendarStore",
+        ),
       ];
       final asserts = RegExp(r"\bassert\(");
       for (final (:path, :name) in classes) {
@@ -549,6 +567,7 @@ void main() {
           "CalendarEditRules<T> updated(",
         ],
         "store/calendar_store.dart": <String>["CalendarShownEntry("],
+        "store/caching_calendar_store.dart": <String>["CachingCalendarStore({"],
       };
       final collected = <String>[];
       for (final MapEntry(key: file, value: names) in declarations.entries) {

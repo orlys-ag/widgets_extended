@@ -81,6 +81,17 @@ read a zoned time's clock, and `CalendarDates`' helpers read the clock of a
 `TZDateTime`. `CalendarView` refuses a store with a zone for now, which its
 build reports as an `ArgumentError`. The package depends on `timezone`, so an
 app resolves `timezone`, `http` and `path` too.
+- Added `CalendarDates.inZone`, a time's instant on a zone's clock, or on the
+device's with none, and `CalendarDates.loadedZones`, the zones of the loaded
+database sorted by name, empty before an app loads the data. The scheduling,
+calendar and package barrels show `Location`, so an app names a zone without
+importing `package:timezone`; it still loads the zone data itself. Added
+`CachingCalendarStore.readAhead`, 0 by default: the days a show and a retry
+also read on each side of the shown range, in the same read, while the load
+status follows the shown range alone. A read-ahead of 2 keeps the shown days
+read across a change between any two zones once the store's reads have
+answered. A negative one throws an `ArgumentError` naming `readAhead`, in every
+build.
 - Added `CalendarEditPolicy.mayOverlap`, which answers whether a change may
 share time with one other entry, and `CalendarOverlapCandidate`, the change
 it is asked about: its start, its end and the entry it changes, none for a

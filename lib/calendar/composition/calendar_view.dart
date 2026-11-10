@@ -534,10 +534,8 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   late CalendarDayHours _storeHours;
 
   /// The store's zone as this state last took it, which
-  /// [_handleStoreChange] compares a notify's zone with. Typed [Object]
-  /// since this library reaches the scheduling module through its barrel,
-  /// which shows no `Location`.
-  Object? _storeZone;
+  /// [_handleStoreChange] compares a notify's zone with.
+  Location? _storeZone;
 
   /// The calendar's one clock: the time read at the start of each minute
   /// and the day marked as today, which the views follow and the policy
