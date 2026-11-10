@@ -98,10 +98,22 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
 
   /// The first day of the week the strip opened on. Index 0 is that week's
   /// first shown day, and each index after or before it the next or the
-  /// previous shown day.
+  /// previous shown day. A plain day, as the cells are.
   late final DateTime _origin = widget.weekdays.weekStartOf(
-    widget.initialDay ?? widget.selectedDay,
+    _plainTwinOf(widget.initialDay ?? widget.selectedDay),
   );
+
+  /// [WeekStrip.selectedDay] and [WeekStrip.today] as plain days, the
+  /// local midnights of their dates, which the cells, plain days stepped
+  /// from [_origin], compare with by `==` however the days given are
+  /// zoned. Made only where the day they twin changes.
+  late DateTime _selectedDay;
+  late DateTime _today;
+
+  /// The local midnight of [day]'s date.
+  static DateTime _plainTwinOf(DateTime day) {
+    return CalendarDates.dateOfDayNumber(CalendarDates.dayNumber(day));
+  }
 
   /// The days from a week's first day to each weekday [WeekStrip.weekdays]
   /// holds, ascending.
@@ -133,6 +145,13 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
   late CalendarThemeData _theme;
 
   @override
+  void initState() {
+    super.initState();
+    _selectedDay = _plainTwinOf(widget.selectedDay);
+    _today = _plainTwinOf(widget.today);
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _theme = CalendarTheme.of(context);
@@ -146,10 +165,20 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
       "A WeekStrip keeps its weekdays; give a strip that changes them its "
       "own key.",
     );
-    // Any new selected day, even one the strip showed, since a drag may
-    // have moved it away since.
+    if (widget.today != oldWidget.today) {
+      _today = _plainTwinOf(widget.today);
+    }
+    // Any new selected date, even one the strip showed, since a drag may
+    // have moved it away since; the same date given on another clock moves
+    // nothing.
+    var moved = false;
+    if (widget.selectedDay != oldWidget.selectedDay) {
+      final twin = _plainTwinOf(widget.selectedDay);
+      moved = twin != _selectedDay;
+      _selectedDay = twin;
+    }
     final recalled = widget.recalls != oldWidget.recalls;
-    if (recalled || widget.selectedDay != oldWidget.selectedDay) {
+    if (recalled || moved) {
       // After the frame, because a scroll dispatches scroll notifications,
       // which must not reach their listeners mid-build.
       SchedulerBinding.instance.addPostFrameCallback((_) {
@@ -203,14 +232,13 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
       return;
     }
     final position = _scroll.position;
-    final middle = (_indexOf(widget.selectedDay) + 0.5) * extent;
+    final middle = (_indexOf(_selectedDay) + 0.5) * extent;
     if (!always &&
         middle >= position.pixels &&
         middle <= position.pixels + position.viewportDimension) {
       return;
     }
-    final target =
-        _indexOf(widget.weekdays.weekStartOf(widget.selectedDay)) * extent;
+    final target = _indexOf(widget.weekdays.weekStartOf(_selectedDay)) * extent;
     final week = _count * extent;
     final distance = target - position.pixels;
     final follow = ++_follows;
@@ -363,8 +391,8 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
           return DayCell(
             day: day,
             inMonth: true,
-            isSelected: day == widget.selectedDay,
-            isToday: day == widget.today,
+            isSelected: day == _selectedDay,
+            isToday: day == _today,
             badges: badges,
             collapse: kAlwaysCompleteAnimation,
           );

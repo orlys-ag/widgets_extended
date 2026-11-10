@@ -1362,7 +1362,10 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// selecting it first when it is a day of the shown month; a day of
   /// another month leaves the selection and the month as they are. Returns
   /// what [_openCreateFlow] returns.
-  Future<void>? _createOn(DateTime day, Rect globalRect) {
+  ({DateTime start, Future<void> done})? _createOn(
+    DateTime day,
+    Rect globalRect,
+  ) {
     if (_grid.contains(day)) {
       _select(day);
     }
@@ -1380,9 +1383,13 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// nothing. Each is a slot whose times the clock reads, in that start's
   /// occurrence where [day]'s clock repeats its time, so none starts before
   /// it. It takes [globalRect], the day cell's, as its rect and returns
-  /// [_createRange]'s future. Where it leaves no such slot in the hours, it
-  /// reports [CalendarView.onCreateRefused] instead and returns null.
-  Future<void>? _openCreateFlow(DateTime day, Rect globalRect) {
+  /// the start of the range it reports with [_createRange]'s future. Where
+  /// it leaves no such slot in the hours, it reports
+  /// [CalendarView.onCreateRefused] instead and returns null.
+  ({DateTime start, Future<void> done})? _openCreateFlow(
+    DateTime day,
+    Rect globalRect,
+  ) {
     final rules = _takeRules();
     final start = rules.earliestStartOn(day, _now.value);
     final shown = widget.store.entriesOn(day).map((shown) {
@@ -1394,11 +1401,14 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       widget.onCreateRefused?.call(day);
       return null;
     }
-    return _createRange(
-      CalendarCreateDetails(
-        range: CalendarCreateRange(start: slot.start, end: slot.end),
-        globalRect: globalRect,
-        userChoseLength: false,
+    return (
+      start: slot.start,
+      done: _createRange(
+        CalendarCreateDetails(
+          range: CalendarCreateRange(start: slot.start, end: slot.end),
+          globalRect: globalRect,
+          userChoseLength: false,
+        ),
       ),
     );
   }

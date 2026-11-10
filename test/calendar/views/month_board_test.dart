@@ -2,26 +2,32 @@
 /// many lanes a week holds, which chips it shows, and how many chips each
 /// day hides), the height a week rests at, the days that show cards, the
 /// bars an entry splits into, a chip drawn again for a new payload, the
-/// hour format its chips are handed and heard in, and when its days are
-/// ready while the store shows another range.
+/// hour format its chips are handed and heard in, when its days are ready
+/// while the store shows another range, and its today, create mark and
+/// cover over a zoned store.
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 
+import '../../scheduling/store/zone_support.dart';
+import '../../scheduling/zones.dart';
 import '../recording_errors.dart';
 
 typedef ShownItem = CalendarShownEntry<String>;
@@ -163,6 +169,49 @@ final class CountingStore extends CachingCalendarStore<String> {
     isReadCalls++;
     return super.isRead(day);
   }
+}
+
+/// A data source whose reads never answer.
+class SilentSource implements CalendarDataSource<String> {
+  @override
+  Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    return Completer<List<CalendarEntry<String>>>().future;
+  }
+
+  @override
+  Future<CalendarEntry<String>> create(CalendarEntry<String> draft) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<CalendarEntry<String>> replace(CalendarEntry<String> entry) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<void> delete(String id) {
+    throw UnimplementedError();
+  }
+}
+
+/// The decoration of Month's create mark under the theme above [view]: the
+/// theme's primary tint, edged in its primary colour.
+BoxDecoration createMarkIn(WidgetTester tester, Finder view) {
+  final theme = CalendarTheme.of(tester.element(view));
+  return BoxDecoration(
+    color: theme.primaryTint,
+    border: Border.all(color: theme.primary, width: 2.0),
+  );
+}
+
+/// The create marks, boxes drawing [mark], under [of].
+Finder createMarksUnder(Finder of, BoxDecoration mark) {
+  return find.descendant(
+    of: of,
+    matching: find.byWidgetPredicate((widget) {
+      return widget is DecoratedBox && widget.decoration == mark;
+    }),
+  );
 }
 
 void main() {
@@ -693,5 +742,128 @@ void main() {
         expect(errors, isEmpty, reason: reason);
       });
     }
+  });
+  testWidgets("MBZ1 a month board over a zoned store marks the zone's today, "
+      "moves a running create's mark to the day holding its start on a new "
+      "zone's clock, and names its cover's days on the zone's clock", (
+    tester,
+  ) async {
+    final on = DateTime(2026, 4, 21, 12);
+    final behind = zoneApartFromDevice(on, -6);
+    final ahead = zoneApartFromDevice(on, 6);
+    DateTime dayIn(tz.Location zone, int day) {
+      return dayOfNumberIn(CalendarDates.dayNumber(april(day)), zone);
+    }
+
+    final store = memoryStoreIn<String>(behind);
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(
+        time: tz.TZDateTime(behind, 2026, 4, 21, 20),
+        today: dayIn(behind, 21),
+      ),
+    );
+    addTearDown(now.dispose);
+    final done = Completer<void>();
+    final pressed = <DateTime>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MonthBoard<String>(
+          store: store,
+          grid: grid,
+          selectedDay: april(20),
+          now: now,
+          onSelectDay: (day) {},
+          onOpenDay: (day) {},
+          onCreateOnDay: (day, globalRect) {
+            pressed.add(day);
+            return (
+              start: tz.TZDateTime(behind, 2026, 4, 21, 22),
+              done: done.future,
+            );
+          },
+          onOpenEntry: (id) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    bool markedToday(DateTime day) {
+      final cell = tester.widget<Semantics>(
+        find
+            .descendant(
+              of: find.byKey(monthDayKey(day)),
+              matching: find.byType(Semantics),
+            )
+            .first,
+      );
+      return cell.properties.label!.split(", ").contains("today");
+    }
+
+    expect(markedToday(april(21)), isTrue);
+    expect(markedToday(april(20)), isFalse);
+    expect(markedToday(april(22)), isFalse);
+
+    await tester.longPress(find.byKey(monthStripKey(april(21))));
+    await tester.pump();
+    expect(pressed, <DateTime>[april(21)]);
+    final mark = createMarkIn(tester, find.byType(MonthBoard<String>));
+    final on21 = createMarksUnder(find.byKey(monthDayKey(april(21))), mark);
+    final on22 = createMarksUnder(find.byKey(monthDayKey(april(22))), mark);
+    expect(on21, findsOneWidget);
+    expect(on22, findsNothing);
+
+    // The start, 22:00 on the 21st six hours behind, is 10:00 on the 22nd
+    // six hours ahead.
+    setStoreZone(store, ahead);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(on21, findsNothing);
+    expect(on22, findsOneWidget);
+    done.complete();
+    await tester.pumpAndSettle();
+    expect(
+      createMarksUnder(find.byType(MonthBoard<String>), mark),
+      findsNothing,
+    );
+
+    final loading = <CalendarLoadingState>[];
+    final caching = cachingStoreIn<String>(behind, dataSource: SilentSource());
+    addTearDown(caching.dispose);
+    caching.show(grid.firstDay, grid.lastDay);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MonthBoard<String>(
+          store: caching,
+          grid: grid,
+          selectedDay: april(20),
+          now: now,
+          onSelectDay: (day) {},
+          onOpenDay: (day) {},
+          onCreateOnDay: null,
+          onOpenEntry: (id) {},
+          loadingBuilder: (context, state) {
+            loading.add(state);
+            return const SizedBox.expand();
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(caching.status, CalendarLoadStatus.loading);
+    final state = loading.last;
+    expect(state.site, CalendarStateSite.cover);
+    expect(state.first, isA<tz.TZDateTime>());
+    expect((state.first as tz.TZDateTime).location, behind);
+    expect(
+      state.first,
+      dayOfNumberIn(CalendarDates.dayNumber(grid.firstDay), behind),
+    );
+    expect(state.last, isA<tz.TZDateTime>());
+    expect(
+      state.last,
+      dayOfNumberIn(CalendarDates.dayNumber(grid.lastDay), behind),
+    );
   });
 }

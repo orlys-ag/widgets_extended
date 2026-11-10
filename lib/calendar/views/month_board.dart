@@ -744,13 +744,19 @@ class MonthBoard<T> extends StatefulWidget {
 
   /// This day was long-pressed outside its chips, its cell lying at the
   /// rect, in global logical pixels, the function is given: it returns the
-  /// future of the create it reports, or null where it reports none, as
-  /// where the create is refused. The board marks the day while that
-  /// future runs, until it completes or fails, unless a later long press's
-  /// create has moved the mark to its own day; a failure is left uncaught
-  /// in the zone the long press ran in. Null where a long press creates
-  /// nothing, as out of edit mode, and opens the day as a tap does.
-  final Future<void>? Function(DateTime day, Rect globalRect)? onCreateOnDay;
+  /// start of the range it reports and the future of that create, or null
+  /// where it reports none, as where the create is refused. The board
+  /// marks the day while that future runs, until it completes or fails,
+  /// unless a later long press's create has moved the mark to its own day;
+  /// a new zone of the store moves the mark to the day holding the start
+  /// on the new clock. A failure is left uncaught in the zone the long
+  /// press ran in. Null where a long press creates nothing, as out of edit
+  /// mode, and opens the day as a tap does.
+  final ({DateTime start, Future<void> done})? Function(
+    DateTime day,
+    Rect globalRect,
+  )?
+  onCreateOnDay;
 
   /// The chip of this item, which is not pending, was tapped.
   final ValueChanged<String> onOpenEntry;
@@ -905,12 +911,24 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     onChanged: _handleBoardSelection,
   );
 
-  /// The today of [MonthBoard.now], which the kept day cells listen to, so
-  /// a new listenable reaches the cells this state keeps and a new minute
-  /// of the same today notifies none.
+  /// The store's zone as the board last took it ([_takeZone]); null for
+  /// the device's.
+  Location? _zone;
+
+  /// The plain twin ([_plainTwinOf]) of the today of [MonthBoard.now],
+  /// which the kept day cells, the plain days of the grid, listen to and
+  /// compare with by `==`, so a new listenable reaches the cells this state
+  /// keeps and a new minute of the same today notifies none, while another
+  /// date always does, however the todays given are zoned.
   late final ValueNotifier<DateTime> _today = ValueNotifier<DateTime>(
-    widget.now.value.today,
+    _plainTwinOf(widget.now.value.today),
   );
+
+  /// The local midnight of [day]'s date, which the grid's plain days
+  /// compare with by `==`.
+  static DateTime _plainTwinOf(DateTime day) {
+    return CalendarDates.dateOfDayNumber(CalendarDates.dayNumber(day));
+  }
 
   /// Whether [MonthBoard.onCreateOnDay] is given, which the kept day cells
   /// listen to, so a long press on them creates only while it is.
@@ -919,8 +937,14 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   );
 
   /// The day whose long press reported the latest create, while that
-  /// create's future runs, which the kept day cells listen to and mark.
+  /// create's future runs, which the kept day cells listen to and mark: a
+  /// plain day of the grid.
   final ValueNotifier<DateTime?> _createMark = ValueNotifier<DateTime?>(null);
+
+  /// The start of the range the create [_createMark] marks reported, so a
+  /// new zone ([_takeZone]) marks the day holding it on the new clock; null
+  /// while [_createMark] is.
+  DateTime? _createAt;
 
   /// Counts the creates the long presses reported, so only the latest
   /// one's completion clears [_createMark].
@@ -1039,6 +1063,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   @override
   void initState() {
     super.initState();
+    _zone = widget.store.zone;
     final grid = widget.grid;
     _board = BoardController<String, MonthChip<T>>(
       vsync: this,
@@ -1116,10 +1141,13 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       widget.store.addListener(_handleStore);
       _syncPending = true;
     }
+    if (widget.store.zone != _zone) {
+      _takeZone();
+    }
     if (widget.now != oldWidget.now) {
       oldWidget.now.removeListener(_handleNow);
       widget.now.addListener(_handleNow);
-      _today.value = widget.now.value.today;
+      _today.value = _plainTwinOf(widget.now.value.today);
     }
     _creates.value = widget.onCreateOnDay != null;
     _bannerHours.value = _bannerHoursOf(widget);
@@ -1195,7 +1223,13 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     );
   }
 
+  /// Follows the store, taking a new zone first ([_takeZone]): the layout
+  /// it asks for lays the refiled entries out as it does any change of
+  /// them.
   void _handleStore() {
+    if (widget.store.zone != _zone) {
+      _takeZone();
+    }
     _noteRange();
     setState(() {
       _syncPending = true;
@@ -1203,7 +1237,27 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   }
 
   void _handleNow() {
-    _today.value = widget.now.value.today;
+    if (widget.store.zone != _zone) {
+      _takeZone();
+      return;
+    }
+    _today.value = _plainTwinOf(widget.now.value.today);
+  }
+
+  /// Takes the store's zone: today as [MonthBoard.now] gives it, and the
+  /// create mark on the day holding the create's start on the new clock
+  /// ([_createAt]). Lays nothing out and installs no animation: the store
+  /// notify that brought the zone, or a new store's build, lays out the
+  /// refiled entries.
+  void _takeZone() {
+    _zone = widget.store.zone;
+    _today.value = _plainTwinOf(widget.now.value.today);
+    final createAt = _createAt;
+    if (createAt != null) {
+      _createMark.value = _plainTwinOf(
+        CalendarDates.inZone(createAt, zone: _zone),
+      );
+    }
   }
 
   /// Notes whether the store has read every day of [MonthBoard.grid],
@@ -1283,16 +1337,18 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       return;
     }
     _focusNode.requestFocus();
-    final future = create(day, globalRect);
-    if (future == null) {
+    final created = create(day, globalRect);
+    if (created == null) {
       return;
     }
     final count = ++_createCount;
     _createMark.value = day;
-    future.whenComplete(() {
+    _createAt = created.start;
+    created.done.whenComplete(() {
       // After dispose the notifier takes no write.
       if (mounted && count == _createCount) {
         _createMark.value = null;
+        _createAt = null;
       }
     });
   }
@@ -1862,6 +1918,15 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// otherwise, as it does for a failed read of another range.
   Widget _buildCover(BuildContext context, CalendarStore<T> store) {
     final grid = widget.grid;
+    // The grid's days are plain; a host is told them on the store's clock.
+    final first = CalendarDates.dateOfDayNumber(
+      CalendarDates.dayNumber(grid.firstDay),
+      zone: _zone,
+    );
+    final last = CalendarDates.dateOfDayNumber(
+      CalendarDates.dayNumber(grid.lastDay),
+      zone: _zone,
+    );
     if (store.status == CalendarLoadStatus.failed &&
         store.isShown(grid.firstDay, grid.lastDay)) {
       final failure = widget.failureBuilder ?? defaultCalendarFailureBuilder;
@@ -1869,8 +1934,8 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
         context,
         CalendarFailureState(
           site: CalendarStateSite.cover,
-          first: grid.firstDay,
-          last: grid.lastDay,
+          first: first,
+          last: last,
           error: store.loadError,
           retry: store.retry,
         ),
@@ -1881,8 +1946,8 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       context,
       CalendarLoadingState(
         site: CalendarStateSite.cover,
-        first: grid.firstDay,
-        last: grid.lastDay,
+        first: first,
+        last: last,
       ),
     );
   }

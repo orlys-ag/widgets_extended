@@ -1,6 +1,7 @@
 /// The day list: the rows it lays out for a day's entries, its gaps and
 /// its banners outside the hours, a card drawn again for a new payload,
-/// a failed row's retry, and the slot lengths it takes.
+/// a failed row's retry, the slot lengths it takes, and its rows and
+/// create mark on a zoned store's clock.
 library;
 
 import 'dart:async';
@@ -575,6 +576,93 @@ void main() {
       expect(creates.last.start, isA<tz.TZDateTime>());
       expect(creates.last.start, tz.TZDateTime(behind, 2026, 4, 21));
     },
-    skip: true,
   );
+  testWidgets("AZ2 a day list over a zone whose clock skips a whole day has "
+      "one header for each day the clock reads, opened on the zone or "
+      "given it later", (tester) async {
+    ensureZones();
+    final apia = tz.getLocation("Pacific/Apia");
+    DateTime dayIn(int day) {
+      return dayOfNumberIn(
+        CalendarDates.dayNumber(DateTime(2011, 12, day)),
+        apia,
+      );
+    }
+
+    // Setup sanity: Apia's clock reads no time of 2011-12-30, whose start
+    // is the start of the 31st.
+    expect(dayIn(30), dayIn(31));
+    CalendarEntry<String> entry(String id, int day) {
+      return CalendarEntry<String>(
+        id: id,
+        start: tz.TZDateTime(apia, 2011, 12, day, 10),
+        end: tz.TZDateTime(apia, 2011, 12, day, 11),
+        title: id,
+        color: const Color(0xFF336699),
+        payload: id,
+      );
+    }
+
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: tz.TZDateTime(apia, 2011, 12, 29, 9), today: dayIn(29)),
+    );
+    addTearDown(now.dispose);
+
+    Future<void> pumpList(MemoryCalendarStore<String> store) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DayList<String>(
+            store: store,
+            weekdays: CalendarWeekdaySet.all,
+            format: CalendarHourLabelFormat.twentyFourHour,
+            hours: CalendarDayHours.allDay,
+            editable: false,
+            selectedDay: dayIn(29),
+            now: now,
+            onTopDay: (day) {},
+            onCreateRange: (details) async {},
+            onEdit: (id) {},
+            onDelete: (id) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    void expectDays() {
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(dayListHeaderKey(DateTime(2011, 12, 29))),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(dayListHeaderKey(DateTime(2011, 12, 31))),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(dayListHeaderKey(DateTime(2011, 12, 30))),
+        findsNothing,
+      );
+    }
+
+    final opened = memoryStoreIn<String>(
+      apia,
+      entries: <CalendarEntry<String>>[entry("b", 29), entry("c", 31)],
+    );
+    addTearDown(opened.dispose);
+    await pumpList(opened);
+    expectDays();
+
+    await tester.pumpWidget(const SizedBox());
+    final later = memoryStoreIn<String>(null);
+    addTearDown(later.dispose);
+    await pumpList(later);
+    expect(
+      find.byKey(dayListHeaderKey(DateTime(2011, 12, 30))),
+      findsOneWidget,
+    );
+    setStoreZone(later, apia);
+    await tester.pumpAndSettle();
+    expectDays();
+  });
 }

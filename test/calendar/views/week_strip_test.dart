@@ -112,6 +112,5 @@ void main() {
       expect(cellsWhere(tester, selected), <int>{april(22)});
       expect(cellsWhere(tester, today), <int>{april(24)});
     },
-    skip: true,
   );
 }
