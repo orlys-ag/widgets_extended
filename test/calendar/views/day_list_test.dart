@@ -577,34 +577,91 @@ void main() {
       expect(creates.last.start, tz.TZDateTime(behind, 2026, 4, 21));
     },
   );
-  testWidgets("AZ2 a day list over a zone whose clock skips a whole day has "
-      "one header for each day the clock reads, opened on the zone or "
-      "given it later", (tester) async {
-    ensureZones();
-    final apia = tz.getLocation("Pacific/Apia");
-    DateTime dayIn(int day) {
-      return dayOfNumberIn(
-        CalendarDates.dayNumber(DateTime(2011, 12, day)),
-        apia,
-      );
-    }
-
-    // Setup sanity: Apia's clock reads no time of 2011-12-30, whose start
-    // is the start of the 31st.
-    expect(dayIn(30), dayIn(31));
-    CalendarEntry<String> entry(String id, int day) {
+  testWidgets("AZ2 a zone change that brings another day under the list's "
+      "top reports no top day", (tester) async {
+    final on = DateTime(2026, 4, 21, 12);
+    final six = zoneApartFromDevice(on, 6);
+    final twelve = zoneApartFromDevice(on, 12);
+    final tuesday = DateTime(2026, 4, 21);
+    CalendarEntry<String> entry(String id, int hour) {
       return CalendarEntry<String>(
         id: id,
-        start: tz.TZDateTime(apia, 2011, 12, day, 10),
-        end: tz.TZDateTime(apia, 2011, 12, day, 11),
+        start: tz.TZDateTime(six, 2026, 4, 21, hour),
+        end: tz.TZDateTime(six, 2026, 4, 21, hour + 1),
         title: id,
         color: const Color(0xFF336699),
         payload: id,
       );
     }
 
+    final store = memoryStoreIn<String>(
+      six,
+      entries: <CalendarEntry<String>>[entry("p", 8), entry("q", 20)],
+    );
+    addTearDown(store.dispose);
     final now = ValueNotifier<CalendarNow>(
-      CalendarNow(time: tz.TZDateTime(apia, 2011, 12, 29, 9), today: dayIn(29)),
+      CalendarNow(time: DateTime(2026, 4, 20, 9), today: DateTime(2026, 4, 20)),
+    );
+    addTearDown(now.dispose);
+    final topDays = <DateTime>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CalendarTheme(
+          data: CalendarThemeData(motionDuration: Duration.zero),
+          child: DayList<String>(
+            store: store,
+            weekdays: CalendarWeekdaySet.all,
+            format: CalendarHourLabelFormat.twentyFourHour,
+            hours: CalendarDayHours.allDay,
+            editable: false,
+            selectedDay: dayOfNumberIn(CalendarDates.dayNumber(tuesday), six),
+            now: now,
+            onTopDay: topDays.add,
+            onCreateRange: (details) async {},
+            onEdit: (id) {},
+            onDelete: (id) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final listTop = tester.getRect(find.byType(DayList<String>)).top;
+    // A jump reports no top day: the list checks for one only while a
+    // drag, or its fling, scrolls it.
+    final position = tester
+        .state<ScrollableState>(find.byType(Scrollable))
+        .position;
+    final qBottom = tester.getRect(find.byKey(entryCardKey("q"))).bottom;
+    position.jumpTo(position.pixels + qBottom - 10.0 - listTop);
+    await tester.pumpAndSettle();
+    topDays.clear();
+
+    setStoreZone(store, twelve);
+    await tester.pump();
+    // Setup sanity: q's card left Tuesday's body, so Wednesday's header
+    // reaches the probe a top day check reads, and Thursday's does not,
+    // where a check would report Wednesday.
+    expect(
+      tester.getRect(find.byKey(dayListHeaderKey(DateTime(2026, 4, 22)))).top,
+      lessThanOrEqualTo(listTop + 1.0),
+    );
+    expect(
+      tester.getRect(find.byKey(dayListHeaderKey(DateTime(2026, 4, 23)))).top,
+      greaterThan(listTop + 1.0),
+    );
+    await tester.pumpAndSettle();
+    expect(topDays, isEmpty);
+  });
+
+  testWidgets("AZ3 a zone whose clock skips a whole day gives that day no "
+      "row, and each day it reads one header", (tester) async {
+    ensureZones();
+    final apia = tz.getLocation("Pacific/Apia");
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(
+        time: DateTime(2011, 12, 29, 9),
+        today: DateTime(2011, 12, 29),
+      ),
     );
     addTearDown(now.dispose);
 
@@ -617,7 +674,10 @@ void main() {
             format: CalendarHourLabelFormat.twentyFourHour,
             hours: CalendarDayHours.allDay,
             editable: false,
-            selectedDay: dayIn(29),
+            selectedDay: dayOfNumberIn(
+              CalendarDates.dayNumber(DateTime(2011, 12, 29)),
+              apia,
+            ),
             now: now,
             onTopDay: (day) {},
             onCreateRange: (details) async {},
@@ -645,14 +705,12 @@ void main() {
       );
     }
 
-    final opened = memoryStoreIn<String>(
-      apia,
-      entries: <CalendarEntry<String>>[entry("b", 29), entry("c", 31)],
-    );
+    final opened = memoryStoreIn<String>(apia);
     addTearDown(opened.dispose);
     await pumpList(opened);
     expectDays();
 
+    // The same list given the zone after its first build.
     await tester.pumpWidget(const SizedBox());
     final later = memoryStoreIn<String>(null);
     addTearDown(later.dispose);
@@ -666,7 +724,7 @@ void main() {
     expectDays();
   });
 
-  testWidgets("AZ3 a zone change files an entry of several days on the new "
+  testWidgets("a zone change files an entry of several days on the new "
       "clock's days, each day's piece read on that clock", (tester) async {
     final on = DateTime(2026, 4, 21, 12);
     final behind = zoneApartFromDevice(on, -6);
