@@ -16,6 +16,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
@@ -31,6 +32,9 @@ import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
+
+import '../../scheduling/store/zone_support.dart';
+import '../../scheduling/zones.dart';
 
 /// The Monday of the week shown.
 final int weekStartDay = CalendarDates.dayNumber(DateTime(2026, 4, 20));
@@ -1575,4 +1579,119 @@ void main() {
     expect(find.text("loading"), findsNothing);
     expect(blockFinder("talk"), findsOneWidget);
   });
+
+  testWidgets(
+    "GZ2 a timed grid over a zoned store reports a create range on the "
+    "zone's clock, and a zone change ends its move drag",
+    (tester) async {
+      final on = DateTime(2026, 4, 21, 12);
+      final ahead6 = zoneApartFromDevice(on, 6);
+      final ahead9 = zoneApartFromDevice(on, 9);
+      final store = memoryStoreIn<String>(
+        ahead6,
+        entries: <CalendarEntry<String>>[
+          CalendarEntry<String>(
+            id: "a",
+            start: tz.TZDateTime(ahead6, 2026, 4, 21, 10),
+            end: tz.TZDateTime(ahead6, 2026, 4, 21, 11),
+            title: "a",
+            color: const Color(0xFF336699),
+            payload: "a",
+          ),
+        ],
+      );
+      addTearDown(store.dispose);
+      final first = dayOfNumberIn(CalendarDates.dayNumber(monday), ahead6);
+      final now = ValueNotifier<CalendarNow>(
+        CalendarNow(
+          time: tz.TZDateTime(ahead6, 2026, 4, 21, 9),
+          today: dayOfNumberIn(CalendarDates.dayNumber(tuesday), ahead6),
+        ),
+      );
+      addTearDown(now.dispose);
+      final creates = <CalendarCreateRange>[];
+      final moves = <CalendarMoveRequest<String>>[];
+      await pumpBoxed(
+        tester,
+        const Size(800.0, 2000.0),
+        TimedGrid<String>(
+          store: store,
+          firstDay: first,
+          dayCount: 7,
+          selectedDay: first,
+          now: now,
+          onSelectDay: (day) {},
+          onOpenEntry: (id) {},
+          onCreate: (details) async {
+            creates.add(details.range);
+          },
+          onMoveRequest: (request) async {
+            moves.add(request);
+          },
+          editable: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final viewport = viewportOf(tester);
+
+      /// The global rect of the slot row holding [minute] on Tuesday,
+      /// column 2: the board's row count less the slot rows and the room
+      /// below them, plus the slots to [minute].
+      Rect slotRect(int minute) {
+        final board =
+            find
+                    .byWidgetPredicate((widget) {
+                      return widget is Board<GridKey, Object?>;
+                    })
+                    .evaluate()
+                    .single
+                    .widget
+                as Board<GridKey, Object?>;
+        final firstSlotRow =
+            board.controller.rows.axis.trackCount -
+            CalendarDayHours.allDay.slotCountOf(
+              CalendarDates.defaultSlotMinutes,
+            ) -
+            1;
+        final rect = viewport.rectOfCell(
+          firstSlotRow + minute ~/ CalendarDates.defaultSlotMinutes,
+          2,
+        )!;
+        return Rect.fromPoints(
+          viewport.localToGlobal(rect.topLeft),
+          viewport.localToGlobal(rect.bottomRight),
+        );
+      }
+
+      final drag = await tester.startGesture(
+        slotRect(14 * 60).center,
+        kind: PointerDeviceKind.mouse,
+      );
+      await drag.moveTo(slotRect(15 * 60).center);
+      await tester.pump();
+      await drag.up();
+      await tester.pumpAndSettle();
+      final range = creates.single;
+      expect(range.start, isA<tz.TZDateTime>());
+      expect(range.start, tz.TZDateTime(ahead6, 2026, 4, 21, 14));
+      expect(range.end, tz.TZDateTime(ahead6, 2026, 4, 21, 15, 15));
+
+      final move = await tester.startGesture(
+        tester.getCenter(blockFinder("a")),
+      );
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await move.moveBy(const Offset(0.0, 100.0));
+      await tester.pump();
+      setStoreZone(store, ahead9);
+      await tester.pump();
+      await move.up();
+      await tester.pumpAndSettle();
+      expect(moves, isEmpty);
+      expect(
+        tester.getRect(blockFinder("a")).top,
+        moreOrLessEquals(slotRect(13 * 60).top, epsilon: 0.5),
+      );
+    },
+    skip: true,
+  );
 }

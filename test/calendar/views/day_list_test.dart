@@ -7,15 +7,20 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
+
+import '../../scheduling/store/zone_support.dart';
+import '../../scheduling/zones.dart';
 
 typedef ShownItem = CalendarShownEntry<String>;
 
@@ -106,6 +111,26 @@ class HeldReads implements CalendarDataSource<String> {
   Future<void> delete(String id) {
     throw UnimplementedError();
   }
+}
+
+/// The decoration of the list's create mark under the theme above [view]:
+/// the theme's primary tint, edged in its primary colour.
+BoxDecoration createMarkIn(WidgetTester tester, Finder view) {
+  final theme = CalendarTheme.of(tester.element(view));
+  return BoxDecoration(
+    color: theme.primaryTint,
+    border: Border.all(color: theme.primary, width: 2.0),
+  );
+}
+
+/// The create marks, boxes drawing [mark], under [of].
+Finder createMarksUnder(Finder of, BoxDecoration mark) {
+  return find.descendant(
+    of: of,
+    matching: find.byWidgetPredicate((widget) {
+      return widget is DecoratedBox && widget.decoration == mark;
+    }),
+  );
 }
 
 void main() {
@@ -462,4 +487,94 @@ void main() {
       "A DayList's slotMinutes, 7, is not one of [5, 10, 15, 20, 30, 60].",
     );
   });
+
+  testWidgets(
+    "AZ1 a day list over a zoned store reports an add on the zone's clock "
+    "and moves a running create's mark at a zone change",
+    (tester) async {
+      final on = DateTime(2026, 4, 21, 12);
+      final ahead = zoneApartFromDevice(on, 6);
+      final behind = zoneApartFromDevice(on, -6);
+      final monday = DateTime(2026, 4, 20);
+      final tuesday = DateTime(2026, 4, 21);
+      final store = memoryStoreIn<String>(ahead);
+      addTearDown(store.dispose);
+      final now = ValueNotifier<CalendarNow>(
+        CalendarNow(time: DateTime(2026, 4, 20, 9), today: monday),
+      );
+      addTearDown(now.dispose);
+      final creates = <CalendarCreateRange>[];
+      var done = Completer<void>();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DayList<String>(
+            store: store,
+            weekdays: CalendarWeekdaySet.all,
+            format: CalendarHourLabelFormat.twentyFourHour,
+            hours: CalendarDayHours.allDay,
+            editable: true,
+            selectedDay: dayOfNumberIn(CalendarDates.dayNumber(monday), ahead),
+            now: now,
+            onTopDay: (day) {},
+            onCreateRange: (details) {
+              creates.add(details.range);
+              return done.future;
+            },
+            onEdit: (id) {},
+            onDelete: (id) {},
+            addButtonBuilder: (context, details) {
+              return GestureDetector(
+                onTap: details.onPressed,
+                child: const Text("add"),
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      Finder addOn(DateTime day) {
+        return find.descendant(
+          of: find.byKey(dayListGapKey(day, 0)),
+          matching: find.text("add"),
+        );
+      }
+
+      await tester.tap(addOn(tuesday));
+      await tester.pump();
+      final start = creates.single.start;
+      expect(start, isA<tz.TZDateTime>());
+      expect(start, tz.TZDateTime(ahead, 2026, 4, 21));
+      final mark = createMarkIn(tester, find.byType(DayList<String>));
+      expect(
+        createMarksUnder(find.byKey(dayListGapKey(tuesday, 0)), mark),
+        findsOneWidget,
+      );
+
+      setStoreZone(store, behind);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(
+        createMarksUnder(find.byKey(dayListGapKey(tuesday, 0)), mark),
+        findsNothing,
+      );
+      expect(
+        createMarksUnder(find.byKey(dayListGapKey(monday, 0)), mark),
+        findsOneWidget,
+      );
+      done.complete();
+      await tester.pumpAndSettle();
+      expect(
+        createMarksUnder(find.byType(DayList<String>), mark),
+        findsNothing,
+      );
+
+      done = Completer<void>()..complete();
+      await tester.tap(addOn(tuesday));
+      await tester.pumpAndSettle();
+      expect(creates, hasLength(2));
+      expect(creates.last.start, isA<tz.TZDateTime>());
+      expect(creates.last.start, tz.TZDateTime(behind, 2026, 4, 21));
+    },
+    skip: true,
+  );
 }
