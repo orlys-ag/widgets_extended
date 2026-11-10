@@ -3706,35 +3706,31 @@ void main() {
 
     final zoneDate = DateTime(2026, 4, 21, 12);
 
-    testWidgets(
-      "CVZ1 a calendar built with a supplied zone reports an "
-      "ArgumentError",
-      skip: true,
-      (tester) async {
-        final zoned = memoryStoreIn<String>(
-          zoneFarFromDevice(zoneDate),
-          entries: <CalendarEntry<String>>[entryOf("a", tuesday, 600, 660)],
-        );
-        addTearDown(zoned.dispose);
-        final controller = CalendarController(
-          view: CalendarViewKind.week,
-          selectedDay: tuesday,
-        );
-        addTearDown(controller.dispose);
-        await tester.pumpWidget(
-          app(
-            CalendarView<String>(
-              store: zoned,
-              controller: controller,
-              clock: fixedClock,
-            ),
+    testWidgets("CVZ1 a calendar built with a supplied zone reports an "
+        "ArgumentError", (tester) async {
+      final zoned = memoryStoreIn<String>(
+        zoneFarFromDevice(zoneDate),
+        entries: <CalendarEntry<String>>[entryOf("a", tuesday, 600, 660)],
+      );
+      addTearDown(zoned.dispose);
+      final controller = CalendarController(
+        view: CalendarViewKind.week,
+        selectedDay: tuesday,
+      );
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            store: zoned,
+            controller: controller,
+            clock: fixedClock,
           ),
-        );
-        expectRefused(tester);
-      },
-    );
+        ),
+      );
+      expectRefused(tester);
+    });
 
-    testWidgets("CVZ2 a zone given later reports the same error", skip: true, (
+    testWidgets("CVZ2 a zone given later reports the same error", (
       tester,
     ) async {
       useTallView(tester);
@@ -3760,6 +3756,9 @@ void main() {
               controller: controller,
               clock: fixedClock,
               editable: true,
+              // Forbids overlaps, so a drag in flight asks its gates again
+              // on the zoned entries of the notify.
+              editPolicy: const NoOverlapsPolicy<String>(),
               onCreateRange: (details) async {},
               onMoveRequest: (request) async {},
             ),
@@ -3772,7 +3771,8 @@ void main() {
         await tester.pumpAndSettle();
       }
 
-      // In Week, with a move's drag in flight.
+      // In Week, with a move's drag in flight, on a zone at the device's
+      // offset: the piece keeps its day, so the sync keeps the drag's item.
       await arrange(CalendarViewKind.week, (store) async {
         expect(blockFinder("a", tuesday), findsOneWidget);
         final gesture = await tester.startGesture(
@@ -3781,7 +3781,7 @@ void main() {
         await tester.pump(kLongPressTimeout + kPressTimeout);
         await gesture.moveBy(const Offset(0.0, 100.0));
         await tester.pump();
-        setStoreZone(store, zone);
+        setStoreZone(store, zoneAtDeviceOffset(zoneDate));
         await tester.pump();
         expect(tester.takeException(), isStoreError());
         expect(find.byType(ErrorWidget), findsOneWidget);
@@ -3816,7 +3816,7 @@ void main() {
       });
     });
 
-    testWidgets("CVZ3 a store with no zone builds", skip: true, (tester) async {
+    testWidgets("CVZ3 a store with no zone builds", (tester) async {
       useTallView(tester);
       final store = memoryStoreIn<String>(
         null,
@@ -3843,7 +3843,7 @@ void main() {
       expect(blockFinder("a", tuesday), findsOneWidget);
     });
 
-    testWidgets("CVZ4 clearing the zone brings the calendar back", skip: true, (
+    testWidgets("CVZ4 clearing the zone brings the calendar back", (
       tester,
     ) async {
       useTallView(tester);
@@ -3906,23 +3906,19 @@ void main() {
       });
     });
 
-    test(
-      "CVZ5 no assertion holds the store zone's throw, which runs in a "
-      "release build",
-      skip: true,
-      () {
-        const path = "lib/calendar/composition/calendar_view.dart";
-        final view = File(path).readAsStringSync();
-        for (final arguments in assertArguments(view)) {
-          expect(
-            arguments,
-            isNot(contains("_storeZoneError")),
-            reason: arguments,
-          );
-        }
-        final build = methodBody(view, "Widget build(BuildContext context)");
-        expect(RegExp(r"\b_storeZoneError\b").hasMatch(build), isTrue);
-      },
-    );
+    test("CVZ5 no assertion holds the store zone's throw, which runs in a "
+        "release build", () {
+      const path = "lib/calendar/composition/calendar_view.dart";
+      final view = File(path).readAsStringSync();
+      for (final arguments in assertArguments(view)) {
+        expect(
+          arguments,
+          isNot(contains("_storeZoneError")),
+          reason: arguments,
+        );
+      }
+      final build = methodBody(view, "Widget build(BuildContext context)");
+      expect(RegExp(r"\b_storeZoneError\b").hasMatch(build), isTrue);
+    });
   });
 }
