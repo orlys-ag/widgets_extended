@@ -5048,7 +5048,6 @@ void _zoneTests() {
 
     test(
       "CZ11 a zone change notifies once and re-reads every read day",
-      skip: true,
       () async {
         final zoneA = tz.getLocation("Asia/Tokyo");
         final zoneB = tz.UTC;
@@ -5105,7 +5104,6 @@ void _zoneTests() {
 
     test(
       "CZ12 only days earlier reads cannot fully cover are unread",
-      skip: true,
       () async {
         Future<void> check(
           tz.Location zoneA,
@@ -5206,72 +5204,118 @@ void _zoneTests() {
       },
     );
 
-    test(
-      "CZ13 a write answering before the re-read files under the new "
-      "zone; a stale read fills nothing",
-      skip: true,
-      () async {
-        final zoneA = tz.getLocation("Asia/Tokyo");
-        final zoneB = tz.getLocation("America/New_York");
-        final day = DateTime(2025, 7, 16);
-        final source = FakeDataSource();
-        final store = cachingStoreIn<String>(zoneA, dataSource: source);
-        addTearDown(store.dispose);
-        final held = task("a", day, 600, 660);
-        store.show(day, day);
-        readsOf(source).single.succeed(<CalendarEntry<String>>[held]);
-        await settle();
-        // A read in flight, from an invalidate, and a move in flight.
-        store.invalidate(day, day);
-        final oldRead = readsOf(source).last;
-        final moved = held.copyWith(
-          start: held.start.add(const Duration(hours: 1)),
-          end: held.end.add(const Duration(hours: 1)),
-        );
-        final write = store.requestMove(moved);
-        final moveCall = callsOf(source, SourceMethod.replace).single;
-        setStoreZone(store, zoneB);
-        final read = store.isRead(day);
-        moveCall.succeed(moved);
-        await settle();
-        final result = await write;
-        expectInZone(result.start, zoneB, moved.start);
-        expectInZone(store.storedEntry("a")!.start, zoneB, moved.start);
+    test("CZ13 a write answering before the re-read files under the new "
+        "zone; a stale read fills nothing", () async {
+      final zoneA = tz.getLocation("Asia/Tokyo");
+      final zoneB = tz.getLocation("America/New_York");
+      final day = DateTime(2025, 7, 16);
+      final source = FakeDataSource();
+      final store = cachingStoreIn<String>(zoneA, dataSource: source);
+      addTearDown(store.dispose);
+      final held = task("a", day, 600, 660);
+      store.show(day, day);
+      readsOf(source).single.succeed(<CalendarEntry<String>>[held]);
+      await settle();
+      // A read in flight, from an invalidate, and a move in flight.
+      store.invalidate(day, day);
+      final oldRead = readsOf(source).last;
+      final moved = held.copyWith(
+        start: held.start.add(const Duration(hours: 1)),
+        end: held.end.add(const Duration(hours: 1)),
+      );
+      final write = store.requestMove(moved);
+      final moveCall = callsOf(source, SourceMethod.replace).single;
+      setStoreZone(store, zoneB);
+      // The move stays pending across the change: a second write is refused,
+      // and the requested entry shows on the new zone's day.
+      expect(store.isPending("a"), isTrue);
+      await expectLater(
+        store.requestDelete("a"),
+        throwsA(isA<CalendarWritePendingException>()),
+      );
+      final movedStart = tz.TZDateTime.from(moved.start, zoneB);
+      final movedDay = DateTime(
+        movedStart.year,
+        movedStart.month,
+        movedStart.day,
+      );
+      final shownMoving = store.entriesOn(movedDay).singleWhere((shown) {
+        return shown.id == "a";
+      });
+      expect(shownMoving.pending, isTrue);
+      expectInZone(shownMoving.entry.start, zoneB, moved.start);
+      final read = store.isRead(day);
+      moveCall.succeed(moved);
+      await settle();
+      final result = await write;
+      expectInZone(result.start, zoneB, moved.start);
+      expectInZone(store.storedEntry("a")!.start, zoneB, moved.start);
 
-        oldRead.succeed(<CalendarEntry<String>>[held]);
-        await settle();
-        expect(store.isRead(day), read);
-        expectInZone(store.storedEntry("a")!.start, zoneB, moved.start);
+      oldRead.succeed(<CalendarEntry<String>>[held]);
+      await settle();
+      expect(store.isRead(day), read);
+      expectInZone(store.storedEntry("a")!.start, zoneB, moved.start);
 
-        // A stale read that fails, with a refresh in flight.
-        final failSource = FakeDataSource();
-        final failing = cachingStoreIn<String>(zoneA, dataSource: failSource);
-        addTearDown(failing.dispose);
-        failing.show(day, day);
-        readsOf(failSource).single.succeed(const <CalendarEntry<String>>[]);
-        await settle();
-        final waited = failing.refresh();
-        final refreshRead = readsOf(failSource).last;
-        setStoreZone(failing, zoneB);
-        final status = failing.status;
-        final error = failing.loadError;
-        final marked = failing.readFailed(day);
-        refreshRead.fail();
-        await settle();
-        expect(failing.status, status);
-        expect(failing.loadError, error);
-        expect(failing.readFailed(day), marked);
-        // The refresh's read went stale; the shown range's re-read is the
-        // one sent next, and carries the wait.
-        readsOf(failSource)[2].succeed(const <CalendarEntry<String>>[]);
-        await settle();
-        await waited;
-      },
-    );
+      // A stale read that fails, with a refresh in flight.
+      final failSource = FakeDataSource();
+      final failing = cachingStoreIn<String>(zoneA, dataSource: failSource);
+      addTearDown(failing.dispose);
+      failing.show(day, day);
+      readsOf(failSource).single.succeed(const <CalendarEntry<String>>[]);
+      await settle();
+      final waited = failing.refresh();
+      final refreshRead = readsOf(failSource).last;
+      setStoreZone(failing, zoneB);
+      final status = failing.status;
+      final error = failing.loadError;
+      final marked = failing.readFailed(day);
+      refreshRead.fail();
+      await settle();
+      expect(failing.status, status);
+      expect(failing.loadError, error);
+      expect(failing.readFailed(day), marked);
+      // The refresh's read went stale; the shown range's re-read is the
+      // one sent next, and carries the wait.
+      readsOf(failSource)[2].succeed(const <CalendarEntry<String>>[]);
+      await settle();
+      await waited;
+
+      // An update in flight across the change shows the stored entry on the
+      // new zone's clock, and, failing, shows it again, no longer pending.
+      final thirdSource = FakeDataSource();
+      final third = cachingStoreIn<String>(zoneA, dataSource: thirdSource);
+      addTearDown(third.dispose);
+      third.show(day, day);
+      readsOf(thirdSource).single.succeed(<CalendarEntry<String>>[held]);
+      await settle();
+      final updating = third.update(held.copyWith(title: "Renamed"));
+      final updateCall = callsOf(thirdSource, SourceMethod.replace).single;
+      setStoreZone(third, zoneB);
+      expect(third.isPending("a"), isTrue);
+      final heldStart = tz.TZDateTime.from(held.start, zoneB);
+      final heldDay = DateTime(heldStart.year, heldStart.month, heldStart.day);
+      final shownUpdating = third.entriesOn(heldDay).single;
+      expect(shownUpdating.pending, isTrue);
+      expectInZone(shownUpdating.entry.start, zoneB, held.start);
+      // The re-read's answer shows through the pending update, which shows
+      // the stored entry as it is stored meanwhile.
+      readsOf(
+        thirdSource,
+      )[1].succeed(<CalendarEntry<String>>[held.copyWith(title: "Changed")]);
+      await settle();
+      expect(third.entriesOn(heldDay).single.entry.title, "Changed");
+      final updateError = errorOf(updating);
+      updateCall.fail();
+      await settle();
+      expect(updateError(), isNotNull);
+      expect(third.isPending("a"), isFalse);
+      final shownAfter = third.entriesOn(heldDay).single;
+      expect(shownAfter.pending, isFalse);
+      expectInZone(shownAfter.entry.start, zoneB, held.start);
+    });
 
     test(
       "CZ14 a zone setter that cannot convert throws and changes nothing",
-      skip: true,
       () async {
         final monrovia = tz.getLocation("Africa/Monrovia");
         final apia = tz.getLocation("Pacific/Apia");
@@ -5335,7 +5379,6 @@ void _zoneTests() {
 
     test(
       "CZ15 a zone change over 5,000 asks a fixed number per entry",
-      skip: true,
       () async {
         final old = tz.getLocation("Etc/GMT");
         final base = numberOf(DateTime(2025, 6, 1));
@@ -5378,78 +5421,70 @@ void _zoneTests() {
       },
     );
 
-    test(
-      "CZ16 a show in flight at a zone change is read again",
-      skip: true,
-      () async {
-        final zoneA = tz.getLocation("Asia/Tokyo");
-        final zoneB = tz.UTC;
-        final day = DateTime(2025, 7, 16);
+    test("CZ16 a show in flight at a zone change is read again", () async {
+      final zoneA = tz.getLocation("Asia/Tokyo");
+      final zoneB = tz.UTC;
+      final day = DateTime(2025, 7, 16);
+      final source = FakeDataSource();
+      final store = cachingStoreIn<String>(zoneA, dataSource: source);
+      addTearDown(store.dispose);
+      store.show(day, day);
+      final oldRead = readsOf(source).single;
+      setStoreZone(store, zoneB);
+      expect(readsOf(source), hasLength(2));
+      final newRead = readsOf(source).last;
+      final entry = task("a", day, 600, 660);
+      oldRead.succeed(<CalendarEntry<String>>[entry]);
+      await settle();
+      expect(store.isRead(day), isFalse);
+      expect(store.storedEntry("a"), isNull);
+      expect(store.status, CalendarLoadStatus.loading);
+      newRead.succeed(<CalendarEntry<String>>[entry]);
+      await settle();
+      expect(store.isRead(day), isTrue);
+      expect(store.status, CalendarLoadStatus.ready);
+      expect(idsOn(store, day), contains("a"));
+    });
+
+    test("CZ17 a refresh in flight waits for the new zone's read", () async {
+      final zoneA = tz.getLocation("Asia/Tokyo");
+      final zoneB = tz.UTC;
+      final day = DateTime(2025, 7, 16);
+      Future<(CachingCalendarStore<String>, FakeDataSource, Future<void>)>
+      arrange() async {
         final source = FakeDataSource();
         final store = cachingStoreIn<String>(zoneA, dataSource: source);
         addTearDown(store.dispose);
         store.show(day, day);
-        final oldRead = readsOf(source).single;
+        readsOf(source).single.succeed(const <CalendarEntry<String>>[]);
+        await settle();
+        final waited = store.refresh();
         setStoreZone(store, zoneB);
-        expect(readsOf(source), hasLength(2));
-        final newRead = readsOf(source).last;
-        final entry = task("a", day, 600, 660);
-        oldRead.succeed(<CalendarEntry<String>>[entry]);
-        await settle();
-        expect(store.isRead(day), isFalse);
-        expect(store.storedEntry("a"), isNull);
-        expect(store.status, CalendarLoadStatus.loading);
-        newRead.succeed(<CalendarEntry<String>>[entry]);
-        await settle();
-        expect(store.isRead(day), isTrue);
-        expect(store.status, CalendarLoadStatus.ready);
-        expect(idsOn(store, day), contains("a"));
-      },
-    );
+        return (store, source, waited);
+      }
 
-    test(
-      "CZ17 a refresh in flight waits for the new zone's read",
-      skip: true,
-      () async {
-        final zoneA = tz.getLocation("Asia/Tokyo");
-        final zoneB = tz.UTC;
-        final day = DateTime(2025, 7, 16);
-        Future<(CachingCalendarStore<String>, FakeDataSource, Future<void>)>
-        arrange() async {
-          final source = FakeDataSource();
-          final store = cachingStoreIn<String>(zoneA, dataSource: source);
-          addTearDown(store.dispose);
-          store.show(day, day);
-          readsOf(source).single.succeed(const <CalendarEntry<String>>[]);
-          await settle();
-          final waited = store.refresh();
-          setStoreZone(store, zoneB);
-          return (store, source, waited);
-        }
+      final (_, source, waited) = await arrange();
+      final done = completedOf(waited);
+      // The refresh's read went stale; the shown range's re-read, the first
+      // the change sent, carries it.
+      final reread = readsOf(source)[2];
+      await settle();
+      expect(done(), isFalse);
+      reread.succeed(const <CalendarEntry<String>>[]);
+      await settle();
+      expect(done(), isTrue);
 
-        final (_, source, waited) = await arrange();
-        final done = completedOf(waited);
-        // The refresh's read went stale; the shown range's re-read carries it.
-        final reread = readsOf(source).last;
-        await settle();
-        expect(done(), isFalse);
-        reread.succeed(const <CalendarEntry<String>>[]);
-        await settle();
-        expect(done(), isTrue);
-
-        final (_, failSource, failWaited) = await arrange();
-        final failure = errorOf(failWaited);
-        await settle();
-        expect(failure(), isNull);
-        final raised = readsOf(failSource).last.fail();
-        await settle();
-        expect(failure(), raised);
-      },
-    );
+      final (_, failSource, failWaited) = await arrange();
+      final failure = errorOf(failWaited);
+      await settle();
+      expect(failure(), isNull);
+      final raised = readsOf(failSource)[2].fail();
+      await settle();
+      expect(failure(), raised);
+    });
 
     test(
       "CZ18 a second zone change and a dispose complete a refresh once",
-      skip: true,
       () async {
         final zoneA = tz.getLocation("Asia/Tokyo");
         final zoneB = tz.UTC;
@@ -5469,10 +5504,13 @@ void _zoneTests() {
         final waited = twice.refresh();
         final done = completedOf(waited);
         setStoreZone(twice, zoneB);
+        final sentByC = readsOf(twiceSource).length;
         setStoreZone(twice, zoneC);
         await settle();
         expect(done(), isFalse);
-        readsOf(twiceSource).last.succeed(const <CalendarEntry<String>>[]);
+        // The second change's first read is its re-read of the shown range,
+        // which carries the wait.
+        readsOf(twiceSource)[sentByC].succeed(const <CalendarEntry<String>>[]);
         await settle();
         expect(done(), isTrue);
         await waited;
@@ -5496,325 +5534,303 @@ void _zoneTests() {
       },
     );
 
-    test(
-      "CZ19 a zone change before any show reads nothing",
-      skip: true,
-      () async {
-        final zone = zoneFarFromDevice(on);
-        final source = FakeDataSource();
-        final store = cachingStoreIn<String>(null, dataSource: source);
-        addTearDown(store.dispose);
-        var notifies = 0;
-        store.addListener(() {
-          notifies++;
-        });
-        setStoreZone(store, zone);
-        expect(notifies, 1);
-        expect(source.calls, isEmpty);
-        final zoned = tz.TZDateTime.from(on, zone);
-        final zoneDay = DateTime(zoned.year, zoned.month, zoned.day);
-        store.show(zoneDay, zoneDay);
-        final read = readsOf(source).single;
-        final (first, last) = deviceSpan(
-          numberOf(zoneDay),
-          numberOf(zoneDay),
-          zone,
-        );
-        expect(numberOf(read.first!), first);
-        expect(numberOf(read.last!), last);
-      },
-    );
+    test("CZ19 a zone change before any show reads nothing", () async {
+      final zone = zoneFarFromDevice(on);
+      final source = FakeDataSource();
+      final store = cachingStoreIn<String>(null, dataSource: source);
+      addTearDown(store.dispose);
+      var notifies = 0;
+      store.addListener(() {
+        notifies++;
+      });
+      setStoreZone(store, zone);
+      expect(notifies, 1);
+      expect(source.calls, isEmpty);
+      final zoned = tz.TZDateTime.from(on, zone);
+      final zoneDay = DateTime(zoned.year, zoned.month, zoned.day);
+      store.show(zoneDay, zoneDay);
+      final read = readsOf(source).single;
+      final (first, last) = deviceSpan(
+        numberOf(zoneDay),
+        numberOf(zoneDay),
+        zone,
+      );
+      expect(numberOf(read.first!), first);
+      expect(numberOf(read.last!), last);
+    });
 
-    test(
-      "CZ20 a zone change clears a failed shown range",
-      skip: true,
-      () async {
-        final zoneA = tz.getLocation("Asia/Tokyo");
-        final zoneB = tz.UTC;
-        final day = DateTime(2025, 7, 16);
+    test("CZ20 a zone change clears a failed shown range", () async {
+      final zoneA = tz.getLocation("Asia/Tokyo");
+      final zoneB = tz.UTC;
+      final day = DateTime(2025, 7, 16);
+      final source = FakeDataSource();
+      final store = cachingStoreIn<String>(zoneA, dataSource: source);
+      addTearDown(store.dispose);
+      store.show(day, day);
+      readsOf(source).single.fail();
+      await settle();
+      expect(store.status, CalendarLoadStatus.failed);
+      expect(store.loadError, isNotNull);
+      expect(store.readFailed(day), isTrue);
+      final calls = source.calls.length;
+      setStoreZone(store, zoneB);
+      expect(store.status, CalendarLoadStatus.loading);
+      expect(store.loadError, isNull);
+      expect(store.readFailed(day), isFalse);
+      expect(source.calls.length, calls + 1);
+      final (first, last) = deviceSpan(numberOf(day), numberOf(day), zoneB);
+      expect(numberOf(readsOf(source).last.first!), first);
+      expect(numberOf(readsOf(source).last.last!), last);
+    });
+
+    test("CZ21 a source answering within the call reads each span once and "
+        "notifies once", () async {
+      final zoneA = tz.getLocation("Asia/Tokyo");
+      final zoneB = tz.UTC;
+      final base = numberOf(DateTime(2025, 7, 10));
+      final source = FakeDataSource();
+      final store = cachingStoreIn<String>(zoneA, dataSource: source);
+      addTearDown(store.dispose);
+      source.answerNow = const <CalendarEntry<String>>[];
+      store.prefetch(dateOf(base), dateOf(base + 2));
+      store.show(dateOf(base + 10), dateOf(base + 13));
+      expect(source.readsNow, hasLength(2));
+      var notifies = 0;
+      store.addListener(() {
+        notifies++;
+      });
+      final before = source.answeredNow.length;
+      setStoreZone(store, zoneB);
+      expect(notifies, 1);
+      final spans = rereadSpans(
+        <(int, int)>[(base, base + 2), (base + 10, base + 13)],
+        (base + 10, base + 13),
+        zoneA,
+        zoneB,
+      );
+      final sent = source.answeredNow.sublist(before);
+      expect(sent, hasLength(spans.length));
+      for (var i = 0; i < spans.length; i++) {
+        final (first, last) = deviceSpan(spans[i].$1, spans[i].$2, zoneB);
+        expect(numberOf(sent[i].first!), first, reason: "span $i");
+        expect(numberOf(sent[i].last!), last, reason: "span $i");
+      }
+      expect(store.status, CalendarLoadStatus.ready);
+      for (var day = base + 10; day <= base + 13; day++) {
+        expect(store.isRead(dateOf(day)), isTrue);
+      }
+    });
+
+    test("CZ22 a second zone change before the re-read answers keeps every "
+        "entry answered", () async {
+      final zoneA = tz.getLocation("Asia/Tokyo");
+      final zoneB = tz.getLocation("Etc/GMT+9");
+      final zoneC = tz.getLocation("Etc/GMT-12");
+      final base = numberOf(DateTime(2025, 7, 10));
+      final first = base;
+      final last = base + 2;
+      final startOfRun = dayOfRunStart(first, zoneA);
+      final early = timesEntry(
+        "early",
+        plainOf(startOfRun.add(const Duration(minutes: 30))),
+        plainOf(startOfRun.add(const Duration(minutes: 60))),
+      );
+      final endOfRun = dayOfRunStart(last + 1, zoneA);
+      final late = timesEntry(
+        "late",
+        plainOf(endOfRun.subtract(const Duration(minutes: 60))),
+        plainOf(endOfRun.subtract(const Duration(minutes: 30))),
+      );
+      final held = <CalendarEntry<String>>[early, late];
+
+      Future<void> run(bool failedRereadFirst) async {
         final source = FakeDataSource();
         final store = cachingStoreIn<String>(zoneA, dataSource: source);
         addTearDown(store.dispose);
-        store.show(day, day);
-        readsOf(source).single.fail();
+        store.show(dateOf(first), dateOf(last));
+        readsOf(source).single.succeed(held);
         await settle();
-        expect(store.status, CalendarLoadStatus.failed);
-        expect(store.loadError, isNotNull);
-        expect(store.readFailed(day), isTrue);
-        final calls = source.calls.length;
         setStoreZone(store, zoneB);
-        expect(store.status, CalendarLoadStatus.loading);
-        expect(store.loadError, isNull);
-        expect(store.readFailed(day), isFalse);
-        expect(source.calls.length, calls + 1);
-        final (first, last) = deviceSpan(numberOf(day), numberOf(day), zoneB);
-        expect(numberOf(readsOf(source).last.first!), first);
-        expect(numberOf(readsOf(source).last.last!), last);
-      },
-    );
-
-    test(
-      "CZ21 a source answering within the call reads each span once and "
-      "notifies once",
-      skip: true,
-      () async {
-        final zoneA = tz.getLocation("Asia/Tokyo");
-        final zoneB = tz.UTC;
-        final base = numberOf(DateTime(2025, 7, 10));
-        final source = FakeDataSource();
-        final store = cachingStoreIn<String>(zoneA, dataSource: source);
-        addTearDown(store.dispose);
-        source.answerNow = const <CalendarEntry<String>>[];
-        store.prefetch(dateOf(base), dateOf(base + 2));
-        store.show(dateOf(base + 10), dateOf(base + 13));
-        expect(source.readsNow, hasLength(2));
-        var notifies = 0;
-        store.addListener(() {
-          notifies++;
-        });
-        final before = source.answeredNow.length;
-        setStoreZone(store, zoneB);
-        expect(notifies, 1);
-        final spans = rereadSpans(
-          <(int, int)>[(base, base + 2), (base + 10, base + 13)],
-          (base + 10, base + 13),
-          zoneA,
-          zoneB,
-        );
-        final sent = source.answeredNow.sublist(before);
-        expect(sent, hasLength(spans.length));
-        for (var i = 0; i < spans.length; i++) {
-          final (first, last) = deviceSpan(spans[i].$1, spans[i].$2, zoneB);
-          expect(numberOf(sent[i].first!), first, reason: "span $i");
-          expect(numberOf(sent[i].last!), last, reason: "span $i");
-        }
-        expect(store.status, CalendarLoadStatus.ready);
-        for (var day = base + 10; day <= base + 13; day++) {
-          expect(store.isRead(dateOf(day)), isTrue);
-        }
-      },
-    );
-
-    test(
-      "CZ22 a second zone change before the re-read answers keeps every "
-      "entry answered",
-      skip: true,
-      () async {
-        final zoneA = tz.getLocation("Asia/Tokyo");
-        final zoneB = tz.getLocation("Etc/GMT+9");
-        final zoneC = tz.getLocation("Etc/GMT-12");
-        final base = numberOf(DateTime(2025, 7, 10));
-        final first = base;
-        final last = base + 2;
-        final startOfRun = dayOfRunStart(first, zoneA);
-        final early = timesEntry(
-          "early",
-          plainOf(startOfRun.add(const Duration(minutes: 30))),
-          plainOf(startOfRun.add(const Duration(minutes: 60))),
-        );
-        final endOfRun = dayOfRunStart(last + 1, zoneA);
-        final late = timesEntry(
-          "late",
-          plainOf(endOfRun.subtract(const Duration(minutes: 60))),
-          plainOf(endOfRun.subtract(const Duration(minutes: 30))),
-        );
-        final held = <CalendarEntry<String>>[early, late];
-
-        Future<void> run(bool failedRereadFirst) async {
-          final source = FakeDataSource();
-          final store = cachingStoreIn<String>(zoneA, dataSource: source);
-          addTearDown(store.dispose);
-          store.show(dateOf(first), dateOf(last));
-          readsOf(source).single.succeed(held);
+        if (failedRereadFirst) {
+          // Each re-read fails: the days it opened stay open and unread.
+          for (final call in readsOf(source).skip(1).toList()) {
+            call.fail();
+          }
           await settle();
-          setStoreZone(store, zoneB);
-          if (failedRereadFirst) {
-            // Each re-read fails: the days it opened stay open and unread.
-            for (final call in readsOf(source).skip(1).toList()) {
-              call.fail();
-            }
-            await settle();
-          }
-          final before = source.calls.length;
-          setStoreZone(store, zoneC);
-          for (final entry in held) {
-            final zoned = tz.TZDateTime.from(entry.start, zoneC);
+        }
+        final before = source.calls.length;
+        setStoreZone(store, zoneC);
+        for (final entry in held) {
+          final zoned = tz.TZDateTime.from(entry.start, zoneC);
+          expect(
+            idsOn(store, DateTime(zoned.year, zoned.month, zoned.day)),
+            contains(entry.id),
+            reason: "entry ${entry.id}, failed re-read $failedRereadFirst",
+          );
+        }
+        // Every day either change opened has a read under the new zone.
+        final openedB = <int>{
+          for (final (from, to) in rereadSpans(
+            <(int, int)>[(first, last)],
+            null,
+            zoneA,
+            zoneB,
+          ))
+            for (var day = from; day <= to; day++) day,
+        };
+        final openedC = <int>{
+          for (final (from, to) in rereadSpans(
+            <(int, int)>[
+              (
+                openedB.reduce((a, b) => a < b ? a : b),
+                openedB.reduce((a, b) => a > b ? a : b),
+              ),
+            ],
+            null,
+            zoneB,
+            zoneC,
+          ))
+            for (var day = from; day <= to; day++) day,
+        };
+        final sent = source.calls.sublist(before);
+        for (final day in openedC) {
+          final (from, to) = deviceSpan(day, day, zoneC);
+          expect(
+            sent.any((call) {
+              return numberOf(call.first!) <= from &&
+                  numberOf(call.last!) >= to;
+            }),
+            isTrue,
+            reason: "day $day, failed re-read $failedRereadFirst",
+          );
+        }
+        for (final day in openedC) {
+          if (!keptRead(day, first, last, zoneA, zoneB) ||
+              !keptRead(day, first, last, zoneB, zoneC)) {
             expect(
-              idsOn(store, DateTime(zoned.year, zoned.month, zoned.day)),
-              contains(entry.id),
-              reason: "entry ${entry.id}, failed re-read $failedRereadFirst",
-            );
-          }
-          // Every day either change opened has a read under the new zone.
-          final openedB = <int>{
-            for (final (from, to) in rereadSpans(
-              <(int, int)>[(first, last)],
-              null,
-              zoneA,
-              zoneB,
-            ))
-              for (var day = from; day <= to; day++) day,
-          };
-          final openedC = <int>{
-            for (final (from, to) in rereadSpans(
-              <(int, int)>[
-                (
-                  openedB.reduce((a, b) => a < b ? a : b),
-                  openedB.reduce((a, b) => a > b ? a : b),
-                ),
-              ],
-              null,
-              zoneB,
-              zoneC,
-            ))
-              for (var day = from; day <= to; day++) day,
-          };
-          final sent = source.calls.sublist(before);
-          for (final day in openedC) {
-            final (from, to) = deviceSpan(day, day, zoneC);
-            expect(
-              sent.any((call) {
-                return numberOf(call.first!) <= from &&
-                    numberOf(call.last!) >= to;
-              }),
-              isTrue,
+              store.isRead(dateOf(day)),
+              isFalse,
               reason: "day $day, failed re-read $failedRereadFirst",
             );
           }
-          for (final day in openedC) {
-            if (!keptRead(day, first, last, zoneA, zoneB) ||
-                !keptRead(day, first, last, zoneB, zoneC)) {
-              expect(
-                store.isRead(dateOf(day)),
-                isFalse,
-                reason: "day $day, failed re-read $failedRereadFirst",
-              );
-            }
-          }
         }
+      }
 
-        await run(false);
-        await run(true);
-      },
-    );
+      await run(false);
+      await run(true);
+    });
 
-    test(
-      "CZ23 an open, unread day answers its entries, shows no marker and "
-      "files an announced put",
-      skip: true,
-      () async {
-        final zoneA = tz.getLocation("Asia/Tokyo");
-        final zoneB = tz.getLocation("Etc/GMT+9");
-        final base = numberOf(DateTime(2025, 7, 10));
+    test("CZ23 an open, unread day answers its entries, shows no marker and "
+        "files an announced put", () async {
+      final zoneA = tz.getLocation("Asia/Tokyo");
+      final zoneB = tz.getLocation("Etc/GMT+9");
+      final base = numberOf(DateTime(2025, 7, 10));
 
-        // A read run that is the shown range, re-read and failed: the day
-        // before the run is open and unread.
-        final failedSource = FakeDataSource();
-        final failed = cachingStoreIn<String>(zoneA, dataSource: failedSource);
-        addTearDown(failed.dispose);
-        final runStart = dayOfRunStart(base + 1, zoneA);
-        final firstEntry = timesEntry(
-          "held",
-          plainOf(runStart.add(const Duration(minutes: 30))),
-          plainOf(runStart.add(const Duration(minutes: 60))),
-        );
-        failed.show(dateOf(base + 1), dateOf(base + 3));
-        readsOf(
-          failedSource,
-        ).single.succeed(<CalendarEntry<String>>[firstEntry]);
-        await settle();
-        setStoreZone(failed, zoneB);
-        final firstZoned = tz.TZDateTime.from(firstEntry.start, zoneB);
-        final firstOpenDay = DateTime(
-          firstZoned.year,
-          firstZoned.month,
-          firstZoned.day,
-        );
-        expect(numberOf(firstOpenDay), lessThan(base + 1));
-        for (final call in readsOf(failedSource).skip(1).toList()) {
-          call.fail();
-        }
-        await settle();
-        expect(failed.isRead(firstOpenDay), isFalse);
-        expect(idsOn(failed, firstOpenDay), <String>["held"]);
-        expect(failed.dayHasShownEntries(firstOpenDay), isFalse);
+      // A read run that is the shown range, re-read and failed: the day
+      // before the run is open and unread.
+      final failedSource = FakeDataSource();
+      final failed = cachingStoreIn<String>(zoneA, dataSource: failedSource);
+      addTearDown(failed.dispose);
+      final runStart = dayOfRunStart(base + 1, zoneA);
+      final firstEntry = timesEntry(
+        "held",
+        plainOf(runStart.add(const Duration(minutes: 30))),
+        plainOf(runStart.add(const Duration(minutes: 60))),
+      );
+      failed.show(dateOf(base + 1), dateOf(base + 3));
+      readsOf(failedSource).single.succeed(<CalendarEntry<String>>[firstEntry]);
+      await settle();
+      setStoreZone(failed, zoneB);
+      final firstZoned = tz.TZDateTime.from(firstEntry.start, zoneB);
+      final firstOpenDay = DateTime(
+        firstZoned.year,
+        firstZoned.month,
+        firstZoned.day,
+      );
+      expect(numberOf(firstOpenDay), lessThan(base + 1));
+      for (final call in readsOf(failedSource).skip(1).toList()) {
+        call.fail();
+      }
+      await settle();
+      expect(failed.isRead(firstOpenDay), isFalse);
+      expect(idsOn(failed, firstOpenDay), <String>["held"]);
+      expect(failed.dayHasShownEntries(firstOpenDay), isFalse);
 
-        // A read day a failed re-read left: still read, read again by a
-        // prefetch, and its marker kept while the shown range has an unread
-        // edge day.
-        final keptDay = dateOf(base + 2);
-        expect(keptRead(base + 2, base + 1, base + 3, zoneA, zoneB), isTrue);
-        expect(failed.isRead(keptDay), isTrue);
-        expect(failed.isRead(dateOf(base + 3)), isFalse);
-        expect(failed.status, isNot(CalendarLoadStatus.ready));
-        final callsBefore = failedSource.calls.length;
-        failed.prefetch(keptDay, keptDay);
-        expect(failedSource.calls, hasLength(callsBefore + 1));
-        final kept = timesEntry(
-          "kept",
-          plainOf(
-            tz.TZDateTime(zoneB, keptDay.year, keptDay.month, keptDay.day, 10),
-          ),
-          plainOf(
-            tz.TZDateTime(zoneB, keptDay.year, keptDay.month, keptDay.day, 11),
-          ),
-        );
-        readsOf(failedSource).last.succeed(<CalendarEntry<String>>[kept]);
-        await settle();
-        expect(failed.status, isNot(CalendarLoadStatus.ready));
-        expect(failed.dayHasShownEntries(keptDay), isTrue);
+      // A read day a failed re-read left: still read, read again by a
+      // prefetch, and its marker kept while the shown range has an unread
+      // edge day.
+      final keptDay = dateOf(base + 2);
+      expect(keptRead(base + 2, base + 1, base + 3, zoneA, zoneB), isTrue);
+      expect(failed.isRead(keptDay), isTrue);
+      expect(failed.isRead(dateOf(base + 3)), isFalse);
+      expect(failed.status, isNot(CalendarLoadStatus.ready));
+      final callsBefore = failedSource.calls.length;
+      failed.prefetch(keptDay, keptDay);
+      expect(failedSource.calls, hasLength(callsBefore + 1));
+      final kept = timesEntry(
+        "kept",
+        plainOf(
+          tz.TZDateTime(zoneB, keptDay.year, keptDay.month, keptDay.day, 10),
+        ),
+        plainOf(
+          tz.TZDateTime(zoneB, keptDay.year, keptDay.month, keptDay.day, 11),
+        ),
+      );
+      readsOf(failedSource).last.succeed(<CalendarEntry<String>>[kept]);
+      await settle();
+      expect(failed.status, isNot(CalendarLoadStatus.ready));
+      expect(failed.dayHasShownEntries(keptDay), isTrue);
 
-        // A read run wider than a shown range wholly kept: its re-reads fail,
-        // the shown range is ready, and an announced put files on the open
-        // day.
-        final changes =
-            StreamController<CalendarSourceChange<String>>.broadcast();
-        addTearDown(changes.close);
-        final source = FakeDataSource();
-        final store = cachingStoreIn<String>(
-          zoneA,
-          dataSource: source,
-          changes: changes.stream,
-        );
-        addTearDown(store.dispose);
-        final heldStart = dayOfRunStart(base, zoneA);
-        final held = timesEntry(
-          "held",
-          plainOf(heldStart.add(const Duration(minutes: 30))),
-          plainOf(heldStart.add(const Duration(minutes: 60))),
-        );
-        store.prefetch(dateOf(base), dateOf(base + 4));
-        readsOf(source).single.succeed(<CalendarEntry<String>>[held]);
-        await settle();
-        store.show(dateOf(base + 1), dateOf(base + 2));
-        expect(store.status, CalendarLoadStatus.ready);
-        setStoreZone(store, zoneB);
-        final zoned = tz.TZDateTime.from(held.start, zoneB);
-        final openDay = DateTime(zoned.year, zoned.month, zoned.day);
-        expect(numberOf(openDay), base - 1);
-        for (final call in readsOf(source).skip(1).toList()) {
-          call.fail();
-        }
-        await settle();
-        expect(store.status, CalendarLoadStatus.ready);
-        final announced = timesEntry(
-          "put",
-          plainOf(zoned.add(const Duration(hours: 1))),
-          plainOf(zoned.add(const Duration(hours: 2))),
-        );
-        changes.add(CalendarEntryPut<String>(announced));
-        await settle();
-        expect(idsOn(store, openDay), containsAll(<String>["held", "put"]));
-        expect(store.isRead(openDay), isFalse);
-        expect(store.dayHasShownEntries(openDay), isFalse);
+      // A read run wider than a shown range wholly kept: its re-reads fail,
+      // the shown range is ready, and an announced put files on the open
+      // day.
+      final changes =
+          StreamController<CalendarSourceChange<String>>.broadcast();
+      addTearDown(changes.close);
+      final source = FakeDataSource();
+      final store = cachingStoreIn<String>(
+        zoneA,
+        dataSource: source,
+        changes: changes.stream,
+      );
+      addTearDown(store.dispose);
+      final heldStart = dayOfRunStart(base, zoneA);
+      final held = timesEntry(
+        "held",
+        plainOf(heldStart.add(const Duration(minutes: 30))),
+        plainOf(heldStart.add(const Duration(minutes: 60))),
+      );
+      store.prefetch(dateOf(base), dateOf(base + 4));
+      readsOf(source).single.succeed(<CalendarEntry<String>>[held]);
+      await settle();
+      store.show(dateOf(base + 1), dateOf(base + 2));
+      expect(store.status, CalendarLoadStatus.ready);
+      setStoreZone(store, zoneB);
+      final zoned = tz.TZDateTime.from(held.start, zoneB);
+      final openDay = DateTime(zoned.year, zoned.month, zoned.day);
+      expect(numberOf(openDay), base - 1);
+      for (final call in readsOf(source).skip(1).toList()) {
+        call.fail();
+      }
+      await settle();
+      expect(store.status, CalendarLoadStatus.ready);
+      final announced = timesEntry(
+        "put",
+        plainOf(zoned.add(const Duration(hours: 1))),
+        plainOf(zoned.add(const Duration(hours: 2))),
+      );
+      changes.add(CalendarEntryPut<String>(announced));
+      await settle();
+      expect(idsOn(store, openDay), containsAll(<String>["held", "put"]));
+      expect(store.isRead(openDay), isFalse);
+      expect(store.dayHasShownEntries(openDay), isFalse);
 
-        store.prefetch(openDay, openDay);
-        answer(readsOf(source).last, <CalendarEntry<String>>[held, announced]);
-        await settle();
-        expect(store.isRead(openDay), isTrue);
-        expect(store.dayHasShownEntries(openDay), isTrue);
-      },
-    );
+      store.prefetch(openDay, openDay);
+      answer(readsOf(source).last, <CalendarEntry<String>>[held, announced]);
+      await settle();
+      expect(store.isRead(openDay), isTrue);
+      expect(store.dayHasShownEntries(openDay), isTrue);
+    });
 
     test("CZ24 a store with no zone stores an entry a read answers off its "
         "days", () async {
@@ -5834,225 +5850,204 @@ void _zoneTests() {
       expect(idsOn(store, dayA), <String>["off"]);
     });
 
-    test(
-      "CZ25 a side span answering before the shown range keeps a crossing "
-      "entry answered and reads nothing more",
-      skip: true,
-      () async {
-        final zoneA = tz.getLocation("Etc/GMT");
-        final zoneB = tz.getLocation("Etc/GMT-3");
-        final base = numberOf(DateTime(2025, 7, 10));
-        final source = FakeDataSource();
-        final store = cachingStoreIn<String>(zoneA, dataSource: source);
-        addTearDown(store.dispose);
-        final edge = dateOf(base + 4);
-        // On zone B's clock the entry crosses the shown range's last day.
-        final crossingStart = tz.TZDateTime(
-          zoneB,
-          edge.year,
-          edge.month,
-          edge.day,
-          23,
-          30,
-        );
-        final crossing = timesEntry(
-          "cross",
-          plainOf(crossingStart),
-          plainOf(crossingStart.add(const Duration(hours: 1))),
-        );
-        store.show(dateOf(base), dateOf(base + 6));
-        readsOf(source).single.succeed(<CalendarEntry<String>>[crossing]);
-        await settle();
-        // The shown range narrows inside the read run.
-        store.show(dateOf(base + 2), dateOf(base + 4));
-        expect(readsOf(source), hasLength(1));
-        setStoreZone(store, zoneB);
-        final spans = rereadSpans(
-          <(int, int)>[(base, base + 6)],
-          (base + 2, base + 4),
-          zoneA,
-          zoneB,
-        );
-        final sent = source.calls.sublist(1);
-        expect(sent, hasLength(spans.length));
-        expect(sent.length, greaterThan(1));
-        final (shownFirst, shownLast) = deviceSpan(base + 2, base + 4, zoneB);
-        expect(numberOf(sent.first.first!), shownFirst);
-        expect(numberOf(sent.first.last!), shownLast);
+    test("CZ25 a side span answering before the shown range keeps a crossing "
+        "entry answered and reads nothing more", () async {
+      final zoneA = tz.getLocation("Etc/GMT");
+      final zoneB = tz.getLocation("Etc/GMT-3");
+      final base = numberOf(DateTime(2025, 7, 10));
+      final source = FakeDataSource();
+      final store = cachingStoreIn<String>(zoneA, dataSource: source);
+      addTearDown(store.dispose);
+      final edge = dateOf(base + 4);
+      // On zone B's clock the entry crosses the shown range's last day.
+      final crossingStart = tz.TZDateTime(
+        zoneB,
+        edge.year,
+        edge.month,
+        edge.day,
+        23,
+        30,
+      );
+      final crossing = timesEntry(
+        "cross",
+        plainOf(crossingStart),
+        plainOf(crossingStart.add(const Duration(hours: 1))),
+      );
+      store.show(dateOf(base), dateOf(base + 6));
+      readsOf(source).single.succeed(<CalendarEntry<String>>[crossing]);
+      await settle();
+      // The shown range narrows inside the read run.
+      store.show(dateOf(base + 2), dateOf(base + 4));
+      expect(readsOf(source), hasLength(1));
+      setStoreZone(store, zoneB);
+      final spans = rereadSpans(
+        <(int, int)>[(base, base + 6)],
+        (base + 2, base + 4),
+        zoneA,
+        zoneB,
+      );
+      final sent = source.calls.sublist(1);
+      expect(sent, hasLength(spans.length));
+      expect(sent.length, greaterThan(1));
+      final (shownFirst, shownLast) = deviceSpan(base + 2, base + 4, zoneB);
+      expect(numberOf(sent.first.first!), shownFirst);
+      expect(numberOf(sent.first.last!), shownLast);
 
-        void expectAnsweredOnBothSides() {
-          final zonedEnd = tz.TZDateTime.from(crossing.end, zoneB);
-          for (final day in <tz.TZDateTime>[crossingStart, zonedEnd]) {
-            expect(
-              idsOn(store, DateTime(day.year, day.month, day.day)),
-              contains("cross"),
-            );
-          }
-          expectInZone(
-            store.storedEntry("cross")!.start,
-            zoneB,
-            crossing.start,
+      void expectAnsweredOnBothSides() {
+        final zonedEnd = tz.TZDateTime.from(crossing.end, zoneB);
+        for (final day in <tz.TZDateTime>[crossingStart, zonedEnd]) {
+          expect(
+            idsOn(store, DateTime(day.year, day.month, day.day)),
+            contains("cross"),
           );
         }
+        expectInZone(store.storedEntry("cross")!.start, zoneB, crossing.start);
+      }
 
-        // A side span answers first with the entry, then the shown range.
-        expect(
-          crossingStart.day,
-          isNot(crossingStart.add(const Duration(hours: 1)).day),
-        );
-        expectAnsweredOnBothSides();
-        final side = sent.sublist(1).firstWhere((call) {
-          return numberOf(call.first!) >= base + 5;
-        });
-        side.succeed(<CalendarEntry<String>>[crossing]);
-        await settle();
-        expectAnsweredOnBothSides();
-        sent.first.succeed(<CalendarEntry<String>>[crossing]);
-        await settle();
-        expectAnsweredOnBothSides();
-        for (final call in sent.sublist(1)) {
-          if (call != side) {
-            call.succeed(const <CalendarEntry<String>>[]);
+      // A side span answers first with the entry, then the shown range.
+      expect(
+        crossingStart.day,
+        isNot(crossingStart.add(const Duration(hours: 1)).day),
+      );
+      expectAnsweredOnBothSides();
+      // The side span after the shown range, the last one sent.
+      final side = sent.last;
+      side.succeed(<CalendarEntry<String>>[crossing]);
+      await settle();
+      expectAnsweredOnBothSides();
+      sent.first.succeed(<CalendarEntry<String>>[crossing]);
+      await settle();
+      expectAnsweredOnBothSides();
+      for (final call in sent.sublist(1)) {
+        if (call != side) {
+          call.succeed(const <CalendarEntry<String>>[]);
+        }
+      }
+      await settle();
+      expectAnsweredOnBothSides();
+      expect(source.calls, hasLength(1 + spans.length));
+    });
+
+    test("CZ26 a re-read answering before a write's answer keeps the held "
+        "entry and reads both entries' days again", () async {
+      final zoneA = tz.getLocation("Etc/GMT");
+      final zoneB = tz.getLocation("Etc/GMT-3");
+      final base = numberOf(DateTime(2025, 7, 10));
+      final source = FakeDataSource();
+      final store = cachingStoreIn<String>(zoneA, dataSource: source);
+      addTearDown(store.dispose);
+      final held = task("a", dateOf(base + 2), 600, 660);
+      store.show(dateOf(base), dateOf(base + 6));
+      readsOf(source).single.succeed(<CalendarEntry<String>>[held]);
+      await settle();
+      final moved = held.copyWith(
+        start: at(dateOf(base + 4), 600),
+        end: at(dateOf(base + 4), 660),
+      );
+      final write = store.requestMove(moved);
+      final moveCall = callsOf(source, SourceMethod.replace).single;
+      setStoreZone(store, zoneB);
+      final reread = readsOf(source)[1];
+      reread.succeed(<CalendarEntry<String>>[held]);
+      await settle();
+      final extra = readsOf(source).length;
+      moveCall.succeed(moved);
+      await settle();
+      final answered = await write;
+      expectInZone(answered.start, zoneB, moved.start);
+      expectInZone(store.storedEntry("a")!.start, zoneB, held.start);
+      expect(readsOf(source).length, greaterThan(extra));
+      final again = readsOf(source).last;
+      again.succeed(<CalendarEntry<String>>[moved]);
+      await settle();
+      expectInZone(store.storedEntry("a")!.start, zoneB, moved.start);
+      final total = readsOf(source).length;
+      await settle();
+      expect(readsOf(source), hasLength(total));
+    });
+
+    test("CZ27 a zone change between none and a zone re-keys read days and "
+        "keeps every entry answered", () async {
+      final far = zoneFarFromDevice(on);
+      final base = numberOf(DateTime(2025, 7, 10));
+      final source = FakeDataSource();
+      final store = cachingStoreIn<String>(null, dataSource: source);
+      addTearDown(store.dispose);
+      var notifies = 0;
+      store.addListener(() {
+        notifies++;
+      });
+      final held = <CalendarEntry<String>>[
+        task("first", dateOf(base + 1), 720, 780),
+        task("second", dateOf(base + 11), 720, 780),
+        timesEntry("day", dateOf(base + 11), dateOf(base + 12), isAllDay: true),
+      ];
+      store.prefetch(dateOf(base), dateOf(base + 2));
+      answer(readsOf(source).single, held);
+      await settle();
+      store.show(dateOf(base + 10), dateOf(base + 13));
+      answer(readsOf(source).last, held);
+      await settle();
+      final runs = <(int, int)>[(base, base + 2), (base + 10, base + 13)];
+      final shownRange = (base + 10, base + 13);
+
+      Future<void> check(
+        tz.Location? old,
+        tz.Location? next,
+        List<(int, int)> runsThen,
+      ) async {
+        final notifiesBefore = notifies;
+        final before = source.calls.length;
+        setStoreZone(store, next);
+        expect(notifies, notifiesBefore + 1);
+        for (final entry in held) {
+          if (entry.isAllDay) {
+            final date = dateOf(numberOf(entry.start));
+            expect(idsOn(store, date), contains(entry.id));
+            final answered = store.storedEntry(entry.id!)!;
+            expect(answered.start.year, date.year);
+            expect(answered.start.month, date.month);
+            expect(answered.start.day, date.day);
+            expect(answered.start is tz.TZDateTime, next != null);
+          } else {
+            final day = next == null
+                ? numberOf(entry.start)
+                : numberOf(tz.TZDateTime.from(entry.start, next));
+            expect(idsOn(store, dateOf(day)), contains(entry.id));
+            final answered = store.storedEntry(entry.id!)!;
+            expect(answered.start.isAtSameMomentAs(entry.start), isTrue);
+            expect(answered.start is tz.TZDateTime, next != null);
           }
         }
-        await settle();
-        expectAnsweredOnBothSides();
-        expect(source.calls, hasLength(1 + spans.length));
-      },
-    );
-
-    test(
-      "CZ26 a re-read answering before a write's answer keeps the held "
-      "entry and reads both entries' days again",
-      skip: true,
-      () async {
-        final zoneA = tz.getLocation("Etc/GMT");
-        final zoneB = tz.getLocation("Etc/GMT-3");
-        final base = numberOf(DateTime(2025, 7, 10));
-        final source = FakeDataSource();
-        final store = cachingStoreIn<String>(zoneA, dataSource: source);
-        addTearDown(store.dispose);
-        final held = task("a", dateOf(base + 2), 600, 660);
-        store.show(dateOf(base), dateOf(base + 6));
-        readsOf(source).single.succeed(<CalendarEntry<String>>[held]);
-        await settle();
-        final moved = held.copyWith(
-          start: at(dateOf(base + 4), 600),
-          end: at(dateOf(base + 4), 660),
-        );
-        final write = store.requestMove(moved);
-        final moveCall = callsOf(source, SourceMethod.replace).single;
-        setStoreZone(store, zoneB);
-        final reread = readsOf(source)[1];
-        reread.succeed(<CalendarEntry<String>>[held]);
-        await settle();
-        final extra = readsOf(source).length;
-        moveCall.succeed(moved);
-        await settle();
-        final answered = await write;
-        expectInZone(answered.start, zoneB, moved.start);
-        expectInZone(store.storedEntry("a")!.start, zoneB, held.start);
-        expect(readsOf(source).length, greaterThan(extra));
-        final again = readsOf(source).last;
-        again.succeed(<CalendarEntry<String>>[moved]);
-        await settle();
-        expectInZone(store.storedEntry("a")!.start, zoneB, moved.start);
-        final total = readsOf(source).length;
-        await settle();
-        expect(readsOf(source), hasLength(total));
-      },
-    );
-
-    test(
-      "CZ27 a zone change between none and a zone re-keys read days and "
-      "keeps every entry answered",
-      skip: true,
-      () async {
-        final far = zoneFarFromDevice(on);
-        final base = numberOf(DateTime(2025, 7, 10));
-        final source = FakeDataSource();
-        final store = cachingStoreIn<String>(null, dataSource: source);
-        addTearDown(store.dispose);
-        var notifies = 0;
-        store.addListener(() {
-          notifies++;
-        });
-        final held = <CalendarEntry<String>>[
-          task("first", dateOf(base + 1), 720, 780),
-          task("second", dateOf(base + 11), 720, 780),
-          timesEntry(
-            "day",
-            dateOf(base + 11),
-            dateOf(base + 12),
-            isAllDay: true,
-          ),
-        ];
-        store.prefetch(dateOf(base), dateOf(base + 2));
-        answer(readsOf(source).single, held);
-        await settle();
-        store.show(dateOf(base + 10), dateOf(base + 13));
-        answer(readsOf(source).last, held);
-        await settle();
-        final runs = <(int, int)>[(base, base + 2), (base + 10, base + 13)];
-        final shownRange = (base + 10, base + 13);
-
-        Future<void> check(
-          tz.Location? old,
-          tz.Location? next,
-          List<(int, int)> runsThen,
-        ) async {
-          final notifiesBefore = notifies;
-          final before = source.calls.length;
-          setStoreZone(store, next);
-          expect(notifies, notifiesBefore + 1);
-          for (final entry in held) {
-            if (entry.isAllDay) {
-              final date = dateOf(numberOf(entry.start));
-              expect(idsOn(store, date), contains(entry.id));
-              final answered = store.storedEntry(entry.id!)!;
-              expect(answered.start.year, date.year);
-              expect(answered.start.month, date.month);
-              expect(answered.start.day, date.day);
-              expect(answered.start is tz.TZDateTime, next != null);
-            } else {
-              final day = next == null
-                  ? numberOf(entry.start)
-                  : numberOf(tz.TZDateTime.from(entry.start, next));
-              expect(idsOn(store, dateOf(day)), contains(entry.id));
-              final answered = store.storedEntry(entry.id!)!;
-              expect(answered.start.isAtSameMomentAs(entry.start), isTrue);
-              expect(answered.start is tz.TZDateTime, next != null);
-            }
-          }
-          final spans = rereadSpans(runsThen, shownRange, old, next);
-          final sent = source.calls.sublist(before);
-          expect(sent, hasLength(spans.length));
-          (int, int) spanOf(int first, int last) {
-            return next == null ? (first, last) : deviceSpan(first, last, next);
-          }
-
-          final (firstDay, lastDay) = spanOf(spans.first.$1, spans.first.$2);
-          expect(numberOf(sent.first.first!), firstDay);
-          expect(numberOf(sent.first.last!), lastDay);
-          for (final (first, last) in runsThen) {
-            for (var day = first - 3; day <= last + 3; day++) {
-              expect(
-                store.isRead(dateOf(day)),
-                keptRead(day, first, last, old, next),
-                reason: "day $day under ${next?.name}",
-              );
-            }
-          }
-          for (final call in sent) {
-            answer(call, held);
-          }
-          await settle();
+        final spans = rereadSpans(runsThen, shownRange, old, next);
+        final sent = source.calls.sublist(before);
+        expect(sent, hasLength(spans.length));
+        (int, int) spanOf(int first, int last) {
+          return next == null ? (first, last) : deviceSpan(first, last, next);
         }
 
-        await check(null, far, runs);
-        await check(far, null, runs);
-      },
-    );
+        final (firstDay, lastDay) = spanOf(spans.first.$1, spans.first.$2);
+        expect(numberOf(sent.first.first!), firstDay);
+        expect(numberOf(sent.first.last!), lastDay);
+        for (final (first, last) in runsThen) {
+          for (var day = first - 3; day <= last + 3; day++) {
+            expect(
+              store.isRead(dateOf(day)),
+              keptRead(day, first, last, old, next),
+              reason: "day $day under ${next?.name}",
+            );
+          }
+        }
+        for (final call in sent) {
+          answer(call, held);
+        }
+        await settle();
+      }
+
+      await check(null, far, runs);
+      // The re-reads above filled every day the first change opened.
+      await check(far, null, rereadSpans(runs, null, null, far));
+    });
 
     test("CZ28 a zone 26 hours from the device reads and re-reads an all-day "
         "entry on its date", () async {

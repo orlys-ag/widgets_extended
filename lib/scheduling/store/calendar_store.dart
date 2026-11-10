@@ -254,7 +254,8 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
   bool isRead(DateTime day);
 
   /// Whether the last read of [day], which is unread, failed: true until a
-  /// read fills the day or a [show], a [retry] or a [refresh] reads it.
+  /// read fills the day, a [show], a [retry] or a [refresh] reads it, or a
+  /// zone change, which ends the mark.
   bool readFailed(DateTime day);
 
   /// Whether the shown range is exactly [first] to [last].
@@ -392,6 +393,11 @@ class CalendarEntryIndex<T> {
   /// Whether [day] is open.
   bool isOpen(int day) {
     return _byDay.containsKey(day);
+  }
+
+  /// The open days, in no set order.
+  Iterable<int> get openDays {
+    return _byDay.keys;
   }
 
   /// Stores [entry], whose id no stored entry has, without filing it under

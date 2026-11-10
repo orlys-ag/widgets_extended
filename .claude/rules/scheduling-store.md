@@ -31,9 +31,10 @@ The contract of `CalendarStore` and its two stores. The layer's imports are in `
   that covers them reads them again, and marks failed each of them that
   no read a show, a retry or a refresh asked for since it was sent
   covers in flight, whether sent or taken over. A mark ends only when a
-  read fills the day or a show, a retry or a refresh reads it, which
+  read fills the day, when a show, a retry or a refresh reads it, which
   each does with a read of its own though a read in flight covers the
-  day, since that read may fail as the last one did; a read the store
+  day, since that read may fail as the last one did, or at a zone change,
+  which ends them all; a read the store
   sends in the background, such as a prefetch, ends a mark only by
   filling the day, and keeps no failed read from making one. The shown
   range's status follows from its days alone: ready once none is unread,
@@ -49,7 +50,9 @@ The contract of `CalendarStore` and its two stores. The layer's imports are in `
   the status, the load error or the entries change, or a mark it ended
   stays ended, so a read that fails within the call and marks those days
   again notifies nothing.
-  A day once read stays read; a changed day keeps showing what the
+  A day once read stays read, except that a zone change re-keys the read
+  days to those earlier reads fully cover under the new zone, which it
+  reads again; a changed day keeps showing what the
   store holds while it is read again in the background, at once where the
   shown range holds it and otherwise once a show or a prefetch covers it,
   and a day being changed does not change the load status. A background

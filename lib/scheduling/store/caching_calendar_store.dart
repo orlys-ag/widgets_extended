@@ -32,6 +32,10 @@ class _Read {
   /// sent the read or took it over as its own; 0 while none has.
   int requestedAt = 0;
 
+  /// Whether a zone change has marked this read, sent under another zone,
+  /// so its answer or failure applies nothing and completes nothing.
+  bool stale = false;
+
   /// The span of the read's days announced changed while it was in flight,
   /// and the clock of the latest such change; [changedAt] is 0 while none
   /// is.
@@ -99,7 +103,9 @@ class _Day {
 
 /// A [CalendarStore] over a [CalendarDataSource]: a copy of the entries on
 /// the days it has read, the range the calendar shows, and the writes in
-/// flight.
+/// flight. A zone change can leave a day open and unread: its entries are
+/// answered, it reports [isRead] and [dayHasShownEntries] false, and an
+/// announced put on it is filed, until a read fills it.
 ///
 /// A read's answer is what the source stored on the read's days when it
 /// was sent. It replaces what the store holds there: each entry it answers
@@ -113,14 +119,17 @@ class _Day {
 /// [refresh] asked for since it was sent covers in flight. A mark ends
 /// once a read fills the day or a [show], a [retry] or a [refresh] reads
 /// it, which each does with a read of its own though a read in flight
-/// covers the day, since that read may fail as the last one did; a read
+/// covers the day, since that read may fail as the last one did, and at
+/// a zone change, which ends every mark; a read
 /// the store sends in the background, such as a [prefetch], ends a mark
 /// only by filling the day, and keeps no failed read from making one. The
 /// shown range's [status] and [loadError] follow from its days and their
 /// marks alone: a mark keeps the error of the failure that made it, and
 /// [loadError] is the latest such error on the range's unread days.
 ///
-/// A day once read stays read. [invalidate], [refresh] and the changes the
+/// A day once read stays read, except that a zone change re-keys the read
+/// days to those its earlier reads fully cover under the new zone, each read
+/// again in the background. [invalidate], [refresh] and the changes the
 /// source announces take a read day's entries to have changed: the day
 /// still shows what the store holds, and is read again in the background,
 /// at once where the shown range holds it and otherwise once a [show] or a
@@ -224,18 +233,17 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// The [show] calls that changed the shown range.
   int _showCount = 0;
 
-  /// The entries the cache knows, filed under the read days, and the
-  /// pending writes.
-  final CalendarEntryIndex<T> _index = CalendarEntryIndex<T>(
-    opensEveryDay: false,
-  );
+  /// The entries the cache knows, filed under the read days and any day a
+  /// zone change left open and unread, and the pending writes.
+  CalendarEntryIndex<T> _index = CalendarEntryIndex<T>(opensEveryDay: false);
 
   /// The reads in flight, in the order they were sent.
   final List<_Read> _reads = <_Read>[];
 
   /// The unread days, by [CalendarDates.dayNumber], whose last read failed,
-  /// each with the failure that marked it, until a read fills them or a [show],
-  /// a [retry] or a [refresh] reads them.
+  /// each with the failure that marked it, until a read fills them, a [show],
+  /// a [retry] or a [refresh] reads them, or a zone change, which ends every
+  /// mark.
   final Map<int, _Mark> _failedDays = <int, _Mark>{};
 
   /// The count of failed reads, which orders their marks in [_failedDays].
@@ -266,7 +274,8 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// another read of it is in flight, and otherwise loading, as before the
   /// first [show]. A failed range stays failed while a read it did not ask
   /// for, such as a [prefetch], reads its failed days, until a [show], a
-  /// [retry] or a [refresh] reads them or reads fill them.
+  /// [retry] or a [refresh] reads them, reads fill them, or a zone change,
+  /// which ends every mark.
   @override
   CalendarLoadStatus get status {
     return _status;
@@ -333,9 +342,10 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// Whether a read of [day], which is unread, failed while no read a
   /// [show], a [retry] or a [refresh] asked for since it was sent was in
   /// flight over it, and neither a read has filled it nor a [show], a
-  /// [retry] or a [refresh] has read it since. A read the store sends in
-  /// the background, as a [prefetch] or the read of changed days does,
-  /// leaves the mark until it fills the day.
+  /// [retry] or a [refresh] has read it since, nor a zone change, which ends
+  /// every mark, has come since. A read the store sends in the background,
+  /// as a [prefetch] or the read of changed days does, leaves the mark until
+  /// it fills the day.
   @override
   bool readFailed(DateTime day) {
     return _failedDays.containsKey(CalendarDates.dayNumber(day));
@@ -501,8 +511,10 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// [retry] does, only where it changes something: a read that fails
   /// within the call with the error the range's marks hold notifies
   /// nothing. Completes once that read answers, or fails with the error it
-  /// failed with; completes at once before the first [show] and after
-  /// [dispose], and when the store is disposed before the read answers.
+  /// failed with; a zone change before it answers passes the wait to the
+  /// read of the shown range that change sends. Completes at once before the
+  /// first [show] and after [dispose], and when the store is disposed before
+  /// the read answers.
   @override
   Future<void> refresh() {
     if (_disposed) {
@@ -987,8 +999,11 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     }
   }
 
-  /// A read's answer. One that answers ends the [readFailed] mark of each
-  /// day it fills, and sends the read again of the shown range's days
+  /// A read's answer. A read sent before a zone change applies nothing,
+  /// answered or failed, and completes nothing, its wait having passed to
+  /// the read of the shown range that zone change sent. One that answers
+  /// ends the [readFailed] mark of each day it fills, and sends the read
+  /// again of the shown range's days
   /// announced changed meanwhile. A failed one marks [readFailed] each of
   /// its days that no read has filled and that no read a [show], a [retry]
   /// or a [refresh] asked for since it was sent covers in flight
@@ -1003,7 +1018,7 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     List<CalendarEntry<T>>? entries,
     Object? error,
   }) {
-    if (_disposed) {
+    if (_disposed || read.stale) {
       return;
     }
     _batch(() {
@@ -1369,9 +1384,10 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// Stores [entry], which the source announced stored, in the store's
-  /// form, where it covers a read day or a day a read in flight covers;
-  /// otherwise forgets the entry its id names, which left the days the
-  /// store holds. A time the zone cannot represent stores nothing and takes
+  /// form, where it covers a read day, a day a zone change left open or a
+  /// day a read in flight covers; otherwise forgets the entry its id names,
+  /// which left the days the store holds. A time the zone cannot represent
+  /// stores nothing and takes
   /// every entry to have changed, so what the source holds is read anew,
   /// since no caller waits on an announced change to fail to.
   void _applyPut(CalendarEntry<T> entry) {
@@ -1402,7 +1418,8 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     }
   }
 
-  /// Whether [entry] covers a read day or a day a read in flight covers.
+  /// Whether [entry] covers an open day, read or left open by a zone
+  /// change, or a day a read in flight covers.
   bool _coversHeldDay(CalendarEntry<T> entry) {
     final first = CalendarDates.dayNumber(entry.start);
     final last = CalendarDates.lastDayNumberOf(entry.start, entry.end);
@@ -1411,11 +1428,29 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
         return true;
       }
     }
-    return _readDaysIn(first, last).isNotEmpty;
+    return _openDayIn(first, last);
+  }
+
+  /// Whether a day from [first] to [last] is open in the index, walking the
+  /// shorter of the span and the open days.
+  bool _openDayIn(int first, int last) {
+    final openDays = _index.openDays;
+    if (last - first < openDays.length) {
+      for (var day = first; day <= last; day++) {
+        if (_index.isOpen(day)) {
+          return true;
+        }
+      }
+      return false;
+    }
+    return openDays.any((day) {
+      return day >= first && day <= last;
+    });
   }
 
   /// The entries shown on [day], sorted by start, end, title and id: those
-  /// filed under it when it is read, and the pending entries covering it.
+  /// filed under it when it is read or left open and unread by a zone
+  /// change, and the pending entries covering it.
   @override
   List<CalendarShownEntry<T>> entriesOn(DateTime day) {
     return _index.entriesOn(CalendarDates.dayNumber(day));
@@ -1432,7 +1467,9 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// Whether [day] shows a marker: it has shown entries, and, while the
-  /// shown range is not ready, it was read under an earlier [show] call.
+  /// shown range is not ready, it was read under an earlier [show] call. A
+  /// day a zone change left open and unread shows none, until a read fills
+  /// it.
   @override
   bool dayHasShownEntries(DateTime day) {
     final number = CalendarDates.dayNumber(day);
@@ -1819,6 +1856,167 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     final first = CalendarDates.dayNumber(answer.start);
     final last = CalendarDates.lastDayNumberOf(answer.start, answer.end);
     return last < read.first || first > read.last;
+  }
+
+  /// Under a zone [next] to come, builds the entries filed under [next],
+  /// the days read and open under it and the spans to read again, changing
+  /// nothing, and answers the function that puts them in place: every read
+  /// in flight goes stale and hands its wait to the read of the shown range,
+  /// which is sent first, and then each other re-read span goes out, all in
+  /// the background, and the listeners are notified once. Coverage comes
+  /// from runs of consecutive days under the old zone: a day [next]'s clock
+  /// reads wholly inside the instants a run of read days covers, whose date
+  /// lies in that run, stays read; every other day of a run of open days,
+  /// widened to the instants and dates the run holds under [next], stays
+  /// open and unread, so its entries stay answered through a second zone
+  /// change or a failed re-read. After [dispose] it builds nothing.
+  @override
+  VoidCallback prepareZone(Location? next) {
+    if (_disposed) {
+      return () {};
+    }
+    final old = zone;
+    final opened = <int>{};
+    final spans = <({int first, int last})>[];
+    for (final (:first, :last) in _runsOf(_index.openDays)) {
+      final startMs = dayStartMillis(first, old);
+      final endMs = dayStartMillis(last + 1, old);
+      final from = math.min(_dayAt(startMs, next), first);
+      final to = math.max(_dayAt(endMs - 1, next), last);
+      opened.addAll(<int>[for (var day = from; day <= to; day++) day]);
+      spans.add((first: from, last: to));
+    }
+    final read = <int>{};
+    for (final (:first, :last) in _runsOf(_days.keys)) {
+      final startMs = dayStartMillis(first, old);
+      final endMs = dayStartMillis(last + 1, old);
+      final firstIn = _dayAt(startMs, next);
+      final lastIn = _dayAt(endMs - 1, next);
+      final readFrom = dayStartMillis(firstIn, next) >= startMs
+          ? firstIn
+          : firstIn + 1;
+      final readTo = dayStartMillis(lastIn + 1, next) <= endMs
+          ? lastIn
+          : lastIn - 1;
+      final lastRead = math.min(readTo, last);
+      for (var day = math.max(readFrom, first); day <= lastRead; day++) {
+        read.add(day);
+      }
+    }
+    final index = _index.refiled((entry) {
+      return zonedEntryOf(entry, next);
+    }, days: opened);
+    final others = _rereadSpans(spans);
+    return () {
+      _batch(() {
+        final waiters = <Completer<void>>[];
+        for (final stale in _reads) {
+          stale.stale = true;
+          final done = stale.done;
+          if (done != null) {
+            waiters.add(done);
+          }
+        }
+        _reads.clear();
+        _index = index;
+        _days.clear();
+        for (final day in read) {
+          _days[day] = _Day(0, 0);
+        }
+        _failedDays.clear();
+        _allChangedAt = ++_clock;
+        _newestFillAt = 0;
+        final shownFirst = _shownFirst;
+        final shownLast = _shownLast;
+        if (shownFirst != null && shownLast != null) {
+          _send(shownFirst, shownLast, done: _waitingOn(waiters));
+        }
+        for (final span in others) {
+          _send(span.first, span.last);
+        }
+        _pruneEntryTimes();
+        _settleStatus();
+        _notify();
+      });
+    };
+  }
+
+  /// The maximal runs of consecutive days of [days], ascending.
+  static List<({int first, int last})> _runsOf(Iterable<int> days) {
+    final sorted = days.toList()..sort();
+    final runs = <({int first, int last})>[];
+    for (final day in sorted) {
+      if (runs.isNotEmpty && runs.last.last == day - 1) {
+        runs[runs.length - 1] = (first: runs.last.first, last: day);
+      } else {
+        runs.add((first: day, last: day));
+      }
+    }
+    return runs;
+  }
+
+  /// [spans] merged where they overlap or touch, less the shown range, which
+  /// is read as a span of its own.
+  List<({int first, int last})> _rereadSpans(
+    List<({int first, int last})> spans,
+  ) {
+    spans.sort((a, b) {
+      return a.first.compareTo(b.first);
+    });
+    final merged = <({int first, int last})>[];
+    for (final span in spans) {
+      if (merged.isNotEmpty && span.first <= merged.last.last + 1) {
+        merged[merged.length - 1] = (
+          first: merged.last.first,
+          last: math.max(merged.last.last, span.last),
+        );
+      } else {
+        merged.add(span);
+      }
+    }
+    final shownFirst = _shownFirst;
+    final shownLast = _shownLast;
+    if (shownFirst == null || shownLast == null) {
+      return merged;
+    }
+    final others = <({int first, int last})>[];
+    for (final span in merged) {
+      if (span.last < shownFirst || span.first > shownLast) {
+        others.add(span);
+        continue;
+      }
+      if (span.first < shownFirst) {
+        others.add((first: span.first, last: shownFirst - 1));
+      }
+      if (span.last > shownLast) {
+        others.add((first: shownLast + 1, last: span.last));
+      }
+    }
+    return others;
+  }
+
+  /// A completer that passes its outcome to every one of [waiters], or null
+  /// where none waits.
+  Completer<void>? _waitingOn(List<Completer<void>> waiters) {
+    if (waiters.isEmpty) {
+      return null;
+    }
+    final passing = Completer<void>();
+    unawaited(
+      passing.future.then(
+        (_) {
+          for (final waiter in waiters) {
+            waiter.complete();
+          }
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          for (final waiter in waiters) {
+            waiter.completeError(error, stackTrace);
+          }
+        },
+      ),
+    );
+    return passing;
   }
 
   /// Stops listening to the source's changes, and completes each refresh
