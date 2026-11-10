@@ -67,6 +67,20 @@ there. These helpers become public: `CalendarDates.addMonths`,
 month occupies over the weekdays a `CalendarWeekdaySet` shows.
 `CalendarDates.nextShownDay` throws an `ArgumentError` naming `direction`, in
 every build, for a direction of 0.
+- Added a store's time zone: a `MemoryCalendarStore` or `CachingCalendarStore`
+takes a `Location` of `package:timezone`, at construction or later through its
+`zone`, and files, reads, writes and limits entries on that zone's clock; with
+none it runs on the device's clock as before. Timed entries read back at the
+same instants as `TZDateTime`s of the zone, all-day entries stay on their
+dates, and a `CalendarDataSource` keeps reading and writing device days and
+plain local times. Setting another zone refiles a store's entries and notifies
+once. A time whose offset in the zone has seconds fails only the operation
+that holds it, with an `ArgumentError`. `CalendarEntry` and
+`CalendarCreateRange` take a `TZDateTime`, `CalendarNow` and the edit policies
+read a zoned time's clock, and `CalendarDates`' helpers read the clock of a
+`TZDateTime`. `CalendarView` refuses a store with a zone for now, which its
+build reports as an `ArgumentError`. The package depends on `timezone`, so an
+app resolves `timezone`, `http` and `path` too.
 - Added `CalendarEditPolicy.mayOverlap`, which answers whether a change may
 share time with one other entry, and `CalendarOverlapCandidate`, the change
 it is asked about: its start, its end and the entry it changes, none for a

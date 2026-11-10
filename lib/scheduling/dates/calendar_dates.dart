@@ -1,20 +1,27 @@
-/// Civil dates on the local wall clock: the day steps, day numbers and
-/// wall minutes of [CalendarDates], weekday sets, month grids, the hours of
-/// a day, and the clock a time of day is named on.
+/// Civil dates on the local wall clock or on the clock of the zone a
+/// `TZDateTime` carries: the day steps, day numbers and wall minutes of
+/// [CalendarDates], weekday sets, month grids, the hours of a day, and the
+/// clock a time of day is named on.
 ///
-/// Every date here is local midnight, built from its year, month and day
-/// fields, so two dates for the same day compare equal and can key a map.
+/// Every date here is a local midnight, or for a `TZDateTime` the first
+/// instant its zone's clock reads that day, built from its year, month and
+/// day fields, so two dates for the same day compare equal and can key a
+/// map.
 library;
 
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:timezone/timezone.dart' show Location, TZDateTime, TzInstant;
+
+export 'package:timezone/timezone.dart' show Location, TZDateTime;
 
 /// The scheduling module's civil-date helpers and constants, on the local
-/// wall clock, which the calendar counts days and minutes with: the day
-/// steps, day numbers and minutes that [CalendarDayHours],
-/// [CalendarWeekdaySet], a `CalendarDataSource`'s reads by days and a
-/// `CalendarEntry`'s times are counted in.
+/// wall clock or, for a `TZDateTime`, on the clock of its zone, which the
+/// calendar counts days and minutes with: the day steps, day numbers and
+/// minutes that [CalendarDayHours], [CalendarWeekdaySet], a
+/// `CalendarDataSource`'s reads by days and a `CalendarEntry`'s times are
+/// counted in.
 ///
 /// Its members are static, under this class's name, so they share no name
 /// with a host's own helpers.
@@ -31,22 +38,40 @@ abstract final class CalendarDates {
   /// wall minutes ([wallMinuteOf]) count in whatever the day's length.
   static const int minutesPerDay = 1440;
 
-  /// The start of [date]'s day, built from its year, month and day.
+  /// The start of [date]'s day, built from its year, month and day: on
+  /// the clock of a `TZDateTime` [date]'s zone, the first instant that
+  /// clock reads the day, a `TZDateTime` of the zone.
   static DateTime dateOnly(DateTime date) {
+    if (date is TZDateTime) {
+      return _zoneDayStart(dayNumber(date), date.location);
+    }
     return DateTime(date.year, date.month, date.day);
   }
 
   /// [date] moved by [days] calendar days. Built from the fields rather than
   /// by adding a `Duration`, so a daylight-saving change cannot move the
-  /// result off midnight.
+  /// result off midnight; for a `TZDateTime` [date] the result is its zone's
+  /// day start, a `TZDateTime` of the zone.
   static DateTime addDays(DateTime date, int days) {
+    if (date is TZDateTime) {
+      return _zoneDayStart(dayNumber(date) + days, date.location);
+    }
     return DateTime(date.year, date.month, date.day + days);
   }
 
   /// [date] moved by [months] whole months, keeping its day of the month
   /// where the target month has it and taking the target's last day where
-  /// it does not.
+  /// it does not; for a `TZDateTime` [date] the result is its zone's day
+  /// start, a `TZDateTime` of the zone.
   static DateTime addMonths(DateTime date, int months) {
+    if (date is TZDateTime) {
+      final first = DateTime.utc(date.year, date.month + months);
+      final day = math.min(date.day, daysInMonth(first.year, first.month));
+      return _zoneDayStart(
+        dayNumber(DateTime.utc(first.year, first.month, day)),
+        date.location,
+      );
+    }
     final first = DateTime(date.year, date.month + months);
     final day = math.min(date.day, daysInMonth(first.year, first.month));
     return DateTime(first.year, first.month, day);
@@ -140,8 +165,14 @@ abstract final class CalendarDates {
     ];
   }
 
-  /// The local midnight of [day], the inverse of [dayNumber].
-  static DateTime dateOfDayNumber(int day) {
+  /// The local midnight of [day], the inverse of [dayNumber]; with [zone],
+  /// the first instant that zone's clock reads the day, a `TZDateTime` of
+  /// the zone, or, for a day the clock skips altogether, the instant it
+  /// skips past it, a time of a later day.
+  static DateTime dateOfDayNumber(int day, {Location? zone}) {
+    if (zone != null) {
+      return _zoneDayStart(day, zone);
+    }
     final utc = DateTime.fromMillisecondsSinceEpoch(
       day * Duration.millisecondsPerDay,
       isUtc: true,
@@ -150,9 +181,15 @@ abstract final class CalendarDates {
   }
 
   /// Whether [time] is the start of its day: the instant
-  /// `DateTime(year, month, day)` gives, so a day of 23 or 25 hours, and one
-  /// whose midnight the clock skips, has one.
+  /// `DateTime(year, month, day)` gives, or the first instant its zone's
+  /// clock reads the day for a `TZDateTime`, so a day of 23 or 25 hours, and
+  /// one whose midnight the clock skips, has one.
   static bool isDayStart(DateTime time) {
+    if (time is TZDateTime) {
+      return time.microsecondsSinceEpoch ==
+          _ZoneClock.around(time).dayStartMs(dayNumber(time)) *
+              Duration.microsecondsPerMillisecond;
+    }
     return time == DateTime(time.year, time.month, time.day);
   }
 
@@ -176,40 +213,49 @@ abstract final class CalendarDates {
   }
 
   /// The wall minute a range ending at [end] ends at: its day's minute 0,
-  /// the 24:00 of the day before, for a day's start, the instant
-  /// `DateTime(year, month, day)` gives, the start of a day whose clock
-  /// skips its midnight included, and [wallMinuteOf]'s otherwise. A day's
-  /// 24:00 is the next day's minute 0.
+  /// the 24:00 of the day before, for a day's start ([isDayStart]), the
+  /// start of a day whose clock skips its midnight included, and
+  /// [wallMinuteOf]'s otherwise. A day's 24:00 is the next day's minute 0.
   static int endWallMinuteOf(DateTime end) {
     return dayNumber(end) * minutesPerDay +
         (isDayStart(end) ? 0 : minuteOfDay(end));
   }
 
-  /// The instant the wall minute [wall] names as a start or a time of day:
-  /// the time its day's clock reads at that hour and minute, minute 0
-  /// included, which is the day's start where its clock reads 00:00; null
-  /// for a time the clock skips, minute 0 of a day whose clock skips its
-  /// midnight included. A range's end converts with [endAtWallMinute].
+  /// The instant the wall minute [wall] names as a start or a time of day,
+  /// on the clock of [zone], of a [from] that is a `TZDateTime` where
+  /// [zone] is null, and otherwise of the device, a `TZDateTime` of the
+  /// zone where a zone's clock is read: the time its day's clock reads at
+  /// that hour and minute, minute 0 included, which is the day's start
+  /// where its clock reads 00:00; null for a time the clock skips, minute 0
+  /// of a day whose clock skips its midnight included. A range's end
+  /// converts with [endAtWallMinute].
   ///
   /// On a day whose clock repeats a stretch, a time in it has two instants:
   /// the earlier, or the later where [from] lies on the same day and is
   /// itself a later occurrence ([isLaterOccurrence]), so a gesture that
   /// began in the repeated stretch stays in the occurrence it began in.
-  static DateTime? timeAtWallMinute(int wall, {DateTime? from}) {
-    return _instantAtWallMinute(wall, from, end: false);
+  /// [from] may be of any form, a `TZDateTime` of another zone or a plain
+  /// `DateTime` included: it is read as an instant on the clock read.
+  static DateTime? timeAtWallMinute(
+    int wall, {
+    DateTime? from,
+    Location? zone,
+  }) {
+    return _instantAtWallMinute(wall, from, end: false, zone: zone);
   }
 
   /// The instant a range ending at the wall minute [wall] ends at:
-  /// [timeAtWallMinute]'s, [from] read as it reads it, except that minute 0
-  /// of a day whose clock skips its midnight, the 24:00 of the day before,
-  /// is the day's start. A day's 24:00 is the next day's minute 0. The
+  /// [timeAtWallMinute]'s, on the clock it reads and [from] read as it
+  /// reads it, except that minute 0 of a day whose clock skips its
+  /// midnight, the 24:00 of the day before, is the day's start. A day's
+  /// 24:00 is the next day's minute 0. The
   /// minute a stretch its day's clock repeats ends at is the instant after
   /// the stretch's second pass, whichever occurrence [from] picks.
   ///
   /// [rangeEndAtWallMinute] ends a range from the stretch's first pass there
   /// with that pass.
-  static DateTime? endAtWallMinute(int wall, {DateTime? from}) {
-    return _instantAtWallMinute(wall, from, end: true);
+  static DateTime? endAtWallMinute(int wall, {DateTime? from, Location? zone}) {
+    return _instantAtWallMinute(wall, from, end: true, zone: zone);
   }
 
   /// The instant a range from [start] ending at the wall minute [wall] ends
@@ -224,6 +270,14 @@ abstract final class CalendarDates {
     int wall, {
     DateTime? from,
   }) {
+    if (start is TZDateTime) {
+      final location = start.location;
+      final instant = _ZoneClock(
+        location,
+        wall * Duration.millisecondsPerMinute,
+      ).rangeEndAt(start, wall, _inZone(from, location));
+      return instant == null ? null : _zoneTime(location, instant);
+    }
     // Inside one pass, instants and wall minutes run together, up to the
     // instant the clock goes back: the only one whose offset is below the
     // minute's before it, and which reads a time not after the start's when
@@ -245,7 +299,16 @@ abstract final class CalendarDates {
     int wall,
     DateTime? from, {
     required bool end,
+    Location? zone,
   }) {
+    final location = zone ?? (from is TZDateTime ? from.location : null);
+    if (location != null) {
+      final instant = _ZoneClock(
+        location,
+        wall * Duration.millisecondsPerMinute,
+      ).instantAtWall(wall, _inZone(from, location), end: end);
+      return instant == null ? null : _zoneTime(location, instant);
+    }
     // Floored, so a wall minute before the epoch's day keeps its minute.
     final minute = wall % minutesPerDay;
     final day = (wall - minute) ~/ minutesPerDay;
@@ -297,6 +360,17 @@ abstract final class CalendarDates {
   /// as a clock turned back does: how far its offset falls by the next day's
   /// start, and zero where it does not fall.
   static Duration repeatedStretchOf(DateTime day) {
+    if (day is TZDateTime) {
+      final number = dayNumber(day);
+      final clock = _ZoneClock(
+        day.location,
+        number * Duration.millisecondsPerDay,
+      );
+      final change =
+          clock.offsetAt(clock.dayStartMs(number)) -
+          clock.offsetAt(clock.dayStartMs(number + 1));
+      return change > 0 ? Duration(milliseconds: change) : Duration.zero;
+    }
     final date = dateOnly(day);
     final change = date.timeZoneOffset - addDays(date, 1).timeZoneOffset;
     return change > Duration.zero ? change : Duration.zero;
@@ -306,6 +380,9 @@ abstract final class CalendarDates {
   /// reads twice, told as of its whole minute, so the seconds past it play
   /// no part.
   static bool isLaterOccurrence(DateTime time) {
+    if (time is TZDateTime) {
+      return _ZoneClock.around(time).isLater(time);
+    }
     // The minute's own instant in time's occurrence: [timeAtWallMinute]
     // answers whole minutes.
     final minute = time.subtract(
@@ -330,6 +407,24 @@ abstract final class CalendarDates {
   /// that fails its test, at most a minute past a stretch the clock repeats
   /// or skips.
   static int firstWallMinuteNotBefore(DateTime time, {DateTime? from}) {
+    if (time is TZDateTime) {
+      final fromIn = _inZone(from, time.location);
+      final clock = _ZoneClock.around(time);
+      final micros = time.microsecondsSinceEpoch;
+      bool isBefore(int? instant) {
+        return instant == null ||
+            instant * Duration.microsecondsPerMillisecond < micros;
+      }
+
+      var wall = wallMinuteOf(time);
+      while (!isBefore(clock.instantAtWall(wall - 1, fromIn, end: false))) {
+        wall--;
+      }
+      while (isBefore(clock.instantAtWall(wall, fromIn, end: false))) {
+        wall++;
+      }
+      return wall;
+    }
     var wall = wallMinuteOf(time);
     while (!(timeAtWallMinute(wall - 1, from: from)?.isBefore(time) ?? true)) {
       wall--;
@@ -358,6 +453,37 @@ abstract final class CalendarDates {
     DateTime? from,
     DateTime? start,
   }) {
+    if (time is TZDateTime) {
+      final location = time.location;
+      final fromIn = _inZone(from, location);
+      final startIn = _inZone(start, location);
+      final clock = _ZoneClock.around(time);
+      final micros = time.microsecondsSinceEpoch;
+      int? endAt(int wall) {
+        return startIn == null
+            ? clock.instantAtWall(wall, fromIn, end: true)
+            : clock.rangeEndAt(startIn, wall, fromIn);
+      }
+
+      bool isAfter(int? instant) {
+        return instant == null ||
+            instant * Duration.microsecondsPerMillisecond > micros;
+      }
+
+      final day = dayNumber(time);
+      var wall =
+          day * minutesPerDay +
+          (micros == clock.dayStartMs(day) * Duration.microsecondsPerMillisecond
+              ? 0
+              : minuteOfDay(time));
+      while (!isAfter(endAt(wall + 1))) {
+        wall++;
+      }
+      while (isAfter(endAt(wall))) {
+        wall--;
+      }
+      return wall;
+    }
     DateTime? endAt(int wall) {
       return start == null
           ? endAtWallMinute(wall, from: from)
@@ -444,7 +570,7 @@ int daysInMonth(int year, int month) {
   return DateTime(year, month + 1, 0).day;
 }
 
-/// The Monday of [date]'s week, at local midnight.
+/// The Monday of [date]'s week, at its day start.
 DateTime weekStartOf(DateTime date) {
   return CalendarDates.addDays(
     CalendarDates.dateOnly(date),
@@ -551,7 +677,7 @@ final class CalendarWeekdaySet {
     return (column - firstColumn) % DateTime.daysPerWeek;
   }
 
-  /// The first day of the week holding [date], at local midnight.
+  /// The first day of the week holding [date], at its day start.
   DateTime weekStartOf(DateTime date) {
     return CalendarDates.addDays(
       CalendarDates.dateOnly(date),
@@ -602,9 +728,10 @@ final class CalendarWeekdaySet {
 }
 
 /// Whether [time] is the later 00:00 of a day whose clock repeats its
-/// midnight, or a time inside its minute: a local time reading 00:00 that
-/// [CalendarDates.isLaterOccurrence] names. Where the clock goes back to
-/// 00:00, it is the instant the stretch's first pass ends.
+/// midnight, or a time inside its minute: a time reading 00:00 on its
+/// clock, not UTC, that [CalendarDates.isLaterOccurrence] names. Where the
+/// clock goes back to 00:00, it is the instant the stretch's first pass
+/// ends.
 bool isLaterMidnight(DateTime time) {
   // A day's start is the earlier 00:00, and the cheaper test.
   return !time.isUtc &&
@@ -621,7 +748,8 @@ bool isLaterMidnight(DateTime time) {
 /// [from], or where that one is not, the first from a later minute on the
 /// grid of [slotMinutes] from midnight; null where none is. Each time is in
 /// [occurrence]'s occurrence where [day]'s clock repeats it, as
-/// [CalendarDates.timeAtWallMinute]'s `from` picks.
+/// [CalendarDates.timeAtWallMinute]'s `from` picks; the clock is the zone's
+/// of a [day] that is a `TZDateTime`, and the device's otherwise.
 ({DateTime start, DateTime end})? firstReadableSlot(
   DateTime day,
   int from,
@@ -630,12 +758,14 @@ bool isLaterMidnight(DateTime time) {
   DateTime? occurrence,
   bool Function(DateTime start, DateTime end)? isFree,
 }) {
+  final zone = zoneOf(day);
   final base = CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay;
   var minute = from;
   while (minute + slotMinutes <= until) {
     final start = CalendarDates.timeAtWallMinute(
       base + minute,
       from: occurrence,
+      zone: zone,
     );
     final end = start == null
         ? null
@@ -670,8 +800,9 @@ int hoursEndMinuteOf(DateTime start, DateTime end) {
 
 final RegExp _isoDatePattern = RegExp(r"^(\d{4})-(\d{2})-(\d{2})$");
 
-/// The local midnight [text] names in the form [CalendarDates.isoDate]
-/// writes, or null when it is not a real date in that form.
+/// The local midnight, on the device's clock, [text] names in the form
+/// [CalendarDates.isoDate] writes, or null when it is not a real date in
+/// that form.
 DateTime? parseIsoDate(String text) {
   final match = _isoDatePattern.firstMatch(text);
   if (match == null) {
@@ -928,7 +1059,7 @@ final class CalendarDayHours {
   /// its day (`CalendarDates.minuteOfDay`) they hold as a start and whose
   /// end's minute on its last day (`CalendarDates.endMinuteOfDay`) they
   /// hold as an end, except an end at the later 00:00 of a day whose clock
-  /// repeats its midnight, a local time reading 00:00 that
+  /// repeats its midnight, a time reading 00:00 that
   /// `CalendarDates.isLaterOccurrence` names, which they hold where Week
   /// and Day draw it: at the minute the repeated stretch's first pass ends,
   /// 01:00 for an hour, whatever day the range starts on; and an end in a
@@ -972,4 +1103,228 @@ enum CalendarHourLabelFormat {
 
   /// The 12-hour clock: "1 PM" in English.
   twelveHour,
+}
+
+/// The zone of [time], where it is a `TZDateTime`.
+Location? zoneOf(DateTime time) {
+  return time is TZDateTime ? time.location : null;
+}
+
+/// The day start, on [zone]'s clock, of the date a plain [day] reads:
+/// [day] itself where [zone] is null or [day] is a `TZDateTime`, and
+/// otherwise [CalendarDates.dateOfDayNumber] of its date.
+DateTime zonedDayOf(DateTime day, Location? zone) {
+  if (zone == null || day is TZDateTime) {
+    return day;
+  }
+  return CalendarDates.dateOfDayNumber(
+    CalendarDates.dayNumber(day),
+    zone: zone,
+  );
+}
+
+/// The instant of the start of the day numbered [day] on [zone]'s clock,
+/// the device's where [zone] is null, in milliseconds since the epoch.
+int dayStartMillis(int day, Location? zone) {
+  if (zone == null) {
+    return CalendarDates.dateOfDayNumber(day).millisecondsSinceEpoch;
+  }
+  return _ZoneClock(zone, day * Duration.millisecondsPerDay).dayStartMs(day);
+}
+
+/// Whether [a] and [b] are the same time: by instant where either is a
+/// `TZDateTime`, and by `==` otherwise, so two plain values answer as they
+/// do alone, a plain UTC time and a local one at the same instant unequal,
+/// and two nulls are the same.
+bool sameTime(DateTime? a, DateTime? b) {
+  if (a != null && b != null && (a is TZDateTime || b is TZDateTime)) {
+    return a.isAtSameMomentAs(b);
+  }
+  return a == b;
+}
+
+/// The first day start, on [zone]'s clock, of the day numbered [day], or
+/// where the clock skips the day the instant it skips past it, as a
+/// `TZDateTime` of [zone].
+DateTime _zoneDayStart(int day, Location zone) {
+  return _zoneTime(
+    zone,
+    _ZoneClock(zone, day * Duration.millisecondsPerDay).dayStartMs(day),
+  );
+}
+
+/// The time at [instant] on [zone]'s clock.
+TZDateTime _zoneTime(Location zone, int instant) {
+  return TZDateTime.fromMillisecondsSinceEpoch(zone, instant);
+}
+
+/// [time] as a `TZDateTime` of [location] where it is of another zone or
+/// plain; null for a null [time].
+TZDateTime? _inZone(DateTime? time, Location location) {
+  if (time == null) {
+    return null;
+  }
+  return time is TZDateTime && time.location == location
+      ? time
+      : TZDateTime.from(time, location);
+}
+
+/// How far a [_ZoneClock]'s window reaches either side of a wall time,
+/// which holds every instant reading it, whatever the zone's offset.
+const int _windowMs = 2 * Duration.millisecondsPerDay;
+
+/// One helper call's reading of a zone's clock: the stretches of one
+/// offset that meet the window of [_windowMs] either side of a wall time,
+/// from `Location.lookupTimeZone`, whose answers bound each stretch.
+///
+/// A wall time's instants are `wall - offset` for each stretch that holds
+/// that instant: none where the clock skips the wall time, one where it
+/// reads it once, and two where it repeats it. Each wall time asks no
+/// further lookup; the window is fetched again only when a walk leaves it.
+final class _ZoneClock {
+  _ZoneClock(this._location, int wallMs) {
+    _cover(wallMs);
+  }
+
+  /// The clock around [time]'s own wall time.
+  factory _ZoneClock.around(TZDateTime time) {
+    return _ZoneClock(
+      time.location,
+      CalendarDates.wallMinuteOf(time) * Duration.millisecondsPerMinute,
+    );
+  }
+
+  final Location _location;
+
+  /// The stretches that meet the window, in ascending order.
+  final List<TzInstant> _spans = <TzInstant>[];
+
+  int _first = 0;
+  int _last = -1;
+
+  void _cover(int wallMs) {
+    if (wallMs >= _first && wallMs <= _last) {
+      return;
+    }
+    _first = wallMs - _windowMs;
+    _last = wallMs + _windowMs;
+    _spans.clear();
+    var span = _location.lookupTimeZone(_first);
+    _spans.add(span);
+    while (span.end <= _last) {
+      span = _location.lookupTimeZone(span.end);
+      _spans.add(span);
+    }
+  }
+
+  int _offsetOf(TzInstant span) {
+    return span.timeZone.offset.inMilliseconds;
+  }
+
+  /// The offset, in milliseconds, at [instant], which lies in the window.
+  int offsetAt(int instant) {
+    for (final span in _spans) {
+      if (instant < span.end) {
+        return _offsetOf(span);
+      }
+    }
+    return _offsetOf(_spans.last);
+  }
+
+  /// The earliest instant reading [wallMs], or null where the clock skips
+  /// it.
+  int? _firstReading(int wallMs) {
+    _cover(wallMs);
+    for (final span in _spans) {
+      final instant = wallMs - _offsetOf(span);
+      if (span.start <= instant && instant < span.end) {
+        return instant;
+      }
+    }
+    return null;
+  }
+
+  /// The latest instant reading [wallMs], or null where the clock skips
+  /// it.
+  int? _lastReading(int wallMs) {
+    _cover(wallMs);
+    for (var index = _spans.length - 1; index >= 0; index--) {
+      final span = _spans[index];
+      final instant = wallMs - _offsetOf(span);
+      if (span.start <= instant && instant < span.end) {
+        return instant;
+      }
+    }
+    return null;
+  }
+
+  /// The instant the day numbered [day] starts: the earliest reading its
+  /// 00:00, or where the clock skips its midnight the boundary it skips
+  /// from, which reads a later minute of the day, or of a later day where
+  /// the clock skips the day whole.
+  int dayStartMs(int day) {
+    final wallMs = day * Duration.millisecondsPerDay;
+    final reading = _firstReading(wallMs);
+    if (reading != null) {
+      return reading;
+    }
+    // No instant reads a wall time only inside a skip, whose boundary lies
+    // between two stretches of the window.
+    for (var index = 0; ; index++) {
+      final boundary = _spans[index].end;
+      if (boundary + _offsetOf(_spans[index]) <= wallMs &&
+          wallMs < boundary + _offsetOf(_spans[index + 1])) {
+        return boundary;
+      }
+    }
+  }
+
+  /// Whether [time] is the later instant of a wall time its day's clock
+  /// reads twice, told as of its whole minute.
+  bool isLater(TZDateTime time) {
+    final minute =
+        time.millisecondsSinceEpoch -
+        time.second * Duration.millisecondsPerSecond -
+        time.millisecond;
+    return minute !=
+        _firstReading(
+          CalendarDates.wallMinuteOf(time) * Duration.millisecondsPerMinute,
+        );
+  }
+
+  /// [wall]'s instant as [CalendarDates.timeAtWallMinute] or, where [end],
+  /// [CalendarDates.endAtWallMinute] reads it on this clock, with [from]
+  /// picking the later of two readings on its own day where it is a later
+  /// occurrence.
+  int? instantAtWall(int wall, TZDateTime? from, {required bool end}) {
+    final minute = wall % CalendarDates.minutesPerDay;
+    final day = (wall - minute) ~/ CalendarDates.minutesPerDay;
+    final wallMs = wall * Duration.millisecondsPerMinute;
+    final earliest = _firstReading(wallMs);
+    if (earliest == null) {
+      return end && minute == 0 ? dayStartMs(day) : null;
+    }
+    if (from != null && CalendarDates.dayNumber(from) == day && isLater(from)) {
+      return _lastReading(wallMs);
+    }
+    return earliest;
+  }
+
+  /// [CalendarDates.rangeEndAtWallMinute]'s instant on this clock: the
+  /// instant the first pass ends where [start] lies in the first pass of a
+  /// stretch the clock repeats and [wall] is where the stretch ends, and
+  /// [instantAtWall] as an end otherwise.
+  int? rangeEndAt(TZDateTime start, int wall, TZDateTime? from) {
+    final startMs = start.millisecondsSinceEpoch;
+    final startWall = CalendarDates.wallMinuteOf(start);
+    final moved = startMs + (wall - startWall) * Duration.millisecondsPerMinute;
+    final movedWall =
+        (moved + offsetAt(moved)) ~/ Duration.millisecondsPerMinute;
+    if (moved > startMs &&
+        movedWall <= startWall &&
+        offsetAt(moved) < offsetAt(moved - Duration.millisecondsPerMinute)) {
+      return moved;
+    }
+    return instantAtWall(wall, from, end: true);
+  }
 }

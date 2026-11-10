@@ -2,6 +2,7 @@
 /// before its boundary, the start of today or the current minute of it.
 library;
 
+import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
 import 'edit_policy.dart';
 
@@ -27,7 +28,9 @@ enum _Hold { free, started, locked }
 ///
 /// Two compare equal where their runtime types and [lockEarlierToday]
 /// are the same. Each answer compares instants and kinds and reads
-/// [CalendarNow]'s fields, so none allocates.
+/// [CalendarNow]'s fields, so none allocates, except that
+/// [earliestStartOn] builds the zone's day start of a plain day under a
+/// zoned [CalendarNow].
 final class HistoryLockPolicy<T> extends CalendarEditPolicy<T> {
   /// The lock at the start of today, or with [lockEarlierToday] at the
   /// current minute of it.
@@ -98,12 +101,12 @@ final class HistoryLockPolicy<T> extends CalendarEditPolicy<T> {
       case _Hold.free:
         return !start.isBefore(boundary);
       case _Hold.started:
-        return start == entry.start &&
+        return sameTime(start, entry.start) &&
             isAllDay == entry.isAllDay &&
             end.isAfter(boundary);
       case _Hold.locked:
-        return start == entry.start &&
-            end == entry.end &&
+        return sameTime(start, entry.start) &&
+            sameTime(end, entry.end) &&
             isAllDay == entry.isAllDay;
     }
   }
@@ -111,13 +114,16 @@ final class HistoryLockPolicy<T> extends CalendarEditPolicy<T> {
   /// [day] where it does not start before the boundary; the boundary on
   /// today's day, an instant on it or, past 23:59 under
   /// [lockEarlierToday], the next day's start; and null on an earlier day.
+  /// A plain [day] under a zoned [now] is read as that date's day start in
+  /// the zone.
   @override
   DateTime? earliestStartOn(DateTime day, CalendarNow now) {
     final boundary = _boundaryOf(now);
-    if (!day.isBefore(boundary)) {
-      return day;
+    final zoned = zonedDayOf(day, zoneOf(boundary));
+    if (!zoned.isBefore(boundary)) {
+      return zoned;
     }
-    return day == now.today ? boundary : null;
+    return sameTime(zoned, now.today) ? boundary : null;
   }
 
   @override

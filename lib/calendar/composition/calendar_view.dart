@@ -186,7 +186,11 @@ final class CalendarEntryTapDetails<T> {
 /// view menu, builds no `Scaffold` or app bar, and never writes [store]'s
 /// settings. It shows and schedules in the store's hours
 /// ([CalendarStore.hours]), and builds again when a set of them notifies.
-/// It disposes no store. It draws in the [CalendarTheme]
+/// It draws no entry on a store's zone ([CalendarStore.zone]): a store with
+/// one is refused, with an [ArgumentError] from the build, and a notify that
+/// brings another zone builds again, so a zone given later is refused and
+/// one cleared brings the calendar back. A store with no zone draws on the
+/// device's clock. It disposes no store. It draws in the [CalendarTheme]
 /// above it; with none, under a Material [Theme], in a
 /// [CalendarThemeExtension] of the [ThemeData], or with none the theme
 /// [CalendarThemeExtension.fromColorScheme] gives the [ColorScheme]; and
@@ -209,7 +213,9 @@ final class CalendarEntryTapDetails<T> {
 /// in every build, after the one for [views]: for a [slotMinutes] that
 /// [CalendarDates.slotMinuteChoices] does not hold; then for store hours
 /// off its grid ([CalendarDayHours.isOnSlotsOf]), named `store.hours`, in
-/// the build after a set of them too; and then for an [editPolicy] whose
+/// the build after a set of them too; then for a store with a zone
+/// ([CalendarStore.zone]), named `store`, in the build after a notify that
+/// brings one too; and then for an [editPolicy] whose
 /// [CalendarEditPolicy.dayLimit] is under 1, named `policy`. The next
 /// build that throws none of them builds the views anew.
 class CalendarView<T> extends StatefulWidget {
@@ -248,7 +254,9 @@ class CalendarView<T> extends StatefulWidget {
 
   /// The entries the calendar shows and its views write, and the hours it
   /// shows and schedules in ([CalendarStore.hours]). The calendar asks it
-  /// to show the range of days its view shows, and never disposes it.
+  /// to show the range of days its view shows, and never disposes it. A
+  /// store with a zone ([CalendarStore.zone]) is refused: the build throws
+  /// an [ArgumentError] named `store`.
   final CalendarStore<T> store;
 
   /// Holds the view, the selected day, the visible range and the zoom
@@ -500,6 +508,20 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     );
   }
 
+  /// The error the build throws for a store with a zone
+  /// ([CalendarStore.zone]), which the views do not draw on, or null.
+  ArgumentError? get _storeZoneError {
+    final zone = widget.store.zone;
+    if (zone == null) {
+      return null;
+    }
+    return ArgumentError.value(
+      zone,
+      "store",
+      "has a zone, which a CalendarView does not draw on",
+    );
+  }
+
   /// The hours the views show and schedule in: the store's
   /// ([CalendarStore.hours]), which a build past [_storeHoursError] has on
   /// the grid of [CalendarView.slotMinutes].
@@ -510,6 +532,12 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// The store's hours as this state last took them, which
   /// [_handleStoreChange] compares a notify's hours with.
   late CalendarDayHours _storeHours;
+
+  /// The store's zone as this state last took it, which
+  /// [_handleStoreChange] compares a notify's zone with. Typed [Object]
+  /// since this library reaches the scheduling module through its barrel,
+  /// which shows no `Location`.
+  Object? _storeZone;
 
   /// The calendar's one clock: the time read at the start of each minute
   /// and the day marked as today, which the views follow and the policy
@@ -634,6 +662,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     _bind(host ?? CalendarController(), shown: null);
     _scheduleMinute(_now.value.time);
     _storeHours = widget.store.hours;
+    _storeZone = widget.store.zone;
     widget.store.addListener(_handleStoreChange);
   }
 
@@ -694,6 +723,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       oldWidget.store.removeListener(_handleStoreChange);
       widget.store.addListener(_handleStoreChange);
       _storeHours = widget.store.hours;
+      _storeZone = widget.store.zone;
     }
     if (viewsChanged || weekdaysChanged || widget.store != oldWidget.store) {
       _scheduleAsk();
@@ -874,16 +904,19 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   }
 
   /// Builds again where a notify of the store brings other hours, which
-  /// the views take from this state's build. The views follow the store's
-  /// entries and load state themselves, so any other notify builds
-  /// nothing here.
+  /// the views take from this state's build, or another zone, which the
+  /// build refuses ([_storeZoneError]) or no longer refuses. The views
+  /// follow the store's entries and load state themselves, so any other
+  /// notify builds nothing here.
   void _handleStoreChange() {
     final hours = widget.store.hours;
-    if (hours == _storeHours) {
+    final zone = widget.store.zone;
+    if (hours == _storeHours && zone == _storeZone) {
       return;
     }
     setState(() {
       _storeHours = hours;
+      _storeZone = zone;
     });
   }
 
@@ -1669,6 +1702,10 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     final hoursError = _storeHoursError;
     if (hoursError != null) {
       throw hoursError;
+    }
+    final zoneError = _storeZoneError;
+    if (zoneError != null) {
+      throw zoneError;
     }
     _takeRules();
     final header = _buildHeader();

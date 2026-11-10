@@ -384,16 +384,19 @@ included, until it is declared stable. Its API is what
 files declare is internal.
 
 An entry is a `CalendarEntry<T>`: an id, null for a draft no store holds
-yet, a start and an exclusive end in local time on whole minutes, a title,
-a colour, and a payload of your own type. An entry is timed unless you
-construct it with `isAllDay: true`. An all-day entry's start and end are
-local midnights, its end the midnight after its last day, so one over
-April 21 runs from `DateTime(2026, 4, 21)` to `DateTime(2026, 4, 22)`; a
-timed entry from a midnight to a midnight stays timed and draws in the
-grid. The constructor throws an `ArgumentError`, in a release build as in a
-debug one, for a UTC or part-minute time, an end not after its start, or
-an all-day time that is not a local midnight. The calendar reads its
-entries from a store, which you create and dispose:
+yet, a start and an exclusive end on whole minutes, on the device's clock
+or, in a store given a zone, on that zone's clock, a title, a colour, and a
+payload of your own type. An entry is timed unless you construct it with
+`isAllDay: true`. An all-day entry's start and end are the starts of their
+days, a local midnight on the device's clock and on a zone's clock the
+first instant it reads that date, its end the start of the day after its
+last day, so one over April 21 runs from `DateTime(2026, 4, 21)` to
+`DateTime(2026, 4, 22)`; a timed entry from a midnight to a midnight stays
+timed and draws in the grid. The constructor throws an `ArgumentError`, in
+a release build as in a debug one, for a plain UTC or part-minute time, an
+end not after its start, or an all-day time that is not the start of its
+day on its clock. The calendar reads its entries from a store, which you
+create and dispose:
 
 ```dart
 final store = MemoryCalendarStore<String>(
@@ -419,15 +422,16 @@ event `start.date` and `end.date` and a timed one `start.dateTime` and
 DTEND of value type DATE and a timed one DATE-TIME; Apple EventKit marks an
 all-day event with `EKEvent.isAllDay`. The date forms and an
 `EKEvent.isAllDay` of true map to `isAllDay: true`, the others to `false`.
-An all-day entry ends at the local midnight after its last day: Google's
-`end.date` and iCalendar's DATE DTEND are exclusive ends, that day already,
-and map as they are; for an all-day `EKEvent`, whose reference states no
-such rule for `endDate`, end the entry at the midnight after the event's
-last day. Build an all-day entry's start and end from the dates' year,
-month and day, `DateTime(year, month, day)`: an all-day date is a local
-date, never converted through UTC, and EventKit returns an all-day event's
-dates in the default time zone. A timed value is an instant, converted to
-local time.
+An all-day entry ends at the start of the day after its last day on its
+store's clock: Google's `end.date` and iCalendar's DATE DTEND are exclusive
+ends, that day already, and map as they are; for an all-day `EKEvent`,
+whose reference states no such rule for `endDate`, end the entry at the
+midnight after the event's last day. Build an all-day entry's start and
+end from the dates' year, month and day, `DateTime(year, month, day)`: an
+all-day date is a local date, never converted through UTC, and EventKit
+returns an all-day event's dates in the default time zone. A timed value
+is an instant, converted to local time, or to the store's zone where it
+has one.
 
 **Stores.** `MemoryCalendarStore` holds the entries you give it and applies
 each write within the call. `CachingCalendarStore` reads by days through
@@ -439,6 +443,44 @@ it reads those days again. A store of your own extends `CalendarStore`
 and answers entries in the order `compareCalendarEntries` gives.
 `CalendarDates` holds the civil-date helpers the calendar counts days and
 minutes with, such as `addDays` and `dayNumber`.
+
+**Time zones.** A store reads its days, times and hours on the device's
+clock unless you give it a `Location` of `package:timezone`, at construction
+(`zone:`) or later (`store.zone = location`); it then files, reads, writes and
+limits entries on that zone's clock, and another zone refiles its entries and
+notifies once. Timed entries read back at the same instants with fields on the
+zone's clock, all-day entries stay on their dates, and a `CalendarDataSource`
+keeps reading and writing device days and plain local times, so a source needs
+no change. A time the zone cannot represent fails only the operation that
+holds it, with an `ArgumentError`. You import `package:timezone` and load its
+data yourself:
+
+```dart
+import 'package:timezone/data/latest_all.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
+
+tz.initializeTimeZones();
+final zone = tz.getLocation("America/Havana");
+final store = MemoryCalendarStore<String>(zone: zone);
+await store.create(
+  CalendarEntry<String>(
+    id: "standup",
+    start: tz.TZDateTime(zone, 2026, 4, 21, 9),
+    end: tz.TZDateTime(zone, 2026, 4, 21, 10),
+    title: "Standup",
+    color: const Color(0xFF3366CC),
+    payload: "team",
+  ),
+);
+```
+
+Load `latest.dart` or `latest_all.dart`, not `latest_10y.dart`, which holds
+rules only for the five years before and after its release, and pass no zone
+rather than `tz.local`, which is UTC after the data loads, not the device's
+zone.
+`CalendarView` refuses a store with a zone for now: its build reports an
+`ArgumentError` naming `store` in the calendar's place, whether the store has
+its zone at the first build or is given one later.
 
 **Editing.** With `editable: true`, Week's and Day's blocks move and
 resize, and a create gesture reports a `CalendarCreateDetails` through

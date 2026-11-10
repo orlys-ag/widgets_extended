@@ -8,12 +8,14 @@ import 'dart:ui' show Color;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 
 import '../class_source.dart';
 import '../dst_days.dart';
+import '../zones.dart';
 
 /// A payload compared by its text, never by identity.
 @immutable
@@ -419,5 +421,36 @@ void main() {
       DateTime(2026, 4, 21),
     );
     expect(oneDay.last, DateTime(2026, 4, 21));
+  });
+
+  group("time zones", () {
+    setUpAll(ensureZones);
+
+    test("ME1 an entry equals another at the same instants whichever carries "
+        "a zone", () {
+      final on = DateTime(2025, 7, 16, 10);
+      final zone = zoneAtDeviceOffset(on);
+      CalendarEntry<String> entry(DateTime start, DateTime end) {
+        return CalendarEntry<String>(
+          id: "a",
+          start: start,
+          end: end,
+          title: "Task",
+          color: const Color(0xFF3060C0),
+          payload: "task",
+        );
+      }
+
+      final plain = entry(on, on.add(const Duration(hours: 1)));
+      for (final location in <tz.Location>[zone, tz.UTC]) {
+        final zoned = entry(
+          tz.TZDateTime.from(plain.start, location),
+          tz.TZDateTime.from(plain.end, location),
+        );
+        expect(plain == zoned, isTrue, reason: location.name);
+        expect(zoned == plain, isTrue, reason: location.name);
+        expect(zoned.hashCode, plain.hashCode, reason: location.name);
+      }
+    });
   });
 }

@@ -28,9 +28,9 @@ Normative for `lib/scheduling/` and `lib/calendar/`, beside each module's own ru
   host's exhaustive `switch` would miss.
 - **Days are civil days.** Every day step and day count in either module
   goes through the dates layer of `lib/scheduling/` and runs on the local
-  wall clock: a day is a year, a month and a day, a step changes the day,
-  and nothing steps a day by a 24-hour `Duration`, so a day of 23 or 25
-  hours at a DST change is one day.
+  wall clock or the clock of the zone a time carries: a day is a year, a
+  month and a day, a step changes the day, and nothing steps a day by a
+  24-hour `Duration`, so a day of 23 or 25 hours at a DST change is one day.
 - **The demo's data code stays in the demo.** Neither module holds an item
   type, an item schema or a validation of the demo's JSON envelope, nor a
   JSON API or a mock of one.
@@ -42,8 +42,9 @@ Normative for `lib/scheduling/` and `lib/calendar/`, beside each module's own ru
 
 - **Entry**: one `CalendarEntry<T>`, carrying the host's payload `T`.
 - **All-day entry**: an entry whose `isAllDay` is true, which covers whole
-  local days from the local midnight of its start to that of its end, an
-  exclusive end; any other entry is timed, whatever its times.
+  civil days from the day start of its start to that of its end on its
+  store's clock, an exclusive end; any other entry is timed, whatever its
+  times.
 - **Pending write**: a write in flight on an entry, which marks the entry
   pending and takes no other write on it; `scheduling-store.md` gives what
   each write shows meanwhile.

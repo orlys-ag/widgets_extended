@@ -16,29 +16,40 @@ import 'edit_policy.dart';
 /// create on [day] reads from that answer.
 @immutable
 final class CalendarEarliestStart {
-  /// The start [earliest] that a policy gave [day], a local day's start,
-  /// with a UTC [earliest] taken as its local time, the same instant.
+  /// The start [earliest] that a policy gave [day], the start of a day on
+  /// its clock, a local one or a `TZDateTime`'s, with a plain UTC [earliest]
+  /// taken as its local time, the same instant.
+  ///
+  /// A `TZDateTime` [earliest] is kept, and a plain [day] given beside it is
+  /// read as that date's day start in the zone; a plain [earliest] of a
+  /// `TZDateTime` [day] is held in that [day]'s zone.
   ///
   /// Throws an [ArgumentError], in every build, naming `day` for a [day]
-  /// that is not a local day's start ([CalendarDates.isDayStart]), a UTC one
-  /// included.
-  CalendarEarliestStart(this.day, DateTime? earliest)
-    : earliest = earliest?.toLocal() {
+  /// that is not the start of its day on its clock
+  /// ([CalendarDates.isDayStart]), a plain UTC one included.
+  CalendarEarliestStart(DateTime day, DateTime? earliest)
+    : day = earliest is TZDateTime ? zonedDayOf(day, earliest.location) : day,
+      earliest = earliest is TZDateTime
+          ? earliest
+          : earliest != null && day is TZDateTime
+          ? TZDateTime.from(earliest, day.location)
+          : earliest?.toLocal() {
     if (!CalendarDates.isDayStart(day)) {
       throw ArgumentError.value(
         day,
         "day",
-        "An earliest start's day is a local day start",
+        "An earliest start's day is the start of a day on its clock",
       );
     }
   }
 
-  /// The day the answer is for, a local day's start.
+  /// The day the answer is for, the start of a day on its clock, a local
+  /// one or a zone's.
   final DateTime day;
 
-  /// The answer, a local time: [day] or an instant before it for no limit,
-  /// an instant on [day] after its start, and null or an instant on a
-  /// later day where no new entry may start on [day].
+  /// The answer, a local time or a `TZDateTime`: [day] or an instant before
+  /// it for no limit, an instant on [day] after its start, and null or an
+  /// instant on a later day where no new entry may start on [day].
   final DateTime? earliest;
 
   /// Whether no new entry may start on [day]: [earliest] is null or on a
@@ -103,8 +114,8 @@ final class CalendarEarliestStart {
   @override
   bool operator ==(Object other) {
     return other is CalendarEarliestStart &&
-        other.day == day &&
-        other.earliest == earliest;
+        sameTime(other.day, day) &&
+        sameTime(other.earliest, earliest);
   }
 
   @override
@@ -282,8 +293,8 @@ final class CalendarEditRules<T> {
   /// last day, the next day's start where they end at 24:00, or starts at
   /// the hours' start on its first, the day's start where they start at
   /// 00:00, so a held slot range ends or starts on a slot the hours hold.
-  /// Null where that is a time the clock skips; the range itself with no
-  /// limit.
+  /// The held time is on [start]'s clock. Null where that is a time the
+  /// clock skips; the range itself with no limit.
   ({DateTime start, DateTime end})? heldToLimit(
     DateTime start,
     DateTime end, {
@@ -294,28 +305,34 @@ final class CalendarEditRules<T> {
     if (limit == null) {
       return (start: start, end: end);
     }
+    final zone = zoneOf(start);
     if (atEnd) {
       final lastDay = CalendarDates.dayNumber(start) + limit - 1;
       final held = isAllDay
-          ? CalendarDates.dateOfDayNumber(lastDay + 1)
+          ? CalendarDates.dateOfDayNumber(lastDay + 1, zone: zone)
           : CalendarDates.endAtWallMinute(
               lastDay * CalendarDates.minutesPerDay + hours.end,
+              zone: zone,
             );
       return held == null ? null : (start: start, end: held);
     }
     final firstDay = CalendarDates.lastDayNumberOf(start, end) - limit + 1;
     final held = isAllDay || hours.start == 0
-        ? CalendarDates.dateOfDayNumber(firstDay)
+        ? CalendarDates.dateOfDayNumber(firstDay, zone: zone)
         : CalendarDates.timeAtWallMinute(
             firstDay * CalendarDates.minutesPerDay + hours.start,
+            zone: zone,
           );
     return held == null ? null : (start: held, end: end);
   }
 
   /// Where a new entry may start on [day], a day's start, at [now]: asks
-  /// [policy] once ([CalendarEditPolicy.earliestStartOn]).
+  /// [policy] once ([CalendarEditPolicy.earliestStartOn]). Under a [now]
+  /// whose time carries a zone, a plain [day] is read as that date's day
+  /// start in the zone, before [policy] is asked.
   CalendarEarliestStart earliestStartOn(DateTime day, CalendarNow now) {
-    return CalendarEarliestStart(day, policy.earliestStartOn(day, now));
+    final zoned = zonedDayOf(day, zoneOf(now.time));
+    return CalendarEarliestStart(zoned, policy.earliestStartOn(zoned, now));
   }
 
   /// The first slot of [slotMinutes] on [start]'s day that a new entry may

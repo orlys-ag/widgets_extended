@@ -137,9 +137,11 @@ String? forwardedCallOf(String body) {
 }
 
 void main() {
-  test("SY1 each file imports, of packages, only Flutter's foundation, of "
-      "dart:ui only Color, and nothing of the calendar, board, sliver_tree "
-      "or sectioned_sliver_list modules, nor the package barrel", () {
+  test("SY1 each file imports, of packages, only Flutter's foundation and, "
+      "in lib/scheduling/dates/calendar_dates.dart alone, "
+      "package:timezone/timezone.dart, of dart:ui only Color, and nothing of "
+      "the calendar, board, sliver_tree or sectioned_sliver_list modules, "
+      "nor the package barrel", () {
     const outside = <String>[
       "lib/calendar/",
       "lib/board/",
@@ -153,7 +155,15 @@ void main() {
           continue;
         }
         if (Uri.parse(uri).hasScheme) {
-          expect(uri, "package:flutter/foundation.dart", reason: path);
+          expect(
+            <String>{
+              "package:flutter/foundation.dart",
+              if (path == "lib/scheduling/dates/calendar_dates.dart")
+                "package:timezone/timezone.dart",
+            },
+            contains(uri),
+            reason: path,
+          );
           continue;
         }
         final target = Uri.parse(path).resolve(uri).path;
@@ -401,6 +411,7 @@ void main() {
       for (final file in trackedDartFiles("test/scheduling"))
         if (layers.contains(layerOf(file)) ||
             file == "test/scheduling/dst_days.dart" ||
+            file == "test/scheduling/zones.dart" ||
             file == "test/scheduling/class_source.dart")
           file,
     ];
@@ -412,6 +423,7 @@ void main() {
       files,
       containsAll(<String>[
         "test/scheduling/dst_days.dart",
+        "test/scheduling/zones.dart",
         "test/scheduling/class_source.dart",
       ]),
     );
@@ -635,5 +647,124 @@ void main() {
       "timeAtWallMinute": "_instantAtWallMinute",
       "endAtWallMinute": "_instantAtWallMinute",
     });
+  });
+  test("SY10 only calendar_dates.dart imports package:timezone, and nothing "
+      "imports its data", () {
+    const importer = "lib/scheduling/dates/calendar_dates.dart";
+    const barrels = <String>[
+      "lib/scheduling/scheduling.dart",
+      "lib/calendar/calendar.dart",
+      "lib/widgets_extended.dart",
+    ];
+    const timezoneUri = "package:timezone/timezone.dart";
+    final files = trackedDartFiles("lib");
+    expect(files, containsAll(<String>[importer, ...barrels]));
+    var imports = 0;
+    final foreign = RegExp(
+      r"package:timezone/(?:data/|browser\.dart|standalone\.dart)",
+    );
+    for (final path in files) {
+      final source = File(path).readAsStringSync();
+      final importing = directiveUris(source).contains(timezoneUri);
+      if (importing) {
+        imports++;
+        expect(path, importer);
+      }
+      expect(foreign.hasMatch(source), isFalse, reason: path);
+    }
+    expect(imports, 1);
+    for (final barrel in barrels) {
+      expect(
+        File(barrel).readAsStringSync(),
+        isNot(contains("package:timezone")),
+        reason: barrel,
+      );
+    }
+  });
+
+  test("SY11 a device-path helper keeps its body after its guard", () {
+    const guards = <String, String>{
+      "dateOnly": "if (date is TZDateTime) {",
+      "addDays": "if (date is TZDateTime) {",
+      "addMonths": "if (date is TZDateTime) {",
+      "isDayStart": "if (time is TZDateTime) {",
+      "rangeEndAtWallMinute": "if (start is TZDateTime) {",
+      "repeatedStretchOf": "if (day is TZDateTime) {",
+      "isLaterOccurrence": "if (time is TZDateTime) {",
+      "firstWallMinuteNotBefore": "if (time is TZDateTime) {",
+      "lastWallMinuteNotAfter": "if (time is TZDateTime) {",
+      "dateOfDayNumber": "if (zone != null) {",
+      "_instantAtWallMinute":
+          "final location = zone ?? (from is TZDateTime ? from.location : null); if (location != null) {",
+    };
+    const deviceBodies = <String, String>{
+      "dateOnly": "return DateTime(date.year, date.month, date.day);",
+      "addDays": "return DateTime(date.year, date.month, date.day + days);",
+      "addMonths":
+          "final first = DateTime(date.year, date.month + months); final day "
+          "= math.min(date.day, daysInMonth(first.year, first.month)); return "
+          "DateTime(first.year, first.month, day);",
+      "isDayStart": "return time == DateTime(time.year, time.month, time.day);",
+      "rangeEndAtWallMinute":
+          "final moved = start.add(Duration(minutes: wall - "
+          "wallMinuteOf(start))); if (moved.isAfter(start) && "
+          "wallMinuteOf(moved) <= wallMinuteOf(start) && moved.timeZoneOffset "
+          "< moved.subtract(const Duration(minutes: 1)).timeZoneOffset) { "
+          "return moved; } return endAtWallMinute(wall, from: from);",
+      "repeatedStretchOf":
+          "final date = dateOnly(day); final change = date.timeZoneOffset - "
+          "addDays(date, 1).timeZoneOffset; return change > Duration.zero ? "
+          "change : Duration.zero;",
+      "isLaterOccurrence":
+          "final minute = time.subtract( Duration( seconds: time.second, "
+          "milliseconds: time.millisecond, microseconds: time.microsecond, ), "
+          "); return minute != timeAtWallMinute(wallMinuteOf(time));",
+      "firstWallMinuteNotBefore":
+          "var wall = wallMinuteOf(time); while (!(timeAtWallMinute(wall - 1, "
+          "from: from)?.isBefore(time) ?? true)) { wall--; } while "
+          "(timeAtWallMinute(wall, from: from)?.isBefore(time) ?? true) { "
+          "wall++; } return wall;",
+      "lastWallMinuteNotAfter":
+          "DateTime? endAt(int wall) { return start == null ? "
+          "endAtWallMinute(wall, from: from) : rangeEndAtWallMinute(start, "
+          "wall, from: from); } var wall = endWallMinuteOf(time); while "
+          "(!(endAt(wall + 1)?.isAfter(time) ?? true)) { wall++; } while "
+          "(endAt(wall)?.isAfter(time) ?? true) { wall--; } return wall;",
+      "dateOfDayNumber":
+          "final utc = DateTime.fromMillisecondsSinceEpoch( day * "
+          "Duration.millisecondsPerDay, isUtc: true, ); return "
+          "DateTime(utc.year, utc.month, utc.day);",
+      "_instantAtWallMinute":
+          "final minute = wall % minutesPerDay; final day = (wall - minute) "
+          "~/ minutesPerDay; final date = dateOfDayNumber(day); final hour = "
+          "minute ~/ 60; final ofHour = minute % 60; bool reads(DateTime "
+          "time) { return time.year == date.year && time.month == date.month "
+          "&& time.day == date.day && time.hour == hour && time.minute == "
+          "ofHour; } final time = minute == 0 ? date : DateTime(date.year, "
+          "date.month, date.day, hour, ofHour); if (!reads(time)) { return "
+          "end && minute == 0 ? date : null; } final change = "
+          "repeatedStretchOf(date); if (change == Duration.zero) { return "
+          "time; } DateTime? earliest; DateTime? latest; for (final candidate "
+          "in <DateTime>[ time.subtract(change), time, time.add(change), ]) { "
+          "if (reads(candidate)) { earliest ??= candidate; latest = "
+          "candidate; } } if (from != null && dayNumber(from) == day && "
+          "isLaterOccurrence(from)) { return latest; } return earliest;",
+    };
+    final statics = staticsOf(
+      classBody(
+        File("lib/scheduling/dates/calendar_dates.dart").readAsStringSync(),
+        "CalendarDates",
+      ),
+    );
+    for (final MapEntry(key: name, value: guard) in guards.entries) {
+      final body = statics[name]!.replaceAll(RegExp(r"\s+"), " ").trim();
+      expect(body, startsWith(guard), reason: name);
+      final close = matchingBracket(body, guard.length - 1, "{", "}");
+      expect(
+        body.substring(close + 1).trim(),
+        deviceBodies[name],
+        reason: name,
+      );
+    }
   });
 }

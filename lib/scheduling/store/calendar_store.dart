@@ -141,11 +141,16 @@ final class CalendarWritePendingException extends CalendarStoreException {
 /// being stored. A host's own store extends this class, in a class it
 /// declares `final` or `base`.
 abstract base class CalendarStore<T> extends ChangeNotifier {
-  /// A store holding writes to [hours].
-  CalendarStore({CalendarDayHours hours = CalendarDayHours.allDay})
-    : _hours = hours;
+  /// A store holding writes to [hours], reading times on the clock of
+  /// [zone], or with none on the device's.
+  CalendarStore({
+    CalendarDayHours hours = CalendarDayHours.allDay,
+    Location? zone,
+  }) : _hours = hours,
+       _zone = zone;
 
   CalendarDayHours _hours;
+  Location? _zone;
 
   /// The hours a new entry, and a write that changes an entry's start, end
   /// or kind, must lie in ([CalendarDayHours.holdsTimes]), which hold every
@@ -167,6 +172,41 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
     }
     _hours = value;
     notifyListeners();
+  }
+
+  /// The zone whose clock this store reads its days, times and hours on, or
+  /// null for the device's: its filing, its reads and writes, the hours and
+  /// the history lock read that clock. A host imports package:timezone and
+  /// loads its zone data itself.
+  ///
+  /// Setting a zone not `==` to this one refiles the store's entries under
+  /// the new zone within the setter and notifies the listeners once, and
+  /// setting an equal one notifies nothing. The hours are minutes of a day
+  /// on the store's clock and do not move. A time the new zone cannot
+  /// represent throws an [ArgumentError], leaving the zone and the entries
+  /// as they were. A calendar listening builds again at a notify, so a host
+  /// sets the zone outside a build.
+  Location? get zone {
+    return _zone;
+  }
+
+  set zone(Location? value) {
+    if (value == _zone) {
+      return;
+    }
+    final commit = prepareZone(value);
+    _zone = value;
+    commit();
+  }
+
+  /// Builds what this store will hold under the zone [next], changing
+  /// nothing, and answers the function that puts it in place and notifies
+  /// the listeners. A store that files entries overrides it, and what it
+  /// throws, as a time [next] cannot represent does, leaves the store as it
+  /// was. Here it answers [notifyListeners].
+  @protected
+  VoidCallback prepareZone(Location? next) {
+    return notifyListeners;
   }
 
   /// Follows from the shown range's days alone: ready once none of them is
@@ -214,7 +254,8 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
   bool isRead(DateTime day);
 
   /// Whether the last read of [day], which is unread, failed: true until a
-  /// read fills the day or a [show], a [retry] or a [refresh] reads it.
+  /// read fills the day, a [show], a [retry] or a [refresh] reads it, or a
+  /// zone change, which ends the mark.
   bool readFailed(DateTime day);
 
   /// Whether the shown range is exactly [first] to [last].
@@ -268,24 +309,29 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
   /// The refusal of [entry] for [hours], or null when the hours hold its
   /// start and its end as [entry]'s kind ([CalendarDayHours.holdsTimes]),
   /// or when it keeps the start, the end and the kind of the stored entry
-  /// its id names.
+  /// its id names. It reads [entry] in the store's zone, where it has one.
+  ///
+  /// Throws an [ArgumentError] for a time the zone cannot represent, a time
+  /// whose offset there is not a whole number of minutes or an all-day date
+  /// its clock skips.
   @protected
   CalendarHoursException? hoursRefusalOf(CalendarEntry<T> entry) {
-    final id = entry.id;
+    final zoned = zonedEntryOf(entry, _zone);
+    final id = zoned.id;
     final stored = id == null ? null : storedEntry(id);
     if (stored != null &&
-        stored.start == entry.start &&
-        stored.end == entry.end &&
-        stored.isAllDay == entry.isAllDay) {
+        sameTime(stored.start, zoned.start) &&
+        sameTime(stored.end, zoned.end) &&
+        stored.isAllDay == zoned.isAllDay) {
       return null;
     }
-    if (hours.holdsTimes(entry.start, entry.end, isAllDay: entry.isAllDay)) {
+    if (hours.holdsTimes(zoned.start, zoned.end, isAllDay: zoned.isAllDay)) {
       return null;
     }
     return CalendarHoursException(
       hours: hours,
-      start: entry.start,
-      end: entry.end,
+      start: zoned.start,
+      end: zoned.end,
     );
   }
 }
@@ -301,7 +347,7 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
 /// one sorted run and the pending list as another, and merges them, so it
 /// costs the entries it answers and a log of the runs, with no sort.
 ///
-/// Days are [CalendarDates.dayNumber]s.
+/// Days are [CalendarDates.dayNumber]s, on the clock of the entries' times.
 class CalendarEntryIndex<T> {
   /// An empty index. With [opensEveryDay], [put] opens every day an entry
   /// covers, and a day [put] or [forget] empties closes; otherwise only
@@ -317,12 +363,13 @@ class CalendarEntryIndex<T> {
   final Map<int, List<CalendarEntry<T>>> _byDay =
       <int, List<CalendarEntry<T>>>{};
 
-  /// An entry per pending id: the entry it files in [_pendingList], or
-  /// null when it files none.
-  final Map<String, CalendarEntry<T>?> _pending = <String, CalendarEntry<T>?>{};
+  /// An entry per pending id: what it files in [_pendingList], or null
+  /// when it files none.
+  final Map<String, _PendingFiled<T>?> _pending = <String, _PendingFiled<T>?>{};
 
-  /// The entries the pending ids show, in [compareCalendarEntries]'s order.
-  final List<CalendarEntry<T>> _pendingList = <CalendarEntry<T>>[];
+  /// The entries the pending ids show, in [compareCalendarEntries]'s order,
+  /// each with the days it covers.
+  final List<_PendingFiled<T>> _pendingList = <_PendingFiled<T>>[];
 
   /// The pending ids that show the stored entry, as it is stored meanwhile.
   final Set<String> _showsStored = <String>{};
@@ -348,6 +395,11 @@ class CalendarEntryIndex<T> {
     return _byDay.containsKey(day);
   }
 
+  /// The open days, in no set order.
+  Iterable<int> get openDays {
+    return _byDay.keys;
+  }
+
   /// Stores [entry], whose id no stored entry has, without filing it under
   /// any day; false, changing nothing, when one has. A pending id that
   /// shows the stored entry shows this one.
@@ -371,7 +423,8 @@ class CalendarEntryIndex<T> {
     final opened = <int, List<CalendarEntry<T>>>{};
     if (days == null) {
       for (final entry in _stored.values) {
-        for (var day = _firstDayOf(entry); day <= _lastDayOf(entry); day++) {
+        final last = _lastDayOf(entry);
+        for (var day = _firstDayOf(entry); day <= last; day++) {
           if (_byDay.containsKey(day)) {
             continue;
           }
@@ -517,10 +570,10 @@ class CalendarEntryIndex<T> {
     if (shown == null) {
       _showsStored.add(id);
     }
-    final filed = shown ?? _stored[id];
+    final filed = _filedOf(shown ?? _stored[id]);
     _pending[id] = filed;
     if (filed != null) {
-      _insert(_pendingList, filed);
+      _insertPending(filed);
     }
     return true;
   }
@@ -533,7 +586,7 @@ class CalendarEntryIndex<T> {
     _showsStored.remove(id);
     final filed = _pending.remove(id);
     if (filed != null) {
-      _remove(_pendingList, filed);
+      _removePending(filed);
     }
   }
 
@@ -545,12 +598,45 @@ class CalendarEntryIndex<T> {
     }
     final filed = _pending[id];
     if (filed != null) {
-      _remove(_pendingList, filed);
+      _removePending(filed);
     }
-    _pending[id] = entry;
-    if (entry != null) {
-      _insert(_pendingList, entry);
+    final shown = _filedOf(entry);
+    _pending[id] = shown;
+    if (shown != null) {
+      _insertPending(shown);
     }
+  }
+
+  /// A new index holding each stored and pending entry through [convert],
+  /// of the same [opensEveryDay], with the pending ids locked as they are
+  /// here and [days] opened as [open] opens them, none given opening every
+  /// day an entry covers. Throws what [convert] throws, leaving this index
+  /// as it was.
+  CalendarEntryIndex<T> refiled(
+    CalendarEntry<T> Function(CalendarEntry<T> entry) convert, {
+    Iterable<int>? days,
+  }) {
+    final next = CalendarEntryIndex<T>(opensEveryDay: opensEveryDay);
+    for (final MapEntry(key: id, value: entry) in _stored.entries) {
+      next._stored[id] = convert(entry);
+    }
+    next.open(days);
+    for (final MapEntry(key: id, value: filed) in _pending.entries) {
+      final CalendarEntry<T>? shown;
+      if (_showsStored.contains(id)) {
+        next._showsStored.add(id);
+        shown = next._stored[id];
+      } else {
+        shown = filed == null ? null : convert(filed.entry);
+      }
+      final refiled = _filedOf(shown);
+      next._pending[id] = refiled;
+      if (refiled != null) {
+        next._pendingList.add(refiled);
+      }
+    }
+    next._pendingList.sort(_compareFiled);
+    return next;
   }
 
   /// The entries shown on [day]: its stored entries whose ids are not
@@ -567,7 +653,7 @@ class CalendarEntryIndex<T> {
           _pending.containsKey(stored[i].id)) {
         i++;
       }
-      while (j < _pendingList.length && !_covers(_pendingList[j], day)) {
+      while (j < _pendingList.length && !_pendingList[j].covers(day)) {
         j++;
       }
       if (i == stored.length && j == _pendingList.length) {
@@ -575,11 +661,11 @@ class CalendarEntryIndex<T> {
       }
       if (j == _pendingList.length ||
           (i < stored.length &&
-              compareCalendarEntries(stored[i], _pendingList[j]) < 0)) {
+              compareCalendarEntries(stored[i], _pendingList[j].entry) < 0)) {
         shown.add(CalendarShownEntry<T>(stored[i], pending: false));
         i++;
       } else {
-        shown.add(CalendarShownEntry<T>(_pendingList[j], pending: true));
+        shown.add(CalendarShownEntry<T>(_pendingList[j].entry, pending: true));
         j++;
       }
     }
@@ -606,9 +692,9 @@ class CalendarEntryIndex<T> {
         }
       }
     }
-    for (final entry in _pendingList) {
-      if (_firstDayOf(entry) <= last && _lastDayOf(entry) >= first) {
-        runs.add(CalendarShownEntry<T>(entry, pending: true));
+    for (final filed in _pendingList) {
+      if (filed.firstDay <= last && filed.lastDay >= first) {
+        runs.add(CalendarShownEntry<T>(filed.entry, pending: true));
       }
     }
     // A run is a stretch in strictly ascending order, so every day's list
@@ -644,8 +730,8 @@ class CalendarEntryIndex<T> {
         }
       }
     }
-    for (final entry in _pendingList) {
-      if (_covers(entry, day)) {
+    for (final filed in _pendingList) {
+      if (filed.covers(day)) {
         return true;
       }
     }
@@ -661,11 +747,6 @@ class CalendarEntryIndex<T> {
   /// ([CalendarDates.lastDayNumberOf]), never a day its end is the start of.
   static int _lastDayOf<T>(CalendarEntry<T> entry) {
     return CalendarDates.lastDayNumberOf(entry.start, entry.end);
-  }
-
-  /// Whether [entry] has a part in the [CalendarDates.dayNumber] [day].
-  static bool _covers<T>(CalendarEntry<T> entry, int day) {
-    return day >= _firstDayOf(entry) && day <= _lastDayOf(entry);
   }
 
   /// The end of the strictly ascending run of [shown] that starts at
@@ -750,6 +831,48 @@ class CalendarEntryIndex<T> {
     }
   }
 
+  /// [entry] with the days it covers, or null for a null [entry].
+  _PendingFiled<T>? _filedOf(CalendarEntry<T>? entry) {
+    return entry == null
+        ? null
+        : _PendingFiled<T>(entry, _firstDayOf(entry), _lastDayOf(entry));
+  }
+
+  int _compareFiled(_PendingFiled<T> a, _PendingFiled<T> b) {
+    return compareCalendarEntries(a.entry, b.entry);
+  }
+
+  /// Files [filed] in [_pendingList] at its place in
+  /// [compareCalendarEntries]'s order.
+  void _insertPending(_PendingFiled<T> filed) {
+    _pendingList.insert(_lowerBoundPending(filed), filed);
+  }
+
+  /// Takes [filed], which [_pendingList] holds, out of it.
+  void _removePending(_PendingFiled<T> filed) {
+    final index = _lowerBoundPending(filed);
+    if (index < _pendingList.length &&
+        _pendingList[index].entry.id == filed.entry.id) {
+      _pendingList.removeAt(index);
+    }
+  }
+
+  /// The first index of [_pendingList] whose entry does not sort before
+  /// [filed]'s.
+  int _lowerBoundPending(_PendingFiled<T> filed) {
+    var low = 0;
+    var high = _pendingList.length;
+    while (low < high) {
+      final middle = (low + high) >> 1;
+      if (_compareFiled(_pendingList[middle], filed) < 0) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    return low;
+  }
+
   /// The first index of [list] whose entry does not sort before [entry].
   int _lowerBound(List<CalendarEntry<T>> list, CalendarEntry<T> entry) {
     var low = 0;
@@ -763,6 +886,27 @@ class CalendarEntryIndex<T> {
       }
     }
     return low;
+  }
+}
+
+/// A pending entry filed with its first and last [CalendarDates.dayNumber],
+/// read once where it is filed, so a read of the pending entries asks no zone
+/// for the days they cover.
+final class _PendingFiled<T> {
+  const _PendingFiled(this.entry, this.firstDay, this.lastDay);
+
+  /// The entry the pending id shows.
+  final CalendarEntry<T> entry;
+
+  /// The first day [entry] has a part in.
+  final int firstDay;
+
+  /// The last day [entry] has a part in.
+  final int lastDay;
+
+  /// Whether [entry] has a part in [day].
+  bool covers(int day) {
+    return day >= firstDay && day <= lastDay;
   }
 }
 

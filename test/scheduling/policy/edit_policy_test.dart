@@ -8,11 +8,13 @@ library;
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
 
 import '../dst_days.dart';
+import '../zones.dart';
 
 /// A Tuesday.
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -1024,5 +1026,43 @@ void main() {
       reason: "one forbidding overlaps that refuses every one",
     );
     expect(log, isNot(contains("b.refusesEveryOverlap")));
+  });
+
+  group("time zones", () {
+    setUpAll(ensureZones);
+
+    test("PE1 a CalendarNow and an overlap candidate compare by instant where "
+        "either carries a zone", () {
+      final on = DateTime(2025, 7, 16, 10, 7);
+      final end = DateTime(2025, 7, 16, 11, 7);
+      final zone = zoneAtDeviceOffset(on);
+      final plainNow = CalendarNow(time: on, today: DateTime(2025, 7, 16));
+      final zonedNow = CalendarNow(
+        time: tz.TZDateTime.from(on, zone),
+        today: tz.TZDateTime.from(DateTime(2025, 7, 16), zone),
+      );
+      expect(plainNow == zonedNow, isTrue);
+      expect(zonedNow == plainNow, isTrue);
+      expect(zonedNow.hashCode, plainNow.hashCode);
+
+      final plainCandidate = CalendarOverlapCandidate<String>(
+        start: on,
+        end: end,
+      );
+      final zonedCandidate = CalendarOverlapCandidate<String>(
+        start: tz.TZDateTime.from(on, zone),
+        end: tz.TZDateTime.from(end, zone),
+      );
+      expect(plainCandidate == zonedCandidate, isTrue);
+      expect(zonedCandidate == plainCandidate, isTrue);
+      expect(zonedCandidate.hashCode, plainCandidate.hashCode);
+
+      final utcCandidate = CalendarOverlapCandidate<String>(
+        start: on.toUtc(),
+        end: end.toUtc(),
+      );
+      expect(utcCandidate == plainCandidate, isFalse);
+      expect(plainCandidate == utcCandidate, isFalse);
+    });
   });
 }

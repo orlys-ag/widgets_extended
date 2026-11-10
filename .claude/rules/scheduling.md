@@ -12,7 +12,7 @@ Normative for `lib/scheduling/`, the scheduling module: the experimental schedul
 
 | Layer | Directory | Rule | Imports | Holds |
 |---|---|---|---|---|
-| Dates | `lib/scheduling/dates/` | `scheduling-dates.md` | Of Flutter, only `package:flutter/foundation.dart`; of the module, nothing outside this layer | `CalendarDates`, day numbers, wall minutes, month grids, weekday sets, day hours and the hour label format |
+| Dates | `lib/scheduling/dates/` | `scheduling-dates.md` | Of Flutter, only `package:flutter/foundation.dart`; of packages, `calendar_dates.dart` alone imports `package:timezone/timezone.dart` and re-exports its `Location` and `TZDateTime` to the layers above; of the module, nothing outside this layer | `CalendarDates`, day numbers, wall minutes, month grids, weekday sets, day hours and the hour label format |
 | Entries | `lib/scheduling/entries/` | `scheduling-entries.md` | `dart:ui` for `Color`, and of Flutter only `package:flutter/foundation.dart` | `CalendarEntry<T>`, `CalendarCreateRange` and the data-source contract |
 | Policy | `lib/scheduling/policy/` | `scheduling-policy.md` | Of Flutter, only `package:flutter/foundation.dart` | The overlap rule, the history lock, `CalendarEditPolicy`, `CalendarEditRules` |
 | Store | `lib/scheduling/store/` | `scheduling-store.md` | Of Flutter, only `package:flutter/foundation.dart` | `CalendarStore` and its two stores |
@@ -39,10 +39,15 @@ Normative for `lib/scheduling/`, the scheduling module: the experimental schedul
   grow, such as item kinds, refusal reasons, resource kinds or recurrence
   rules, is a class hierarchy later code extends, never an enum or a sealed
   class, which can never gain a value or a subtype. A new ability of a data
-  source is a new interface.
+  source is a new interface. Package timezone's `Location` is the one foreign
+  type on the public surface: a store's zone, and the `zone` parameter of
+  each `CalendarDates` helper that takes one. No barrel shows it, so a host
+  imports `package:timezone` itself. A store or helper given a zone answers
+  its times as `TZDateTime`s, typed `DateTime`.
 - **The core's tests run on the core alone.** No file under
   `test/scheduling/dates/`, `entries/`, `policy/` or `store/`, nor
-  `test/scheduling/dst_days.dart` or `test/scheduling/class_source.dart`,
+  `test/scheduling/dst_days.dart`, `test/scheduling/zones.dart` or
+  `test/scheduling/class_source.dart`,
   imports anything of `lib/calendar/`, the package barrel, `lib/board/`,
   `lib/sliver_tree/`, `lib/sectioned_sliver_list/` or a file under
   `test/calendar/`.

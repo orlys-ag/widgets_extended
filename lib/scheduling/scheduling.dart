@@ -1,5 +1,6 @@
 /// The scheduling core of a host's entries, without a widget: civil days on
-/// the local wall clock ([CalendarDates], [CalendarWeekdaySet],
+/// the local wall clock or the clock of a zone a store is given
+/// ([CalendarDates], [CalendarWeekdaySet],
 /// [CalendarDayHours], [CalendarMonthGrid]); [CalendarEntry], with the
 /// host's payload, and the [CalendarDataSource] contract; the limits on
 /// edits ([CalendarEditPolicy], [CalendarEditRules], [NoOverlapsPolicy]'s
