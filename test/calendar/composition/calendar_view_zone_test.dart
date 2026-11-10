@@ -234,19 +234,7 @@ Offset slotCenter(WidgetTester tester, int minute, int col) {
 
 /// The timed grid's vertical scroll position.
 ScrollPosition verticalOf(WidgetTester tester) {
-  return tester
-      .stateList<ScrollableState>(
-        find.descendant(
-          of: find.byType(TimedGrid<String>),
-          matching: find.byType(Scrollable),
-        ),
-      )
-      .map((state) {
-        return state.position;
-      })
-      .firstWhere((position) {
-        return position.axis == Axis.vertical;
-      });
+  return gridViewport(tester).verticalPosition!;
 }
 
 /// A canvas that records the rects and lines drawn on it with their
@@ -614,7 +602,6 @@ void main() {
         }
       }
     },
-    skip: true,
   );
 
   testWidgets(
@@ -676,7 +663,6 @@ void main() {
         await tester.pumpAndSettle();
       }
     },
-    skip: true,
   );
 
   testWidgets(
@@ -749,13 +735,9 @@ void main() {
               findsOneWidget,
             );
           case CalendarViewKind.week:
-            expect(
-              find.descendant(
-                of: blockFinder("a"),
-                matching: find.textContaining("09:00"),
-              ),
-              findsOneWidget,
-            );
+            // Week's blocks are not detailed, so the default block draws
+            // its title alone; Day's block above carries the times.
+            break;
           case CalendarViewKind.month:
             final labels = tester
                 .widgetList<Semantics>(
@@ -780,7 +762,6 @@ void main() {
         await tester.pumpAndSettle();
       }
     },
-    skip: true,
   );
 
   testWidgets(
@@ -835,7 +816,6 @@ void main() {
         await tester.pumpAndSettle();
       }
     },
-    skip: true,
   );
 
   testWidgets(
@@ -922,7 +902,6 @@ void main() {
       expect(requested.start, timeIn(zone, 2026, 4, 21, 11));
       expect(requested.end, timeIn(zone, 2026, 4, 21, 12));
     },
-    skip: true,
   );
 
   testWidgets(
@@ -1019,7 +998,6 @@ void main() {
         await tester.pumpAndSettle();
       }
     },
-    skip: true,
   );
 
   testWidgets(
@@ -1109,6 +1087,18 @@ void main() {
         ];
       }
 
+      /// Whether [card] starts under [day]'s header and above the end of
+      /// the next day's, as a card arriving in [day]'s body does while the
+      /// body opens over the next header.
+      bool arriving(Rect card, DateTime day) {
+        final header = tester.getRect(find.byKey(dayListHeaderKey(day)));
+        final next = find.byKey(
+          dayListHeaderKey(CalendarDates.addDays(day, 1)),
+        );
+        return card.top >= header.bottom - 0.5 &&
+            (next.evaluate().isEmpty || card.top < tester.getRect(next).bottom);
+      }
+
       /// Whether [card] lies under [day]'s header, before the next day's.
       bool under(Rect card, DateTime day) {
         final header = tester.getRect(find.byKey(dayListHeaderKey(day)));
@@ -1176,7 +1166,7 @@ void main() {
             );
             expect(
               cards.any((card) {
-                return under(card, wednesday);
+                return arriving(card, wednesday);
               }),
               isTrue,
             );
@@ -1209,13 +1199,21 @@ void main() {
         final range = opened.controller.visibleRange!;
         expect(isDayStartIn(range.first, b), isTrue, reason: "$view");
         expect(isDayStartIn(range.last, b), isTrue, reason: "$view");
-        expect(todaysMarked(tester, view), <int>{dateOf(wednesday)});
+        if (browsed == null) {
+          expect(todaysMarked(tester, view), <int>{dateOf(wednesday)});
+        }
         expect(opened.notifies.single, 1, reason: "$view");
         if (browsed != null) {
           expect(dateOf(opened.headerDays.last), dateOf(browsed));
           final strip = tester.getRect(find.byType(WeekStrip<String>));
           final cell = tester.getRect(find.byKey(weekStripDayKey(browsed)));
           expect(strip.contains(cell.center), isTrue);
+          // The browsed week holds no today: the strip brought back to the
+          // selected day's week shows it.
+          expect(todaysMarked(tester, view), isEmpty);
+          opened.controller.goTo(opened.controller.selectedDay);
+          await tester.pumpAndSettle();
+          expect(todaysMarked(tester, view), <int>{dateOf(wednesday)});
         }
         if (view == CalendarViewKind.week) {
           // From B to no zone.
@@ -1261,9 +1259,14 @@ void main() {
               isTrue,
             );
           case CalendarViewKind.agenda:
-            final cards = cardsOf("a");
-            expect(cards, hasLength(1));
-            expect(under(cards.single, wednesday), isTrue);
+            // The leaving card takes no room from the first frame, and its
+            // row goes at the next, so the arriving card moves no further.
+            final arrived = cardsOf("a").where((card) {
+              return under(card, wednesday);
+            }).toList();
+            expect(arrived, hasLength(1));
+            await tester.pumpAndSettle();
+            expect(cardsOf("a"), <Rect>[arrived.single]);
         }
         await close();
       }
@@ -1273,7 +1276,21 @@ void main() {
       final agenda = await open(CalendarViewKind.agenda, a);
       setStoreZone(agenda.store, b);
       await tester.pumpAndSettle();
-      expect(under(cardsOf("e").single, tuesday), isTrue);
+      // Setup sanity: "e" lies in the top day's section, under the top of
+      // its pinned header, which can draw over the section's first card.
+      final moved = cardsOf("e").single;
+      expect(
+        moved.top,
+        greaterThanOrEqualTo(
+          tester.getRect(find.byKey(dayListHeaderKey(tuesday))).top,
+        ),
+      );
+      expect(
+        moved.bottom,
+        lessThanOrEqualTo(
+          tester.getRect(find.byKey(dayListHeaderKey(wednesday))).top + 0.5,
+        ),
+      );
       agenda.notifies[0] = 0;
       setStoreZone(agenda.store, a);
       await tester.pumpAndSettle();
@@ -1296,8 +1313,35 @@ void main() {
         }, reason: "$view");
         await close();
       }
+
+      // Back to A one frame into the change to B, while its motion runs.
+      Map<String, List<Rect>> placesIn(CalendarViewKind view) {
+        return <String, List<Rect>>{
+          for (final id in <String>["a", "b", "e"])
+            id: <Rect>[
+              for (final element in entryFinder(view, id).evaluate())
+                tester.getRect(find.byWidget(element.widget)),
+            ],
+        };
+      }
+
+      for (final view in CalendarViewKind.values) {
+        final opened = await open(view, a);
+        final atA = placesIn(view);
+        setStoreZone(opened.store, b);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 16));
+        // Setup sanity: the change to B is under way.
+        expect(placesIn(view), isNot(atA), reason: "$view");
+        setStoreZone(opened.store, a);
+        await tester.pump();
+        expect(tester.takeException(), isNull, reason: "$view");
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: "$view");
+        expect(placesIn(view), atA, reason: "$view");
+        await close();
+      }
     },
-    skip: true,
   );
 
   testWidgets(
@@ -1418,11 +1462,18 @@ void main() {
         await tester.pumpAndSettle();
         final col = weekColOf(tuesday);
         final slot = slotExtent(tester, col);
+        // A pending block shows an indicator that repeats until its write
+        // completes, so the frames run for a bounded time, past the motion.
+        Future<void> settleHeld() async {
+          await tester.pump();
+          await tester.pump(const Duration(seconds: 1));
+        }
+
         final gesture = await lift(tester, tester.getCenter(blockFinder("a")));
         await gesture.moveBy(Offset(0.0, 8 * slot));
         await tester.pump();
         await gesture.up();
-        await tester.pumpAndSettle();
+        await settleHeld();
         expect(source.held, hasLength(1));
         expect(
           tester.getRect(blockFinder("a", tuesday)).top,
@@ -1431,7 +1482,7 @@ void main() {
         setStoreZone(store, b);
         await tester.pump();
         expect(tester.takeException(), isNull);
-        await tester.pumpAndSettle();
+        await settleHeld();
         // Before the write completes, at its requested time on B's clock.
         expect(
           tester.getRect(blockFinder("a", tuesday)).top,
@@ -1584,7 +1635,6 @@ void main() {
         );
       }
     },
-    skip: true,
   );
 
   testWidgets(
@@ -1718,7 +1768,6 @@ void main() {
         await tester.pumpAndSettle();
       }
     },
-    skip: true,
   );
 
   testWidgets(
@@ -1803,8 +1852,9 @@ void main() {
         );
         await resize.moveBy(Offset(0.0, slot));
         await tester.pump();
-        await resize.moveBy(Offset(0.0, slot / 2 - 3.0));
-        await tester.pump();
+        // A resize snaps the end it holds to the nearest slot line, so the
+        // moves below keep that end within a quarter slot of the line it
+        // reached.
         await expectNoneWithin(resize, "resize");
         await resize.up();
         await tester.pumpAndSettle();
@@ -1831,7 +1881,6 @@ void main() {
       expect(one, <int>[6, 6, 6]);
       expect(many, <int>[6, 6, 6]);
     },
-    skip: true,
   );
 
   testWidgets(
@@ -1891,7 +1940,6 @@ void main() {
       final many = await lookupsWith(500);
       expect(many - one, 998);
     },
-    skip: true,
   );
 
   test("VZ12 no document says a calendar refuses a zoned store, and "
@@ -1926,7 +1974,7 @@ void main() {
     }
     final readme = File("README.md").readAsStringSync();
     expect(readme, contains("readAhead: 2"));
-  }, skip: true);
+  });
 }
 
 /// The doc comment right above the line of [source] that starts with
