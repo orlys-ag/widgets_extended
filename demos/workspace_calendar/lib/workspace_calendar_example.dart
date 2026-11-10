@@ -59,8 +59,6 @@
 /// deletes. A write that fails says why.
 library;
 
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
@@ -306,20 +304,23 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _store.hours = settings.hours;
   }
 
-  /// Opens the time zone sheet: the zone panel over the store's zone, as
-  /// tall as 0.7 of the screen, less what the keyboard covers, and padded
-  /// above the keyboard, so its list scrolls its last rows into view.
+  /// Opens the time zone sheet: the zone panel over the store's zone, 0.7
+  /// of the screen tall, padded above the keyboard. The sheet stays below
+  /// the screen's top intrusions, such as a status bar, and within the
+  /// screen, so where the keyboard leaves less than that height the panel
+  /// takes what is left, in which its list scrolls.
   void _openZones() {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       builder: (context) {
-        final inset = MediaQuery.viewInsetsOf(context).bottom;
-        final height = MediaQuery.sizeOf(context).height;
         return Padding(
-          padding: EdgeInsets.only(bottom: inset),
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(context).bottom,
+          ),
           child: SizedBox(
-            height: math.min(height * 0.7, height - inset),
+            height: MediaQuery.sizeOf(context).height * 0.7,
             child: ListenableBuilder(
               listenable: _store,
               builder: (context, child) {

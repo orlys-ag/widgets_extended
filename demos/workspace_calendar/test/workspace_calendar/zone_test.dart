@@ -513,4 +513,52 @@ void main() {
       expect(find.text("New Task"), findsNothing);
     },
   );
+
+  testWidgets(
+    "DZ5 the zone sheet keeps the search field and the zone list above the "
+    "keyboard",
+    (tester) async {
+      await pumpCalendar(tester, clock: noonClock);
+      // Month, whose scaffold keeps its height under a keyboard, so the
+      // calendar behind the sheet lays out as with none.
+      await pickMode(tester, "Month");
+      const strings = DefaultCalendarLocalizations();
+      final screen =
+          tester.view.physicalSize.height / tester.view.devicePixelRatio;
+      await tester.tap(zoneButton);
+      await tester.pumpAndSettle();
+      await tester.tap(inPanel(find.text(strings.addZonesLabel)));
+      await tester.pumpAndSettle();
+      final field = inPanel(find.byType(TextField));
+      await tester.tap(field);
+      await tester.pump();
+      final list = inPanel(find.byType(CustomScrollView));
+
+      // A keyboard taller than the room the unpadded sheet leaves below the
+      // search field.
+      const keyboard = 600.0;
+      tester.view.viewInsets = const FakeViewPadding(bottom: keyboard);
+      await tester.pump();
+      expect(
+        tester.getRect(field).bottom,
+        lessThanOrEqualTo(screen - keyboard),
+      );
+      expect(tester.getRect(list).bottom, lessThanOrEqualTo(screen - keyboard));
+      expect(tester.getRect(list).height, greaterThanOrEqualTo(56.0));
+
+      // Under a status bar the sheet keeps below it.
+      const statusBar = 47.0;
+      tester.view.padding = const FakeViewPadding(top: statusBar);
+      await tester.pump();
+      expect(tester.getRect(field).top, greaterThanOrEqualTo(statusBar));
+      expect(tester.getRect(list).height, greaterThanOrEqualTo(56.0));
+
+      tester.view.resetPadding();
+      tester.view.resetViewInsets();
+      await tester.pump();
+      final panel = tester.getRect(find.byType(CalendarZonePanel));
+      expect(panel.height, moreOrLessEquals(screen * 0.7));
+      expect(panel.bottom, moreOrLessEquals(screen));
+    },
+  );
 }
