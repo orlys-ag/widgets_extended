@@ -665,4 +665,75 @@ void main() {
     await tester.pumpAndSettle();
     expectDays();
   });
+
+  testWidgets("AZ3 a zone change files an entry of several days on the new "
+      "clock's days, each day's piece read on that clock", (tester) async {
+    final on = DateTime(2026, 4, 21, 12);
+    final behind = zoneApartFromDevice(on, -6);
+    final ahead = zoneApartFromDevice(on, 6);
+    final tuesday = DateTime(2026, 4, 21);
+    final thursday = DateTime(2026, 4, 23);
+    // From 22:00 on Tuesday to 08:00 on Thursday on the clock 6 hours
+    // ahead, whose Thursday piece ends 4 hours before Thursday starts on
+    // the clock 6 hours behind.
+    final store = memoryStoreIn<String>(
+      behind,
+      entries: <CalendarEntry<String>>[
+        CalendarEntry<String>(
+          id: "c",
+          start: tz.TZDateTime(behind, 2026, 4, 21, 10),
+          end: tz.TZDateTime(behind, 2026, 4, 22, 20),
+          title: "c",
+          color: const Color(0xFF336699),
+          payload: "c",
+        ),
+      ],
+    );
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 20, 9), today: DateTime(2026, 4, 20)),
+    );
+    addTearDown(now.dispose);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(800.0, 2000.0);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DayList<String>(
+          store: store,
+          weekdays: CalendarWeekdaySet.all,
+          format: CalendarHourLabelFormat.twentyFourHour,
+          hours: CalendarDayHours.allDay,
+          editable: false,
+          selectedDay: dayOfNumberIn(CalendarDates.dayNumber(tuesday), behind),
+          now: now,
+          onTopDay: (day) {},
+          onCreateRange: (details) async {},
+          onEdit: (id) {},
+          onDelete: (id) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final cards = find.byKey(entryCardKey("c"));
+    // Setup sanity: the entry lies on Tuesday and Wednesday.
+    expect(cards, findsNWidgets(2));
+
+    setStoreZone(store, ahead);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(cards, findsNWidgets(3));
+    final thursdayHeader = tester.getRect(
+      find.byKey(dayListHeaderKey(thursday)),
+    );
+    expect(
+      cards.evaluate().where((card) {
+        return tester.getRect(find.byWidget(card.widget)).top >=
+            thursdayHeader.bottom - 0.5;
+      }),
+      hasLength(1),
+    );
+  });
 }

@@ -1807,19 +1807,36 @@ class _DayListState<T> extends State<DayList<T>> {
           },
         );
       case DayListBody(:final day):
+        final zone = _zone;
         return AnswerBuilder<List<DayListRow>>(
           listenables: <Listenable>[widget.store],
           answer: () {
-            return _blockRowsOf(day);
+            return _blockRowsOf(_dayOnClock(day, zone));
           },
           equals: listEquals,
           builder: (context, rows, child) {
-            return _buildBody(day, rows);
+            return _buildBody(_dayOnClock(day, zone), rows);
           },
         );
       default:
         throw ArgumentError.value(row, "row", "not a row of the tree");
     }
+  }
+
+  /// [day], the start of a row's date on the clock of [zone], on the clock
+  /// the list holds: [day] itself while the list holds [zone], and the
+  /// start of the same date on the list's clock once it took another
+  /// ([_takeZone]). A store notify that brings a new zone runs each body's
+  /// answer before the tree hands the body its row of the new clock, and
+  /// the store's entries are then on the new clock.
+  DateTime _dayOnClock(DateTime day, Location? zone) {
+    if (identical(zone, _zone)) {
+      return day;
+    }
+    return CalendarDates.dateOfDayNumber(
+      CalendarDates.dayNumber(day),
+      zone: _zone,
+    );
   }
 
   /// The block of [day]'s [rows], over which, on the day [DayList.now]
