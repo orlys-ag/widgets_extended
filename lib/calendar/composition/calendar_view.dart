@@ -613,19 +613,14 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     vsync: this,
   );
 
-  /// The theme [_resolveTheme] resolved, which the state draws and
-  /// animates its own parts with, and the one it puts above the views,
-  /// null where it puts none.
-  CalendarThemeData _theme = CalendarThemeData.builtIn;
-  CalendarThemeData? _insertedTheme;
+  /// Resolves the theme the state draws and animates its own parts with,
+  /// and the one it puts above the views ([_resolveTheme]).
+  final CalendarThemeResolver _themes = CalendarThemeResolver();
 
-  /// The last [ColorScheme] a theme was derived from, and that theme.
-  ColorScheme? _derivedScheme;
-  CalendarThemeData? _derivedTheme;
-
-  /// Whether the build puts a transparent [Material] above everything it
-  /// builds.
-  bool _insertsMaterial = false;
+  /// The theme [_themes] last resolved.
+  CalendarThemeData get _theme {
+    return _themes.theme;
+  }
 
   /// The key of the header, the cards and the views, under the optional
   /// [Material] and [CalendarTheme], so a resolve that adds or drops one
@@ -674,8 +669,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
 
   @override
   void reassemble() {
-    _derivedScheme = null;
-    _derivedTheme = null;
+    _themes.reset();
     // A reload can change what a getter of the policy answers while the
     // policy stays `==` to itself, which [CalendarEditRules.updated] would
     // not read again.
@@ -974,39 +968,10 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   }
 
   /// Resolves the theme the views draw with, and whether a [Material] goes
-  /// above them. A [CalendarTheme] above wins; with none, the theme comes
-  /// from the [ThemeData] where a [Theme] is above, and is the built-in
-  /// one where none is. Sets the fold's and the picker's durations to the
-  /// theme's.
+  /// above them ([CalendarThemeResolver.resolve]). Sets the fold's and the
+  /// picker's durations to the theme's.
   void _resolveTheme() {
-    final hasTheme = context.findAncestorWidgetOfExactType<Theme>() != null;
-    final hasMaterial =
-        LookupBoundary.findAncestorWidgetOfExactType<Material>(context) != null;
-    _insertsMaterial = hasTheme && !hasMaterial;
-    final ambient = context.dependOnInheritedWidgetOfExactType<CalendarTheme>();
-    if (ambient != null) {
-      _theme = ambient.data;
-      _insertedTheme = null;
-    } else if (!hasTheme) {
-      _theme = CalendarThemeData.builtIn;
-      _insertedTheme = null;
-    } else {
-      final themeData = Theme.of(context);
-      final extension = themeData.extension<CalendarThemeExtension>();
-      if (extension != null) {
-        _theme = extension.data;
-      } else {
-        final scheme = themeData.colorScheme;
-        var derived = _derivedTheme;
-        if (derived == null || scheme != _derivedScheme) {
-          derived = CalendarThemeExtension.fromColorScheme(scheme).data;
-          _derivedScheme = scheme;
-          _derivedTheme = derived;
-        }
-        _theme = derived;
-      }
-      _insertedTheme = _theme;
-    }
+    _themes.resolve(context);
     _collapseController.duration = _theme.motionDuration;
     _pickerShown.duration = _theme.motionDuration;
   }
@@ -1720,11 +1685,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
         view = _buildMonth(header);
     }
     Widget content = KeyedSubtree(key: _contentKey, child: view);
-    final inserted = _insertedTheme;
+    final inserted = _themes.inserted;
     if (inserted != null) {
       content = CalendarTheme(data: inserted, child: content);
     }
-    if (_insertsMaterial) {
+    if (_themes.hasTheme && !_themes.hasMaterial) {
       content = Material(type: MaterialType.transparency, child: content);
     }
     return content;
