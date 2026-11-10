@@ -478,9 +478,14 @@ Load `latest.dart` or `latest_all.dart`, not `latest_10y.dart`, which holds
 rules only for the five years before and after its release, and pass no zone
 rather than `tz.local`, which is UTC after the data loads, not the device's
 zone.
-`CalendarView` refuses a store with a zone for now: its build reports an
-`ArgumentError` naming `store` in the calendar's place, whether the store has
-its zone at the first build or is given one later.
+`CalendarView` draws on its store's zone: each view files, places and labels
+entries and reads the clock on that zone's clock, and the days and times it
+reports are `TZDateTime`s of the zone. A zone given later keeps the selected
+date, moves today, ends the drags in flight and moves the entries as any store
+change does. Over a `CachingCalendarStore`, give a store whose users switch
+zones `readAhead: 2`, so it keeps the shown days read across a change once its
+reads have answered; with none, the days the new zone's re-read has not
+answered show the loading state.
 
 **Editing.** With `editable: true`, Week's and Day's blocks move and
 resize, and a create gesture reports a `CalendarCreateDetails` through

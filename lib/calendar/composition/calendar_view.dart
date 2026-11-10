@@ -186,11 +186,22 @@ final class CalendarEntryTapDetails<T> {
 /// view menu, builds no `Scaffold` or app bar, and never writes [store]'s
 /// settings. It shows and schedules in the store's hours
 /// ([CalendarStore.hours]), and builds again when a set of them notifies.
-/// It draws no entry on a store's zone ([CalendarStore.zone]): a store with
-/// one is refused, with an [ArgumentError] from the build, and a notify that
-/// brings another zone builds again, so a zone given later is refused and
-/// one cleared brings the calendar back. A store with no zone draws on the
-/// device's clock. It disposes no store. It draws in the [CalendarTheme]
+/// It draws on its store's zone ([CalendarStore.zone]): every view files,
+/// places and labels the entries on the zone's clock, the clock is read on
+/// it, and each day the calendar holds or hands out, the selected day, the
+/// visible range's days and the days the builders' details name included,
+/// is the start of a date on it, a `TZDateTime` of the zone typed
+/// [DateTime], as are a create range's times. A store with no zone draws on
+/// the device's clock. A notify that brings another zone keeps the
+/// selected date and Week's and Day's scroll position, moves today to the
+/// new clock's date, ends the drags in flight, writing nothing, and moves
+/// the entries as any store change does, over the views' motion. Over a
+/// [CachingCalendarStore] they move so only where the store kept the shown
+/// days read across the change, which a [CachingCalendarStore.readAhead]
+/// of 2 does once the store's reads have answered, so a host whose users
+/// switch zones over one sets it to 2; otherwise the views draw the
+/// loading state over the days the new zone's re-read has not answered.
+/// It disposes no store. It draws in the [CalendarTheme]
 /// above it; with none, under a Material [Theme], in a
 /// [CalendarThemeExtension] of the [ThemeData], or with none the theme
 /// [CalendarThemeExtension.fromColorScheme] gives the [ColorScheme]; and
@@ -213,9 +224,7 @@ final class CalendarEntryTapDetails<T> {
 /// in every build, after the one for [views]: for a [slotMinutes] that
 /// [CalendarDates.slotMinuteChoices] does not hold; then for store hours
 /// off its grid ([CalendarDayHours.isOnSlotsOf]), named `store.hours`, in
-/// the build after a set of them too; then for a store with a zone
-/// ([CalendarStore.zone]), named `store`, in the build after a notify that
-/// brings one too; and then for an [editPolicy] whose
+/// the build after a set of them too; and then for an [editPolicy] whose
 /// [CalendarEditPolicy.dayLimit] is under 1, named `policy`. The next
 /// build that throws none of them builds the views anew.
 class CalendarView<T> extends StatefulWidget {
@@ -254,9 +263,9 @@ class CalendarView<T> extends StatefulWidget {
 
   /// The entries the calendar shows and its views write, and the hours it
   /// shows and schedules in ([CalendarStore.hours]). The calendar asks it
-  /// to show the range of days its view shows, and never disposes it. A
-  /// store with a zone ([CalendarStore.zone]) is refused: the build throws
-  /// an [ArgumentError] named `store`.
+  /// to show the range of days its view shows, and never disposes it. The
+  /// calendar draws on its zone ([CalendarStore.zone]), the device's clock
+  /// where it has none.
   final CalendarStore<T> store;
 
   /// Holds the view, the selected day, the visible range and the zoom
@@ -350,9 +359,9 @@ class CalendarView<T> extends StatefulWidget {
   final CalendarMonthLayout monthLayout;
 
   /// Reads the current time, which the calendar reads when first built and
-  /// again at the start of each minute; null reads [DateTime.now]. A UTC
-  /// reading is taken as its local time, the same instant, so the day it
-  /// marks is the local one.
+  /// again at the start of each minute; null reads [DateTime.now]. A
+  /// reading is taken on the clock of [store]'s zone, the same instant, or
+  /// with no zone as its local time, so the day it marks is that clock's.
   ///
   /// A new function is read at once, and the next minute is timed from
   /// its reading. The reading replaces the time the calendar holds where
@@ -363,8 +372,9 @@ class CalendarView<T> extends StatefulWidget {
   final DateTime Function()? clock;
 
   /// The day the calendar marks as today and opens on, read by its year,
-  /// month and day, so a UTC today names the same date; null marks the
-  /// local day [clock] reads, moving at midnight.
+  /// month and day, so a UTC today names the same date, which the calendar
+  /// takes on the clock of [store]'s zone; null marks the day [clock] reads
+  /// on that clock, the local one with no zone, moving at its midnight.
   final DateTime? today;
 
   /// Draws Week's and Day's blocks; null for the module's default.

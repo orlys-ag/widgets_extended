@@ -133,9 +133,14 @@ base class CalendarController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The selected day, a local midnight on a weekday the calendar shows.
-  /// Throws a [StateError] for a controller given no day and bound to no
-  /// calendar; a bound one always has one.
+  /// The selected day, on a weekday the calendar shows. On a controller a
+  /// calendar binds, it is the start of a day on the clock of that
+  /// calendar's store's zone ([CalendarStore.zone]): a `TZDateTime` of the
+  /// zone typed [DateTime], or a local midnight where the store has none.
+  /// On an unbound one, it is the start of the given day's date on that
+  /// day's own clock ([CalendarDates.dateOnly]). Throws a [StateError] for
+  /// a controller given no day and bound to no calendar; a bound one always
+  /// has one.
   ///
   /// Set on a bound controller, the calendar selects the shown day nearest
   /// [value]'s day; on an unbound one, [value]'s day is kept until a

@@ -30,6 +30,7 @@ import 'package:widgets_extended/calendar/views/week_strip.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 
@@ -514,6 +515,55 @@ class HeldWrites implements CalendarDataSource<String> {
     final done = Completer<CalendarEntry<String>>();
     held.add((entry: entry, done: done));
     return done.future;
+  }
+
+  @override
+  Future<void> delete(String id) {
+    throw UnimplementedError();
+  }
+}
+
+/// A data source that answers each read within the call, through a
+/// [SynchronousFuture], with the entries covering its days, or, while
+/// [holds] is set, holds the answer for good, as a read still on its way.
+class HeldReads implements CalendarDataSource<String> {
+  HeldReads(this.entries);
+
+  /// The entries, at device-local times, as a data source holds them.
+  final List<CalendarEntry<String>> entries;
+
+  bool holds = false;
+
+  /// The days of each read sent while [holds] was set.
+  final List<({DateTime first, DateTime last})> held =
+      <({DateTime first, DateTime last})>[];
+
+  @override
+  Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    if (holds) {
+      held.add((first: first, last: last));
+      return Completer<List<CalendarEntry<String>>>().future;
+    }
+    final from = CalendarDates.dayNumber(first);
+    final to = CalendarDates.dayNumber(last);
+    return SynchronousFuture<List<CalendarEntry<String>>>(
+      <CalendarEntry<String>>[
+        for (final entry in entries)
+          if (CalendarDates.dayNumber(entry.start) <= to &&
+              CalendarDates.lastDayNumberOf(entry.start, entry.end) >= from)
+            entry,
+      ],
+    );
+  }
+
+  @override
+  Future<CalendarEntry<String>> create(CalendarEntry<String> draft) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<CalendarEntry<String>> replace(CalendarEntry<String> entry) {
+    throw UnimplementedError();
   }
 
   @override
@@ -1778,8 +1828,10 @@ void main() {
       final tuesday = DateTime(2026, 4, 21);
 
       /// The lookups each of a move drag's pointer moves across a slot
-      /// asks, with [count] entries, after checking that moves within a
-      /// slot of a move, a resize and a create drag ask none.
+      /// asks, with [count] entries, to landings ending before 12:00, then
+      /// those of a move to a landing ending at the next day's start,
+      /// after checking that moves within a slot of a move, a resize and a
+      /// create drag ask none.
       Future<List<int>> lookupsWith(int count) async {
         final zone = CountingLocation(apart(5));
         final entries = <CalendarEntry<String>>[
@@ -1787,6 +1839,11 @@ void main() {
             "a",
             timeIn(zone, 2026, 4, 21, 10),
             timeIn(zone, 2026, 4, 21, 11),
+          ),
+          entryOf(
+            "z",
+            timeIn(zone, 2026, 4, 22, 22, 45),
+            timeIn(zone, 2026, 4, 22, 23, 45),
           ),
           for (var index = 1; index < count; index++)
             entryOf(
@@ -1802,6 +1859,7 @@ void main() {
           selectedDay: tuesday,
         );
         addTearDown(controller.dispose);
+        final requests = <CalendarMoveRequest<String>>[];
         await tester.pumpWidget(
           app(
             CalendarView<String>(
@@ -1810,7 +1868,9 @@ void main() {
               clock: fixedClock,
               editable: true,
               onCreateRange: (details) async {},
-              onMoveRequest: (request) async {},
+              onMoveRequest: (request) async {
+                requests.add(request);
+              },
             ),
           ),
         );
@@ -1829,10 +1889,9 @@ void main() {
           }
         }
 
-        // A move.
+        // A move, to landings from 10:15 to 11:15, 10:30 to 11:30 and
+        // 10:45 to 11:45.
         final move = await lift(tester, tester.getCenter(blockFinder("a")));
-        await move.moveBy(Offset(0.0, slot));
-        await tester.pump();
         final perMove = <int>[];
         for (var step = 0; step < 3; step++) {
           final before = zone.lookups;
@@ -1843,6 +1902,24 @@ void main() {
         await expectNoneWithin(move, "move");
         await move.up();
         await tester.pumpAndSettle();
+        // Setup sanity: the drop requested the third landing.
+        expect(
+          requests.single.requested.start,
+          timeIn(zone, 2026, 4, 21, 10, 45),
+        );
+
+        // A move of "z" one slot down, to a landing from 23:00 to the
+        // next day's start.
+        final last = await lift(tester, tester.getCenter(blockFinder("z")));
+        final before = zone.lookups;
+        await last.moveBy(Offset(0.0, slot));
+        await tester.pump();
+        perMove.add(zone.lookups - before);
+        await last.up();
+        await tester.pumpAndSettle();
+        // Setup sanity: the drop requested that landing.
+        expect(requests.last.requested.start, timeIn(zone, 2026, 4, 22, 23));
+        expect(requests.last.requested.end, dayIn(zone, 2026, 4, 23));
 
         // A resize.
         await select(tester, blockFinder("a"));
@@ -1878,8 +1955,8 @@ void main() {
 
       final one = await lookupsWith(1);
       final many = await lookupsWith(500);
-      expect(one, <int>[6, 6, 6]);
-      expect(many, <int>[6, 6, 6]);
+      expect(one, <int>[17, 17, 17, 18]);
+      expect(many, <int>[17, 17, 17, 18]);
     },
   );
 
@@ -1975,6 +2052,259 @@ void main() {
     final readme = File("README.md").readAsStringSync();
     expect(readme, contains("readAhead: 2"));
   });
+
+  testWidgets(
+    "VZ13 a zone change over a caching store whose reads answered moves the "
+    "entries as over a memory store where the read-ahead kept the shown "
+    "days read, and shows the loading state with none",
+    (tester) async {
+      ensureZones();
+      useTallView(tester);
+      // Fixed offsets 26 hours apart: Etc/GMT+12 and Etc/GMT-14.
+      final west = gmtZone(-12);
+      final east = gmtZone(14);
+      final tuesday = DateTime(2026, 4, 21);
+      final wednesday = DateTime(2026, 4, 22);
+      final friday = DateTime(2026, 4, 24);
+      const probe = ValueKey<String>("loading probe");
+
+      /// [view] over a caching store on the west zone reading [readAhead]
+      /// days ahead, once every read answered, its source then holding
+      /// each read.
+      Future<
+        ({
+          CachingCalendarStore<String> store,
+          CalendarController controller,
+          HeldReads source,
+        })
+      >
+      open(
+        CalendarViewKind view,
+        int readAhead, {
+        CalendarThemeData? theme,
+      }) async {
+        final source = HeldReads(<CalendarEntry<String>>[
+          entryOf(
+            "c",
+            instantOf(timeIn(west, 2026, 4, 21, 10)),
+            instantOf(timeIn(west, 2026, 4, 23, 10)),
+          ),
+        ]);
+        final store = CachingCalendarStore<String>(
+          dataSource: source,
+          zone: west,
+          readAhead: readAhead,
+        );
+        addTearDown(store.dispose);
+        final controller = CalendarController(
+          view: view,
+          selectedDay: wednesday,
+          minSlotHeight: 25.0,
+        );
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(
+          app(
+            CalendarView<String>(
+              store: store,
+              controller: controller,
+              clock: fixedClock,
+              loadingBuilder: (context, state) {
+                return const SizedBox(key: probe);
+              },
+            ),
+            calendarTheme: theme,
+          ),
+        );
+        expect(tester.takeException(), isNull);
+        await tester.pumpAndSettle();
+        if (view == CalendarViewKind.week || view == CalendarViewKind.day) {
+          verticalOf(tester).jumpTo(0.0);
+          await tester.pumpAndSettle();
+        }
+        // Setup sanity: every read answered.
+        expect(store.status, CalendarLoadStatus.ready, reason: "$view");
+        expect(find.byKey(probe), findsNothing, reason: "$view");
+        source.holds = true;
+        return (store: store, controller: controller, source: source);
+      }
+
+      Future<void> close() async {
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+      }
+
+      /// The rects of [id]'s Agenda cards.
+      List<Rect> cardsOf(String id) {
+        return <Rect>[
+          for (final card in find.byKey(entryCardKey(id)).evaluate())
+            tester.getRect(find.byWidget(card.widget)),
+        ];
+      }
+
+      /// Whether [card] lies under [day]'s header, before the next day's.
+      bool under(Rect card, DateTime day) {
+        final header = tester.getRect(find.byKey(dayListHeaderKey(day)));
+        final next = find.byKey(
+          dayListHeaderKey(CalendarDates.addDays(day, 1)),
+        );
+        return card.top >= header.bottom - 0.5 &&
+            (next.evaluate().isEmpty ||
+                card.bottom <= tester.getRect(next).top + 0.5);
+      }
+
+      /// Whether [card] starts under [day]'s header and above the end of
+      /// the next day's, as a card arriving in [day]'s body does while the
+      /// body opens over the next header.
+      bool arriving(Rect card, DateTime day) {
+        final header = tester.getRect(find.byKey(dayListHeaderKey(day)));
+        final next = find.byKey(
+          dayListHeaderKey(CalendarDates.addDays(day, 1)),
+        );
+        return card.top >= header.bottom - 0.5 &&
+            (next.evaluate().isEmpty || card.top < tester.getRect(next).bottom);
+      }
+
+      /// Expects "c" at its place on the east zone's clock: from Wednesday
+      /// 12:00 to Friday 12:00.
+      void expectMoved(CalendarViewKind view) {
+        switch (view) {
+          case CalendarViewKind.day:
+          case CalendarViewKind.week:
+            expect(
+              tester.getRect(blockFinder("c", wednesday)).top,
+              moreOrLessEquals(
+                rowTop(tester, 12 * 60, colIn(view, wednesday)),
+                epsilon: 0.5,
+              ),
+              reason: "$view",
+            );
+          case CalendarViewKind.month:
+            final chip = tester.getRect(chipFinder("c"));
+            expect(
+              chip.left,
+              moreOrLessEquals(
+                tester.getRect(find.byKey(monthDayKey(wednesday))).left,
+                epsilon: 0.5,
+              ),
+            );
+          case CalendarViewKind.agenda:
+            final cards = cardsOf("c");
+            expect(
+              cards.any((card) {
+                return under(card, friday);
+              }),
+              isTrue,
+            );
+            expect(
+              cards.any((card) {
+                return under(card, tuesday);
+              }),
+              isFalse,
+            );
+        }
+      }
+
+      for (final view in CalendarViewKind.values) {
+        // With a read-ahead of 2.
+        final ahead = await open(view, 2);
+        ahead.store.zone = east;
+        await tester.pump();
+        expect(tester.takeException(), isNull, reason: "$view");
+        expect(ahead.store.status, CalendarLoadStatus.ready, reason: "$view");
+        expect(find.byKey(probe), findsNothing, reason: "$view");
+        // Setup sanity: the change sent reads the source holds.
+        expect(ahead.source.held, isNotEmpty, reason: "$view");
+        await tester.pump(const Duration(milliseconds: 16));
+        switch (view) {
+          case CalendarViewKind.day:
+          case CalendarViewKind.week:
+            final col = colIn(view, wednesday);
+            final top = tester.getRect(blockFinder("c", wednesday)).top;
+            expect(top, greaterThan(rowTop(tester, 0, col)), reason: "$view");
+            expect(top, lessThan(rowTop(tester, 12 * 60, col)));
+          case CalendarViewKind.month:
+            final left = tester.getRect(chipFinder("c")).left;
+            expect(
+              left,
+              greaterThan(
+                tester.getRect(find.byKey(monthDayKey(tuesday))).left,
+              ),
+            );
+            expect(
+              left,
+              lessThan(tester.getRect(find.byKey(monthDayKey(wednesday))).left),
+            );
+          case CalendarViewKind.agenda:
+            final cards = cardsOf("c");
+            expect(
+              cards.any((card) {
+                return under(card, tuesday);
+              }),
+              isTrue,
+            );
+            expect(
+              cards.any((card) {
+                return arriving(card, friday);
+              }),
+              isTrue,
+            );
+        }
+        await tester.pumpAndSettle();
+        expectMoved(view);
+        await close();
+
+        // Under a theme whose motion is off, at the new place at once.
+        final still = await open(
+          view,
+          2,
+          theme: CalendarThemeData(motionDuration: Duration.zero),
+        );
+        still.store.zone = east;
+        await tester.pump();
+        if (view == CalendarViewKind.agenda) {
+          // The leaving card takes no room from the first frame, and its
+          // row goes at the next, so the arriving card moves no further.
+          final arrived = cardsOf("c").where((card) {
+            return under(card, friday);
+          }).toList();
+          expect(arrived, hasLength(1));
+          await tester.pumpAndSettle();
+          expect(
+            cardsOf("c").where((card) {
+              return under(card, friday);
+            }),
+            <Rect>[arrived.single],
+          );
+        }
+        expectMoved(view);
+        await close();
+
+        // With no read-ahead, the shown range's first two days are read
+        // again under the new zone.
+        final none = await open(view, 0);
+        none.store.zone = east;
+        await tester.pump();
+        expect(tester.takeException(), isNull, reason: "$view");
+        expect(none.store.status, CalendarLoadStatus.loading, reason: "$view");
+        final range = none.controller.visibleRange!;
+        expect(none.store.isRead(range.first), isFalse, reason: "$view");
+        expect(
+          none.store.isRead(CalendarDates.addDays(range.first, 1)),
+          isFalse,
+          reason: "$view",
+        );
+        expect(
+          none.store.isRead(CalendarDates.addDays(range.first, 2)),
+          isTrue,
+          reason: "$view",
+        );
+        if (view != CalendarViewKind.agenda) {
+          expect(find.byKey(probe), findsWidgets, reason: "$view");
+        }
+        await close();
+      }
+    },
+  );
 }
 
 /// The doc comment right above the line of [source] that starts with

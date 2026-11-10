@@ -78,8 +78,13 @@ once. A time whose offset in the zone has seconds fails only the operation
 that holds it, with an `ArgumentError`. `CalendarEntry` and
 `CalendarCreateRange` take a `TZDateTime`, `CalendarNow` and the edit policies
 read a zoned time's clock, and `CalendarDates`' helpers read the clock of a
-`TZDateTime`. `CalendarView` refuses a store with a zone for now, which its
-build reports as an `ArgumentError`. The package depends on `timezone`, so an
+`TZDateTime`. `CalendarView` draws on its store's zone: its views file,
+place and label entries and read the clock on that zone's clock, the days and
+times it reports are `TZDateTime`s of the zone, and a zone given later keeps
+the selected date, moves today, ends the drags in flight and moves the entries
+as any store change does. Over a `CachingCalendarStore`, a store whose users
+switch zones takes `readAhead: 2`, so it keeps the shown days read across a
+change once its reads have answered. The package depends on `timezone`, so an
 app resolves `timezone`, `http` and `path` too.
 - Added `CalendarDates.inZone`, a time's instant on a zone's clock, or on the
 device's with none, and `CalendarDates.loadedZones`, the zones of the loaded
