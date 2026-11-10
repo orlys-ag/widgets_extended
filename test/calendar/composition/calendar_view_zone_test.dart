@@ -2170,6 +2170,9 @@ void main() {
         switch (view) {
           case CalendarViewKind.day:
           case CalendarViewKind.week:
+            if (view == CalendarViewKind.day) {
+              expect(blockFinder("c"), findsOneWidget);
+            }
             expect(
               tester.getRect(blockFinder("c", wednesday)).top,
               moreOrLessEquals(
@@ -2215,13 +2218,32 @@ void main() {
         // Setup sanity: the change sent reads the source holds.
         expect(ahead.source.held, isNotEmpty, reason: "$view");
         await tester.pump(const Duration(milliseconds: 16));
+        List<Rect>? dayBlocks;
         switch (view) {
-          case CalendarViewKind.day:
           case CalendarViewKind.week:
+            // The piece of offset 0 slides from Tuesday 10:00 to Wednesday
+            // 12:00 under the one key it keeps.
             final col = colIn(view, wednesday);
             final top = tester.getRect(blockFinder("c", wednesday)).top;
-            expect(top, greaterThan(rowTop(tester, 0, col)), reason: "$view");
+            expect(top, greaterThan(rowTop(tester, 10 * 60, col)));
             expect(top, lessThan(rowTop(tester, 12 * 60, col)));
+          case CalendarViewKind.day:
+            // Wednesday's piece takes offset 0 in place of 1: the piece of
+            // offset 1 exits at the 00:00 row while that of offset 0 enters
+            // at the 12:00 row.
+            dayBlocks = <Rect>[
+              for (final block in blockFinder("c", wednesday).evaluate())
+                tester.getRect(find.byWidget(block.widget)),
+            ]..sort((a, b) => a.top.compareTo(b.top));
+            expect(dayBlocks, hasLength(2));
+            expect(
+              dayBlocks.first.top,
+              moreOrLessEquals(rowTop(tester, 0, 1), epsilon: 0.5),
+            );
+            expect(
+              dayBlocks.last.top,
+              moreOrLessEquals(rowTop(tester, 12 * 60, 1), epsilon: 0.5),
+            );
           case CalendarViewKind.month:
             final left = tester.getRect(chipFinder("c")).left;
             expect(
@@ -2251,6 +2273,16 @@ void main() {
         }
         await tester.pumpAndSettle();
         expectMoved(view);
+        if (dayBlocks != null) {
+          // The two pieces, one ramping its width out and the other in,
+          // were together narrower than the settled block, so each was;
+          // sharing the day's lanes at full width they would be wider.
+          final settled = tester.getRect(blockFinder("c", wednesday)).width;
+          expect(
+            dayBlocks.first.width + dayBlocks.last.width,
+            lessThan(settled),
+          );
+        }
         await close();
 
         // Under a theme whose motion is off, at the new place at once.
