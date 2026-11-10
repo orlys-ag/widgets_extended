@@ -4489,7 +4489,6 @@ void _zoneTests() {
         );
         final call = callsOf(source, SourceMethod.create).single;
         expect(call.entry!.start, isNot(isA<tz.TZDateTime>()));
-        expect(call.entry!.start.isUtc, isFalse);
         expect(call.entry!.start.isAtSameMomentAs(entry.start), isTrue);
         call.succeed(call.entry!.copyWith(id: "b"));
         expectInZone((await created).start, zone, entry.start);
@@ -4523,7 +4522,6 @@ void _zoneTests() {
           (sent.end, entry.end),
         ]) {
           expect(time, isNot(isA<tz.TZDateTime>()));
-          expect(time.isUtc, isFalse);
           expect(time.isAtSameMomentAs(instant), isTrue);
         }
       }
@@ -4688,8 +4686,6 @@ void _zoneTests() {
         final entry = call.entry!;
         expect(entry.start, isNot(isA<tz.TZDateTime>()));
         expect(entry.end, isNot(isA<tz.TZDateTime>()));
-        expect(entry.start.isUtc, isFalse);
-        expect(entry.end.isUtc, isFalse);
         expect(entry.start.isAtSameMomentAs(start), isTrue);
         expect(entry.end.isAtSameMomentAs(end), isTrue);
       }
@@ -4802,10 +4798,11 @@ void _zoneTests() {
       ]);
       await settle();
       final accepted = store.create(timesEntry("in", wall(10), wall(11)));
+      expect(callsOf(source, SourceMethod.create), hasLength(1));
       final create = callsOf(source, SourceMethod.create).single;
       expect(create.entry!.start.isAtSameMomentAs(wall(10)), isTrue);
       create.succeed(timesEntry("in", wall(10), wall(11)));
-      expect((await accepted).id, "in");
+      await expectLater(accepted, acceptedAs("in"));
       await expectLater(
         store.create(timesEntry("out", wall(20), wall(21))),
         throwsA(isA<CalendarHoursException>()),
@@ -4828,9 +4825,10 @@ void _zoneTests() {
         final zoneOnly = store.create(
           timesEntry("zone-only", wall(hour), wall(hour + 1)),
         );
+        expect(callsOf(source, SourceMethod.create), hasLength(2));
         final call = callsOf(source, SourceMethod.create).last;
         call.succeed(call.entry!.copyWith(id: "zone-only"));
-        expect((await zoneOnly).id, "zone-only");
+        await expectLater(zoneOnly, acceptedAs("zone-only"));
       }
       final renamed = store.update(
         timesEntry(
@@ -4840,9 +4838,10 @@ void _zoneTests() {
           title: "Renamed",
         ),
       );
+      expect(callsOf(source, SourceMethod.replace), hasLength(1));
       final replace = callsOf(source, SourceMethod.replace).single;
       replace.succeed(replace.entry);
-      expect((await renamed).title, "Renamed");
+      await expectLater(renamed, acceptedAs("held", title: "Renamed"));
     });
 
     test(

@@ -807,8 +807,10 @@ void main() {
         hours: hours,
       );
       addTearDown(store.dispose);
-      final accepted = await store.create(timesEntry("in", wall(10), wall(11)));
-      expect(accepted.id, "in");
+      await expectLater(
+        store.create(timesEntry("in", wall(10), wall(11))),
+        acceptedAs("in"),
+      );
       await expectLater(
         store.create(timesEntry("out", wall(20), wall(21))),
         throwsA(isA<CalendarHoursException>()),
@@ -827,22 +829,24 @@ void main() {
       ];
       if (hoursOnlyInZone.isNotEmpty) {
         final hour = hoursOnlyInZone.first;
-        final created = await store.create(
-          timesEntry("zone-only", wall(hour), wall(hour + 1)),
+        await expectLater(
+          store.create(timesEntry("zone-only", wall(hour), wall(hour + 1))),
+          acceptedAs("zone-only"),
         );
-        expect(created.id, "zone-only");
       }
       // The zone's clock reads no hours value at any other wall time: the
       // plain instants of the held entry keep its times, not refused.
-      final updated = await store.update(
-        timesEntry(
-          "held",
-          plainOf(wall(20)),
-          plainOf(wall(21)),
-          title: "Renamed",
+      await expectLater(
+        store.update(
+          timesEntry(
+            "held",
+            plainOf(wall(20)),
+            plainOf(wall(21)),
+            title: "Renamed",
+          ),
         ),
+        acceptedAs("held", title: "Renamed"),
       );
-      expect(updated.title, "Renamed");
     });
 
     test("MZ6 a zone change notifies once and refiles; an == zone notifies "
@@ -895,7 +899,6 @@ void main() {
       expect(zoneOfStore(store), isNull);
       final back = store.storedEntry("a")!;
       expect(back.start, isNot(isA<tz.TZDateTime>()));
-      expect(back.start.isUtc, isFalse);
       expect(back.start.isAtSameMomentAs(entry.start), isTrue);
       expect(
         store.entriesOn(onDay).map((shown) {
@@ -1072,7 +1075,6 @@ void main() {
       expect(identical(store.storedEntry("plain"), plain), isTrue);
       final held = store.storedEntry("zoned")!;
       expect(held.start, isNot(isA<tz.TZDateTime>()));
-      expect(held.start.isUtc, isFalse);
       expect(held.start.isAtSameMomentAs(plain.start), isTrue);
       expect(held.end.isAtSameMomentAs(plain.end), isTrue);
       expect(

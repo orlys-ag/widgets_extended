@@ -1,7 +1,8 @@
 /// What the store layer's zone tests share beside `../zones.dart`: stores
-/// built in a zone, and their zone set and read.
+/// built in a zone, their zone set and read, and a write's accepted entry.
 library;
 
+import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
@@ -49,4 +50,26 @@ void setStoreZone<T>(CalendarStore<T> store, tz.Location? zone) {
 /// [store]'s zone, null for the device's clock.
 tz.Location? zoneOfStore<T>(CalendarStore<T> store) {
   return store.zone;
+}
+
+/// A write's future that completes with the entry [id] names, of [title]
+/// where one is given; a write the store refuses fails it.
+Matcher acceptedAs(String id, {String? title}) {
+  var entry = isA<CalendarEntry<String>>().having(
+    (entry) {
+      return entry.id;
+    },
+    "id",
+    id,
+  );
+  if (title != null) {
+    entry = entry.having(
+      (entry) {
+        return entry.title;
+      },
+      "title",
+      title,
+    );
+  }
+  return completion(entry);
 }
