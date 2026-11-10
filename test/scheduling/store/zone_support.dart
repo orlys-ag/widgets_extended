@@ -122,17 +122,12 @@ CachingCalendarStore<T> cachingStoreIn<T>(
   Stream<CalendarSourceChange<T>>? changes,
   CalendarDayHours? hours,
 }) {
-  return Function.apply(
-        CachingCalendarStore<T>.new,
-        const <Object?>[],
-        <Symbol, Object?>{
-          #dataSource: dataSource,
-          #changes: changes,
-          #hours: hours ?? CalendarDayHours.allDay,
-          #zone: zone,
-        },
-      )
-      as CachingCalendarStore<T>;
+  return CachingCalendarStore<T>(
+    dataSource: dataSource,
+    changes: changes,
+    hours: hours ?? CalendarDayHours.allDay,
+    zone: zone,
+  );
 }
 
 /// Sets [store]'s zone.

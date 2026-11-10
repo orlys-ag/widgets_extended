@@ -12,8 +12,9 @@ import '../entries/calendar_data_source.dart';
 import '../entries/calendar_entry.dart';
 import 'calendar_store.dart';
 
-/// One `read` call in flight, over the [CalendarDates.dayNumber]s [first] to
-/// [last].
+/// One `read` call in flight, over the store's own [CalendarDates.dayNumber]s
+/// [first] to [last], on the clock the store reads, whatever device days the
+/// data source is asked for.
 class _Read {
   _Read(this.first, this.last, this.sentAt, this.done);
 
@@ -176,12 +177,14 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// first [show], and applying each change [changes] announces, if given,
   /// until it is disposed: a [CalendarEntryPut] or a [CalendarEntryRemoved]
   /// is applied without a read, a [CalendarDaysChanged] is an [invalidate]
-  /// of its days, and a [CalendarAllChanged], or an error on the stream, is
-  /// an [invalidate] of every day.
+  /// of its days, or with a zone of the zone days its device days touch,
+  /// and a [CalendarAllChanged], or an error on the stream, is an
+  /// [invalidate] of every day.
   CachingCalendarStore({
     required CalendarDataSource<T> dataSource,
     Stream<CalendarSourceChange<T>>? changes,
     super.hours,
+    super.zone,
   }) : _dataSource = dataSource {
     _changes = changes?.listen(_applyChange, onError: _changesFailed);
   }
@@ -877,14 +880,18 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     }
   }
 
-  /// Sends a read of [first] to [last], which [done], if given, waits on,
-  /// and which a [show], a [retry] or a [refresh] asked for where
-  /// [requested]. It ends no [readFailed] mark: a [show], a [retry] or a
-  /// [refresh] ends the marks of the days it reads itself. The read is in
-  /// flight before the source is called, so an answer that arrives within
-  /// the call, as a [SynchronousFuture]'s does, finishes it. After
-  /// [dispose], as when a source call disposed the store, it sends nothing
-  /// and completes [done], as [dispose] completes a refresh's.
+  /// Sends a read of the store's days [first] to [last], which [done], if
+  /// given, waits on, and which a [show], a [retry] or a [refresh] asked for
+  /// where [requested]. The data source is asked for the device days
+  /// covering them: their own numbers with no zone, and with one the device
+  /// days holding those days' instants, widened to hold their numbers too,
+  /// so an all-day entry on those dates is read wherever the zone lies. It
+  /// ends no [readFailed] mark: a [show], a [retry] or a [refresh] ends the
+  /// marks of the days it reads itself. The read is in flight before the
+  /// source is called, so an answer that arrives within the call, as a
+  /// [SynchronousFuture]'s does, finishes it. After [dispose], as when a
+  /// source call disposed the store, it sends nothing and completes [done],
+  /// as [dispose] completes a refresh's.
   void _send(
     int first,
     int last, {
@@ -900,11 +907,21 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
       read.requestedAt = read.sentAt;
     }
     _reads.add(read);
+    final zone = this.zone;
+    var deviceFirst = first;
+    var deviceLast = last;
+    if (zone != null) {
+      deviceFirst = math.min(_dayAt(dayStartMillis(first, zone), null), first);
+      deviceLast = math.max(
+        _dayAt(dayStartMillis(last + 1, zone) - 1, null),
+        last,
+      );
+    }
     _callSource<List<CalendarEntry<T>>>(
       () {
         return _dataSource.read(
-          CalendarDates.dateOfDayNumber(first),
-          CalendarDates.dateOfDayNumber(last),
+          CalendarDates.dateOfDayNumber(deviceFirst),
+          CalendarDates.dateOfDayNumber(deviceLast),
         );
       },
       (entries) {
@@ -1012,6 +1029,14 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
         }
       }
     }
+    if (answered != null) {
+      try {
+        answered = _zonedAnswer(read, answered);
+      } on ArgumentError catch (conversion) {
+        failure = conversion;
+        answered = null;
+      }
+    }
     final changed = answered != null && _applyRead(read, answered);
     _pruneEntryTimes();
     final endedMarks = _endedMarks;
@@ -1042,6 +1067,29 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
         done.completeError(failure!);
       }
     }
+  }
+
+  /// [entries], the answer of [read], in the store's form ([zonedEntryOf]),
+  /// less, with a zone, each entry with no part in the read's days: the
+  /// device days the read asked for hold entries of other zone days.
+  ///
+  /// Throws an [ArgumentError] for a time the zone cannot represent.
+  List<CalendarEntry<T>> _zonedAnswer(
+    _Read read,
+    List<CalendarEntry<T>> entries,
+  ) {
+    final zone = this.zone;
+    final zoned = <CalendarEntry<T>>[];
+    for (final entry in entries) {
+      final converted = zonedEntryOf(entry, zone);
+      if (zone == null ||
+          (CalendarDates.dayNumber(converted.start) <= read.last &&
+              CalendarDates.lastDayNumberOf(converted.start, converted.end) >=
+                  read.first)) {
+        zoned.add(converted);
+      }
+    }
+    return zoned;
   }
 
   /// Applies [entries], the answer of [read], and returns whether what the
@@ -1256,10 +1304,52 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
       case CalendarEntryRemoved<T>(:final id):
         _applyRemoved(id);
       case CalendarDaysChanged<T>(:final first, :final last):
-        invalidate(first, last);
+        _invalidateDeviceDays(first, last);
       case CalendarAllChanged<T>():
         _changeAll();
     }
+  }
+
+  /// Takes the entries on the device days from [first] to [last] to have
+  /// changed, as [invalidate] does: with no zone its own days, and with one
+  /// the zone days those device days touch, from the zone's day of the
+  /// start of [first]'s device day to its day of the instant before the
+  /// device day after [last], widened to hold their numbers too.
+  void _invalidateDeviceDays(DateTime first, DateTime last) {
+    final zone = this.zone;
+    if (zone == null) {
+      invalidate(first, last);
+      return;
+    }
+    final firstNumber = CalendarDates.dayNumber(first);
+    final lastNumber = CalendarDates.dayNumber(last);
+    final firstDay = math.min(
+      _dayAt(
+        CalendarDates.dateOfDayNumber(firstNumber).millisecondsSinceEpoch,
+        zone,
+      ),
+      firstNumber,
+    );
+    final lastDay = math.max(
+      _dayAt(
+        CalendarDates.dateOfDayNumber(lastNumber + 1).millisecondsSinceEpoch -
+            1,
+        zone,
+      ),
+      lastNumber,
+    );
+    _markChanged(firstDay, lastDay, ++_clock);
+    _readChangedShown();
+  }
+
+  /// The [CalendarDates.dayNumber] of the instant [instant], in milliseconds
+  /// since the epoch, on [zone]'s clock, the device's where it is null.
+  static int _dayAt(int instant, Location? zone) {
+    return CalendarDates.dayNumber(
+      zone == null
+          ? DateTime.fromMillisecondsSinceEpoch(instant)
+          : TZDateTime.fromMillisecondsSinceEpoch(zone, instant),
+    );
   }
 
   /// An error on the stream of changes: the store cannot tell what it
@@ -1278,15 +1368,25 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     _readChangedShown();
   }
 
-  /// Stores [entry], which the source announced stored, where it covers a
-  /// read day or a day a read in flight covers; otherwise forgets the
-  /// entry its id names, which left the days the store holds.
+  /// Stores [entry], which the source announced stored, in the store's
+  /// form, where it covers a read day or a day a read in flight covers;
+  /// otherwise forgets the entry its id names, which left the days the
+  /// store holds. A time the zone cannot represent stores nothing and takes
+  /// every entry to have changed, so what the source holds is read anew,
+  /// since no caller waits on an announced change to fail to.
   void _applyPut(CalendarEntry<T> entry) {
-    final id = entry.id!;
+    final CalendarEntry<T> zoned;
+    try {
+      zoned = zonedEntryOf(entry, zone);
+    } on ArgumentError {
+      _changeAll();
+      return;
+    }
+    final id = zoned.id!;
     _setTime(id, ++_clock);
-    if (_coversHeldDay(entry)) {
-      if (_differs(_index.stored(id), entry)) {
-        _index.put(entry);
+    if (_coversHeldDay(zoned)) {
+      if (_differs(_index.stored(id), zoned)) {
+        _index.put(zoned);
         _notify();
       }
     } else if (_index.forget(id) != null) {
@@ -1365,33 +1465,43 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// Nothing is shown before the source answers, and an answer that
   /// arrives within the call, as a [SynchronousFuture]'s does, is stored
   /// within it. It sends nothing and fails with a [StateError] after
-  /// [dispose], and with a [CalendarHoursException] for a draft outside
-  /// [hours]. An answer with no id fails with a [StateError] and stores
+  /// [dispose], with a [CalendarHoursException] for a draft outside
+  /// [hours], and with an [ArgumentError] for a time the zone cannot
+  /// represent. An answer with no id fails with a [StateError] and stores
   /// nothing; one whose id has a write in flight, as after a read that
-  /// brought the entry and a move of it, completes and changes nothing.
+  /// brought the entry and a move of it, completes and changes nothing. The
+  /// data source receives device form ([deviceEntryOf]), and the answer is
+  /// taken to the store's form as it arrives.
   @override
   Future<CalendarEntry<T>> create(CalendarEntry<T> draft) {
     if (_disposed) {
       return _refuse(_disposedError());
     }
-    final refusal = hoursRefusalOf(draft);
+    final CalendarEntry<T> zoned;
+    try {
+      zoned = zonedEntryOf(draft, zone);
+    } on ArgumentError catch (error) {
+      return _refuse(error);
+    }
+    final refusal = hoursRefusalOf(zoned);
     if (refusal != null) {
       return _refuse(refusal);
     }
     return _write<CalendarEntry<T>, CalendarEntry<T>>(
       send: () {
-        return _dataSource.create(draft);
+        return _dataSource.create(deviceEntryOf(zoned));
       },
       store: (created, sentAt) {
         final id = created.id;
         if (id == null) {
           throw StateError("The data source created an entry with no id.");
         }
+        final answer = zonedEntryOf(created, zone);
         if (!_disposed && !_index.isPending(id)) {
-          _storeAnswer(id, created, sentAt);
+          _storeAnswer(id, answer, sentAt);
           _notify();
         }
-        return created;
+        return answer;
       },
     );
   }
@@ -1402,12 +1512,14 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// change announced or a read sent since contradicts it
   /// ([CachingCalendarStore]), or fails with the source's error. It sends
   /// nothing and fails with a [StateError] after [dispose], with an
-  /// [ArgumentError] for an entry with no id, with a
-  /// [CalendarHoursException] when [hoursRefusalOf] refuses it, and with
-  /// a [CalendarWritePendingException] on a pending entry. An answer under
-  /// another id fails with a [StateError], the entry showing as stored
-  /// again. An answer that arrives within the call, as a
-  /// [SynchronousFuture]'s does, is stored within it.
+  /// [ArgumentError] for an entry with no id or a time the zone cannot
+  /// represent, with a [CalendarHoursException] when [hoursRefusalOf]
+  /// refuses it, and with a [CalendarWritePendingException] on a pending
+  /// entry. An answer under another id fails with a [StateError], the entry
+  /// showing as stored again. An answer that arrives within the call, as a
+  /// [SynchronousFuture]'s does, is stored within it. The data source
+  /// receives device form ([deviceEntryOf]), and the answer is taken to the
+  /// store's form as it arrives.
   @override
   Future<CalendarEntry<T>> update(CalendarEntry<T> entry) {
     final id = entry.id;
@@ -1419,14 +1531,20 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
         ArgumentError.value(entry, "entry", "An update needs an id."),
       );
     }
-    final refusal = hoursRefusalOf(entry);
+    final CalendarEntry<T> zoned;
+    try {
+      zoned = zonedEntryOf(entry, zone);
+    } on ArgumentError catch (error) {
+      return _refuse(error);
+    }
+    final refusal = hoursRefusalOf(zoned);
     if (refusal != null) {
       return _refuse(refusal);
     }
     return _write<CalendarEntry<T>, CalendarEntry<T>>(
       lock: id,
       send: () {
-        return _dataSource.replace(entry);
+        return _dataSource.replace(deviceEntryOf(zoned));
       },
       store: (updated, sentAt) {
         return _storeReplaced(id, updated, sentAt);
@@ -1440,12 +1558,14 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// sent since contradicts it ([CachingCalendarStore]), or fails with the
   /// source's error, the stored entry showing again. It sends nothing
   /// and fails with a [StateError] after [dispose], with an
-  /// [ArgumentError] for an entry with no id, with a
-  /// [CalendarHoursException] when [hoursRefusalOf] refuses it, and with
-  /// a [CalendarWritePendingException] on a pending entry; a move onto
-  /// another entry's time is sent. An answer under another id fails with
-  /// a [StateError]. An answer that arrives within the call, as a
-  /// [SynchronousFuture]'s does, is stored within it.
+  /// [ArgumentError] for an entry with no id or a time the zone cannot
+  /// represent, with a [CalendarHoursException] when [hoursRefusalOf]
+  /// refuses it, and with a [CalendarWritePendingException] on a pending
+  /// entry; a move onto another entry's time is sent. An answer under
+  /// another id fails with a [StateError]. An answer that arrives within
+  /// the call, as a [SynchronousFuture]'s does, is stored within it. The
+  /// data source receives device form ([deviceEntryOf]), and the answer is
+  /// taken to the store's form as it arrives.
   @override
   Future<CalendarEntry<T>> requestMove(CalendarEntry<T> requested) {
     final id = requested.id;
@@ -1457,15 +1577,21 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
         ArgumentError.value(requested, "requested", "A move needs an id."),
       );
     }
-    final refusal = hoursRefusalOf(requested);
+    final CalendarEntry<T> zoned;
+    try {
+      zoned = zonedEntryOf(requested, zone);
+    } on ArgumentError catch (error) {
+      return _refuse(error);
+    }
+    final refusal = hoursRefusalOf(zoned);
     if (refusal != null) {
       return _refuse(refusal);
     }
     return _write<CalendarEntry<T>, CalendarEntry<T>>(
       lock: id,
-      shown: requested,
+      shown: zoned,
       send: () {
-        return _dataSource.replace(requested);
+        return _dataSource.replace(deviceEntryOf(zoned));
       },
       store: (moved, sentAt) {
         return _storeReplaced(id, moved, sentAt);
@@ -1614,10 +1740,11 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// Stores [answer], what the data source replaced [id] with for a write
-  /// sent at the clock [sentAt] ([_storeAnswer]), unless the store is
-  /// disposed, and returns it, what the write completes with, whether or
-  /// not it is stored; throws a [StateError] for an answer under another
-  /// id.
+  /// sent at the clock [sentAt] ([_storeAnswer]), in the store's form,
+  /// unless the store is disposed, and returns it, what the write completes
+  /// with, whether or not it is stored; throws a [StateError] for an answer
+  /// under another id, and an [ArgumentError] for a time the zone cannot
+  /// represent.
   CalendarEntry<T> _storeReplaced(
     String id,
     CalendarEntry<T> answer,
@@ -1628,10 +1755,11 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
         "The data source replaced $id with an entry under ${answer.id}.",
       );
     }
+    final zoned = zonedEntryOf(answer, zone);
     if (!_disposed) {
-      _storeAnswer(id, answer, sentAt);
+      _storeAnswer(id, zoned, sentAt);
     }
-    return answer;
+    return zoned;
   }
 
   /// Stores [answer], what a write sent at the clock [sentAt] left under
