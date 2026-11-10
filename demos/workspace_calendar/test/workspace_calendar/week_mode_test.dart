@@ -197,7 +197,7 @@ void main() {
       monday,
       CalendarDates.addDays(monday, 6),
     );
-    await pumpCalendar(tester, api: api);
+    await pumpCalendar(tester, api: api, readAhead: 0);
     final requests = api.requests.length;
 
     await tester.tap(find.byTooltip("Calendar view"));
@@ -371,6 +371,7 @@ void main() {
       tester,
       editing: true,
       api: MockCalendarApi.seeded(today, latency: latency),
+      readAhead: 0,
     );
     await pickMode(tester, "Week");
 
@@ -473,7 +474,7 @@ void main() {
   testWidgets("W3 a range across empty cells creates its continuous range", (
     tester,
   ) async {
-    final api = await pumpCalendar(tester, editing: true);
+    final api = await pumpCalendar(tester, editing: true, readAhead: 0);
     await pickMode(tester, "Week");
     final saturday = colOf(5);
     final sunday = colOf(6);
@@ -689,7 +690,7 @@ void main() {
 
   testWidgets("W3 a second press while a range runs starts nothing of its "
       "own", (tester) async {
-    final api = await pumpCalendar(tester, editing: true);
+    final api = await pumpCalendar(tester, editing: true, readAhead: 0);
     await pickMode(tester, "Week");
     final saturday = colOf(5);
     final sunday = colOf(6);
@@ -743,7 +744,7 @@ void main() {
   });
 
   testWidgets("W4 the form validates before sending", (tester) async {
-    final api = await pumpCalendar(tester, editing: true);
+    final api = await pumpCalendar(tester, editing: true, readAhead: 0);
     await pickMode(tester, "Week");
     final requests = api.requests.length;
 
@@ -800,6 +801,7 @@ void main() {
       tester,
       editing: true,
       api: MockCalendarApi.seeded(today, latency: latency),
+      readAhead: 0,
     );
     await pickMode(tester, "Week");
     final requests = api.requests.length;
@@ -900,7 +902,13 @@ void main() {
       taskJson("Weekend", DateTime(2026, 4, 25), 15 * 60, 16 * 60, dayCount: 2),
     );
     final weekend = await idOn(tester, api, DateTime(2026, 4, 25), "Weekend");
-    await pumpCalendar(tester, editing: true, api: api, size: tall);
+    await pumpCalendar(
+      tester,
+      editing: true,
+      api: api,
+      size: tall,
+      readAhead: 0,
+    );
     await pickMode(tester, "Week");
     final requests = api.requests.length;
     final saturday = blockFinder(weekend, DateTime(2026, 4, 25));
@@ -940,6 +948,7 @@ void main() {
       tester,
       editing: true,
       api: MockCalendarApi.seeded(today, latency: latency),
+      readAhead: 0,
     );
     await pickMode(tester, "Week");
 
@@ -1272,6 +1281,7 @@ void main() {
       tester,
       editing: true,
       api: MockCalendarApi.seeded(today, latency: const Duration(seconds: 1)),
+      readAhead: 0,
     );
     await pickMode(tester, "Week");
     final requests = api.requests.length;
@@ -1763,7 +1773,13 @@ void main() {
     );
     final summit = await idOn(tester, api, DateTime(2026, 4, 25), "Summit");
     final planning = await idOn(tester, api, monday, "Weekly planning");
-    await pumpCalendar(tester, editing: true, api: api, size: tall);
+    await pumpCalendar(
+      tester,
+      editing: true,
+      api: api,
+      size: tall,
+      readAhead: 0,
+    );
     await pickMode(tester, "Week");
 
     // Tuesday 10:30 lies inside "Design new UX flow for Michael", 10:00 to
@@ -2874,7 +2890,13 @@ void main() {
     final api = MockCalendarApi(latency: harnessLatency);
     await createBeforePump(tester, api, taskJson("Moved", today, 600, 660));
     final moved = await idOn(tester, api, today, "Moved");
-    await pumpCalendar(tester, editing: true, api: api, size: tall);
+    await pumpCalendar(
+      tester,
+      editing: true,
+      api: api,
+      size: tall,
+      readAhead: 0,
+    );
     await pickMode(tester, "Week");
     api.failurePolicy = (request) {
       return request.method == CalendarMethod.update ? "Moving failed." : null;

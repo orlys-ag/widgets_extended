@@ -264,7 +264,7 @@ void main() {
       api,
       taskJson("Evening", today, 17 * 60, 19 * 60),
     );
-    await pumpCalendar(tester, api: api, size: tall);
+    await pumpCalendar(tester, api: api, size: tall, readAhead: 0);
     await pickMode(tester, "Week");
     await pickHours(tester, 8, 18);
 
@@ -412,7 +412,13 @@ void main() {
       api,
       taskJson("Early", today, 7 * 60, 9 * 60),
     );
-    await pumpCalendar(tester, editing: true, api: api, size: tall);
+    await pumpCalendar(
+      tester,
+      editing: true,
+      api: api,
+      size: tall,
+      readAhead: 0,
+    );
     await pickMode(tester, "Week");
     await pickHours(tester, 8, 18);
     await tester.tap(blockFinder(early));

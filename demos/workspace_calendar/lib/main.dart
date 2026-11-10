@@ -2,10 +2,13 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:timezone/data/latest_all.dart' as tz;
 
 import 'workspace_calendar_example.dart';
 
 void main() {
+  // The zones the time zone sheet lists and a store draws on.
+  tz.initializeTimeZones();
   runApp(const WorkspaceCalendarApp());
 }
 

@@ -238,7 +238,7 @@ void main() {
   ) async {
     // The default phone size, which scrolls far enough to show 08:00 at
     // the top.
-    final api = await pumpCalendar(tester, editing: true);
+    final api = await pumpCalendar(tester, editing: true, readAhead: 0);
     final requests = api.requests.length;
     await pickMode(tester, "Day");
 
@@ -391,7 +391,7 @@ void main() {
 
   testWidgets("D5 Day mode reads the selected day's week, so a step within "
       "it shows its day at once", (tester) async {
-    final api = await pumpCalendar(tester, size: tall);
+    final api = await pumpCalendar(tester, size: tall, readAhead: 0);
     // Agenda read April's grid and its list the weeks of the days it built:
     // the last day read ends a week.
     var readTo = today;
@@ -798,7 +798,7 @@ void main() {
       seed: <Map<String, Object?>>[taskJson("Late", today, 13 * 60, 14 * 60)],
       latency: harnessLatency,
     );
-    await pumpCalendar(tester, api: api, size: tall);
+    await pumpCalendar(tester, api: api, size: tall, readAhead: 0);
     await pickMode(tester, "Day");
     // Row 0 is the room above 08:00, rows 1 to 24 the slots, and row 25
     // the room below 14:00.

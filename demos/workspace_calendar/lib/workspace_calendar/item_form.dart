@@ -418,28 +418,38 @@ class _ItemFormState extends State<_ItemForm> {
       "title": _title.text,
       "start": _allDay
           ? itemTimeText(_startDate, allDay: true)
-          : _timeText(_startDate, _startMinute, end: false),
+          : _timeText(
+              _startDate,
+              _startMinute,
+              end: false,
+              zone: widget.store.zone,
+            ),
       "end": _allDay
           ? itemTimeText(CalendarDates.addDays(_endDate, 1), allDay: true)
-          : _timeText(_endDate, _endMinute, end: true),
+          : _timeText(_endDate, _endMinute, end: true, zone: widget.store.zone),
       "fields": fields,
     };
   }
 
-  /// [minute] of [day] as the envelope writes a timed item's time
-  /// ([itemTimeText]): for a start the time
-  /// [CalendarDates.timeAtWallMinute] gives, and for an [end] the one
-  /// [CalendarDates.endAtWallMinute] gives, each the earlier of a time the
-  /// clock repeats, so an end at 24:00 is the next day's start, even where
-  /// the clock skips that day's midnight; and a time the clock skips, as
-  /// it skips a start at 00:00 of such a day, as its own text, which the
-  /// validator then reports.
-  static String _timeText(DateTime day, int minute, {required bool end}) {
+  /// [minute] of [day] on [zone]'s clock, the device's where it is null,
+  /// as the envelope writes a timed item's time ([itemTimeText]): for a
+  /// start the time [CalendarDates.timeAtWallMinute] gives, and for an
+  /// [end] the one [CalendarDates.endAtWallMinute] gives, each the earlier
+  /// of a time the clock repeats, so an end at 24:00 is the next day's
+  /// start, even where the clock skips that day's midnight; and a time the
+  /// clock skips, as it skips a start at 00:00 of such a day, as its own
+  /// text, which the validator then reports.
+  static String _timeText(
+    DateTime day,
+    int minute, {
+    required bool end,
+    required Location? zone,
+  }) {
     final wall =
         CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay + minute;
     final time = end
-        ? CalendarDates.endAtWallMinute(wall)
-        : CalendarDates.timeAtWallMinute(wall);
+        ? CalendarDates.endAtWallMinute(wall, zone: zone)
+        : CalendarDates.timeAtWallMinute(wall, zone: zone);
     if (time == null) {
       return "${isoDate(day)}T${isoTime(minute)}";
     }
@@ -457,11 +467,24 @@ class _ItemFormState extends State<_ItemForm> {
     var errors = validateItemJson(json);
     if (errors.isEmpty) {
       final to = itemFromJson(json);
+      // The envelope's times read back plain; the policy judges them on the
+      // store's clock, as the store's entries and [widget.now] are.
+      final zone = widget.store.zone;
+      DateTime onClock(DateTime time) {
+        if (to.isAllDay) {
+          return CalendarDates.dateOfDayNumber(
+            CalendarDates.dayNumber(time),
+            zone: zone,
+          );
+        }
+        return CalendarDates.inZone(time, zone: zone);
+      }
+
       errors = lockErrorsOf<ItemPayload>(
         widget.policy,
         widget.now(),
         _isDraft ? null : widget.item,
-        (start: to.start, end: to.end),
+        (start: onClock(to.start), end: onClock(to.end)),
         isAllDay: to.isAllDay,
       );
     }

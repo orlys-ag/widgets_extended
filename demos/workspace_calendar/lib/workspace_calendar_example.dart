@@ -43,12 +43,23 @@
 /// Today, in the calendar bar, selects today, or the shown day nearest it,
 /// in every view, and slides a strip a drag moved away back to it.
 ///
+/// The app bar's time zone button, which names the city of the store's
+/// zone or the device's zone, opens a [CalendarZonePanel] in a bottom
+/// sheet. A pick there sets the store's zone, which every view then draws
+/// on, the item form writes and reads its times on, and the history lock
+/// judges on, and closes the sheet; a removal of the current zone puts the
+/// store back on the device's clock and leaves the sheet open. The store
+/// reads [WorkspaceCalendarExample.readAhead] days on each side of the
+/// range it shows, so a change of zone finds the shown days read.
+///
 /// A tap on an item opens its form, which edits it in edit mode unless the
 /// history lock holds it locked, and otherwise shows it read-only; a create
 /// the calendar's gestures pick opens the create flow over the range
 /// picked; Agenda's Edit opens the form, and its Delete asks before it
 /// deletes. A write that fails says why.
 library;
+
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/widgets_extended.dart';
@@ -77,6 +88,7 @@ class WorkspaceCalendarExample extends StatelessWidget {
     this.editing = false,
     this.calendarTheme,
     this.builders = harborItemBuilders,
+    this.readAhead = 2,
   });
 
   /// The day the calendar opens on and marks as today. Null opens on the
@@ -106,6 +118,12 @@ class WorkspaceCalendarExample extends StatelessWidget {
   /// unless given; a null field gives the view's default.
   final ItemBuilders builders;
 
+  /// The days the store reads on each side of the range it shows
+  /// ([CachingCalendarStore.readAhead]), 2 unless given, which keeps the
+  /// shown days read across a change between any two zones once the
+  /// store's reads have answered.
+  final int readAhead;
+
   static final ThemeData _theme = buildHarborTheme();
 
   @override
@@ -122,6 +140,7 @@ class WorkspaceCalendarExample extends StatelessWidget {
           clock: clock ?? DateTime.now,
           editing: editing,
           builders: builders,
+          readAhead: readAhead,
         ),
       ),
     );
@@ -135,6 +154,7 @@ class _WorkspaceCalendar extends StatefulWidget {
     required this.clock,
     required this.editing,
     required this.builders,
+    required this.readAhead,
   });
 
   final DateTime? today;
@@ -142,6 +162,7 @@ class _WorkspaceCalendar extends StatefulWidget {
   final DateTime Function() clock;
   final bool editing;
   final ItemBuilders builders;
+  final int readAhead;
 
   @override
   State<_WorkspaceCalendar> createState() {
@@ -155,8 +176,16 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   /// The API [_store] reads and writes through, kept so a
   /// [MockCalendarApi]'s overlap rule follows [_settings]
-  /// ([_setApiOverlaps]).
-  late final CalendarApi _api = widget.api ?? MockCalendarApi.seeded(_today());
+  /// ([_setApiOverlaps]). A mock is seeded around the device's today, as
+  /// [initState] reads it before [_store] is made.
+  late final CalendarApi _api =
+      widget.api ??
+      MockCalendarApi.seeded(
+        CalendarDates.dateOnly(widget.today ?? widget.clock().toLocal()),
+      );
+
+  /// The zones the user added in the time zone sheet's panel.
+  final CalendarZoneController _zones = CalendarZoneController();
 
   /// The calendar's view, selected day and zoom sizes, which Today and the
   /// settings sheet's sliders set; the calendar opens on Agenda.
@@ -190,6 +219,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _store = CachingCalendarStore<ItemPayload>(
       dataSource: CalendarApiSource(_api),
       hours: _settings.hours,
+      readAhead: widget.readAhead,
     );
     _controller.addListener(_handleControllerChange);
   }
@@ -211,21 +241,25 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     _controller.dispose();
     _store.dispose();
     _barController.dispose();
+    _zones.dispose();
     super.dispose();
   }
 
   /// The day the calendar marks as today when called: the widget's today,
-  /// or the local day of the clock's reading, as [CalendarView] takes a
-  /// UTC one.
+  /// or the day of the clock's reading on the clock of the store's zone,
+  /// the device's with none, as [CalendarView] takes a UTC one.
   DateTime _today() {
-    return CalendarDates.dateOnly(widget.today ?? widget.clock().toLocal());
+    return CalendarDates.dateOnly(
+      widget.today ?? CalendarDates.inZone(widget.clock(), zone: _store.zone),
+    );
   }
 
   /// The time the calendar's edit policy answers at when called, which a
-  /// form reads when it opens and at Save: the clock's, with the day the
-  /// calendar marks as today, the local day of a UTC reading.
+  /// form reads when it opens and at Save: the clock's reading on the
+  /// clock of the store's zone, the device's with none, with the day the
+  /// calendar marks as today.
   CalendarNow _currentNow() {
-    final now = widget.clock().toLocal();
+    final now = CalendarDates.inZone(widget.clock(), zone: _store.zone);
     return CalendarNow(time: now, today: widget.today ?? now);
   }
 
@@ -270,6 +304,55 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     });
     _setApiOverlaps(settings);
     _store.hours = settings.hours;
+  }
+
+  /// Opens the time zone sheet: the zone panel over the store's zone, as
+  /// tall as 0.7 of the screen, less what the keyboard covers, and padded
+  /// above the keyboard, so its list scrolls its last rows into view.
+  void _openZones() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        final inset = MediaQuery.viewInsetsOf(context).bottom;
+        final height = MediaQuery.sizeOf(context).height;
+        return Padding(
+          padding: EdgeInsets.only(bottom: inset),
+          child: SizedBox(
+            height: math.min(height * 0.7, height - inset),
+            child: ListenableBuilder(
+              listenable: _store,
+              builder: (context, child) {
+                return CalendarZonePanel(
+                  value: _store.zone,
+                  controller: _zones,
+                  clock: widget.clock,
+                  onChanged: (zone) {
+                    _pickZone(context, zone);
+                  },
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Sets the store's zone to [zone], and closes the sheet of [sheet]
+  /// unless the panel reported the removal of the store's zone, which it
+  /// removes from [_zones] before it reports it.
+  void _pickZone(BuildContext sheet, Location? zone) {
+    final current = _store.zone;
+    final removed =
+        zone == null && current != null && !_zones.contains(current);
+    _store.zone = zone;
+    setState(() {
+      // The app bar's button names the new zone.
+    });
+    if (!removed) {
+      Navigator.pop(sheet);
+    }
   }
 
   void _showMessage(String message) {
@@ -349,6 +432,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
 
   @override
   Widget build(BuildContext context) {
+    final zone = _store.zone;
     return Scaffold(
       // A form's keyboard leaves the month board's height, and so its
       // weeks, as they are; the form's dialog pads itself by the keyboard.
@@ -368,6 +452,23 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
           style: TextStyle(fontSize: 20.0, fontWeight: FontWeight.w600),
         ),
         actions: <Widget>[
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 120.0),
+            child: Tooltip(
+              message: "Time zone",
+              child: TextButton.icon(
+                icon: const Icon(Icons.public),
+                label: Text(
+                  zone == null
+                      ? CalendarLocalizations.of(context).deviceZoneName
+                      : CalendarZonePanel.cityOf(zone),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onPressed: _openZones,
+              ),
+            ),
+          ),
           IconButton(
             tooltip: "Calendar settings bar",
             onPressed: _toggleBar,
