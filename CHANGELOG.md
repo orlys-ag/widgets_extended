@@ -685,7 +685,8 @@ inverse of `globalToPaintLocal`, which every implementation of the port gains.
 - Fix: another scroll during a spring-back a resize's own make-room preview
 started, a `jumpTo`, an `animateTo`, a mouse wheel, a second pointer or the
 drag's autoscroller, read as part of that spring-back, which moves no resize
-target, so the target under a still pointer did not follow the content. Such a
+target, so the target under a still pointer moved by less than the content
+scrolled, or not at all. Such a
 scroll now moves that target by its whole scroll, as it does with no
 spring-back running, while the spring-back itself still moves it by nothing;
 and where that preview stands, the autoscroller steps from an overscroll by its
@@ -693,7 +694,10 @@ step instead of landing on the end of the scroll range. To tell the two apart,
 a board's scroll positions now report the board's own scroll physics in
 `ScrollPosition.physics`, installed outermost, wrapping the physics the app
 gives in `Board.verticalDetails` and `Board.horizontalDetails`, and answering
-every member as those do.
+every member as those do. A scroll position that an app's `ScrollController`
+creates without the physics its `Scrollable` gives it does not carry the
+board's physics, and there such a scroll still moves the target by less than
+its scroll.
 - Fix: a sticky header retiring by push-up painted above the tree sliver's own
 paint origin with no clip, so it was drawn over whatever sat above the scroll
 view: a tree short enough to fit its viewport declares no visual overflow, so

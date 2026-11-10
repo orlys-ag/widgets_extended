@@ -143,6 +143,12 @@ class Board<TKey, TItem> extends StatefulWidget {
   /// never replaces a scroll position on the board's account; it still
   /// replaces one on its own triggers, such as a change of a type in the
   /// physics given here.
+  ///
+  /// A scroll position that the `ScrollableDetails.controller` given here
+  /// creates without the physics the `Scrollable` gives it does not carry
+  /// the board's physics. On such a position, another scroll during a
+  /// spring-back that a resize's own make-room preview started can move
+  /// the resize's target by less than its scroll.
   final ScrollableDetails verticalDetails;
 
   /// The horizontal `Scrollable`'s configuration.
