@@ -487,6 +487,48 @@ zones `readAhead: 2`, so it keeps the shown days read across a change once its
 reads have answered; with none, the days the new zone's re-read has not
 answered show the loading state.
 
+`CalendarZonePanel` is an inline list from which a user picks that zone. Its
+first list shows the device's zone, then the zones the user added, which a
+`CalendarZoneController` holds; a tap reports a zone through `onChanged`, null
+for the device's, and each added zone has a button that removes it. Its pill
+opens a second list of every loaded zone, or of the `zones` you give it,
+sorted by id and filtered by city and id as the user types, where a tap adds
+a zone or removes an added one. The panel draws in the calendar's theme, takes
+its words from `CalendarLocalizations`, fills the height its parent gives and
+needs a `MaterialLocalizations` above it. Beside a calendar, rebuilt with the
+store:
+
+```dart
+final zones = CalendarZoneController(
+  zones: <Location>[tz.getLocation("Asia/Tokyo")],
+);
+final store = MemoryCalendarStore<String>();
+final app = MaterialApp(
+  home: Scaffold(
+    body: Row(
+      children: <Widget>[
+        SizedBox(
+          width: 320.0,
+          child: ListenableBuilder(
+            listenable: store,
+            builder: (context, child) {
+              return CalendarZonePanel(
+                value: store.zone,
+                controller: zones,
+                onChanged: (zone) {
+                  store.zone = zone;
+                },
+              );
+            },
+          ),
+        ),
+        Expanded(child: CalendarView<String>(store: store)),
+      ],
+    ),
+  ),
+);
+```
+
 **Editing.** With `editable: true`, Week's and Day's blocks move and
 resize, and a create gesture reports a `CalendarCreateDetails` through
 `onCreateRange`: the range it picked, where its mark is on screen when it

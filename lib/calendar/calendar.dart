@@ -57,6 +57,8 @@ export 'composition/calendar_header.dart'
 export 'composition/calendar_theme_extension.dart' show CalendarThemeExtension;
 export 'composition/calendar_view.dart'
     show CalendarController, CalendarEntryTapDetails, CalendarView;
+export 'composition/calendar_zone_panel.dart'
+    show CalendarZoneController, CalendarZonePanel;
 export 'presentation/calendar_activity_indicator.dart'
     show CalendarActivityIndicator;
 export 'presentation/calendar_builders.dart'

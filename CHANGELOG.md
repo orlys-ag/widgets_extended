@@ -97,6 +97,15 @@ status follows the shown range alone. A read-ahead of 2 keeps the shown days
 read across a change between any two zones once the store's reads have
 answered. A negative one throws an `ArgumentError` naming `readAhead`, in every
 build.
+- Added `CalendarZonePanel`, an inline list from which a user picks the zone a
+calendar's store draws on: the device's zone, then the zones a
+`CalendarZoneController` holds, a tap reporting a zone through `onChanged`,
+and behind its pill a list of every loaded zone, or of the zones given, sorted
+by id and searched by city and id, where a tap adds or removes a zone. It
+draws in the calendar's theme, shows each zone's offset from UTC, and takes
+its words from seven `CalendarLocalizations` members with English defaults:
+`deviceZoneName`, `utcOffset`, `addZonesLabel`, `searchZonesHint`,
+`noZonesMessage`, `removeZoneTooltip` and `zonesBackTooltip`.
 - Added `CalendarEditPolicy.mayOverlap`, which answers whether a change may
 share time with one other entry, and `CalendarOverlapCandidate`, the change
 it is asked about: its start, its end and the entry it changes, none for a

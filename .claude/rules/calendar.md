@@ -14,7 +14,7 @@ Normative for `lib/calendar/`, the calendar module: `CalendarView`, a calendar o
 |---|---|---|---|
 | Presentation | `lib/calendar/presentation/` | `calendar-presentation.md` | `CalendarThemeData`, `CalendarTheme`, `CalendarLocalizations`, the builder signatures, and the day badges' kinds |
 | Views | `lib/calendar/views/` | `calendar-views.md` | Week's and Day's timed grid, the month board, Agenda's day list, the week strip, the month picker, day cells, entry cards, the pinch |
-| Composition | `lib/calendar/composition/` | `calendar-composition.md` | `CalendarView`, `CalendarController`, the header, view switching, the folding calendar card, the default chrome |
+| Composition | `lib/calendar/composition/` | `calendar-composition.md` | `CalendarView`, `CalendarController`, the header, view switching, the folding calendar card, the default chrome, the zone panel |
 
 ## Conventions that cut across every layer
 
