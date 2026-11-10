@@ -14,7 +14,7 @@ import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/policy/edit_rules.dart';
 
 import '../dst_days.dart';
-import '../store/zone_support.dart';
+import '../zones.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 

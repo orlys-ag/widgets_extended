@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/scheduling.dart';
 
+import '../zones.dart';
 import 'zone_support.dart';
 
 const Color taskColor = Color(0xFF3060C0);

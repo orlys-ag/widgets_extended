@@ -426,11 +426,12 @@ An all-day entry ends at the start of the day after its last day on its
 store's clock: Google's `end.date` and iCalendar's DATE DTEND are exclusive
 ends, that day already, and map as they are; for an all-day `EKEvent`,
 whose reference states no such rule for `endDate`, end the entry at the
-midnight after the event's last day. Build an all-day entry's start and end from the dates' year,
-month and day, `DateTime(year, month, day)`: an all-day date is a local
-date, never converted through UTC, and EventKit returns an all-day event's
-dates in the default time zone. A timed value is an instant, converted to
-local time, or to the store's zone where it has one.
+midnight after the event's last day. Build an all-day entry's start and
+end from the dates' year, month and day, `DateTime(year, month, day)`: an
+all-day date is a local date, never converted through UTC, and EventKit
+returns an all-day event's dates in the default time zone. A timed value
+is an instant, converted to local time, or to the store's zone where it
+has one.
 
 **Stores.** `MemoryCalendarStore` holds the entries you give it and applies
 each write within the call. `CachingCalendarStore` reads by days through

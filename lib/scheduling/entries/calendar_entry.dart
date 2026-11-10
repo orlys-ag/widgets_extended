@@ -322,7 +322,8 @@ CalendarEntry<T> deviceEntryOf<T>(CalendarEntry<T> entry) {
 /// [time], named [name], as [zonedEntryOf] holds it: of an all-day entry,
 /// [zone]'s day start of its date, unless it is a `TZDateTime` of [zone],
 /// which the entry's constructor took as such a day start; of a timed one,
-/// [zonedTimeOf]'s.
+/// `TZDateTime.from`'s in [zone] at its instant, unless it is already a
+/// `TZDateTime` of [zone].
 DateTime _zonedTimeIn(
   DateTime time,
   String name,

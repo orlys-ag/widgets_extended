@@ -15,7 +15,7 @@ import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 
 import '../class_source.dart';
 import '../dst_days.dart';
-import '../store/zone_support.dart';
+import '../zones.dart';
 
 /// A payload compared by its text, never by identity.
 @immutable

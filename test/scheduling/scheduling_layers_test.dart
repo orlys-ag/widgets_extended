@@ -411,6 +411,7 @@ void main() {
       for (final file in trackedDartFiles("test/scheduling"))
         if (layers.contains(layerOf(file)) ||
             file == "test/scheduling/dst_days.dart" ||
+            file == "test/scheduling/zones.dart" ||
             file == "test/scheduling/class_source.dart")
           file,
     ];
@@ -422,6 +423,7 @@ void main() {
       files,
       containsAll(<String>[
         "test/scheduling/dst_days.dart",
+        "test/scheduling/zones.dart",
         "test/scheduling/class_source.dart",
       ]),
     );

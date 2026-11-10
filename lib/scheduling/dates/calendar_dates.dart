@@ -1110,24 +1110,6 @@ Location? zoneOf(DateTime time) {
   return time is TZDateTime ? time.location : null;
 }
 
-/// [time] as a `TZDateTime` of [zone] at its instant, or with no [zone] a
-/// plain local time at its instant.
-DateTime zonedTimeOf(DateTime time, Location? zone) {
-  if (zone == null) {
-    return localTimeOf(time);
-  }
-  return time is TZDateTime && time.location == zone
-      ? time
-      : TZDateTime.from(time, zone);
-}
-
-/// [time] as a plain local time at its instant.
-DateTime localTimeOf(DateTime time) {
-  return time is TZDateTime
-      ? DateTime.fromMillisecondsSinceEpoch(time.millisecondsSinceEpoch)
-      : time.toLocal();
-}
-
 /// The day start, on [zone]'s clock, of the date a plain [day] reads:
 /// [day] itself where [zone] is null or [day] is a `TZDateTime`, and
 /// otherwise [CalendarDates.dateOfDayNumber] of its date.

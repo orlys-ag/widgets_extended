@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/scheduling.dart';
 
+import '../zones.dart';
 import 'zone_support.dart';
 
 /// The error a test fails a data-source call with.
@@ -4516,31 +4517,57 @@ void _zoneTests() {
       expectHeld(store.entriesOn(zoneDay).single.entry);
       expectHeld(store.entriesBetween(zoneDay, zoneDay).single.entry);
 
-      final created = store.create(timesEntry("b", entry.start, entry.end));
-      callsOf(
-        source,
-        SourceMethod.create,
-      ).single.succeed(timesEntry("b", entry.start, entry.end));
-      expectHeld(await created);
-      final updated = store.update(
-        timesEntry("a", entry.start, entry.end, title: "Updated"),
-      );
-      callsOf(source, SourceMethod.replace).single.succeed(
-        timesEntry("a", entry.start, entry.end, title: "Updated"),
-      );
-      expectHeld(await updated);
-      final moved = store.requestMove(
-        timesEntry("b", entry.start, entry.end, title: "Moved"),
-      );
-      final moving = store.entriesOn(zoneDay).firstWhere((shown) {
-        return shown.id == "b";
-      });
-      expectHeld(moving.entry);
-      callsOf(
-        source,
-        SourceMethod.replace,
-      ).last.succeed(timesEntry("b", entry.start, entry.end, title: "Moved"));
-      expectHeld(await moved);
+      void expectDeviceForm(CalendarEntry<String> sent) {
+        for (final (time, instant) in <(DateTime, DateTime)>[
+          (sent.start, entry.start),
+          (sent.end, entry.end),
+        ]) {
+          expect(time, isNot(isA<tz.TZDateTime>()));
+          expect(time.isUtc, isFalse);
+          expect(time.isAtSameMomentAs(instant), isTrue);
+        }
+      }
+
+      // Each write is given the times plain, then as another zone's
+      // `TZDateTime`s, neither the store's zone nor the device's.
+      final other = tz.getLocation("Asia/Kolkata");
+      final forms = <(String, DateTime, DateTime)>[
+        ("b", entry.start, entry.end),
+        (
+          "c",
+          tz.TZDateTime.from(entry.start, other),
+          tz.TZDateTime.from(entry.end, other),
+        ),
+      ];
+      for (final (id, start, end) in forms) {
+        final created = store.create(timesEntry(id, start, end));
+        final create = callsOf(source, SourceMethod.create).last;
+        expectDeviceForm(create.entry!);
+        create.succeed(timesEntry(id, entry.start, entry.end));
+        expectHeld(await created);
+
+        final updated = store.update(
+          timesEntry("a", start, end, title: "Updated $id"),
+        );
+        final replace = callsOf(source, SourceMethod.replace).last;
+        expectDeviceForm(replace.entry!);
+        replace.succeed(
+          timesEntry("a", entry.start, entry.end, title: "Updated $id"),
+        );
+        expectHeld(await updated);
+
+        final moved = store.requestMove(
+          timesEntry(id, start, end, title: "Moved"),
+        );
+        final moving = store.entriesOn(zoneDay).firstWhere((shown) {
+          return shown.id == id;
+        });
+        expectHeld(moving.entry);
+        final move = callsOf(source, SourceMethod.replace).last;
+        expectDeviceForm(move.entry!);
+        move.succeed(timesEntry(id, entry.start, entry.end, title: "Moved"));
+        expectHeld(await moved);
+      }
     });
 
     test("CZ3 an all-day entry stays on its date", () async {

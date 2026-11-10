@@ -14,7 +14,7 @@ import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
 
 import '../dst_days.dart';
-import '../store/zone_support.dart';
+import '../zones.dart';
 
 /// A Tuesday.
 final DateTime tuesday = DateTime(2026, 4, 21);

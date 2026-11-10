@@ -11,7 +11,7 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 
 import '../class_source.dart';
-import '../store/zone_support.dart';
+import '../zones.dart';
 
 /// [minute] minutes after [day]'s midnight.
 DateTime at(DateTime day, int minute) {

@@ -11,7 +11,7 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 
 import '../dst_days.dart';
-import '../store/zone_support.dart';
+import '../zones.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
