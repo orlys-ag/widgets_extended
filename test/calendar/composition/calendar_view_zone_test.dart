@@ -749,6 +749,7 @@ void main() {
             CalendarView<String>(
               store: store,
               controller: controller,
+              hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
               clock: () {
                 return clock;
               },
@@ -1831,7 +1832,8 @@ void main() {
       /// asks, with [count] entries, to landings ending before 12:00, then
       /// those of a move to a landing ending at the next day's start,
       /// after checking that moves within a slot of a move, a resize and a
-      /// create drag ask none.
+      /// create drag ask none. Every entry but "a" is a timed entry of the
+      /// shown week, spread over its days and its hours before 20:00.
       Future<List<int>> lookupsWith(int count) async {
         final zone = CountingLocation(apart(5));
         final entries = <CalendarEntry<String>>[
@@ -1839,11 +1841,6 @@ void main() {
             "a",
             timeIn(zone, 2026, 4, 21, 10),
             timeIn(zone, 2026, 4, 21, 11),
-          ),
-          entryOf(
-            "z",
-            timeIn(zone, 2026, 4, 22, 22, 45),
-            timeIn(zone, 2026, 4, 22, 23, 45),
           ),
           for (var index = 1; index < count; index++)
             entryOf(
@@ -1876,6 +1873,22 @@ void main() {
         );
         expect(tester.takeException(), isNull);
         await tester.pumpAndSettle();
+        // Setup sanity: every entry is a timed one of the shown week, and
+        // the whole day lies in view, so no drag below scrolls the grid.
+        expect(entries.length, count);
+        final range = controller.visibleRange!;
+        for (final entry in entries) {
+          expect(entry.isAllDay, isFalse);
+          expect(
+            CalendarDates.dayNumber(entry.start),
+            inInclusiveRange(
+              CalendarDates.dayNumber(range.first),
+              CalendarDates.dayNumber(range.last),
+            ),
+            reason: entry.id,
+          );
+        }
+        expect(verticalOf(tester).maxScrollExtent, 0.0);
         final col = weekColOf(tuesday);
         final slot = slotExtent(tester, col);
         final quarter = Offset(0.0, slot / 4);
@@ -1902,24 +1915,42 @@ void main() {
         await expectNoneWithin(move, "move");
         await move.up();
         await tester.pumpAndSettle();
-        // Setup sanity: the drop requested the third landing.
+        // Setup sanity: the drop requested the third landing, and the
+        // request wrote nothing, so the block is back at the stored 10:00.
         expect(
           requests.single.requested.start,
           timeIn(zone, 2026, 4, 21, 10, 45),
         );
+        expect(
+          tester.getRect(blockFinder("a")).top,
+          moreOrLessEquals(rowTop(tester, 10 * 60, col), epsilon: 0.5),
+        );
 
-        // A move of "z" one slot down, to a landing from 23:00 to the
+        // One move of 52 slot rows down, to a landing from 23:00 to the
         // next day's start.
-        final last = await lift(tester, tester.getCenter(blockFinder("z")));
+        final last = await lift(tester, tester.getCenter(blockFinder("a")));
         final before = zone.lookups;
-        await last.moveBy(Offset(0.0, slot));
+        await last.moveBy(Offset(0.0, 52 * slot));
         await tester.pump();
         perMove.add(zone.lookups - before);
         await last.up();
         await tester.pumpAndSettle();
         // Setup sanity: the drop requested that landing.
-        expect(requests.last.requested.start, timeIn(zone, 2026, 4, 22, 23));
-        expect(requests.last.requested.end, dayIn(zone, 2026, 4, 23));
+        expect(requests, hasLength(2));
+        expect(
+          requests.last.requested.start.isAtSameMomentAs(
+            timeIn(zone, 2026, 4, 21, 23),
+          ),
+          isTrue,
+          reason: "${requests.last.requested.start}",
+        );
+        expect(
+          requests.last.requested.end.isAtSameMomentAs(
+            dayIn(zone, 2026, 4, 22),
+          ),
+          isTrue,
+          reason: "${requests.last.requested.end}",
+        );
 
         // A resize.
         await select(tester, blockFinder("a"));
