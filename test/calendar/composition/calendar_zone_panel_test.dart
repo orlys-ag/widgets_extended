@@ -438,34 +438,73 @@ void main() {
         await tester.pumpWidget(const SizedBox());
       }
 
-      // A keystroke asks offsets of the rows it mounts alone.
-      final controller = CalendarZoneController();
-      addTearDown(controller.dispose);
-      await tester.pumpWidget(
-        host(
-          CalendarZonePanel(
-            value: null,
-            onChanged: (zone) {},
-            controller: controller,
-            zones: counting,
-            clock: fixedClock,
+      // Each frame of a keystroke builds the rows the list holds in view
+      // before the filter, as they leave or stay, and those it holds in view
+      // after it, as they arrive or slide in: at most the rows of two lists
+      // at rest, whatever the list's length. A row's build asks its zone's
+      // offset once, through `CalendarDates.inZone`, so the lookups count
+      // the builds, and every zone asked has its row mounted.
+      for (final zones in <List<CountingLocation>>[
+        counting,
+        counting.sublist(0, 60),
+      ]) {
+        final controller = CalendarZoneController();
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(
+          host(
+            CalendarZonePanel(
+              value: null,
+              onChanged: (zone) {},
+              controller: controller,
+              zones: zones,
+              clock: fixedClock,
+            ),
           ),
-        ),
-      );
-      await openAdding(tester);
-      final before = <int>[for (final zone in counting) zone.lookups];
-      await tester.enterText(find.byType(TextField), "z");
-      await tester.pump();
-      final asked = <String>[
-        for (var index = 0; index < counting.length; index++)
-          if (counting[index].lookups != before[index]) counting[index].name,
-      ];
-      // Setup sanity: the keystroke built rows.
-      expect(asked, isNotEmpty);
-      for (final name in asked) {
-        expect(rowOf(name), findsOneWidget, reason: name);
+        );
+        await openAdding(tester);
+        final bound = 2 * boundOf();
+        for (final query in <String>[
+          "z",
+          "",
+          "a",
+          "am",
+          "ame",
+          "am",
+          "a",
+          "",
+        ]) {
+          // The first frame's count holds what the keystroke itself asks.
+          var before = <int>[for (final zone in zones) zone.lookups];
+          await tester.enterText(find.byType(TextField), query);
+          var frames = 0;
+          var built = 0;
+          do {
+            await tester.pump(
+              frames == 0 ? Duration.zero : const Duration(milliseconds: 16),
+            );
+            frames += 1;
+            var builds = 0;
+            final asked = <String>[];
+            for (var index = 0; index < zones.length; index++) {
+              final lookups = zones[index].lookups - before[index];
+              if (lookups > 0) {
+                builds += lookups;
+                asked.add(zones[index].name);
+              }
+            }
+            before = <int>[for (final zone in zones) zone.lookups];
+            final reason = "${zones.length} zones, \"$query\", frame $frames";
+            expect(builds, lessThanOrEqualTo(bound), reason: reason);
+            for (final name in asked) {
+              expect(rowOf(name), findsOneWidget, reason: "$reason: $name");
+            }
+            built += builds;
+          } while (tester.binding.hasScheduledFrame);
+          // Setup sanity: the keystroke built rows.
+          expect(built, greaterThan(0), reason: "${zones.length} \"$query\"");
+        }
+        await tester.pumpWidget(const SizedBox());
       }
-      expect(asked.length, lessThanOrEqualTo(rows.evaluate().length));
     },
   );
 

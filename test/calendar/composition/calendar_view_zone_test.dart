@@ -603,6 +603,26 @@ class HeldReads implements CalendarDataSource<String> {
   throw StateError("No Etc/GMT zone reads another month than the device.");
 }
 
+/// An `Etc/GMT` zone 12 or more hours from the device's offset at [on],
+/// reading another civil day than the device does at [on], as
+/// [zoneFarFromDevice] gives, and skipping a zone a whole number of days
+/// from the device, whose clock reads the device's hours.
+tz.Location zoneFarOnAnotherHour(DateTime on) {
+  final deviceDay = CalendarDates.dayNumber(on);
+  for (var offset = 14; offset >= -12; offset--) {
+    final zone = gmtZone(offset);
+    final there = tz.TZDateTime.from(on, zone);
+    final apart = (there.timeZoneOffset - on.timeZoneOffset).inMinutes;
+    if (apart.abs() < 12 * 60 || apart % CalendarDates.minutesPerDay == 0) {
+      continue;
+    }
+    if (CalendarDates.dayNumber(there) != deviceDay) {
+      return zone;
+    }
+  }
+  throw StateError("No Etc/GMT zone is 12 hours from the device at $on");
+}
+
 void main() {
   testWidgets(
     "VZ1 a calendar over a zoned store builds in Agenda, Day, Week and Month "
@@ -822,11 +842,14 @@ void main() {
       ensureZones();
       useTallView(tester);
       final clock = DateTime(2026, 4, 21, 12);
-      final zone = zoneFarFromDevice(clock);
+      final zone = zoneFarOnAnotherHour(clock);
       final reading = tz.TZDateTime.from(clock, zone);
       final zoneDay = DateTime(reading.year, reading.month, reading.day);
-      // Setup sanity: the zone reads another date than the device.
+      final zoneMinute = reading.hour * 60 + reading.minute;
+      // Setup sanity: the zone reads another date than the device, and
+      // another minute, where Day's line lies.
       expect(dateOf(zoneDay), isNot(dateOf(clock)));
+      expect(zoneMinute, isNot(clock.hour * 60 + clock.minute));
       for (final view in CalendarViewKind.values) {
         final store = memoryStoreIn<String>(zone);
         addTearDown(store.dispose);
@@ -850,14 +873,17 @@ void main() {
         await tester.pumpAndSettle();
         expect(dateOf(controller.selectedDay), dateOf(zoneDay));
         expect(todaysMarked(tester, view), <int>{dateOf(zoneDay)});
-        if (view == CalendarViewKind.week) {
+        if (view == CalendarViewKind.week || view == CalendarViewKind.day) {
+          // Day's one day is the grid's column 1, after the hours.
           final line = nowLine(tester)!;
           final expected = nowLineAt(
             tester,
-            reading.hour * 60 + reading.minute,
-            weekColOf(zoneDay),
+            zoneMinute,
+            view == CalendarViewKind.week ? weekColOf(zoneDay) : 1,
           );
-          expect(line.from.dx, moreOrLessEquals(expected.left));
+          if (view == CalendarViewKind.week) {
+            expect(line.from.dx, moreOrLessEquals(expected.left));
+          }
           expect(line.from.dy, moreOrLessEquals(expected.y));
         }
         await tester.pumpWidget(calendar(DateTime(2026, 4, 21)));
