@@ -1,5 +1,5 @@
-/// The history lock in the app: its switches in the settings sheet, the
-/// item form's errors, what it keeps as it is in Week, Agenda and Month
+/// The history lock in the app, which the settings the calendar opens on
+/// turn on: the item form's errors, what it keeps as it is in Week, Agenda and Month
 /// and in the item form, and the day it locks under a clock reading UTC.
 library;
 
@@ -13,7 +13,6 @@ import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/item_form.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 
 import 'calendar_harness.dart';
 
@@ -87,16 +86,8 @@ Future<MockCalendarApi> pumpLocked(
         () {
           return midMorning;
         },
+    settings: CalendarSettings(lockPast: true, lockEarlierToday: earlierToday),
   );
-  await openSettings(tester);
-  await tester.tap(find.byKey(lockPastKey));
-  await tester.pumpAndSettle();
-  if (earlierToday) {
-    await tester.tap(find.byKey(lockEarlierTodayKey));
-    await tester.pumpAndSettle();
-  }
-  await tester.tapAt(const Offset(195.0, 20.0));
-  await tester.pumpAndSettle();
   return api;
 }
 
@@ -281,41 +272,6 @@ void main() {
       expect(locked == pastOnly, isFalse);
       expect(locked.hashCode == pastOnly.hashCode, isFalse);
     });
-  });
-
-  testWidgets("K7 the sheet's Lock earlier today takes input only while "
-      "Lock past days is on, and each switch sets its setting", (tester) async {
-    CalendarSettings? reported;
-    final zones = CalendarZoneController();
-    addTearDown(zones.dispose);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: CalendarSettingsSheet(
-            settings: const CalendarSettings(),
-            zone: null,
-            zones: zones,
-            clock: DateTime.now,
-            onZoneChanged: (zone) {},
-            onChanged: (settings) {
-              reported = settings;
-            },
-          ),
-        ),
-      ),
-    );
-    SwitchListTile earlierToday() {
-      return tester.widget<SwitchListTile>(find.byKey(lockEarlierTodayKey));
-    }
-
-    expect(earlierToday().onChanged, isNull);
-    await tester.tap(find.byKey(lockPastKey));
-    await tester.pump();
-    expect(reported?.lockPast, isTrue);
-    expect(earlierToday().onChanged, isNotNull);
-    await tester.tap(find.byKey(lockEarlierTodayKey));
-    await tester.pump();
-    expect(reported?.lockEarlierToday, isTrue);
   });
 
   testWidgets("K8 in Week a past block does not lift, and a later one "
@@ -598,18 +554,15 @@ void main() {
         api: api,
         size: tall,
         editing: true,
+        settings: const CalendarSettings(
+          lockPast: true,
+          lockEarlierToday: true,
+        ),
         pinsToday: false,
         clock: () {
           return reading.toUtc();
         },
       );
-      await openSettings(tester);
-      await tester.tap(find.byKey(lockPastKey));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(lockEarlierTodayKey));
-      await tester.pumpAndSettle();
-      await tester.tapAt(const Offset(195.0, 20.0));
-      await tester.pumpAndSettle();
       bool isSelected(DateTime day) {
         return tester.widget<DayCell>(find.byKey(dayCellKey(day))).isSelected;
       }

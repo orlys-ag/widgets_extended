@@ -45,26 +45,14 @@ Map<String, String> hoursErrorsOf(
   };
 }
 
-/// The names of Month's layouts in the settings sheet.
-extension MonthLayoutLabel on CalendarMonthLayout {
-  /// The layout's name in the settings sheet.
-  String get label {
-    switch (this) {
-      case CalendarMonthLayout.showAll:
-        return "Show all items";
-      case CalendarMonthLayout.fitScreen:
-        return "Fit to screen";
-    }
-  }
-}
-
-/// What the settings sheet chooses: whether the
-/// calendar is in [editing] mode, whether the history lock holds past
-/// days, [lockPast], and earlier today too, [lockEarlierToday], whether
-/// items may share time, [allowsOverlaps], the [weekdays] it shows and the
-/// one its weeks start on, the [hours] it shows and schedules in, the
-/// [slotMinutes] of its slots, the [hourLabelFormat] the timed grid labels
-/// them in, and Month's [monthLayout].
+/// The calendar's settings: whether it is in [editing] mode, whether the
+/// history lock holds past days, [lockPast], and earlier today too,
+/// [lockEarlierToday], whether items may share time, [allowsOverlaps], the
+/// [weekdays] it shows and the one its weeks start on, the [hours] it shows
+/// and schedules in, the [slotMinutes] of its slots, the [hourLabelFormat]
+/// the timed grid labels them in, and Month's [monthLayout]. The settings
+/// sheet chooses the weekdays, the slot length, the hours, their labels
+/// and the overlaps, and the header's toggle edit mode.
 @immutable
 class CalendarSettings {
   const CalendarSettings({

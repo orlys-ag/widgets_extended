@@ -181,31 +181,6 @@ void main() {
     expect(find.text("Calendar settings"), findsNothing);
   });
 
-  testWidgets("L1 the sheet offers the month layouts and opens on the one "
-      "in force", (tester) async {
-    await pumpCalendar(tester);
-    await openSettings(tester);
-    Set<CalendarMonthLayout> chosen() {
-      return tester
-          .widget<SegmentedButton<CalendarMonthLayout>>(
-            find.byKey(monthLayoutKey),
-          )
-          .selected;
-    }
-
-    expect(chosen(), <CalendarMonthLayout>{CalendarMonthLayout.fitScreen});
-    expect(find.text("Show all items"), findsOneWidget);
-    expect(find.text("Fit to screen"), findsOneWidget);
-    await tester.ensureVisible(find.text("Show all items"));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text("Show all items"));
-    await tester.pumpAndSettle();
-    expect(chosen(), <CalendarMonthLayout>{CalendarMonthLayout.showAll});
-    await closeSettings(tester);
-    await openSettings(tester);
-    expect(chosen(), <CalendarMonthLayout>{CalendarMonthLayout.showAll});
-  });
-
   testWidgets("H2 the hours trim the week grid to their slots", (tester) async {
     final semantics = tester.ensureSemantics();
     await pumpCalendar(tester, size: tall);
@@ -833,9 +808,9 @@ void main() {
   });
 
   testWidgets("E1 the calendar opens out of edit mode, and the settings "
-      "sheet holds the time zone, the days, the slot length and the hours, "
-      "then the lock, Month's layout and the overlap switch, and no edit "
-      "mode and no least sizes", (tester) async {
+      "sheet holds the time zone, the days, the slot length, the hours and "
+      "the overlap switch, with no divider, edit mode, least sizes, history "
+      "lock or Month layout", (tester) async {
     await pumpCalendar(tester);
     expect(tester.widget<IconButton>(editToggleFinder()).isSelected, isFalse);
     await openSettings(tester);
@@ -847,13 +822,17 @@ void main() {
     expect(find.text("Slot length"), findsOneWidget);
     expect(find.textContaining("Hours"), findsOneWidget);
     expect(find.text("AM/PM"), findsOneWidget);
-    expect(find.text("Lock past days"), findsOneWidget);
-    expect(find.text("Month layout"), findsOneWidget);
     expect(find.text("Allow overlapping items"), findsOneWidget);
     // A pinch on a grid sets the least day width and slot height.
     expect(find.text("Day width"), findsNothing);
     expect(find.text("Slot height"), findsNothing);
     expect(find.byType(Slider), findsNothing);
+    // The settings the calendar opens on give the lock and the layout.
+    expect(find.byType(Divider), findsNothing);
+    expect(find.text("Lock past days"), findsNothing);
+    expect(find.text("Lock earlier today too"), findsNothing);
+    expect(find.text("Month layout"), findsNothing);
+    expect(find.byType(SegmentedButton<CalendarMonthLayout>), findsNothing);
   });
   testWidgets("SL1 the sheet offers the six slot lengths and opens on the "
       "one in force", (tester) async {
@@ -960,8 +939,8 @@ void main() {
     expect(tester.widget<SwitchListTile>(overlaps).value, isTrue);
   });
 
-  testWidgets("OS4 after each switch of the sheet the calendar's edit "
-      "policy is the one its settings give", (tester) async {
+  testWidgets("OS4 after each flip of the sheet's overlap switch the "
+      "calendar's edit policy is the one its settings give", (tester) async {
     await pumpCalendar(tester, editing: true);
     await pickMode(tester, "Week");
     CalendarEditPolicy<ItemPayload>? shownPolicy() {
@@ -984,10 +963,7 @@ void main() {
       expect(shownPolicy(), settings.editPolicy, reason: "$settings");
     }
 
-    await flip(lockPastKey, settings.copyWith(lockPast: true));
-    await flip(lockEarlierTodayKey, settings.copyWith(lockEarlierToday: true));
     await flip(allowsOverlapsKey, settings.copyWith(allowsOverlaps: true));
-    await flip(lockPastKey, settings.copyWith(lockPast: false));
     await flip(allowsOverlapsKey, settings.copyWith(allowsOverlaps: false));
     await closeSettings(tester);
   });

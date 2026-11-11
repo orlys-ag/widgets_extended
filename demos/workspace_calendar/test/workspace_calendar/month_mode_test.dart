@@ -22,6 +22,7 @@ import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
@@ -86,8 +87,9 @@ RenderBoardViewport<String> monthViewport(WidgetTester tester) {
 }
 
 /// Pumps the calendar over a mock holding [seed] at [latency], in edit
-/// mode when [editing], and picks Month, and with [showAll] the Show all
-/// items layout in place of the Fit to screen it starts on.
+/// mode when [editing], and picks Month, on the Show all items layout
+/// ([CalendarMonthLayout.showAll]) where [showAll] and otherwise on the Fit
+/// to screen it starts on.
 Future<MockCalendarApi> pumpMonth(
   WidgetTester tester, {
   List<Map<String, Object?>> seed = const <Map<String, Object?>>[],
@@ -97,17 +99,48 @@ Future<MockCalendarApi> pumpMonth(
   Size size = const Size(390.0, 844.0),
 }) async {
   final api = MockCalendarApi(seed: seed, latency: latency);
-  await pumpCalendar(tester, api: api, editing: editing, size: size);
+  await pumpCalendar(
+    tester,
+    api: api,
+    editing: editing,
+    size: size,
+    settings: layoutSettings(showAll: showAll),
+  );
   await pickMode(tester, "Month");
-  if (showAll) {
-    await pickMonthLayout(tester, "Show all items");
-  }
   return api;
+}
+
+/// The settings a calendar opens on: on the Show all items layout where
+/// [showAll], and otherwise on Fit to screen.
+CalendarSettings layoutSettings({required bool showAll}) {
+  return CalendarSettings(
+    monthLayout: showAll
+        ? CalendarMonthLayout.showAll
+        : CalendarMonthLayout.fitScreen,
+  );
+}
+
+/// The layout the calendar's Month is on.
+CalendarMonthLayout shownLayout(WidgetTester tester) {
+  return tester
+      .widget<CalendarView<ItemPayload>>(find.byType(CalendarView<ItemPayload>))
+      .monthLayout;
+}
+
+/// Unmounts the calendar, then [pumpMonth]s a new one over [seed] where
+/// [showAll] says, so a test compares Month's two layouts.
+Future<MockCalendarApi> repumpMonth(
+  WidgetTester tester, {
+  List<Map<String, Object?>> seed = const <Map<String, Object?>>[],
+  required bool showAll,
+}) async {
+  await tester.pumpWidget(const SizedBox());
+  return pumpMonth(tester, seed: seed, showAll: showAll);
 }
 
 /// Pumps the calendar over the default seed, in edit mode when [editing],
 /// its store reading [readAhead] days on each side of the range it shows,
-/// and picks Month, and with [showAll] the Show all items layout.
+/// and picks Month, on the Show all items layout where [showAll].
 Future<MockCalendarApi> pumpSeededMonth(
   WidgetTester tester, {
   bool showAll = false,
@@ -118,11 +151,9 @@ Future<MockCalendarApi> pumpSeededMonth(
     tester,
     editing: editing,
     readAhead: readAhead,
+    settings: layoutSettings(showAll: showAll),
   );
   await pickMode(tester, "Month");
-  if (showAll) {
-    await pickMonthLayout(tester, "Show all items");
-  }
   return api;
 }
 
@@ -262,17 +293,6 @@ int listCount(MockCalendarApi api) {
 Future<void> toggleWeekends(WidgetTester tester) async {
   await openSettings(tester);
   flipWeekends(tester);
-  await tester.pumpAndSettle();
-  await closeSettings(tester);
-}
-
-/// Opens the calendar settings, picks the month layout [label], scrolling
-/// it into the sheet's view first, and closes them.
-Future<void> pickMonthLayout(WidgetTester tester, String label) async {
-  await openSettings(tester);
-  await tester.ensureVisible(find.text(label));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text(label));
   await tester.pumpAndSettle();
   await closeSettings(tester);
 }
@@ -1743,7 +1763,6 @@ void main() {
     "lane",
     (tester) async {
       await pumpMonth(tester, seed: hourlyTasks(april(22), 7, 8));
-      await pickMonthLayout(tester, "Fit to screen");
       final board = tester.getRect(monthBoardFinder());
       final cell = tester.getRect(dayFinder(april(22)));
       expect(cell.height, near(board.height / 5));
@@ -1775,7 +1794,6 @@ void main() {
   testWidgets("M30 under Fit to screen a tap on a day's +N more opens it in "
       "Day mode", (tester) async {
     await pumpMonth(tester, seed: hourlyTasks(april(22), 7, 8));
-    await pickMonthLayout(tester, "Fit to screen");
     await tester.tap(moreFinder());
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
@@ -1795,7 +1813,6 @@ void main() {
         taskAt("Wednesday", april(22), 11, 12),
       ],
     );
-    await pickMonthLayout(tester, "Fit to screen");
     tester.view.physicalSize = const Size(390.0, 420.0);
     await tester.pumpAndSettle();
     // Sanity: the weeks hold one lane.
@@ -1826,7 +1843,11 @@ void main() {
     await pumpMonth(tester, seed: hourlyTasks(april(22), 7, 8));
     expect(moreFinder(), findsOneWidget);
 
-    await pickMonthLayout(tester, "Show all items");
+    await repumpMonth(
+      tester,
+      seed: hourlyTasks(april(22), 7, 8),
+      showAll: true,
+    );
     expect(tester.getSize(dayFinder(april(22))).height, near(strip + 7 * lane));
     expect(moreFinder(), findsNothing);
   });
@@ -1834,7 +1855,6 @@ void main() {
   testWidgets("M33 under Fit to screen a resize to fewer lanes hides more "
       "chips", (tester) async {
     await pumpMonth(tester, seed: hourlyTasks(april(22), 7, 8));
-    await pickMonthLayout(tester, "Fit to screen");
     final before = lanesOf(tester, april(22));
     expect(find.text("+${8 - before} more"), findsOneWidget);
 
@@ -1987,8 +2007,14 @@ void main() {
     expect(selected().top, greaterThanOrEqualTo(-0.5));
     expect(selected().bottom, lessThanOrEqualTo(board.height + 0.5));
 
-    await pickMonthLayout(tester, "Show all items");
-    expect(height(), near(3 * share));
+    // Show all items, on a calendar of its own at the same slot height.
+    await repumpMonth(tester, showAll: true);
+    expect(shownLayout(tester), CalendarMonthLayout.showAll);
+    await setLeastSizes(
+      tester,
+      slotHeight: CalendarController.minSlotHeightHigh,
+    );
+    expect(monthViewport(tester).rectOfCell(3, 2)!.height, near(3 * share));
   });
 
   testWidgets("M39 days at least 100 px wide in weeks at least 136 px tall "
@@ -2200,17 +2226,14 @@ void main() {
     "items the week grows to hold the deepest banner, and under Fit to "
     "screen the banner stacks under a day's \"+N more\"",
     (tester) async {
-      await pumpMonth(
-        tester,
-        showAll: true,
-        seed: <Map<String, Object?>>[
-          for (var i = 0; i < 8; i++)
-            taskJson("Busy $i", april(24), (9 + i) * 60, (9 + i) * 60 + 30),
-          taskJson("Late", april(24), 19 * 60, 20 * 60),
-          taskJson("Short", april(23), 10 * 60, 11 * 60),
-          taskJson("Late too", april(23), 19 * 60, 20 * 60),
-        ],
-      );
+      final seed = <Map<String, Object?>>[
+        for (var i = 0; i < 8; i++)
+          taskJson("Busy $i", april(24), (9 + i) * 60, (9 + i) * 60 + 30),
+        taskJson("Late", april(24), 19 * 60, 20 * 60),
+        taskJson("Short", april(23), 10 * 60, 11 * 60),
+        taskJson("Late too", april(23), 19 * 60, 20 * 60),
+      ];
+      await pumpMonth(tester, showAll: true, seed: seed);
       await pickHours(tester, 8, 18);
       final friday = tester.getRect(dayFinder(april(24)));
       final later = tester.getRect(find.byKey(monthLaterKey(april(24))));
@@ -2227,7 +2250,9 @@ void main() {
       expect(shortLater.top, near(short.bottom + 1.0));
       expect(shortLater.bottom, lessThan(thursday.bottom - lane));
 
-      await pickMonthLayout(tester, "Fit to screen");
+      // Fit to screen, on a calendar of its own over the same hours.
+      await repumpMonth(tester, seed: seed, showAll: false);
+      await pickHours(tester, 8, 18);
       final more = tester.getRect(find.byKey(monthMoreKey(april(24))));
       final fitLater = tester.getRect(find.byKey(monthLaterKey(april(24))));
       expect(fitLater.top, near(more.bottom + 2.0));

@@ -356,7 +356,8 @@ void main() {
   });
 
   testWidgets("VS5 an open month picker stays open on its year through "
-      "every change of view, and Today closes it", (tester) async {
+      "every change of view, with the Today button hidden, as no day "
+      "changed, and the title closes it", (tester) async {
     final controller = CalendarController();
     addTearDown(controller.dispose);
     await tester.pumpWidget(
@@ -390,7 +391,8 @@ void main() {
     expect(find.byKey(picker), findsOneWidget);
     expect(inHeader("2027"), findsOneWidget);
 
-    await tester.tap(todayHit);
+    expect(todayHit, findsNothing);
+    await tester.tap(find.byTooltip("Close the months"));
     await tester.pumpAndSettle();
     expect(find.byKey(picker), findsNothing);
     expect(inHeader("Apr 2026"), findsOneWidget);

@@ -1,19 +1,19 @@
-/// The calendar on a zone: the settings sheet's time zone part and the
-/// sheet of zones it opens, the item form's times and the store's hours on
-/// the store's zone clock, and the history lock judged on it.
+/// The calendar on a zone: the settings sheet's time zone part and its
+/// manage mode, the item form's times and the store's hours on the store's
+/// zone clock, and the history lock judged on it.
 library;
 
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show clampDouble;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
-import 'package:widgets_extended/calendar/composition/calendar_zone_panel.dart'
-    show zonePanelRowKey;
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
+import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/item_form.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
@@ -88,18 +88,45 @@ Future<void> zoneStore(
   await tester.pumpAndSettle();
 }
 
-/// Opens the settings sheet where it is closed, then the sheet of zones
-/// over it from its Manage chip.
-Future<void> openZoneSheet(WidgetTester tester) async {
+/// Opens the settings sheet where it is closed, then its manage mode from
+/// its Manage chip.
+Future<void> openManaging(WidgetTester tester) async {
   await openSettings(tester);
   await tester.tap(find.byKey(manageZonesKey));
   await tester.pumpAndSettle();
-  expect(find.byType(CalendarZonePanel), findsOneWidget);
 }
 
-/// [finder] inside the open zone panel.
-Finder inPanel(Finder finder) {
-  return find.descendant(of: find.byType(CalendarZonePanel), matching: finder);
+/// Types [text] in the manage mode's search field.
+Future<void> searchZones(WidgetTester tester, String text) async {
+  await tester.enterText(find.byKey(zoneSearchKey), text);
+  await tester.pumpAndSettle();
+}
+
+/// Adds the zone named [name] with a tap on its row in the manage mode's
+/// list, searched for by [query] so the row shows.
+Future<void> addZone(WidgetTester tester, String query, String name) async {
+  await searchZones(tester, query);
+  await tester.tap(find.byKey(zoneRowKey(name)));
+  await tester.pumpAndSettle();
+}
+
+/// The sheet's chip of the zone named [name], or with the empty name the
+/// chip of the device's zone.
+Finder zoneChip(String name) {
+  return find.byKey(zoneChipKey(name));
+}
+
+/// The names of the zones the manage mode's list holds, in its order.
+List<String> listedZones(WidgetTester tester) {
+  return tester
+      .widget<SliverTree<String, Location>>(
+        find.descendant(
+          of: find.byKey(zoneListKey),
+          matching: find.byType(SliverTree<String, Location>),
+        ),
+      )
+      .controller
+      .liveRootKeys;
 }
 
 /// Scrolls the grid so the slot row of [minute] shows near its top.
@@ -202,9 +229,7 @@ void main() {
   testWidgets(
     "DZ1 the settings sheet's time zone part names the chosen zone with its "
     "offset over a chip for the device's zone and one for each added zone, "
-    "a tap on one zones the store, and its Manage chip opens the panel in a "
-    "sheet over it, where picking a zone in view 1 zones the store and "
-    "closes that sheet",
+    "and a tap on a chip zones the store",
     (tester) async {
       await pumpCalendar(tester, clock: noonClock);
       final store = storeOf(tester);
@@ -217,17 +242,13 @@ void main() {
         );
       }
 
-      Finder chip(String name) {
-        return find.byKey(zoneChipKey(name));
-      }
-
       bool chosen(String name) {
-        return tester.widget<ChoiceChip>(chip(name)).selected;
+        return tester.widget<InputChip>(zoneChip(name)).selected;
       }
 
       final chips = find.descendant(
         of: find.byKey(zoneChoicesKey),
-        matching: find.byType(ChoiceChip),
+        matching: find.byType(InputChip),
       );
       await openSettings(tester);
       expect(
@@ -237,36 +258,19 @@ void main() {
       expect(chips, findsOneWidget);
       expect(chosen(""), isTrue);
 
-      Future<void> openSheet() async {
-        await openZoneSheet(tester);
-      }
-
-      Future<void> search(String text) async {
-        await tester.enterText(inPanel(find.byType(TextField)), text);
-        await tester.pumpAndSettle();
-      }
-
-      Future<void> back() async {
-        await tester.tap(inPanel(find.byTooltip(strings.zonesBackTooltip)));
-        await tester.pumpAndSettle();
-      }
-
-      // Havana added in view 2 and picked in view 1.
-      await openSheet();
-      await tester.tap(inPanel(find.text(strings.addZonesLabel)));
+      await tester.tap(find.byKey(manageZonesKey));
       await tester.pumpAndSettle();
-      await search("havana");
-      await tester.tap(inPanel(find.text("Havana")));
+      await addZone(tester, "havana", "America/Havana");
+      await addZone(tester, "tokyo", "Asia/Tokyo");
+      await tester.tap(find.byKey(zonesBackKey));
       await tester.pumpAndSettle();
-      // Setup sanity: an add reports nothing, so the sheet stays.
+      // Setup sanity: the adds chose no zone.
       expect(store.zone, isNull);
-      await back();
-      await tester.tap(inPanel(find.text("Havana")));
+      expect(chips, findsNWidgets(3));
+
+      await tester.tap(zoneChip("America/Havana"));
       await tester.pumpAndSettle();
       expect(store.zone?.name, "America/Havana");
-      expect(find.byType(CalendarZonePanel), findsNothing);
-      expect(find.byType(CalendarSettingsSheet), findsOneWidget);
-      expect(chips, findsNWidgets(2));
       expect(chosen("America/Havana"), isTrue);
       expect(chosen(""), isFalse);
       expect(
@@ -276,80 +280,231 @@ void main() {
         findsOneWidget,
       );
 
-      // The chips switch between the zones.
-      await tester.tap(chip(""));
+      await tester.tap(zoneChip(""));
       await tester.pumpAndSettle();
       expect(store.zone, isNull);
       expect(chosen(""), isTrue);
       expect(chosen("America/Havana"), isFalse);
-      await tester.tap(chip("America/Havana"));
-      await tester.pumpAndSettle();
-      expect(store.zone?.name, "America/Havana");
-      expect(chosen("America/Havana"), isTrue);
-
-      // Unchecking the current zone in view 2 puts the store back on the
-      // device's clock and leaves the sheet open there.
-      await openSheet();
-      await tester.tap(inPanel(find.text(strings.addZonesLabel)));
-      await tester.pumpAndSettle();
-      await search("havana");
-      await tester.tap(inPanel(find.text("Havana")));
-      await tester.pumpAndSettle();
-      expect(store.zone, isNull);
-      expect(find.byType(CalendarZonePanel), findsOneWidget);
-      expect(inPanel(find.byType(TextField)), findsOneWidget);
-
-      // Tokyo checked there, then picked in view 1.
-      await search("tokyo");
-      await tester.tap(inPanel(find.text("Tokyo")));
-      await tester.pumpAndSettle();
-      await back();
-      await tester.tap(inPanel(find.text("Tokyo")));
+      await tester.tap(zoneChip("Asia/Tokyo"));
       await tester.pumpAndSettle();
       expect(store.zone?.name, "Asia/Tokyo");
-      expect(find.byType(CalendarZonePanel), findsNothing);
-      expect(chips, findsNWidgets(2));
-      expect(chip("America/Havana"), findsNothing);
       expect(chosen("Asia/Tokyo"), isTrue);
       // Tokyo's offset is not the device's in any zone the tests run in.
       expect(
         find.textContaining("Tokyo, ${offsetOf(tz.getLocation("Asia/Tokyo"))}"),
         findsOneWidget,
       );
+    },
+  );
 
-      // Under the keyboard, the sheet stays within the screen and its list
-      // scrolls its last row above the keyboard.
-      await openSheet();
-      await tester.tap(inPanel(find.text(strings.addZonesLabel)));
+  testWidgets(
+    "MZ1 the Manage chip turns the manage mode on: the title reads Time zone "
+    "selection after a back button, the time zone part stays with Manage "
+    "selected, and a search field over the zone list takes the place of the "
+    "settings under it; the back button and Manage each end it",
+    (tester) async {
+      await pumpCalendar(tester, clock: noonClock);
+      await openSettings(tester);
+      bool manageSelected() {
+        return tester.widget<FilterChip>(find.byKey(manageZonesKey)).selected;
+      }
+
+      Rect rectOf(Key key) {
+        return tester.getRect(find.byKey(key));
+      }
+
+      void expectSettings() {
+        expect(find.text("Calendar settings"), findsOneWidget);
+        expect(find.byKey(zonesBackKey), findsNothing);
+        expect(manageSelected(), isFalse);
+        expect(find.byKey(slotLengthKey), findsOneWidget);
+        expect(find.byKey(allowsOverlapsKey), findsOneWidget);
+        expect(find.byKey(zoneSearchKey), findsNothing);
+        expect(find.byKey(zoneListKey), findsNothing);
+      }
+
+      void expectManaging() {
+        expect(find.text("Time zone selection"), findsOneWidget);
+        expect(find.text("Calendar settings"), findsNothing);
+        expect(
+          rectOf(zonesBackKey).right,
+          lessThanOrEqualTo(
+            tester.getRect(find.text("Time zone selection")).left,
+          ),
+        );
+        expect(zoneChip(""), findsOneWidget);
+        expect(manageSelected(), isTrue);
+        expect(find.byKey(slotLengthKey), findsNothing);
+        expect(find.byKey(allowsOverlapsKey), findsNothing);
+        expect(
+          rectOf(zoneChoicesKey).bottom,
+          lessThan(rectOf(zoneSearchKey).top),
+        );
+        expect(rectOf(zoneSearchKey).bottom, lessThan(rectOf(zoneListKey).top));
+      }
+
+      expectSettings();
+      await tester.tap(find.byKey(manageZonesKey));
       await tester.pumpAndSettle();
-      const keyboard = 300.0;
-      tester.view.viewInsets = const FakeViewPadding(bottom: keyboard);
+      expectManaging();
+      await tester.tap(find.byKey(zonesBackKey));
       await tester.pumpAndSettle();
-      final screen = tester.view.physicalSize.height;
-      expect(tester.getRect(find.byType(CalendarZonePanel)).top, 0.0);
-      final list = tester.state<ScrollableState>(
-        find.descendant(
-          of: inPanel(find.byType(CustomScrollView)),
-          matching: find.byType(Scrollable),
+      expectSettings();
+      await tester.tap(find.byKey(manageZonesKey));
+      await tester.pumpAndSettle();
+      expectManaging();
+      await tester.tap(find.byKey(manageZonesKey));
+      await tester.pumpAndSettle();
+      expectSettings();
+    },
+  );
+
+  testWidgets(
+    "MZ2 a tap on a zone's row adds the zone: the rows under it close up "
+    "over Harbor's motion, a chip with a remove button shows for it, the "
+    "store's zone stays, and the manage mode stays on",
+    (tester) async {
+      await pumpCalendar(tester, clock: noonClock);
+      final store = storeOf(tester);
+      await openManaging(tester);
+      await searchZones(tester, "america/h");
+      final havana = find.byKey(zoneRowKey("America/Havana"));
+      final below = find.byKey(zoneRowKey("America/Hermosillo"));
+      // Setup sanity: Hermosillo's row is the one under Havana's.
+      expect(tester.getRect(below).top, tester.getRect(havana).bottom);
+      final from = tester.getRect(below).top;
+      final to = tester.getRect(havana).top;
+      expect(zoneChip("America/Havana"), findsNothing);
+
+      await tester.tap(havana);
+      // The add rebuilds the list, which starts the rows' motion a frame on.
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(harborMotionDuration ~/ 2);
+      expect(tester.getRect(below).top, inExclusiveRange(to, from));
+      await tester.pumpAndSettle();
+      expect(find.byKey(zoneSearchKey), findsOneWidget);
+      expect(zoneChip("America/Havana"), findsOneWidget);
+      expect(
+        tester.widget<InputChip>(zoneChip("America/Havana")).onDeleted,
+        isNotNull,
+      );
+      expect(store.zone, isNull);
+    },
+  );
+
+  testWidgets(
+    "MZ3 the list holds, by name, the loaded zones not added whose id or "
+    "city holds the search text, ignoring case and outer spaces, and a "
+    "text that matches none shows a message",
+    (tester) async {
+      await pumpCalendar(tester, clock: noonClock);
+      await openManaging(tester);
+      final all = CalendarDates.loadedZones();
+      List<String> expected(String query, Set<String> added) {
+        final text = query.trim().toLowerCase();
+        return <String>[
+          for (final zone in all)
+            if (!added.contains(zone.name) &&
+                (zone.name.toLowerCase().contains(text) ||
+                    CalendarZonePanel.cityOf(
+                      zone,
+                    ).toLowerCase().contains(text)))
+              zone.name,
+        ];
+      }
+
+      // Setup sanity: the zone database is loaded, and New York's id and
+      // city differ in the text each search below matches.
+      expect(all.length, greaterThan(400));
+      expect(
+        CalendarZonePanel.cityOf(tz.getLocation("America/New_York")),
+        "New York",
+      );
+      expect(listedZones(tester), expected("", <String>{}));
+      await searchZones(tester, "  HAVANA ");
+      expect(
+        listedZones(tester),
+        allOf(contains("America/Havana"), expected("havana", <String>{})),
+      );
+      await searchZones(tester, "new york");
+      expect(
+        listedZones(tester),
+        allOf(contains("America/New_York"), expected("new york", <String>{})),
+      );
+      await searchZones(tester, "america/new_");
+      expect(
+        listedZones(tester),
+        allOf(
+          contains("America/New_York"),
+          expected("america/new_", <String>{}),
         ),
       );
-      // The list's extent grows as it lays its rows out, so it jumps to
-      // its end until the end stays.
-      while (list.position.pixels < list.position.maxScrollExtent) {
-        list.position.jumpTo(list.position.maxScrollExtent);
-        await tester.pumpAndSettle();
-      }
-      final last = tester
-          .widget<SliverTree<String, Location>>(
-            inPanel(find.byType(SliverTree<String, Location>)),
-          )
-          .controller
-          .liveRootKeys
-          .last;
+
+      await addZone(tester, "havana", "America/Havana");
+      await searchZones(tester, "");
+      expect(listedZones(tester), expected("", <String>{"America/Havana"}));
+
+      const message = "No time zone to add matches.";
+      expect(find.text(message), findsNothing);
+      await searchZones(tester, "zzzz");
       expect(
-        tester.getRect(find.byKey(zonePanelRowKey(last))).bottom,
-        lessThanOrEqualTo(screen - keyboard + 0.5),
+        find.byWidgetPredicate((widget) {
+          final key = widget.key;
+          return key is ValueKey<String> &&
+              key.value.startsWith("settings-zone-row-");
+        }),
+        findsNothing,
       );
+      expect(find.text(message), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    "MZ4 in the manage mode each added zone's chip, never the device's, "
+    "grows a remove button over Harbor's motion; a removal puts the zone "
+    "back in the list, and that of the chosen zone chooses the device's",
+    (tester) async {
+      await pumpCalendar(tester, clock: noonClock);
+      final store = storeOf(tester);
+      InputChip chipOf(String name) {
+        return tester.widget<InputChip>(zoneChip(name));
+      }
+
+      await openManaging(tester);
+      await addZone(tester, "havana", "America/Havana");
+      await addZone(tester, "tokyo", "Asia/Tokyo");
+      await tester.tap(find.byKey(zonesBackKey));
+      await tester.pumpAndSettle();
+      expect(chipOf("America/Havana").onDeleted, isNull);
+      await tester.tap(zoneChip("America/Havana"));
+      await tester.pumpAndSettle();
+      // Setup sanity: Havana is the chosen zone.
+      expect(store.zone?.name, "America/Havana");
+      final narrow = tester.getSize(zoneChip("America/Havana")).width;
+
+      await tester.tap(find.byKey(manageZonesKey));
+      await tester.pump();
+      await tester.pump(harborMotionDuration ~/ 2);
+      final growing = tester.getSize(zoneChip("America/Havana")).width;
+      await tester.pumpAndSettle();
+      final wide = tester.getSize(zoneChip("America/Havana")).width;
+      expect(growing, inExclusiveRange(narrow, wide));
+      expect(chipOf("").onDeleted, isNull);
+
+      await tester.tap(
+        find.descendant(
+          of: zoneChip("America/Havana"),
+          matching: find.byIcon(Icons.close),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(zoneChip("America/Havana"), findsNothing);
+      expect(store.zone, isNull);
+      expect(chipOf("").selected, isTrue);
+      expect(zoneChip("Asia/Tokyo"), findsOneWidget);
+      await searchZones(tester, "havana");
+      expect(find.byKey(zoneRowKey("America/Havana")), findsOneWidget);
     },
   );
 
@@ -520,19 +675,16 @@ void main() {
         tester,
         api: MockCalendarApi(latency: harnessLatency),
         editing: true,
+        settings: const CalendarSettings(
+          lockPast: true,
+          lockEarlierToday: true,
+        ),
         clock: () {
           return plainNow;
         },
         size: tall,
       );
       await zoneStore(tester, lockApi, far);
-      await openSettings(tester);
-      await tester.tap(find.byKey(lockPastKey));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(lockEarlierTodayKey));
-      await tester.pumpAndSettle();
-      await tester.tapAt(const Offset(195.0, 20.0));
-      await tester.pumpAndSettle();
       await pickMode(tester, "Week");
       await createTaskAt(tester, (hour + 1) * 60);
       await tester.enterText(find.widgetWithText(TextField, "Title"), "Lock");
@@ -558,49 +710,109 @@ void main() {
   );
 
   testWidgets(
-    "DZ5 the zone sheet keeps the search field and the zone list above the "
-    "keyboard",
+    "MZ5 the Manage chip is a pill at the right end of the time zone row, "
+    "level with the chosen zone's name above the zone chips, in the manage "
+    "mode too",
+    (tester) async {
+      await pumpCalendar(tester, clock: noonClock);
+      await openSettings(tester);
+      final manage = find.byKey(manageZonesKey);
+      final sheet = find.byType(CalendarSettingsSheet);
+      for (final managing in <bool>[false, true]) {
+        if (managing) {
+          await tester.tap(manage);
+          await tester.pumpAndSettle();
+          // Setup sanity: the manage mode shows.
+          expect(find.byKey(zoneSearchKey), findsOneWidget);
+        }
+        final reason = managing ? "managing" : "settings";
+        final rect = tester.getRect(manage);
+        // The sheet pads its content 24 px from its edges.
+        expect(rect.right, tester.getRect(sheet).right - 24.0, reason: reason);
+        expect(
+          rect.center.dy,
+          moreOrLessEquals(
+            tester.getCenter(find.textContaining("This device, ")).dy,
+            epsilon: 0.5,
+          ),
+          reason: reason,
+        );
+        expect(
+          tester
+              .widget<Material>(
+                find
+                    .descendant(of: manage, matching: find.byType(Material))
+                    .first,
+              )
+              .shape,
+          isA<StadiumBorder>(),
+          reason: reason,
+        );
+      }
+    },
+  );
+
+  testWidgets(
+    "DZ5 the manage mode's list is two fifths of the height the keyboard "
+    "and the status bar leave, from 112 to 320 px; the sheet keeps the "
+    "search field and the list above the keyboard, and itself below the "
+    "status bar",
     (tester) async {
       await pumpCalendar(tester, clock: noonClock);
       // Month, whose scaffold keeps its height under a keyboard, so the
       // calendar behind the sheet lays out as with none.
       await pickMode(tester, "Month");
-      const strings = DefaultCalendarLocalizations();
       final screen =
           tester.view.physicalSize.height / tester.view.devicePixelRatio;
-      await openZoneSheet(tester);
-      await tester.tap(inPanel(find.text(strings.addZonesLabel)));
-      await tester.pumpAndSettle();
-      final field = inPanel(find.byType(TextField));
+      await openManaging(tester);
+      final field = find.byKey(zoneSearchKey);
+      final list = find.byKey(zoneListKey);
+      final sheet = find.byType(BottomSheet);
+      expect(tester.getSize(list).height, 320.0);
       await tester.tap(field);
       await tester.pump();
-      final list = inPanel(find.byType(CustomScrollView));
 
-      // A keyboard taller than the room the unpadded sheet leaves below the
-      // search field.
-      const keyboard = 600.0;
-      tester.view.viewInsets = const FakeViewPadding(bottom: keyboard);
-      await tester.pump();
-      expect(
-        tester.getRect(field).bottom,
-        lessThanOrEqualTo(screen - keyboard),
-      );
-      expect(tester.getRect(list).bottom, lessThanOrEqualTo(screen - keyboard));
-      expect(tester.getRect(list).height, greaterThanOrEqualTo(56.0));
+      for (final keyboard in <double>[300.0, 600.0]) {
+        tester.view.viewInsets = FakeViewPadding(bottom: keyboard);
+        await tester.pumpAndSettle();
+        final reason = "keyboard $keyboard";
+        expect(
+          tester.getSize(list).height,
+          moreOrLessEquals(
+            clampDouble((screen - keyboard) * 0.4, 112.0, 320.0),
+          ),
+          reason: reason,
+        );
+        // The field shows under the sheet's drag handle, and the list
+        // ends above the keyboard.
+        expect(
+          tester.getRect(field).top,
+          greaterThanOrEqualTo(
+            tester.getRect(sheet).top + kMinInteractiveDimension - 0.5,
+          ),
+          reason: reason,
+        );
+        expect(
+          tester.getRect(list).bottom,
+          lessThanOrEqualTo(screen - keyboard + 0.5),
+          reason: reason,
+        );
+      }
 
-      // Under a status bar the sheet keeps below it.
       const statusBar = 47.0;
       tester.view.padding = const FakeViewPadding(top: statusBar);
-      await tester.pump();
-      expect(tester.getRect(field).top, greaterThanOrEqualTo(statusBar));
-      expect(tester.getRect(list).height, greaterThanOrEqualTo(56.0));
-
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300.0);
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(list).height,
+        moreOrLessEquals((screen - 300.0 - statusBar) * 0.4),
+      );
+      tester.view.viewInsets = const FakeViewPadding(bottom: 600.0);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(sheet).top, greaterThanOrEqualTo(statusBar));
       tester.view.resetPadding();
       tester.view.resetViewInsets();
-      await tester.pump();
-      final panel = tester.getRect(find.byType(CalendarZonePanel));
-      expect(panel.height, moreOrLessEquals(screen * 0.7));
-      expect(panel.bottom, moreOrLessEquals(screen));
+      await tester.pumpAndSettle();
     },
   );
 }

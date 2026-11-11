@@ -119,11 +119,6 @@ void main() {
       expect(all == again, isTrue);
       expect(all.hashCode == settings.hashCode, isFalse);
     });
-
-    test("names each layout", () {
-      expect(CalendarMonthLayout.showAll.label, "Show all items");
-      expect(CalendarMonthLayout.fitScreen.label, "Fit to screen");
-    });
   });
 
   group("C8 CalendarSettings hour label format", () {

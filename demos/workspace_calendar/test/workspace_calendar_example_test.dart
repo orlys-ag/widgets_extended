@@ -374,8 +374,8 @@ void main() {
   });
 
   testWidgets("E11 the settings sheet opens from the header's settings "
-      "button, the row's last, 4 px after the view button and in the colour "
-      "of the header's other icons", (tester) async {
+      "button, the row's last, 4 px after the view button and in its "
+      "colour, circle and icon size", (tester) async {
     await pumpCalendar(tester);
     final settings = find.descendant(
       of: find.byType(CalendarView<ItemPayload>),
@@ -387,7 +387,12 @@ void main() {
       find.descendant(of: settings, matching: find.byIcon(Icons.tune)),
       findsOneWidget,
     );
-    final rect = tester.getRect(settings);
+    // The button's tap target, as the view button's rect is.
+    final settingsButton = find.ancestor(
+      of: find.descendant(of: settings, matching: find.byIcon(Icons.tune)),
+      matching: find.byType(IconButton),
+    );
+    final rect = tester.getRect(settingsButton);
     expect(rect.left - tester.getRect(view).right, 4.0);
     expect(rect.center.dy, tester.getRect(view).center.dy);
 
@@ -405,6 +410,25 @@ void main() {
     }
 
     expect(glyph(settings), glyph(view));
+
+    // The same circle around the same icon as the view button.
+    Finder inkOf(Finder button) {
+      return find.descendant(of: button, matching: find.byType(Material)).first;
+    }
+
+    Finder iconOf(Finder button) {
+      return find.descendant(of: button, matching: find.byType(Icon));
+    }
+
+    expect(tester.getSize(inkOf(settingsButton)), tester.getSize(inkOf(view)));
+    expect(
+      tester.widget<Material>(inkOf(settingsButton)).shape,
+      tester.widget<Material>(inkOf(view)).shape,
+    );
+    expect(
+      tester.getSize(iconOf(settingsButton)),
+      tester.getSize(iconOf(view)),
+    );
 
     await tapAndSettle(tester, settings);
     expect(find.byType(CalendarSettingsSheet), findsOneWidget);
@@ -668,10 +692,10 @@ void main() {
     expect(twelveHour.size, const Size(39.0, 30.0));
   });
 
-  testWidgets("E23 the sheet lists the time zone, the days, the slot length "
-      "and the hours, then under a divider the history lock, Month's "
-      "layout and the overlap switch, offering the slot "
-      "length once", (tester) async {
+  testWidgets("E23 the sheet lists the time zone, the days, the slot length, "
+      "the hours and the overlap switch, offering the slot length once", (
+    tester,
+  ) async {
     await pumpCalendar(tester);
     await openSettings(tester);
     const order = <ValueKey<String>>[
@@ -679,10 +703,6 @@ void main() {
       shownDaysKey,
       slotLengthKey,
       hoursSliderKey,
-      settingsDividerKey,
-      lockPastKey,
-      lockEarlierTodayKey,
-      monthLayoutKey,
       allowsOverlapsKey,
     ];
     for (var index = 1; index < order.length; index++) {

@@ -116,10 +116,11 @@ hears a slide of the card, which notified nothing before, and a `goTo` that
 brings the card back or closes the picker notifies once, as one event.
 - The calendar's built-in header holds its controls in one row: after the
 chevrons and the title, a Today button, a calendar icon that shows while a
-tap on it would change what the calendar shows (the selected day is not
-the shown day nearest today on the store's zone clock, or
-`showsSelectedDay` is false) and then closes the month picker and selects
-that day or brings the card or the strip back to it; and at the row's end,
+tap on it would change the day the calendar shows (the selected day is
+not the shown day nearest today on the store's zone clock, or the card or
+the strip has moved off the selected day; the month picker alone does not
+show it) and then closes the month picker and selects that day or brings
+the card or the strip back to it; and at the row's end,
 where `CalendarView.onEditableChanged` is given, an edit mode toggle that
 reports the opposite of `editable`, then the view button. The view menu's
 "Agenda", "Day", "Week" or "Month" label with its arrow became that view
