@@ -109,10 +109,10 @@ final class CalendarHeaderDetails {
   /// one.
   final VoidCallback? onToday;
 
-  /// Whether [onToday] would change what the calendar shows: while the
+  /// Whether [onToday] would change the day the calendar shows: while the
   /// selected day is not the shown day nearest today, on the clock of the
-  /// store's zone, or the calendar does not show its selected day
-  /// ([CalendarController.showsSelectedDay]).
+  /// store's zone, or the calendar card or the week strip has moved off
+  /// the selected day. The month picker alone does not make it true.
   final bool canGoToToday;
 
   /// Whether the calendar is in edit mode (`CalendarView.editable`).
@@ -156,7 +156,8 @@ typedef CalendarHeaderBuilder =
 /// mode; then, 4 px on, where [CalendarHeaderDetails.views] lists more
 /// than one view, the view button, the icon of the view shown, which a
 /// screen reader hears named, and which opens a menu of the views, each
-/// with its icon and name. The title gives up width, scaling down, only
+/// with its icon and name. The Today button, the toggle and the view
+/// button are 32 px circles around 22 px icons. The title gives up width, scaling down, only
 /// where the row is too narrow for the rest.
 ///
 /// The Today button shows while [CalendarHeaderDetails.canGoToToday] is
@@ -178,6 +179,17 @@ class CalendarHeader extends StatelessWidget {
   const CalendarHeader({super.key, required this.details});
 
   final CalendarHeaderDetails details;
+
+  /// The style of the Today button, the edit mode toggle and the view
+  /// button: a 32 px circle around a 22 px icon, in a tap target as tall
+  /// as the chevrons'.
+  static const ButtonStyle _roundButton = ButtonStyle(
+    visualDensity: VisualDensity.compact,
+    fixedSize: WidgetStatePropertyAll<Size>(Size.square(32.0)),
+    padding: WidgetStatePropertyAll<EdgeInsetsGeometry>(EdgeInsets.zero),
+    iconSize: WidgetStatePropertyAll<double>(22.0),
+    shape: WidgetStatePropertyAll<OutlinedBorder>(CircleBorder()),
+  );
 
   static String _viewLabel(
     CalendarLocalizations strings,
@@ -346,8 +358,7 @@ class CalendarHeader extends StatelessWidget {
             icon: const Icon(Icons.edit_outlined),
             selectedIcon: const Icon(Icons.edit),
             tooltip: strings.editModeTooltip,
-            visualDensity: VisualDensity.compact,
-            style: ButtonStyle(
+            style: _roundButton.copyWith(
               foregroundColor: WidgetStateProperty.fromMap(
                 <WidgetStatesConstraint, Color>{
                   WidgetState.selected: theme.primary,
@@ -378,7 +389,7 @@ class CalendarHeader extends StatelessWidget {
                 color: theme.surface,
                 icon: Icon(_viewIcon(details.view)),
                 iconColor: theme.text,
-                style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                style: _roundButton,
                 onSelected: details.onSelectView,
                 itemBuilder: (context) {
                   return <PopupMenuEntry<CalendarViewKind>>[
@@ -417,8 +428,7 @@ class CalendarHeader extends StatelessWidget {
 
 /// The header's Today button: a calendar icon in the theme's text colour,
 /// as the header's other icons, at full opacity while [shown] and at none
-/// otherwise, fading
-/// between them over the theme's motion. Hidden, it keeps its size and
+/// otherwise, fading between them over the theme's motion. Hidden, it keeps its size and
 /// takes no pointer, no focus and no screen reader's attention.
 class _TodayButton extends StatelessWidget {
   const _TodayButton({
@@ -450,7 +460,7 @@ class _TodayButton extends StatelessWidget {
               icon: const Icon(Icons.today_outlined),
               tooltip: tooltip,
               color: theme.text,
-              visualDensity: VisualDensity.compact,
+              style: CalendarHeader._roundButton,
               onPressed: onPressed,
             ),
           ),

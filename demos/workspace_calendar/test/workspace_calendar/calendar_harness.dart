@@ -16,6 +16,7 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart'
     show parseIsoDate;
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
@@ -317,6 +318,7 @@ Widget calendarApp({
   DateTime? today,
   DateTime Function()? clock,
   bool editing = false,
+  CalendarSettings settings = const CalendarSettings(),
   ItemBuilders builders = harborItemBuilders,
   int readAhead = 2,
 }) {
@@ -331,6 +333,7 @@ Widget calendarApp({
             api: api,
             clock: clock,
             editing: true,
+            settings: settings,
             builders: builders,
             readAhead: readAhead,
           )
@@ -338,6 +341,7 @@ Widget calendarApp({
             today: today,
             api: api,
             clock: clock,
+            settings: settings,
             builders: builders,
             readAhead: readAhead,
           ),
@@ -359,6 +363,7 @@ Future<MockCalendarApi> pumpCalendar(
   DateTime Function()? clock,
   bool pinsToday = true,
   bool editing = false,
+  CalendarSettings settings = const CalendarSettings(),
   ItemBuilders builders = harborItemBuilders,
   int readAhead = 2,
 }) async {
@@ -372,6 +377,7 @@ Future<MockCalendarApi> pumpCalendar(
       today: pinsToday ? today : null,
       clock: clock,
       editing: editing,
+      settings: settings,
       builders: builders,
       readAhead: readAhead,
     ),

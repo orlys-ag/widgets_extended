@@ -20,35 +20,38 @@
 /// edit mode the calendar is read-only, so nothing is moved, resized or
 /// created, and a tap on an item opens its form read-only.
 ///
-/// The settings sheet, which opens from the header's settings button, holds in
-/// its first part the time zone, the weekday a week starts on, which every
-/// view's weeks and columns follow, and which weekdays show, the length of
-/// the calendar's slots, which the item form's times step by too, and the
+/// The settings sheet, which opens from the header's settings button,
+/// holds the time zone, the weekday a week starts on, which every view's
+/// weeks and columns follow, and which weekdays show, the length of the
+/// calendar's slots, which the item form's times step by too, and the
 /// hours the calendar shows and schedules in, with whether Week and Day
-/// label them AM/PM. Under a divider, it chooses how Month fits its weeks.
-/// A pinch on a grid sets the least width of a day in Week, Day and Month
-/// and the least height of the timed grids' slots, on the calendar's
+/// label them AM/PM, and under them whether items may overlap. A pinch on
+/// a grid sets the least width of a day in Week, Day and Month and the
+/// least height of the timed grids' slots, on the calendar's
 /// [CalendarController].
 ///
-/// The sheet also chooses the history lock, which in edit mode keeps the
-/// past as it is: no item before today, or with its second switch before
-/// now, is moved, resized, edited or deleted, nor does an item move,
-/// resize or get created there, and an item in progress changes only its
-/// end. A create with no time left after the lock on its day says so.
+/// The settings the calendar opens on ([WorkspaceCalendarExample.settings])
+/// hold the history lock and Month's layout, which the sheet does not
+/// offer. The lock, off unless they turn it on, in edit mode keeps the
+/// past as it is: no item before today, or with
+/// [CalendarSettings.lockEarlierToday] before now, is moved, resized,
+/// edited or deleted, nor does an item move, resize or get created there,
+/// and an item in progress changes only its end. A create with no time
+/// left after the lock on its day says so.
 ///
-/// Its last switch lets items overlap: in edit mode Week's and Day's
-/// moves, resizes and creates then go over other items' times, the items
-/// sharing a time side by side, and a [MockCalendarApi] stores them. Off,
-/// the gestures keep to free time and the mock API refuses an item whose
-/// new times share time with another.
+/// The sheet's overlap switch lets items overlap: in edit mode Week's and
+/// Day's moves, resizes and creates then go over other items' times, the
+/// items sharing a time side by side, and a [MockCalendarApi] stores them.
+/// Off, the gestures keep to free time and the mock API refuses an item
+/// whose new times share time with another.
 ///
 /// The sheet's time zone part picks the zone among the device's and those
-/// the user added in the sheet of zones its Manage chip opens over it, a
-/// [CalendarZonePanel]. The zone
-/// picked is the store's, which every view then draws on, the item form
-/// writes and reads its times on, and the history lock judges on. The
-/// store reads [WorkspaceCalendarExample.readAhead] days on each side of
-/// the range it shows, so a change of zone finds the shown days read.
+/// the user added in the sheet's manage mode, which its Manage chip turns
+/// on. The zone picked is the store's, which every view then draws on, the
+/// item form writes and reads its times on, and the history lock judges
+/// on. The store reads [WorkspaceCalendarExample.readAhead] days on each
+/// side of the range it shows, so a change of zone finds the shown days
+/// read.
 ///
 /// A tap on an item opens its form, which edits it in edit mode unless the
 /// history lock holds it locked, and otherwise shows it read-only; a create
@@ -78,6 +81,7 @@ class WorkspaceCalendarExample extends StatelessWidget {
     this.api,
     this.clock,
     this.editing = false,
+    this.settings = const CalendarSettings(),
     this.calendarTheme,
     this.builders = harborItemBuilders,
     this.readAhead = 2,
@@ -98,9 +102,15 @@ class WorkspaceCalendarExample extends StatelessWidget {
   /// minute. Null reads [DateTime.now].
   final DateTime Function()? clock;
 
-  /// Whether the calendar opens in edit mode, which the settings sheet's
-  /// edit mode switch then turns on and off.
+  /// Whether the calendar opens in edit mode, which the header's edit mode
+  /// toggle then turns on and off.
   final bool editing;
+
+  /// The settings the calendar opens on, but for edit mode, which
+  /// [editing] gives; the settings sheet then changes those it offers. The
+  /// history lock and Month's layout, which it does not offer, keep the
+  /// values these give.
+  final CalendarSettings settings;
 
   /// The theme the calendar's views draw with; null gives
   /// [harborCalendarTheme]. It shadows any [CalendarTheme] of the host's.
@@ -131,6 +141,7 @@ class WorkspaceCalendarExample extends StatelessWidget {
           api: api,
           clock: clock ?? DateTime.now,
           editing: editing,
+          settings: settings,
           builders: builders,
           readAhead: readAhead,
         ),
@@ -145,6 +156,7 @@ class _WorkspaceCalendar extends StatefulWidget {
     required this.api,
     required this.clock,
     required this.editing,
+    required this.settings,
     required this.builders,
     required this.readAhead,
   });
@@ -153,6 +165,7 @@ class _WorkspaceCalendar extends StatefulWidget {
   final CalendarApi? api;
   final DateTime Function() clock;
   final bool editing;
+  final CalendarSettings settings;
   final ItemBuilders builders;
   final int readAhead;
 
@@ -175,7 +188,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
         CalendarDates.dateOnly(widget.today ?? widget.clock().toLocal()),
       );
 
-  /// The zones the user added in the settings sheet's sheet of zones.
+  /// The zones the user added in the settings sheet's manage mode.
   final CalendarZoneController _zones = CalendarZoneController();
 
   /// The calendar's view, selected day and zoom sizes, which a pinch on a
@@ -194,7 +207,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
 
   /// What the settings sheet last chose, and before it chooses, the
   /// defaults with the edit mode the calendar was given.
-  late CalendarSettings _settings = CalendarSettings(editing: widget.editing);
+  late CalendarSettings _settings = widget.settings.copyWith(
+    editing: widget.editing,
+  );
 
   @override
   void initState() {
@@ -255,8 +270,18 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
     }
   }
 
+  /// The style of the header's settings button, as the built-in header's
+  /// view button: a 32 px circle around a 22 px icon.
+  static const ButtonStyle _headerButton = ButtonStyle(
+    visualDensity: VisualDensity.compact,
+    fixedSize: WidgetStatePropertyAll<Size>(Size.square(32.0)),
+    padding: WidgetStatePropertyAll<EdgeInsetsGeometry>(EdgeInsets.zero),
+    iconSize: WidgetStatePropertyAll<double>(22.0),
+    shape: WidgetStatePropertyAll<OutlinedBorder>(CircleBorder()),
+  );
+
   /// The calendar's built-in header, then 4 px on, at the row's end, the
-  /// settings button, an icon in the colour of the header's other icons.
+  /// settings button, drawn as the header's view button is.
   Widget _buildHeader(BuildContext context, CalendarHeaderDetails details) {
     return Row(
       children: <Widget>[
@@ -266,7 +291,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
           icon: const Icon(Icons.tune),
           tooltip: "Calendar settings",
           color: CalendarTheme.of(context).text,
-          visualDensity: VisualDensity.compact,
+          style: _headerButton,
           onPressed: _openSettings,
         ),
       ],

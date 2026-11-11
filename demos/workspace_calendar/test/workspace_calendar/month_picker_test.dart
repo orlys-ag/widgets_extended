@@ -324,14 +324,16 @@ void main() {
   });
 
   testWidgets("P7 the picker stays open through a change of view, its "
-      "chevrons stepping its year, and Today closes it", (tester) async {
+      "chevrons stepping its year, with Today hidden, as no day changed, and "
+      "the title closes it", (tester) async {
     await pumpCalendar(tester);
     await openPicker(tester);
     await pickMode(tester, "Week");
     expect(find.byType(MonthPicker), findsOneWidget);
     expect(find.byTooltip("Next year"), findsOneWidget);
 
-    await tapToday(tester);
+    expect(todayButtonFinder().hitTestable(), findsNothing);
+    await tester.tap(find.byTooltip("Close the months"));
     await tester.pumpAndSettle();
     expect(find.byType(MonthPicker), findsNothing);
     expect(find.byTooltip("Next week"), findsOneWidget);

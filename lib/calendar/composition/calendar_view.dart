@@ -180,13 +180,13 @@ final class CalendarEntryTapDetails<T> {
 /// the title names its year, and the chevrons or a swipe across it step a
 /// year; a month picked selects its day of the selected day's day of the
 /// month, as a month step does. The header's Today button shows while a
-/// tap on it would change what the calendar shows: while the selected day
-/// is not the shown day nearest today, which it selects, or the calendar
-/// does not show its selected day ([CalendarController.showsSelectedDay]),
-/// which it brings back; a tap also closes the month picker. Its edit mode
-/// toggle, where [onEditableChanged] is given, reports the opposite of
-/// [editable], and its view button, the icon of the view shown, opens the
-/// view menu. [headerBuilder] builds the header in place of the built-in
+/// tap on it would change the day the calendar shows: while the selected
+/// day is not the shown day nearest today, which it selects, or the card
+/// or the strip has moved off the selected day, which it brings back; the
+/// month picker alone does not show it, and a tap closes the picker. Its
+/// edit mode toggle, where [onEditableChanged] is given, reports the
+/// opposite of [editable], and its view button, the icon of the view shown,
+/// opens the view menu. [headerBuilder] builds the header in place of the built-in
 /// one, and [showsHeader] false builds none, nor in Week and Month the
 /// header's card. The built-in header puts a transparent [Material] above
 /// itself where none is above, and its view menu needs
@@ -1250,11 +1250,16 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     return _showsCalendarCard ? _browsedDay : null;
   }
 
-  /// [CalendarController.showsSelectedDay] of this calendar.
+  /// [CalendarController.showsSelectedDay] of this calendar: false while
+  /// the month picker shows.
   bool get _showsSelectedDay {
-    if (_picksMonth) {
-      return false;
-    }
+    return !_picksMonth && _browseHoldsSelectedDay;
+  }
+
+  /// Whether the calendar card or the week strip, as a slide, a chevron or
+  /// a drag left it, holds the selected day, whether the month picker shows
+  /// over it or not; true in Week and Month, which show no card.
+  bool get _browseHoldsSelectedDay {
     final browsed = _shownBrowse;
     if (browsed == null) {
       return true;
@@ -1580,9 +1585,10 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   }
 
   /// [CalendarHeaderDetails.canGoToToday]: whether the selected day is not
-  /// the shown day nearest today, or the calendar does not show it.
+  /// the shown day nearest today, or the card or the strip has moved off
+  /// it. The month picker counts for neither, as it changes no day.
   bool get _canGoToToday {
-    if (!_showsSelectedDay) {
+    if (!_browseHoldsSelectedDay) {
       return true;
     }
     final target = CalendarDates.shownDayNear(

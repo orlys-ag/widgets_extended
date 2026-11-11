@@ -282,8 +282,9 @@ void main() {
   });
 
   testWidgets("HD4 with today selected, the Today button shows while the "
-      "card shows another month, the month picker shows, or a drag has "
-      "moved the strip off today, and a tap brings each back", (tester) async {
+      "card shows another month or a drag has moved the strip off today, and "
+      "a tap brings each back; the month picker alone, on any year, leaves "
+      "it hidden", (tester) async {
     final semantics = tester.ensureSemantics();
     final controller = CalendarController();
     addTearDown(controller.dispose);
@@ -313,8 +314,14 @@ void main() {
     await tester.pumpAndSettle();
     const picker = ValueKey<String>("month-picker");
     expect(find.byKey(picker), findsOneWidget);
-    expect(todayShows(tester), isTrue);
-    await tapToday(tester);
+    expect(todayShows(tester), isFalse);
+    await tester.tap(find.byTooltip("Next year"));
+    await tester.pumpAndSettle();
+    // Setup sanity: the picker shows the next year.
+    expect(find.text("2027"), findsOneWidget);
+    expect(todayShows(tester), isFalse);
+    await tester.tap(find.byTooltip("Close the months"));
+    await tester.pumpAndSettle();
     expect(find.byKey(picker), findsNothing);
     expect(todayShows(tester), isFalse);
 
@@ -601,5 +608,90 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.selectedDay, tuesday);
     expect(details.canGoToToday, isFalse);
+  });
+
+  testWidgets("HD11 over the month picker, the Today button shows while "
+      "another day is selected or the card shows another month, and a tap "
+      "closes the picker and brings the calendar to today", (tester) async {
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(
+      app(CalendarView<String>(store: store, clock: fixedClock)),
+    );
+    await tester.pumpAndSettle();
+    const picker = ValueKey<String>("month-picker");
+
+    await tapDay(tester, wednesday);
+    // Setup sanity: another day is selected.
+    expect(isSelected(tester, wednesday), isTrue);
+    await tester.tap(find.byTooltip("Pick a month"));
+    await tester.pumpAndSettle();
+    expect(find.byKey(picker), findsOneWidget);
+    expect(todayShows(tester), isTrue);
+    await tapToday(tester);
+    expect(find.byKey(picker), findsNothing);
+    expect(isSelected(tester, tuesday), isTrue);
+
+    await tester.tap(find.byTooltip("Next month"));
+    await tester.pumpAndSettle();
+    // Setup sanity: the card shows May, with today still selected.
+    expect(find.text("May 2026"), findsOneWidget);
+    await tester.tap(find.byTooltip("Pick a month"));
+    await tester.pumpAndSettle();
+    expect(find.byKey(picker), findsOneWidget);
+    expect(todayShows(tester), isTrue);
+    await tapToday(tester);
+    expect(find.byKey(picker), findsNothing);
+    expect(find.text("Apr 2026"), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets("HD12 the Today button, the edit mode toggle and the view "
+      "button are 32 px circles around 22 px icons, the toggle's fill a "
+      "circle too, and the chevrons keep their 24 px icons", (tester) async {
+    usePhoneView(tester);
+    await tester.pumpWidget(
+      app(
+        CalendarView<String>(
+          store: store,
+          clock: fixedClock,
+          editable: true,
+          onEditableChanged: (editable) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tapDay(tester, wednesday);
+    // Setup sanity: Today shows, and the toggle is selected.
+    expect(todayShows(tester), isTrue);
+    expect(
+      tester.widget<IconButton>(find.byKey(calendarEditToggleKey)).isSelected,
+      isTrue,
+    );
+    for (final button in <Finder>[
+      todayButton,
+      find.byKey(calendarEditToggleKey),
+      find.byKey(calendarViewButtonKey),
+    ]) {
+      final ink = find
+          .descendant(of: button, matching: find.byType(Material))
+          .first;
+      expect(tester.getSize(ink), const Size.square(32.0), reason: "$button");
+      expect(
+        tester.widget<Material>(ink).shape,
+        isA<CircleBorder>(),
+        reason: "$button",
+      );
+      expect(
+        tester.getSize(
+          find.descendant(of: button, matching: find.byType(Icon)),
+        ),
+        const Size.square(22.0),
+        reason: "$button",
+      );
+    }
+    expect(
+      tester.getSize(find.byIcon(Icons.chevron_right)),
+      const Size.square(24.0),
+    );
   });
 }

@@ -17,6 +17,7 @@ import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
@@ -437,7 +438,7 @@ final List<Map<String, Object?>> lockSeed = <Map<String, Object?>>[
 
 /// The calendar over [lockSeed] with [builders], in edit mode when
 /// [editing], its clock reading [clock], and where [editing] the history
-/// lock on to now through the settings sheet.
+/// lock on to now.
 Future<MockCalendarApi> pumpLocked(
   WidgetTester tester,
   ItemBuilders builders, {
@@ -451,19 +452,11 @@ Future<MockCalendarApi> pumpLocked(
     api: api,
     size: const Size(390.0, 1400.0),
     editing: editing,
+    settings: CalendarSettings(lockPast: editing, lockEarlierToday: editing),
     clock: clock,
     builders: builders,
     readAhead: readAhead,
   );
-  if (editing) {
-    await openSettings(tester);
-    await tester.tap(find.byKey(lockPastKey));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(lockEarlierTodayKey));
-    await tester.pumpAndSettle();
-    await tester.tapAt(const Offset(195.0, 20.0));
-    await tester.pumpAndSettle();
-  }
   return api;
 }
 
