@@ -6,7 +6,7 @@ paths:
 
 # calendar architecture: composition
 
-The contract of `CalendarView`, `CalendarController`, the header and the default chrome. The conventions every layer follows are in `calendar.md` and `shared-calendar-conventions.md`.
+The contract of `CalendarView`, `CalendarController`, the header, the zone panel and the default chrome. The conventions every layer follows are in `calendar.md` and `shared-calendar-conventions.md`.
 
 - **Imports**: of Flutter, `package:flutter/material.dart` and the libraries
   below it; the scheduling module, through
@@ -14,12 +14,16 @@ The contract of `CalendarView`, `CalendarController`, the header and the default
 - **`CalendarView`** offers in its view menu the views its parameters list,
   opening on the one they name, and builds no `Scaffold` or app bar. Its
   configuration is its parameters, and it shows and schedules in its
-  store's hours, keeping none of its own.
+  store's hours, keeping none of its own, and draws on its store's zone,
+  every day it holds or reports starting on that zone's clock.
 - **`CalendarController`** is listenable and holds the view, the selected
   day, the visible range and the zoom sizes, which the host sets and listens
   to.
 - **The header** (the title, the chevrons, the view menu and the month
   picker) is built in; a parameter hides it and a builder replaces it.
+- **The zone panel** (`CalendarZonePanel`) lists inline the device's zone,
+  the zones a host's `CalendarZoneController` holds and every loaded zone,
+  and reports the one the user picks.
 - **The default chrome**: the defaults for the header's menu and tooltips
   and for the loading and failure states, and the theme's Material adapter,
   which resolves a `ThemeExtension` and the host's `ColorScheme` into the

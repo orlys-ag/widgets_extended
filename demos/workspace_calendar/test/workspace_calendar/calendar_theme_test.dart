@@ -422,8 +422,13 @@ List<Map<String, Object?>> themeSeed() {
   ];
 }
 
-/// The app [pumpThemed] pumps, under [theme].
-Widget themedApp(MockCalendarApi api, CalendarThemeData theme) {
+/// The app [pumpThemed] pumps, under [theme], its store reading
+/// [readAhead] days on each side of the range it shows.
+Widget themedApp(
+  MockCalendarApi api,
+  CalendarThemeData theme, {
+  int readAhead = 2,
+}) {
   return MaterialApp(
     // The M3 ink sparkle shader cannot load under the test binding.
     theme: ThemeData(splashFactory: NoSplash.splashFactory),
@@ -433,18 +438,21 @@ Widget themedApp(MockCalendarApi api, CalendarThemeData theme) {
       clock: clockAtNineThirty,
       api: api,
       calendarTheme: theme,
+      readAhead: readAhead,
     ),
   );
 }
 
 /// Pumps the editing calendar on [today] at 09:30 under [theme], over the
-/// [themeSeed] at [harnessLatency] with [failurePolicy], at [size], and
+/// [themeSeed] at [harnessLatency] with [failurePolicy], at [size], its
+/// store reading [readAhead] days on each side of the range it shows, and
 /// settles. Returns the mock.
 Future<MockCalendarApi> pumpThemed(
   WidgetTester tester,
   CalendarThemeData theme, {
   Size size = const Size(390.0, 844.0),
   CalendarFailurePolicy? failurePolicy,
+  int readAhead = 2,
 }) async {
   tester.view.devicePixelRatio = 1.0;
   tester.view.physicalSize = size;
@@ -457,7 +465,7 @@ Future<MockCalendarApi> pumpThemed(
   // A calendar pumped before in the same test goes, so this one starts
   // anew over [api].
   await tester.pumpWidget(const SizedBox.shrink());
-  await tester.pumpWidget(themedApp(api, theme));
+  await tester.pumpWidget(themedApp(api, theme, readAhead: readAhead));
   await tester.pump(api.latency);
   await tester.pumpAndSettle();
   return api;
@@ -3475,7 +3483,7 @@ void main() {
   testWidgets("C11 under A each animation runs 900 ms on a linear curve", (
     tester,
   ) async {
-    final api = await pumpThemed(tester, sentinelA);
+    final api = await pumpThemed(tester, sentinelA, readAhead: 0);
     expectListMotion(tester, const Duration(milliseconds: 900), Curves.linear);
 
     // An Agenda row growing in.

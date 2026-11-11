@@ -5,7 +5,8 @@
 /// each of those defaults to, a
 /// block drawn again for a new payload, the theme's shadows, when its days
 /// are ready on the range its owner asks, its selection as the store
-/// moves off that range, and the ids a move request takes.
+/// moves off that range, the ids a move request takes, and its days,
+/// ranges and held moves on a zoned store's clock.
 library;
 
 import 'dart:async';
@@ -16,6 +17,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
@@ -31,6 +33,9 @@ import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
+
+import '../../scheduling/store/zone_support.dart';
+import '../../scheduling/zones.dart';
 
 /// The Monday of the week shown.
 final int weekStartDay = CalendarDates.dayNumber(DateTime(2026, 4, 20));
@@ -90,6 +95,47 @@ Finder blockFinder(String id, [DateTime? day]) {
     final key = widget.key;
     return key is ValueKey<String> && key.value.startsWith("block-$id@");
   });
+}
+
+/// The global rect of the slot row holding [minute] in [column] of the one
+/// grid [tester] holds over every hour at the default slot: the board's row
+/// count less the slot rows and the room below them, plus the slots to
+/// [minute].
+Rect slotRectOf(WidgetTester tester, int minute, {int column = 2}) {
+  final viewport = viewportOf(tester);
+  final board =
+      find
+              .byWidgetPredicate((widget) {
+                return widget is Board<GridKey, Object?>;
+              })
+              .evaluate()
+              .single
+              .widget
+          as Board<GridKey, Object?>;
+  final firstSlotRow =
+      board.controller.rows.axis.trackCount -
+      CalendarDayHours.allDay.slotCountOf(CalendarDates.defaultSlotMinutes) -
+      1;
+  final rect = viewport.rectOfCell(
+    firstSlotRow + minute ~/ CalendarDates.defaultSlotMinutes,
+    column,
+  )!;
+  return Rect.fromPoints(
+    viewport.localToGlobal(rect.topLeft),
+    viewport.localToGlobal(rect.bottomRight),
+  );
+}
+
+/// A one-hour timed entry [id] from [start] on [start]'s clock.
+CalendarEntry<String> hourEntry(String id, tz.TZDateTime start) {
+  return CalendarEntry<String>(
+    id: id,
+    start: start,
+    end: start.add(const Duration(hours: 1)),
+    title: id,
+    color: const Color(0xFF336699),
+    payload: id,
+  );
 }
 
 /// A canvas that records the rects drawn on it with their paints. Every
@@ -1574,5 +1620,308 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text("loading"), findsNothing);
     expect(blockFinder("talk"), findsOneWidget);
+  });
+
+  testWidgets(
+    "GZ2 a timed grid over a zoned store reports a create range on the "
+    "zone's clock, and a zone change ends its move drag",
+    (tester) async {
+      final on = DateTime(2026, 4, 21, 12);
+      final ahead6 = zoneApartFromDevice(on, 6);
+      final ahead9 = zoneApartFromDevice(on, 9);
+      final store = memoryStoreIn<String>(
+        ahead6,
+        entries: <CalendarEntry<String>>[
+          CalendarEntry<String>(
+            id: "a",
+            start: tz.TZDateTime(ahead6, 2026, 4, 21, 10),
+            end: tz.TZDateTime(ahead6, 2026, 4, 21, 11),
+            title: "a",
+            color: const Color(0xFF336699),
+            payload: "a",
+          ),
+        ],
+      );
+      addTearDown(store.dispose);
+      final first = dayOfNumberIn(CalendarDates.dayNumber(monday), ahead6);
+      final now = ValueNotifier<CalendarNow>(
+        CalendarNow(
+          time: tz.TZDateTime(ahead6, 2026, 4, 21, 9),
+          today: dayOfNumberIn(CalendarDates.dayNumber(tuesday), ahead6),
+        ),
+      );
+      addTearDown(now.dispose);
+      final creates = <CalendarCreateRange>[];
+      final moves = <CalendarMoveRequest<String>>[];
+      await pumpBoxed(
+        tester,
+        const Size(800.0, 2000.0),
+        TimedGrid<String>(
+          store: store,
+          firstDay: first,
+          dayCount: 7,
+          selectedDay: first,
+          now: now,
+          onSelectDay: (day) {},
+          onOpenEntry: (id) {},
+          onCreate: (details) async {
+            creates.add(details.range);
+          },
+          onMoveRequest: (request) async {
+            moves.add(request);
+          },
+          editable: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final viewport = viewportOf(tester);
+
+      /// The global rect of the slot row holding [minute] on Tuesday,
+      /// column 2: the board's row count less the slot rows and the room
+      /// below them, plus the slots to [minute].
+      Rect slotRect(int minute) {
+        final board =
+            find
+                    .byWidgetPredicate((widget) {
+                      return widget is Board<GridKey, Object?>;
+                    })
+                    .evaluate()
+                    .single
+                    .widget
+                as Board<GridKey, Object?>;
+        final firstSlotRow =
+            board.controller.rows.axis.trackCount -
+            CalendarDayHours.allDay.slotCountOf(
+              CalendarDates.defaultSlotMinutes,
+            ) -
+            1;
+        final rect = viewport.rectOfCell(
+          firstSlotRow + minute ~/ CalendarDates.defaultSlotMinutes,
+          2,
+        )!;
+        return Rect.fromPoints(
+          viewport.localToGlobal(rect.topLeft),
+          viewport.localToGlobal(rect.bottomRight),
+        );
+      }
+
+      final drag = await tester.startGesture(
+        slotRect(14 * 60).center,
+        kind: PointerDeviceKind.mouse,
+      );
+      await drag.moveTo(slotRect(15 * 60).center);
+      await tester.pump();
+      await drag.up();
+      await tester.pumpAndSettle();
+      final range = creates.single;
+      expect(range.start, isA<tz.TZDateTime>());
+      expect(range.start, tz.TZDateTime(ahead6, 2026, 4, 21, 14));
+      expect(range.end, tz.TZDateTime(ahead6, 2026, 4, 21, 15, 15));
+
+      final move = await tester.startGesture(
+        tester.getCenter(blockFinder("a")),
+      );
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await move.moveBy(const Offset(0.0, 100.0));
+      await tester.pump();
+      setStoreZone(store, ahead9);
+      await tester.pump();
+      await move.up();
+      await tester.pumpAndSettle();
+      expect(moves, isEmpty);
+      expect(
+        tester.getRect(blockFinder("a")).top,
+        moreOrLessEquals(slotRect(13 * 60).top, epsilon: 0.5),
+      );
+    },
+  );
+  test("GZ1 tracks on a zone give its day starts, and tracks that differ "
+      "only in their zone are not equal", () {
+    final on = DateTime(2026, 4, 21, 12);
+    final zone = zoneApartFromDevice(on, 6);
+    final zoned = GridTracks(firstDay: weekStartDay, dayCount: 7, zone: zone);
+    for (var column = 1; column <= 7; column++) {
+      final date = zoned.dateAt(column);
+      expect(date, isA<tz.TZDateTime>(), reason: "column $column");
+      expect(
+        date,
+        dayOfNumberIn(weekStartDay + column - 1, zone),
+        reason: "column $column",
+      );
+    }
+    expect(week.dateAt(1), monday);
+    expect(week.dateAt(1), isNot(isA<tz.TZDateTime>()));
+    expect(zoned, isNot(week));
+    final same = GridTracks(
+      firstDay: weekStartDay,
+      dayCount: 7,
+      zone: zoneApartFromDevice(on, 6),
+    );
+    expect(zoned, same);
+    expect(zoned.hashCode, same.hashCode);
+    expect(
+      zoned,
+      isNot(
+        GridTracks(
+          firstDay: weekStartDay,
+          dayCount: 7,
+          zone: zoneApartFromDevice(on, -6),
+        ),
+      ),
+    );
+  });
+
+  testWidgets(
+    "GZ3 a move the host holds is drawn at its requested instants on a new "
+    "zone's clock until the host answers",
+    (tester) async {
+      final on = DateTime(2026, 4, 21, 12);
+      final ahead6 = zoneApartFromDevice(on, 6);
+      final ahead9 = zoneApartFromDevice(on, 9);
+      final store = memoryStoreIn<String>(
+        ahead6,
+        entries: <CalendarEntry<String>>[
+          hourEntry("a", tz.TZDateTime(ahead6, 2026, 4, 21, 10)),
+        ],
+      );
+      addTearDown(store.dispose);
+      final first = dayOfNumberIn(CalendarDates.dayNumber(monday), ahead6);
+      final now = ValueNotifier<CalendarNow>(
+        CalendarNow(
+          time: tz.TZDateTime(ahead6, 2026, 4, 21, 9),
+          today: dayOfNumberIn(CalendarDates.dayNumber(tuesday), ahead6),
+        ),
+      );
+      addTearDown(now.dispose);
+      final answer = Completer<void>();
+      final moves = <CalendarMoveRequest<String>>[];
+      await pumpBoxed(
+        tester,
+        const Size(800.0, 2000.0),
+        TimedGrid<String>(
+          store: store,
+          firstDay: first,
+          dayCount: 7,
+          selectedDay: first,
+          now: now,
+          onSelectDay: (day) {},
+          onOpenEntry: (id) {},
+          onCreate: (details) async {},
+          onMoveRequest: (request) {
+            moves.add(request);
+            return answer.future;
+          },
+          editable: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      Rect slotRect(int minute) {
+        return slotRectOf(tester, minute);
+      }
+
+      final move = await tester.startGesture(
+        tester.getCenter(blockFinder("a")),
+      );
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await move.moveBy(
+        Offset(0.0, slotRect(12 * 60).top - slotRect(10 * 60).top),
+      );
+      await tester.pump();
+      await move.up();
+      // The held block shows a pending indicator that runs until the host
+      // answers, so the motion is waited out rather than settled.
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+      expect(
+        moves.single.requested.start,
+        tz.TZDateTime(ahead6, 2026, 4, 21, 12),
+      );
+      // Setup sanity: the held block lies at the 12:00 row.
+      expect(
+        tester.getRect(blockFinder("a")).top,
+        moreOrLessEquals(slotRect(12 * 60).top, epsilon: 0.5),
+      );
+
+      // 12:00 six hours ahead of the device is 15:00 nine hours ahead.
+      setStoreZone(store, ahead9);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+      expect(tester.takeException(), isNull);
+      expect(
+        tester.getRect(blockFinder("a")).top,
+        moreOrLessEquals(slotRect(15 * 60).top, epsilon: 0.5),
+      );
+
+      // The host wrote nothing, so the stored entry shows again: 10:00 six
+      // hours ahead is 13:00 nine hours ahead.
+      answer.complete();
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(blockFinder("a")).top,
+        moreOrLessEquals(slotRect(13 * 60).top, epsilon: 0.5),
+      );
+    },
+  );
+
+  testWidgets("GZ4 a week over a zone whose clock skips a whole day builds, "
+      "its entries in their days' columns", (tester) async {
+    ensureZones();
+    final apia = tz.getLocation("Pacific/Apia");
+    DateTime dayIn(int year, int month, int day) {
+      return dayOfNumberIn(
+        CalendarDates.dayNumber(DateTime(year, month, day)),
+        apia,
+      );
+    }
+
+    // Setup sanity: Apia's clock reads no time of 2011-12-30.
+    expect(
+      CalendarDates.dayNumber(dayIn(2011, 12, 30)),
+      isNot(CalendarDates.dayNumber(DateTime(2011, 12, 30))),
+    );
+    final store = memoryStoreIn<String>(
+      apia,
+      entries: <CalendarEntry<String>>[
+        hourEntry("b", tz.TZDateTime(apia, 2011, 12, 29, 10)),
+        hourEntry("c", tz.TZDateTime(apia, 2011, 12, 31, 10)),
+      ],
+    );
+    addTearDown(store.dispose);
+    final first = dayIn(2011, 12, 26);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(
+        time: tz.TZDateTime(apia, 2011, 12, 31, 9),
+        today: dayIn(2011, 12, 31),
+      ),
+    );
+    addTearDown(now.dispose);
+    await pumpBoxed(
+      tester,
+      const Size(800.0, 2000.0),
+      TimedGrid<String>(
+        store: store,
+        firstDay: first,
+        dayCount: 7,
+        selectedDay: first,
+        now: now,
+        onSelectDay: (day) {},
+        onOpenEntry: (id) {},
+        onCreate: (details) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    final b = tester.getRect(blockFinder("b", DateTime(2011, 12, 29)));
+    final c = tester.getRect(blockFinder("c", DateTime(2011, 12, 31)));
+    // Thursday's column is the fourth, and Saturday's the sixth.
+    bool inColumn(Rect block, int column) {
+      final cell = slotRectOf(tester, 600, column: column);
+      return block.center.dx > cell.left && block.center.dx < cell.right;
+    }
+
+    expect(inColumn(b, 4), isTrue);
+    expect(inColumn(c, 6), isTrue);
+    expect(b.top, moreOrLessEquals(slotRectOf(tester, 600).top, epsilon: 0.5));
+    expect(c.top, moreOrLessEquals(slotRectOf(tester, 600).top, epsilon: 0.5));
   });
 }

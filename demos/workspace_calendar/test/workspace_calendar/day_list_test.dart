@@ -127,6 +127,7 @@ void main() {
       tester,
       editing: true,
       api: MockCalendarApi.seeded(today, latency: latency),
+      readAhead: 0,
     );
     final requests = api.requests.length;
 

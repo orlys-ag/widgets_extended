@@ -21,7 +21,10 @@ The contract of `CalendarStore` and its two stores. The layer's imports are in `
   resize or delete shows the stored entry again.
 - **Freshness.** `invalidate` and `refresh` take entries to have changed at
   their source, so the store answers those days anew.
-- **The caching store** reads through a data source by days. A read's
+- **The caching store** reads through a data source by days. A show and a
+  retry also read the store's read-ahead, a count of days on each side of
+  the shown range, in the same read, and the status follows the shown range
+  alone. A read's
   answer is what the source stored on its days when the read was sent, and
   replaces what the store holds there, except what a later read, a write
   confirmed since or a change announced since told it: one clock orders
@@ -42,8 +45,9 @@ The contract of `CalendarStore` and its two stores. The layer's imports are in `
   many reads cover its unread days. A mark keeps the error of the failure
   that made it, which a later failure on the marked day does not replace,
   and the load error is the latest such error on the shown range's unread
-  days. A retry ends the marks of the shown range's days and of the days
-  it is given, and reads them again: the marked days with a read of its
+  days. A retry ends the marks of the shown range's days, of its
+  read-ahead's days and of the days it is given, and reads them again:
+  the marked days with a read of its
   own, and the rest of their unread and changed days as a prefetch does,
   taking over a read in flight that covers the unread ones; as one read
   where the two spans to read overlap or touch. It notifies only where

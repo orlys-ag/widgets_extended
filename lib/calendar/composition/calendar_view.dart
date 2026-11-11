@@ -186,11 +186,22 @@ final class CalendarEntryTapDetails<T> {
 /// view menu, builds no `Scaffold` or app bar, and never writes [store]'s
 /// settings. It shows and schedules in the store's hours
 /// ([CalendarStore.hours]), and builds again when a set of them notifies.
-/// It draws no entry on a store's zone ([CalendarStore.zone]): a store with
-/// one is refused, with an [ArgumentError] from the build, and a notify that
-/// brings another zone builds again, so a zone given later is refused and
-/// one cleared brings the calendar back. A store with no zone draws on the
-/// device's clock. It disposes no store. It draws in the [CalendarTheme]
+/// It draws on its store's zone ([CalendarStore.zone]): every view files,
+/// places and labels the entries on the zone's clock, the clock is read on
+/// it, and each day the calendar holds or hands out, the selected day, the
+/// visible range's days and the days the builders' details name included,
+/// is the start of a date on it, a `TZDateTime` of the zone typed
+/// [DateTime], as are a create range's times. A store with no zone draws on
+/// the device's clock. A notify that brings another zone keeps the
+/// selected date and Week's and Day's scroll position, moves today to the
+/// new clock's date, ends the drags in flight, writing nothing, and moves
+/// the entries as any store change does, over the views' motion. Over a
+/// [CachingCalendarStore] they move so only where the store kept the shown
+/// days read across the change, which a [CachingCalendarStore.readAhead]
+/// of 2 does once the store's reads have answered, so a host whose users
+/// switch zones over one sets it to 2; otherwise the views draw the
+/// loading state over the days the new zone's re-read has not answered.
+/// It disposes no store. It draws in the [CalendarTheme]
 /// above it; with none, under a Material [Theme], in a
 /// [CalendarThemeExtension] of the [ThemeData], or with none the theme
 /// [CalendarThemeExtension.fromColorScheme] gives the [ColorScheme]; and
@@ -213,9 +224,7 @@ final class CalendarEntryTapDetails<T> {
 /// in every build, after the one for [views]: for a [slotMinutes] that
 /// [CalendarDates.slotMinuteChoices] does not hold; then for store hours
 /// off its grid ([CalendarDayHours.isOnSlotsOf]), named `store.hours`, in
-/// the build after a set of them too; then for a store with a zone
-/// ([CalendarStore.zone]), named `store`, in the build after a notify that
-/// brings one too; and then for an [editPolicy] whose
+/// the build after a set of them too; and then for an [editPolicy] whose
 /// [CalendarEditPolicy.dayLimit] is under 1, named `policy`. The next
 /// build that throws none of them builds the views anew.
 class CalendarView<T> extends StatefulWidget {
@@ -254,9 +263,9 @@ class CalendarView<T> extends StatefulWidget {
 
   /// The entries the calendar shows and its views write, and the hours it
   /// shows and schedules in ([CalendarStore.hours]). The calendar asks it
-  /// to show the range of days its view shows, and never disposes it. A
-  /// store with a zone ([CalendarStore.zone]) is refused: the build throws
-  /// an [ArgumentError] named `store`.
+  /// to show the range of days its view shows, and never disposes it. The
+  /// calendar draws on its zone ([CalendarStore.zone]), the device's clock
+  /// where it has none.
   final CalendarStore<T> store;
 
   /// Holds the view, the selected day, the visible range and the zoom
@@ -350,9 +359,9 @@ class CalendarView<T> extends StatefulWidget {
   final CalendarMonthLayout monthLayout;
 
   /// Reads the current time, which the calendar reads when first built and
-  /// again at the start of each minute; null reads [DateTime.now]. A UTC
-  /// reading is taken as its local time, the same instant, so the day it
-  /// marks is the local one.
+  /// again at the start of each minute; null reads [DateTime.now]. A
+  /// reading is taken on the clock of [store]'s zone, the same instant, or
+  /// with no zone as its local time, so the day it marks is that clock's.
   ///
   /// A new function is read at once, and the next minute is timed from
   /// its reading. The reading replaces the time the calendar holds where
@@ -363,8 +372,9 @@ class CalendarView<T> extends StatefulWidget {
   final DateTime Function()? clock;
 
   /// The day the calendar marks as today and opens on, read by its year,
-  /// month and day, so a UTC today names the same date; null marks the
-  /// local day [clock] reads, moving at midnight.
+  /// month and day, so a UTC today names the same date, which the calendar
+  /// takes on the clock of [store]'s zone; null marks the day [clock] reads
+  /// on that clock, the local one with no zone, moving at its midnight.
   final DateTime? today;
 
   /// Draws Week's and Day's blocks; null for the module's default.
@@ -508,20 +518,6 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     );
   }
 
-  /// The error the build throws for a store with a zone
-  /// ([CalendarStore.zone]), which the views do not draw on, or null.
-  ArgumentError? get _storeZoneError {
-    final zone = widget.store.zone;
-    if (zone == null) {
-      return null;
-    }
-    return ArgumentError.value(
-      zone,
-      "store",
-      "has a zone, which a CalendarView does not draw on",
-    );
-  }
-
   /// The hours the views show and schedule in: the store's
   /// ([CalendarStore.hours]), which a build past [_storeHoursError] has on
   /// the grid of [CalendarView.slotMinutes].
@@ -533,16 +529,15 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// [_handleStoreChange] compares a notify's hours with.
   late CalendarDayHours _storeHours;
 
-  /// The store's zone as this state last took it, which
-  /// [_handleStoreChange] compares a notify's zone with. Typed [Object]
-  /// since this library reaches the scheduling module through its barrel,
-  /// which shows no `Location`.
-  Object? _storeZone;
+  /// The store's zone as this state last took it ([_takeZone]), on whose
+  /// clock every day the state holds or reports starts ([_dayIn]) and the
+  /// clock is read ([_nowAt]); null for the device's.
+  Location? _storeZone;
 
   /// The calendar's one clock: the time read at the start of each minute
   /// and the day marked as today, which the views follow and the policy
   /// is asked at ([_nowAt]).
-  late final ValueNotifier<CalendarNow> _now;
+  late final _CalendarNowNotifier _now;
 
   /// Fires at the start of the next minute, to read the clock again.
   Timer? _minuteTimer;
@@ -613,19 +608,14 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     vsync: this,
   );
 
-  /// The theme [_resolveTheme] resolved, which the state draws and
-  /// animates its own parts with, and the one it puts above the views,
-  /// null where it puts none.
-  CalendarThemeData _theme = CalendarThemeData.builtIn;
-  CalendarThemeData? _insertedTheme;
+  /// Resolves the theme the state draws and animates its own parts with,
+  /// and the one it puts above the views ([_resolveTheme]).
+  final CalendarThemeResolver _themes = CalendarThemeResolver();
 
-  /// The last [ColorScheme] a theme was derived from, and that theme.
-  ColorScheme? _derivedScheme;
-  CalendarThemeData? _derivedTheme;
-
-  /// Whether the build puts a transparent [Material] above everything it
-  /// builds.
-  bool _insertsMaterial = false;
+  /// The theme [_themes] last resolved.
+  CalendarThemeData get _theme {
+    return _themes.theme;
+  }
 
   /// The key of the header, the cards and the views, under the optional
   /// [Material] and [CalendarTheme], so a resolve that adds or drops one
@@ -656,13 +646,15 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   void initState() {
     super.initState();
     _takeViews();
-    _now = ValueNotifier<CalendarNow>(_nowAt(_clock()));
+    _storeZone = widget.store.zone;
+    _now = _CalendarNowNotifier(_nowAt(_clock()));
     final host = widget.controller;
     _ownsController = host == null;
     _bind(host ?? CalendarController(), shown: null);
     _scheduleMinute(_now.value.time);
     _storeHours = widget.store.hours;
-    _storeZone = widget.store.zone;
+    // Before any view's, which the views build after this, so at a notify
+    // a view that takes a new zone reads the clock this state retook.
     widget.store.addListener(_handleStoreChange);
   }
 
@@ -674,8 +666,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
 
   @override
   void reassemble() {
-    _derivedScheme = null;
-    _derivedTheme = null;
+    _themes.reset();
     // A reload can change what a getter of the policy answers while the
     // policy stays `==` to itself, which [CalendarEditRules.updated] would
     // not read again.
@@ -720,10 +711,14 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       _grid = CalendarMonthGrid.of(day, weekdays: widget.weekdays);
     }
     if (widget.store != oldWidget.store) {
+      // Before the views' own updates, which run in the build after this.
       oldWidget.store.removeListener(_handleStoreChange);
       widget.store.addListener(_handleStoreChange);
       _storeHours = widget.store.hours;
-      _storeZone = widget.store.zone;
+      final zone = widget.store.zone;
+      if (zone != _storeZone) {
+        _takeZone(zone);
+      }
     }
     if (viewsChanged || weekdaysChanged || widget.store != oldWidget.store) {
       _scheduleAsk();
@@ -784,9 +779,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       view = _listedView(named);
     }
     final day = CalendarDates.shownDayNear(
-      CalendarDates.dateOnly(
-        controller._selectedDay ?? shown?.day ?? _now.value.today,
-      ),
+      _dayIn(controller._selectedDay ?? shown?.day ?? _now.value.today),
       widget.weekdays,
     );
     controller._visibleRange = _askedRange;
@@ -904,26 +897,65 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   }
 
   /// Builds again where a notify of the store brings other hours, which
-  /// the views take from this state's build, or another zone, which the
-  /// build refuses ([_storeZoneError]) or no longer refuses. The views
-  /// follow the store's entries and load state themselves, so any other
-  /// notify builds nothing here.
+  /// the views take from this state's build, or another zone, which it
+  /// takes first ([_takeZone]). The views follow the store's entries, load
+  /// state and zone themselves, so any other notify builds nothing here.
   void _handleStoreChange() {
     final hours = widget.store.hours;
     final zone = widget.store.zone;
     if (hours == _storeHours && zone == _storeZone) {
       return;
     }
+    if (zone != _storeZone) {
+      _takeZone(zone);
+    }
     setState(() {
       _storeHours = hours;
-      _storeZone = zone;
     });
   }
 
+  /// Takes [zone], the store's new zone: keeps the selected date and the
+  /// card's browsed one, each now the start of that date on the new clock
+  /// ([_dayIn]); reads the held time on the new clock, which moves today
+  /// to the new clock's date; and asks the store for the range after the
+  /// frame. Its controller notifies once after the frame, as its selected
+  /// day and range read otherwise ([_noteLifecycle]). The clock notifies
+  /// whether or not the new reading is `==` to the old
+  /// ([_CalendarNowNotifier.retake]), as [CalendarNow] compares instants,
+  /// and two zones can read the same instants on different dates.
+  void _takeZone(Location? zone) {
+    _noteLifecycle();
+    _storeZone = zone;
+    _controller._selectedDay = _dayIn(_day);
+    final browsed = _browsedDay;
+    if (browsed != null) {
+      _browsedDay = _dayIn(browsed);
+    }
+    _now.retake(_nowAt(CalendarDates.inZone(_now.value.time, zone: zone)));
+    _scheduleAsk();
+  }
+
+  /// The start of [day]'s date, read by its year, month and day, on the
+  /// clock of the store's zone: a `TZDateTime` of the zone, or a local
+  /// midnight with none. Every day entering the state passes through it,
+  /// so the days it holds compare with one another by `==`.
+  DateTime _dayIn(DateTime day) {
+    return CalendarDates.dateOfDayNumber(
+      CalendarDates.dayNumber(day),
+      zone: _storeZone,
+    );
+  }
+
   /// The clock reading [time] on the day the calendar marks as today:
-  /// [CalendarView.today], or with none [time]'s local day.
+  /// [CalendarView.today], or with none [time]'s day, both on the clock of
+  /// the store's zone where it has one, and otherwise [time]'s local day.
   CalendarNow _nowAt(DateTime time) {
-    return CalendarNow(time: time, today: widget.today ?? time.toLocal());
+    final zone = _storeZone;
+    if (zone == null) {
+      return CalendarNow(time: time, today: widget.today ?? time.toLocal());
+    }
+    final zoned = CalendarDates.inZone(time, zone: zone);
+    return CalendarNow(time: zoned, today: widget.today ?? zoned);
   }
 
   /// Whether [next], a reading of a new [CalendarView.clock], leaves
@@ -974,39 +1006,10 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   }
 
   /// Resolves the theme the views draw with, and whether a [Material] goes
-  /// above them. A [CalendarTheme] above wins; with none, the theme comes
-  /// from the [ThemeData] where a [Theme] is above, and is the built-in
-  /// one where none is. Sets the fold's and the picker's durations to the
-  /// theme's.
+  /// above them ([CalendarThemeResolver.resolve]). Sets the fold's and the
+  /// picker's durations to the theme's.
   void _resolveTheme() {
-    final hasTheme = context.findAncestorWidgetOfExactType<Theme>() != null;
-    final hasMaterial =
-        LookupBoundary.findAncestorWidgetOfExactType<Material>(context) != null;
-    _insertsMaterial = hasTheme && !hasMaterial;
-    final ambient = context.dependOnInheritedWidgetOfExactType<CalendarTheme>();
-    if (ambient != null) {
-      _theme = ambient.data;
-      _insertedTheme = null;
-    } else if (!hasTheme) {
-      _theme = CalendarThemeData.builtIn;
-      _insertedTheme = null;
-    } else {
-      final themeData = Theme.of(context);
-      final extension = themeData.extension<CalendarThemeExtension>();
-      if (extension != null) {
-        _theme = extension.data;
-      } else {
-        final scheme = themeData.colorScheme;
-        var derived = _derivedTheme;
-        if (derived == null || scheme != _derivedScheme) {
-          derived = CalendarThemeExtension.fromColorScheme(scheme).data;
-          _derivedScheme = scheme;
-          _derivedTheme = derived;
-        }
-        _theme = derived;
-      }
-      _insertedTheme = _theme;
-    }
+    _themes.resolve(context);
     _collapseController.duration = _theme.motionDuration;
     _pickerShown.duration = _theme.motionDuration;
   }
@@ -1019,7 +1022,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     switch (_view) {
       case CalendarViewKind.agenda:
       case CalendarViewKind.month:
-        return (first: _grid.firstDay, last: _grid.lastDay);
+        return (first: _dayIn(_grid.firstDay), last: _dayIn(_grid.lastDay));
       case CalendarViewKind.week:
         final first = weekdays.weekStartOf(_day);
         return (
@@ -1114,19 +1117,18 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   }
 
   void _select(DateTime day) {
-    if (day == _day) {
+    final selected = _dayIn(day);
+    if (selected == _day) {
       return;
     }
     _event(() {
-      _writeDay(day);
+      _writeDay(selected);
     });
   }
 
   /// A host's set of the selected day.
   void _selectDay(DateTime day) {
-    _select(
-      CalendarDates.shownDayNear(CalendarDates.dateOnly(day), widget.weekdays),
-    );
+    _select(CalendarDates.shownDayNear(_dayIn(day), widget.weekdays));
   }
 
   /// A menu pick, a header's [CalendarHeaderDetails.onSelectView] or a
@@ -1150,10 +1152,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     if (_picksMonth) {
       _closeMonthPicker();
     }
-    final target = CalendarDates.shownDayNear(
-      CalendarDates.dateOnly(day),
-      widget.weekdays,
-    );
+    final target = CalendarDates.shownDayNear(_dayIn(day), widget.weekdays);
     if (target != _day) {
       _select(target);
       return;
@@ -1173,8 +1172,9 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       _select(day);
       return;
     }
+    final opened = _dayIn(day);
     _event(() {
-      _writeDay(day);
+      _writeDay(opened);
       _writeView(CalendarViewKind.day);
     });
   }
@@ -1188,13 +1188,13 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// Moves the calendar card to the month of [day], selecting nothing.
   void _browse(DateTime day) {
     setState(() {
-      _browsedDay = DateTime(day.year, day.month);
+      _browsedDay = _dayIn(DateTime(day.year, day.month));
     });
   }
 
   void _browseStrip(DateTime day) {
     setState(() {
-      _browsedDay = day;
+      _browsedDay = _dayIn(day);
     });
   }
 
@@ -1399,11 +1399,14 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// selecting it first when it is a day of the shown month; a day of
   /// another month leaves the selection and the month as they are. Returns
   /// what [_openCreateFlow] returns.
-  Future<void>? _createOn(DateTime day, Rect globalRect) {
+  ({DateTime start, Future<void> done})? _createOn(
+    DateTime day,
+    Rect globalRect,
+  ) {
     if (_grid.contains(day)) {
       _select(day);
     }
-    return _openCreateFlow(day, globalRect);
+    return _openCreateFlow(_dayIn(day), globalRect);
   }
 
   /// Reports a create on [day], from the earliest start [_policy] gives it
@@ -1417,9 +1420,13 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// nothing. Each is a slot whose times the clock reads, in that start's
   /// occurrence where [day]'s clock repeats its time, so none starts before
   /// it. It takes [globalRect], the day cell's, as its rect and returns
-  /// [_createRange]'s future. Where it leaves no such slot in the hours, it
-  /// reports [CalendarView.onCreateRefused] instead and returns null.
-  Future<void>? _openCreateFlow(DateTime day, Rect globalRect) {
+  /// the start of the range it reports with [_createRange]'s future. Where
+  /// it leaves no such slot in the hours, it reports
+  /// [CalendarView.onCreateRefused] instead and returns null.
+  ({DateTime start, Future<void> done})? _openCreateFlow(
+    DateTime day,
+    Rect globalRect,
+  ) {
     final rules = _takeRules();
     final start = rules.earliestStartOn(day, _now.value);
     final shown = widget.store.entriesOn(day).map((shown) {
@@ -1431,11 +1438,14 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       widget.onCreateRefused?.call(day);
       return null;
     }
-    return _createRange(
-      CalendarCreateDetails(
-        range: CalendarCreateRange(start: slot.start, end: slot.end),
-        globalRect: globalRect,
-        userChoseLength: false,
+    return (
+      start: slot.start,
+      done: _createRange(
+        CalendarCreateDetails(
+          range: CalendarCreateRange(start: slot.start, end: slot.end),
+          globalRect: globalRect,
+          userChoseLength: false,
+        ),
       ),
     );
   }
@@ -1703,10 +1713,6 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     if (hoursError != null) {
       throw hoursError;
     }
-    final zoneError = _storeZoneError;
-    if (zoneError != null) {
-      throw zoneError;
-    }
     _takeRules();
     final header = _buildHeader();
     final Widget view;
@@ -1720,13 +1726,43 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
         view = _buildMonth(header);
     }
     Widget content = KeyedSubtree(key: _contentKey, child: view);
-    final inserted = _insertedTheme;
+    final inserted = _themes.inserted;
     if (inserted != null) {
       content = CalendarTheme(data: inserted, child: content);
     }
-    if (_insertsMaterial) {
+    if (_themes.hasTheme && !_themes.hasMaterial) {
       content = Material(type: MaterialType.transparency, child: content);
     }
     return content;
+  }
+}
+
+/// [_CalendarViewState]'s clock: a listenable [CalendarNow] whose [value]
+/// setter, as a [ValueNotifier]'s, notifies only for a value not `==` to
+/// the one it holds, and whose [retake] replaces and notifies always.
+final class _CalendarNowNotifier extends ChangeNotifier
+    implements ValueListenable<CalendarNow> {
+  _CalendarNowNotifier(this._value);
+
+  CalendarNow _value;
+
+  @override
+  CalendarNow get value {
+    return _value;
+  }
+
+  set value(CalendarNow next) {
+    if (next == _value) {
+      return;
+    }
+    _value = next;
+    notifyListeners();
+  }
+
+  /// Takes [next] and notifies, `==` to the held value or not, as a new
+  /// zone's reading of the same instants on other dates is.
+  void retake(CalendarNow next) {
+    _value = next;
+    notifyListeners();
   }
 }

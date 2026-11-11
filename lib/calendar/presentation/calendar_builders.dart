@@ -279,7 +279,8 @@ final class CalendarAddButtonDetails {
     required this.onPressed,
   });
 
-  /// The day the gap lies in, at local midnight.
+  /// The day the gap lies in, at its start on the clock of the store's
+  /// zone, a local midnight where the store has none.
   final DateTime day;
 
   /// The minute after midnight a press adds an entry at.
@@ -316,10 +317,12 @@ final class CalendarLoadingState {
   /// Where the view shows the state.
   final CalendarStateSite site;
 
-  /// The first day being read, at local midnight.
+  /// The first day being read, at its start on the clock of the store's
+  /// zone, a local midnight where the store has none.
   final DateTime first;
 
-  /// The last day being read, at local midnight; [first] in a row.
+  /// The last day being read, at its start as [first] is; [first] in a
+  /// row.
   final DateTime last;
 }
 
@@ -339,10 +342,12 @@ final class CalendarFailureState {
   /// Where the view shows the state.
   final CalendarStateSite site;
 
-  /// The first day whose read failed, at local midnight.
+  /// The first day whose read failed, at its start on the clock of the
+  /// store's zone, a local midnight where the store has none.
   final DateTime first;
 
-  /// The last day whose read failed, at local midnight; [first] in a row.
+  /// The last day whose read failed, at its start as [first] is; [first]
+  /// in a row.
   final DateTime last;
 
   /// The error the store's read failed with, as the store holds it; null

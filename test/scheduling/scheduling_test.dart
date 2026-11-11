@@ -45,6 +45,11 @@ void main() {
         calendar.CalendarWeekdaySet,
         widgets_extended.CalendarWeekdaySet,
       ],
+      "Location": <Object>[
+        scheduling.Location,
+        calendar.Location,
+        widgets_extended.Location,
+      ],
       "CalendarAllChanged": <Object>[
         scheduling.CalendarAllChanged,
         calendar.CalendarAllChanged,
@@ -186,7 +191,7 @@ void main() {
         widgets_extended.MemoryCalendarStore,
       ],
     };
-    expect(names, hasLength(33));
+    expect(names, hasLength(34));
     for (final MapEntry(key: name, value: values) in names.entries) {
       expect(values[1], values[0], reason: "calendar: $name");
       expect(values[2], values[0], reason: "package: $name");
@@ -213,6 +218,8 @@ void main() {
       scheduling.CalendarDates.nextShownDay,
       scheduling.CalendarDates.shownDaysOfWeek,
       scheduling.CalendarDates.dateOfDayNumber,
+      scheduling.CalendarDates.inZone,
+      scheduling.CalendarDates.loadedZones,
       scheduling.CalendarDates.isDayStart,
       scheduling.CalendarDates.minuteOfDay,
       scheduling.CalendarDates.endMinuteOfDay,

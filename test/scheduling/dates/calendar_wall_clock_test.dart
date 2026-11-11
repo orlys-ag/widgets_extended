@@ -1378,6 +1378,63 @@ void main() {
         });
       },
     );
+
+    test("ZC5 inZone keeps a time's instant on the zone's clock, gives back "
+        "a time already of the zone, and gives a plain local time with no "
+        "zone", () {
+      final havana = tz.getLocation("America/Havana");
+      final tokyo = tz.getLocation("Asia/Tokyo");
+      // 12:30 UTC reads 08:30 in Havana, on daylight time in April.
+      final utc = DateTime.utc(2026, 4, 21, 12, 30);
+      final plain = utc.toLocal();
+      final ofTokyo = tz.TZDateTime.from(utc, tokyo);
+      final ofHavana = tz.TZDateTime.from(utc, havana);
+      for (final time in <DateTime>[utc, plain, ofTokyo, ofHavana]) {
+        final zoned = CalendarDates.inZone(time, zone: havana);
+        expect(zoned, isA<tz.TZDateTime>(), reason: "$time");
+        expect((zoned as tz.TZDateTime).location, havana, reason: "$time");
+        expect(zoned.isAtSameMomentAs(time), isTrue, reason: "$time");
+        expect(zoned.hour, 8, reason: "$time");
+        expect(zoned.minute, 30, reason: "$time");
+      }
+      expect(
+        identical(CalendarDates.inZone(ofHavana, zone: havana), ofHavana),
+        isTrue,
+      );
+
+      for (final time in <DateTime>[utc, plain, ofTokyo, ofHavana]) {
+        final local = CalendarDates.inZone(time);
+        expect(local, isNot(isA<tz.TZDateTime>()), reason: "$time");
+        expect(local.isUtc, isFalse, reason: "$time");
+        expect(local.isAtSameMomentAs(time), isTrue, reason: "$time");
+        expect(local.hour, plain.hour, reason: "$time");
+        expect(local.day, plain.day, reason: "$time");
+      }
+    });
+
+    test("ZC6 loadedZones lists the loaded database's zones sorted by name, "
+        "in an unmodifiable list of its own", () {
+      // The data loads in name order, so a zone added after it puts the
+      // database out of that order, which the list's order then owes to
+      // the sort alone. The last test of the file adds it, so no other
+      // reads the database with it.
+      tz.timeZoneDatabase.add(
+        tz.Location("Test/Unsorted", const [], const [], const []),
+      );
+      final database = tz.timeZoneDatabase.locations;
+      final names = database.keys.toList();
+      final sorted = <String>[...names]..sort();
+      expect(names, isNot(sorted));
+      final zones = CalendarDates.loadedZones();
+      expect(<String>[for (final zone in zones) zone.name], sorted);
+      for (final zone in zones) {
+        expect(identical(zone, database[zone.name]), isTrue, reason: zone.name);
+      }
+      expect(() {
+        zones.add(zones.first);
+      }, throwsUnsupportedError);
+      expect(identical(CalendarDates.loadedZones(), zones), isFalse);
+    });
   });
 }
 

@@ -107,13 +107,19 @@ Future<MockCalendarApi> pumpMonth(
 }
 
 /// Pumps the calendar over the default seed, in edit mode when [editing],
+/// its store reading [readAhead] days on each side of the range it shows,
 /// and picks Month, and with [showAll] the Show all items layout.
 Future<MockCalendarApi> pumpSeededMonth(
   WidgetTester tester, {
   bool showAll = false,
   bool editing = false,
+  int readAhead = 2,
 }) async {
-  final api = await pumpCalendar(tester, editing: editing);
+  final api = await pumpCalendar(
+    tester,
+    editing: editing,
+    readAhead: readAhead,
+  );
   await pickMode(tester, "Month");
   if (showAll) {
     await pickMonthLayout(tester, "Show all items");
@@ -902,7 +908,7 @@ void main() {
     "M15 Month shows the load overlay while it loads, and the error and a "
     "Retry that reads again",
     (tester) async {
-      final api = await pumpSeededMonth(tester);
+      final api = await pumpSeededMonth(tester, readAhead: 0);
       api.failurePolicy = (request) {
         return request.method == CalendarMethod.list ? "Reading failed." : null;
       };

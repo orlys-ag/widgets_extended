@@ -1,10 +1,97 @@
-/// The calendar's theme as a Material [ThemeExtension], and the theme a
-/// [ColorScheme] gives it.
+/// The calendar's theme as a Material [ThemeExtension], the theme a
+/// [ColorScheme] gives it, and the resolver that picks the theme a widget
+/// of the composition draws in.
 library;
 
 import 'package:flutter/material.dart';
 
 import '../presentation/calendar_theme.dart';
+
+/// Resolves the theme a widget of the composition draws in, and the one it
+/// puts above what it builds: a [CalendarTheme] above wins; with none, the
+/// theme comes from the [ThemeData] where a [Theme] is above, its
+/// [CalendarThemeExtension] or with none the theme
+/// [CalendarThemeExtension.fromColorScheme] gives its [ColorScheme]; and
+/// with no [Theme] either, it is [CalendarThemeData.builtIn].
+///
+/// The theme derived from a [ColorScheme] is kept for the next
+/// [resolve] that finds a scheme `==` to it, until [reset] drops it.
+final class CalendarThemeResolver {
+  CalendarThemeData _theme = CalendarThemeData.builtIn;
+  CalendarThemeData? _inserted;
+  bool _hasTheme = false;
+  bool _hasMaterial = false;
+
+  /// The last [ColorScheme] a theme was derived from, and that theme.
+  ColorScheme? _derivedScheme;
+  CalendarThemeData? _derivedTheme;
+
+  /// The theme the last [resolve] found, [CalendarThemeData.builtIn]
+  /// before the first.
+  CalendarThemeData get theme {
+    return _theme;
+  }
+
+  /// The theme to put above what the widget builds, as the last [resolve]
+  /// found it: [theme] where it came from a [Theme], and null where a
+  /// [CalendarTheme] above gave it or no [Theme] is above.
+  CalendarThemeData? get inserted {
+    return _inserted;
+  }
+
+  /// Whether the last [resolve] found a [Theme] above.
+  bool get hasTheme {
+    return _hasTheme;
+  }
+
+  /// Whether the last [resolve] found a [Material] above, within the
+  /// nearest [LookupBoundary].
+  bool get hasMaterial {
+    return _hasMaterial;
+  }
+
+  /// Resolves [theme], [inserted], [hasTheme] and [hasMaterial] from what
+  /// lies above [context], which depends on the [CalendarTheme] and, under
+  /// a [Theme], on the [ThemeData] it reads. Called from the owning state's
+  /// `didChangeDependencies` and `reassemble`.
+  void resolve(BuildContext context) {
+    _hasTheme = context.findAncestorWidgetOfExactType<Theme>() != null;
+    _hasMaterial =
+        LookupBoundary.findAncestorWidgetOfExactType<Material>(context) != null;
+    final ambient = context.dependOnInheritedWidgetOfExactType<CalendarTheme>();
+    if (ambient != null) {
+      _theme = ambient.data;
+      _inserted = null;
+    } else if (!_hasTheme) {
+      _theme = CalendarThemeData.builtIn;
+      _inserted = null;
+    } else {
+      final themeData = Theme.of(context);
+      final extension = themeData.extension<CalendarThemeExtension>();
+      if (extension != null) {
+        _theme = extension.data;
+      } else {
+        final scheme = themeData.colorScheme;
+        var derived = _derivedTheme;
+        if (derived == null || scheme != _derivedScheme) {
+          derived = CalendarThemeExtension.fromColorScheme(scheme).data;
+          _derivedScheme = scheme;
+          _derivedTheme = derived;
+        }
+        _theme = derived;
+      }
+      _inserted = _theme;
+    }
+  }
+
+  /// Drops the theme kept from the last [ColorScheme], so the next
+  /// [resolve] derives it again, as after a hot reload, which can change
+  /// what [CalendarThemeExtension.fromColorScheme] gives.
+  void reset() {
+    _derivedScheme = null;
+    _derivedTheme = null;
+  }
+}
 
 /// A [CalendarThemeData] carried in a [ThemeData]'s extensions, which a
 /// `CalendarView` with no [CalendarTheme] above it draws with.

@@ -305,6 +305,7 @@ void main() {
       "CalendarView",
       "CalendarActivityIndicator",
       "CalendarTheme",
+      "CalendarZonePanel",
     };
     const bases = <String>{
       "CalendarController",

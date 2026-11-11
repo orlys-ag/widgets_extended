@@ -956,6 +956,10 @@ class _DayListState<T> extends State<DayList<T>> {
   late int _first;
   late int _last;
 
+  /// The store's zone as the list last took it ([_takeZone]), on whose
+  /// clock the rows' days start; null for the device's.
+  Location? _zone;
+
   /// Counts the list's re-centrings, each of which builds a new scroll
   /// view and a new tree.
   int _generation = 0;
@@ -1017,6 +1021,11 @@ class _DayListState<T> extends State<DayList<T>> {
   /// each gap row listens and draws the mark while it names the row.
   final ValueNotifier<({int day, int start})?> _createMark =
       ValueNotifier<({int day, int start})?>(null);
+
+  /// The start of the range the create [_createMark] marks reported, so a
+  /// new zone ([_takeZone]) marks the gap holding that instant on the new
+  /// clock; null while [_createMark] is.
+  DateTime? _createAt;
 
   /// Counts the creates the add buttons reported, so only the latest one's
   /// completion clears [_createMark].
@@ -1092,8 +1101,10 @@ class _DayListState<T> extends State<DayList<T>> {
       CalendarDates.slotMinuteChoices.contains(widget.slotMinutes),
       _slotMinutesMessage(widget.slotMinutes),
     );
+    _zone = widget.store.zone;
     _centreOn(widget.selectedDay);
     _scroll = ScrollController(initialScrollOffset: _offsetOf(_topDay));
+    widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
     _scheduleLanding();
   }
@@ -1123,6 +1134,13 @@ class _DayListState<T> extends State<DayList<T>> {
       CalendarDates.slotMinuteChoices.contains(widget.slotMinutes),
       _slotMinutesMessage(widget.slotMinutes),
     );
+    if (widget.store != oldWidget.store) {
+      oldWidget.store.removeListener(_handleStore);
+      widget.store.addListener(_handleStore);
+    }
+    if (widget.store.zone != _zone) {
+      _takeZone();
+    }
     if (widget.now != oldWidget.now) {
       oldWidget.now.removeListener(_handleNow);
       widget.now.addListener(_handleNow);
@@ -1159,6 +1177,7 @@ class _DayListState<T> extends State<DayList<T>> {
 
   @override
   void dispose() {
+    widget.store.removeListener(_handleStore);
     widget.now.removeListener(_handleNow);
     _calendarNow.dispose();
     _scroll.dispose();
@@ -1173,6 +1192,10 @@ class _DayListState<T> extends State<DayList<T>> {
   /// other new value becomes [_calendarNow] at once, at which the rows
   /// that show an answer ask [_policy] again.
   void _handleNow() {
+    if (widget.store.zone != _zone) {
+      setState(_takeZone);
+      return;
+    }
     final now = widget.now.value;
     final day = CalendarDates.dateOnly(now.time);
     if (day != _nowDay || now.today != _today) {
@@ -1186,6 +1209,61 @@ class _DayListState<T> extends State<DayList<T>> {
     if (now != _calendarNow.value) {
       _calendarNow.askAgain(now);
     }
+  }
+
+  /// Follows the store for its zone alone: the rows read the store
+  /// through their own listeners. A new zone builds the list again on the
+  /// zone's clock ([_takeZone]).
+  void _handleStore() {
+    if (widget.store.zone != _zone) {
+      setState(_takeZone);
+    }
+  }
+
+  /// Takes the store's zone: makes the rows again on its clock, with the
+  /// keys they had, so the tree moves each day's rows to the refiled
+  /// entries as it does at any change of them; puts the top day on its
+  /// date's start on the new clock, reporting nothing, so the selected day
+  /// stays; takes [DayList.now] as the list's time; and marks the gap that
+  /// holds an open create's start on the new clock ([_createAt]).
+  void _takeZone() {
+    _zone = widget.store.zone;
+    _rows = _rowsOf();
+    _topDay = CalendarDates.dateOfDayNumber(
+      CalendarDates.dayNumber(_topDay),
+      zone: _zone,
+    );
+    final now = widget.now.value;
+    _nowDay = CalendarDates.dateOnly(now.time);
+    _today = now.today;
+    _pendingNow = now;
+    final createAt = _createAt;
+    if (createAt != null) {
+      _createMark.value = _gapMarkHolding(createAt);
+    }
+  }
+
+  /// The mark of the gap row holding [time] on the clock of [_zone], or
+  /// null where no gap of its day holds it.
+  ({int day, int start})? _gapMarkHolding(DateTime time) {
+    final zoned = CalendarDates.inZone(time, zone: _zone);
+    final number = CalendarDates.dayNumber(zoned);
+    final day = CalendarDates.dateOfDayNumber(number, zone: _zone);
+    final rows = dayListRowsOf(
+      day,
+      widget.store.entriesOn(day),
+      widget.hours,
+      editable: widget.editable,
+    );
+    for (final row in rows) {
+      if (row is DayListGap) {
+        final minute = row.clock.minuteOf(zoned);
+        if (row.unfoldedStart <= minute && minute < row.unfoldedEnd) {
+          return (day: number, start: row.unfoldedStart);
+        }
+      }
+    }
+    return null;
   }
 
   /// Holds the days around [day] and makes their rows.
@@ -1271,14 +1349,20 @@ class _DayListState<T> extends State<DayList<T>> {
   }
 
   /// A header and a body for each day from [_first] to [_last] that
-  /// [DayList.weekdays] shows; writes [_rowsByKey].
+  /// [DayList.weekdays] shows, each day starting on the clock of [_zone];
+  /// writes [_rowsByKey]. A day that clock skips whole has no rows: its
+  /// start is an instant of the next day, whose rows they would repeat.
   List<DayListRow> _rowsOf() {
     final rows = <DayListRow>[];
+    final zone = _zone;
     for (var number = _first; number <= _last; number++) {
       if (!widget.weekdays.containsDay(number)) {
         continue;
       }
-      final day = CalendarDates.dateOfDayNumber(number);
+      final day = CalendarDates.dateOfDayNumber(number, zone: zone);
+      if (zone != null && CalendarDates.dayNumber(day) != number) {
+        continue;
+      }
       rows.add(DayListHeader(day));
       rows.add(DayListBody(day));
     }
@@ -1723,19 +1807,36 @@ class _DayListState<T> extends State<DayList<T>> {
           },
         );
       case DayListBody(:final day):
+        final zone = _zone;
         return AnswerBuilder<List<DayListRow>>(
           listenables: <Listenable>[widget.store],
           answer: () {
-            return _blockRowsOf(day);
+            return _blockRowsOf(_dayOnClock(day, zone));
           },
           equals: listEquals,
           builder: (context, rows, child) {
-            return _buildBody(day, rows);
+            return _buildBody(_dayOnClock(day, zone), rows);
           },
         );
       default:
         throw ArgumentError.value(row, "row", "not a row of the tree");
     }
+  }
+
+  /// [day], the start of a row's date on the clock of [zone], on the clock
+  /// the list holds: [day] itself while the list holds [zone], and the
+  /// start of the same date on the list's clock once it took another
+  /// ([_takeZone]). A store notify that brings a new zone runs each body's
+  /// answer before the tree hands the body its row of the new clock, and
+  /// the store's entries are then on the new clock.
+  DateTime _dayOnClock(DateTime day, Location? zone) {
+    if (identical(zone, _zone)) {
+      return day;
+    }
+    return CalendarDates.dateOfDayNumber(
+      CalendarDates.dayNumber(day),
+      zone: _zone,
+    );
   }
 
   /// The block of [day]'s [rows], over which, on the day [DayList.now]
@@ -1842,6 +1943,7 @@ class _DayListState<T> extends State<DayList<T>> {
           : (globalRect) {
               final create = ++_createCount;
               _createMark.value = mark;
+              _createAt = add.start;
               Future<void>.sync(() {
                 return widget.onCreateRange(
                   CalendarCreateDetails(
@@ -1854,6 +1956,7 @@ class _DayListState<T> extends State<DayList<T>> {
                 // After dispose the notifier takes no write.
                 if (mounted && create == _createCount) {
                   _createMark.value = null;
+                  _createAt = null;
                 }
               });
             },

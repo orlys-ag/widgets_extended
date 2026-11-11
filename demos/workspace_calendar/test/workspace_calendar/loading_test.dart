@@ -68,6 +68,7 @@ void main() {
       tester,
       editing: true,
       api: MockCalendarApi.seeded(today, latency: latency),
+      readAhead: 0,
     );
 
     await selectNextMonth(tester);
@@ -270,6 +271,7 @@ void main() {
     final api = await pumpCalendar(
       tester,
       api: MockCalendarApi.seeded(today, latency: latency),
+      readAhead: 0,
     );
     api.failurePolicy = (request) {
       return request.method == CalendarMethod.list ? "Reading failed." : null;

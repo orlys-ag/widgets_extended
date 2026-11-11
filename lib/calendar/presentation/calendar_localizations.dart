@@ -9,8 +9,8 @@ import 'package:flutter/widgets.dart';
 import '../../scheduling/scheduling.dart';
 
 /// Every text the calendar shows or a screen reader hears: the names of the
-/// months and weekdays, the times and dates, and the views', the header's
-/// and the default builders' labels, sentences and hints.
+/// months and weekdays, the times and dates, and the views', the header's,
+/// the zone panel's and the default builders' labels, sentences and hints.
 ///
 /// [CalendarLocalizations.of] reads the instance the nearest [Localizations]
 /// loaded, and [DefaultCalendarLocalizations] where it loaded none. To
@@ -257,6 +257,51 @@ abstract base class CalendarLocalizations {
   /// What a screen reader hears for the calendar card's pull tab while the
   /// card shows a month.
   String get showWeekLabel;
+
+  /// The zone panel's name of the device's own zone, its first row's
+  /// label: "Device time zone".
+  String get deviceZoneName {
+    return "Device time zone";
+  }
+
+  /// A zone's offset from UTC of [minutes], east positive, as the zone
+  /// panel's rows show it: "UTC+05:30", "UTC-03:00", "UTC+00:00".
+  String utcOffset(int minutes) {
+    final sign = minutes < 0 ? "-" : "+";
+    final whole = minutes.abs();
+    final hours = (whole ~/ 60).toString().padLeft(2, "0");
+    final rest = (whole % 60).toString().padLeft(2, "0");
+    return "UTC$sign$hours:$rest";
+  }
+
+  /// The label of the zone panel's button that opens its list of every
+  /// zone: "Add time zones".
+  String get addZonesLabel {
+    return "Add time zones";
+  }
+
+  /// The hint of the zone panel's search field: "Search time zones".
+  String get searchZonesHint {
+    return "Search time zones";
+  }
+
+  /// What the zone panel shows in place of its list of every zone where it
+  /// has none: "No time zones".
+  String get noZonesMessage {
+    return "No time zones";
+  }
+
+  /// The tooltip of the zone panel's button that removes the zone of
+  /// [city] from the added zones: "Remove $city".
+  String removeZoneTooltip(String city) {
+    return "Remove $city";
+  }
+
+  /// The tooltip of the zone panel's button back from its list of every
+  /// zone: "Back".
+  String get zonesBackTooltip {
+    return "Back";
+  }
 }
 
 /// [CalendarLocalizations] in US English.

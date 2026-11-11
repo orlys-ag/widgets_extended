@@ -26,6 +26,8 @@ const int collapsedStripRows = 3;
 /// columns right of the gutter are the days of the [dayCount] days from
 /// [firstDay] whose weekday [weekdays] holds, in order, so a day it does
 /// not hold has no column and the days either side of it are adjacent.
+/// Their dates are on the clock of [zone], or of the device where it is
+/// null.
 @immutable
 class GridTracks {
   GridTracks({
@@ -35,6 +37,7 @@ class GridTracks {
     this.hours = CalendarDayHours.allDay,
     this.firstSlotRow = 1,
     this.slotMinutes = CalendarDates.defaultSlotMinutes,
+    this.zone,
   }) : assert(dayCount >= 1),
        assert(firstSlotRow >= 0),
        assert(slotMinutes > 0),
@@ -58,6 +61,10 @@ class GridTracks {
   /// The length of one slot, one row, in minutes; [hours] start and end on
   /// its grid ([CalendarDayHours.isOnSlotsOf]).
   final int slotMinutes;
+
+  /// The zone whose clock the shown days' dates ([dateAt]) start on, or
+  /// null for the device's.
+  final Location? zone;
 
   /// The [CalendarDates.dayNumber]s of the shown days, ascending: column `c`
   /// shows `_days[c - 1]`.
@@ -83,10 +90,11 @@ class GridTracks {
     return firstSlotRow + rowCount - 1;
   }
 
-  /// The local midnights of the shown days, by column as [_days]: built at
-  /// the first [dateAt] of this instance, so a later one builds no date.
+  /// The starts of the shown days on [zone]'s clock, local midnights where
+  /// it is null, by column as [_days]: built at the first [dateAt] of this
+  /// instance, so a later one builds no date and asks the zone nothing.
   late final List<DateTime> _dates = List<DateTime>.unmodifiable(<DateTime>[
-    for (final day in _days) CalendarDates.dateOfDayNumber(day),
+    for (final day in _days) CalendarDates.dateOfDayNumber(day, zone: zone),
   ]);
 
   /// Whether each shown day's clock repeats a stretch, by column as
@@ -103,7 +111,11 @@ class GridTracks {
     return _days[column - 1];
   }
 
-  /// The local midnight of the day [column] shows, 1 to [columnCount].
+  /// The start of the day [column] shows, 1 to [columnCount], on [zone]'s
+  /// clock: a `TZDateTime` of [zone], or a local midnight where it is
+  /// null. A day [zone]'s clock skips whole keeps its column, whose start
+  /// is the instant the clock skips past the day
+  /// ([CalendarDates.dateOfDayNumber]), a time of a later day.
   DateTime dateAt(int column) {
     assert(column >= 1 && column <= columnCount);
     return _dates[column - 1];
@@ -175,7 +187,8 @@ class GridTracks {
         other.weekdays == weekdays &&
         other.hours == hours &&
         other.firstSlotRow == firstSlotRow &&
-        other.slotMinutes == slotMinutes;
+        other.slotMinutes == slotMinutes &&
+        other.zone == zone;
   }
 
   @override
@@ -187,6 +200,7 @@ class GridTracks {
       hours,
       firstSlotRow,
       slotMinutes,
+      zone,
     );
   }
 }
@@ -690,8 +704,8 @@ class TimedGridLayout<T> {
   /// instants do ([GridTracks.repeatsStretchAt]).
   ///
   /// Where [previous] split the identical entries, with the same pending
-  /// flags in the same order, on the same days, weekdays and hours, the
-  /// split is [previous], and runs nothing: a store notify that changes
+  /// flags in the same order, on the same days, weekdays, hours and zone,
+  /// the split is [previous], and runs nothing: a store notify that changes
   /// nothing the grid shows splits nothing; and a store that notifies as
   /// it is asked for new days, before the grid has them, syncs on the
   /// days shown before, whose split it keeps, so the step splits once.
@@ -708,6 +722,7 @@ class TimedGridLayout<T> {
           read.dayCount == tracks.dayCount &&
           read.weekdays == tracks.weekdays &&
           read.hours == tracks.hours &&
+          read.zone == tracks.zone &&
           _sameShown(read.shown, shown)) {
         return previous;
       }
@@ -789,6 +804,7 @@ class TimedGridLayout<T> {
         dayCount: tracks.dayCount,
         weekdays: tracks.weekdays,
         hours: tracks.hours,
+        zone: tracks.zone,
       ),
       pieces: pieces,
       bars: stacked.bars,
@@ -799,15 +815,16 @@ class TimedGridLayout<T> {
     );
   }
 
-  /// The entry list the split read, with the days, weekdays and hours it
-  /// split them for, never the slot length or the rows, which it does not
-  /// read; null for [TimedGridLayout.empty].
+  /// The entry list the split read, with the days, weekdays, hours and
+  /// zone it split them for, never the slot length or the rows, which it
+  /// does not read; null for [TimedGridLayout.empty].
   final ({
     List<CalendarShownEntry<T>> shown,
     int firstDay,
     int dayCount,
     CalendarWeekdaySet weekdays,
     CalendarDayHours hours,
+    Location? zone,
   })?
   _read;
 

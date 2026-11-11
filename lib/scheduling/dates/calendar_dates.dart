@@ -12,7 +12,8 @@ library;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:timezone/timezone.dart' show Location, TZDateTime, TzInstant;
+import 'package:timezone/timezone.dart'
+    show Location, TZDateTime, TzInstant, timeZoneDatabase;
 
 export 'package:timezone/timezone.dart' show Location, TZDateTime;
 
@@ -178,6 +179,34 @@ abstract final class CalendarDates {
       isUtc: true,
     );
     return DateTime(utc.year, utc.month, utc.day);
+  }
+
+  /// [time]'s instant on [zone]'s clock: a `TZDateTime` of [zone], typed
+  /// `DateTime`, which is [time] itself where [time] is a `TZDateTime`
+  /// whose location is `==` to [zone]. With no [zone], the instant on the
+  /// device's clock, a plain local `DateTime`.
+  static DateTime inZone(DateTime time, {Location? zone}) {
+    if (zone == null) {
+      if (time is TZDateTime) {
+        return DateTime.fromMicrosecondsSinceEpoch(time.microsecondsSinceEpoch);
+      }
+      return time.toLocal();
+    }
+    if (time is TZDateTime && time.location == zone) {
+      return time;
+    }
+    return TZDateTime.from(time, zone);
+  }
+
+  /// Every zone of the loaded zone database, sorted by name: an
+  /// unmodifiable list, a new one at each call, which is empty until a host
+  /// loads the zone data.
+  static List<Location> loadedZones() {
+    final zones = timeZoneDatabase.locations.values.toList();
+    zones.sort((a, b) {
+      return a.name.compareTo(b.name);
+    });
+    return List<Location>.unmodifiable(zones);
   }
 
   /// Whether [time] is the start of its day: the instant

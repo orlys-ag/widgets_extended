@@ -90,10 +90,14 @@ int listCalls(MockCalendarApi api) {
   }).length;
 }
 
-/// The calendar over [seed] in Day mode on [today].
-Future<MockCalendarApi> pumpDay(WidgetTester tester) async {
+/// The calendar over [seed] in Day mode on [today], its store reading
+/// [readAhead] days on each side of the range it shows.
+Future<MockCalendarApi> pumpDay(
+  WidgetTester tester, {
+  int readAhead = 2,
+}) async {
   final api = MockCalendarApi(seed: seed, latency: harnessLatency);
-  await pumpCalendar(tester, api: api);
+  await pumpCalendar(tester, api: api, readAhead: readAhead);
   await pickMode(tester, "Day");
   return api;
 }
@@ -174,7 +178,7 @@ void main() {
   testWidgets("WS3 a drag slides the strip day by day, across weeks, and "
       "selects nothing; at rest the strip reads the weeks of the days it "
       "shows, and a tap on one of them shows that day at once", (tester) async {
-    final api = await pumpDay(tester);
+    final api = await pumpDay(tester, readAhead: 0);
     final lists = listCalls(api);
 
     await slideStrip(tester, 3);
@@ -307,7 +311,7 @@ void main() {
   testWidgets("WS6 with the weekends hidden the strip shows five weekdays "
       "and slides through the weekdays alone, and it and Day read only "
       "them", (tester) async {
-    final api = await pumpDay(tester);
+    final api = await pumpDay(tester, readAhead: 0);
     await openBar(tester);
     flipWeekends(tester);
     await tester.pumpAndSettle();

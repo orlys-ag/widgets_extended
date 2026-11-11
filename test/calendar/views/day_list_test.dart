@@ -1,21 +1,27 @@
 /// The day list: the rows it lays out for a day's entries, its gaps and
 /// its banners outside the hours, a card drawn again for a new payload,
-/// a failed row's retry, and the slot lengths it takes.
+/// a failed row's retry, the slot lengths it takes, and its rows and
+/// create mark on a zoned store's clock.
 library;
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
+
+import '../../scheduling/store/zone_support.dart';
+import '../../scheduling/zones.dart';
 
 typedef ShownItem = CalendarShownEntry<String>;
 
@@ -106,6 +112,26 @@ class HeldReads implements CalendarDataSource<String> {
   Future<void> delete(String id) {
     throw UnimplementedError();
   }
+}
+
+/// The decoration of the list's create mark under the theme above [view]:
+/// the theme's primary tint, edged in its primary colour.
+BoxDecoration createMarkIn(WidgetTester tester, Finder view) {
+  final theme = CalendarTheme.of(tester.element(view));
+  return BoxDecoration(
+    color: theme.primaryTint,
+    border: Border.all(color: theme.primary, width: 2.0),
+  );
+}
+
+/// The create marks, boxes drawing [mark], under [of].
+Finder createMarksUnder(Finder of, BoxDecoration mark) {
+  return find.descendant(
+    of: of,
+    matching: find.byWidgetPredicate((widget) {
+      return widget is DecoratedBox && widget.decoration == mark;
+    }),
+  );
 }
 
 void main() {
@@ -460,6 +486,312 @@ void main() {
     expect(
       (error as AssertionError).message,
       "A DayList's slotMinutes, 7, is not one of [5, 10, 15, 20, 30, 60].",
+    );
+  });
+
+  testWidgets(
+    "AZ1 a day list over a zoned store reports an add on the zone's clock "
+    "and moves a running create's mark at a zone change",
+    (tester) async {
+      final on = DateTime(2026, 4, 21, 12);
+      final ahead = zoneApartFromDevice(on, 6);
+      final behind = zoneApartFromDevice(on, -6);
+      final monday = DateTime(2026, 4, 20);
+      final tuesday = DateTime(2026, 4, 21);
+      final store = memoryStoreIn<String>(ahead);
+      addTearDown(store.dispose);
+      final now = ValueNotifier<CalendarNow>(
+        CalendarNow(time: DateTime(2026, 4, 20, 9), today: monday),
+      );
+      addTearDown(now.dispose);
+      final creates = <CalendarCreateRange>[];
+      var done = Completer<void>();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DayList<String>(
+            store: store,
+            weekdays: CalendarWeekdaySet.all,
+            format: CalendarHourLabelFormat.twentyFourHour,
+            hours: CalendarDayHours.allDay,
+            editable: true,
+            selectedDay: dayOfNumberIn(CalendarDates.dayNumber(monday), ahead),
+            now: now,
+            onTopDay: (day) {},
+            onCreateRange: (details) {
+              creates.add(details.range);
+              return done.future;
+            },
+            onEdit: (id) {},
+            onDelete: (id) {},
+            addButtonBuilder: (context, details) {
+              return GestureDetector(
+                onTap: details.onPressed,
+                child: const Text("add"),
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      Finder addOn(DateTime day) {
+        return find.descendant(
+          of: find.byKey(dayListGapKey(day, 0)),
+          matching: find.text("add"),
+        );
+      }
+
+      await tester.tap(addOn(tuesday));
+      await tester.pump();
+      final start = creates.single.start;
+      expect(start, isA<tz.TZDateTime>());
+      expect(start, tz.TZDateTime(ahead, 2026, 4, 21));
+      final mark = createMarkIn(tester, find.byType(DayList<String>));
+      expect(
+        createMarksUnder(find.byKey(dayListGapKey(tuesday, 0)), mark),
+        findsOneWidget,
+      );
+
+      setStoreZone(store, behind);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(
+        createMarksUnder(find.byKey(dayListGapKey(tuesday, 0)), mark),
+        findsNothing,
+      );
+      expect(
+        createMarksUnder(find.byKey(dayListGapKey(monday, 0)), mark),
+        findsOneWidget,
+      );
+      done.complete();
+      await tester.pumpAndSettle();
+      expect(
+        createMarksUnder(find.byType(DayList<String>), mark),
+        findsNothing,
+      );
+
+      done = Completer<void>()..complete();
+      await tester.tap(addOn(tuesday));
+      await tester.pumpAndSettle();
+      expect(creates, hasLength(2));
+      expect(creates.last.start, isA<tz.TZDateTime>());
+      expect(creates.last.start, tz.TZDateTime(behind, 2026, 4, 21));
+    },
+  );
+  testWidgets("AZ2 a zone change that brings another day under the list's "
+      "top reports no top day", (tester) async {
+    final on = DateTime(2026, 4, 21, 12);
+    final six = zoneApartFromDevice(on, 6);
+    final twelve = zoneApartFromDevice(on, 12);
+    final tuesday = DateTime(2026, 4, 21);
+    CalendarEntry<String> entry(String id, int hour) {
+      return CalendarEntry<String>(
+        id: id,
+        start: tz.TZDateTime(six, 2026, 4, 21, hour),
+        end: tz.TZDateTime(six, 2026, 4, 21, hour + 1),
+        title: id,
+        color: const Color(0xFF336699),
+        payload: id,
+      );
+    }
+
+    final store = memoryStoreIn<String>(
+      six,
+      entries: <CalendarEntry<String>>[entry("p", 8), entry("q", 20)],
+    );
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 20, 9), today: DateTime(2026, 4, 20)),
+    );
+    addTearDown(now.dispose);
+    final topDays = <DateTime>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CalendarTheme(
+          data: CalendarThemeData(motionDuration: Duration.zero),
+          child: DayList<String>(
+            store: store,
+            weekdays: CalendarWeekdaySet.all,
+            format: CalendarHourLabelFormat.twentyFourHour,
+            hours: CalendarDayHours.allDay,
+            editable: false,
+            selectedDay: dayOfNumberIn(CalendarDates.dayNumber(tuesday), six),
+            now: now,
+            onTopDay: topDays.add,
+            onCreateRange: (details) async {},
+            onEdit: (id) {},
+            onDelete: (id) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final listTop = tester.getRect(find.byType(DayList<String>)).top;
+    // A jump reports no top day: the list checks for one only while a
+    // drag, or its fling, scrolls it.
+    final position = tester
+        .state<ScrollableState>(find.byType(Scrollable))
+        .position;
+    final qBottom = tester.getRect(find.byKey(entryCardKey("q"))).bottom;
+    position.jumpTo(position.pixels + qBottom - 10.0 - listTop);
+    await tester.pumpAndSettle();
+    topDays.clear();
+
+    setStoreZone(store, twelve);
+    await tester.pump();
+    // Setup sanity: q's card left Tuesday's body, so Wednesday's header
+    // reaches the probe a top day check reads, and Thursday's does not,
+    // where a check would report Wednesday.
+    expect(
+      tester.getRect(find.byKey(dayListHeaderKey(DateTime(2026, 4, 22)))).top,
+      lessThanOrEqualTo(listTop + 1.0),
+    );
+    expect(
+      tester.getRect(find.byKey(dayListHeaderKey(DateTime(2026, 4, 23)))).top,
+      greaterThan(listTop + 1.0),
+    );
+    await tester.pumpAndSettle();
+    expect(topDays, isEmpty);
+  });
+
+  testWidgets("AZ3 a zone whose clock skips a whole day gives that day no "
+      "row, and each day it reads one header", (tester) async {
+    ensureZones();
+    final apia = tz.getLocation("Pacific/Apia");
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(
+        time: DateTime(2011, 12, 29, 9),
+        today: DateTime(2011, 12, 29),
+      ),
+    );
+    addTearDown(now.dispose);
+
+    Future<void> pumpList(MemoryCalendarStore<String> store) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DayList<String>(
+            store: store,
+            weekdays: CalendarWeekdaySet.all,
+            format: CalendarHourLabelFormat.twentyFourHour,
+            hours: CalendarDayHours.allDay,
+            editable: false,
+            selectedDay: dayOfNumberIn(
+              CalendarDates.dayNumber(DateTime(2011, 12, 29)),
+              apia,
+            ),
+            now: now,
+            onTopDay: (day) {},
+            onCreateRange: (details) async {},
+            onEdit: (id) {},
+            onDelete: (id) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    void expectDays() {
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(dayListHeaderKey(DateTime(2011, 12, 29))),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(dayListHeaderKey(DateTime(2011, 12, 31))),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(dayListHeaderKey(DateTime(2011, 12, 30))),
+        findsNothing,
+      );
+    }
+
+    final opened = memoryStoreIn<String>(apia);
+    addTearDown(opened.dispose);
+    await pumpList(opened);
+    expectDays();
+
+    // The same list given the zone after its first build.
+    await tester.pumpWidget(const SizedBox());
+    final later = memoryStoreIn<String>(null);
+    addTearDown(later.dispose);
+    await pumpList(later);
+    expect(
+      find.byKey(dayListHeaderKey(DateTime(2011, 12, 30))),
+      findsOneWidget,
+    );
+    setStoreZone(later, apia);
+    await tester.pumpAndSettle();
+    expectDays();
+  });
+
+  testWidgets("a zone change files an entry of several days on the new "
+      "clock's days, each day's piece read on that clock", (tester) async {
+    final on = DateTime(2026, 4, 21, 12);
+    final behind = zoneApartFromDevice(on, -6);
+    final ahead = zoneApartFromDevice(on, 6);
+    final tuesday = DateTime(2026, 4, 21);
+    final thursday = DateTime(2026, 4, 23);
+    // From 22:00 on Tuesday to 08:00 on Thursday on the clock 6 hours
+    // ahead, whose Thursday piece ends 4 hours before Thursday starts on
+    // the clock 6 hours behind.
+    final store = memoryStoreIn<String>(
+      behind,
+      entries: <CalendarEntry<String>>[
+        CalendarEntry<String>(
+          id: "c",
+          start: tz.TZDateTime(behind, 2026, 4, 21, 10),
+          end: tz.TZDateTime(behind, 2026, 4, 22, 20),
+          title: "c",
+          color: const Color(0xFF336699),
+          payload: "c",
+        ),
+      ],
+    );
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 20, 9), today: DateTime(2026, 4, 20)),
+    );
+    addTearDown(now.dispose);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(800.0, 2000.0);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DayList<String>(
+          store: store,
+          weekdays: CalendarWeekdaySet.all,
+          format: CalendarHourLabelFormat.twentyFourHour,
+          hours: CalendarDayHours.allDay,
+          editable: false,
+          selectedDay: dayOfNumberIn(CalendarDates.dayNumber(tuesday), behind),
+          now: now,
+          onTopDay: (day) {},
+          onCreateRange: (details) async {},
+          onEdit: (id) {},
+          onDelete: (id) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final cards = find.byKey(entryCardKey("c"));
+    // Setup sanity: the entry lies on Tuesday and Wednesday.
+    expect(cards, findsNWidgets(2));
+
+    setStoreZone(store, ahead);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(cards, findsNWidgets(3));
+    final thursdayHeader = tester.getRect(
+      find.byKey(dayListHeaderKey(thursday)),
+    );
+    expect(
+      cards.evaluate().where((card) {
+        return tester.getRect(find.byWidget(card.widget)).top >=
+            thursdayHeader.bottom - 0.5;
+      }),
+      hasLength(1),
     );
   });
 }

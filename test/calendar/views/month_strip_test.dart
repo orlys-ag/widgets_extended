@@ -8,6 +8,8 @@ import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/month_strip.dart';
 
+import '../../scheduling/zones.dart';
+
 /// Pumps a strip on April 2026 under [snap], 350 px wide, and returns the
 /// months it reports through [MonthStrip.onBrowse].
 Future<List<DateTime>> pumpStrip(
@@ -140,4 +142,82 @@ void main() {
     await tester.pumpAndSettle();
     expect(browsed, <DateTime>[DateTime(2026, 5)]);
   });
+
+  testWidgets(
+    "SZ2 a month strip marks the selected day and today given as a zone's "
+    "day starts",
+    (tester) async {
+      final on = DateTime(2026, 4, 21, 12);
+      DateTime aprilIn(int hours, int day) {
+        return dayOfNumberIn(
+          CalendarDates.dayNumber(DateTime(2026, 4, day)),
+          zoneApartFromDevice(on, hours),
+        );
+      }
+
+      int april(int day) {
+        return CalendarDates.dayNumber(DateTime(2026, 4, day));
+      }
+
+      Set<int> cellsWhere(bool Function(DayCell cell) marks) {
+        return <int>{
+          for (final cell in tester.widgetList<DayCell>(find.byType(DayCell)))
+            if (marks(cell)) CalendarDates.dayNumber(cell.day),
+        };
+      }
+
+      final store = MemoryCalendarStore<String>();
+      addTearDown(store.dispose);
+      Widget strip(DateTime selectedDay, DateTime today) {
+        return MaterialApp(
+          home: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 350.0,
+              child: MonthStrip<String>(
+                store: store,
+                month: DateTime(2026, 4),
+                selectedDay: selectedDay,
+                today: today,
+                weekdays: CalendarWeekdaySet.all,
+                rowHeight: 48.0,
+                collapse: kAlwaysDismissedAnimation,
+                onSelectDay: (day) {},
+                onBrowse: (month) {},
+              ),
+            ),
+          ),
+        );
+      }
+
+      await tester.pumpWidget(strip(aprilIn(6, 21), aprilIn(6, 23)));
+      await tester.pumpAndSettle();
+      expect(
+        cellsWhere((cell) {
+          return cell.isSelected;
+        }),
+        <int>{april(21)},
+      );
+      expect(
+        cellsWhere((cell) {
+          return cell.isToday;
+        }),
+        <int>{april(23)},
+      );
+      await tester.pumpWidget(strip(aprilIn(-6, 22), aprilIn(-6, 24)));
+      await tester.pumpAndSettle();
+      expect(
+        cellsWhere((cell) {
+          return cell.isSelected;
+        }),
+        <int>{april(22)},
+      );
+      expect(
+        cellsWhere((cell) {
+          return cell.isToday;
+        }),
+        <int>{april(24)},
+      );
+    },
+  );
 }

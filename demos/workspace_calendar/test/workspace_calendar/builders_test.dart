@@ -443,6 +443,7 @@ Future<MockCalendarApi> pumpLocked(
   ItemBuilders builders, {
   DateTime Function() clock = midMorning,
   bool editing = true,
+  int readAhead = 2,
 }) async {
   final api = MockCalendarApi(seed: lockSeed, latency: harnessLatency);
   await pumpCalendar(
@@ -452,6 +453,7 @@ Future<MockCalendarApi> pumpLocked(
     editing: editing,
     clock: clock,
     builders: builders,
+    readAhead: readAhead,
   );
   if (editing) {
     await openSettings(tester);
@@ -472,6 +474,7 @@ Future<MockCalendarApi> stepToUnread(
   WidgetTester tester,
   ItemBuilders builders, {
   Size size = const Size(390.0, 844.0),
+  int readAhead = 2,
 }) async {
   final api = await pumpCalendar(
     tester,
@@ -480,6 +483,7 @@ Future<MockCalendarApi> stepToUnread(
     size: size,
     api: MockCalendarApi.seeded(today, latency: second),
     builders: builders,
+    readAhead: readAhead,
   );
   await selectNextMonth(tester);
   await pumpFor(tester, const Duration(milliseconds: 500));
@@ -702,6 +706,7 @@ void main() {
       clock: nineOClock,
       api: MockCalendarApi.seeded(today, latency: second),
       builders: marks.builders,
+      readAhead: 0,
     );
     await pickMode(tester, "Day");
     final ids = <String>[
@@ -792,6 +797,7 @@ void main() {
       clock: nineOClock,
       api: MockCalendarApi.seeded(today, latency: second),
       builders: marks.builders,
+      readAhead: 0,
     );
     await pickMode(tester, "Week");
     await tester.tap(find.byTooltip("Next week"));
@@ -863,6 +869,7 @@ void main() {
       clock: nineOClock,
       api: MockCalendarApi.seeded(today, latency: second),
       builders: const ItemBuilders(),
+      readAhead: 0,
     );
     await pickMode(tester, "Week");
     expect(find.byType(HarborBlock), findsNothing);
@@ -919,6 +926,7 @@ void main() {
       clock: nineOClock,
       api: MockCalendarApi.seeded(today, latency: second),
       builders: const ItemBuilders(),
+      readAhead: 0,
     );
     await pickMode(tester, "Day");
     expect(find.byType(HarborBlock), findsNothing);
@@ -1015,6 +1023,7 @@ void main() {
       editing: true,
       clock: nineOClock,
       builders: counts.builders,
+      readAhead: 0,
     );
     await pickMode(tester, "Week");
     expect(counts.blocks, greaterThan(4));
@@ -1096,6 +1105,7 @@ void main() {
       editing: true,
       clock: nineOClock,
       builders: a.builders,
+      readAhead: 0,
     );
     await pickMode(tester, "Week");
     final ids = await weekIds(tester, api);
@@ -1109,6 +1119,7 @@ void main() {
         clock: nineOClock,
         editing: true,
         builders: b.builders,
+        readAhead: 0,
       ),
     );
     await tester.pumpAndSettle();
@@ -1141,6 +1152,7 @@ void main() {
         clock: nineOClock,
         editing: true,
         builders: c.builders,
+        readAhead: 0,
       ),
     );
     expect(tester.takeException(), isNull);
@@ -1171,6 +1183,7 @@ void main() {
         clock: nineOClock,
         editing: true,
         builders: d.builders,
+        readAhead: 0,
       ),
     );
     await gesture.moveBy(const Offset(0.0, 40.0));
@@ -1470,6 +1483,7 @@ void main() {
       clock: nineOClock,
       api: MockCalendarApi.seeded(today, latency: second),
       builders: marks.builders,
+      readAhead: 0,
     );
     await pickMode(tester, "Month");
     await tester.tap(find.byTooltip("Next month"));
@@ -1800,7 +1814,7 @@ void main() {
     tester,
   ) async {
     final marks = MarkingBuilders();
-    final api = await stepToUnread(tester, marks.builders);
+    final api = await stepToUnread(tester, marks.builders, readAhead: 0);
     final loadings = keyedSlots("day-list-loading-");
     expect(loadings, isNotEmpty);
     for (final row in loadings.entries) {
@@ -1859,6 +1873,7 @@ void main() {
       clock: nineOClock,
       api: MockCalendarApi.seeded(today, latency: second),
       builders: prefetch.builders,
+      readAhead: 0,
     );
     prefetchApi.failurePolicy = (request) {
       return request.method == CalendarMethod.list ? "Reading failed." : null;
@@ -2011,7 +2026,7 @@ void main() {
     tester,
   ) async {
     final marks = MarkingBuilders();
-    final api = await pumpLocked(tester, marks.builders);
+    final api = await pumpLocked(tester, marks.builders, readAhead: 0);
     final ended = marks.lastCard(endedId).details;
     expect(ended.onEdit, isNull);
     expect(ended.onDelete, isNull);
@@ -2049,7 +2064,7 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
     final viewing = MarkingBuilders();
-    await pumpLocked(tester, viewing.builders, editing: false);
+    await pumpLocked(tester, viewing.builders, editing: false, readAhead: 0);
     expect(viewing.cards.length, greaterThan(4));
     for (final call in viewing.cards) {
       expect(call.details.onEdit, isNull, reason: call.entry.id);

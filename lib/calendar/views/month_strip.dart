@@ -186,9 +186,23 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
   /// The theme above the strip, whose motion a slide takes when it starts.
   late CalendarThemeData _theme;
 
+  /// [MonthStrip.selectedDay] and [MonthStrip.today] as plain days, the
+  /// local midnights of their dates, which the cells, the plain days of
+  /// [CalendarMonthGrid]s, compare with by `==` however the days given are
+  /// zoned. Made only where the day they twin changes.
+  late DateTime _selectedDay;
+  late DateTime _today;
+
+  /// The local midnight of [day]'s date.
+  static DateTime _plainTwinOf(DateTime day) {
+    return CalendarDates.dateOfDayNumber(CalendarDates.dayNumber(day));
+  }
+
   @override
   void initState() {
     super.initState();
+    _selectedDay = _plainTwinOf(widget.selectedDay);
+    _today = _plainTwinOf(widget.today);
     widget.collapse.addListener(_handleCollapse);
     // After the frame, because a read may notify the day cells' listeners,
     // which must not rebuild mid-build.
@@ -213,6 +227,12 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
       "A MonthStrip keeps its weekdays; give a strip that changes them its "
       "own key.",
     );
+    if (widget.selectedDay != oldWidget.selectedDay) {
+      _selectedDay = _plainTwinOf(widget.selectedDay);
+    }
+    if (widget.today != oldWidget.today) {
+      _today = _plainTwinOf(widget.today);
+    }
     if (widget.collapse != oldWidget.collapse) {
       oldWidget.collapse.removeListener(_handleCollapse);
       widget.collapse.addListener(_handleCollapse);
@@ -373,7 +393,7 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
-    final selected = widget.selectedDay;
+    final selected = _selectedDay;
     final forward = Directionality.of(context) == TextDirection.rtl ? -1 : 1;
     final DateTime day;
     final key = event.logicalKey;
@@ -464,8 +484,8 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
                         .cellOf(
                           monthFoldDay(
                             resting,
-                            selectedDay: widget.selectedDay,
-                            today: widget.today,
+                            selectedDay: _selectedDay,
+                            today: _today,
                             weekdays: widget.weekdays,
                           ),
                         )
@@ -519,8 +539,8 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
       return _NeighbourDay<T>(
         store: widget.store,
         day: day,
-        isSelected: day == widget.selectedDay,
-        isToday: day == widget.today,
+        isSelected: day == _selectedDay,
+        isToday: day == _today,
         collapse: widget.collapse,
         dayBadges: widget.dayBadges,
       );
@@ -540,8 +560,8 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
             key: dayCellKey(day),
             day: day,
             inMonth: true,
-            isSelected: day == widget.selectedDay,
-            isToday: day == widget.today,
+            isSelected: day == _selectedDay,
+            isToday: day == _today,
             badges: badges,
             collapse: widget.collapse,
           );

@@ -252,13 +252,15 @@ DateTime endOfJson(Map<String, Object?> item) {
 
 /// The app [pumpCalendar] pumps: the calendar over [api], given [today]
 /// and [clock], opening in edit mode when [editing], its views drawing
-/// with [builders].
+/// with [builders], its store reading [readAhead] days on each side of
+/// the range it shows.
 Widget calendarApp({
   required MockCalendarApi api,
   DateTime? today,
   DateTime Function()? clock,
   bool editing = false,
   ItemBuilders builders = harborItemBuilders,
+  int readAhead = 2,
 }) {
   return MaterialApp(
     // The M3 ink sparkle shader cannot load under the test binding.
@@ -272,12 +274,14 @@ Widget calendarApp({
             clock: clock,
             editing: true,
             builders: builders,
+            readAhead: readAhead,
           )
         : WorkspaceCalendarExample(
             today: today,
             api: api,
             clock: clock,
             builders: builders,
+            readAhead: readAhead,
           ),
   );
 }
@@ -288,7 +292,8 @@ Widget calendarApp({
 /// first read complete. Returns the mock. With [pinsToday] false the
 /// calendar is given no day, so it opens on the day [clock] reads and
 /// marks that day as today. With [editing] it opens in edit mode. Its
-/// views draw with [builders].
+/// views draw with [builders], and its store reads [readAhead] days on
+/// each side of the range it shows.
 Future<MockCalendarApi> pumpCalendar(
   WidgetTester tester, {
   MockCalendarApi? api,
@@ -297,6 +302,7 @@ Future<MockCalendarApi> pumpCalendar(
   bool pinsToday = true,
   bool editing = false,
   ItemBuilders builders = harborItemBuilders,
+  int readAhead = 2,
 }) async {
   final mock = api ?? MockCalendarApi.seeded(today, latency: harnessLatency);
   tester.view.devicePixelRatio = 1.0;
@@ -309,6 +315,7 @@ Future<MockCalendarApi> pumpCalendar(
       clock: clock,
       editing: editing,
       builders: builders,
+      readAhead: readAhead,
     ),
   );
   await tester.pump(mock.latency);
