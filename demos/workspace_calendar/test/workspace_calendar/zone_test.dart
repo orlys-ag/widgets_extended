@@ -575,7 +575,7 @@ void main() {
           .color;
       final action = IconTheme.of(
         tester.element(
-          find.descendant(of: bar, matching: find.byIcon(Icons.settings)),
+          find.descendant(of: bar, matching: find.byIcon(Icons.more_vert)),
         ),
       ).color;
       // Setup sanity: the bar's actions stand out from its fill.

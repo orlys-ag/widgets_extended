@@ -16,7 +16,6 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart'
     show parseIsoDate;
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
@@ -258,12 +257,6 @@ int listCount(MockCalendarApi api) {
   }).length;
 }
 
-/// Closes the sheet with a tap on the barrier above it.
-Future<void> closeSettings(WidgetTester tester) async {
-  await tester.tapAt(const Offset(195.0, 20.0));
-  await tester.pumpAndSettle();
-}
-
 /// Moves the open settings sheet's day width slider to [width] through
 /// its own callback.
 Future<void> setDayWidth(WidgetTester tester, double width) async {
@@ -278,19 +271,21 @@ Future<void> setSlotHeight(WidgetTester tester, double height) async {
   await tester.pumpAndSettle();
 }
 
-/// Opens the calendar bar, shows or hides Saturday and Sunday together and
-/// closes it.
+/// Opens the settings sheet, shows or hides Saturday and Sunday together
+/// and closes it.
 Future<void> toggleWeekends(WidgetTester tester) async {
-  await openBar(tester);
+  await openSettings(tester);
   flipWeekends(tester);
   await tester.pumpAndSettle();
-  await closeBar(tester);
+  await closeSettings(tester);
 }
 
-/// Opens the calendar settings, picks the month layout [label] and closes
-/// them.
+/// Opens the calendar settings, picks the month layout [label], scrolling
+/// it into the sheet's view first, and closes them.
 Future<void> pickMonthLayout(WidgetTester tester, String label) async {
   await openSettings(tester);
+  await tester.ensureVisible(find.text(label));
+  await tester.pumpAndSettle();
   await tester.tap(find.text(label));
   await tester.pumpAndSettle();
   await closeSettings(tester);
@@ -301,15 +296,15 @@ int lanesOf(WidgetTester tester, DateTime day) {
   return ((tester.getSize(dayFinder(day)).height - strip) / lane).floor();
 }
 
-/// Opens the calendar bar, moves its hours slider to [start] to [end]
-/// o'clock through its own callback, and closes the bar.
+/// Opens the settings sheet, moves its hours slider to [start] to [end]
+/// o'clock through its own callback, and closes the sheet.
 Future<void> pickHours(WidgetTester tester, int start, int end) async {
-  await openBar(tester);
+  await openSettings(tester);
   tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
     RangeValues(start.toDouble(), end.toDouble()),
   );
   await tester.pumpAndSettle();
-  await closeBar(tester);
+  await closeSettings(tester);
 }
 
 /// The texts under [finder], in tree order.
@@ -1092,8 +1087,9 @@ void main() {
     expect(ticks, 0);
     expect(controller.debugSlideInstallCount, slides);
 
-    // The bar opens first, as its slide resizes the board.
-    await openBar(tester);
+    // The sheet opens before the count starts, so the count is the
+    // weekday change's alone.
+    await openSettings(tester);
     structural = 0;
     flipWeekends(tester);
     await tester.pumpAndSettle();
@@ -1196,7 +1192,7 @@ void main() {
       // The delete is sent here, and answered a latency later.
       final sent = tester.binding.clock.now();
       await tester.pumpAndSettle();
-      await openBar(tester);
+      await openSettings(tester);
       await tester.pump(latency - tester.binding.clock.now().difference(sent));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
@@ -1235,7 +1231,7 @@ void main() {
       }
       expect(ticks, 0);
       controller.removeAnimationListener(onTick);
-      await closeBar(tester);
+      await closeSettings(tester);
     },
   );
 
@@ -2120,13 +2116,13 @@ void main() {
     "it",
     (tester) async {
       await pumpSeededMonth(tester);
-      await openBar(tester);
+      await openSettings(tester);
       final days = tester.widget<SegmentedButton<int>>(
         find.byKey(shownDaysKey),
       );
       days.onSelectionChanged!(days.selected.difference(const <int>{1}));
       await tester.pumpAndSettle();
-      await closeBar(tester);
+      await closeSettings(tester);
       await tester.tap(find.byTooltip("Next month"));
       await tester.pump(harnessLatency);
       await tester.pumpAndSettle();

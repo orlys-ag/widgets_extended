@@ -15,7 +15,6 @@ import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
@@ -277,23 +276,24 @@ int expectBlockMarks(
   return slots;
 }
 
-/// Sets the open calendar bar's hours to [start] to [end] o'clock through
-/// its slider's own callback, as a drag of it does, and closes the bar.
+/// Opens the settings sheet, sets its hours to [start] to [end] o'clock
+/// through its slider's own callback, as a drag of it does, and closes the
+/// sheet.
 Future<void> pickHours(WidgetTester tester, int start, int end) async {
-  await openBar(tester);
+  await openSettings(tester);
   tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
     RangeValues(start.toDouble(), end.toDouble()),
   );
   await tester.pumpAndSettle();
-  await closeBar(tester);
+  await closeSettings(tester);
 }
 
-/// Shows or hides the weekends through the calendar bar.
+/// Shows or hides the weekends through the settings sheet.
 Future<void> toggleWeekends(WidgetTester tester) async {
-  await openBar(tester);
+  await openSettings(tester);
   flipWeekends(tester);
   await tester.pumpAndSettle();
-  await closeBar(tester);
+  await closeSettings(tester);
 }
 
 /// Two touches [spread] apart up and down around [focal], each moved
@@ -2296,7 +2296,7 @@ void main() {
     }
   });
 
-  testWidgets("HF6 with the bar's AM/PM switch on, Harbor's Day block and "
+  testWidgets("HF6 with the sheet's AM/PM switch on, Harbor's Day block and "
       "Month card write their times on the 12-hour clock", (tester) async {
     await pumpCalendar(
       tester,
@@ -2306,10 +2306,10 @@ void main() {
       ),
       size: const Size(1200.0, 1600.0),
     );
-    await openBar(tester);
+    await openSettings(tester);
     await tester.tap(find.byKey(hourLabelFormatKey));
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
 
     await pickMode(tester, "Day");
     expect(

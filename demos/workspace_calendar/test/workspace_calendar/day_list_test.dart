@@ -3,7 +3,7 @@
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
+import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
@@ -23,23 +23,23 @@ Finder cardFinder(String id) {
   return find.byKey(entryCardKey(id));
 }
 
-/// Opens the calendar bar, sets the hours to [start] to [end] o'clock and
-/// closes it.
+/// Opens the settings sheet, sets the hours to [start] to [end] o'clock
+/// and closes it.
 Future<void> pickHours(WidgetTester tester, int start, int end) async {
-  await openBar(tester);
+  await openSettings(tester);
   tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
     RangeValues(start.toDouble(), end.toDouble()),
   );
   await tester.pumpAndSettle();
-  await closeBar(tester);
+  await closeSettings(tester);
 }
 
-/// Opens the calendar bar, flips its AM/PM switch and closes it.
+/// Opens the settings sheet, flips its AM/PM switch and closes it.
 Future<void> flipHourFormat(WidgetTester tester) async {
-  await openBar(tester);
+  await openSettings(tester);
   await tester.tap(find.byKey(hourLabelFormatKey));
   await tester.pumpAndSettle();
-  await closeBar(tester);
+  await closeSettings(tester);
 }
 
 Finder dayFinder(DateTime day) {
@@ -370,10 +370,10 @@ void main() {
         ..line(color: HarborColors.outline),
     );
 
-    await openBar(tester);
+    await openSettings(tester);
     await tester.tap(find.byKey(hourLabelFormatKey));
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
     expect(inside(time, "9:30 AM"), findsOneWidget);
     expect(inside(gap, "10 AM"), findsOneWidget);
   });
@@ -547,12 +547,12 @@ void main() {
     expect(find.byKey(dayListGapKey(day, 0)), findsOneWidget);
     expect(find.byKey(dayListGapKey(day, 8 * 60)), findsNothing);
 
-    await openBar(tester);
+    await openSettings(tester);
     tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
       const RangeValues(8.0, 18.0),
     );
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
     expect(find.byKey(dayListGapKey(day, 0)), findsNothing);
     expect(find.byKey(dayListGapKey(day, 8 * 60)), findsOneWidget);
   });
@@ -697,7 +697,7 @@ void main() {
     // Setup sanity: every item shows inside the whole day's hours.
     expect(cardFinder("item-1"), findsOneWidget);
 
-    await openBar(tester);
+    await openSettings(tester);
     tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
       const RangeValues(8.0, 18.0),
     );
@@ -713,7 +713,7 @@ void main() {
     );
     expect(find.byKey(itemCardStartsAtKey("item-1")), findsNothing);
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
     expect(cardFinder("item-1"), findsNothing);
     expect(cardFinder("item-3"), findsNothing);
     expect(cardFinder("item-4"), findsNothing);

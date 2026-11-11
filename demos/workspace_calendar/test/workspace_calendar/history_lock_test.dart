@@ -613,6 +613,12 @@ void main() {
 
       // Setup sanity: the calendar opened on the local day of the reading.
       expect(isSelected(today), isTrue);
+      // Today would select that day, so its pill stays hidden.
+      expect(todayButtonFinder().hitTestable(), findsNothing);
+      await tester.tap(find.byKey(dayCellKey(wednesday)).hitTestable());
+      await tester.pumpAndSettle();
+      // Setup sanity: the tap moved the selection off today.
+      expect(isSelected(wednesday), isTrue);
       await tapToday(tester);
       await tester.pumpAndSettle();
       expect(isSelected(today), isTrue);

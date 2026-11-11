@@ -1585,14 +1585,16 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    var notifies = 0;
-    controller.addListener(() {
-      notifies++;
-    });
     var rebuilds = 0;
     final area = find.byKey(calendarDaysAreaKey);
     await tester.tap(find.byTooltip("Pick a month"));
     await tester.pump();
+    // Counted from after the tap, which notifies once for the picker it
+    // opens ([CalendarController.showsSelectedDay]).
+    var notifies = 0;
+    controller.addListener(() {
+      notifies++;
+    });
     final before = tester.getSize(area).height;
     debugOnRebuildDirtyWidget = (element, builtOnce) {
       if (element.widget is CalendarView<String>) {

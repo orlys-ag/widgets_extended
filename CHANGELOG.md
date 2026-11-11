@@ -106,6 +106,14 @@ draws in the calendar's theme, shows each zone's offset from UTC, and takes
 its words from seven `CalendarLocalizations` members with English defaults:
 `deviceZoneName`, `utcOffset`, `addZonesLabel`, `searchZonesHint`,
 `noZonesMessage`, `removeZoneTooltip` and `zonesBackTooltip`.
+- Added `CalendarController.showsSelectedDay`: false while the month picker
+shows, while Agenda's or Day's calendar card, unfolded, shows another month
+than the selected day's, and while its week strip, folded, has been dragged
+to days without the selected day; true otherwise, on an unbound controller,
+and after `goTo` of the selected day. A controller now notifies once for a
+browse, a fold or the month picker where this value changes, so a host
+hears a slide of the card, which notified nothing before, and a `goTo` that
+brings the card back or closes the picker notifies once, as one event.
 - Added `CalendarEditPolicy.mayOverlap`, which answers whether a change may
 share time with one other entry, and `CalendarOverlapCandidate`, the change
 it is asked about: its start, its end and the entry it changes, none for a

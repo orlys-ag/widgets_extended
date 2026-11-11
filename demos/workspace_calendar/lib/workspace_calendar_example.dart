@@ -1,6 +1,6 @@
 /// A workspace calendar over a calendar API: the module's [CalendarView], in
-/// Agenda, Day, Week and Month, under the workspace's app bar, the calendar
-/// bar the app bar opens, and the settings sheet.
+/// Agenda, Day, Week and Month, under the workspace's app bar, with its
+/// Today pill, and the settings sheet.
 ///
 /// The calendar reads the range it shows through a [CachingCalendarStore]
 /// over a [CalendarApiSource], which caches the days it has read and
@@ -12,21 +12,18 @@
 /// carry a dot for each type of item they have, in the type's Harbor
 /// colour ([harborDayBadges]).
 ///
-/// The app bar's chevron opens a bar under it, and closes it again, the
-/// bar sliding down from under the app bar, or back up, over
-/// [harborMotionDuration]: the calendar bar ([CalendarBar]), holding
-/// Today, the edit mode switch, the weekday a week starts on, which every
-/// view's weeks and columns follow, and which weekdays show, the hours the
-/// calendar shows and schedules in, and whether Week and Day label them
-/// AM/PM. The calendar opens on Agenda, out of edit mode unless it is
-/// given it, and with the bar closed. Out of edit mode the calendar is
-/// read-only, so nothing is moved, resized or created, and a tap on an
-/// item opens its form read-only. The settings sheet, which opens from the
-/// app bar's More menu, chooses how Month fits its weeks, the length of the
-/// calendar's slots, which the item form's times step by too, and on the
-/// calendar's [CalendarController] the least width of a day in Week, Day
-/// and Month and the least height of the timed grids' slots, which a pinch
-/// on a grid sets too.
+/// The settings sheet, which opens from the app bar's More menu, holds in
+/// its first part the edit mode switch, the weekday a week starts on,
+/// which every view's weeks and columns follow, and which weekdays show,
+/// the length of the calendar's slots, which the item form's times step by
+/// too, and the hours the calendar shows and schedules in, with whether
+/// Week and Day label them AM/PM. The calendar opens on Agenda, out of edit
+/// mode unless it is given it. Out of edit mode the calendar is read-only,
+/// so nothing is moved, resized or created, and a tap on an item opens its
+/// form read-only. Under a divider, the sheet chooses how Month fits its
+/// weeks, and on the calendar's [CalendarController] the least width of a
+/// day in Week, Day and Month and the least height of the timed grids'
+/// slots, which a pinch on a grid sets too.
 ///
 /// The sheet also chooses the history lock, which in edit mode keeps the
 /// past as it is: no item before today, or with its second switch before
@@ -40,8 +37,12 @@
 /// the gestures keep to free time and the mock API refuses an item whose
 /// new times share time with another.
 ///
-/// Today, in the calendar bar, selects today, or the shown day nearest it,
-/// in every view, and slides a strip a drag moved away back to it.
+/// The app bar's Today pill ([TodayPill]) shows while the selected day is
+/// not the shown day nearest today, on the clock of the store's zone, or
+/// the calendar shows a month or a strip of days moved off the selected
+/// day, or the month picker. A tap on it selects that day in every view,
+/// slides a strip a drag moved away back to it and closes the month
+/// picker, and the pill fades out.
 ///
 /// The app bar's time zone button, which names the city of the store's
 /// zone or the device's zone, opens a [CalendarZonePanel] in a bottom
@@ -64,7 +65,6 @@ import 'package:widgets_extended/widgets_extended.dart';
 
 import 'workspace_calendar/calendar_api.dart';
 import 'workspace_calendar/calendar_api_source.dart';
-import 'workspace_calendar/calendar_bar.dart';
 import 'workspace_calendar/calendar_item.dart';
 import 'workspace_calendar/calendar_settings.dart';
 import 'workspace_calendar/harbor_theme.dart';
@@ -72,6 +72,7 @@ import 'workspace_calendar/item_builders.dart';
 import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';
 import 'workspace_calendar/settings_sheet.dart';
+import 'workspace_calendar/today_pill.dart';
 
 /// The entries of the app bar's More menu.
 enum _MoreAction { settings }
@@ -104,7 +105,7 @@ class WorkspaceCalendarExample extends StatelessWidget {
   /// minute. Null reads [DateTime.now].
   final DateTime Function()? clock;
 
-  /// Whether the calendar opens in edit mode, which the calendar bar's
+  /// Whether the calendar opens in edit mode, which the settings sheet's
   /// edit mode switch then turns on and off.
   final bool editing;
 
@@ -168,8 +169,7 @@ class _WorkspaceCalendar extends StatefulWidget {
   }
 }
 
-class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
-    with SingleTickerProviderStateMixin {
+class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
   late final CachingCalendarStore<ItemPayload> _store;
 
   /// The API [_store] reads and writes through, kept so a
@@ -185,10 +185,14 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// The zones the user added in the time zone sheet's panel.
   final CalendarZoneController _zones = CalendarZoneController();
 
-  /// The calendar's view, selected day and zoom sizes, which Today and the
-  /// settings sheet's sliders set; the calendar opens on Agenda.
-  final CalendarController _controller = CalendarController(
+  /// The calendar's view, selected day and zoom sizes, which the Today
+  /// pill and the settings sheet's sliders set. The calendar opens on
+  /// Agenda and today, a day the pill reads before the calendar binds the
+  /// controller. Made where [initState] first reads it, after [_store],
+  /// whose zone [_today] reads.
+  late final CalendarController _controller = CalendarController(
     view: CalendarViewKind.agenda,
+    selectedDay: _today(),
   );
 
   /// Whether the calendar shows Month, which the Scaffold's keyboard inset
@@ -196,19 +200,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   /// zoom builds nothing here.
   bool _showsMonth = false;
 
-  /// What the calendar bar and the settings sheet last chose, and before
-  /// they choose, the defaults with the edit mode the calendar was given.
+  /// What the settings sheet last chose, and before it chooses, the
+  /// defaults with the edit mode the calendar was given.
   late CalendarSettings _settings = CalendarSettings(editing: widget.editing);
-
-  /// Whether the calendar bar is open, or opening.
-  bool _barOpen = false;
-
-  /// How far the calendar bar shows, 0 closed and 1 open, animated on
-  /// [harborMotionCurve] by [_toggleBar].
-  late final AnimationController _barController = AnimationController(
-    vsync: this,
-    duration: harborMotionDuration,
-  );
 
   @override
   void initState() {
@@ -238,7 +232,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     // unmount before it does.
     _controller.dispose();
     _store.dispose();
-    _barController.dispose();
     _zones.dispose();
     super.dispose();
   }
@@ -271,17 +264,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
   }
 
   /// Closes the month picker, then selects today, or the shown day nearest
-  /// it.
+  /// it, bringing a strip a drag moved back to it.
   void _goToToday() {
     _controller.goTo(_today());
-  }
-
-  /// Opens the calendar bar, or closes it.
-  void _toggleBar() {
-    setState(() {
-      _barOpen = !_barOpen;
-    });
-    _barController.animateTo(_barOpen ? 1.0 : 0.0, curve: harborMotionCurve);
   }
 
   void _openSettings() {
@@ -293,9 +278,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
     );
   }
 
-  /// Applies what the calendar bar or the settings sheet chose; the
-  /// calendar itself moves a selected day new weekdays hide to the nearest
-  /// shown one.
+  /// Applies what the settings sheet chose; the calendar itself moves a
+  /// selected day new weekdays hide to the nearest shown one.
   void _applySettings(CalendarSettings settings) {
     setState(() {
       _settings = settings;
@@ -480,14 +464,14 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
               ),
             ),
           ),
-          IconButton(
-            tooltip: "Calendar settings bar",
-            onPressed: _toggleBar,
-            icon: AnimatedRotation(
-              turns: _barOpen ? 0.5 : 0.0,
-              duration: harborMotionDuration,
-              curve: harborMotionCurve,
-              child: const Icon(Icons.settings),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4.0),
+            child: TodayPill(
+              controller: _controller,
+              today: _today,
+              weekdays: _settings.weekdays,
+              clock: widget.clock,
+              onPressed: _goToToday,
             ),
           ),
           PopupMenuButton<_MoreAction>(
@@ -520,7 +504,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          _buildBar(),
           Expanded(
             child: CalendarView<ItemPayload>(
               store: _store,
@@ -558,35 +541,4 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
       ),
     );
   }
-
-  /// The calendar bar, at the height [_barController] gives it, its bottom
-  /// part showing first so it slides down from under the app bar; nothing
-  /// while it is closed.
-  Widget _buildBar() {
-    return AnimatedBuilder(
-      animation: _barController,
-      child: CalendarBar(
-        key: calendarBarKey,
-        settings: _settings,
-        onChanged: _applySettings,
-        onToday: _goToToday,
-      ),
-      builder: (context, child) {
-        final shown = _barController.value;
-        if (shown == 0.0) {
-          return const SizedBox.shrink();
-        }
-        return ClipRect(
-          child: Align(
-            alignment: Alignment.bottomCenter,
-            heightFactor: shown,
-            child: child,
-          ),
-        );
-      },
-    );
-  }
 }
-
-/// The key of the calendar bar the app bar's chevron opens.
-const ValueKey<String> calendarBarKey = ValueKey<String>("calendar-bar");

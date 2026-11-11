@@ -312,10 +312,10 @@ void main() {
       "and slides through the weekdays alone, and it and Day read only "
       "them", (tester) async {
     final api = await pumpDay(tester, readAhead: 0);
-    await openBar(tester);
+    await openSettings(tester);
     flipWeekends(tester);
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
     expect(stripDays(tester), run(april(20), 5));
 
     final lists = listCalls(api);

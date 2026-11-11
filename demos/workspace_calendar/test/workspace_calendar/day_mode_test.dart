@@ -5,7 +5,6 @@ library;
 import 'dart:ui' as ui;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
@@ -137,15 +136,15 @@ Future<void> step(WidgetTester tester, String tooltip, {int times = 1}) async {
   }
 }
 
-/// Opens the calendar bar, sets the hours to [start] to [end] o'clock and
-/// closes it.
+/// Opens the settings sheet, sets the hours to [start] to [end] o'clock
+/// and closes it.
 Future<void> setHours(WidgetTester tester, int start, int end) async {
-  await openBar(tester);
+  await openSettings(tester);
   tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
     RangeValues(start.toDouble(), end.toDouble()),
   );
   await tester.pumpAndSettle();
-  await closeBar(tester);
+  await closeSettings(tester);
 }
 
 /// The line the timed grid's foreground marks the current time with.
@@ -1018,10 +1017,10 @@ void main() {
     expect(cellRect(tester, 24, dayColumn).bottom, near(bottom.top));
 
     // AM/PM names the hours to a screen reader as the gutter does.
-    await openBar(tester);
+    await openSettings(tester);
     await tester.tap(find.byKey(hourLabelFormatKey));
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
     expect(
       find.bySemanticsLabel("Tuesday, April 21, 3 more items before 8 AM"),
       findsOneWidget,

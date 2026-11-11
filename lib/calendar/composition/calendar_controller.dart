@@ -1,7 +1,13 @@
 part of 'calendar_view.dart';
 
-/// What a controller's view, selected day and visible range read.
-typedef _Observed = ({CalendarViewKind? view, DateTime? day, _Range? range});
+/// What a controller's view, selected day, visible range and
+/// [CalendarController.showsSelectedDay] read.
+typedef _Observed = ({
+  CalendarViewKind? view,
+  DateTime? day,
+  _Range? range,
+  bool shows,
+});
 
 /// The view, the selected day, the visible range and the zoom sizes of a
 /// [CalendarView], which its host sets and listens to.
@@ -15,7 +21,8 @@ typedef _Observed = ({CalendarViewKind? view, DateTime? day, _Range? range});
 /// A set on a bound controller goes through its calendar, which applies
 /// it as the header would and notifies once where a value changed, so
 /// each listener reads what the calendar shows. An event in the calendar,
-/// a menu pick, a tap, a chevron step or a scroll that selects a day,
+/// a menu pick, a tap, a chevron step or a scroll that selects a day, or
+/// a browse, a fold or the month picker that changes [showsSelectedDay],
 /// notifies the same way, within the event. A change the calendar makes
 /// as it is built, given this controller, new weekdays, new views or a new
 /// store, or left, applies its values at once and notifies once after
@@ -289,6 +296,24 @@ base class CalendarController extends ChangeNotifier {
     return _binding == null ? null : _visibleRange;
   }
 
+  /// Whether the bound calendar shows its selected day as [goTo] of that
+  /// day leaves it. False while the month picker shows; while the
+  /// calendar card of Agenda or Day, unfolded, shows a month other than
+  /// the selected day's, which a slide or a chevron moved it to; and while
+  /// the card's week strip, folded, shows a week's count of shown days
+  /// without the selected day, a drag having moved it. True otherwise, and
+  /// on a controller bound to no calendar.
+  ///
+  /// The strip's days are a week's count of shown days around the day a
+  /// drag last brought to its middle, which are the days it shows at rest.
+  /// The card opens a new strip, on a week of the month the card shows, at
+  /// each fold, once a drag on its pull tab moves the fold, and for new
+  /// weekdays; until a drag moves that strip, its days are the shown days
+  /// of the week it opened on.
+  bool get showsSelectedDay {
+    return _binding?._showsSelectedDay ?? true;
+  }
+
   /// Brings the calendar to [day]: on a bound controller, closes the month
   /// picker, then where the shown day nearest [day] is selected brings the
   /// calendar card or the week strip back to it from where a drag or a
@@ -312,7 +337,12 @@ base class CalendarController extends ChangeNotifier {
   }
 
   _Observed get _observed {
-    return (view: _view, day: _selectedDay, range: visibleRange);
+    return (
+      view: _view,
+      day: _selectedDay,
+      range: visibleRange,
+      shows: showsSelectedDay,
+    );
   }
 
   /// Binds [state]. A state bound before switches to a copy of this
