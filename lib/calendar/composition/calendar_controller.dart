@@ -302,7 +302,9 @@ base class CalendarController extends ChangeNotifier {
   /// the selected day's, which a slide or a chevron moved it to; and while
   /// the card's week strip, folded, shows a week's count of shown days
   /// without the selected day, a drag having moved it. True otherwise, and
-  /// on a controller bound to no calendar.
+  /// on a controller bound to no calendar. In Week and Month, which show no
+  /// card, only the month picker makes it false; a card moved in Agenda or
+  /// Day counts again once either view shows it.
   ///
   /// The strip's days are a week's count of shown days around the day a
   /// drag last brought to its middle, which are the days it shows at rest.

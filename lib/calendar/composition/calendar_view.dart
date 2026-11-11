@@ -111,12 +111,12 @@ final class CalendarEntryTapDetails<T> {
 ///   on it moves, a tap on it switching; a downward drag on the folded
 ///   strip unfolds it too. Once folded the week strip takes its place,
 ///   opening on that week.
-/// - Day: the calendar card folded, its week strip a week's worth of days
-///   whose days a tap selects and which a drag slides day by day without
-///   selecting, the header naming the month of the day at its middle; and
-///   under it a timed grid of the selected day, with no day header, whose
-///   blocks show their times and summaries. The pull tab unfolds the
-///   month, and a drag up the grid folds it again.
+/// - Day: the calendar card over a timed grid of the selected day, with no
+///   day header, whose blocks show their times and summaries. The card
+///   folds and unfolds as in Agenda, a drag up the grid folding it; folded,
+///   its week strip is a week's worth of days whose days a tap selects and
+///   which a drag slides day by day without selecting, the header naming
+///   the month of the day at its middle.
 /// - Week: a timed grid of the selected day's week under the header's
 ///   card, its days in columns under a day header whose tap selects a day.
 /// - Month: the month's weeks under the header's card, each entry a chip
@@ -137,6 +137,16 @@ final class CalendarEntryTapDetails<T> {
 ///   start leaves no slot of the store's hours that day whose start and
 ///   end the day's clock both read, as where the clock skips the start or
 ///   the end of each, it reports [onCreateRefused] and marks nothing.
+///
+/// The calendar card opens on its month, in every view. A change of view,
+/// whether a menu pick, the view shown picked again, a set of
+/// [CalendarController.view], new [views] or a tap on a day in Month,
+/// leaves the card and the month picker as they are: Agenda and Day show
+/// the card folded or not as it was, on the month a chevron or a slide
+/// moved it to and with its strip on the days a drag moved it to; Week and
+/// Month, which show no card, show the selected day's week or month,
+/// which the header names, and leave the card waiting for Agenda or Day.
+/// An open month picker stays open on its year.
 ///
 /// An entry runs from its start to its end ([CalendarEntry]): Week and Day
 /// draw a timed entry as one block per shown day it covers, at its exact
@@ -169,11 +179,18 @@ final class CalendarEntryTapDetails<T> {
 /// under the header as the header's card grows to hold it. While it shows,
 /// the title names its year, and the chevrons or a swipe across it step a
 /// year; a month picked selects its day of the selected day's day of the
-/// month, as a month step does. [headerBuilder] builds the header in
-/// place of the built-in one, and [showsHeader] false builds none, nor in
-/// Week and Month the header's card. The built-in header puts a
-/// transparent [Material] above itself where none is above, and its view
-/// menu needs [MaterialLocalizations] above the calendar.
+/// month, as a month step does. The header's Today button shows while a
+/// tap on it would change what the calendar shows: while the selected day
+/// is not the shown day nearest today, which it selects, or the calendar
+/// does not show its selected day ([CalendarController.showsSelectedDay]),
+/// which it brings back; a tap also closes the month picker. Its edit mode
+/// toggle, where [onEditableChanged] is given, reports the opposite of
+/// [editable], and its view button, the icon of the view shown, opens the
+/// view menu. [headerBuilder] builds the header in place of the built-in
+/// one, and [showsHeader] false builds none, nor in Week and Month the
+/// header's card. The built-in header puts a transparent [Material] above
+/// itself where none is above, and its view menu needs
+/// [MaterialLocalizations] above the calendar.
 ///
 /// [controller] holds the view and the selected day, which the host sets
 /// and listens to, the range of days the calendar asks [store] to show,
@@ -236,6 +253,7 @@ class CalendarView<T> extends StatefulWidget {
     this.controller,
     this.views = CalendarViewKind.values,
     this.editable = false,
+    this.onEditableChanged,
     this.editPolicy,
     this.weekdays = CalendarWeekdaySet.all,
     this.slotMinutes = CalendarDates.defaultSlotMinutes,
@@ -278,7 +296,7 @@ class CalendarView<T> extends StatefulWidget {
 
   /// The views the header's menu offers, in its order, each once; the
   /// calendar opens on the first unless [controller] names another. With
-  /// one, the header names it with no menu.
+  /// one, the built-in header has no view button.
   final List<CalendarViewKind> views;
 
   /// Whether the calendar is in edit mode: Week's and Day's blocks move
@@ -288,6 +306,12 @@ class CalendarView<T> extends StatefulWidget {
   /// [CalendarEditPolicy.dayLimit] and [CalendarEditPolicy.allowsOverlaps]
   /// when it takes a policy, and asks it nothing else.
   final bool editable;
+
+  /// A tap on the built-in header's edit mode toggle, with the mode it
+  /// asks for, the opposite of [editable], which the host shows by setting
+  /// [editable]; null builds no toggle. A custom header receives it as
+  /// [CalendarHeaderDetails.onEditableChanged].
+  final ValueChanged<bool>? onEditableChanged;
 
   /// What may change in edit mode, and where a new entry may start
   /// ([CalendarEditPolicy]): Week's and Day's moves, resizes and creates,
@@ -583,18 +607,19 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   DateTime? _browsedDay;
 
   /// Whether a drag of the week strip set [_browsedDay], which is then the
-  /// day at the strip's middle, rather than a slide or a chevron. False
-  /// once that strip is gone, at a fold short of the week
-  /// ([_handleFold]) or new weekdays, as the next strip opens on the week
-  /// of [monthFoldDay].
+  /// day at the strip's middle, rather than a slide or a chevron. The
+  /// strip a switch to Week or Month takes away comes back with that day
+  /// at its middle. False once a fold short of the week ([_handleFold]) or
+  /// new weekdays end that strip, as the next one opens on the week of
+  /// [monthFoldDay].
   bool _browsedByStrip = false;
 
   /// The month grid of the selected day.
   late CalendarMonthGrid _grid;
 
-  /// Whether the calendar card settles on the selected day's week rather
-  /// than its month. Only meaningful in Agenda and Day, which open
-  /// unfolded and folded.
+  /// Whether the calendar card settles on its week strip rather than its
+  /// month. Only Agenda and Day show the card; Week and Month keep it as
+  /// it is for them.
   bool _collapsed = false;
 
   /// Whether the month picker shows, and the year it shows.
@@ -798,7 +823,6 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       controller._view = view;
       controller._selectedDay = day;
       _grid = CalendarMonthGrid.of(day, weekdays: widget.weekdays);
-      _resetForView(view);
     } else {
       controller._view = shown.view;
       controller._selectedDay = shown.day;
@@ -1112,22 +1136,10 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     }
   }
 
-  /// Shows [view], whose calendar card, in Agenda and Day, opens at once on
-  /// the month and on the selected day's week, the month picker closed.
+  /// Shows [view], leaving the calendar card's fold and browse and the
+  /// month picker as they are.
   void _writeView(CalendarViewKind view) {
     _controller._view = view;
-    _resetForView(view);
-  }
-
-  void _resetForView(CalendarViewKind view) {
-    _collapsed = view == CalendarViewKind.day;
-    _browsedDay = null;
-    // Before the fold's write, which runs [_handleFold]: a bind writes it
-    // in a build, where no event may run.
-    _browsedByStrip = false;
-    _picksMonth = false;
-    _collapseController.value = _collapsed ? 1.0 : 0.0;
-    _pickerShown.value = 0.0;
   }
 
   void _select(DateTime day) {
@@ -1147,7 +1159,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
 
   /// A menu pick, a header's [CalendarHeaderDetails.onSelectView] or a
   /// host's set of the view: [view] must be listed. A pick of the view
-  /// shown runs the view switch's resets too.
+  /// shown changes nothing, and so notifies nothing.
   void _selectView(CalendarViewKind view) {
     assert(
       _views.contains(view),
@@ -1231,12 +1243,19 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     }
   }
 
+  /// [_browsedDay] where the view shows the calendar card, and null in
+  /// Week and Month, which show the selected day's week or month while the
+  /// card waits.
+  DateTime? get _shownBrowse {
+    return _showsCalendarCard ? _browsedDay : null;
+  }
+
   /// [CalendarController.showsSelectedDay] of this calendar.
   bool get _showsSelectedDay {
     if (_picksMonth) {
       return false;
     }
-    final browsed = _browsedDay;
+    final browsed = _shownBrowse;
     if (browsed == null) {
       return true;
     }
@@ -1540,7 +1559,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     return CalendarHeaderDetails(
       view: _view,
       views: _views,
-      day: _browsedDay ?? _day,
+      day: _shownBrowse ?? _day,
       pickerYear: _picksMonth ? _pickerYear : null,
       stepUnit: _stepUnit,
       onPrevious: _stepBack,
@@ -1548,7 +1567,29 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       onSelectView: _selectView,
       onOpenPicker: _openMonthPicker,
       onClosePicker: _closeMonthPicker,
+      onToday: _goToToday,
+      canGoToToday: _canGoToToday,
+      editable: widget.editable,
+      onEditableChanged: widget.onEditableChanged,
     );
+  }
+
+  /// The header's Today: [_goTo] of the day the calendar marks as today.
+  void _goToToday() {
+    _goTo(_now.value.today);
+  }
+
+  /// [CalendarHeaderDetails.canGoToToday]: whether the selected day is not
+  /// the shown day nearest today, or the calendar does not show it.
+  bool get _canGoToToday {
+    if (!_showsSelectedDay) {
+      return true;
+    }
+    final target = CalendarDates.shownDayNear(
+      _dayIn(_now.value.today),
+      widget.weekdays,
+    );
+    return CalendarDates.dayNumber(target) != CalendarDates.dayNumber(_day);
   }
 
   /// The header in its place, built in a [Builder] there, so a throw in
@@ -1604,6 +1645,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       onBrowseStrip: _browseStrip,
       onSettle: _settleCollapse,
       onUnfold: _unfold,
+      stripMiddleDay: _browsedByStrip ? _browsedDay : null,
       dayBadges: widget.dayBadges,
     );
   }

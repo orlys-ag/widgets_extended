@@ -476,6 +476,9 @@ void main() {
 
     controller.view = CalendarViewKind.day;
     await tester.pumpAndSettle();
+    // Day's card opens on its month, which the pull tab folds.
+    await tester.tap(find.byKey(calendarPullTabKey));
+    await tester.pumpAndSettle();
     final selected = find.byKey(weekStripDayKey(april28)).hitTestable();
     expect(selected, findsOneWidget);
     final strip = find.byType(WeekStrip<String>);
@@ -535,6 +538,9 @@ void main() {
     expect(notifies.count, 1);
 
     controller.view = CalendarViewKind.day;
+    await tester.pumpAndSettle();
+    // Day's card opens on its month, which the pull tab folds.
+    await tester.tap(find.byKey(calendarPullTabKey));
     await tester.pumpAndSettle();
     notifies.clear();
     final selected = find.byKey(weekStripDayKey(tuesday)).hitTestable();
@@ -596,6 +602,9 @@ void main() {
     final controller = CalendarController(view: CalendarViewKind.day);
     addTearDown(controller.dispose);
     await pumpCalendar(tester, controller);
+    // Day's card opens on its month, which the pull tab folds.
+    await tester.tap(find.byKey(calendarPullTabKey));
+    await tester.pumpAndSettle();
     final selected = find.byKey(weekStripDayKey(tuesday)).hitTestable();
     await dragStripDays(tester, 7);
     // Setup sanity: the strip moved a week on, off the selected day, whose
@@ -627,6 +636,9 @@ void main() {
     final controller = CalendarController(view: CalendarViewKind.day);
     addTearDown(controller.dispose);
     await pumpCalendar(tester, controller);
+    // Day's card opens on its month, which the pull tab folds.
+    await tester.tap(find.byKey(calendarPullTabKey));
+    await tester.pumpAndSettle();
     final selected = find.byKey(weekStripDayKey(tuesday)).hitTestable();
     await dragStripDays(tester, 7);
     // Setup sanity: the strip moved a week on, off the selected day.

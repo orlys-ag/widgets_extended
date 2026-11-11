@@ -257,20 +257,6 @@ int listCount(MockCalendarApi api) {
   }).length;
 }
 
-/// Moves the open settings sheet's day width slider to [width] through
-/// its own callback.
-Future<void> setDayWidth(WidgetTester tester, double width) async {
-  tester.widget<Slider>(find.byKey(dayWidthSliderKey)).onChanged!(width);
-  await tester.pumpAndSettle();
-}
-
-/// Moves the open settings sheet's slot height slider to [height] through
-/// its own callback.
-Future<void> setSlotHeight(WidgetTester tester, double height) async {
-  tester.widget<Slider>(find.byKey(slotHeightSliderKey)).onChanged!(height);
-  await tester.pumpAndSettle();
-}
-
 /// Opens the settings sheet, shows or hides Saturday and Sunday together
 /// and closes it.
 Future<void> toggleWeekends(WidgetTester tester) async {
@@ -391,7 +377,7 @@ void main() {
     "in Agenda",
     (tester) async {
       await pumpCalendar(tester);
-      expect(find.text("Agenda"), findsOneWidget);
+      expect(viewButtonShowing("Agenda"), findsOneWidget);
       expect(find.byType(DayList<ItemPayload>), findsOneWidget);
       expect(find.byType(DayCell), findsNWidgets(30));
 
@@ -717,7 +703,7 @@ void main() {
       await pumpSeededMonth(tester);
       await tester.tap(stripFinder(april(22)));
       await tester.pumpAndSettle();
-      expect(find.text("Day"), findsOneWidget);
+      expect(viewButtonShowing("Day"), findsOneWidget);
       expect(gridDay(tester), april(22));
     },
   );
@@ -729,7 +715,7 @@ void main() {
       await pumpSeededMonth(tester);
       await tapEmptyPart(tester, april(22));
       expect(find.text("New item"), findsNothing);
-      expect(find.text("Day"), findsOneWidget);
+      expect(viewButtonShowing("Day"), findsOneWidget);
       expect(gridDay(tester), april(22));
     },
   );
@@ -742,7 +728,7 @@ void main() {
     await tester.pump(harnessLatency);
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
-    expect(find.text("Day"), findsOneWidget);
+    expect(viewButtonShowing("Day"), findsOneWidget);
     expect(gridDay(tester), may(1));
   });
 
@@ -1722,7 +1708,7 @@ void main() {
 
       tester.semantics.tap(find.semantics.byLabel("Wednesday, April 22"));
       await tester.pumpAndSettle();
-      expect(find.text("Day"), findsOneWidget);
+      expect(viewButtonShowing("Day"), findsOneWidget);
       expect(gridDay(tester), april(22));
       semantics.dispose();
     },
@@ -1793,7 +1779,7 @@ void main() {
     await tester.tap(moreFinder());
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
-    expect(find.text("Day"), findsOneWidget);
+    expect(viewButtonShowing("Day"), findsOneWidget);
     expect(gridDay(tester), april(22));
   });
 
@@ -1897,9 +1883,7 @@ void main() {
     final viewport = monthViewport(tester);
     expect(viewport.horizontalPosition!.maxScrollExtent, 0.0);
 
-    await openSettings(tester);
-    await setDayWidth(tester, 100.0);
-    await closeSettings(tester);
+    await setLeastSizes(tester, dayWidth: 100.0);
     expect(tester.getSize(dayFinder(april(22))).width, near(100.0));
 
     // Each letter stays over its column as the board scrolls across.
@@ -1938,9 +1922,7 @@ void main() {
   testWidgets("M36 under Fit to screen a wide day scrolls the board across "
       "alone, the weeks keeping their share of its height", (tester) async {
     await pumpMonth(tester, seed: hourlyTasks(april(22), 8, 8));
-    await openSettings(tester);
-    await setDayWidth(tester, 100.0);
-    await closeSettings(tester);
+    await setLeastSizes(tester, dayWidth: 100.0);
 
     final viewport = monthViewport(tester);
     final board = tester.getRect(monthBoardFinder());
@@ -1956,9 +1938,7 @@ void main() {
     await pickMode(tester, "Week");
     await tester.tap(find.byKey(dayHeaderKey(april(26))));
     await tester.pumpAndSettle();
-    await openSettings(tester);
-    await setDayWidth(tester, 100.0);
-    await closeSettings(tester);
+    await setLeastSizes(tester, dayWidth: 100.0);
 
     await pickMode(tester, "Month");
     final board = tester.getRect(monthBoardFinder());
@@ -1969,9 +1949,7 @@ void main() {
 
     expect(shows(april(26)), isTrue);
 
-    await openSettings(tester);
-    await setDayWidth(tester, 120.0);
-    await closeSettings(tester);
+    await setLeastSizes(tester, dayWidth: 120.0);
     expect(shows(april(26)), isTrue);
   });
 
@@ -1992,15 +1970,17 @@ void main() {
       return viewport.rectOfCell(3, 2)!.height;
     }
 
-    await openSettings(tester);
-    await setSlotHeight(tester, CalendarController.minSlotHeightLow);
-    await closeSettings(tester);
+    await setLeastSizes(
+      tester,
+      slotHeight: CalendarController.minSlotHeightLow,
+    );
     expect(height(), near(share));
     expect(viewport.verticalPosition!.maxScrollExtent, 0.0);
 
-    await openSettings(tester);
-    await setSlotHeight(tester, CalendarController.minSlotHeightHigh);
-    await closeSettings(tester);
+    await setLeastSizes(
+      tester,
+      slotHeight: CalendarController.minSlotHeightHigh,
+    );
     expect(height(), near(3 * share));
     // The fourth week lies below the board's height at the new scale, and
     // above it at the end of the scroll.
@@ -2032,9 +2012,7 @@ void main() {
     expect(tester.getSize(bar).height, lane);
     expect(inBar(find.text("09:00-10:00")), findsNothing);
 
-    await openSettings(tester);
-    await setDayWidth(tester, 100.0);
-    await closeSettings(tester);
+    await setLeastSizes(tester, dayWidth: 100.0);
     // Sanity: the weeks rest short of a card week; the fifth, which holds
     // no item, rests at its share.
     expect(
@@ -2043,9 +2021,7 @@ void main() {
     );
     expect(tester.getSize(bar).height, lane);
 
-    await openSettings(tester);
-    await setSlotHeight(tester, 18.0);
-    await closeSettings(tester);
+    await setLeastSizes(tester, slotHeight: 18.0);
     expect(tester.getSize(bar).height, monthCardExtent);
     expect(inBar(find.text("Standup")), findsOneWidget);
     expect(inBar(find.text("09:00-10:00")), findsOneWidget);
@@ -2055,9 +2031,7 @@ void main() {
       near(strip + 4 * monthCardExtent),
     );
 
-    await openSettings(tester);
-    await setDayWidth(tester, 96.0);
-    await closeSettings(tester);
+    await setLeastSizes(tester, dayWidth: 96.0);
     expect(inBar(find.text("09:00-10:00")), findsNothing);
   });
 
@@ -2066,10 +2040,7 @@ void main() {
     tester,
   ) async {
     await pumpMonth(tester, seed: hourlyTasks(april(22), 8, 8));
-    await openSettings(tester);
-    await setDayWidth(tester, 100.0);
-    await setSlotHeight(tester, 18.0);
-    await closeSettings(tester);
+    await setLeastSizes(tester, dayWidth: 100.0, slotHeight: 18.0);
     // A 1.125 scale of 136 px weeks rests at 153 px, which holds three
     // card lanes: two cards and the banner.
     expect(find.text("+6 more"), findsOneWidget);

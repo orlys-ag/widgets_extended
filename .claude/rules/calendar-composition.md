@@ -19,8 +19,9 @@ The contract of `CalendarView`, `CalendarController`, the header, the zone panel
 - **`CalendarController`** is listenable and holds the view, the selected
   day, the visible range and the zoom sizes, which the host sets and listens
   to.
-- **The header** (the title, the chevrons, the view menu and the month
-  picker) is built in; a parameter hides it and a builder replaces it.
+- **The header** (the title, the chevrons, the Today button, the edit mode
+  toggle, the view button and its menu, and the month picker) is built in;
+  a parameter hides it and a builder replaces it.
 - **The zone panel** (`CalendarZonePanel`) lists inline the device's zone,
   the zones a host's `CalendarZoneController` holds and every loaded zone,
   and reports the one the user picks.

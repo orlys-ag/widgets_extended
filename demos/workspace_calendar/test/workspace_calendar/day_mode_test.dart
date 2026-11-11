@@ -241,9 +241,10 @@ void main() {
     final requests = api.requests.length;
     await pickMode(tester, "Day");
 
-    expect(find.text("Day"), findsOneWidget);
+    expect(viewButtonShowing("Day"), findsOneWidget);
     expect(gridDay(tester), today);
-    expect(find.byKey(dayCellKey(today)), findsNothing);
+    // The card shows its month, as Agenda left it.
+    expect(find.byKey(dayCellKey(today)), findsOneWidget);
     expect(find.byType(DayList<ItemPayload>), findsNothing);
     expect(find.byTooltip("Add item"), findsNothing);
     expect(find.byTooltip("Previous day"), findsOneWidget);
@@ -403,6 +404,9 @@ void main() {
     expect(readTo.weekday, DateTime.sunday);
     final lists = listCalls(api);
     await pickMode(tester, "Day");
+    // Folded, so the card's month, which reads the grid of each month it
+    // shows, leaves the reads to Day.
+    await foldCard(tester);
     expect(listCalls(api), lists);
 
     await step(
@@ -897,11 +901,7 @@ void main() {
     await pumpCalendar(tester, api: api);
     // Slots of 12 px, so a block's lines get its rows times 12, less its
     // 1 px margins and 3 px paddings.
-    await openSettings(tester);
-    tester.widget<Slider>(find.byKey(slotHeightSliderKey)).onChanged!(12.0);
-    await tester.pumpAndSettle();
-    await tester.tapAt(const Offset(195.0, 20.0));
-    await tester.pumpAndSettle();
+    await setLeastSizes(tester, slotHeight: 12.0);
     await pickMode(tester, "Day");
 
     Finder lineOf(String id, String text) {
@@ -1050,12 +1050,8 @@ void main() {
     await pumpCalendar(tester, api: api);
     await pickMode(tester, "Day");
     await setHours(tester, 8, 14);
-    await openSettings(tester);
     // 24 slots of 48 px, taller than the grid, so it scrolls.
-    tester.widget<Slider>(find.byKey(slotHeightSliderKey)).onChanged!(48.0);
-    await tester.pumpAndSettle();
-    await tester.tapAt(const Offset(195.0, 20.0));
-    await tester.pumpAndSettle();
+    await setLeastSizes(tester, slotHeight: 48.0);
 
     final grid = gridViewport(tester);
     final region = grid.scrolledRegion;
@@ -1110,15 +1106,11 @@ void main() {
     );
   });
 
-  testWidgets("D19 Day opens with its days folded into the strip; the pull "
-      "tab unfolds the month, where a tap shows that day, and a drag up "
-      "the board folds it again", (tester) async {
+  testWidgets("D19 Day shows the month Agenda's card showed, where a tap "
+      "shows that day; a drag up the board folds it into the strip, and the "
+      "pull tab unfolds it again", (tester) async {
     await pumpCalendar(tester);
     await pickMode(tester, "Day");
-    expect(find.byType(WeekStrip<ItemPayload>), findsOneWidget);
-
-    await tester.drag(find.byKey(calendarPullTabKey), const Offset(0.0, 300.0));
-    await tester.pumpAndSettle();
     expect(find.byType(WeekStrip<ItemPayload>), findsNothing);
     final thursday = DateTime(2026, 4, 23);
     await tester.tap(find.byKey(dayCellKey(thursday)));
@@ -1131,6 +1123,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(WeekStrip<ItemPayload>), findsOneWidget);
+
+    await tester.drag(find.byKey(calendarPullTabKey), const Offset(0.0, 300.0));
+    await tester.pumpAndSettle();
+    expect(find.byType(WeekStrip<ItemPayload>), findsNothing);
   });
 
   testWidgets("D20 over an in-memory store a drop applies within the drop, "

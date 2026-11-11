@@ -15,9 +15,10 @@ ValueKey<String> weekStripDayKey(DateTime day) {
   return ValueKey<String>("strip-day-${CalendarDates.isoDate(day)}");
 }
 
-/// As many days side by side as [weekdays] holds of a week, opening on the
-/// shown days of [initialDay]'s week, or where it is null [selectedDay]'s,
-/// which starts on [weekdays]' first weekday. Each is a [DayCell]
+/// As many days side by side as [weekdays] holds of a week, opening with
+/// [initialMiddleDay] at its middle, or else on the shown days of
+/// [initialDay]'s week, or where it is null [selectedDay]'s, which starts
+/// on [weekdays]' first weekday. Each is a [DayCell]
 /// as Agenda's folded month shows it: its weekday's abbreviation
 /// over its number on a circle, the selected day's in the primary colour,
 /// today's ringed, and badges on a day with items once the store has read
@@ -51,6 +52,7 @@ class WeekStrip<T> extends StatefulWidget {
     required this.onBrowse,
     this.recalls = 0,
     this.initialDay,
+    this.initialMiddleDay,
     this.dayBadges,
   });
 
@@ -77,6 +79,12 @@ class WeekStrip<T> extends StatefulWidget {
   /// [selectedDay]'s.
   final DateTime? initialDay;
 
+  /// A day the strip opens with at its middle, as [onBrowse] reports the
+  /// middle: half a week's count of shown days before it, rounded down,
+  /// and the rest from it on. Where it is not a shown day, the first shown
+  /// day after it. Null opens the strip as [initialDay] says.
+  final DateTime? initialMiddleDay;
+
   /// The kinds of entry the days' badges mark; null for one primary dot
   /// on a day with entries.
   final CalendarDayBadges<T>? dayBadges;
@@ -100,8 +108,22 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
   /// first shown day, and each index after or before it the next or the
   /// previous shown day. A plain day, as the cells are.
   late final DateTime _origin = widget.weekdays.weekStartOf(
-    _plainTwinOf(widget.initialDay ?? widget.selectedDay),
+    _plainTwinOf(
+      widget.initialMiddleDay ?? widget.initialDay ?? widget.selectedDay,
+    ),
   );
+
+  /// The index of the day at the strip's start as it opens: half a week's
+  /// count of shown days before [WeekStrip.initialMiddleDay]'s, or where
+  /// that is null 0, the first shown day of [_origin]'s week.
+  late final int _openingIndex = _openingIndexOf(widget.initialMiddleDay);
+
+  int _openingIndexOf(DateTime? middle) {
+    if (middle == null) {
+      return 0;
+    }
+    return _indexOf(_plainTwinOf(middle)) - _count ~/ 2;
+  }
 
   /// [WeekStrip.selectedDay] and [WeekStrip.today] as plain days, the
   /// local midnights of their dates, which the cells, plain days stepped
@@ -122,13 +144,13 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
       widget.weekdays.offsetOf(column),
   ];
 
-  final ScrollController _scroll = ScrollController();
+  final _OpeningScrollController _scroll = _OpeningScrollController();
 
   /// The width of a day as the last layout gave it; null before it.
   double? _extent;
 
   /// The index of the day at the strip's middle as last seen.
-  late int _middle = _columns.length ~/ 2;
+  late int _middle = _openingIndex + _count ~/ 2;
 
   /// Whether the strip is moving to follow the selected day, which
   /// reports no day through [WeekStrip.onBrowse].
@@ -265,13 +287,18 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
         });
   }
 
-  /// Keeps the day at the strip's start where a new width gives a day a
-  /// new [extent]. Called from the layout callback, before the scroll view
-  /// lays out at the offset it corrects.
+  /// Opens the strip at [_openingIndex] where the first layout gives a day
+  /// its [extent], and keeps the day at the strip's start where a new
+  /// width gives it a new one. Called from the layout callback, before the
+  /// scroll view makes its position or lays out at the offset it corrects.
   void _keepFirstDay(double extent) {
     final old = _extent;
     _extent = extent;
-    if (old == null || old == extent || !_scroll.hasClients) {
+    if (old == null) {
+      _scroll.opening = _openingIndex * extent;
+      return;
+    }
+    if (old == extent || !_scroll.hasClients) {
       return;
     }
     final position = _scroll.position;
@@ -442,5 +469,18 @@ class StripSnapPhysics extends ScrollPhysics {
       velocity,
       tolerance: tolerance,
     );
+  }
+}
+
+/// A [ScrollController] whose [initialScrollOffset], which a scroll view
+/// reads as it makes its position, is [opening]: the week strip sets it at
+/// its first layout, the first to give a day's width, before the scroll
+/// view under it builds.
+class _OpeningScrollController extends ScrollController {
+  double opening = 0.0;
+
+  @override
+  double get initialScrollOffset {
+    return opening;
   }
 }

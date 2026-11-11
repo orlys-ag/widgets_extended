@@ -58,6 +58,10 @@ final class CalendarHeaderDetails {
     required this.onSelectView,
     required this.onOpenPicker,
     required this.onClosePicker,
+    this.onToday,
+    this.canGoToToday = false,
+    this.editable = false,
+    this.onEditableChanged,
   });
 
   /// The view shown.
@@ -96,21 +100,72 @@ final class CalendarHeaderDetails {
 
   /// Closes the month picker.
   final VoidCallback onClosePicker;
+
+  /// Brings the calendar to today, as [CalendarController.goTo] of today
+  /// does: closes the month picker, and selects the shown day nearest
+  /// today, or where that day is selected, brings the calendar card or
+  /// the week strip a slide, a chevron or a drag moved back to it. Null
+  /// where whoever made these details gives none; a `CalendarView` gives
+  /// one.
+  final VoidCallback? onToday;
+
+  /// Whether [onToday] would change what the calendar shows: while the
+  /// selected day is not the shown day nearest today, on the clock of the
+  /// store's zone, or the calendar does not show its selected day
+  /// ([CalendarController.showsSelectedDay]).
+  final bool canGoToToday;
+
+  /// Whether the calendar is in edit mode (`CalendarView.editable`).
+  final bool editable;
+
+  /// Reports a toggle of edit mode with the mode asked for, the opposite
+  /// of [editable] (`CalendarView.onEditableChanged`); null where the
+  /// host takes none.
+  final ValueChanged<bool>? onEditableChanged;
 }
+
+/// The key of the built-in header's Today button.
+const ValueKey<String> calendarTodayButtonKey = ValueKey<String>(
+  "calendar-today",
+);
+
+/// The key of the built-in header's edit mode toggle.
+const ValueKey<String> calendarEditToggleKey = ValueKey<String>(
+  "calendar-edit-toggle",
+);
+
+/// The key of the built-in header's view button.
+const ValueKey<String> calendarViewButtonKey = ValueKey<String>(
+  "calendar-view-button",
+);
 
 /// Builds a calendar's header from [details], in place of the built-in
 /// one.
 typedef CalendarHeaderBuilder =
     Widget Function(BuildContext context, CalendarHeaderDetails details);
 
-/// The built-in header for [details]: the previous and next chevrons
-/// around the title, which names [CalendarHeaderDetails.day]'s month and
-/// year, or the month picker's year while it shows, and opens or closes
-/// the picker when tapped; and the name of the view shown, with a menu of
-/// [CalendarHeaderDetails.views] where it lists more than one. Drawn in the
-/// [CalendarTheme] above [context], under a transparent [Material] of the
-/// ambient text style that it puts in where no [Material] is above it. Its
-/// menu needs [MaterialLocalizations] above it.
+/// The built-in header for [details], in one row. At its start: the
+/// previous and next chevrons around the title, which names
+/// [CalendarHeaderDetails.day]'s month and year, or the month picker's year
+/// while it shows, and opens or closes the picker when tapped; then, where
+/// [CalendarHeaderDetails.onToday] is given, the Today button, a calendar
+/// icon that calls it. At its end: where
+/// [CalendarHeaderDetails.onEditableChanged] is given, the edit mode
+/// toggle, a pencil, filled and tinted while
+/// [CalendarHeaderDetails.editable] is true, which reports the opposite
+/// mode; then, 4 px on, where [CalendarHeaderDetails.views] lists more
+/// than one view, the view button, the icon of the view shown, which a
+/// screen reader hears named, and which opens a menu of the views, each
+/// with its icon and name. The title gives up width, scaling down, only
+/// where the row is too narrow for the rest.
+///
+/// The Today button shows while [CalendarHeaderDetails.canGoToToday] is
+/// true, fading in and out over the theme's motion, and keeps its width
+/// while hidden, when it takes no pointer, no focus and no screen reader's
+/// attention. Drawn in the [CalendarTheme] above [context], under a
+/// transparent [Material] of the ambient text style that it puts in where
+/// no [Material] is above it. Its menu needs [MaterialLocalizations] above
+/// it.
 Widget defaultCalendarHeaderBuilder(
   BuildContext context,
   CalendarHeaderDetails details,
@@ -137,6 +192,19 @@ class CalendarHeader extends StatelessWidget {
         return strings.weekView;
       case CalendarViewKind.month:
         return strings.monthView;
+    }
+  }
+
+  static IconData _viewIcon(CalendarViewKind view) {
+    switch (view) {
+      case CalendarViewKind.agenda:
+        return Icons.view_agenda_outlined;
+      case CalendarViewKind.day:
+        return Icons.calendar_view_day_outlined;
+      case CalendarViewKind.week:
+        return Icons.calendar_view_week_outlined;
+      case CalendarViewKind.month:
+        return Icons.calendar_view_month_outlined;
     }
   }
 
@@ -214,7 +282,9 @@ class CalendarHeader extends StatelessWidget {
     final strings = CalendarLocalizations.of(context);
     final year = details.pickerYear;
     final day = details.day;
-    final viewName = Text(_viewLabel(strings, details.view), style: titleStyle);
+    final onToday = details.onToday;
+    final onEditableChanged = details.onEditableChanged;
+    final picksView = details.views.length > 1;
     final row = Row(
       children: <Widget>[
         Expanded(
@@ -259,41 +329,72 @@ class CalendarHeader extends StatelessWidget {
                 visualDensity: VisualDensity.compact,
                 onPressed: details.onNext,
               ),
+              if (onToday != null)
+                _TodayButton(
+                  shown: details.canGoToToday,
+                  tooltip: strings.todayTooltip,
+                  theme: theme,
+                  onPressed: onToday,
+                ),
             ],
           ),
         ),
-        if (details.views.length == 1)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
-            child: viewName,
-          )
-        else
-          PopupMenuButton<CalendarViewKind>(
-            tooltip: strings.viewMenuTooltip,
-            initialValue: details.view,
-            color: theme.surface,
-            onSelected: details.onSelectView,
-            itemBuilder: (context) {
-              return <PopupMenuEntry<CalendarViewKind>>[
-                for (final value in details.views)
-                  PopupMenuItem<CalendarViewKind>(
-                    value: value,
-                    child: Text(_viewLabel(strings, value)),
-                  ),
-              ];
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 8.0,
-                vertical: 8.0,
+        if (onEditableChanged != null)
+          IconButton(
+            key: calendarEditToggleKey,
+            isSelected: details.editable,
+            icon: const Icon(Icons.edit_outlined),
+            selectedIcon: const Icon(Icons.edit),
+            tooltip: strings.editModeTooltip,
+            visualDensity: VisualDensity.compact,
+            style: ButtonStyle(
+              foregroundColor: WidgetStateProperty.fromMap(
+                <WidgetStatesConstraint, Color>{
+                  WidgetState.selected: theme.primary,
+                  WidgetState.any: theme.text,
+                },
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  viewName,
-                  const SizedBox(width: 4.0),
-                  Icon(Icons.keyboard_arrow_down, color: theme.text),
-                ],
+              backgroundColor:
+                  WidgetStateProperty.fromMap(<WidgetStatesConstraint, Color>{
+                    WidgetState.selected: theme.primaryTint,
+                    WidgetState.any: Colors.transparent,
+                  }),
+            ),
+            onPressed: () {
+              onEditableChanged(!details.editable);
+            },
+          ),
+        if (onEditableChanged != null && picksView) const SizedBox(width: 4.0),
+        if (picksView)
+          // One node, so a screen reader hears the view shown with the
+          // button's tooltip.
+          MergeSemantics(
+            child: Semantics(
+              value: _viewLabel(strings, details.view),
+              child: PopupMenuButton<CalendarViewKind>(
+                key: calendarViewButtonKey,
+                tooltip: strings.viewMenuTooltip,
+                initialValue: details.view,
+                color: theme.surface,
+                icon: Icon(_viewIcon(details.view)),
+                iconColor: theme.text,
+                style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                onSelected: details.onSelectView,
+                itemBuilder: (context) {
+                  return <PopupMenuEntry<CalendarViewKind>>[
+                    for (final value in details.views)
+                      PopupMenuItem<CalendarViewKind>(
+                        value: value,
+                        child: Row(
+                          children: <Widget>[
+                            Icon(_viewIcon(value), color: theme.text),
+                            const SizedBox(width: 12.0),
+                            Flexible(child: Text(_viewLabel(strings, value))),
+                          ],
+                        ),
+                      ),
+                  ];
+                },
               ),
             ),
           ),
@@ -310,6 +411,51 @@ class CalendarHeader extends StatelessWidget {
       type: MaterialType.transparency,
       textStyle: DefaultTextStyle.of(context).style,
       child: row,
+    );
+  }
+}
+
+/// The header's Today button: a calendar icon in the theme's text colour,
+/// as the header's other icons, at full opacity while [shown] and at none
+/// otherwise, fading
+/// between them over the theme's motion. Hidden, it keeps its size and
+/// takes no pointer, no focus and no screen reader's attention.
+class _TodayButton extends StatelessWidget {
+  const _TodayButton({
+    required this.shown,
+    required this.tooltip,
+    required this.theme,
+    required this.onPressed,
+  });
+
+  final bool shown;
+  final String tooltip;
+  final CalendarThemeData theme;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExcludeFocus(
+      excluding: !shown,
+      child: ExcludeSemantics(
+        excluding: !shown,
+        child: IgnorePointer(
+          ignoring: !shown,
+          child: AnimatedOpacity(
+            opacity: shown ? 1.0 : 0.0,
+            duration: theme.motionDuration,
+            curve: theme.motionCurve,
+            child: IconButton(
+              key: calendarTodayButtonKey,
+              icon: const Icon(Icons.today_outlined),
+              tooltip: tooltip,
+              color: theme.text,
+              visualDensity: VisualDensity.compact,
+              onPressed: onPressed,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

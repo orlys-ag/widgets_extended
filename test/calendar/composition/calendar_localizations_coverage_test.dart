@@ -345,6 +345,16 @@ final class _Marked extends DefaultCalendarLocalizations {
   String get showWeekLabel {
     return bracketed(super.showWeekLabel);
   }
+
+  @override
+  String get todayTooltip {
+    return bracketed(super.todayTooltip);
+  }
+
+  @override
+  String get editModeTooltip {
+    return bracketed(super.editModeTooltip);
+  }
 }
 
 class _MarkedDelegate extends LocalizationsDelegate<CalendarLocalizations> {
@@ -452,7 +462,8 @@ Widget app(Widget home, {required bool marked}) {
 }
 
 /// Pumps an editable calendar on [store] and [controller], Monday to
-/// Friday, under [app], and settles it.
+/// Friday, with the header's edit mode toggle, under [app], and settles
+/// it.
 Future<void> pumpCalendar(
   WidgetTester tester, {
   required CalendarStore<String> store,
@@ -465,6 +476,7 @@ Future<void> pumpCalendar(
         store: store,
         controller: controller,
         editable: true,
+        onEditableChanged: (editable) {},
         weekdays: CalendarWeekdaySet.workweek,
         clock: fixedClock,
         entryKindOf: (entry) {

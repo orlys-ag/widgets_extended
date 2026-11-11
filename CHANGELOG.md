@@ -114,6 +114,32 @@ and after `goTo` of the selected day. A controller now notifies once for a
 browse, a fold or the month picker where this value changes, so a host
 hears a slide of the card, which notified nothing before, and a `goTo` that
 brings the card back or closes the picker notifies once, as one event.
+- The calendar's built-in header holds its controls in one row: after the
+chevrons and the title, a Today button, a calendar icon that shows while a
+tap on it would change what the calendar shows (the selected day is not
+the shown day nearest today on the store's zone clock, or
+`showsSelectedDay` is false) and then closes the month picker and selects
+that day or brings the card or the strip back to it; and at the row's end,
+where `CalendarView.onEditableChanged` is given, an edit mode toggle that
+reports the opposite of `editable`, then the view button. The view menu's
+"Agenda", "Day", "Week" or "Month" label with its arrow became that view
+button, the icon of the view shown, which a screen reader hears with the
+view's name and whose menu lists each view with its icon; with one view
+listed the header shows no view button, where it named the view. A custom
+header receives the new controls as `CalendarHeaderDetails.onToday`,
+`canGoToToday`, `editable` and `onEditableChanged`, and their words come
+from two new `CalendarLocalizations` members with English defaults,
+`todayTooltip` and `editModeTooltip`.
+- A change of view no longer resets the calendar card or the month picker.
+The card opens on its month in every view, Day included, which opened it
+folded into the week strip. A pick of another view or of the view shown, a
+set of `CalendarController.view`, new `views` and a tap on a day in Month
+keep the card folded or not, on the month a chevron or a slide moved it to
+and with its strip on the days a drag moved it to; Week and Month, which
+show no card, show the selected day's week or month and name its month,
+leaving the card for Agenda and Day to show again as it was. An open month
+picker stays open on its year, where a change of view closed it; Today
+still closes it.
 - Added `CalendarEditPolicy.mayOverlap`, which answers whether a change may
 share time with one other entry, and `CalendarOverlapCandidate`, the change
 it is asked about: its start, its end and the entry it changes, none for a

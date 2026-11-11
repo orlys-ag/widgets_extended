@@ -1,6 +1,6 @@
-/// The calendar on a zone: the app bar's time zone button and its sheet,
-/// the item form's times and the store's hours on the store's zone clock,
-/// and the history lock judged on it.
+/// The calendar on a zone: the settings sheet's time zone part and the
+/// sheet of zones it opens, the item form's times and the store's hours on
+/// the store's zone clock, and the history lock judged on it.
 library;
 
 import 'dart:math' as math;
@@ -88,9 +88,13 @@ Future<void> zoneStore(
   await tester.pumpAndSettle();
 }
 
-/// The app bar's time zone button.
-Finder get zoneButton {
-  return find.widgetWithIcon(TextButton, Icons.public);
+/// Opens the settings sheet where it is closed, then the sheet of zones
+/// over it from its Manage chip.
+Future<void> openZoneSheet(WidgetTester tester) async {
+  await openSettings(tester);
+  await tester.tap(find.byKey(manageZonesKey));
+  await tester.pumpAndSettle();
+  expect(find.byType(CalendarZonePanel), findsOneWidget);
 }
 
 /// [finder] inside the open zone panel.
@@ -196,27 +200,45 @@ void main() {
   setUpAll(tz_data.initializeTimeZones);
 
   testWidgets(
-    "DZ1 the app bar's zone button opens the panel in a sheet, and picking a "
-    "zone in view 1 zones the store and closes the sheet",
+    "DZ1 the settings sheet's time zone part names the chosen zone with its "
+    "offset over a chip for the device's zone and one for each added zone, "
+    "a tap on one zones the store, and its Manage chip opens the panel in a "
+    "sheet over it, where picking a zone in view 1 zones the store and "
+    "closes that sheet",
     (tester) async {
       await pumpCalendar(tester, clock: noonClock);
       final store = storeOf(tester);
       expect(store, isA<CachingCalendarStore<ItemPayload>>());
       expect((store as CachingCalendarStore<ItemPayload>).readAhead, 2);
       const strings = DefaultCalendarLocalizations();
+      String offsetOf(Location? zone) {
+        return strings.utcOffset(
+          CalendarDates.inZone(noon, zone: zone).timeZoneOffset.inMinutes,
+        );
+      }
+
+      Finder chip(String name) {
+        return find.byKey(zoneChipKey(name));
+      }
+
+      bool chosen(String name) {
+        return tester.widget<ChoiceChip>(chip(name)).selected;
+      }
+
+      final chips = find.descendant(
+        of: find.byKey(zoneChoicesKey),
+        matching: find.byType(ChoiceChip),
+      );
+      await openSettings(tester);
       expect(
-        find.descendant(
-          of: zoneButton,
-          matching: find.text(strings.deviceZoneName),
-        ),
+        find.textContaining("This device, ${offsetOf(null)}"),
         findsOneWidget,
       );
-      expect(find.byTooltip("Time zone"), findsOneWidget);
+      expect(chips, findsOneWidget);
+      expect(chosen(""), isTrue);
 
       Future<void> openSheet() async {
-        await tester.tap(zoneButton);
-        await tester.pumpAndSettle();
-        expect(find.byType(CalendarZonePanel), findsOneWidget);
+        await openZoneSheet(tester);
       }
 
       Future<void> search(String text) async {
@@ -243,10 +265,27 @@ void main() {
       await tester.pumpAndSettle();
       expect(store.zone?.name, "America/Havana");
       expect(find.byType(CalendarZonePanel), findsNothing);
+      expect(find.byType(CalendarSettingsSheet), findsOneWidget);
+      expect(chips, findsNWidgets(2));
+      expect(chosen("America/Havana"), isTrue);
+      expect(chosen(""), isFalse);
       expect(
-        find.descendant(of: zoneButton, matching: find.text("Havana")),
+        find.textContaining(
+          "Havana, ${offsetOf(tz.getLocation("America/Havana"))}",
+        ),
         findsOneWidget,
       );
+
+      // The chips switch between the zones.
+      await tester.tap(chip(""));
+      await tester.pumpAndSettle();
+      expect(store.zone, isNull);
+      expect(chosen(""), isTrue);
+      expect(chosen("America/Havana"), isFalse);
+      await tester.tap(chip("America/Havana"));
+      await tester.pumpAndSettle();
+      expect(store.zone?.name, "America/Havana");
+      expect(chosen("America/Havana"), isTrue);
 
       // Unchecking the current zone in view 2 puts the store back on the
       // device's clock and leaves the sheet open there.
@@ -269,8 +308,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(store.zone?.name, "Asia/Tokyo");
       expect(find.byType(CalendarZonePanel), findsNothing);
+      expect(chips, findsNWidgets(2));
+      expect(chip("America/Havana"), findsNothing);
+      expect(chosen("Asia/Tokyo"), isTrue);
+      // Tokyo's offset is not the device's in any zone the tests run in.
       expect(
-        find.descendant(of: zoneButton, matching: find.text("Tokyo")),
+        find.textContaining("Tokyo, ${offsetOf(tz.getLocation("Asia/Tokyo"))}"),
         findsOneWidget,
       );
 
@@ -525,8 +568,7 @@ void main() {
       const strings = DefaultCalendarLocalizations();
       final screen =
           tester.view.physicalSize.height / tester.view.devicePixelRatio;
-      await tester.tap(zoneButton);
-      await tester.pumpAndSettle();
+      await openZoneSheet(tester);
       await tester.tap(inPanel(find.text(strings.addZonesLabel)));
       await tester.pumpAndSettle();
       final field = inPanel(find.byType(TextField));
@@ -559,45 +601,6 @@ void main() {
       final panel = tester.getRect(find.byType(CalendarZonePanel));
       expect(panel.height, moreOrLessEquals(screen * 0.7));
       expect(panel.bottom, moreOrLessEquals(screen));
-    },
-  );
-
-  testWidgets(
-    "DZ6 the app bar's zone button draws its globe and its label in the "
-    "colour the bar gives its other actions",
-    (tester) async {
-      await pumpCalendar(tester, clock: noonClock);
-      final bar = find.byType(AppBar);
-      final fill = tester
-          .widget<Material>(
-            find.descendant(of: bar, matching: find.byType(Material)).first,
-          )
-          .color;
-      final action = IconTheme.of(
-        tester.element(
-          find.descendant(of: bar, matching: find.byIcon(Icons.more_vert)),
-        ),
-      ).color;
-      // Setup sanity: the bar's actions stand out from its fill.
-      expect(action, isNot(fill));
-      final globe = IconTheme.of(
-        tester.element(
-          find.descendant(of: zoneButton, matching: find.byIcon(Icons.public)),
-        ),
-      ).color;
-      expect(globe, action);
-      final label = tester.widget<RichText>(
-        find.descendant(
-          of: find.descendant(
-            of: zoneButton,
-            matching: find.text(
-              const DefaultCalendarLocalizations().deviceZoneName,
-            ),
-          ),
-          matching: find.byType(RichText),
-        ),
-      );
-      expect(label.text.style!.color, action);
     },
   );
 }

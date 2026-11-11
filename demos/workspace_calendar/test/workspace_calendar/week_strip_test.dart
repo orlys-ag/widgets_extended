@@ -90,8 +90,9 @@ int listCalls(MockCalendarApi api) {
   }).length;
 }
 
-/// The calendar over [seed] in Day mode on [today], its store reading
-/// [readAhead] days on each side of the range it shows.
+/// The calendar over [seed] in Day mode on [today], its card folded into
+/// the week strip, its store reading [readAhead] days on each side of the
+/// range it shows.
 Future<MockCalendarApi> pumpDay(
   WidgetTester tester, {
   int readAhead = 2,
@@ -99,6 +100,7 @@ Future<MockCalendarApi> pumpDay(
   final api = MockCalendarApi(seed: seed, latency: harnessLatency);
   await pumpCalendar(tester, api: api, readAhead: readAhead);
   await pickMode(tester, "Day");
+  await foldCard(tester);
   return api;
 }
 
@@ -393,9 +395,8 @@ void main() {
     expect(find.text("May 2026"), findsOneWidget);
   });
 
-  testWidgets("WS9 a change of mode names the selected day's month again", (
-    tester,
-  ) async {
+  testWidgets("WS9 Week names the selected day's month, not the month a "
+      "drag moved Day's strip to", (tester) async {
     await pumpDay(tester);
     await slideStrip(tester, 14);
     expect(find.text("May 2026"), findsOneWidget);

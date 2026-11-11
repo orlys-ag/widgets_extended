@@ -12,18 +12,23 @@
 /// carry a dot for each type of item they have, in the type's Harbor
 /// colour ([harborDayBadges]).
 ///
-/// The settings sheet, which opens from the app bar's More menu, holds in
-/// its first part the edit mode switch, the weekday a week starts on,
-/// which every view's weeks and columns follow, and which weekdays show,
-/// the length of the calendar's slots, which the item form's times step by
-/// too, and the hours the calendar shows and schedules in, with whether
-/// Week and Day label them AM/PM. The calendar opens on Agenda, out of edit
-/// mode unless it is given it. Out of edit mode the calendar is read-only,
-/// so nothing is moved, resized or created, and a tap on an item opens its
-/// form read-only. Under a divider, the sheet chooses how Month fits its
-/// weeks, and on the calendar's [CalendarController] the least width of a
-/// day in Week, Day and Month and the least height of the timed grids'
-/// slots, which a pinch on a grid sets too.
+/// The calendar's header holds, beside the month's title, the Today button,
+/// which shows while a tap on it would change what the calendar shows and
+/// brings it to today on the clock of the chosen zone, the edit mode
+/// toggle, the view button, and at the row's end the settings button. The
+/// calendar opens on Agenda, out of edit mode unless it is given it. Out of
+/// edit mode the calendar is read-only, so nothing is moved, resized or
+/// created, and a tap on an item opens its form read-only.
+///
+/// The settings sheet, which opens from the header's settings button, holds in
+/// its first part the time zone, the weekday a week starts on, which every
+/// view's weeks and columns follow, and which weekdays show, the length of
+/// the calendar's slots, which the item form's times step by too, and the
+/// hours the calendar shows and schedules in, with whether Week and Day
+/// label them AM/PM. Under a divider, it chooses how Month fits its weeks.
+/// A pinch on a grid sets the least width of a day in Week, Day and Month
+/// and the least height of the timed grids' slots, on the calendar's
+/// [CalendarController].
 ///
 /// The sheet also chooses the history lock, which in edit mode keeps the
 /// past as it is: no item before today, or with its second switch before
@@ -37,21 +42,13 @@
 /// the gestures keep to free time and the mock API refuses an item whose
 /// new times share time with another.
 ///
-/// The app bar's Today pill ([TodayPill]) shows while the selected day is
-/// not the shown day nearest today, on the clock of the store's zone, or
-/// the calendar shows a month or a strip of days moved off the selected
-/// day, or the month picker. A tap on it selects that day in every view,
-/// slides a strip a drag moved away back to it and closes the month
-/// picker, and the pill fades out.
-///
-/// The app bar's time zone button, which names the city of the store's
-/// zone or the device's zone, opens a [CalendarZonePanel] in a bottom
-/// sheet. A pick there sets the store's zone, which every view then draws
-/// on, the item form writes and reads its times on, and the history lock
-/// judges on, and closes the sheet; a removal of the current zone puts the
-/// store back on the device's clock and leaves the sheet open. The store
-/// reads [WorkspaceCalendarExample.readAhead] days on each side of the
-/// range it shows, so a change of zone finds the shown days read.
+/// The sheet's time zone part picks the zone among the device's and those
+/// the user added in the sheet of zones its Manage chip opens over it, a
+/// [CalendarZonePanel]. The zone
+/// picked is the store's, which every view then draws on, the item form
+/// writes and reads its times on, and the history lock judges on. The
+/// store reads [WorkspaceCalendarExample.readAhead] days on each side of
+/// the range it shows, so a change of zone finds the shown days read.
 ///
 /// A tap on an item opens its form, which edits it in edit mode unless the
 /// history lock holds it locked, and otherwise shows it read-only; a create
@@ -72,10 +69,6 @@ import 'workspace_calendar/item_builders.dart';
 import 'workspace_calendar/item_form.dart';
 import 'workspace_calendar/mock_calendar_api.dart';
 import 'workspace_calendar/settings_sheet.dart';
-import 'workspace_calendar/today_pill.dart';
-
-/// The entries of the app bar's More menu.
-enum _MoreAction { settings }
 
 /// The calendar under its own Harbor theme, whatever the host's theme.
 class WorkspaceCalendarExample extends StatelessWidget {
@@ -182,14 +175,13 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
         CalendarDates.dateOnly(widget.today ?? widget.clock().toLocal()),
       );
 
-  /// The zones the user added in the time zone sheet's panel.
+  /// The zones the user added in the settings sheet's sheet of zones.
   final CalendarZoneController _zones = CalendarZoneController();
 
-  /// The calendar's view, selected day and zoom sizes, which the Today
-  /// pill and the settings sheet's sliders set. The calendar opens on
-  /// Agenda and today, a day the pill reads before the calendar binds the
-  /// controller. Made where [initState] first reads it, after [_store],
-  /// whose zone [_today] reads.
+  /// The calendar's view, selected day and zoom sizes, which a pinch on a
+  /// grid sets. The calendar opens on Agenda and today. Made
+  /// where [initState] first reads it, after [_store], whose zone [_today]
+  /// reads.
   late final CalendarController _controller = CalendarController(
     view: CalendarViewKind.agenda,
     selectedDay: _today(),
@@ -263,23 +255,41 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
     }
   }
 
-  /// Closes the month picker, then selects today, or the shown day nearest
-  /// it, bringing a strip a drag moved back to it.
-  void _goToToday() {
-    _controller.goTo(_today());
+  /// The calendar's built-in header, then 4 px on, at the row's end, the
+  /// settings button, an icon in the colour of the header's other icons.
+  Widget _buildHeader(BuildContext context, CalendarHeaderDetails details) {
+    return Row(
+      children: <Widget>[
+        Expanded(child: defaultCalendarHeaderBuilder(context, details)),
+        const SizedBox(width: 4.0),
+        IconButton(
+          icon: const Icon(Icons.tune),
+          tooltip: "Calendar settings",
+          color: CalendarTheme.of(context).text,
+          visualDensity: VisualDensity.compact,
+          onPressed: _openSettings,
+        ),
+      ],
+    );
   }
 
   void _openSettings() {
     showCalendarSettings(
       context,
       settings: _settings,
-      controller: _controller,
+      zone: _store.zone,
+      zones: _zones,
+      clock: widget.clock,
       onChanged: _applySettings,
+      onZoneChanged: (zone) {
+        _store.zone = zone;
+      },
     );
   }
 
-  /// Applies what the settings sheet chose; the calendar itself moves a
-  /// selected day new weekdays hide to the nearest shown one.
+  /// Applies what the settings sheet or the header's edit mode toggle
+  /// chose; the calendar itself moves a selected day new weekdays hide to
+  /// the nearest shown one.
   void _applySettings(CalendarSettings settings) {
     setState(() {
       _settings = settings;
@@ -288,56 +298,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
     _store.hours = settings.hours;
   }
 
-  /// Opens the time zone sheet: the zone panel over the store's zone, 0.7
-  /// of the screen tall, padded above the keyboard. The sheet stays below
-  /// the screen's top intrusions, such as a status bar, and within the
-  /// screen, so where the keyboard leaves less than that height the panel
-  /// takes what is left, in which its list scrolls.
-  void _openZones() {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.viewInsetsOf(context).bottom,
-          ),
-          child: SizedBox(
-            height: MediaQuery.sizeOf(context).height * 0.7,
-            child: ListenableBuilder(
-              listenable: _store,
-              builder: (context, child) {
-                return CalendarZonePanel(
-                  value: _store.zone,
-                  controller: _zones,
-                  clock: widget.clock,
-                  onChanged: (zone) {
-                    _pickZone(context, zone);
-                  },
-                );
-              },
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  /// Sets the store's zone to [zone], and closes the sheet of [sheet]
-  /// unless the panel reported the removal of the store's zone, which it
-  /// removes from [_zones] before it reports it.
-  void _pickZone(BuildContext sheet, Location? zone) {
-    final current = _store.zone;
-    final removed =
-        zone == null && current != null && !_zones.contains(current);
-    _store.zone = zone;
-    setState(() {
-      // The app bar's button names the new zone.
-    });
-    if (!removed) {
-      Navigator.pop(sheet);
-    }
+  /// The header's edit mode toggle.
+  void _setEditing(bool editing) {
+    _applySettings(_settings.copyWith(editing: editing));
   }
 
   void _showMessage(String message) {
@@ -417,7 +380,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
 
   @override
   Widget build(BuildContext context) {
-    final zone = _store.zone;
     return Scaffold(
       // A form's keyboard leaves the month board's height, and so its
       // weeks, as they are; the form's dialog pads itself by the keyboard.
@@ -436,70 +398,6 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
           "Lu Test Workspace",
           style: TextStyle(fontSize: 20.0, fontWeight: FontWeight.w600),
         ),
-        actions: <Widget>[
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 120.0),
-            child: Tooltip(
-              message: "Time zone",
-              // The app bar gives its actions its foreground through their
-              // IconTheme, which a TextButton does not read: it would keep
-              // the scheme's primary, the bar's own fill.
-              child: Builder(
-                builder: (context) {
-                  return TextButton.icon(
-                    style: TextButton.styleFrom(
-                      foregroundColor: IconTheme.of(context).color,
-                    ),
-                    icon: const Icon(Icons.public),
-                    label: Text(
-                      zone == null
-                          ? CalendarLocalizations.of(context).deviceZoneName
-                          : CalendarZonePanel.cityOf(zone),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onPressed: _openZones,
-                  );
-                },
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4.0),
-            child: TodayPill(
-              controller: _controller,
-              today: _today,
-              weekdays: _settings.weekdays,
-              clock: widget.clock,
-              onPressed: _goToToday,
-            ),
-          ),
-          PopupMenuButton<_MoreAction>(
-            tooltip: "More",
-            icon: const Icon(Icons.more_vert),
-            color: HarborColors.surface,
-            onSelected: (action) {
-              switch (action) {
-                case _MoreAction.settings:
-                  _openSettings();
-              }
-            },
-            itemBuilder: (context) {
-              return const <PopupMenuEntry<_MoreAction>>[
-                PopupMenuItem<_MoreAction>(
-                  value: _MoreAction.settings,
-                  child: Row(
-                    children: <Widget>[
-                      Icon(Icons.tune, color: HarborColors.text),
-                      SizedBox(width: 12.0),
-                      Flexible(child: Text("Calendar settings")),
-                    ],
-                  ),
-                ),
-              ];
-            },
-          ),
-        ],
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -509,6 +407,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
               store: _store,
               controller: _controller,
               editable: _settings.editing,
+              onEditableChanged: _setEditing,
+              headerBuilder: _buildHeader,
               editPolicy: _settings.editPolicy,
               weekdays: _settings.weekdays,
               slotMinutes: _settings.slotMinutes,

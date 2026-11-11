@@ -424,8 +424,8 @@ void main() {
       expect(english.addEntryAt("09:00"), "Add an item at 09:00");
     });
 
-    test("names the header's views, chevrons, title and menu, and the "
-        "card's pull tab", () {
+    test("names the header's views, chevrons, title, menu, Today button "
+        "and edit mode toggle, and the card's pull tab", () {
       expect(english.agendaView, "Agenda");
       expect(english.dayView, "Day");
       expect(english.weekView, "Week");
@@ -441,6 +441,8 @@ void main() {
       expect(english.pickMonthTooltip, "Pick a month");
       expect(english.closeMonthsTooltip, "Close the months");
       expect(english.viewMenuTooltip, "Calendar view");
+      expect(english.todayTooltip, "Today");
+      expect(english.editModeTooltip, "Edit mode");
       expect(english.showMonthLabel, "Show the month");
       expect(english.showWeekLabel, "Show the week");
     });

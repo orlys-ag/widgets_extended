@@ -120,6 +120,7 @@ class CalendarCard<T> extends StatefulWidget {
     required this.onBrowseStrip,
     required this.onSettle,
     required this.onUnfold,
+    this.stripMiddleDay,
     this.dayBadges,
   });
 
@@ -164,6 +165,11 @@ class CalendarCard<T> extends StatefulWidget {
 
   /// A drag down the folded strip asks to unfold the month.
   final VoidCallback onUnfold;
+
+  /// The day a drag left at the middle of a week strip, which a strip the
+  /// card builds opens with at its middle ([WeekStrip.initialMiddleDay]);
+  /// null opens it on the week of [monthFoldDay].
+  final DateTime? stripMiddleDay;
 
   /// The kinds of entry the days' badges mark, in the month and in the
   /// week strip; null for one primary dot on a day with entries.
@@ -225,8 +231,9 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
   }
 
   /// The strip of days the folded month becomes, opening on the week the
-  /// month folded into. Its weekdays are fixed for its life, so new ones
-  /// build a new strip.
+  /// month folded into, or with [CalendarCard.stripMiddleDay] at its
+  /// middle. Its weekdays are fixed for its life, so new ones build a new
+  /// strip.
   Widget _buildStrip() {
     return WeekStrip<T>(
       key: ValueKey<CalendarWeekdaySet>(widget.weekdays),
@@ -241,6 +248,7 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
         today: widget.today,
         weekdays: widget.weekdays,
       ),
+      initialMiddleDay: widget.stripMiddleDay,
       onSelectDay: widget.onSelectDay,
       onBrowse: widget.onBrowseStrip,
       dayBadges: widget.dayBadges,

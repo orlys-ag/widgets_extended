@@ -247,7 +247,7 @@ abstract base class CalendarLocalizations {
   /// The tooltip of the header's title while it closes the month picker.
   String get closeMonthsTooltip;
 
-  /// The tooltip of the header's view menu.
+  /// The tooltip of the header's view button, which opens the view menu.
   String get viewMenuTooltip;
 
   /// What a screen reader hears for the calendar card's pull tab while the
@@ -301,6 +301,17 @@ abstract base class CalendarLocalizations {
   /// zone: "Back".
   String get zonesBackTooltip {
     return "Back";
+  }
+
+  /// The tooltip of the header's button that brings the calendar to
+  /// today: "Today".
+  String get todayTooltip {
+    return "Today";
+  }
+
+  /// The tooltip of the header's edit mode toggle: "Edit mode".
+  String get editModeTooltip {
+    return "Edit mode";
   }
 }
 
