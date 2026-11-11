@@ -1,12 +1,16 @@
 /// The calendar's controller: its sizes and their defaults, the sets that
 /// reach a bound calendar, the events that notify it, the range the
-/// calendar asks, goTo, and the lifecycle changes a bind, a swap, a
-/// second calendar and an unmount make.
+/// calendar asks, goTo, whether the calendar shows its selected day, and
+/// the lifecycle changes a bind, a swap, a second calendar and an unmount
+/// make.
 library;
 
+import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/composition/calendar_card.dart'
+    show calendarPullTabKey;
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
@@ -75,6 +79,21 @@ class Notifies {
   void _record() {
     ranges.add(controller.visibleRange);
   }
+}
+
+/// Drags the week strip on by [days] day widths, past the touch slop
+/// first, and lets go once the drag has stood still, so the strip comes to
+/// rest on the nearest day.
+Future<void> dragStripDays(WidgetTester tester, int days) async {
+  final strip = find.byType(WeekStrip<String>);
+  final dayWidth = tester.getSize(strip).width / DateTime.daysPerWeek;
+  final gesture = await tester.startGesture(tester.getCenter(strip));
+  await gesture.moveBy(const Offset(-(kTouchSlop + 1.0), 0.0));
+  await tester.pump();
+  await gesture.moveBy(Offset(-dayWidth * days, 0.0));
+  await tester.pump(const Duration(milliseconds: 500));
+  await gesture.up();
+  await tester.pumpAndSettle();
 }
 
 /// A host that owns [controller]'s life: it disposes the controller when
@@ -314,9 +333,8 @@ void main() {
   });
 
   testWidgets("CO5 a menu pick, a day tap, a chevron step and Month's tap "
-      "that opens Day each notify once; a browse notifies nothing", (
-    tester,
-  ) async {
+      "that opens Day each notify once; a browse notifies once, for "
+      "showsSelectedDay alone", (tester) async {
     final controller = CalendarController();
     addTearDown(controller.dispose);
     await pumpCalendar(tester, controller);
@@ -333,8 +351,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text("May 2026"), findsOneWidget);
     expect(controller.selectedDay, april28);
-    expect(notifies.count, 0);
+    expect(controller.showsSelectedDay, isFalse);
+    expect(notifies.count, 1);
 
+    notifies.clear();
     await tester.tap(find.byTooltip("Calendar view"));
     await tester.pumpAndSettle();
     await tester.tap(find.text("Week").last);
@@ -420,8 +440,8 @@ void main() {
   });
 
   testWidgets("CO7 goTo brings the card or the strip back to the selected "
-      "day with no notify, selects another day with one, and closes the "
-      "month picker", (tester) async {
+      "day with one notify, for showsSelectedDay, selects another day with "
+      "one, and closes the month picker with one", (tester) async {
     final controller = CalendarController();
     addTearDown(controller.dispose);
     await pumpCalendar(tester, controller);
@@ -430,11 +450,14 @@ void main() {
     await tester.tap(find.byTooltip("Next month"));
     await tester.pumpAndSettle();
     expect(find.text("May 2026"), findsOneWidget);
+    notifies.clear();
     controller.goTo(tuesday);
     await tester.pumpAndSettle();
     expect(find.text("Apr 2026"), findsOneWidget);
-    expect(notifies.count, 0);
+    expect(controller.selectedDay, tuesday);
+    expect(notifies.count, 1);
 
+    notifies.clear();
     final april28 = DateTime(2026, 4, 28);
     controller.goTo(april28);
     await tester.pumpAndSettle();
@@ -445,6 +468,7 @@ void main() {
     await tester.pumpAndSettle();
     const picker = ValueKey<String>("month-picker");
     expect(find.byKey(picker), findsOneWidget);
+    notifies.clear();
     controller.goTo(april28);
     await tester.pumpAndSettle();
     expect(find.byKey(picker), findsNothing);
@@ -452,7 +476,6 @@ void main() {
 
     controller.view = CalendarViewKind.day;
     await tester.pumpAndSettle();
-    notifies.clear();
     final selected = find.byKey(weekStripDayKey(april28)).hitTestable();
     expect(selected, findsOneWidget);
     final strip = find.byType(WeekStrip<String>);
@@ -460,11 +483,168 @@ void main() {
     await tester.pumpAndSettle();
     expect(selected, findsNothing);
     expect(find.text("May 2026"), findsOneWidget);
+    notifies.clear();
     controller.goTo(april28);
     await tester.pumpAndSettle();
     expect(selected, findsOneWidget);
     expect(find.text("Apr 2026"), findsOneWidget);
+    expect(notifies.count, 1);
+  });
+
+  testWidgets("CO13 showsSelectedDay is false while the month picker shows, "
+      "the unfolded card another month, or the folded card's strip days "
+      "without the selected day, and each change notifies once", (
+    tester,
+  ) async {
+    final controller = CalendarController();
+    addTearDown(controller.dispose);
+    expect(controller.showsSelectedDay, isTrue);
+    await pumpCalendar(tester, controller);
+    final notifies = Notifies(controller);
+    const picker = ValueKey<String>("month-picker");
+    // Setup sanity: Agenda's card, unfolded, on the selected day's month.
+    expect(controller.view, CalendarViewKind.agenda);
+    expect(controller.selectedDay, tuesday);
+    expect(controller.showsSelectedDay, isTrue);
+
+    await tester.tap(find.byTooltip("Next month"));
+    await tester.pumpAndSettle();
+    expect(find.text("May 2026"), findsOneWidget);
+    expect(controller.showsSelectedDay, isFalse);
+    expect(notifies.count, 1);
+
+    notifies.clear();
+    await tester.tap(find.byTooltip("Previous month"));
+    await tester.pumpAndSettle();
+    expect(find.text("Apr 2026"), findsOneWidget);
+    expect(controller.showsSelectedDay, isTrue);
+    expect(notifies.count, 1);
+
+    notifies.clear();
+    await tester.tap(find.byTooltip("Pick a month"));
+    await tester.pumpAndSettle();
+    expect(find.byKey(picker), findsOneWidget);
+    expect(controller.showsSelectedDay, isFalse);
+    expect(notifies.count, 1);
+
+    notifies.clear();
+    await tester.tap(find.byTooltip("Close the months"));
+    await tester.pumpAndSettle();
+    expect(find.byKey(picker), findsNothing);
+    expect(controller.showsSelectedDay, isTrue);
+    expect(notifies.count, 1);
+
+    controller.view = CalendarViewKind.day;
+    await tester.pumpAndSettle();
+    notifies.clear();
+    final selected = find.byKey(weekStripDayKey(tuesday)).hitTestable();
+    final first = find.byKey(weekStripDayKey(monday)).hitTestable();
+    // Setup sanity: Day's card folded, its strip on the selected day's
+    // week.
+    expect(selected, findsOneWidget);
+    expect(first, findsOneWidget);
+
+    await dragStripDays(tester, 1);
+    // Setup sanity: the strip moved a day on and still shows the selected
+    // day.
+    expect(first, findsNothing);
+    expect(selected, findsOneWidget);
+    expect(controller.showsSelectedDay, isTrue);
     expect(notifies.count, 0);
+
+    await dragStripDays(tester, 1);
+    expect(selected, findsNothing);
+    expect(controller.showsSelectedDay, isFalse);
+    expect(notifies.count, 1);
+
+    notifies.clear();
+    controller.goTo(tuesday);
+    await tester.pumpAndSettle();
+    expect(selected, findsOneWidget);
+    expect(controller.showsSelectedDay, isTrue);
+    expect(notifies.count, 1);
+  });
+
+  testWidgets("CO14 a fold after a slide of the card reads the shown days "
+      "of the week the strip opens on, with one notify", (tester) async {
+    final controller = CalendarController();
+    addTearDown(controller.dispose);
+    await pumpCalendar(tester, controller);
+    final april27 = DateTime(2026, 4, 27);
+    await tester.tap(find.byKey(dayCellKey(april27)).hitTestable());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("Next month"));
+    await tester.pumpAndSettle();
+    // Setup sanity: the unfolded card shows May, off the selected day.
+    expect(controller.selectedDay, april27);
+    expect(find.text("May 2026"), findsOneWidget);
+    expect(controller.showsSelectedDay, isFalse);
+    final notifies = Notifies(controller);
+
+    // The strip opens on the week of May's first day, which holds the
+    // selected Monday, though the seven days around May 1 would not.
+    await tester.tap(find.byKey(calendarPullTabKey));
+    await tester.pumpAndSettle();
+    expect(find.byKey(weekStripDayKey(april27)).hitTestable(), findsOneWidget);
+    expect(controller.showsSelectedDay, isTrue);
+    expect(notifies.count, 1);
+  });
+
+  testWidgets("CO15 a drag of the folded card's pull tab that settles it "
+      "folded again reads the week the new strip opens on, with one "
+      "notify", (tester) async {
+    final controller = CalendarController(view: CalendarViewKind.day);
+    addTearDown(controller.dispose);
+    await pumpCalendar(tester, controller);
+    final selected = find.byKey(weekStripDayKey(tuesday)).hitTestable();
+    await dragStripDays(tester, 7);
+    // Setup sanity: the strip moved a week on, off the selected day, whose
+    // month its middle day, April 30, is still in.
+    expect(selected, findsNothing);
+    expect(
+      find.byKey(weekStripDayKey(DateTime(2026, 4, 30))).hitTestable(),
+      findsOneWidget,
+    );
+    expect(controller.showsSelectedDay, isFalse);
+    final notifies = Notifies(controller);
+
+    await tester.timedDrag(
+      find.byKey(calendarPullTabKey),
+      const Offset(0.0, 30.0),
+      const Duration(seconds: 1),
+    );
+    await tester.pumpAndSettle();
+    // Setup sanity: the card settled folded, its new strip on the selected
+    // day's week.
+    expect(find.byType(WeekStrip<String>), findsOneWidget);
+    expect(selected, findsOneWidget);
+    expect(controller.showsSelectedDay, isTrue);
+    expect(notifies.count, 1);
+  });
+
+  testWidgets("CO16 new weekdays under a strip a drag moved read the week "
+      "the new strip opens on, with one notify", (tester) async {
+    final controller = CalendarController(view: CalendarViewKind.day);
+    addTearDown(controller.dispose);
+    await pumpCalendar(tester, controller);
+    final selected = find.byKey(weekStripDayKey(tuesday)).hitTestable();
+    await dragStripDays(tester, 7);
+    // Setup sanity: the strip moved a week on, off the selected day.
+    expect(selected, findsNothing);
+    expect(controller.showsSelectedDay, isFalse);
+    final notifies = Notifies(controller);
+
+    await pumpCalendar(
+      tester,
+      controller,
+      weekdays: CalendarWeekdaySet.workweek,
+    );
+    // Setup sanity: the selected Tuesday stays shown, and the new strip
+    // opens on its week.
+    expect(controller.selectedDay, tuesday);
+    expect(selected, findsOneWidget);
+    expect(controller.showsSelectedDay, isTrue);
+    expect(notifies.count, 1);
   });
 
   testWidgets("CO8 with no controller the menu switches the views", (

@@ -1208,6 +1208,9 @@ void main() {
             CalendarDates.daysBetween(tuesday, browsed),
             greaterThanOrEqualTo(4),
           );
+          // The drag notified, as it moved the strip off the selected day;
+          // the count is of the zone change's notifies.
+          opened.notifies[0] = 0;
         }
         final col = timed ? colIn(view, tuesday) : 0;
         setStoreZone(opened.store, b);

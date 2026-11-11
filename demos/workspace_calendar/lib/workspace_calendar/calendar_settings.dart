@@ -58,7 +58,7 @@ extension MonthLayoutLabel on CalendarMonthLayout {
   }
 }
 
-/// What the calendar bar and the settings sheet choose: whether the
+/// What the settings sheet chooses: whether the
 /// calendar is in [editing] mode, whether the history lock holds past
 /// days, [lockPast], and earlier today too, [lockEarlierToday], whether
 /// items may share time, [allowsOverlaps], the [weekdays] it shows and the

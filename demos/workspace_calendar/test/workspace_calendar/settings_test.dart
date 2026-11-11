@@ -1,11 +1,10 @@
-/// The calendar's settings, in the calendar bar and the settings sheet,
-/// and what they change: the hours the timed grids show and the store
+/// The calendar's settings, in the settings sheet, and what they change:
+/// the hours the timed grids show and the store
 /// schedules in, the weekdays, the slot length, and the least size of the
 /// grids' cells.
 library;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
@@ -54,14 +53,8 @@ int updateCount(MockCalendarApi api) {
   }).length;
 }
 
-/// Closes the sheet with a tap on the barrier above it.
-Future<void> closeSettings(WidgetTester tester) async {
-  await tester.tapAt(const Offset(195.0, 20.0));
-  await tester.pumpAndSettle();
-}
-
-/// Moves the open calendar bar's hours slider to [start] to [end] o'clock
-/// through its own callback.
+/// Moves the open settings sheet's hours slider to [start] to [end]
+/// o'clock through its own callback.
 Future<void> setHours(WidgetTester tester, int start, int end) async {
   tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
     RangeValues(start.toDouble(), end.toDouble()),
@@ -93,12 +86,12 @@ Future<void> chooseSlotLength(WidgetTester tester, int minutes) async {
   await tester.pumpAndSettle();
 }
 
-/// Opens the calendar bar, sets the hours to [start] to [end] o'clock and
-/// closes it.
+/// Opens the settings sheet, sets the hours to [start] to [end] o'clock
+/// and closes it.
 Future<void> pickHours(WidgetTester tester, int start, int end) async {
-  await openBar(tester);
+  await openSettings(tester);
   await setHours(tester, start, end);
-  await closeBar(tester);
+  await closeSettings(tester);
 }
 
 Finder dropdownFinder(String label) {
@@ -138,7 +131,7 @@ Finder arrowIn(String id, IconData icon) {
   return find.descendant(of: blockFinder(id), matching: find.byIcon(icon));
 }
 
-/// The labels of the open calendar bar's days shown buttons, in order.
+/// The labels of the open settings sheet's days shown buttons, in order.
 List<String> shownDayLabels(WidgetTester tester) {
   final days = tester.widget<SegmentedButton<int>>(find.byKey(shownDaysKey));
   return <String>[
@@ -146,13 +139,13 @@ List<String> shownDayLabels(WidgetTester tester) {
   ];
 }
 
-/// Opens the calendar bar, shows or hides Saturday and Sunday together and
-/// closes it.
+/// Opens the settings sheet, shows or hides Saturday and Sunday together
+/// and closes it.
 Future<void> toggleWeekends(WidgetTester tester) async {
-  await openBar(tester);
+  await openSettings(tester);
   flipWeekends(tester);
   await tester.pumpAndSettle();
-  await closeBar(tester);
+  await closeSettings(tester);
 }
 
 Finder dayFinder(int year, int month, int day) {
@@ -179,19 +172,17 @@ List<String> weekdayHeaderLetters(WidgetTester tester) {
 }
 
 void main() {
-  testWidgets("H1 the bar names the hours in force and the sheet the "
-      "least sizes, and the bar opens again on new hours", (tester) async {
+  testWidgets("H1 the sheet names the hours in force and the least sizes, "
+      "and opens again on new hours", (tester) async {
     await pumpCalendar(tester);
-    await openBar(tester);
+    await openSettings(tester);
     expect(find.textContaining("00:00 - 24:00"), findsOneWidget);
     await setHours(tester, 8, 18);
     expect(find.textContaining("08:00 - 18:00"), findsOneWidget);
-    await closeBar(tester);
+    await closeSettings(tester);
     expect(find.textContaining("08:00 - 18:00"), findsNothing);
-    await openBar(tester);
-    expect(find.textContaining("08:00 - 18:00"), findsOneWidget);
-
     await openSettings(tester);
+    expect(find.textContaining("08:00 - 18:00"), findsOneWidget);
     expect(find.text("Calendar settings"), findsOneWidget);
     expect(find.text("At least 44 px"), findsOneWidget);
     expect(find.text("At least 16 px per 15 minutes"), findsOneWidget);
@@ -214,6 +205,8 @@ void main() {
     expect(chosen(), <CalendarMonthLayout>{CalendarMonthLayout.fitScreen});
     expect(find.text("Show all items"), findsOneWidget);
     expect(find.text("Fit to screen"), findsOneWidget);
+    await tester.ensureVisible(find.text("Show all items"));
+    await tester.pumpAndSettle();
     await tester.tap(find.text("Show all items"));
     await tester.pumpAndSettle();
     expect(chosen(), <CalendarMonthLayout>{CalendarMonthLayout.showAll});
@@ -560,7 +553,7 @@ void main() {
   });
 
   testWidgets("H8 the AM/PM switch relabels the hours of a week with no "
-      "items, painted and to a screen reader, and the bar opens on it", (
+      "items, painted and to a screen reader, and the sheet opens on it", (
     tester,
   ) async {
     // No item moves, so no item change rebuilds the board's cells.
@@ -586,7 +579,7 @@ void main() {
 
     final character = lineWidths().first.single / 5;
 
-    await openBar(tester);
+    await openSettings(tester);
     Finder twelveHour() {
       return find.byKey(hourLabelFormatKey);
     }
@@ -594,7 +587,7 @@ void main() {
     expect(tester.widget<Switch>(twelveHour()).value, isFalse);
     await tester.tap(twelveHour());
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
     expect(gutterLabelFinder("8 AM"), findsOneWidget);
     expect(gutterLabelFinder("12 PM"), findsOneWidget);
     expect(gutterLabelFinder("1 PM"), findsOneWidget);
@@ -619,16 +612,16 @@ void main() {
         <double>[for (final line in lines) line.length * character],
     ]);
 
-    await openBar(tester);
+    await openSettings(tester);
     expect(tester.widget<Switch>(twelveHour()).value, isTrue);
     semantics.dispose();
   });
 
-  testWidgets("H9 the bar's hours read as the AM/PM switch says, the "
+  testWidgets("H9 the sheet's hours read as the AM/PM switch says, the "
       "whole day as 12 AM - 12 AM, and its slider has no labels over its "
       "thumbs, which a screen reader hears in that format", (tester) async {
     await pumpCalendar(tester);
-    await openBar(tester);
+    await openSettings(tester);
     RangeSlider slider() {
       return tester.widget<RangeSlider>(find.byKey(hoursSliderKey));
     }
@@ -769,10 +762,10 @@ void main() {
     expect(find.text("Friday, May 29"), findsOneWidget);
   });
 
-  testWidgets("W6 the week starts on the weekday the bar picks, in the "
-      "bar's days and in every view", (tester) async {
+  testWidgets("W6 the week starts on the weekday the sheet picks, in the "
+      "sheet's days and in every view", (tester) async {
     await pumpCalendar(tester);
-    await openBar(tester);
+    await openSettings(tester);
     await tester.tap(find.byKey(weekStartKey));
     await tester.pumpAndSettle();
     await tester.tap(find.text("Sunday").last);
@@ -786,7 +779,7 @@ void main() {
       "Fri",
       "Sat",
     ]);
-    await closeBar(tester);
+    await closeSettings(tester);
 
     expect(weekdayHeaderLetters(tester), <String>[
       "Sun",
@@ -823,15 +816,15 @@ void main() {
     ]);
   });
 
-  testWidgets("W7 the bar hides any weekday from the views, and keeps the "
+  testWidgets("W7 the sheet hides any weekday from the views, and keeps the "
       "last one shown", (tester) async {
     await pumpCalendar(tester);
-    await openBar(tester);
+    await openSettings(tester);
     await tester.tap(
       find.descendant(of: find.byKey(shownDaysKey), matching: find.text("Wed")),
     );
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
     expect(weekdayHeaderLetters(tester), <String>[
       "Mon",
       "Tue",
@@ -843,7 +836,7 @@ void main() {
     await pickMode(tester, "Week");
     expect(headerFinder(DateTime(2026, 4, 22)), findsNothing);
 
-    await openBar(tester);
+    await openSettings(tester);
     tester
         .widget<SegmentedButton<int>>(find.byKey(shownDaysKey))
         .onSelectionChanged!(const <int>{0});
@@ -859,22 +852,21 @@ void main() {
   });
 
   testWidgets("E1 the calendar opens out of edit mode, and the settings "
-      "sheet holds the lock, Month's layout and the least sizes, and none of "
-      "the bar's settings", (tester) async {
+      "sheet holds edit mode, the days, the slot length and the hours, then "
+      "the lock, Month's layout and the least sizes", (tester) async {
     await pumpCalendar(tester);
-    await openBar(tester);
-    expect(tester.widget<Switch>(find.byKey(editModeKey)).value, isFalse);
-    await closeBar(tester);
     await openSettings(tester);
+    expect(tester.widget<Switch>(find.byKey(editModeKey)).value, isFalse);
+    expect(find.text("Edit mode"), findsOneWidget);
+    expect(find.text("Week starts on"), findsOneWidget);
+    expect(find.text("Days shown"), findsOneWidget);
+    expect(find.text("Slot length"), findsOneWidget);
+    expect(find.textContaining("Hours"), findsOneWidget);
+    expect(find.text("AM/PM"), findsOneWidget);
     expect(find.text("Lock past days"), findsOneWidget);
     expect(find.text("Month layout"), findsOneWidget);
     expect(find.text("Day width"), findsOneWidget);
     expect(find.text("Slot height"), findsOneWidget);
-    expect(find.text("Edit mode"), findsNothing);
-    expect(find.text("Week starts on"), findsNothing);
-    expect(find.text("Days shown"), findsNothing);
-    expect(find.text("Hours"), findsNothing);
-    expect(find.text("AM/PM hour labels"), findsNothing);
   });
   testWidgets("SL1 the sheet offers the six slot lengths and opens on the "
       "one in force", (tester) async {

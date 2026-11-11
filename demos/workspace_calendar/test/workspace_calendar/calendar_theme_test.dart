@@ -13,7 +13,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_bar.dart';
+import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
@@ -970,16 +970,16 @@ void hotReload(WidgetTester tester) {
   tester.binding.buildOwner!.reassemble(tester.binding.rootElement!);
 }
 
-/// Opens the calendar bar, sets the hours to [start] to [end] o'clock and
-/// closes it.
+/// Opens the settings sheet, sets the hours to [start] to [end] o'clock
+/// and closes it.
 Future<void> pickHours(WidgetTester tester, int start, int end) async {
-  await openBar(tester);
+  await openSettings(tester);
   setHours(tester, start, end);
   await tester.pumpAndSettle();
-  await closeBar(tester);
+  await closeSettings(tester);
 }
 
-/// Sets the hours of the open calendar bar to [start] to [end] o'clock
+/// Sets the hours of the open settings sheet to [start] to [end] o'clock
 /// through its slider's own callback. Pumps nothing.
 void setHours(WidgetTester tester, int start, int end) {
   tester.widget<RangeSlider>(find.byKey(hoursSliderKey)).onChanged!(
@@ -1761,7 +1761,7 @@ void main() {
 
     // A gap row coming in on new hours grows on A's motion.
     await revealDay(tester, april(21));
-    await openBar(tester);
+    await openSettings(tester);
     setHours(tester, 7, 18);
     await tester.pump();
     await tester.pump();
@@ -1773,7 +1773,7 @@ void main() {
     await tester.pumpAndSettle();
     setHours(tester, 8, 18);
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
 
     // A reveal from rest scrolls on A's motion: linear, its two middle
     // quarters each a quarter of the way, and done at 900 ms.
@@ -1895,7 +1895,7 @@ void main() {
     await installTheme(tester, api, sentinelA);
     await tester.pumpAndSettle();
     await revealDay(tester, april(21));
-    await openBar(tester);
+    await openSettings(tester);
     setHours(tester, 7, 18);
     await tester.pump();
     await tester.pump();
@@ -2222,10 +2222,10 @@ void main() {
     await tester.pumpAndSettle();
 
     // Weekends hidden, then Day, then a failed read.
-    await openBar(tester);
+    await openSettings(tester);
     flipWeekends(tester);
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
     probe("Week without weekends");
     await pickMode(tester, "Day");
     probe("Day");
@@ -2909,10 +2909,10 @@ void main() {
     );
     await gesture.cancel();
     await tester.pumpAndSettle();
-    await openBar(tester);
+    await openSettings(tester);
     flipWeekends(tester);
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
     expectText(
       tester,
       textIn(find.byKey(hiddenCountKey), "+1"),
@@ -2920,10 +2920,10 @@ void main() {
       "badgeStyle",
       theme.primary,
     );
-    await openBar(tester);
+    await openSettings(tester);
     flipWeekends(tester);
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
 
     // Month's numbers, letters, "+N more", chips and picker.
     await tester.tap(find.byKey(dayHeaderKey(april(23))));
@@ -3287,19 +3287,19 @@ void main() {
     );
     await gesture.cancel();
     await tester.pumpAndSettle();
-    await openBar(tester);
+    await openSettings(tester);
     flipWeekends(tester);
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
     expectColour(
       decorationOf(tester, find.byKey(hiddenCountKey)).color!,
       theme.primaryTint,
       "hidden pill",
     );
-    await openBar(tester);
+    await openSettings(tester);
     flipWeekends(tester);
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
 
     // Month's paints, pills, ring and "+N more".
     await tester.tap(find.byKey(dayHeaderKey(april(23))));
@@ -3416,10 +3416,10 @@ void main() {
     }
 
     Future<void> flipWeekendsShown() async {
-      await openBar(tester);
+      await openSettings(tester);
       flipWeekends(tester);
       await tester.pumpAndSettle();
-      await closeBar(tester);
+      await closeSettings(tester);
     }
 
     await pickHours(tester, 8, 18);
@@ -3487,7 +3487,7 @@ void main() {
     expectListMotion(tester, const Duration(milliseconds: 900), Curves.linear);
 
     // An Agenda row growing in.
-    await openBar(tester);
+    await openSettings(tester);
     setHours(tester, 7, 23);
     await tester.pump();
     await tester.pump();
@@ -3497,7 +3497,7 @@ void main() {
       moreOrLessEquals(0.5),
     );
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
 
     // A reveal.
     final from = listOffset(tester);
@@ -3535,7 +3535,6 @@ void main() {
     // The grid's style and a lift, in today's week.
     await tapToday(tester);
     await tester.pumpAndSettle();
-    await closeBar(tester);
     await pickMode(tester, "Week");
     expectBoardMotion(
       gridBoard(tester).controller,
@@ -3656,7 +3655,7 @@ void main() {
       switch (mode) {
         case "Agenda":
           // A gap row coming in on new hours, on B's motion.
-          await openBar(tester);
+          await openSettings(tester);
           setHours(tester, 7, 23);
           await tester.pump();
           await tester.pump();
@@ -3666,7 +3665,7 @@ void main() {
             moreOrLessEquals(Curves.easeIn.transform(0.5)),
           );
           await tester.pumpAndSettle();
-          await closeBar(tester);
+          await closeSettings(tester);
         case "Day":
           // A strip slide on B's motion.
           final week = tester
@@ -3784,7 +3783,7 @@ void main() {
 
     // An Agenda row growing in under A runs on under B to its end.
     await pickMode(tester, "Agenda");
-    await openBar(tester);
+    await openSettings(tester);
     setHours(tester, 7, 23);
     await tester.pump();
     await tester.pump();
@@ -3865,12 +3864,12 @@ void main() {
     final api = await pumpThemed(tester, still);
 
     // An Agenda row coming in.
-    await openBar(tester);
+    await openSettings(tester);
     setHours(tester, 7, 23);
     await tester.pump();
     expect(sizeFactorOf(tester, dayListGapKey(april(21), 7 * 60)), 1.0);
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
 
     // A reveal, which the frame of the tap starts after it.
     await tester.tap(cellOf(april(23)));
@@ -3912,7 +3911,6 @@ void main() {
     // A lift.
     await tapToday(tester);
     await tester.pumpAndSettle();
-    await closeBar(tester);
     await pickMode(tester, "Week");
     final gesture = await liftBlock(tester, "item-7");
     await tester.pump();

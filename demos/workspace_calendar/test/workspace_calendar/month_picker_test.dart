@@ -359,10 +359,10 @@ void main() {
   testWidgets("P9 a pick whose day of the month falls on a hidden weekday "
       "selects the next shown day of that month", (tester) async {
     await pumpCalendar(tester);
-    await openBar(tester);
+    await openSettings(tester);
     flipWeekends(tester);
     await tester.pumpAndSettle();
-    await closeBar(tester);
+    await closeSettings(tester);
     await openPicker(tester);
     // June 21 is a Sunday.
     await pickMonth(tester, 2026, 6);
