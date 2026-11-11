@@ -561,4 +561,43 @@ void main() {
       expect(panel.bottom, moreOrLessEquals(screen));
     },
   );
+
+  testWidgets(
+    "DZ6 the app bar's zone button draws its globe and its label in the "
+    "colour the bar gives its other actions",
+    (tester) async {
+      await pumpCalendar(tester, clock: noonClock);
+      final bar = find.byType(AppBar);
+      final fill = tester
+          .widget<Material>(
+            find.descendant(of: bar, matching: find.byType(Material)).first,
+          )
+          .color;
+      final action = IconTheme.of(
+        tester.element(
+          find.descendant(of: bar, matching: find.byIcon(Icons.settings)),
+        ),
+      ).color;
+      // Setup sanity: the bar's actions stand out from its fill.
+      expect(action, isNot(fill));
+      final globe = IconTheme.of(
+        tester.element(
+          find.descendant(of: zoneButton, matching: find.byIcon(Icons.public)),
+        ),
+      ).color;
+      expect(globe, action);
+      final label = tester.widget<RichText>(
+        find.descendant(
+          of: find.descendant(
+            of: zoneButton,
+            matching: find.text(
+              const DefaultCalendarLocalizations().deviceZoneName,
+            ),
+          ),
+          matching: find.byType(RichText),
+        ),
+      );
+      expect(label.text.style!.color, action);
+    },
+  );
 }
