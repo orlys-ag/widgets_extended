@@ -457,16 +457,26 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar>
             constraints: const BoxConstraints(maxWidth: 120.0),
             child: Tooltip(
               message: "Time zone",
-              child: TextButton.icon(
-                icon: const Icon(Icons.public),
-                label: Text(
-                  zone == null
-                      ? CalendarLocalizations.of(context).deviceZoneName
-                      : CalendarZonePanel.cityOf(zone),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                onPressed: _openZones,
+              // The app bar gives its actions its foreground through their
+              // IconTheme, which a TextButton does not read: it would keep
+              // the scheme's primary, the bar's own fill.
+              child: Builder(
+                builder: (context) {
+                  return TextButton.icon(
+                    style: TextButton.styleFrom(
+                      foregroundColor: IconTheme.of(context).color,
+                    ),
+                    icon: const Icon(Icons.public),
+                    label: Text(
+                      zone == null
+                          ? CalendarLocalizations.of(context).deviceZoneName
+                          : CalendarZonePanel.cityOf(zone),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    onPressed: _openZones,
+                  );
+                },
               ),
             ),
           ),
