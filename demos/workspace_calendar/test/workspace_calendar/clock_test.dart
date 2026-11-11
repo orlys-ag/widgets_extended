@@ -214,6 +214,7 @@ void main() {
     expect(ringIn(tester, find.byKey(dayHeaderKey(thursday))), isNull);
 
     await pickMode(tester, "Day");
+    await foldCard(tester);
     expect(ringIn(tester, find.byKey(weekStripDayKey(tuesday))), isTodayRing);
     expect(ringIn(tester, find.byKey(weekStripDayKey(thursday))), isNull);
 

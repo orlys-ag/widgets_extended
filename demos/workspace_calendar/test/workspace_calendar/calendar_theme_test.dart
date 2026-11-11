@@ -1452,6 +1452,7 @@ void main() {
 
     // Day's strip, and its slide to the next week on A's motion.
     await pickMode(tester, "Day");
+    await foldCard(tester);
     final stripRoots = <Finder>[find.byType(DayCell)];
     drawn = drawnUnder(tester, stripRoots);
     expectOnly(drawn, sentinelA, forbidden: const [], reason: "Day");
@@ -2607,6 +2608,7 @@ void main() {
 
     // Strip days' weekday names, across the rebuild a tap makes.
     await pickMode(tester, "Day");
+    await foldCard(tester);
     TextStyle weekday(DateTime day, String name) {
       return tester
           .widget<Text>(
@@ -2820,6 +2822,7 @@ void main() {
     // Day's strip and detailed blocks.
     await revealDay(tester, april(21));
     await pickMode(tester, "Day");
+    await foldCard(tester);
     expectText(
       tester,
       textIn(stripCellOf(april(22)), "Wed"),
@@ -3433,6 +3436,7 @@ void main() {
     await visit("the picker in Agenda");
     await togglePicker();
     await pickMode(tester, "Day");
+    await foldCard(tester);
     await visit("Day", labels: true);
     await pickMode(tester, "Week");
     await visit("Week", labels: true);
@@ -3518,6 +3522,7 @@ void main() {
 
     // A strip slide.
     await pickMode(tester, "Day");
+    await foldCard(tester);
     final week = tester.getSize(find.byType(WeekStrip<ItemPayload>)).width;
     await tester.tap(find.byKey(weekStripDayKey(april(26))));
     await tester.pumpAndSettle();
@@ -3580,6 +3585,9 @@ void main() {
       final api = await pumpThemed(tester, sentinelA);
       if (mode != "Agenda") {
         await pickMode(tester, mode);
+      }
+      if (mode == "Day") {
+        await foldCard(tester);
       }
       final grid = mode == "Day" || mode == "Week";
       ({int row, int col})? top;
@@ -3887,6 +3895,7 @@ void main() {
     // A strip slide, then a drag of the strip into the next month, which
     // the header names.
     await pickMode(tester, "Day");
+    await foldCard(tester);
     final week = tester.getSize(find.byType(WeekStrip<ItemPayload>)).width;
     await tester.tap(find.byKey(weekStripDayKey(april(26))));
     await tester.pumpAndSettle();

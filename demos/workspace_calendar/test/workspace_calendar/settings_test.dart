@@ -62,13 +62,6 @@ Future<void> setHours(WidgetTester tester, int start, int end) async {
   await tester.pumpAndSettle();
 }
 
-/// Moves the open sheet's slider [key] to [value] through its own
-/// callback.
-Future<void> setSlider(WidgetTester tester, Key key, double value) async {
-  tester.widget<Slider>(find.byKey(key)).onChanged!(value);
-  await tester.pumpAndSettle();
-}
-
 /// The open sheet's slot length buttons.
 SegmentedButton<int> slotLengthButtons(WidgetTester tester) {
   return tester.widget<SegmentedButton<int>>(find.byKey(slotLengthKey));
@@ -172,8 +165,8 @@ List<String> weekdayHeaderLetters(WidgetTester tester) {
 }
 
 void main() {
-  testWidgets("H1 the sheet names the hours in force and the least sizes, "
-      "and opens again on new hours", (tester) async {
+  testWidgets("H1 the sheet names the hours in force, and opens again on "
+      "new hours", (tester) async {
     await pumpCalendar(tester);
     await openSettings(tester);
     expect(find.textContaining("00:00 - 24:00"), findsOneWidget);
@@ -184,8 +177,6 @@ void main() {
     await openSettings(tester);
     expect(find.textContaining("08:00 - 18:00"), findsOneWidget);
     expect(find.text("Calendar settings"), findsOneWidget);
-    expect(find.text("At least 44 px"), findsOneWidget);
-    expect(find.text("At least 16 px per 15 minutes"), findsOneWidget);
     await closeSettings(tester);
     expect(find.text("Calendar settings"), findsNothing);
   });
@@ -349,9 +340,7 @@ void main() {
     expect(bottom.left, near(header.left));
 
     // Slots too tall to fit scroll beneath the rows, which stay put.
-    await openSettings(tester);
-    await setSlider(tester, slotHeightSliderKey, 32.0);
-    await closeSettings(tester);
+    await setLeastSizes(tester, slotHeight: 32.0);
     final block = tester.getRect(blockFinder(uxFlowId));
     // From the middle of Saturday's column, which holds no item.
     await tester.dragFrom(
@@ -461,12 +450,7 @@ void main() {
     expect(cell.width, near((grid.size.width - gutter) / 7));
     expect(cell.height, near(16.0));
 
-    await openSettings(tester);
-    await setSlider(tester, dayWidthSliderKey, 120.0);
-    expect(find.text("At least 120 px"), findsOneWidget);
-    await setSlider(tester, slotHeightSliderKey, 24.0);
-    expect(find.text("At least 24 px per 15 minutes"), findsOneWidget);
-    await closeSettings(tester);
+    await setLeastSizes(tester, dayWidth: 120.0, slotHeight: 24.0);
     final larger = cellRect(tester, rowOf(9 * 60), colOf(0));
     expect(larger.width, near(120.0));
     expect(larger.height, near(24.0));
@@ -504,9 +488,7 @@ void main() {
 
     // The time at the top edge, the room's share of a slot before 08:00,
     // stays there, so the room above 08:00's line grows with the slots.
-    await openSettings(tester);
-    await setSlider(tester, slotHeightSliderKey, 32.0);
-    await closeSettings(tester);
+    await setLeastSizes(tester, slotHeight: 32.0);
     expect(cellRect(tester, rowOf(8 * 60), 1).height, near(32.0));
     expect(
       cellRect(tester, rowOf(8 * 60), 1).top,
@@ -518,9 +500,7 @@ void main() {
       "08:00", (tester) async {
     await pumpCalendar(tester);
     await pickHours(tester, 12, 24);
-    await openSettings(tester);
-    await setSlider(tester, slotHeightSliderKey, 32.0);
-    await closeSettings(tester);
+    await setLeastSizes(tester, slotHeight: 32.0);
     await pickMode(tester, "Week");
 
     // The seed's items before 12:00 put the 24 px row counting them in
@@ -796,6 +776,7 @@ void main() {
     );
 
     await pickMode(tester, "Day");
+    await foldCard(tester);
     expect(
       tester.getRect(find.byKey(weekStripDayKey(DateTime(2026, 4, 19)))).left,
       near(tester.getRect(find.byType(WeekStrip<ItemPayload>)).left),
@@ -852,12 +833,15 @@ void main() {
   });
 
   testWidgets("E1 the calendar opens out of edit mode, and the settings "
-      "sheet holds edit mode, the days, the slot length and the hours, then "
-      "the lock, Month's layout and the least sizes", (tester) async {
+      "sheet holds the time zone, the days, the slot length and the hours, "
+      "then the lock, Month's layout and the overlap switch, and no edit "
+      "mode and no least sizes", (tester) async {
     await pumpCalendar(tester);
+    expect(tester.widget<IconButton>(editToggleFinder()).isSelected, isFalse);
     await openSettings(tester);
-    expect(tester.widget<Switch>(find.byKey(editModeKey)).value, isFalse);
-    expect(find.text("Edit mode"), findsOneWidget);
+    expect(find.text("Edit mode"), findsNothing);
+    expect(find.textContaining("Time zone"), findsOneWidget);
+    expect(find.byKey(zoneChoicesKey), findsOneWidget);
     expect(find.text("Week starts on"), findsOneWidget);
     expect(find.text("Days shown"), findsOneWidget);
     expect(find.text("Slot length"), findsOneWidget);
@@ -865,8 +849,11 @@ void main() {
     expect(find.text("AM/PM"), findsOneWidget);
     expect(find.text("Lock past days"), findsOneWidget);
     expect(find.text("Month layout"), findsOneWidget);
-    expect(find.text("Day width"), findsOneWidget);
-    expect(find.text("Slot height"), findsOneWidget);
+    expect(find.text("Allow overlapping items"), findsOneWidget);
+    // A pinch on a grid sets the least day width and slot height.
+    expect(find.text("Day width"), findsNothing);
+    expect(find.text("Slot height"), findsNothing);
+    expect(find.byType(Slider), findsNothing);
   });
   testWidgets("SL1 the sheet offers the six slot lengths and opens on the "
       "one in force", (tester) async {
@@ -880,8 +867,9 @@ void main() {
     expect(slotLengthButtons(tester).selected, <int>{15});
   });
 
-  testWidgets("SL2 choosing 30 minutes gives the grid 48 slot rows, and the "
-      "slot height names them", (tester) async {
+  testWidgets("SL2 choosing 30 minutes gives the grid 48 slot rows", (
+    tester,
+  ) async {
     await pumpCalendar(tester, size: tall);
     await pickMode(tester, "Week");
     final grid = gridViewport(tester);
@@ -889,7 +877,6 @@ void main() {
     await openSettings(tester);
     await chooseSlotLength(tester, 30);
     expect(slotLengthButtons(tester).selected, <int>{30});
-    expect(find.text("At least 16 px per 30 minutes"), findsOneWidget);
     await closeSettings(tester);
     // The day header, the room above the slots, 48 slots and the room
     // below them.
@@ -915,8 +902,8 @@ void main() {
     );
     expect(start.withSlotMinutes(5), start.copyWith(slotMinutes: 5));
 
-    final controller = CalendarController();
-    addTearDown(controller.dispose);
+    final zones = CalendarZoneController();
+    addTearDown(zones.dispose);
     final chosen = <CalendarSettings>[];
     await tester.pumpWidget(
       MaterialApp(
@@ -924,7 +911,10 @@ void main() {
         home: Scaffold(
           body: CalendarSettingsSheet(
             settings: start,
-            controller: controller,
+            zone: null,
+            zones: zones,
+            clock: DateTime.now,
+            onZoneChanged: (zone) {},
             onChanged: chosen.add,
           ),
         ),
@@ -939,8 +929,8 @@ void main() {
 
   testWidgets("OS1 the sheet's overlap switch is off by default, and a tap "
       "reports settings that allow overlaps", (tester) async {
-    final controller = CalendarController();
-    addTearDown(controller.dispose);
+    final zones = CalendarZoneController();
+    addTearDown(zones.dispose);
     final chosen = <CalendarSettings>[];
     await tester.pumpWidget(
       MaterialApp(
@@ -948,7 +938,10 @@ void main() {
         home: Scaffold(
           body: CalendarSettingsSheet(
             settings: const CalendarSettings(),
-            controller: controller,
+            zone: null,
+            zones: zones,
+            clock: DateTime.now,
+            onZoneChanged: (zone) {},
             onChanged: chosen.add,
           ),
         ),

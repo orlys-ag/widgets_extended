@@ -1,14 +1,17 @@
 /// Helpers the calendar's widget tests share: the fixed day, the host the
-/// calendar is pumped in, the settings sheet and its edit mode switch, the
-/// app bar's Today pill, the timed grid's viewport, a block's selection and
+/// calendar is pumped in, the settings sheet, the header's edit mode toggle
+/// and Today button, the timed grid's viewport, a block's selection and
 /// move, a read of the mock, and a canvas that records what a painter
 /// draws.
 library;
 
 import 'dart:ui' as ui;
 
+import 'package:widgets_extended/calendar/composition/calendar_card.dart'
+    show calendarPullTabKey;
+import 'package:widgets_extended/calendar/composition/calendar_header.dart'
+    show calendarEditToggleKey, calendarTodayButtonKey, calendarViewButtonKey;
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
-import 'package:workspace_calendar/workspace_calendar/today_pill.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart'
     show parseIsoDate;
@@ -24,6 +27,7 @@ import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/month_strip.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
+import 'package:widgets_extended/calendar/views/week_strip.dart';
 
 /// A Tuesday. April 2026 starts on a Wednesday and has 30 days, so its
 /// Monday-first grid runs from March 30 to May 3 in five weeks.
@@ -184,6 +188,24 @@ void expectFormDays(String day, int days) {
   );
 }
 
+/// The icon the calendar header's view button shows for each view, by the
+/// view's name.
+const Map<String, IconData> viewIcons = <String, IconData>{
+  "Agenda": Icons.view_agenda_outlined,
+  "Day": Icons.calendar_view_day_outlined,
+  "Week": Icons.calendar_view_week_outlined,
+  "Month": Icons.calendar_view_month_outlined,
+};
+
+/// The calendar header's view button where it shows the icon of [mode],
+/// "Agenda", "Day", "Week" or "Month".
+Finder viewButtonShowing(String mode) {
+  return find.descendant(
+    of: find.byKey(calendarViewButtonKey),
+    matching: find.byIcon(viewIcons[mode]!),
+  );
+}
+
 /// Opens the calendar's mode menu and picks [mode], "Agenda", "Day", "Week"
 /// or "Month".
 Future<void> pickMode(WidgetTester tester, String mode) async {
@@ -191,6 +213,40 @@ Future<void> pickMode(WidgetTester tester, String mode) async {
   await tester.pumpAndSettle();
   await tester.tap(find.text(mode).last);
   await tester.pumpAndSettle();
+}
+
+/// The controller the example gives its calendar.
+CalendarController calendarControllerOf(WidgetTester tester) {
+  return tester
+      .widget<CalendarView<ItemPayload>>(find.byType(CalendarView<ItemPayload>))
+      .controller!;
+}
+
+/// Sets the calendar's least day width and least slot height, as a pinch
+/// on a grid does, and lets the calendar settle.
+Future<void> setLeastSizes(
+  WidgetTester tester, {
+  double? dayWidth,
+  double? slotHeight,
+}) async {
+  final controller = calendarControllerOf(tester);
+  if (dayWidth != null) {
+    controller.minDayWidth = dayWidth;
+  }
+  if (slotHeight != null) {
+    controller.minSlotHeight = slotHeight;
+  }
+  await tester.pumpAndSettle();
+}
+
+/// Folds the calendar card, which opens on its month, into its week strip
+/// with a tap on the pull tab, and lets it settle.
+Future<void> foldCard(WidgetTester tester) async {
+  // Setup sanity: the card shows its month, so the tap folds it.
+  expect(find.byType(WeekStrip<ItemPayload>), findsNothing);
+  await tester.tap(find.byKey(calendarPullTabKey));
+  await tester.pumpAndSettle();
+  expect(find.byType(WeekStrip<ItemPayload>), findsOneWidget);
 }
 
 /// Stores [item] through [api] before the calendar is pumped, and pumps
@@ -325,15 +381,13 @@ Future<MockCalendarApi> pumpCalendar(
   return mock;
 }
 
-/// Opens the settings sheet from the app bar's More menu where it is
-/// closed.
+/// Opens the settings sheet from the header's settings button where it
+/// is closed.
 Future<void> openSettings(WidgetTester tester) async {
   if (find.byType(CalendarSettingsSheet).evaluate().isNotEmpty) {
     return;
   }
-  await tester.tap(find.byTooltip("More"));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text("Calendar settings"));
+  await tester.tap(find.byTooltip("Calendar settings"));
   await tester.pumpAndSettle();
 }
 
@@ -347,22 +401,25 @@ Future<void> closeSettings(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-/// Opens the settings sheet where it is closed, flips its edit mode
-/// switch, and closes the sheet.
+/// The calendar header's edit mode toggle.
+Finder editToggleFinder() {
+  return find.byKey(calendarEditToggleKey);
+}
+
+/// Taps the calendar header's edit mode toggle, and lets the calendar
+/// settle.
 Future<void> toggleEditMode(WidgetTester tester) async {
-  await openSettings(tester);
-  await tester.tap(find.byKey(editModeKey));
+  await tester.tap(editToggleFinder());
   await tester.pumpAndSettle();
-  await closeSettings(tester);
 }
 
-/// The app bar's Today pill, shown or not.
+/// The calendar header's Today button, shown or not.
 Finder todayButtonFinder() {
-  return find.byKey(todayPillKey);
+  return find.byKey(calendarTodayButtonKey);
 }
 
-/// Taps the app bar's Today pill, which must show, and pumps nothing
-/// after the tap.
+/// Taps the calendar header's Today button, which must show, and pumps
+/// nothing after the tap.
 Future<void> tapToday(WidgetTester tester) async {
   await tester.tap(todayButtonFinder().hitTestable());
 }

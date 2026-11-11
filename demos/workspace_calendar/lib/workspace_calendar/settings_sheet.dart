@@ -1,10 +1,10 @@
-/// The calendar's settings sheet. Its first part, in compact rows: the edit
-/// mode switch, the weekdays the calendar shows and the weekday a week
-/// starts on, the length of the calendar's slots, and the hours it shows
-/// and schedules in, with whether the timed grid labels them AM/PM. Under a
-/// divider: the history lock, how Month fits its weeks, on the calendar's
-/// controller the least width of a day in Week, Day and Month and the least
-/// height of the timed grid's slots, and whether items may overlap.
+/// The calendar's settings sheet. Its first part, in compact rows: the zone
+/// whose clock the calendar reads, picked among the device's and the zones
+/// the user added, which a sheet of zones over it adds and removes; the
+/// weekdays the calendar shows and the weekday a week starts on, the
+/// length of the calendar's slots, and the hours it shows and schedules
+/// in, with whether the timed grid labels them AM/PM. Under a divider: the
+/// history lock, how Month fits its weeks, and whether items may overlap.
 library;
 
 import 'package:flutter/material.dart';
@@ -13,8 +13,19 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
 
-/// The key of the sheet's edit mode switch.
-const ValueKey<String> editModeKey = ValueKey<String>("settings-edit-mode");
+/// The key of the sheet's chips of the zones the calendar can read.
+const ValueKey<String> zoneChoicesKey = ValueKey<String>("settings-zones");
+
+/// The key of the sheet's chip of the zone named [name], or with the empty
+/// name the chip of the device's zone.
+ValueKey<String> zoneChipKey(String name) {
+  return ValueKey<String>("settings-zone-$name");
+}
+
+/// The key of the sheet's chip that opens the sheet of zones.
+const ValueKey<String> manageZonesKey = ValueKey<String>(
+  "settings-manage-zones",
+);
 
 /// The key of the sheet's menu of the weekday a week starts on.
 const ValueKey<String> weekStartKey = ValueKey<String>("settings-week-start");
@@ -52,16 +63,6 @@ const ValueKey<String> monthLayoutKey = ValueKey<String>(
 /// The key of the sheet's slot length buttons.
 const ValueKey<String> slotLengthKey = ValueKey<String>("settings-slot-length");
 
-/// The key of the sheet's day width slider.
-const ValueKey<String> dayWidthSliderKey = ValueKey<String>(
-  "settings-day-width",
-);
-
-/// The key of the sheet's slot height slider.
-const ValueKey<String> slotHeightSliderKey = ValueKey<String>(
-  "settings-slot-height",
-);
-
 /// The key of the sheet's switch that lets items share time.
 const ValueKey<String> allowsOverlapsKey = ValueKey<String>(
   "settings-allows-overlaps",
@@ -79,16 +80,20 @@ String hoursLabel(
   return "$start - $end";
 }
 
-/// Opens the settings sheet on [settings] and the sizes of [controller],
-/// at most nine tenths of the screen's height, scrolling past it. Each
-/// change applies at once, a setting through [onChanged] and a size on
-/// [controller], so the calendar behind the sheet shows it while the
-/// sheet is open. Completes when the sheet closes.
+/// Opens the settings sheet on [settings], the calendar's [zone], null for
+/// the device's, and the zones of [zones], at most nine tenths of the
+/// screen's height, scrolling past it. Each change applies at once, a
+/// setting through [onChanged] and a zone through [onZoneChanged], so the
+/// calendar behind the sheet shows it while the sheet is open. The zones show their offsets at
+/// [clock]'s reading. Completes when the sheet closes.
 Future<void> showCalendarSettings(
   BuildContext context, {
   required CalendarSettings settings,
-  required CalendarController controller,
+  required Location? zone,
+  required CalendarZoneController zones,
+  required DateTime Function() clock,
   required ValueChanged<CalendarSettings> onChanged,
+  required ValueChanged<Location?> onZoneChanged,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -102,8 +107,11 @@ Future<void> showCalendarSettings(
     builder: (context) {
       return CalendarSettingsSheet(
         settings: settings,
-        controller: controller,
+        zone: zone,
+        zones: zones,
+        clock: clock,
         onChanged: onChanged,
+        onZoneChanged: onZoneChanged,
       );
     },
   );
@@ -112,10 +120,13 @@ Future<void> showCalendarSettings(
 /// The sheet [showCalendarSettings] opens, in two parts a divider parts.
 ///
 /// The first, in compact rows of a title with its control at the row's
-/// end: a switch of edit mode; the days, a menu of the weekday a week
-/// starts on over a button for each weekday, in the week's order, that
-/// shows or hides it, never hiding the last one shown; the slot length,
-/// a button for each of [slotMinuteChoices], choosing through
+/// end: the time zone, named with its offset from UTC, over a chip for the
+/// device's zone and one for each zone of [zones], the chip of the chosen
+/// zone selected, a tap on one choosing its zone, and a chip that opens
+/// the sheet of zones over this one; the days, a menu of the
+/// weekday a week starts on over a button for each weekday, in the week's
+/// order, that shows or hides it, never hiding the last one shown; the
+/// slot length, a button for each of [slotMinuteChoices], choosing through
 /// [CalendarSettings.withSlotMinutes]; and the hours, a switch for AM/PM
 /// hour labels over a range slider for the hours, in whole hours at least
 /// one apart, with no labels over its thumbs, the hours, and to a screen
@@ -124,26 +135,44 @@ Future<void> showCalendarSettings(
 ///
 /// The second: a switch for the history lock of past days and, under it,
 /// one that extends the lock to earlier today, which takes input only
-/// while the first is on; a segmented button for Month's layout; a slider
-/// for each least size of [controller]; and last a switch that lets items
-/// overlap.
+/// while the first is on; a segmented button for Month's layout; and last
+/// a switch that lets items overlap.
+///
+/// The sheet of zones holds a [CalendarZonePanel] over [zones], marking the
+/// chosen zone, 0.7 of the screen tall or what the keyboard leaves of it,
+/// padded above the keyboard. A pick there chooses its zone and closes it;
+/// a removal of the chosen zone chooses the device's and leaves it open.
 class CalendarSettingsSheet extends StatefulWidget {
   const CalendarSettingsSheet({
     super.key,
     required this.settings,
-    required this.controller,
+    required this.zone,
+    required this.zones,
+    required this.clock,
     required this.onChanged,
+    required this.onZoneChanged,
   });
 
   /// The settings the sheet opens on.
   final CalendarSettings settings;
 
-  /// The calendar's controller, whose least day width and slot height the
-  /// sliders show and set, following a pinch on a grid as well.
-  final CalendarController controller;
+  /// The zone the sheet opens on, the one whose clock the calendar reads;
+  /// null for the device's.
+  final Location? zone;
 
-  /// Reports each change, once per new value.
+  /// The zones the user added, which the chips offer and the sheet of
+  /// zones adds and removes.
+  final CalendarZoneController zones;
+
+  /// Reads the time at which the zones show their offsets.
+  final DateTime Function() clock;
+
+  /// Reports each change of the settings, once per new value.
   final ValueChanged<CalendarSettings> onChanged;
+
+  /// Reports each change of the zone, once per new zone, null for the
+  /// device's.
+  final ValueChanged<Location?> onZoneChanged;
 
   @override
   State<CalendarSettingsSheet> createState() {
@@ -154,6 +183,18 @@ class CalendarSettingsSheet extends StatefulWidget {
 class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
   late CalendarSettings _settings = widget.settings;
 
+  /// The chosen zone, null for the device's, which the chips and the sheet
+  /// of zones mark.
+  late final ValueNotifier<Location?> _zone = ValueNotifier<Location?>(
+    widget.zone,
+  );
+
+  @override
+  void dispose() {
+    _zone.dispose();
+    super.dispose();
+  }
+
   void _set(CalendarSettings settings) {
     if (settings == _settings) {
       return;
@@ -162,6 +203,67 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
       _settings = settings;
     });
     widget.onChanged(settings);
+  }
+
+  /// Chooses [zone], null for the device's, where it is not the chosen one.
+  void _setZone(Location? zone) {
+    if (zone == _zone.value) {
+      return;
+    }
+    setState(() {
+      _zone.value = zone;
+    });
+    widget.onZoneChanged(zone);
+  }
+
+  /// Opens the sheet of zones over this one: the zone panel over the
+  /// chosen zone, 0.7 of the screen tall, padded above the keyboard. The
+  /// sheet stays below the screen's top intrusions, such as a status bar,
+  /// and within the screen, so where the keyboard leaves less than that
+  /// height the panel takes what is left, in which its list scrolls.
+  void _openZones() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheet) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(sheet).bottom,
+          ),
+          child: SizedBox(
+            height: MediaQuery.sizeOf(sheet).height * 0.7,
+            child: ValueListenableBuilder<Location?>(
+              valueListenable: _zone,
+              builder: (context, zone, child) {
+                return CalendarZonePanel(
+                  value: zone,
+                  controller: widget.zones,
+                  clock: widget.clock,
+                  onChanged: (picked) {
+                    _pickZone(sheet, picked);
+                  },
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// The sheet of zones' pick of [zone], null for the device's: chooses it
+  /// and closes the sheet of [sheet], unless the panel reported the removal
+  /// of the chosen zone, which it removes from [CalendarSettingsSheet.zones]
+  /// before it reports it.
+  void _pickZone(BuildContext sheet, Location? zone) {
+    final current = _zone.value;
+    final removed =
+        zone == null && current != null && !widget.zones.contains(current);
+    _setZone(zone);
+    if (!removed) {
+      Navigator.pop(sheet);
+    }
   }
 
   /// Whole hours from the slider's two thumbs. A pair less than an hour
@@ -214,21 +316,70 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
     );
   }
 
-  /// Edit mode, the days, the slot length and the hours, in compact rows.
+  /// The time zone part: the chosen zone and its offset over the chips.
+  Widget _buildZonePart(CalendarLocalizations strings) {
+    final chosen = _zone.value;
+    final offset = CalendarDates.inZone(
+      widget.clock(),
+      zone: chosen,
+    ).timeZoneOffset.inMinutes;
+    final name = chosen == null
+        ? _deviceChip
+        : CalendarZonePanel.cityOf(chosen);
+    return _Part(
+      title: "Time zone",
+      value: "$name, ${strings.utcOffset(offset)}",
+      child: ListenableBuilder(
+        listenable: widget.zones,
+        builder: (context, child) {
+          return Wrap(
+            key: zoneChoicesKey,
+            spacing: 8.0,
+            runSpacing: 4.0,
+            children: <Widget>[
+              for (final zone in <Location?>[null, ...widget.zones.zones])
+                ChoiceChip(
+                  key: zoneChipKey(zone?.name ?? ""),
+                  label: Text(
+                    zone == null ? _deviceChip : CalendarZonePanel.cityOf(zone),
+                  ),
+                  selected: zone?.name == chosen?.name,
+                  showCheckmark: false,
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  onSelected: (selected) {
+                    _setZone(zone);
+                  },
+                ),
+              ActionChip(
+                key: manageZonesKey,
+                avatar: const Icon(Icons.edit_location_alt_outlined),
+                label: const Text("Manage"),
+                tooltip: "Add or remove time zones",
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onPressed: _openZones,
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// The name of the device's zone on its chip and in the time zone part.
+  static const String _deviceChip = "This device";
+
+  /// The time zone, the days, the slot length and the hours, in compact
+  /// rows.
   List<Widget> _buildCompactPart(BuildContext context) {
     final weekdays = _settings.weekdays;
     final hours = _settings.hours;
     final format = _settings.hourLabelFormat;
     final strings = CalendarLocalizations.of(context);
     return <Widget>[
-      _SwitchRow(
-        switchKey: editModeKey,
-        label: "Edit mode",
-        value: _settings.editing,
-        onChanged: (editing) {
-          _set(_settings.copyWith(editing: editing));
-        },
-      ),
+      _buildZonePart(strings),
+      const SizedBox(height: 8.0),
       _Part(
         title: "Days shown",
         trailing: Row(
@@ -291,10 +442,7 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
             for (final minutes in CalendarDates.slotMinuteChoices)
               ButtonSegment<int>(
                 value: minutes,
-                label: Text(
-                  "$minutes",
-                  style: const TextStyle(fontSize: 13.0),
-                ),
+                label: Text("$minutes", style: const TextStyle(fontSize: 13.0)),
               ),
           ],
           selected: <int>{_settings.slotMinutes},
@@ -344,8 +492,7 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
     ];
   }
 
-  /// The history lock, Month's layout, the least sizes and the overlap
-  /// switch.
+  /// The history lock, Month's layout and the overlap switch.
   List<Widget> _buildListPart() {
     return <Widget>[
       SwitchListTile(
@@ -397,61 +544,6 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
       const _Note(
         "Fit to screen keeps the month on the screen; a busy day "
         "shows +N more.",
-      ),
-      const SizedBox(height: 16.0),
-      ListenableBuilder(
-        listenable: widget.controller,
-        builder: (context, child) {
-          final controller = widget.controller;
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              _Heading(
-                label: "Day width",
-                value: "At least ${controller.minDayWidth.round()} px",
-              ),
-              Slider(
-                key: dayWidthSliderKey,
-                value: controller.minDayWidth,
-                min: CalendarController.minDayWidthLow,
-                max: CalendarController.minDayWidthHigh,
-                divisions:
-                    ((CalendarController.minDayWidthHigh -
-                                CalendarController.minDayWidthLow) /
-                            4.0)
-                        .round(),
-                onChanged: (value) {
-                  controller.minDayWidth = value.roundToDouble();
-                },
-              ),
-              _Heading(
-                label: "Slot height",
-                value:
-                    "At least ${controller.minSlotHeight.round()} px "
-                    "per ${_settings.slotMinutes} minutes",
-              ),
-              Slider(
-                key: slotHeightSliderKey,
-                value: controller.minSlotHeight,
-                min: CalendarController.minSlotHeightLow,
-                max: CalendarController.minSlotHeightHigh,
-                divisions:
-                    ((CalendarController.minSlotHeightHigh -
-                                CalendarController.minSlotHeightLow) /
-                            2.0)
-                        .round(),
-                onChanged: (value) {
-                  controller.minSlotHeight = value.roundToDouble();
-                },
-              ),
-            ],
-          );
-        },
-      ),
-      const _Note(
-        "Days and slots stretch to fill the grid; larger sizes make "
-        "it scroll. A pinch on a grid sets them too.",
       ),
       const SizedBox(height: 16.0),
       SwitchListTile(
@@ -593,56 +685,6 @@ class _SmallSwitch extends StatelessWidget {
   }
 }
 
-/// [label], a part's title, along a compact row with a small switch of
-/// [value], keyed [switchKey], at its end: a screen reader hears the two
-/// as one switch, and a tap anywhere on the row flips it as a tap on the
-/// switch does.
-class _SwitchRow extends StatelessWidget {
-  const _SwitchRow({
-    required this.switchKey,
-    required this.label,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final Key switchKey;
-  final String label;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return MergeSemantics(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8.0),
-        onTap: () {
-          onChanged(!value);
-        },
-        child: SizedBox(
-          height: _Part.rowHeight,
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: _Part.titleStyle,
-                ),
-              ),
-              _SmallSwitch(
-                switchKey: switchKey,
-                value: value,
-                onChanged: onChanged,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// [label] before a small switch of [value], keyed [switchKey]: a screen
 /// reader hears the two as one switch, and a tap on the label flips it as
 /// a tap on the switch does.
@@ -755,13 +797,11 @@ class _WeekStartMenu extends StatelessWidget {
   }
 }
 
-/// A heading of the sheet's second part: [label], and its [value] at the
-/// end of the row when it has one.
+/// A heading of the sheet's second part.
 class _Heading extends StatelessWidget {
-  const _Heading({required this.label, this.value});
+  const _Heading({required this.label});
 
   final String label;
-  final String? value;
 
   /// The style of a heading's label.
   static const TextStyle labelStyle = TextStyle(
@@ -772,28 +812,7 @@ class _Heading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final value = this.value;
-    // The value takes the width the label leaves and wraps in it, so a
-    // narrow sheet does not overflow.
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(label, style: labelStyle),
-        if (value != null) ...<Widget>[
-          const SizedBox(width: 12.0),
-          Expanded(
-            child: Text(
-              value,
-              textAlign: TextAlign.end,
-              style: const TextStyle(
-                fontSize: 14.0,
-                color: HarborColors.textSecondary,
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
+    return Text(label, style: labelStyle);
   }
 }
 

@@ -16,6 +16,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/timezone.dart' as tz;
 
 import 'package:widgets_extended/board/board.dart';
+import 'package:widgets_extended/calendar/composition/calendar_card.dart'
+    show calendarPullTabKey;
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_localizations.dart';
@@ -1199,6 +1201,9 @@ void main() {
         }
         DateTime? browsed;
         if (view == CalendarViewKind.day) {
+          // Day's card opens on its month, which the pull tab folds.
+          await tester.tap(find.byKey(calendarPullTabKey));
+          await tester.pumpAndSettle();
           final strip = find.byType(WeekStrip<String>);
           await tester.drag(strip, Offset(-tester.getSize(strip).width, 0.0));
           await tester.pumpAndSettle();
@@ -2142,6 +2147,7 @@ void main() {
         CalendarViewKind view,
         int readAhead, {
         CalendarThemeData? theme,
+        DateTime? selectedDay,
       }) async {
         final source = HeldReads(<CalendarEntry<String>>[
           entryOf(
@@ -2158,7 +2164,7 @@ void main() {
         addTearDown(store.dispose);
         final controller = CalendarController(
           view: view,
-          selectedDay: wednesday,
+          selectedDay: selectedDay ?? wednesday,
           minSlotHeight: 25.0,
         );
         addTearDown(controller.dispose);
@@ -2372,8 +2378,17 @@ void main() {
         await close();
 
         // With no read-ahead, the shown range's first two days are read
-        // again under the new zone.
-        final none = await open(view, 0);
+        // again under the new zone. Day's card reads its month's grid, which
+        // the zone change leaves two days short of only at its start, so
+        // Day opens on the grid's first week, as Agenda's range starts
+        // there.
+        final none = await open(
+          view,
+          0,
+          selectedDay: view == CalendarViewKind.day
+              ? DateTime(2026, 4, 1)
+              : null,
+        );
         none.store.zone = east;
         await tester.pump();
         expect(tester.takeException(), isNull, reason: "$view");

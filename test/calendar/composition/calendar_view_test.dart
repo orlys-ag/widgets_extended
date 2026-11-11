@@ -123,19 +123,28 @@ class HeldSource implements CalendarDataSource<String> {
 
   bool holds = false;
 
+  /// A day whose reads wait in [pending] whatever [holds] says; null for
+  /// none.
+  DateTime? withheld;
+
   final List<VoidCallback> pending = <VoidCallback>[];
 
   @override
   Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
     final from = CalendarDates.dayNumber(first);
     final to = CalendarDates.dayNumber(last);
+    final day = withheld;
+    final withholds =
+        day != null &&
+        CalendarDates.dayNumber(day) >= from &&
+        CalendarDates.dayNumber(day) <= to;
     final answer = <CalendarEntry<String>>[
       for (final entry in entries)
         if (CalendarDates.dayNumber(entry.start) <= to &&
             CalendarDates.lastDayNumberOf(entry.start, entry.end) >= from)
           entry,
     ];
-    if (!holds) {
+    if (!holds && !withholds) {
       return SynchronousFuture<List<CalendarEntry<String>>>(answer);
     }
     final completer = Completer<List<CalendarEntry<String>>>();
@@ -529,7 +538,7 @@ void main() {
       findsNothing,
     );
     expect(find.byType(DayList<String>), findsOneWidget);
-    expect(find.text("Agenda"), findsOneWidget);
+    expect(find.byIcon(Icons.view_agenda_outlined), findsOneWidget);
     final list = tester.element(find.byType(DayList<String>));
     final style = DefaultTextStyle.of(list).style;
     expect(style.decoration, anyOf(isNull, TextDecoration.none));
@@ -626,23 +635,33 @@ void main() {
     expect(find.byType(DayList<String>), findsNothing);
   });
 
-  testWidgets("CV4 with one view listed the header names it with no menu", (
+  testWidgets("CV4 with one view listed the header has no view button", (
     tester,
   ) async {
+    Widget calendar(List<CalendarViewKind> views) {
+      return app(
+        CalendarView<String>(store: store, clock: fixedClock, views: views),
+      );
+    }
+
     await tester.pumpWidget(
-      app(
-        CalendarView<String>(
-          store: store,
-          clock: fixedClock,
-          views: const <CalendarViewKind>[CalendarViewKind.week],
-        ),
-      ),
+      calendar(const <CalendarViewKind>[
+        CalendarViewKind.week,
+        CalendarViewKind.day,
+      ]),
+    );
+    await tester.pumpAndSettle();
+    // Setup sanity: with two views the header has the button.
+    expect(find.byKey(calendarViewButtonKey), findsOneWidget);
+
+    await tester.pumpWidget(
+      calendar(const <CalendarViewKind>[CalendarViewKind.week]),
     );
     await tester.pumpAndSettle();
     expect(find.byType(TimedGrid<String>), findsOneWidget);
-    expect(find.text("Week"), findsOneWidget);
+    expect(find.byKey(calendarViewButtonKey), findsNothing);
     expect(find.byTooltip("Calendar view"), findsNothing);
-    expect(find.byIcon(Icons.keyboard_arrow_down), findsNothing);
+    expect(find.byIcon(Icons.calendar_view_week_outlined), findsNothing);
   });
 
   testWidgets("CV5 an empty views list throws an ArgumentError from the "
@@ -773,7 +792,7 @@ void main() {
       expect(tester.takeException(), isA<AssertionError>());
       expect(controller.view, CalendarViewKind.agenda);
       await tester.pumpAndSettle();
-      expect(find.text("Agenda"), findsOneWidget);
+      expect(find.byIcon(Icons.view_agenda_outlined), findsOneWidget);
       expect(find.byType(DayList<String>), findsOneWidget);
     });
 
@@ -801,7 +820,7 @@ void main() {
       expect(tester.takeException(), isA<AssertionError>());
       expect(second.view, CalendarViewKind.agenda);
       await tester.pumpAndSettle();
-      expect(find.text("Agenda"), findsOneWidget);
+      expect(find.byIcon(Icons.view_agenda_outlined), findsOneWidget);
       expect(find.byType(DayList<String>), findsOneWidget);
     });
 
@@ -1777,6 +1796,9 @@ void main() {
       calendar(plainTheme(extensions: <ThemeExtension<dynamic>>[large])),
     );
     await tester.pumpAndSettle();
+    // Day's card opens on its month, which the pull tab folds.
+    await tester.tap(find.byKey(calendarPullTabKey));
+    await tester.pumpAndSettle();
     final row = tester.getSize(grid).height;
     expect(
       row,
@@ -2027,7 +2049,9 @@ void main() {
       );
     }
 
-    // Day under the workweek: the weekend is not read.
+    // Day under the workweek: the weekend is not read. Day's card reads
+    // its month's grid, weekends included, so that read waits.
+    source.withheld = saturday;
     asked = (first: monday, last: DateTime(2026, 4, 24));
     await tester.pumpWidget(calendar(CalendarWeekdaySet.workweek));
     await tester.pumpAndSettle();

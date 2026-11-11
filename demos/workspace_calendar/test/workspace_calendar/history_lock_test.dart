@@ -286,14 +286,17 @@ void main() {
   testWidgets("K7 the sheet's Lock earlier today takes input only while "
       "Lock past days is on, and each switch sets its setting", (tester) async {
     CalendarSettings? reported;
-    final controller = CalendarController();
-    addTearDown(controller.dispose);
+    final zones = CalendarZoneController();
+    addTearDown(zones.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: CalendarSettingsSheet(
             settings: const CalendarSettings(),
-            controller: controller,
+            zone: null,
+            zones: zones,
+            clock: DateTime.now,
+            onZoneChanged: (zone) {},
             onChanged: (settings) {
               reported = settings;
             },

@@ -709,6 +709,7 @@ void main() {
       readAhead: 0,
     );
     await pickMode(tester, "Day");
+    await foldCard(tester);
     final ids = <String>[
       for (final json in await listAll(tester, api, today, today))
         json["id"]! as String,
@@ -929,6 +930,7 @@ void main() {
       readAhead: 0,
     );
     await pickMode(tester, "Day");
+    await foldCard(tester);
     expect(find.byType(HarborBlock), findsNothing);
     expectDefaultTaskBlock(tester, brainstormId);
     expect(

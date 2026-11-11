@@ -9,7 +9,6 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
-import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 
 import 'calendar_harness.dart';
 
@@ -45,16 +44,6 @@ Future<void> pinch(
 /// Week's slot at [minute] on [weekday]'s column.
 Rect slotRect(WidgetTester tester, int minute, int weekday) {
   return cellRect(tester, rowOf(minute), colOf(weekday));
-}
-
-/// The value of the settings sheet's slider [key], with the sheet opened
-/// and closed again.
-Future<double> sliderValue(WidgetTester tester, Key key) async {
-  await openSettings(tester);
-  final value = tester.widget<Slider>(find.byKey(key)).value;
-  await tester.tapAt(const Offset(195.0, 20.0));
-  await tester.pumpAndSettle();
-  return value;
 }
 
 /// The month board's cell of [day].
@@ -105,9 +94,8 @@ void expectHeld(Rect before, Rect after, Offset focal, Axis axis) {
 void main() {
   testWidgets("Z1 in Week a pinch up and down zooms the slots around the "
       "point between the fingers, from the height shown up to the most the "
-      "settings offer and down to the least, which the settings then hold", (
-    tester,
-  ) async {
+      "controller takes and down to the least, which the controller then "
+      "holds", (tester) async {
     await pumpCalendar(tester);
     await pickMode(tester, "Week");
     final before = slotRect(tester, 12 * 60, 2);
@@ -141,13 +129,14 @@ void main() {
       spread: 300.0,
     );
     expect(
-      await sliderValue(tester, slotHeightSliderKey),
+      calendarControllerOf(tester).minSlotHeight,
       CalendarController.minSlotHeightLow,
     );
   });
 
   testWidgets("Z2 in Week a pinch across zooms the days around the point "
-      "between the fingers up to the most width the settings offer; in Day, "
+      "between the fingers up to the most width the controller takes; in "
+      "Day, "
       "one column wide, it zooms nothing", (tester) async {
     await pumpCalendar(tester);
     await pickMode(tester, "Week");
@@ -178,7 +167,7 @@ void main() {
     final day = cellRect(tester, dayRowOf(12 * 60), 1);
     await pinch(tester, day.center, axis: Axis.horizontal, step: -4.0);
     expect(
-      await sliderValue(tester, dayWidthSliderKey),
+      calendarControllerOf(tester).minDayWidth,
       CalendarController.minDayWidthHigh,
     );
   });
@@ -252,7 +241,7 @@ void main() {
     );
     expect(monthDayRect(tester, day).height, before.height);
     expect(
-      await sliderValue(tester, slotHeightSliderKey),
+      calendarControllerOf(tester).minSlotHeight,
       CalendarController.defaultMinSlotHeight,
     );
 

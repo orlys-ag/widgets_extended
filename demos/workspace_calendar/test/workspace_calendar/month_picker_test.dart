@@ -282,6 +282,7 @@ void main() {
       "gives the strip back on that day", (tester) async {
     await pumpCalendar(tester);
     await pickMode(tester, "Day");
+    await foldCard(tester);
     await openPicker(tester);
     expect(find.byType(MonthPicker), findsOneWidget);
     expect(find.byType(WeekStrip<ItemPayload>), findsNothing);
@@ -313,7 +314,7 @@ void main() {
     expect(find.byKey(dayHeaderKey(DateTime(2026, 7, 21))), findsOneWidget);
 
     await pickMode(tester, "Month");
-    await openPicker(tester);
+    // The picker stays open through the change of view.
     expect(find.byType(MonthPicker), findsOneWidget);
     await pickMonth(tester, 2026, 9);
     expect(find.byType(MonthPicker), findsOneWidget);
@@ -322,19 +323,18 @@ void main() {
     expect(find.text("Sep 2026"), findsOneWidget);
   });
 
-  testWidgets("P7 a change of view, or Today, closes the picker", (
-    tester,
-  ) async {
+  testWidgets("P7 the picker stays open through a change of view, its "
+      "chevrons stepping its year, and Today closes it", (tester) async {
     await pumpCalendar(tester);
     await openPicker(tester);
     await pickMode(tester, "Week");
-    expect(find.byType(MonthPicker), findsNothing);
-    expect(find.byTooltip("Next week"), findsOneWidget);
+    expect(find.byType(MonthPicker), findsOneWidget);
+    expect(find.byTooltip("Next year"), findsOneWidget);
 
-    await openPicker(tester);
     await tapToday(tester);
     await tester.pumpAndSettle();
     expect(find.byType(MonthPicker), findsNothing);
+    expect(find.byTooltip("Next week"), findsOneWidget);
   });
 
   testWidgets("P8 a second year step mid-slide carries the picker on, the "
@@ -484,6 +484,7 @@ void main() {
     expectSmooth(await areaHeights(tester), picker, month);
 
     await pickMode(tester, "Day");
+    await foldCard(tester);
     final strip = tester.getSize(area).height;
     // Setup sanity: the picker is taller than the strip.
     expect(picker, greaterThan(strip));
