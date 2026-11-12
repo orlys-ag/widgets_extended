@@ -17,8 +17,18 @@
 /// brings it to today on the clock of the chosen zone, the edit mode
 /// toggle, the view button, and at the row's end the settings button. The
 /// calendar opens on Agenda, out of edit mode unless it is given it. Out of
-/// edit mode the calendar is read-only, so nothing is moved, resized or
-/// created, and a tap on an item opens its form read-only.
+/// edit mode the calendar is read-only, so nothing is moved or resized, and
+/// nothing is created but through the add button, and a tap on an item
+/// opens its form read-only.
+///
+/// The add button floats over the calendar's bottom right corner in every
+/// view, in edit mode and out of it, and opens the create flow on one slot:
+/// on today in Agenda, whose list selects each day it scrolls to, and on
+/// the selected day in Day, Week and Month, at the first slot from the
+/// start the settings' edit policy gives the day, after the current time
+/// on today, that no item holds. Week's, Day's and Month's grids keep their
+/// last slot and their last week clear of it, above the screen's bottom
+/// inset too, while Agenda's rows pass under it.
 ///
 /// The settings sheet, which opens from the header's settings button,
 /// holds the time zone, the weekday a week starts on, which every view's
@@ -125,6 +135,14 @@ class WorkspaceCalendarExample extends StatelessWidget {
   /// shown days read across a change between any two zones once the
   /// store's reads have answered.
   final int readAhead;
+
+  /// The room the calendar keeps under its grids for the add button
+  /// ([CalendarView.bottomPadding]), past the screen's bottom inset, which
+  /// the calendar keeps itself: the margin a
+  /// [FloatingActionButtonLocation.endFloat] button keeps from the bottom
+  /// of the safe area, a regular Material 3 button's 56 px height, and an
+  /// 8 px gap above it.
+  static const double addButtonRoom = kFloatingActionButtonMargin + 56.0 + 8.0;
 
   static final ThemeData _theme = buildHarborTheme();
 
@@ -268,6 +286,22 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
         _showsMonth = month;
       });
     }
+  }
+
+  final GlobalKey _addButtonKey = GlobalKey();
+
+  /// The add button's create, on today in Agenda and on the selected day
+  /// in the other views, reported where the button lies on screen. A day
+  /// with no slot left says so ([CalendarView.onCreateRefused]).
+  void _createFromButton() {
+    final box = _addButtonKey.currentContext?.findRenderObject();
+    final rect = box is RenderBox && box.hasSize
+        ? box.localToGlobal(Offset.zero) & box.size
+        : Rect.zero;
+    final day = _controller.view == CalendarViewKind.agenda
+        ? _today()
+        : _controller.selectedDay;
+    _controller.createOn(day, globalRect: rect);
   }
 
   /// The style of the header's settings button, as the built-in header's
@@ -424,6 +458,12 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
           style: TextStyle(fontSize: 20.0, fontWeight: FontWeight.w600),
         ),
       ),
+      floatingActionButton: FloatingActionButton(
+        key: _addButtonKey,
+        tooltip: "Add item",
+        onPressed: _createFromButton,
+        child: const Icon(Icons.add),
+      ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -460,6 +500,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
               onCreateRefused: (day) {
                 _showMessage("No new item can start on this day.");
               },
+              bottomPadding: WorkspaceCalendarExample.addButtonRoom,
             ),
           ),
         ],

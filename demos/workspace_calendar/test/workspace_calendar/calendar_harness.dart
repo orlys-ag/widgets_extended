@@ -34,6 +34,14 @@ import 'package:widgets_extended/calendar/views/week_strip.dart';
 /// Monday-first grid runs from March 30 to May 3 in five weeks.
 final DateTime today = DateTime(2026, 4, 21);
 
+/// The room the calendar keeps under Week's, Day's and Month's grids for
+/// the add button, in a view with no bottom inset.
+const double addButtonRoom = WorkspaceCalendarExample.addButtonRoom;
+
+/// The harness's phone grown by [addButtonRoom], whose grids have the
+/// height the harness's phone would give them without the add button.
+const Size roomyPhone = Size(390.0, 844.0 + addButtonRoom);
+
 /// The latency of the mock [pumpCalendar] builds when given none.
 const Duration harnessLatency = Duration(milliseconds: 100);
 

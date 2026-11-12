@@ -740,7 +740,12 @@ class TimedGrid<T> extends StatefulWidget {
     this.chipBuilder,
     this.loadingBuilder,
     this.failureBuilder,
+    this.bottomPadding = 0.0,
   }) : assert(dayCount >= 1),
+       assert(
+         bottomPadding >= 0.0 && bottomPadding < double.infinity,
+         "A TimedGrid's bottomPadding must be non-negative and finite.",
+       ),
        assert(
          minDayWidth > 0.0 && minDayWidth < double.infinity,
          "A TimedGrid's minDayWidth must be positive and finite.",
@@ -922,6 +927,13 @@ class TimedGrid<T> extends StatefulWidget {
   /// Draws the cover's content when the read of the grid's days failed;
   /// null for [defaultCalendarFailureBuilder].
   final CalendarFailureBuilder? failureBuilder;
+
+  /// The room under the hours' end, in logical pixels: the row below the
+  /// slots grows by it, so the last slot scrolls that far up from the
+  /// grid's bottom edge, or, where the slots stretch to fill the grid,
+  /// ends that far higher. The row counting the entries after the hours
+  /// stays frozen at its height above it, over the surface colour.
+  final double bottomPadding;
 
   @override
   State<TimedGrid<T>> createState() {
@@ -1547,6 +1559,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   late _Notices _rowNotices = _notices;
   late int _rowStripRows = _stripRows;
   late CalendarHourLabelFormat _rowFormat = widget.hourLabelFormat;
+  late double _rowBottomPadding = widget.bottomPadding;
 
   /// The strip rows the rows the board has keep frozen
   /// ([_frozenStripRows]), which the readers of the band take, as they
@@ -1819,7 +1832,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             widget.hours != oldWidget.hours ||
             widget.hourLabelFormat != oldWidget.hourLabelFormat ||
             widget.minDayWidth != oldWidget.minDayWidth ||
-            widget.minSlotHeight != oldWidget.minSlotHeight)) {
+            widget.minSlotHeight != oldWidget.minSlotHeight ||
+            widget.bottomPadding != oldWidget.bottomPadding)) {
       _fitAxes(size);
     }
     final rangeChanged = widget.storeRange != oldWidget.storeRange;
@@ -2375,9 +2389,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return _notices.above ? _noticeHeight : _labelRoom;
   }
 
-  /// The height of the row below the slots.
+  /// The height of the row below the slots: the row counting the entries
+  /// after the hours, or the room, and [TimedGrid.bottomPadding] under it.
   double get _edgeBelow {
-    return _notices.below ? _noticeHeight : _labelRoom;
+    return (_notices.below ? _noticeHeight : _labelRoom) + widget.bottomPadding;
   }
 
   /// Gives the board the rows [_rowsConfig] makes, and notes what they
@@ -2390,6 +2405,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _rowNotices = _notices;
     _rowStripRows = _stripRows;
     _rowFormat = widget.hourLabelFormat;
+    _rowBottomPadding = widget.bottomPadding;
     _rowFrozenStripRows = _frozenStripRows;
     if (!_stripPartial) {
       _minuteBeforeExpand = null;
@@ -2520,7 +2536,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _notices != _rowNotices ||
         _stripRows != _rowStripRows ||
         _frozenStripRows != _rowFrozenStripRows ||
-        widget.hourLabelFormat != _rowFormat) {
+        widget.hourLabelFormat != _rowFormat ||
+        widget.bottomPadding != _rowBottomPadding) {
       _slotHeight = slotHeight;
       _replaceRows();
     }
@@ -4241,7 +4258,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             ? _stripStart + strip
             : _tracks.firstSlotRow - 1;
       }
-    } else if (_notices.below && y >= size.height - _noticeHeight) {
+    } else if (_notices.below &&
+        y >= size.height - _noticeHeight - _rowBottomPadding) {
       row = _tracks.lastSlotRow + 1;
     } else if (!_verticalScroll.hasClients) {
       return -1;
@@ -4272,7 +4290,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         if (slot < _tracks.rowCount) {
           row = _tracks.firstSlotRow + slot;
         } else if (!_notices.below &&
-            content - _tracks.rowCount * _slotHeight < _rowRoom) {
+            content - _tracks.rowCount * _slotHeight <
+                _rowRoom + _rowBottomPadding) {
           row = _tracks.lastSlotRow + 1;
         } else {
           row = -1;
@@ -6794,7 +6813,9 @@ class _HiddenCount extends StatelessWidget {
 /// the side facing the slots and one along the day's left edge, and while
 /// the day has some, an arrow pointing their way and
 /// [CalendarLocalizations.moreCount], or "+N" in a column too narrow for
-/// that.
+/// that. Below the slots the notice takes the cell's top [_noticeHeight],
+/// over the surface colour in the rest, which [TimedGrid.bottomPadding]
+/// adds, so the cell needs no new build for a new padding.
 class _NoticeCell extends StatelessWidget {
   const _NoticeCell({
     required this.hidden,
@@ -6816,7 +6837,7 @@ class _NoticeCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final styles = _GridStyles.of(context);
-    return ValueListenableBuilder<GridHiddenCounts>(
+    final notice = ValueListenableBuilder<GridHiddenCounts>(
       valueListenable: hidden,
       builder: (context, value, child) {
         // New tracks reach the counts in the sync that places items on
@@ -6852,6 +6873,16 @@ class _NoticeCell extends StatelessWidget {
           child: cell,
         );
       },
+    );
+    if (above) {
+      return notice;
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        SizedBox(height: _noticeHeight, child: notice),
+        Expanded(child: styles.surfaceBox),
+      ],
     );
   }
 

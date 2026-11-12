@@ -492,7 +492,14 @@ void main() {
       ],
       latency: harnessLatency,
     );
-    await pumpCalendar(tester, editing: true, api: api);
+    // Tall enough that the floating add button, over the list's bottom
+    // right corner, leaves every gap row this test taps clear.
+    await pumpCalendar(
+      tester,
+      editing: true,
+      api: api,
+      size: const Size(390.0, 1400.0),
+    );
     await tester.tap(dayFinder(day));
     await tester.pumpAndSettle();
     Finder shows(String label, String text) {
@@ -508,9 +515,14 @@ void main() {
     }
 
     Future<void> addFrom(Finder row) async {
-      await tester.tap(
-        find.descendant(of: row, matching: find.byIcon(Icons.add)),
+      final add = find.descendant(of: row, matching: find.byIcon(Icons.add));
+      expect(
+        tester
+            .getRect(add)
+            .overlaps(tester.getRect(find.byType(FloatingActionButton))),
+        isFalse,
       );
+      await tester.tap(add);
       await tester.pumpAndSettle();
       expect(find.text("New item"), findsOneWidget);
       await tester.tap(find.text("Task").last);
