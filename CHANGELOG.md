@@ -106,6 +106,23 @@ draws in the calendar's theme, shows each zone's offset from UTC, and takes
 its words from seven `CalendarLocalizations` members with English defaults:
 `deviceZoneName`, `utcOffset`, `addZonesLabel`, `searchZonesHint`,
 `noZonesMessage`, `removeZoneTooltip` and `zonesBackTooltip`.
+- Added `CalendarController.createOn`, which reports a create on a day
+through `CalendarView.onCreateRange`, as Month's long press does, in any
+view and out of edit mode too: one slot, at the first free slot from the
+edit policy's earliest start, and on today from the current time, with the
+rect the host gives (such as its add button's) and no length chosen. It
+returns the host's future, or null where it reports `onCreateRefused`
+instead or the controller is bound to no calendar, and it changes neither
+the selected day nor the view.
+- Week's, Day's and Month's grids keep clear the bottom inset of the
+calendar's `MediaQuery`, such as a phone's home indicator, and the new
+`CalendarView.bottomPadding` past it, room for a host's floating action
+button: Week's and Day's last slot scrolls up past them, or ends above
+them where the slots fit the grid, the row counting the entries after the
+hours staying above them; and Month's weeks share the height above them.
+Their builders read no bottom inset. Agenda's list, which has no end,
+lets its rows pass under them. A `bottomPadding` that is negative or not
+finite throws an `ArgumentError`.
 - Added `CalendarController.showsSelectedDay`: false while the month picker
 shows, while Agenda's or Day's calendar card, unfolded, shows another month
 than the selected day's, and while its week strip, folded, has been dragged

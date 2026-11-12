@@ -330,6 +330,33 @@ base class CalendarController extends ChangeNotifier {
     selectedDay = day;
   }
 
+  /// Reports a create on [day] through the bound calendar's
+  /// [CalendarView.onCreateRange], as a long press on a day in Month
+  /// reports one, whatever its view and in edit mode or out of it: one
+  /// slot, at the first slot from the earliest start its
+  /// [CalendarView.editPolicy] gives [day]
+  /// ([CalendarEditPolicy.earliestStartOn]) that no entry the store shows
+  /// on [day] shares, or, where the policy allows no overlaps and none is,
+  /// the first whose sharing entries [CalendarEditPolicy.mayOverlap] all
+  /// lets it share; and where neither is left, the first slot of the
+  /// store's hours from that start. On the day the calendar marks as
+  /// today the start is also no earlier than the current time
+  /// ([CalendarNow.timeOnToday]), so the slot is the first after it. The
+  /// report carries [globalRect], in global logical pixels, as its
+  /// [CalendarCreateDetails.globalRect], such as the rect of the button
+  /// that asked, and [CalendarCreateDetails.userChoseLength] false.
+  ///
+  /// Returns the future of the calendar's call of
+  /// [CalendarView.onCreateRange], one that completes at once where it is
+  /// null. Where those starts leave no slot of the store's hours on [day]
+  /// whose start and end its clock both read, it reports
+  /// [CalendarView.onCreateRefused] instead and returns null; an unbound
+  /// controller reports nothing and returns null. It changes neither the
+  /// selected day nor the view, and no view marks the create.
+  Future<void>? createOn(DateTime day, {required Rect globalRect}) {
+    return _binding?._createOnRequest(day, globalRect);
+  }
+
   /// Releases the controller. A [CalendarView] disposes the controller it
   /// made, never a host's.
   @override

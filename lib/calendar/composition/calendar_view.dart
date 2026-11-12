@@ -243,8 +243,9 @@ final class CalendarEntryTapDetails<T> {
 /// [CalendarDates.slotMinuteChoices] does not hold; then for store hours
 /// off its grid ([CalendarDayHours.isOnSlotsOf]), named `store.hours`, in
 /// the build after a set of them too; and then for an [editPolicy] whose
-/// [CalendarEditPolicy.dayLimit] is under 1, named `policy`. The next
-/// build that throws none of them builds the views anew.
+/// [CalendarEditPolicy.dayLimit] is under 1, named `policy`; and then for
+/// a [bottomPadding] that is negative or not finite. The next build that
+/// throws none of them builds the views anew.
 class CalendarView<T> extends StatefulWidget {
   /// A calendar of [store]'s entries in the views [views] lists.
   const CalendarView({
@@ -278,6 +279,7 @@ class CalendarView<T> extends StatefulWidget {
     this.onCreateRefused,
     this.showsHeader = true,
     this.headerBuilder,
+    this.bottomPadding = 0.0,
   });
 
   /// The entries the calendar shows and its views write, and the hours it
@@ -493,6 +495,19 @@ class CalendarView<T> extends StatefulWidget {
   /// in it costs the header alone.
   final CalendarHeaderBuilder? headerBuilder;
 
+  /// The room the calendar keeps at its bottom, in logical pixels, past
+  /// the bottom inset of its [MediaQuery] ([MediaQuery.paddingOf]), which
+  /// it keeps too: room for what a host lays over the calendar's bottom
+  /// edge, such as a floating action button. Week's and Day's grid
+  /// scrolls its last slot up past both, or where its slots stretch to
+  /// its height ends them above both, and keeps the row counting the
+  /// entries after the hours above both; Month's weeks share the height
+  /// above both, which stays empty. Agenda's list, which runs on past
+  /// every day it shows, lets its rows pass under them. Under Week's,
+  /// Day's and Month's grids the [MediaQuery] reports no bottom inset, so
+  /// a builder there pads by none again.
+  final double bottomPadding;
+
   @override
   State<CalendarView<T>> createState() {
     return _CalendarViewState<T>();
@@ -525,6 +540,20 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       slotMinutes,
       "slotMinutes",
       "is not one of ${CalendarDates.slotMinuteChoices}",
+    );
+  }
+
+  /// The error the build throws for a [CalendarView.bottomPadding] that is
+  /// negative or not finite, or null.
+  ArgumentError? get _bottomPaddingError {
+    final padding = widget.bottomPadding;
+    if (padding >= 0.0 && padding < double.infinity) {
+      return null;
+    }
+    return ArgumentError.value(
+      padding,
+      "bottomPadding",
+      "is not non-negative and finite",
     );
   }
 
@@ -1505,6 +1534,14 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     }
   }
 
+  /// [CalendarController.createOn]: a create on [day] as
+  /// [_openCreateFlow] reports one, after the current time where [day] is
+  /// today, with [_createRange]'s future, or null where it reports a
+  /// refusal. It selects nothing and marks nothing.
+  Future<void>? _createOnRequest(DateTime day, Rect globalRect) {
+    return _openCreateFlow(_dayIn(day), globalRect, afterNow: true)?.done;
+  }
+
   /// Month's long press on [day], whose cell lies at [globalRect],
   /// selecting it first when it is a day of the shown month; a day of
   /// another month leaves the selection and the month as they are. Returns
@@ -1529,16 +1566,28 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// that start, over an entry, refused or not, which asks [_policy]
   /// nothing. Each is a slot whose times the clock reads, in that start's
   /// occurrence where [day]'s clock repeats its time, so none starts before
-  /// it. It takes [globalRect], the day cell's, as its rect and returns
-  /// the start of the range it reports with [_createRange]'s future. Where
-  /// it leaves no such slot in the hours, it reports
-  /// [CalendarView.onCreateRefused] instead and returns null.
+  /// it. Where [afterNow] and [day] is today, the start is the later of
+  /// that start and the current time ([CalendarNow.timeOnToday]). It takes
+  /// [globalRect] as its rect and returns the start of the range it
+  /// reports with [_createRange]'s future. Where it leaves no such slot in
+  /// the hours, it reports [CalendarView.onCreateRefused] instead and
+  /// returns null.
   ({DateTime start, Future<void> done})? _openCreateFlow(
     DateTime day,
-    Rect globalRect,
-  ) {
+    Rect globalRect, {
+    bool afterNow = false,
+  }) {
     final rules = _takeRules();
-    final start = rules.earliestStartOn(day, _now.value);
+    final now = _now.value;
+    var start = rules.earliestStartOn(day, now);
+    final earliest = start.earliest;
+    if (afterNow &&
+        earliest != null &&
+        CalendarDates.dayNumber(start.day) ==
+            CalendarDates.dayNumber(now.today) &&
+        earliest.isBefore(now.timeOnToday)) {
+      start = CalendarEarliestStart(start.day, now.timeOnToday);
+    }
     final shown = widget.store.entriesOn(day).map((shown) {
       return shown.entry;
     });
@@ -1707,6 +1756,23 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     );
   }
 
+  /// The room Week's, Day's and Month's grids keep at their bottom: the
+  /// bottom inset of the calendar's [MediaQuery] and
+  /// [CalendarView.bottomPadding].
+  double get _bottomRoom {
+    return MediaQuery.paddingOf(context).bottom + widget.bottomPadding;
+  }
+
+  /// [grid] under a [MediaQuery] with no bottom inset, which [_bottomRoom]
+  /// has taken.
+  Widget _withoutBottomInset(Widget grid) {
+    return MediaQuery.removePadding(
+      context: context,
+      removeBottom: true,
+      child: grid,
+    );
+  }
+
   /// The timed grid of the selected day's week in Week, under the header
   /// card, and of the selected day in Day, under the calendar card. The
   /// grid builds in a builder on the controller, which a pinch's zoom
@@ -1718,6 +1784,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     final firstDay = week ? range.first : _day;
     final dayCount = week ? DateTime.daysPerWeek : 1;
     final controller = _controller;
+    final bottomRoom = _bottomRoom;
     final key = ValueKey<(CalendarViewKind, bool)>((
       view,
       dayCount > 1 && widget.weekdays.columns.length > 1,
@@ -1735,47 +1802,50 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
         Expanded(
           child: NotificationListener<ScrollNotification>(
             onNotification: _handleGridScroll,
-            child: ListenableBuilder(
-              listenable: controller,
-              builder: (context, child) {
-                return TimedGrid<T>(
-                  // Each view builds its own grid, which opens scrolled to
-                  // its opening time, and so does a week of one shown
-                  // weekday, as a grid keeps one day column or more than
-                  // one.
-                  key: key,
-                  store: widget.store,
-                  firstDay: firstDay,
-                  dayCount: dayCount,
-                  selectedDay: _day,
-                  now: _now,
-                  onSelectDay: _select,
-                  onOpenEntry: _openEntry,
-                  onCreate: _createRange,
-                  onMoveRequest: widget.onMoveRequest,
-                  onZoom: (minSlotHeight, minDayWidth) {
-                    controller.setZoom(
-                      minSlotHeight: minSlotHeight,
-                      minDayWidth: minDayWidth,
-                    );
-                  },
-                  editable: widget.editable,
-                  editPolicy: _policy,
-                  weekdays: widget.weekdays,
-                  hours: _hours,
-                  slotMinutes: widget.slotMinutes,
-                  hourLabelFormat: widget.hourLabelFormat,
-                  minDayWidth: controller.minDayWidth,
-                  minSlotHeight: controller.minSlotHeight,
-                  storeRange: range,
-                  // The week strip names Day's one day.
-                  showsDayHeader: week,
-                  blockBuilder: widget.blockBuilder,
-                  chipBuilder: widget.chipBuilder,
-                  loadingBuilder: widget.loadingBuilder,
-                  failureBuilder: widget.failureBuilder,
-                );
-              },
+            child: _withoutBottomInset(
+              ListenableBuilder(
+                listenable: controller,
+                builder: (context, child) {
+                  return TimedGrid<T>(
+                    // Each view builds its own grid, which opens scrolled to
+                    // its opening time, and so does a week of one shown
+                    // weekday, as a grid keeps one day column or more than
+                    // one.
+                    key: key,
+                    store: widget.store,
+                    firstDay: firstDay,
+                    dayCount: dayCount,
+                    selectedDay: _day,
+                    now: _now,
+                    onSelectDay: _select,
+                    onOpenEntry: _openEntry,
+                    onCreate: _createRange,
+                    onMoveRequest: widget.onMoveRequest,
+                    onZoom: (minSlotHeight, minDayWidth) {
+                      controller.setZoom(
+                        minSlotHeight: minSlotHeight,
+                        minDayWidth: minDayWidth,
+                      );
+                    },
+                    editable: widget.editable,
+                    editPolicy: _policy,
+                    weekdays: widget.weekdays,
+                    hours: _hours,
+                    slotMinutes: widget.slotMinutes,
+                    hourLabelFormat: widget.hourLabelFormat,
+                    minDayWidth: controller.minDayWidth,
+                    minSlotHeight: controller.minSlotHeight,
+                    storeRange: range,
+                    // The week strip names Day's one day.
+                    showsDayHeader: week,
+                    blockBuilder: widget.blockBuilder,
+                    chipBuilder: widget.chipBuilder,
+                    loadingBuilder: widget.loadingBuilder,
+                    failureBuilder: widget.failureBuilder,
+                    bottomPadding: bottomRoom,
+                  );
+                },
+              ),
             ),
           ),
         ),
@@ -1789,6 +1859,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// zoom rebuilds alone.
   Widget _buildMonth(Widget? header) {
     final controller = _controller;
+    final bottomRoom = _bottomRoom;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -1796,36 +1867,39 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
         Expanded(
           child: ColoredBox(
             color: _theme.surface,
-            child: ListenableBuilder(
-              listenable: controller,
-              builder: (context, child) {
-                return MonthBoard<T>(
-                  key: const ValueKey<String>("month-board"),
-                  store: widget.store,
-                  grid: _grid,
-                  layout: widget.monthLayout,
-                  minDayWidth: controller.minDayWidth,
-                  weekScale: controller.monthWeekScale,
-                  hours: _hours,
-                  hourLabelFormat: widget.hourLabelFormat,
-                  selectedDay: _day,
-                  now: _now,
-                  onSelectDay: _select,
-                  onOpenDay: _openDay,
-                  onCreateOnDay: widget.editable ? _createOn : null,
-                  onOpenEntry: _openEntry,
-                  onZoom: (weekScale, minDayWidth) {
-                    controller.setZoom(
-                      monthWeekScale: weekScale,
-                      minDayWidth: minDayWidth,
-                    );
-                  },
-                  chipBuilder: widget.chipBuilder,
-                  loadingBuilder: widget.loadingBuilder,
-                  failureBuilder: widget.failureBuilder,
-                  entryKindOf: widget.entryKindOf,
-                );
-              },
+            child: _withoutBottomInset(
+              ListenableBuilder(
+                listenable: controller,
+                builder: (context, child) {
+                  return MonthBoard<T>(
+                    key: const ValueKey<String>("month-board"),
+                    store: widget.store,
+                    grid: _grid,
+                    layout: widget.monthLayout,
+                    minDayWidth: controller.minDayWidth,
+                    weekScale: controller.monthWeekScale,
+                    hours: _hours,
+                    hourLabelFormat: widget.hourLabelFormat,
+                    selectedDay: _day,
+                    now: _now,
+                    onSelectDay: _select,
+                    onOpenDay: _openDay,
+                    onCreateOnDay: widget.editable ? _createOn : null,
+                    onOpenEntry: _openEntry,
+                    onZoom: (weekScale, minDayWidth) {
+                      controller.setZoom(
+                        monthWeekScale: weekScale,
+                        minDayWidth: minDayWidth,
+                      );
+                    },
+                    chipBuilder: widget.chipBuilder,
+                    loadingBuilder: widget.loadingBuilder,
+                    failureBuilder: widget.failureBuilder,
+                    entryKindOf: widget.entryKindOf,
+                    bottomPadding: bottomRoom,
+                  );
+                },
+              ),
             ),
           ),
         ),
@@ -1846,6 +1920,10 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     final hoursError = _storeHoursError;
     if (hoursError != null) {
       throw hoursError;
+    }
+    final paddingError = _bottomPaddingError;
+    if (paddingError != null) {
+      throw paddingError;
     }
     _takeRules();
     final header = _buildHeader();

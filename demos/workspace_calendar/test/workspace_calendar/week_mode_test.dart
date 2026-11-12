@@ -1034,13 +1034,15 @@ void main() {
     expect(api.requests.last.method, CalendarMethod.delete);
   });
 
-  testWidgets("W8 no view has a floating add button", (tester) async {
+  testWidgets("W8 Agenda and Week have one floating add button", (
+    tester,
+  ) async {
     await pumpCalendar(tester, editing: true);
-    expect(find.byType(FloatingActionButton), findsNothing);
+    expect(find.byType(FloatingActionButton), findsOneWidget);
 
     await pickMode(tester, "Week");
     expect(blockFinder(designCritiqueId), findsOneWidget);
-    expect(find.byType(FloatingActionButton), findsNothing);
+    expect(find.byType(FloatingActionButton), findsOneWidget);
   });
 
   testWidgets("W9 a pending move shows in Agenda mode", (tester) async {

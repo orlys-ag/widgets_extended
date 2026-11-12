@@ -44,9 +44,9 @@ const double lane = 18.0;
 /// hours.
 const double band = 18.0;
 
-/// A phone a little shorter than the harness's, whose weeks rest at
+/// A phone a little shorter than [roomyPhone], whose weeks rest at
 /// 135 px: five chip lanes, and short of a card week.
-const Size shortPhone = Size(390.0, 839.0);
+const Size shortPhone = Size(390.0, 839.0 + addButtonRoom);
 
 DateTime april(int day) {
   return DateTime(2026, 4, day);
@@ -1535,7 +1535,7 @@ void main() {
       expect(growing, lessThan(lane));
       final board = tester.getRect(monthBoardFinder());
 
-      tester.view.physicalSize = const Size(390.0, 800.0);
+      tester.view.physicalSize = const Size(390.0, 800.0 + addButtonRoom);
       await tester.pump();
       // Sanity: the weeks were refitted to the shorter board.
       final refitted = tester.getRect(monthBoardFinder()).height;
@@ -1736,7 +1736,8 @@ void main() {
 
   testWidgets(
     "M28 Month's weekday letters and board run the body's full width and "
-    "down to its bottom, under the header card Week shows",
+    "down to the add button's room above its bottom, under the header card "
+    "Week shows",
     (tester) async {
       await pumpCalendar(tester);
       await pickMode(tester, "Week");
@@ -1753,7 +1754,7 @@ void main() {
       expect(board.top, near(letters.bottom));
       expect(board.left, near(0.0));
       expect(board.right, near(390.0));
-      expect(board.bottom, near(week.bottom));
+      expect(board.bottom, near(week.bottom - addButtonRoom));
     },
   );
 
@@ -2065,7 +2066,11 @@ void main() {
       "that fit, and its +N more takes the last, inset as a card is", (
     tester,
   ) async {
-    await pumpMonth(tester, seed: hourlyTasks(april(22), 8, 8));
+    await pumpMonth(
+      tester,
+      seed: hourlyTasks(april(22), 8, 8),
+      size: roomyPhone,
+    );
     await setLeastSizes(tester, dayWidth: 100.0, slotHeight: 18.0);
     // A 1.125 scale of 136 px weeks rests at 153 px, which holds three
     // card lanes: two cards and the banner.

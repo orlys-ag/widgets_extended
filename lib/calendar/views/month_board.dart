@@ -617,8 +617,9 @@ enum CalendarMonthLayout {
 ///
 /// The days share the board's width, and are never narrower than
 /// [minDayWidth]: past the width, the board scrolls across, the letters
-/// with it. The weeks share the board's height, each resting at
-/// [weekScale] times its share: past 1, the board scrolls down. The board
+/// with it. The weeks share the board's height above [bottomPadding],
+/// which stays empty, each resting at [weekScale] times its share: past 1,
+/// the board scrolls down, its last week ending above the padding. The board
 /// opens scrolled to show the selected day, and does again for a new
 /// month, a new [minDayWidth] and a new [weekScale].
 ///
@@ -700,7 +701,11 @@ class MonthBoard<T> extends StatefulWidget {
     this.loadingBuilder,
     this.failureBuilder,
     this.entryKindOf,
-  });
+    this.bottomPadding = 0.0,
+  }) : assert(
+         bottomPadding >= 0.0 && bottomPadding < double.infinity,
+         "A MonthBoard's bottomPadding must be non-negative and finite.",
+       );
 
   final CalendarStore<T> store;
 
@@ -784,6 +789,11 @@ class MonthBoard<T> extends StatefulWidget {
   /// leaves the kind out. A new one, not `==` to the last, names every bar
   /// again.
   final String? Function(CalendarEntry<T> entry)? entryKindOf;
+
+  /// The room under the board, in logical pixels, which it leaves empty:
+  /// the weeks share the height above it, and a board that scrolls down
+  /// ends its last week there.
+  final double bottomPadding;
 
   @override
   State<MonthBoard<T>> createState() {
@@ -1957,11 +1967,11 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = constraints.biggest;
-        // The board takes the height under the letters, whose columns the
-        // layout sizes first.
-        _layoutBoard(
-          Size(size.width, math.max(0.0, size.height - weekdayHeaderHeight)),
-        );
+        final below = math.max(0.0, size.height - weekdayHeaderHeight);
+        final padding = math.min(widget.bottomPadding, below);
+        // The board takes the height between the letters, whose columns
+        // the layout sizes first, and the padding.
+        _layoutBoard(Size(size.width, below - padding));
         final store = widget.store;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2013,6 +2023,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
                 ],
               ),
             ),
+            if (padding > 0.0) SizedBox(height: padding),
           ],
         );
       },

@@ -246,7 +246,8 @@ void main() {
     // The card shows its month, as Agenda left it.
     expect(find.byKey(dayCellKey(today)), findsOneWidget);
     expect(find.byType(DayList<ItemPayload>), findsNothing);
-    expect(find.byTooltip("Add item"), findsNothing);
+    // The floating add button shows in Day as in every view.
+    expect(find.byTooltip("Add item"), findsOneWidget);
     expect(find.byTooltip("Previous day"), findsOneWidget);
     expect(find.byTooltip("Next day"), findsOneWidget);
 
@@ -499,11 +500,11 @@ void main() {
     expect(blockFinder(brainstormId), findsNothing);
     expect(find.byKey(dayHeaderKey(today)), findsNothing);
     expect(find.byKey(hiddenCountKey), findsNothing);
-    // The slots share the grid's height less the room above and the row
-    // below.
+    // The slots share the grid's height less the room above, the row
+    // below and the add button's room under it.
     expect(
       grid.rectOfCell(24, dayColumn)!.bottom,
-      near(grid.size.height - 24.0),
+      near(grid.size.height - 24.0 - addButtonRoom),
     );
     expect(grid.rectOfCell(1, dayColumn)!.top, near(labelRoom(tester)));
 
@@ -656,12 +657,13 @@ void main() {
       end.offset.dx + end.paragraph.maxIntrinsicWidth,
       near(gutterRight - 6.0),
     );
-    // The first and the last lie inside the grid, 2 px from its edges but
-    // for the half pixel their lines lie above their edges.
+    // The first and the last lie inside the grid, 2 px from its top and
+    // from the add button's room above its bottom, but for the half pixel
+    // their lines lie above their edges.
     expect(labels.first.offset.dy, moreOrLessEquals(1.5, epsilon: 0.25));
     expect(
       end.offset.dy + end.paragraph.height,
-      moreOrLessEquals(grid.size.height - 2.5, epsilon: 0.25),
+      moreOrLessEquals(grid.size.height - addButtonRoom - 2.5, epsilon: 0.25),
     );
     // Clipped to the gutter, from the top of the scrolled region to its
     // bottom.
@@ -1002,7 +1004,8 @@ void main() {
 
     // The rows are the grid's first and last, right of the hour gutter,
     // in the place of the room above and below the slots, so they meet
-    // the slots: row 1 is 08:00's slot and row 24 13:45's.
+    // the slots: row 1 is 08:00's slot and row 24 13:45's. The row below
+    // keeps the add button's room under it.
     final grid = gridViewport(tester);
     final box = grid.localToGlobal(Offset.zero) & grid.size;
     final gutter = grid.frozenInsetOf(Axis.horizontal);
@@ -1011,7 +1014,7 @@ void main() {
     expect(top.top, near(box.top));
     expect(top.left, near(box.left + gutter));
     expect(top.right, near(box.right));
-    expect(bottom.bottom, near(box.bottom));
+    expect(bottom.bottom, near(box.bottom - addButtonRoom));
     expect(bottom.left, near(box.left + gutter));
     expect(cellRect(tester, 1, dayColumn).top, near(top.bottom));
     expect(cellRect(tester, 24, dayColumn).bottom, near(bottom.top));
@@ -1068,7 +1071,7 @@ void main() {
     // its height less that half pixel below the bottom edge, past which
     // the end's label reaches.
     expect(region.top, 24.0);
-    expect(region.bottom, grid.size.height - 24.0);
+    expect(region.bottom, grid.size.height - 24.0 - addButtonRoom);
     expect(
       clips().first.top,
       moreOrLessEquals(region.top - half - 0.5, epsilon: 0.25),

@@ -32,6 +32,10 @@ import 'package:workspace_calendar/workspace_calendar_example.dart';
 import 'calendar_harness.dart';
 
 /// The fourteen colour fields, numbered from 1 in this order.
+/// A size whose Month days hold cards: 1100 px wide, and 900 px tall above
+/// the room the calendar keeps for the add button.
+const Size cardSize = Size(1100.0, 900.0 + addButtonRoom);
+
 const List<String> colourNames = <String>[
   "primary",
   "onPrimary",
@@ -1962,7 +1966,7 @@ void main() {
       "B from the frame that installs it", (tester) async {
     final fields = <String>{};
     final roots = <Finder>[find.byType(MonthBoard<ItemPayload>)];
-    for (final size in const <Size>[Size(390.0, 844.0), Size(1100.0, 900.0)]) {
+    for (final size in const <Size>[Size(390.0, 844.0), cardSize]) {
       final api = await pumpThemed(tester, sentinelA, size: size);
       await pickMode(tester, "Month");
       var drawn = drawnUnder(tester, roots);
@@ -3028,7 +3032,7 @@ void main() {
     );
 
     // Month's cards, at a size whose days hold them.
-    await pumpThemed(tester, theme, size: const Size(1100.0, 900.0));
+    await pumpThemed(tester, theme, size: cardSize);
     await pickMode(tester, "Month");
     final card = find.byKey(monthChipKey(monthSegmentKey("item-1", april(20))));
     expectText(
@@ -3469,7 +3473,7 @@ void main() {
     }
 
     // Month's cards, at a size whose days hold them.
-    api = await pumpThemed(tester, sentinelA, size: const Size(1100.0, 900.0));
+    api = await pumpThemed(tester, sentinelA, size: cardSize);
     await pickMode(tester, "Month");
     await visit("Month's cards");
 

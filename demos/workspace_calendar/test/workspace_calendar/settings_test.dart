@@ -301,8 +301,8 @@ void main() {
     );
     expect(find.byKey(hiddenCountKey), findsNothing);
 
-    // The rows lie in the days' columns, under the header and on the
-    // grid's bottom edge.
+    // The rows lie in the days' columns, under the header and the add
+    // button's room above the grid's bottom edge.
     final grid = gridViewport(tester);
     final box = grid.localToGlobal(Offset.zero) & grid.size;
     final header = tester.getRect(headerFinder(wednesday));
@@ -311,7 +311,7 @@ void main() {
     expect(top.top, near(header.bottom));
     expect(top.left, near(header.left));
     expect(top.width, near(header.width));
-    expect(bottom.bottom, near(box.bottom));
+    expect(bottom.bottom, near(box.bottom - addButtonRoom));
     expect(bottom.left, near(header.left));
 
     // Slots too tall to fit scroll beneath the rows, which stay put.
@@ -443,11 +443,11 @@ void main() {
     final bottom = grid.localToGlobal(Offset(0.0, grid.size.height)).dy;
     expect(
       cellRect(tester, officeRow(8 * 60), 1).height,
-      near((grid.size.height - 40.0 - 2 * room) / 40),
+      near((grid.size.height - 40.0 - 2 * room - addButtonRoom) / 40),
     );
     expect(
       cellRect(tester, officeRow(17 * 60 + 45), 1).bottom,
-      near(bottom - room),
+      near(bottom - room - addButtonRoom),
     );
   });
 

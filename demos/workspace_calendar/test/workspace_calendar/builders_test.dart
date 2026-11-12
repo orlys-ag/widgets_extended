@@ -1619,7 +1619,12 @@ void main() {
   testWidgets("BM5 a pinch and a scroll call the chip builder no more often "
       "than the base built chips, and call no block builder", (tester) async {
     final counts = CountingBuilders();
-    await pumpCalendar(tester, clock: nineOClock, builders: counts.builders);
+    await pumpCalendar(
+      tester,
+      clock: nineOClock,
+      builders: counts.builders,
+      size: roomyPhone,
+    );
     await pickMode(tester, "Month");
     expect(counts.chips, greaterThan(4));
     counts.clear();
