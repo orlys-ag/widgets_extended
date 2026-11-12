@@ -93,33 +93,6 @@ double fadeOf(WidgetTester tester, Finder finder) {
   return fades.isEmpty ? 1.0 : fades.first.opacity;
 }
 
-/// Picks [option] in the dropdown labelled [label], scrolling its menu by
-/// [delta] until the option shows.
-Future<void> chooseOption(
-  WidgetTester tester,
-  String label,
-  String option, {
-  double delta = 100.0,
-}) async {
-  await tester.tap(
-    find.ancestor(
-      of: find.text(label),
-      matching: find.byWidgetPredicate((widget) {
-        return widget is DropdownButtonFormField;
-      }),
-    ),
-  );
-  await tester.pumpAndSettle();
-  final menu = find.byType(Scrollable).last;
-  final item = find.descendant(of: menu, matching: find.text(option));
-  await tester.scrollUntilVisible(item, delta, scrollable: menu);
-  // Centred, as an item scrolled to the menu's edge can sit under it.
-  await Scrollable.ensureVisible(tester.element(item), alignment: 0.5);
-  await tester.pumpAndSettle();
-  await tester.tap(item);
-  await tester.pumpAndSettle();
-}
-
 void main() {
   testWidgets("L1 delete from the card menu", (tester) async {
     const latency = Duration(seconds: 1);
@@ -160,7 +133,7 @@ void main() {
       tester.widget<DayCell>(dayFinder(DateTime(2026, 4, 23))).hasEntries,
       isTrue,
     );
-    await cardAction(tester, designCritiqueId, "Delete");
+    await cardAction(tester, releaseRiskId, "Delete");
     await tester.tap(find.widgetWithText(TextButton, "Delete"));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));

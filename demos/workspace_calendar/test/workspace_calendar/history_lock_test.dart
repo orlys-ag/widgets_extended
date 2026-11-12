@@ -11,7 +11,6 @@ import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
-import 'package:workspace_calendar/workspace_calendar/item_form.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 
 import 'calendar_harness.dart';
@@ -113,41 +112,6 @@ Offset centerOf(WidgetTester tester, int minute, int weekday) {
   return cellRect(tester, rowOf(minute), colOf(weekday)).center;
 }
 
-Finder formButton(String label) {
-  return find.widgetWithText(TextButton, label);
-}
-
-Finder dropdownFinder(String label) {
-  return find.ancestor(
-    of: find.text(label),
-    matching: find.byType(DropdownButtonFormField<int>),
-  );
-}
-
-/// The time the form's [label] dropdown shows.
-Finder dropdownShows(String label, String time) {
-  return find.descendant(of: dropdownFinder(label), matching: find.text(time));
-}
-
-/// Picks [option] in the form's dropdown labelled [label], scrolling its
-/// menu by [delta], forward for a positive one, until the option shows.
-Future<void> chooseOption(
-  WidgetTester tester,
-  String label,
-  String option,
-  double delta,
-) async {
-  await tester.tap(dropdownFinder(label));
-  await tester.pumpAndSettle();
-  final menu = find.byType(Scrollable).last;
-  final item = find.descendant(of: menu, matching: find.text(option));
-  await tester.scrollUntilVisible(item, delta, scrollable: menu);
-  await Scrollable.ensureVisible(tester.element(item), alignment: 0.5);
-  await tester.pumpAndSettle();
-  await tester.tap(item);
-  await tester.pumpAndSettle();
-}
-
 /// Drags from [from] by [delta] with a mouse, and lets the write it causes
 /// complete.
 Future<void> mouseDrag(
@@ -206,7 +170,7 @@ void main() {
       final now = CalendarNow(time: midMorning, today: today);
       final running = stored(shape(today, 10 * 60, 12 * 60));
       expect(
-        lockErrorsOf(
+        formErrorsOf(
           lock,
           now,
           null,
@@ -216,7 +180,7 @@ void main() {
         <String>["start"],
       );
       expect(
-        lockErrorsOf(
+        formErrorsOf(
           lock,
           now,
           null,
@@ -226,7 +190,7 @@ void main() {
         <String>["start"],
       );
       expect(
-        lockErrorsOf(
+        formErrorsOf(
           lock,
           now,
           running,
@@ -236,7 +200,7 @@ void main() {
         <String>["start", "end"],
       );
       expect(
-        lockErrorsOf(
+        formErrorsOf(
           lock,
           now,
           running,
@@ -246,7 +210,7 @@ void main() {
         isEmpty,
       );
       expect(
-        lockErrorsOf(
+        formErrorsOf(
           lock,
           now,
           stored(shape(today, 8 * 60, 9 * 60)),
@@ -434,7 +398,7 @@ void main() {
       ),
     );
     expect(day.onTap, isNull);
-    await chooseOption(tester, "End time", "11:00", -100.0);
+    await chooseOption(tester, "End time", "11:00");
     await tester.tap(find.byType(FilledButton));
     await tester.pumpAndSettle();
     expect(find.text("The end can't be in the past."), findsOneWidget);
@@ -444,10 +408,9 @@ void main() {
     await tester.tap(blockFinder(laterId));
     await tester.pumpAndSettle();
     expect(formButton("Delete"), findsOneWidget);
-    await chooseOption(tester, "Start time", "10:00", -100.0);
-    await tester.tap(find.byType(FilledButton));
-    await tester.pumpAndSettle();
-    expect(find.text("The start can't be in the past."), findsOneWidget);
+    // A start before now is offered disabled; one after it is not.
+    expect(optionEnabled(tester, "Start time", "10:00"), isFalse);
+    expect(optionEnabled(tester, "Start time", "11:15"), isTrue);
   });
 
   testWidgets("K12 in Agenda an ended item's card has no menu, a running "

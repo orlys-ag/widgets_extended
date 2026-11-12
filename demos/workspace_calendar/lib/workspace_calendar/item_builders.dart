@@ -302,9 +302,23 @@ class _HarborElement extends StatelessElement {
   }
 }
 
+/// The corner radius of a [HarborBlock] and a [HarborChip] at an end where
+/// the item starts or ends.
+const Radius _entryRadius = Radius.circular(4.0);
+
+/// The width of the edge in the type's colour down the leading side of a
+/// [HarborBlock] and a [HarborChip].
+const double _entryEdgeWidth = 4.0;
+
+/// The gap between that edge and the text of a [HarborBlock] and a
+/// [HarborChip].
+const double _entryTextGap = 4.0;
+
 /// One item's block: its type's tint with a 4 px edge, its text, and an
-/// arrow at each end the grid's hours cut. Dimmed with a progress
-/// indicator while [ShownItem.pending].
+/// arrow at each end the grid's hours cut. Rounded as a [HarborChip] is,
+/// at an end where the item starts or ends, and square at an end it
+/// continues past or the hours cut. Dimmed with a progress indicator while
+/// [ShownItem.pending].
 ///
 /// A [CalendarBlockDetails.detailed] block, which a grid of one day column
 /// shows, has its title and its times on its first line, the times
@@ -328,14 +342,28 @@ class HarborBlock extends StatelessWidget {
     final styles = _HarborStyles.of(context);
     final item = entry.entry;
     final style = harborTypeStyleOf(item.type);
-    Widget content = DecoratedBox(
-      decoration: BoxDecoration(
-        color: style.tint,
-        border: Border(left: BorderSide(color: style.edge, width: 4.0)),
+    // A Border, unlike a Padding, does not inset the box's child, so each
+    // form's padding starts past the edge.
+    Widget content = ClipRRect(
+      borderRadius: BorderRadius.vertical(
+        top: details.continuesBefore || details.cutAtStart
+            ? Radius.zero
+            : _entryRadius,
+        bottom: details.continuesAfter || details.cutAtEnd
+            ? Radius.zero
+            : _entryRadius,
       ),
-      child: details.detailed
-          ? _buildLines(item, styles, CalendarLocalizations.of(context))
-          : _buildCompact(item, styles),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: style.tint,
+          border: Border(
+            left: BorderSide(color: style.edge, width: _entryEdgeWidth),
+          ),
+        ),
+        child: details.detailed
+            ? _buildLines(item, styles, CalendarLocalizations.of(context))
+            : _buildCompact(item, styles),
+      ),
     );
     if (details.cutAtStart || details.cutAtEnd) {
       content = Stack(
@@ -382,7 +410,12 @@ class HarborBlock extends StatelessWidget {
         minHeight: 0.0,
         maxHeight: double.infinity,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(4.0, 2.0, 4.0, 2.0),
+          padding: const EdgeInsets.fromLTRB(
+            _entryEdgeWidth + _entryTextGap,
+            2.0,
+            4.0,
+            2.0,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -423,7 +456,12 @@ class HarborBlock extends StatelessWidget {
       }
     }
     return Padding(
-      padding: const EdgeInsets.fromLTRB(6.0, 3.0, 6.0, 3.0),
+      padding: const EdgeInsets.fromLTRB(
+        _entryEdgeWidth + _entryTextGap,
+        3.0,
+        6.0,
+        3.0,
+      ),
       child: Flow(
         delegate: const _BlockLinesDelegate(),
         children: <Widget>[
@@ -520,7 +558,7 @@ class HarborChip extends StatelessWidget {
     final styles = _HarborStyles.of(context);
     final item = entry.entry;
     final style = harborTypeStyleOf(item.type);
-    const radius = Radius.circular(4.0);
+    const radius = _entryRadius;
     final title = Text(
       item.title,
       maxLines: 1,
@@ -538,10 +576,13 @@ class HarborChip extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            SizedBox(width: 4.0, child: ColoredBox(color: style.edge)),
+            SizedBox(
+              width: _entryEdgeWidth,
+              child: ColoredBox(color: style.edge),
+            ),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                padding: const EdgeInsets.symmetric(horizontal: _entryTextGap),
                 child: details.card
                     ? _buildCardLines(
                         title,

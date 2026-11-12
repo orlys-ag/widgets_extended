@@ -137,7 +137,7 @@ void main() {
     final selected = tester.widget<DayCell>(dayFinder(2026, 4, 21));
     expect(selected.isSelected, isTrue);
     expect(selected.isToday, isTrue);
-    // Kept tasks sit at today + 6 and + 7, "Design critique" on Thursday,
+    // Kept tasks sit at today + 6 and + 7, "Release notes incomplete" on Thursday,
     // and nothing on Saturday.
     expect(hasMarker(tester, 4, 27), isTrue);
     expect(hasMarker(tester, 4, 28), isTrue);

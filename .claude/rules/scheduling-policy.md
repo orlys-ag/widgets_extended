@@ -23,6 +23,10 @@ The contract of the rules that limit edits. The layer's imports are in `scheduli
   and its answer on overlaps once, when made. They answer whether the hours
   and the policy admit a change's times, where the day limit holds a range,
   and which slot a create takes.
+- **The schedule check** (`CalendarScheduleCheck`) decides nothing
+  itself: every rule it reports is an answer of the edit rules or their
+  policy, and it names which answer refused, as a
+  `CalendarScheduleProblem`, a class hierarchy the module grows.
 - **The history lock** keeps the past as it is: before its boundary, the
   start of today or the time of day now rounded up to a whole minute, no
   entry moves, resizes or is created. An entry that ends at the boundary or

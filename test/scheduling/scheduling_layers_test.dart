@@ -240,6 +240,9 @@ void main() {
           "CalendarCreateRange",
           "CalendarEntry",
         },
+        "lib/scheduling/entries/calendar_schedule.dart": <String>{
+          "CalendarSchedule",
+        },
         "lib/scheduling/policy/edit_policy.dart": <String>{
           "CalendarEditPolicy",
           "CalendarNow",
@@ -255,6 +258,26 @@ void main() {
         },
         "lib/scheduling/policy/history_lock_policy.dart": <String>{
           "HistoryLockPolicy",
+        },
+        "lib/scheduling/policy/schedule_check.dart": <String>{
+          "CalendarScheduleAllDayNotAllowed",
+          "CalendarScheduleBeforeEarliest",
+          "CalendarScheduleCheck",
+          "CalendarScheduleEndInPast",
+          "CalendarScheduleEndNotAfterStart",
+          "CalendarScheduleEndSkipped",
+          "CalendarScheduleKindKept",
+          "CalendarScheduleLocked",
+          "CalendarScheduleOptions",
+          "CalendarScheduleOutsideHours",
+          "CalendarScheduleOverlapRefused",
+          "CalendarSchedulePastDay",
+          "CalendarScheduleProblem",
+          "CalendarScheduleRefused",
+          "CalendarScheduleSpansDays",
+          "CalendarScheduleStartKept",
+          "CalendarScheduleStartSkipped",
+          "CalendarScheduleTooManyDays",
         },
         "lib/scheduling/store/caching_calendar_store.dart": <String>{
           "CachingCalendarStore",
@@ -303,7 +326,8 @@ void main() {
   });
 
   test("SY5 each class the barrel shows says how a host builds on it: the "
-      "stores and the edit policy base, the data source an interface, and "
+      "stores, the edit policy and the schedule problem base, the data "
+      "source an interface, and "
       "every other class final or sealed; and each function or constant it "
       "shows names the calendar", () {
     final files = schedulingFiles();
@@ -312,6 +336,7 @@ void main() {
       "MemoryCalendarStore",
       "CachingCalendarStore",
       "CalendarEditPolicy",
+      "CalendarScheduleProblem",
     };
     const interfaces = <String>{"CalendarDataSource"};
     final shown = <String>{

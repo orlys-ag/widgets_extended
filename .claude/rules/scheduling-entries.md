@@ -6,7 +6,7 @@ paths:
 
 # scheduling architecture: entries
 
-The contract of `CalendarEntry<T>`, `CalendarCreateRange` and the data-source contract. The layer's imports are in `scheduling.md`'s table, and the conventions every layer follows in `scheduling.md` and `shared-calendar-conventions.md`.
+The contract of `CalendarEntry<T>`, `CalendarCreateRange`, `CalendarSchedule` and the data-source contract. The layer's imports are in `scheduling.md`'s table, and the conventions every layer follows in `scheduling.md` and `shared-calendar-conventions.md`.
 
 - **`CalendarEntry<T>`** is immutable: an id, its start and end, whether
   it is all-day, a title, a colour and a payload of the host's type `T`;
@@ -16,6 +16,10 @@ The contract of `CalendarEntry<T>`, `CalendarCreateRange` and the data-source co
   all-day or timed; its constructor throws an `ArgumentError`, in every
   build, naming the first of `CalendarEntry`'s time rules its times break,
   in `CalendarEntry`'s order, so an entry of its times constructs.
+- **`CalendarSchedule`** is the immutable schedule a form edits: civil
+  days and wall minutes, so it holds a time a clock skips, which its
+  `timesOn` reports as null instead of moving it. A new start keeps its
+  length in wall minutes.
 - **The data-source contract**: asynchronous reads of the entries covering a
   range of days, and writes that create, replace or delete one entry. A read
   or write completes with what it stored, or fails with an error.

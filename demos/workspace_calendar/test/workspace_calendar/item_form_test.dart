@@ -34,6 +34,7 @@ Future<void> openForm(
   int slotMinutes = CalendarDates.defaultSlotMinutes,
   CalendarEditPolicy<ItemPayload> policy =
       const UnrestrictedEditPolicy<ItemPayload>(),
+  DateTime? now,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -49,7 +50,10 @@ Future<void> openForm(
                   id: "item-1",
                   policy: policy,
                   now: () {
-                    return CalendarNow(time: wednesday, today: wednesday);
+                    return CalendarNow(
+                      time: now ?? wednesday,
+                      today: wednesday,
+                    );
                   },
                   slotMinutes: slotMinutes,
                 );
@@ -89,6 +93,32 @@ List<String> timeChoices(WidgetTester tester, String label) {
 
 const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
 
+/// The menu item of [minute] in the form's time field labelled [label].
+DropdownMenuItem<int> timeItem(WidgetTester tester, String label, int minute) {
+  final dropdown = tester.widget<DropdownButton<int>>(
+    find.descendant(
+      of: timeField(label),
+      matching: find.byType(DropdownButton<int>),
+    ),
+  );
+  return dropdown.items!.singleWhere((item) {
+    return item.value == minute;
+  });
+}
+
+/// Picks [time] in the form's time field labelled [label].
+Future<void> pickTime(WidgetTester tester, String label, String time) async {
+  await tester.tap(timeField(label));
+  await tester.pumpAndSettle();
+  final menu = find.byType(Scrollable).last;
+  final item = find.descendant(of: menu, matching: find.text(time));
+  await tester.scrollUntilVisible(item, 100.0, scrollable: menu);
+  await Scrollable.ensureVisible(tester.element(item), alignment: 0.5);
+  await tester.pumpAndSettle();
+  await tester.tap(item);
+  await tester.pumpAndSettle();
+}
+
 /// A policy that admits only a change to a timed item, and gives no day an
 /// earliest start, so the form keys every change it refuses.
 final class _TimedChangesOnly extends CalendarEditPolicy<ItemPayload> {
@@ -112,6 +142,70 @@ final class _TimedChangesOnly extends CalendarEditPolicy<ItemPayload> {
 }
 
 void main() {
+  testWidgets("R1 a new start time moves the end and keeps the length", (
+    tester,
+  ) async {
+    final store = MemoryCalendarStore<ItemPayload>(
+      entries: <CalendarItem>[
+        task(DateTime(2026, 4, 22, 9), DateTime(2026, 4, 22, 10)),
+      ],
+    );
+    addTearDown(store.dispose);
+    await openForm(tester, store);
+    await pickTime(tester, "Start time", "11:00");
+    expect(
+      find.descendant(
+        of: timeField("Start time"),
+        matching: find.text("11:00"),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: timeField("End time"), matching: find.text("12:00")),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets("R2 under the history lock a start before now is disabled, "
+      "and one after it is not", (tester) async {
+    final store = MemoryCalendarStore<ItemPayload>(
+      entries: <CalendarItem>[
+        task(DateTime(2026, 4, 22, 11), DateTime(2026, 4, 22, 12)),
+      ],
+    );
+    addTearDown(store.dispose);
+    await openForm(
+      tester,
+      store,
+      policy: const HistoryLockPolicy<ItemPayload>(lockEarlierToday: true),
+      now: DateTime(2026, 4, 22, 9, 30),
+    );
+    expect(timeItem(tester, "Start time", 9 * 60).enabled, isFalse);
+    expect(timeItem(tester, "Start time", 9 * 60 + 30).enabled, isTrue);
+    expect(timeItem(tester, "Start time", 11 * 60).enabled, isTrue);
+  });
+
+  testWidgets("R3 an item sharing time with another names it before Save", (
+    tester,
+  ) async {
+    final store = MemoryCalendarStore<ItemPayload>(
+      entries: <CalendarItem>[
+        task(DateTime(2026, 4, 22, 9), DateTime(2026, 4, 22, 10)),
+        calendarItem(
+          id: "item-2",
+          type: CalendarItemType.task,
+          title: "Standup",
+          start: DateTime(2026, 4, 22, 9, 30),
+          end: DateTime(2026, 4, 22, 10, 30),
+          fields: const <String, Object?>{"status": "toDo"},
+        ),
+      ],
+    );
+    addTearDown(store.dispose);
+    await openForm(tester, store);
+    expect(find.textContaining("Standup"), findsOneWidget);
+  });
+
   testWidgets("IF1 the form shows Start date, Start time, End date, End "
       "time and All day, and All day hides the times and saves day starts", (
     tester,
@@ -169,8 +263,9 @@ void main() {
     expect(starts, containsAll(<String>["09:00", "09:30", "10:00"]));
     expect(starts, isNot(contains("09:15")));
     expect(starts, hasLength(48));
+    // On the start day the ends are the slots after the 09:00 start.
     final ends = timeChoices(tester, "End time");
-    expect(ends.first, "00:30");
+    expect(ends.first, "09:30");
     expect(ends, isNot(contains("09:45")));
 
     // At the default 15 minutes the form offers the quarter hours.

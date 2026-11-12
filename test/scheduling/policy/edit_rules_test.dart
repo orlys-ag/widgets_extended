@@ -200,6 +200,31 @@ void main() {
     expect(inside.firstSlotMinute(15), 690);
   });
 
+  test("ER18 a first slot of a given length steps by the slot length and "
+      "ends by the hours' end", () {
+    final rules = rulesOf(hours: office);
+    final start = CalendarEarliestStart(tuesday, tuesday);
+    final early = <CalendarEntry<String>>[
+      entryOf("early", at(tuesday, 8), at(tuesday, 8, 20)),
+    ];
+    expect(
+      rules.firstSlot(start, clearOf: early, lengthMinutes: 60),
+      slot(at(tuesday, 8, 30), at(tuesday, 9, 30)),
+    );
+    expect(
+      rules.firstSlot(start, clearOf: early),
+      slot(at(tuesday, 8, 30), at(tuesday, 8, 45)),
+    );
+    expect(
+      rules.firstSlot(start, from: 17 * 60, lengthMinutes: 60),
+      slot(at(tuesday, 17), at(tuesday, 18)),
+    );
+    expect(
+      rules.firstSlot(start, from: 17 * 60 + 15, lengthMinutes: 60),
+      isNull,
+    );
+  });
+
   test("ER2 the first slot is the earliest of the hours clear of the given "
       "entries, the hours' first with none given, and none where every "
       "slot meets one", () {

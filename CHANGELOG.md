@@ -815,6 +815,16 @@ disposes them; a row still waits for a running enter, exit or extent animation
 or FLIP slide before it goes. `TreeChildManager.removeChild`, which
 `SliverTreeElement` left empty, now removes the row, and the render object
 calls it inside its layout.
+- Added `CalendarSchedule`, the schedule a form edits for any kind of
+entry: its civil days and wall minutes, its length kept as its start
+moves, all-day turned on and back, and its times on a zone's clock, null
+where the clock skips one; and `CalendarScheduleCheck`, which names, as
+`CalendarScheduleProblem`s, which of the edit rules' and the policy's
+answers refuse a schedule, lists the entries it overlaps, gives the first
+minute its start may take and the next free range of its length, under a
+kind's `CalendarScheduleOptions`. `CalendarEditRules.firstSlot` takes an
+optional `lengthMinutes`, the length of the range it finds, still
+stepping by the slot.
 
 ## 0.0.35
 

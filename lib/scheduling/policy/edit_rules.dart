@@ -357,17 +357,25 @@ final class CalendarEditRules<T> {
   /// override [CalendarEditPolicy.mayOverlap], whose default then answers
   /// false, every such entry blocks the slot too.
   ///
-  /// A slot is [slotMinutes] of wall-clock time
+  /// A slot is [lengthMinutes] of wall-clock time, [slotMinutes] where it
+  /// is null, and the search steps by [slotMinutes] whatever its length
   /// ([CalendarDates.timeAtWallMinute]), so on a day whose clock repeats a
   /// stretch, one from the stretch's first pass to a time after the
   /// stretch's end lasts that stretch longer, and one from the first pass
   /// to the stretch's end ends with that pass, as the clock goes back.
+  ///
+  /// Throws an [ArgumentError], in every build, for a [lengthMinutes]
+  /// under 1.
   ({DateTime start, DateTime end})? firstSlot(
     CalendarEarliestStart start, {
     Iterable<CalendarEntry<T>> clearOf = const <Never>[],
     int? from,
     int? until,
+    int? lengthMinutes,
   }) {
+    if (lengthMinutes != null && lengthMinutes < 1) {
+      throw ArgumentError.value(lengthMinutes, "lengthMinutes", "is under 1");
+    }
     // The first slot whose sharing entries the policy all allows, which the
     // scan holds while it looks on for a slot no entry shares.
     ({DateTime start, DateTime end})? held;
@@ -376,6 +384,7 @@ final class CalendarEditRules<T> {
       math.max(from ?? hours.start, start.firstSlotMinute(slotMinutes)),
       until ?? hours.end,
       slotMinutes,
+      length: lengthMinutes,
       occurrence: start.occurrence,
       isFree: (slotStart, slotEnd) {
         CalendarOverlapCandidate<T>? candidate;

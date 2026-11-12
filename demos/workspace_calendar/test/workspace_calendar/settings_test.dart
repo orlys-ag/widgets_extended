@@ -87,15 +87,6 @@ Future<void> pickHours(WidgetTester tester, int start, int end) async {
   await closeSettings(tester);
 }
 
-Finder dropdownFinder(String label) {
-  return find.ancestor(
-    of: find.text(label),
-    matching: find.byWidgetPredicate((widget) {
-      return widget is DropdownButtonFormField;
-    }),
-  );
-}
-
 /// The minutes the form's [label] time field offers, in order.
 List<int?> offeredMinutes(WidgetTester tester, String label) {
   final button = tester.widget<DropdownButton<int>>(

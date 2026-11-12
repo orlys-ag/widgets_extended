@@ -24,18 +24,6 @@ Finder addButton() {
   return find.byType(FloatingActionButton);
 }
 
-Finder dropdownShows(String label, String time) {
-  return find.descendant(
-    of: find.ancestor(
-      of: find.text(label),
-      matching: find.byWidgetPredicate((widget) {
-        return widget is DropdownButtonFormField;
-      }),
-    ),
-    matching: find.text(time),
-  );
-}
-
 /// Picks Task in the create flow's type picker.
 Future<void> pickTask(WidgetTester tester) async {
   expect(find.text("New item"), findsOneWidget);

@@ -1,11 +1,11 @@
 /// The calendar's create flow, its item form, which also shows an item
 /// read-only, and the delete confirmation.
 ///
-/// The form is generated from the item type's schema and checks its input
-/// with the same validator the API runs, and against the calendar's edit
-/// policy, whose refusals [lockErrorsOf] keys as the form's fields, before it sends
-/// anything; the store holds its times to the calendar's hours, and the
-/// time fields offer the slot boundaries inside them.
+/// The form opens in a modal bottom sheet. Its schedule section, which
+/// every item type shares, edits a [CalendarSchedule] and shows what its
+/// [CalendarScheduleCheck] answers; its details are generated from the item
+/// type's schema. Save sends nothing while the check names a problem
+/// ([scheduleErrorsOf]) or the validator the API runs refuses the item.
 library;
 
 import 'package:flutter/material.dart';
@@ -14,14 +14,16 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'calendar_api.dart';
 import 'calendar_api_source.dart';
 import 'calendar_item.dart';
+import 'calendar_settings.dart';
 import 'calendar_schema.dart';
 import 'harbor_theme.dart';
+import 'schedule_section.dart';
 
-/// Asks for a type, then opens the form for a new item of it over the
-/// range [range] picked, with All day on for an all-day range, whose Save
-/// [policy] checks at the time [now] reads then; its times step by
-/// [slotMinutes]. Completes when the flow closes, whether or not an item
-/// was created.
+/// Opens the form for a new item over the range [range] picked, with All
+/// day on for an all-day range, its type chosen in the form, Task first;
+/// its Save [policy] checks at the time [now] reads then, and its times
+/// step by [slotMinutes]. Completes when the form closes, whether or not
+/// an item was created.
 Future<void> showCreateFlow(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
@@ -29,36 +31,8 @@ Future<void> showCreateFlow(
   required CalendarEditPolicy<ItemPayload> policy,
   required ValueGetter<CalendarNow> now,
   int slotMinutes = CalendarDates.defaultSlotMinutes,
-}) async {
-  final type = await showDialog<CalendarItemType>(
-    context: context,
-    builder: (context) {
-      return SimpleDialog(
-        title: const Text("New item"),
-        children: <Widget>[
-          for (final type in CalendarItemType.values)
-            SimpleDialogOption(
-              onPressed: () {
-                Navigator.of(context).pop(type);
-              },
-              child: Row(
-                children: <Widget>[
-                  Icon(
-                    harborTypeStyleOf(type).icon,
-                    color: harborTypeStyleOf(type).edge,
-                  ),
-                  const SizedBox(width: 12.0),
-                  Text(type.label),
-                ],
-              ),
-            ),
-        ],
-      );
-    },
-  );
-  if (type == null || !context.mounted) {
-    return;
-  }
+}) {
+  const type = CalendarItemType.task;
   final draft = calendarItem(
     type: type,
     title: "",
@@ -67,7 +41,7 @@ Future<void> showCreateFlow(
     fields: withFieldDefaults(type, const <String, Object?>{}),
     isAllDay: range.isAllDay,
   );
-  await _showForm(
+  return _showForm(
     context,
     store: store,
     item: draft,
@@ -106,8 +80,8 @@ Future<void> showEditForm(
 }
 
 /// Opens the form for the stored item [id] read-only: it shows the item's
-/// fields, takes no input and has Close for its one action. Does nothing
-/// when the store does not hold it.
+/// schedule and fields, takes no input and has Close for its one action.
+/// Does nothing when the store does not hold it.
 Future<void> showItemDetails(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
@@ -147,62 +121,56 @@ Future<bool> confirmDelete(BuildContext context) async {
   return confirmed ?? false;
 }
 
-/// The item form's errors for [to], a change of the stored [from] or,
-/// where [from] is null, a new item, which [policy] refuses at [now],
-/// keyed as `validateItemJson` keys them; empty where it admits it. [to]
-/// is a change to an all-day item where [isAllDay] and to a timed one
-/// otherwise.
-///
-/// A change [CalendarEditPolicy.admitsChange] admits has none. Of a
-/// refused one, an item the policy does not let be edited is locked; of
-/// one it lets neither move nor resize its start, a moved start, else a
-/// changed kind, and an end it refuses with the start and the kind kept
-/// are each an error. Any other change, as a new item, starts on a day the
-/// policy gives no earliest start on, or before the earliest start it
-/// gives.
-Map<String, String> lockErrorsOf<T>(
-  CalendarEditPolicy<T> policy,
-  CalendarNow now,
-  CalendarEntry<T>? from,
-  ({DateTime start, DateTime end}) to, {
-  required bool isAllDay,
-}) {
-  if (from != null) {
-    if (policy.admitsChange(from, to.start, to.end, now, isAllDay: isAllDay)) {
-      return const <String, String>{};
-    }
-    if (!policy.mayEdit(from, now)) {
-      return const <String, String>{"start": "Past items are locked."};
-    }
-    if (!policy.mayMove(from, now) &&
-        !policy.resizableEdges(from, now).hasStart) {
-      return <String, String>{
-        if (to.start != from.start)
-          "start": "An item in progress keeps its start."
-        else if (isAllDay != from.isAllDay)
-          "start": "An item in progress keeps its All day setting.",
-        if (!policy.admitsChange(
-          from,
-          from.start,
-          to.end,
-          now,
-          isAllDay: from.isAllDay,
-        ))
-          "end": "The end can't be in the past.",
-      };
-    }
+/// The form's message for [problem].
+String scheduleProblemMessage(CalendarScheduleProblem problem) {
+  switch (problem) {
+    case CalendarScheduleEndNotAfterStart():
+      return "The end must be after the start.";
+    case CalendarScheduleTooManyDays():
+      return "The item covers 1 to $maxDayCount days.";
+    case CalendarScheduleSpansDays():
+      return "This item ends on the day it starts.";
+    case CalendarScheduleAllDayNotAllowed():
+      return "This item can't be all day.";
+    case CalendarScheduleStartSkipped():
+    case CalendarScheduleEndSkipped():
+      return "The clock skips this time on that day.";
+    case CalendarScheduleOutsideHours():
+      return "Outside the calendar's hours.";
+    case CalendarSchedulePastDay():
+      return "Past days are locked.";
+    case CalendarScheduleBeforeEarliest():
+      return "The start can't be in the past.";
+    case CalendarScheduleLocked():
+      return "Past items are locked.";
+    case CalendarScheduleStartKept():
+      return "An item in progress keeps its start.";
+    case CalendarScheduleKindKept():
+      return "An item in progress keeps its All day setting.";
+    case CalendarScheduleEndInPast():
+      return "The end can't be in the past.";
+    case CalendarScheduleOverlapRefused<ItemPayload>(:final other):
+      return "Overlaps ${other.title}.";
+    case CalendarScheduleRefused():
+      return "The calendar's rules refuse this time.";
+    default:
+      return "This time isn't allowed.";
   }
-  final day = CalendarDates.dateOnly(to.start);
-  final earliest = policy.earliestStartOn(day, now);
-  // An earliest start on a later day leaves none on this one.
-  if (earliest == null ||
-      CalendarDates.dayNumber(earliest) > CalendarDates.dayNumber(day)) {
-    return const <String, String>{"start": "Past days are locked."};
+}
+
+/// The form's errors for [problems], keyed `start` or `end` as the form's
+/// fields and the envelope key them ([CalendarScheduleProblem.atEnd]), the
+/// first problem of each key giving its message.
+Map<String, String> scheduleErrorsOf(
+  Iterable<CalendarScheduleProblem> problems,
+) {
+  final errors = <String, String>{};
+  for (final problem in problems) {
+    errors.putIfAbsent(problem.atEnd ? "end" : "start", () {
+      return scheduleProblemMessage(problem);
+    });
   }
-  if (to.start.isBefore(earliest)) {
-    return const <String, String>{"start": "The start can't be in the past."};
-  }
-  return const <String, String>{};
+  return errors;
 }
 
 Future<void> _showForm(
@@ -214,9 +182,16 @@ Future<void> _showForm(
   ValueGetter<CalendarNow>? now,
   int slotMinutes = CalendarDates.defaultSlotMinutes,
 }) {
-  return showDialog<void>(
+  // Neither a drag nor the barrier closes the sheet: a drag would close it
+  // through the sheet's onClosing, which no PopScope stops, so a save in
+  // flight would lose its outcome. Cancel, Save, Delete and the back
+  // gesture close it, the last through the form's PopScope.
+  return showModalBottomSheet<void>(
     context: context,
-    barrierDismissible: false,
+    isScrollControlled: true,
+    useSafeArea: true,
+    isDismissible: false,
+    enableDrag: false,
     builder: (context) {
       return _ItemForm(
         store: store,
@@ -257,12 +232,11 @@ class _ItemForm extends StatefulWidget {
   /// Whether every control is disabled and Close is the one action.
   final bool readOnly;
 
-  /// The edit policy, asked when the form opens, for what it takes input
-  /// in and whether it offers Delete, and at Save, which it refuses to
-  /// break.
+  /// The edit policy the schedule's check asks, and which decides whether
+  /// the form offers Delete.
   final CalendarEditPolicy<ItemPayload> policy;
 
-  /// The time [policy] is asked at, read at each ask.
+  /// The time the policy is asked at, read at each ask.
   final ValueGetter<CalendarNow> now;
 
   @override
@@ -276,31 +250,22 @@ class _ItemFormState extends State<_ItemForm> {
     text: widget.item.title,
   );
 
-  /// The day of the item's start.
-  late DateTime _startDate = CalendarDates.dateOfDayNumber(
-    CalendarDates.dayNumber(widget.item.start),
+  late CalendarItemType _type = widget.item.type;
+
+  late CalendarSchedule _schedule = CalendarSchedule.of(
+    widget.item.start,
+    widget.item.end,
+    isAllDay: widget.item.isAllDay,
   );
 
-  /// The start's minute of [_startDate].
-  late int _startMinute = CalendarDates.minuteOfDay(widget.item.start);
-
-  /// The last day the item has a part in.
-  late DateTime _endDate = CalendarDates.dateOfDayNumber(
-    CalendarDates.lastDayNumberOf(widget.item.start, widget.item.end),
-  );
-
-  /// The end's minute of [_endDate], 1440 for an end at the start of the
-  /// day after it.
-  late int _endMinute = CalendarDates.endMinuteOfDay(widget.item.end);
-
-  /// Whether the item covers whole days, from [_startDate]'s start to the
-  /// start of the day after [_endDate], and the time fields hide.
-  late bool _allDay = widget.item.isAllDay;
-
-  /// Whether the policy, when the form opened, let the stored item neither
-  /// move nor resize its start, so its start date, its start time and All
-  /// day take no input; false for a draft and read-only.
-  late final bool _startFixed = _fixesStart();
+  /// The rules the schedule is checked under: the policy, the store's
+  /// hours when the form opened, and the slot length.
+  late final CalendarEditRules<ItemPayload> _rules =
+      CalendarEditRules<ItemPayload>(
+        policy: widget.policy,
+        hours: widget.store.hours,
+        slotMinutes: widget.slotMinutes,
+      );
 
   /// Whether the form offers Delete: of a stored item the policy, when the
   /// form opened, let be deleted, where the form is not read-only.
@@ -317,7 +282,7 @@ class _ItemFormState extends State<_ItemForm> {
   /// The values of the schema's choice and bool fields, by key.
   final Map<String, Object?> _values = <String, Object?>{};
 
-  /// The validator's errors, keyed as it keys them.
+  /// The errors the last Save found, keyed as the validator keys them.
   Map<String, String> _errors = const <String, String>{};
 
   /// A failure that names no field: an overlap, the network, a lock.
@@ -335,25 +300,27 @@ class _ItemFormState extends State<_ItemForm> {
     return widget.item.id == null;
   }
 
-  bool _fixesStart() {
-    if (_isDraft || widget.readOnly) {
-      return false;
-    }
-    final now = widget.now();
-    return !widget.policy.mayMove(widget.item, now) &&
-        !widget.policy.resizableEdges(widget.item, now).hasStart;
-  }
-
   TypeSchema get _schema {
-    return schemaOf(widget.item.type);
+    return schemaOf(_type);
   }
 
   @override
   void initState() {
     super.initState();
-    final fields = withFieldDefaults(widget.item.type, widget.item.fields);
+    _initFields(widget.item.fields);
+  }
+
+  /// The details' controls for [_type], at [fields] with the type's
+  /// defaults for those it lacks.
+  void _initFields(Map<String, Object?> fields) {
+    for (final controller in _texts.values) {
+      controller.dispose();
+    }
+    _texts.clear();
+    _values.clear();
+    final values = withFieldDefaults(_type, fields);
     for (final field in _schema.fields) {
-      final value = fields[field.key];
+      final value = values[field.key];
       switch (field.kind) {
         case FieldKind.choice:
         case FieldKind.boolean:
@@ -381,10 +348,26 @@ class _ItemFormState extends State<_ItemForm> {
     super.dispose();
   }
 
-  /// The item the form holds, as an envelope: with All day on, an all-day
-  /// item from [_startDate] to the day after [_endDate], written as dates
-  /// ([itemTimeText]), and otherwise a timed one from [_startMinute] of
-  /// [_startDate] to [_endMinute] of [_endDate].
+  /// The check of the schedule now, against the entries the store shows
+  /// over its days.
+  CalendarScheduleCheck<ItemPayload> _check() {
+    return CalendarScheduleCheck<ItemPayload>(
+      schedule: _schedule,
+      rules: _rules,
+      now: widget.now(),
+      others: widget.store
+          .entriesBetween(_schedule.startDay, _schedule.endDay)
+          .map((shown) {
+            return shown.entry;
+          }),
+      entry: _isDraft ? null : widget.item,
+      options: scheduleOptionsOf(_type),
+    );
+  }
+
+  /// The item the form holds, as an envelope: its schedule's times on the
+  /// store's clock, as [itemTimeText] writes them; a time the clock skips
+  /// as its own local text, which the validator then reports.
   Map<String, Object?> _envelope() {
     final fields = <String, Object?>{};
     for (final field in _schema.fields) {
@@ -412,82 +395,46 @@ class _ItemFormState extends State<_ItemForm> {
           }
       }
     }
+    final schedule = _schedule;
+    final times = schedule.timesOn(widget.store.zone);
+    final allDay = schedule.isAllDay;
+    String textOf(DateTime? time, DateTime day, int minute) {
+      if (time != null) {
+        return itemTimeText(time, allDay: allDay);
+      }
+      return "${isoDate(day)}T${isoTime(minute)}";
+    }
+
     return <String, Object?>{
       if (widget.item.id != null) "id": widget.item.id,
-      "type": widget.item.type.id,
+      "type": _type.id,
       "title": _title.text,
-      "start": _allDay
-          ? itemTimeText(_startDate, allDay: true)
-          : _timeText(
-              _startDate,
-              _startMinute,
-              end: false,
-              zone: widget.store.zone,
-            ),
-      "end": _allDay
-          ? itemTimeText(CalendarDates.addDays(_endDate, 1), allDay: true)
-          : _timeText(_endDate, _endMinute, end: true, zone: widget.store.zone),
+      "start": textOf(times?.start, schedule.startDay, schedule.startMinute),
+      "end": textOf(times?.end, schedule.endDay, schedule.endMinute),
       "fields": fields,
     };
   }
 
-  /// [minute] of [day] on [zone]'s clock, the device's where it is null,
-  /// as the envelope writes a timed item's time ([itemTimeText]): for a
-  /// start the time [CalendarDates.timeAtWallMinute] gives, and for an
-  /// [end] the one [CalendarDates.endAtWallMinute] gives, each the earlier
-  /// of a time the clock repeats, so an end at 24:00 is the next day's
-  /// start, even where the clock skips that day's midnight; and a time the
-  /// clock skips, as it skips a start at 00:00 of such a day, as its own
-  /// text, which the validator then reports.
-  static String _timeText(
-    DateTime day,
-    int minute, {
-    required bool end,
-    required Location? zone,
-  }) {
-    final wall =
-        CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay + minute;
-    final time = end
-        ? CalendarDates.endAtWallMinute(wall, zone: zone)
-        : CalendarDates.timeAtWallMinute(wall, zone: zone);
-    if (time == null) {
-      return "${isoDate(day)}T${isoTime(minute)}";
-    }
-    return itemTimeText(time, allDay: false);
-  }
-
-  /// Validates and sends. Nothing is sent while a field breaks a rule, or
-  /// the item breaks the edit policy; the form stays open, with every
+  /// Validates and sends. Nothing is sent while the schedule's check names
+  /// a problem or a field breaks a rule; the form stays open, with every
   /// control disabled, until the API answers, and closes on success.
   Future<void> _save() async {
     if (_saving) {
       return;
     }
     final json = _envelope();
-    var errors = validateItemJson(json);
-    if (errors.isEmpty) {
-      final to = itemFromJson(json);
-      // The envelope's times read back plain; the policy judges them on the
-      // store's clock, as the store's entries and [widget.now] are.
-      final zone = widget.store.zone;
-      DateTime onClock(DateTime time) {
-        if (to.isAllDay) {
-          return CalendarDates.dateOfDayNumber(
-            CalendarDates.dayNumber(time),
-            zone: zone,
-          );
-        }
-        return CalendarDates.inZone(time, zone: zone);
-      }
-
-      errors = lockErrorsOf<ItemPayload>(
-        widget.policy,
-        widget.now(),
-        _isDraft ? null : widget.item,
-        (start: onClock(to.start), end: onClock(to.end)),
-        isAllDay: to.isAllDay,
-      );
-    }
+    final problems = _check().problems;
+    final times = _schedule.timesOn(widget.store.zone);
+    final errors = <String, String>{
+      ...validateItemJson(json),
+      ...scheduleErrorsOf(problems),
+      // The hours' own words, as the store's refusal of them reads.
+      if (times != null &&
+          problems.any((problem) {
+            return problem is CalendarScheduleOutsideHours;
+          }))
+        ...hoursErrorsOf(times.start, times.end, widget.store.hours),
+    };
     if (errors.isNotEmpty) {
       setState(() {
         _errors = errors;
@@ -549,96 +496,17 @@ class _ItemFormState extends State<_ItemForm> {
     }
   }
 
-  /// Picks a day from [initial], and hands it to [onPicked].
-  Future<void> _pickDate(
-    DateTime initial,
-    ValueChanged<DateTime> onPicked,
-  ) async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: DateTime(initial.year - 5),
-      lastDate: DateTime(initial.year + 5, 12, 31),
-    );
-    if (picked != null && mounted) {
-      setState(() {
-        onPicked(CalendarDates.dateOnly(picked));
-      });
+  /// A new item's type: the details reset to [type]'s defaults, the title
+  /// and the schedule kept.
+  void _selectType(CalendarItemType type) {
+    if (type == _type) {
+      return;
     }
-  }
-
-  /// A field naming [date] that opens a date picker, showing the error
-  /// [validateItemJson] keys [errorKey] where it is not null; a [fixed]
-  /// one takes no input.
-  Widget _dateField({
-    required String label,
-    required String? errorKey,
-    required DateTime date,
-    required ValueChanged<DateTime> onPicked,
-    bool fixed = false,
-  }) {
-    return InkWell(
-      onTap: _locked || fixed
-          ? null
-          : () {
-              _pickDate(date, onPicked);
-            },
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: label,
-          errorText: errorKey == null ? null : _errors[errorKey],
-          suffixIcon: const Icon(Icons.calendar_today),
-        ),
-        child: Text(isoDate(date)),
-      ),
-    );
-  }
-
-  /// A dropdown of every slot boundary from [first] to [last] minutes, and
-  /// of [value] where it lies outside them, so an item that lay outside the
-  /// calendar's hours when they changed shows its own time. A [fixed] one
-  /// takes no input.
-  Widget _minuteField({
-    required String label,
-    required String errorKey,
-    required int value,
-    required int first,
-    required int last,
-    required ValueChanged<int> onChanged,
-    bool fixed = false,
-  }) {
-    final minutes = <int>{
-      for (var minute = first; minute <= last; minute += widget.slotMinutes)
-        minute,
-      value,
-    }.toList()..sort();
-    return DropdownButtonFormField<int>(
-      initialValue: value,
-      decoration: InputDecoration(
-        labelText: label,
-        errorText: _errors[errorKey],
-      ),
-      items: <DropdownMenuItem<int>>[
-        for (final minute in minutes)
-          DropdownMenuItem<int>(
-            value: minute,
-            child: Text(
-              CalendarLocalizations.of(
-                context,
-              ).formatTime(minute, CalendarHourLabelFormat.twentyFourHour),
-            ),
-          ),
-      ],
-      onChanged: _locked || fixed
-          ? null
-          : (minute) {
-              if (minute != null) {
-                setState(() {
-                  onChanged(minute);
-                });
-              }
-            },
-    );
+    setState(() {
+      _type = type;
+      _initFields(const <String, Object?>{});
+      _errors = const <String, String>{};
+    });
   }
 
   /// The control for one schema field, by its kind.
@@ -648,6 +516,7 @@ class _ItemFormState extends State<_ItemForm> {
       case FieldKind.choice:
         final value = _values[field.key];
         return DropdownButtonFormField<String>(
+          key: ValueKey<String>("${_type.id}.${field.key}"),
           initialValue: value is String ? value : null,
           decoration: InputDecoration(labelText: field.label, errorText: error),
           items: <DropdownMenuItem<String>>[
@@ -709,24 +578,53 @@ class _ItemFormState extends State<_ItemForm> {
     }
   }
 
+  Widget _typeSelector() {
+    return SegmentedButton<CalendarItemType>(
+      showSelectedIcon: false,
+      segments: <ButtonSegment<CalendarItemType>>[
+        for (final type in CalendarItemType.values)
+          ButtonSegment<CalendarItemType>(
+            value: type,
+            icon: Icon(harborTypeStyleOf(type).icon),
+            label: Text(type.label),
+          ),
+      ],
+      selected: <CalendarItemType>{_type},
+      onSelectionChanged: _locked
+          ? null
+          : (selected) {
+              _selectType(selected.single);
+            },
+    );
+  }
+
+  Widget _typeRow() {
+    final style = harborTypeStyleOf(_type);
+    return Row(
+      children: <Widget>[
+        Icon(style.icon, color: style.edge),
+        const SizedBox(width: 8.0),
+        Text(
+          _type.label,
+          style: const TextStyle(fontSize: 15.0, color: HarborColors.text),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final type = widget.item.type;
-    final style = harborTypeStyleOf(type);
     final message = _message;
-    final hours = widget.store.hours;
-    final started = _startFixed;
+    final String heading;
+    if (widget.readOnly) {
+      heading = _type.label;
+    } else if (_isDraft) {
+      heading = "New item";
+    } else {
+      heading = "Edit ${_type.label}";
+    }
     final fields = <Widget>[
-      Row(
-        children: <Widget>[
-          Icon(style.icon, color: style.edge),
-          const SizedBox(width: 8.0),
-          Text(
-            type.label,
-            style: const TextStyle(fontSize: 15.0, color: HarborColors.text),
-          ),
-        ],
-      ),
+      if (_isDraft && !widget.readOnly) _typeSelector() else _typeRow(),
       TextField(
         controller: _title,
         enabled: !_locked,
@@ -735,170 +633,114 @@ class _ItemFormState extends State<_ItemForm> {
           errorText: _errors["title"],
         ),
       ),
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Expanded(
-            child: _dateField(
-              label: "Start date",
-              errorKey: _allDay ? "start" : null,
-              date: _startDate,
-              onPicked: (date) {
-                _startDate = date;
-              },
-              fixed: started,
-            ),
-          ),
-          if (!_allDay) ...<Widget>[
-            const SizedBox(width: 12.0),
-            Expanded(
-              child: _minuteField(
-                label: "Start time",
-                errorKey: "start",
-                value: _startMinute,
-                first: hours.start,
-                last: hours.end - widget.slotMinutes,
-                onChanged: (minute) {
-                  _startMinute = minute;
-                },
-                fixed: started,
-              ),
-            ),
-          ],
-        ],
-      ),
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Expanded(
-            child: _dateField(
-              label: "End date",
-              errorKey: _allDay ? "end" : null,
-              date: _endDate,
-              onPicked: (date) {
-                _endDate = date;
-              },
-            ),
-          ),
-          if (!_allDay) ...<Widget>[
-            const SizedBox(width: 12.0),
-            Expanded(
-              child: _minuteField(
-                label: "End time",
-                errorKey: "end",
-                value: _endMinute,
-                first: hours.start + widget.slotMinutes,
-                last: hours.end,
-                onChanged: (minute) {
-                  _endMinute = minute;
-                },
-              ),
-            ),
-          ],
-        ],
-      ),
-      SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        title: const Text("All day"),
-        value: _allDay,
-        onChanged: _locked || started
-            ? null
-            : (on) {
-                setState(() {
-                  _allDay = on;
-                });
-              },
+      // The store's notifications check the schedule again, so an item
+      // another write puts over its time shows while the form is open.
+      ListenableBuilder(
+        listenable: widget.store,
+        builder: (context, child) {
+          return ScheduleSection(
+            check: _check(),
+            hours: widget.store.hours,
+            slotMinutes: widget.slotMinutes,
+            zone: widget.store.zone,
+            locked: _locked,
+            errors: _errors,
+            onChanged: (schedule) {
+              setState(() {
+                _schedule = schedule;
+              });
+            },
+          );
+        },
       ),
       for (final field in _schema.fields) _fieldFor(field),
     ];
     return PopScope(
       canPop: !_saving,
-      child: Dialog(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480.0),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 12.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Text(
-                  widget.readOnly
-                      ? type.label
-                      : "${_isDraft ? "New" : "Edit"} ${type.label}",
-                  style: const TextStyle(
-                    fontSize: 20.0,
-                    fontWeight: FontWeight.w600,
-                    color: HarborColors.text,
-                  ),
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 12.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(
+                heading,
+                style: const TextStyle(
+                  fontSize: 20.0,
+                  fontWeight: FontWeight.w600,
+                  color: HarborColors.text,
                 ),
-                const SizedBox(height: 12.0),
-                Flexible(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        for (final field in fields)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 12.0),
-                            child: field,
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-                if (message != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8.0),
-                    child: Text(
-                      message,
-                      style: const TextStyle(color: HarborColors.error),
-                    ),
-                  ),
-                // Stacks the actions where a narrow screen cannot fit them in
-                // a row.
-                OverflowBar(
-                  alignment: MainAxisAlignment.end,
-                  spacing: 8.0,
-                  overflowAlignment: OverflowBarAlignment.end,
-                  children: <Widget>[
-                    if (widget.readOnly)
-                      TextButton(
-                        onPressed: () {
-                          Navigator.of(context).pop();
-                        },
-                        child: const Text("Close"),
-                      ),
-                    if (_deletable)
-                      TextButton(
-                        onPressed: _saving ? null : _delete,
-                        child: const Text("Delete"),
-                      ),
-                    if (!widget.readOnly) ...<Widget>[
-                      TextButton(
-                        onPressed: _saving
-                            ? null
-                            : () {
-                                Navigator.of(context).pop();
-                              },
-                        child: const Text("Cancel"),
-                      ),
-                      FilledButton(
-                        onPressed: _saving ? null : _save,
-                        child: _saving
-                            ? const SizedBox.square(
-                                dimension: 16.0,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.0,
-                                ),
-                              )
-                            : const Text("Save"),
-                      ),
+              ),
+              const SizedBox(height: 12.0),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      for (final field in fields)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12.0),
+                          child: field,
+                        ),
                     ],
-                  ],
+                  ),
                 ),
-              ],
-            ),
+              ),
+              if (message != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Text(
+                    message,
+                    style: const TextStyle(color: HarborColors.error),
+                  ),
+                ),
+              // Stacks the actions where a narrow screen cannot fit them in
+              // a row.
+              OverflowBar(
+                alignment: MainAxisAlignment.end,
+                spacing: 8.0,
+                overflowAlignment: OverflowBarAlignment.end,
+                children: <Widget>[
+                  if (widget.readOnly)
+                    TextButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                      },
+                      child: const Text("Close"),
+                    ),
+                  if (_deletable)
+                    TextButton(
+                      onPressed: _saving ? null : _delete,
+                      child: const Text("Delete"),
+                    ),
+                  if (!widget.readOnly) ...<Widget>[
+                    TextButton(
+                      onPressed: _saving
+                          ? null
+                          : () {
+                              Navigator.of(context).pop();
+                            },
+                      child: const Text("Cancel"),
+                    ),
+                    FilledButton(
+                      onPressed: _saving ? null : _save,
+                      child: _saving
+                          ? const SizedBox.square(
+                              dimension: 16.0,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.0,
+                              ),
+                            )
+                          : const Text("Save"),
+                    ),
+                  ],
+                ],
+              ),
+            ],
           ),
         ),
       ),

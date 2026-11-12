@@ -4,7 +4,8 @@
 /// [CalendarDayHours], [CalendarMonthGrid]); [CalendarEntry], with the
 /// host's payload, and the [CalendarDataSource] contract; the limits on
 /// edits ([CalendarEditPolicy], [CalendarEditRules], [NoOverlapsPolicy]'s
-/// overlap rule and [HistoryLockPolicy]); and a [CalendarStore], a
+/// overlap rule and [HistoryLockPolicy]); the [CalendarSchedule] a form
+/// edits and its [CalendarScheduleCheck]; and a [CalendarStore], a
 /// [MemoryCalendarStore] of the host's entries or a [CachingCalendarStore]
 /// reading and writing through a [CalendarDataSource]. The calendar,
 /// `CalendarView`, builds on it.
@@ -30,6 +31,7 @@ export 'entries/calendar_data_source.dart'
         CalendarEntryRemoved,
         CalendarSourceChange;
 export 'entries/calendar_entry.dart' show CalendarCreateRange, CalendarEntry;
+export 'entries/calendar_schedule.dart' show CalendarSchedule;
 export 'policy/edit_policy.dart'
     show
         CalendarEditPolicy,
@@ -41,6 +43,26 @@ export 'policy/edit_policy.dart'
         UnrestrictedEditPolicy;
 export 'policy/edit_rules.dart' show CalendarEarliestStart, CalendarEditRules;
 export 'policy/history_lock_policy.dart' show HistoryLockPolicy;
+export 'policy/schedule_check.dart'
+    show
+        CalendarScheduleAllDayNotAllowed,
+        CalendarScheduleBeforeEarliest,
+        CalendarScheduleCheck,
+        CalendarScheduleEndInPast,
+        CalendarScheduleEndNotAfterStart,
+        CalendarScheduleEndSkipped,
+        CalendarScheduleKindKept,
+        CalendarScheduleLocked,
+        CalendarScheduleOptions,
+        CalendarScheduleOutsideHours,
+        CalendarScheduleOverlapRefused,
+        CalendarSchedulePastDay,
+        CalendarScheduleProblem,
+        CalendarScheduleRefused,
+        CalendarScheduleSpansDays,
+        CalendarScheduleStartKept,
+        CalendarScheduleStartSkipped,
+        CalendarScheduleTooManyDays;
 export 'store/caching_calendar_store.dart' show CachingCalendarStore;
 export 'store/calendar_store.dart'
     show

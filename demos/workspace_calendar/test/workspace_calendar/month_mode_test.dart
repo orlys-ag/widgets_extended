@@ -181,7 +181,7 @@ Future<void> longPressDay(WidgetTester tester, DateTime day) async {
 /// Dismisses the create flow's type picker with a tap on its barrier.
 Future<void> dismissPicker(WidgetTester tester) async {
   expect(find.text("New item"), findsOneWidget);
-  await tester.tapAt(const Offset(10.0, 10.0));
+  await tester.tap(formButton("Cancel"));
   await tester.pumpAndSettle();
   expect(find.text("New item"), findsNothing);
 }
@@ -190,56 +190,6 @@ Future<void> dismissPicker(WidgetTester tester) async {
 Future<void> pickTask(WidgetTester tester) async {
   expect(find.text("New item"), findsOneWidget);
   await tester.tap(find.text("Task").last);
-  await tester.pumpAndSettle();
-}
-
-Finder fieldFinder(String label) {
-  return find.widgetWithText(TextField, label);
-}
-
-String fieldText(WidgetTester tester, String label) {
-  return tester.widget<TextField>(fieldFinder(label)).controller!.text;
-}
-
-Finder dropdownFinder(String label) {
-  return find.ancestor(
-    of: find.text(label),
-    matching: find.byWidgetPredicate((widget) {
-      return widget is DropdownButtonFormField;
-    }),
-  );
-}
-
-/// The time the form's [label] dropdown shows.
-Finder dropdownShows(String label, String time) {
-  return find.descendant(of: dropdownFinder(label), matching: find.text(time));
-}
-
-Finder formButton(String label) {
-  return find.widgetWithText(TextButton, label);
-}
-
-Finder saveFinder() {
-  return find.byType(FilledButton);
-}
-
-/// Picks [option] in the dropdown labelled [label], scrolling its menu by
-/// [delta], forward for a positive one, until the option shows.
-Future<void> chooseOption(
-  WidgetTester tester,
-  String label,
-  String option, {
-  double delta = 100.0,
-}) async {
-  await tester.tap(dropdownFinder(label));
-  await tester.pumpAndSettle();
-  final menu = find.byType(Scrollable).last;
-  final item = find.descendant(of: menu, matching: find.text(option));
-  await tester.scrollUntilVisible(item, delta, scrollable: menu);
-  // Centred, as an item scrolled to the menu's edge can sit under it.
-  await Scrollable.ensureVisible(tester.element(item), alignment: 0.5);
-  await tester.pumpAndSettle();
-  await tester.tap(item);
   await tester.pumpAndSettle();
 }
 
@@ -574,7 +524,7 @@ void main() {
       await tester.tap(saveFinder());
       await tester.pump(harnessLatency);
       await tester.pumpAndSettle();
-      expect(find.text("New Task"), findsNothing);
+      expect(find.text("New item"), findsNothing);
 
       final monday = april(20);
       final m = tester.getRect(chipFinder("item-2", monday)).top;
@@ -966,8 +916,8 @@ void main() {
       await tester.tap(chipFinder("item-2", monday));
       await tester.pumpAndSettle();
       expect(find.text("Edit Task"), findsOneWidget);
-      await chooseOption(tester, "Start time", "08:00", delta: -100.0);
-      await chooseOption(tester, "End time", "09:00", delta: -100.0);
+      await chooseOption(tester, "Start time", "08:00");
+      await chooseOption(tester, "End time", "09:00");
 
       final reported = <String>{};
       addTearDown(() {
@@ -1497,8 +1447,8 @@ void main() {
     await tester.pump();
     expect(structural, 0);
     expect(tester.getRect(monthBoardFinder()), board);
-    // Sanity: the form's dialog moves above the keyboard once its inset
-    // padding has animated; its surface is the Material it builds.
+    // Sanity: the form's sheet keeps its content above the keyboard; its
+    // surface is the Material the sheet builds.
     await tester.pumpAndSettle();
     expect(structural, 0);
     expect(tester.getRect(monthBoardFinder()), board);
@@ -1507,8 +1457,8 @@ void main() {
           .getRect(
             find
                 .descendant(
-                  of: find.byType(Dialog),
-                  matching: find.byType(Material),
+                  of: find.byType(BottomSheet),
+                  matching: find.byType(FilledButton),
                 )
                 .first,
           )

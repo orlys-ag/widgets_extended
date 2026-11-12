@@ -191,63 +191,37 @@ typedef _WeekEntry = ({
 /// of every kept task that can fall on its day, whichever day today is.
 const List<_WeekEntry> _weekEntries = <_WeekEntry>[
   (
-    weekday: 0,
-    type: CalendarItemType.meeting,
-    title: "Weekly planning",
-    start: 8 * 60,
-    end: 9 * 60,
-    fields: <String, Object?>{
-      "location": "Room 4B",
-      "attendees": <String>["Ana", "Ben", "Chen"],
-    },
-  ),
-  (
     weekday: 2,
-    type: CalendarItemType.deadline,
-    title: "Roadmap draft due",
+    type: CalendarItemType.risk,
+    title: "Roadmap draft may slip",
     start: 17 * 60,
     end: 17 * 60 + 30,
-    fields: <String, Object?>{"project": "Roadmap", "met": false},
+    fields: <String, Object?>{
+      "severity": "high",
+      "project": "Roadmap",
+      "mitigated": false,
+    },
   ),
   (
     weekday: 3,
-    type: CalendarItemType.meeting,
-    title: "Design critique",
+    type: CalendarItemType.risk,
+    title: "Release notes incomplete",
     start: 16 * 60,
     end: 17 * 60,
     fields: <String, Object?>{
-      "location": "Studio",
-      "attendees": <String>["Lu", "Michael"],
-      "videoLink": "https://meet.example.com/critique",
+      "severity": "medium",
+      "project": "Mobile app",
+      "mitigated": false,
     },
-  ),
-  (
-    weekday: 4,
-    type: CalendarItemType.meeting,
-    title: "Client demo",
-    start: 16 * 60 + 30,
-    end: 17 * 60 + 30,
-    fields: <String, Object?>{
-      "attendees": <String>["Ana", "Michael", "Sam"],
-      "videoLink": "https://meet.example.com/demo",
-    },
-  ),
-  (
-    weekday: 4,
-    type: CalendarItemType.deadline,
-    title: "Release notes due",
-    start: 16 * 60,
-    end: 16 * 60 + 30,
-    fields: <String, Object?>{"project": "Mobile app", "met": false},
   ),
 ];
 
 /// The seed of the demo's mock API around [today], as item envelopes
 /// without ids, in this order: the kept tasks at their offsets from
-/// [today]; the meetings and deadlines of the Monday-to-Sunday week
-/// holding [today]; "Day off", an Out of office from 09:00 to 17:00 on the
-/// first day of that week, Monday first, that holds no kept task; and
-/// "Conference trip", an all-day Out of office over the five days from
+/// [today]; the risks of the Monday-to-Sunday week holding [today];
+/// "Day off", a time-off Request from 09:00 to 17:00 on the first day of
+/// that week, Monday first, that holds no kept task; and
+/// "Conference trip", an all-day travel Request over the five days from
 /// the first Monday at least 19 days after [today], its start and end the
 /// dates of that Monday and of the day five days on.
 List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
@@ -294,11 +268,11 @@ List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
   }
   seed.add(
     _envelope(
-      type: CalendarItemType.outOfOffice,
+      type: CalendarItemType.request,
       title: "Day off",
       start: _at(dayOff, 9 * 60),
       end: _at(dayOff, 17 * 60),
-      fields: const <String, Object?>{"reason": "vacation"},
+      fields: const <String, Object?>{"status": "approved", "kind": "timeOff"},
     ),
   );
   final earliest = CalendarDates.addDays(day, 19);
@@ -308,11 +282,11 @@ List<Map<String, Object?>> defaultCalendarSeed(DateTime today) {
   );
   seed.add(
     _envelope(
-      type: CalendarItemType.outOfOffice,
+      type: CalendarItemType.request,
       title: "Conference trip",
       start: tripStart,
       end: CalendarDates.addDays(tripStart, 5),
-      fields: const <String, Object?>{"reason": "travel"},
+      fields: const <String, Object?>{"status": "pending", "kind": "travel"},
       allDay: true,
     ),
   );

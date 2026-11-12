@@ -10,18 +10,18 @@ import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// A meeting's envelope, built anew on each call, its attendees a list:
+/// A request's envelope, built anew on each call, its approvers a list:
 /// from 10:00 on 2026-04-21 to 11:10 the next day.
-Map<String, Object?> envelope({List<String> attendees = const ["Ana", "Bo"]}) {
+Map<String, Object?> envelope({List<String> approvers = const ["Ana", "Bo"]}) {
   return <String, Object?>{
     "id": "item-4",
-    "type": "meeting",
+    "type": "request",
     "title": "Planning",
     "start": "2026-04-21T10:00",
     "end": "2026-04-22T11:10",
     "fields": <String, Object?>{
-      "location": "Room 4B",
-      "attendees": <Object?>[...attendees],
+      "kind": "review",
+      "approvers": <Object?>[...approvers],
     },
   };
 }
@@ -86,14 +86,14 @@ void main() {
         ),
       ),
     );
-    expect(item.type, CalendarItemType.meeting);
+    expect(item.type, CalendarItemType.request);
     expect(item.start, DateTime(2026, 4, 21, 10));
     expect(item.end, DateTime(2026, 4, 22, 11, 10));
 
     final again = itemFromJson(envelope());
     expect(again == item, isTrue);
     expect(again.hashCode, item.hashCode);
-    final changed = itemFromJson(envelope(attendees: const ["Ana", "Cy"]));
+    final changed = itemFromJson(envelope(approvers: const ["Ana", "Cy"]));
     expect(changed == item, isFalse);
 
     final task = calendarItem(
@@ -103,7 +103,7 @@ void main() {
       end: DateTime(2026, 4, 22, 10),
     );
     expect(task.color, harborTypeStyleOf(CalendarItemType.task).edge);
-    expect(item.color, harborTypeStyleOf(CalendarItemType.meeting).edge);
+    expect(item.color, harborTypeStyleOf(CalendarItemType.request).edge);
 
     final missing = envelope()..remove("title");
     expect(() => itemFromJson(missing), throwsFormatException);
@@ -196,11 +196,11 @@ void main() {
       "itemTimeText writes a date for an all-day time and its instant in UTC "
       "for a timed one", () {
     final away = calendarItem(
-      type: CalendarItemType.outOfOffice,
+      type: CalendarItemType.request,
       title: "Away",
       start: DateTime(2026, 4, 21),
       end: DateTime(2026, 4, 22),
-      fields: const <String, Object?>{"reason": "travel"},
+      fields: const <String, Object?>{"kind": "travel"},
       isAllDay: true,
     );
     final json = away.toJson();
