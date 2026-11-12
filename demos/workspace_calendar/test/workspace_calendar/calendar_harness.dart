@@ -13,8 +13,6 @@ import 'package:widgets_extended/calendar/composition/calendar_header.dart'
     show calendarEditToggleKey, calendarTodayButtonKey, calendarViewButtonKey;
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:widgets_extended/widgets_extended.dart';
-import 'package:widgets_extended/scheduling/dates/calendar_dates.dart'
-    show parseIsoDate;
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
@@ -29,6 +27,8 @@ import 'package:widgets_extended/calendar/views/month_strip.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
+
+export 'form_driver.dart';
 
 /// A Tuesday. April 2026 starts on a Wednesday and has 30 days, so its
 /// Monday-first grid runs from March 30 to May 3 in five weeks.
@@ -46,7 +46,7 @@ const Size roomyPhone = Size(390.0, 844.0 + addButtonRoom);
 const Duration harnessLatency = Duration(milliseconds: 100);
 
 // The ids of the seed around [today]: `defaultCalendarSeed` lists the kept
-// tasks first, then the week's meetings and deadlines, then "Day off" and
+// tasks first, then the week's risks, then "Day off" and
 // "Conference trip", and the mock numbers them in that order.
 const String uxFlowId = "item-5";
 const String brainstormId = "item-6";
@@ -57,9 +57,9 @@ const String clientPresentationId = "item-18";
 const String teamOffsiteId = "item-20";
 const String releasePlanningId = "item-21";
 const String designSystemSyncId = "item-22";
-const String designCritiqueId = "item-25";
-const String dayOffId = "item-28";
-const String conferenceTripId = "item-29";
+const String releaseRiskId = "item-24";
+const String dayOffId = "item-25";
+const String conferenceTripId = "item-26";
 
 /// The Monday of [today]'s week.
 final DateTime monday = DateTime(2026, 4, 20);
@@ -167,34 +167,6 @@ Rect cellRect(WidgetTester tester, int row, int col) {
   final viewport = gridViewport(tester);
   final rect = viewport.rectOfCell(row, col)!;
   return viewport.localToGlobal(rect.topLeft) & rect.size;
-}
-
-/// The item form's date field labelled [label], "Start date" or "End
-/// date".
-Finder formDateFinder(String label) {
-  return find.ancestor(
-    of: find.text(label),
-    matching: find.byType(InputDecorator),
-  );
-}
-
-/// The item form's date field labelled [label] showing [date], as
-/// [CalendarDates.isoDate] writes it.
-Finder formDateShows(String label, String date) {
-  return find.descendant(of: formDateFinder(label), matching: find.text(date));
-}
-
-/// Expects the item form's Start date to name [day] and its End date the
-/// day [days] - 1 days after it, both as [CalendarDates.isoDate] writes them.
-void expectFormDays(String day, int days) {
-  expect(formDateShows("Start date", day), findsOneWidget);
-  expect(
-    formDateShows(
-      "End date",
-      isoDate(CalendarDates.addDays(parseIsoDate(day)!, days - 1)),
-    ),
-    findsOneWidget,
-  );
 }
 
 /// The icon the calendar header's view button shows for each view, by the

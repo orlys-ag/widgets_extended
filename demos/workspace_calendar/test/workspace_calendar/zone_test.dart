@@ -14,7 +14,6 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
-import 'package:workspace_calendar/workspace_calendar/item_form.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 
@@ -142,35 +141,6 @@ Future<void> showMinute(WidgetTester tester, int minute) async {
   await tester.pumpAndSettle();
 }
 
-/// The text a dropdown labelled [label] shows as its value.
-Finder dropdownFinder(String label) {
-  return find.ancestor(
-    of: find.text(label),
-    matching: find.byWidgetPredicate((widget) {
-      return widget is DropdownButtonFormField;
-    }),
-  );
-}
-
-/// Picks [option] in the form's dropdown labelled [label], scrolling its
-/// menu until the option shows.
-Future<void> chooseOption(
-  WidgetTester tester,
-  String label,
-  String option,
-) async {
-  await tester.tap(dropdownFinder(label));
-  await tester.pumpAndSettle();
-  final menu = find.byType(Scrollable).last;
-  final item = find.descendant(of: menu, matching: find.text(option));
-  await tester.scrollUntilVisible(item, -100.0, scrollable: menu);
-  // Centred, as an item scrolled to the menu's edge can sit under it.
-  await Scrollable.ensureVisible(tester.element(item), alignment: 0.5);
-  await tester.pumpAndSettle();
-  await tester.tap(item);
-  await tester.pumpAndSettle();
-}
-
 /// Taps Tuesday's slot of [minute] in Week and picks Task in the create
 /// flow, which opens the form of a new Task.
 Future<void> createTaskAt(WidgetTester tester, int minute) async {
@@ -180,7 +150,7 @@ Future<void> createTaskAt(WidgetTester tester, int minute) async {
   expect(find.text("New item"), findsOneWidget);
   await tester.tap(find.text("Task").last);
   await tester.pumpAndSettle();
-  expect(find.text("New Task"), findsOneWidget);
+  expect(find.text("New item"), findsOneWidget);
 }
 
 /// Creates "Zoned" through the form at 09:00 on Tuesday of Week, over a
@@ -210,7 +180,7 @@ Future<({String id, MockCalendarApi api})> createAtNine(
   await tester.tap(find.widgetWithText(FilledButton, "Save"));
   await tester.pump(api.latency);
   await tester.pumpAndSettle();
-  expect(find.text("New Task"), findsNothing);
+  expect(find.text("New item"), findsNothing);
   final listed = await listAll(
     tester,
     api,
@@ -625,7 +595,7 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.text("New Task"), findsOneWidget);
+      expect(find.text("New item"), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
 
       // The lock: the store on a zone 12 or more hours from the device, the
@@ -649,7 +619,7 @@ void main() {
         lockEarlierToday: true,
       ).editPolicy;
       Map<String, String> judged(DateTime start, CalendarNow at) {
-        return lockErrorsOf<ItemPayload>(policy, at, null, (
+        return formErrorsOf<ItemPayload>(policy, at, null, (
           start: start,
           end: start.add(const Duration(minutes: 15)),
         ), isAllDay: false);
@@ -692,11 +662,10 @@ void main() {
         return "${value.toString().padLeft(2, "0")}:00";
       }
 
-      await chooseOption(tester, "Start time", hourText(hour - 1));
-      await tester.tap(find.widgetWithText(FilledButton, "Save"));
-      await tester.pumpAndSettle();
-      expect(find.text("The start can't be in the past."), findsOneWidget);
-      expect(find.text("New Task"), findsOneWidget);
+      // The zone's clock, not the device's, refuses the earlier start,
+      // which the form offers disabled.
+      expect(optionEnabled(tester, "Start time", hourText(hour - 1)), isFalse);
+      expect(optionEnabled(tester, "Start time", hourText(hour + 1)), isTrue);
 
       await chooseOption(tester, "Start time", hourText(hour + 1));
       await tester.tap(find.widgetWithText(FilledButton, "Save"));
@@ -705,7 +674,7 @@ void main() {
       expect(find.text("Past days are locked."), findsNothing);
       await tester.pump(lockApi.latency);
       await tester.pumpAndSettle();
-      expect(find.text("New Task"), findsNothing);
+      expect(find.text("New item"), findsNothing);
     },
   );
 

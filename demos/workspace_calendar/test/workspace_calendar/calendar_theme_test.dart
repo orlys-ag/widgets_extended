@@ -381,48 +381,44 @@ Map<String, Object?> itemJson(
 }
 
 /// The seed of [pumpThemed], which has no task, whose edge is
-/// [HarborColors.primary]'s value: on Tuesday 21 a meeting from 09:00 to
-/// 10:00 with a location; on Wednesday 22 meetings from 07:00 to 09:00 and
-/// from 17:00 to 19:00; on Thursday 23 deadlines from 05:00 to 06:00 and
-/// from 20:00 to 21:00; on Friday 24 seven 30-minute meetings from 08:00;
-/// on Saturday 25 an out-of-office from 09:00 to 12:00; and nothing on
+/// [HarborColors.primary]'s value: on Tuesday 21 an approved request from
+/// 09:00 to 10:00; on Wednesday 22 requests from 07:00 to 09:00 and from
+/// 17:00 to 19:00; on Thursday 23 risks from 05:00 to 06:00 and from 20:00
+/// to 21:00; on Friday 24 seven 30-minute requests from 08:00; on
+/// Saturday 25 a travel request from 09:00 to 12:00; and nothing on
 /// Monday 20.
 List<Map<String, Object?>> themeSeed() {
-  const meeting = CalendarItemType.meeting;
-  const deadline = CalendarItemType.deadline;
+  const request = CalendarItemType.request;
+  const risk = CalendarItemType.risk;
   return <Map<String, Object?>>[
-    itemJson(meeting, "Planning", DateTime(2026, 4, 21), 9 * 60, 10 * 60, {
-      "location": "Room 2",
+    itemJson(request, "Planning", DateTime(2026, 4, 21), 9 * 60, 10 * 60, {
+      "status": "approved",
+      "kind": "review",
     }),
-    itemJson(meeting, "Early sync", DateTime(2026, 4, 22), 7 * 60, 9 * 60, {
-      "location": "Room 3",
+    itemJson(request, "Early sync", DateTime(2026, 4, 22), 7 * 60, 9 * 60, {
+      "kind": "review",
     }),
-    itemJson(meeting, "Late sync", DateTime(2026, 4, 22), 17 * 60, 19 * 60, {
-      "location": "Room 4",
+    itemJson(request, "Late sync", DateTime(2026, 4, 22), 17 * 60, 19 * 60, {
+      "kind": "review",
     }),
-    itemJson(deadline, "Report", DateTime(2026, 4, 23), 5 * 60, 6 * 60, {
+    itemJson(risk, "Report", DateTime(2026, 4, 23), 5 * 60, 6 * 60, {
       "project": "Atlas",
     }),
-    itemJson(deadline, "Release", DateTime(2026, 4, 23), 20 * 60, 21 * 60, {
+    itemJson(risk, "Release", DateTime(2026, 4, 23), 20 * 60, 21 * 60, {
       "project": "Atlas",
     }),
     for (var i = 0; i < 7; i++)
       itemJson(
-        meeting,
+        request,
         "Slot ${i + 1}",
         DateTime(2026, 4, 24),
         8 * 60 + 30 * i,
         8 * 60 + 30 * (i + 1),
-        <String, Object?>{},
+        <String, Object?>{"kind": "other"},
       ),
-    itemJson(
-      CalendarItemType.outOfOffice,
-      "Away",
-      DateTime(2026, 4, 25),
-      9 * 60,
-      12 * 60,
-      {"reason": "travel"},
-    ),
+    itemJson(request, "Away", DateTime(2026, 4, 25), 9 * 60, 12 * 60, {
+      "kind": "travel",
+    }),
   ];
 }
 
@@ -1978,7 +1974,7 @@ void main() {
         Curves.linear,
       );
       if (size.width < 400.0) {
-        // Friday's seven meetings take more lanes than a week holds.
+        // Friday's seven requests take more lanes than a week holds.
         expect(
           find.descendant(
             of: find.byType(MonthBoard<ItemPayload>),
@@ -2195,7 +2191,7 @@ void main() {
     );
 
     // The lift moves on and drops where the pointer is: four hours below
-    // where it lifted, past Friday's other meetings.
+    // where it lifted, past Friday's other requests.
     await gesture.moveBy(Offset(0.0, slot.height * 6.0));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
@@ -2790,7 +2786,7 @@ void main() {
     );
     expectText(
       tester,
-      textIn(find.byKey(entryCardKey("item-1")), "Room 2"),
+      textIn(find.byKey(entryCardKey("item-1")), "Approved, Review"),
       theme,
       "entryCardSummaryStyle",
       theme.textSecondary,
@@ -2888,7 +2884,7 @@ void main() {
     );
     expectText(
       tester,
-      textIn(blockFinder("item-1"), "Room 2"),
+      textIn(blockFinder("item-1"), "Approved"),
       theme,
       "blockSummaryStyle",
       theme.textSecondary,
@@ -3085,7 +3081,7 @@ void main() {
     final badge = decorationOf(tester, find.byKey(dayBadgeKey(april(22))));
     expectColour(
       badge.color!,
-      harborTypeStyleOf(CalendarItemType.meeting).edge,
+      harborTypeStyleOf(CalendarItemType.request).edge,
       "badge",
     );
     expectColour(

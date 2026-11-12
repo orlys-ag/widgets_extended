@@ -116,14 +116,14 @@ void main() {
       ),
       HarborColors.onPrimary,
     );
-    // Another day's marker is its meeting's Harbor badge.
+    // Another day's marker is its risk's Harbor badge.
     final thursday = dayFinder(DateTime(2026, 4, 23));
     final badge = tester.widget<DecoratedBox>(
       find.byKey(dayBadgeKey(DateTime(2026, 4, 23))),
     );
     expect(
       (badge.decoration as BoxDecoration).color,
-      harborTypeStyleOf(CalendarItemType.meeting).edge,
+      harborTypeStyleOf(CalendarItemType.risk).edge,
     );
 
     await tester.tap(thursday);
@@ -135,9 +135,9 @@ void main() {
       ),
       HarborColors.primary,
     );
-    final card = find.byKey(entryCardKey(designCritiqueId));
+    final card = find.byKey(entryCardKey(releaseRiskId));
     final cardFill = decorationIn(tester, card);
-    expect(cardFill.color, const Color(0xFFE0ECEB));
+    expect(cardFill.color, const Color(0xFFF6E6E3));
     expect(cardFill.borderRadius, BorderRadius.circular(16.0));
     expect(cardFill.border, isNull);
     final icons = tester
@@ -146,8 +146,8 @@ void main() {
         )
         .toList();
     expect(
-      icons.singleWhere((icon) => icon.icon == Icons.groups).color,
-      const Color(0xFF1F7A72),
+      icons.singleWhere((icon) => icon.icon == Icons.warning_amber).color,
+      const Color(0xFFC2503A),
     );
     expect(
       icons.singleWhere((icon) => icon.icon == Icons.more_horiz).color,
@@ -173,11 +173,11 @@ void main() {
 
     // The block and the drag config.
     await pickMode(tester, "Week");
-    final block = blockFinder(designCritiqueId);
+    final block = blockFinder(releaseRiskId);
     final blockFill = decorationIn(tester, block);
-    expect(blockFill.color, const Color(0xFFE0ECEB));
+    expect(blockFill.color, const Color(0xFFF6E6E3));
     expect((blockFill.border! as Border).left.width, 4.0);
-    expect((blockFill.border! as Border).left.color, const Color(0xFF1F7A72));
+    expect((blockFill.border! as Border).left.color, const Color(0xFFC2503A));
     final board = tester.widget<Board<GridKey, GridShape<ItemPayload>>>(
       find.byType(Board<GridKey, GridShape<ItemPayload>>),
     );
@@ -187,7 +187,7 @@ void main() {
     await tester.tap(block);
     await tester.pumpAndSettle();
     expect(
-      Theme.of(tester.element(find.text("Edit Meeting"))).colorScheme.primary,
+      Theme.of(tester.element(find.text("Edit Risk"))).colorScheme.primary,
       HarborColors.primary,
     );
     await tester.tap(find.widgetWithText(TextButton, "Cancel"));
@@ -213,7 +213,7 @@ void main() {
     await pumpUnderHostTheme(tester);
     await tester.tap(dayFinder(DateTime(2026, 4, 23)));
     await tester.pumpAndSettle();
-    final card = find.byKey(entryCardKey(designCritiqueId));
+    final card = find.byKey(entryCardKey(releaseRiskId));
     await tester.tap(
       find.descendant(
         of: card,
@@ -233,7 +233,7 @@ void main() {
     expect(decorationIn(tester, dayFinder(today)).color, HarborColors.primary);
     await tester.tap(dayFinder(DateTime(2026, 4, 23)));
     await tester.pumpAndSettle();
-    final card = find.byKey(entryCardKey(designCritiqueId));
+    final card = find.byKey(entryCardKey(releaseRiskId));
     expect(
       textColorOf(
         tester,
@@ -252,7 +252,7 @@ void main() {
         tester,
         find
             .descendant(
-              of: blockFinder(designCritiqueId),
+              of: blockFinder(releaseRiskId),
               matching: find.byType(Text),
             )
             .first,

@@ -15,9 +15,8 @@ import 'package:widgets_extended/widgets_extended.dart';
 
 enum CalendarItemType {
   task("task", "Task"),
-  meeting("meeting", "Meeting"),
-  outOfOffice("outOfOffice", "Out of office"),
-  deadline("deadline", "Deadline");
+  risk("risk", "Risk"),
+  request("request", "Request");
 
   const CalendarItemType(this.id, this.label);
 
@@ -164,66 +163,94 @@ const TypeSchema _taskSchema = TypeSchema(
   summaryKeys: <String>["status", "priority"],
 );
 
-const TypeSchema _meetingSchema = TypeSchema(
-  type: CalendarItemType.meeting,
-  fields: <FieldSpec>[
-    FieldSpec(key: "attendees", label: "Attendees", kind: FieldKind.textList),
-    FieldSpec(key: "location", label: "Location", kind: FieldKind.text),
-    FieldSpec(key: "videoLink", label: "Video link", kind: FieldKind.url),
-    FieldSpec(key: "agenda", label: "Agenda", kind: FieldKind.longText),
-  ],
-  summaryKeys: <String>["location", "attendees"],
-);
-
-const TypeSchema _outOfOfficeSchema = TypeSchema(
-  type: CalendarItemType.outOfOffice,
+const TypeSchema _riskSchema = TypeSchema(
+  type: CalendarItemType.risk,
   fields: <FieldSpec>[
     FieldSpec(
-      key: "reason",
-      label: "Reason",
+      key: "severity",
+      label: "Severity",
       kind: FieldKind.choice,
       required: true,
       choices: <FieldChoice>[
-        FieldChoice("vacation", "Vacation"),
-        FieldChoice("sick", "Sick"),
-        FieldChoice("travel", "Travel"),
-        FieldChoice("other", "Other"),
+        FieldChoice("low", "Low"),
+        FieldChoice("medium", "Medium"),
+        FieldChoice("high", "High"),
       ],
+      defaultValue: "medium",
     ),
-    FieldSpec(key: "note", label: "Note", kind: FieldKind.longText),
-  ],
-  summaryKeys: <String>["reason"],
-);
-
-const TypeSchema _deadlineSchema = TypeSchema(
-  type: CalendarItemType.deadline,
-  fields: <FieldSpec>[
     FieldSpec(
       key: "project",
       label: "Project",
       kind: FieldKind.text,
       required: true,
     ),
+    FieldSpec(key: "owner", label: "Owner", kind: FieldKind.text),
     FieldSpec(
-      key: "met",
-      label: "Met",
+      key: "mitigated",
+      label: "Mitigated",
       kind: FieldKind.boolean,
       defaultValue: false,
     ),
+    FieldSpec(key: "mitigation", label: "Mitigation", kind: FieldKind.longText),
   ],
-  summaryKeys: <String>["project", "met"],
+  summaryKeys: <String>["severity", "mitigated"],
+);
+
+const TypeSchema _requestSchema = TypeSchema(
+  type: CalendarItemType.request,
+  fields: <FieldSpec>[
+    FieldSpec(
+      key: "status",
+      label: "Status",
+      kind: FieldKind.choice,
+      required: true,
+      choices: <FieldChoice>[
+        FieldChoice("pending", "Pending"),
+        FieldChoice("approved", "Approved"),
+        FieldChoice("declined", "Declined"),
+      ],
+      defaultValue: "pending",
+    ),
+    FieldSpec(
+      key: "kind",
+      label: "Kind",
+      kind: FieldKind.choice,
+      required: true,
+      choices: <FieldChoice>[
+        FieldChoice("timeOff", "Time off"),
+        FieldChoice("travel", "Travel"),
+        FieldChoice("review", "Review"),
+        FieldChoice("access", "Access"),
+        FieldChoice("other", "Other"),
+      ],
+    ),
+    FieldSpec(key: "approvers", label: "Approvers", kind: FieldKind.textList),
+    FieldSpec(key: "link", label: "Link", kind: FieldKind.url),
+    FieldSpec(key: "details", label: "Details", kind: FieldKind.longText),
+  ],
+  summaryKeys: <String>["status", "kind"],
 );
 
 TypeSchema schemaOf(CalendarItemType type) {
   switch (type) {
     case CalendarItemType.task:
       return _taskSchema;
-    case CalendarItemType.meeting:
-      return _meetingSchema;
-    case CalendarItemType.outOfOffice:
-      return _outOfOfficeSchema;
-    case CalendarItemType.deadline:
-      return _deadlineSchema;
+    case CalendarItemType.risk:
+      return _riskSchema;
+    case CalendarItemType.request:
+      return _requestSchema;
+  }
+}
+
+/// The schedule options of [type]'s items, which the form's schedule
+/// section and its check read: the standard options for every type, so a
+/// Task, like the others, may span days and be all-day.
+CalendarScheduleOptions scheduleOptionsOf(CalendarItemType type) {
+  switch (type) {
+    case CalendarItemType.task:
+    case CalendarItemType.risk:
+    case CalendarItemType.request:
+      return CalendarScheduleOptions.standard;
   }
 }
 

@@ -44,12 +44,10 @@ Map<String, Object?> validFields(CalendarItemType type) {
   switch (type) {
     case CalendarItemType.task:
       return <String, Object?>{"status": "toDo"};
-    case CalendarItemType.meeting:
-      return <String, Object?>{};
-    case CalendarItemType.outOfOffice:
-      return <String, Object?>{"reason": "vacation"};
-    case CalendarItemType.deadline:
+    case CalendarItemType.risk:
       return <String, Object?>{"project": "Roadmap"};
+    case CalendarItemType.request:
+      return <String, Object?>{"kind": "timeOff"};
   }
 }
 
@@ -234,11 +232,11 @@ void main() {
       api,
       envelope(start: 720, end: 780, fields: const <String, Object?>{}),
     );
-    final deadline = await stored(
+    final risk = await stored(
       tester,
       api,
       envelope(
-        type: CalendarItemType.deadline,
+        type: CalendarItemType.risk,
         start: 780,
         end: 840,
         fields: const <String, Object?>{"project": "Roadmap"},
@@ -247,16 +245,16 @@ void main() {
     final taskFields = (await fetched(tester, api, task))["fields"]! as Map;
     expect(taskFields["status"], "toDo");
     expect(taskFields["priority"], "medium");
-    final deadlineFields =
-        (await fetched(tester, api, deadline))["fields"]! as Map;
-    expect(deadlineFields["met"], false);
+    final riskFields = (await fetched(tester, api, risk))["fields"]! as Map;
+    expect(riskFields["severity"], "medium");
+    expect(riskFields["mitigated"], false);
 
-    // A three-day Meeting, Monday 2026-04-27 to Wednesday 2026-04-29.
-    final meeting = await stored(
+    // A three-day Request, Monday 2026-04-27 to Wednesday 2026-04-29.
+    final request = await stored(
       tester,
       api,
       envelope(
-        type: CalendarItemType.meeting,
+        type: CalendarItemType.request,
         day: DateTime(2026, 4, 27),
         dayCount: 3,
       ),
@@ -267,21 +265,21 @@ void main() {
       DateTime(2026, 4, 27),
       DateTime(2026, 4, 27),
     );
-    expect(idsOf(firstDay).where((id) => id == meeting), hasLength(1));
+    expect(idsOf(firstDay).where((id) => id == request), hasLength(1));
     final lastDay = await listed(
       tester,
       api,
       DateTime(2026, 4, 29),
       DateTime(2026, 5, 2),
     );
-    expect(idsOf(lastDay).where((id) => id == meeting), hasLength(1));
+    expect(idsOf(lastDay).where((id) => id == request), hasLength(1));
     final around = await listed(
       tester,
       api,
       DateTime(2026, 4, 22),
       DateTime(2026, 5, 4),
     );
-    expect(idsOf(around).where((id) => id == meeting), hasLength(1));
+    expect(idsOf(around).where((id) => id == request), hasLength(1));
   });
 
   testWidgets("A2 update changes title, times and fields; delete makes get "
@@ -332,12 +330,16 @@ void main() {
     final task = await stored(tester, api, envelope());
     final before = await listed(tester, api, wednesday, wednesday);
 
-    Map<String, Object?> meeting(Map<String, Object?> fields) {
-      return envelope(type: CalendarItemType.meeting, fields: fields);
+    /// A Request of kind Review with [fields] besides.
+    Map<String, Object?> request(Map<String, Object?> fields) {
+      return envelope(
+        type: CalendarItemType.request,
+        fields: <String, Object?>{"kind": "review", ...fields},
+      );
     }
 
-    Map<String, Object?> deadline(Map<String, Object?> fields) {
-      return envelope(type: CalendarItemType.deadline, fields: fields);
+    Map<String, Object?> risk(Map<String, Object?> fields) {
+      return envelope(type: CalendarItemType.risk, fields: fields);
     }
 
     expect(
@@ -345,13 +347,13 @@ void main() {
       validationOf(<String>{"title"}),
     );
     expect(
-      await errorOf(tester, api.create(deadline(const <String, Object?>{}))),
+      await errorOf(tester, api.create(risk(const <String, Object?>{}))),
       validationOf(<String>{"fields.project"}),
     );
     expect(
       await errorOf(
         tester,
-        api.create(deadline(const <String, Object?>{"project": "  "})),
+        api.create(risk(const <String, Object?>{"project": "  "})),
       ),
       validationOf(<String>{"fields.project"}),
     );
@@ -359,7 +361,7 @@ void main() {
       await errorOf(
         tester,
         api.create(<String, Object?>{
-          ...deadline(const <String, Object?>{}),
+          ...risk(const <String, Object?>{}),
           "title": "",
         }),
       ),
@@ -377,39 +379,42 @@ void main() {
     expect(
       await errorOf(
         tester,
-        api.create(meeting(const <String, Object?>{"videoLink": "ftp://x"})),
+        api.create(request(const <String, Object?>{"link": "ftp://x"})),
       ),
-      validationOf(<String>{"fields.videoLink"}),
+      validationOf(<String>{"fields.link"}),
     );
     expect(
       await errorOf(
         tester,
-        api.create(meeting(const <String, Object?>{"videoLink": "https://"})),
+        api.create(request(const <String, Object?>{"link": "https://"})),
       ),
-      validationOf(<String>{"fields.videoLink"}),
+      validationOf(<String>{"fields.link"}),
     );
     expect(
       await errorOf(
         tester,
-        api.create(meeting(const <String, Object?>{"location": 5})),
+        api.create(request(const <String, Object?>{"details": 5})),
       ),
-      validationOf(<String>{"fields.location"}),
+      validationOf(<String>{"fields.details"}),
     );
     expect(
       await errorOf(
         tester,
-        api.create(meeting(const <String, Object?>{"attendees": "Ana"})),
+        api.create(request(const <String, Object?>{"approvers": "Ana"})),
       ),
-      validationOf(<String>{"fields.attendees"}),
+      validationOf(<String>{"fields.approvers"}),
     );
     expect(
       await errorOf(
         tester,
         api.create(
-          deadline(const <String, Object?>{"project": "Roadmap", "met": "yes"}),
+          risk(const <String, Object?>{
+            "project": "Roadmap",
+            "mitigated": "yes",
+          }),
         ),
       ),
-      validationOf(<String>{"fields.met"}),
+      validationOf(<String>{"fields.mitigated"}),
     );
     expect(
       await errorOf(
@@ -432,7 +437,7 @@ void main() {
     expect(
       await errorOf(
         tester,
-        api.update(task, meeting(const <String, Object?>{})),
+        api.update(task, request(const <String, Object?>{})),
       ),
       validationOf(<String>{"type"}),
     );
@@ -456,17 +461,14 @@ void main() {
     final linkless = await answer(
       tester,
       api.create(<String, Object?>{
-        ...meeting(const <String, Object?>{"videoLink": ""}),
+        ...request(const <String, Object?>{"link": ""}),
         "start": "2026-04-22T10:00",
         "end": "2026-04-22T11:00",
       }),
     );
     expect(linkless.error, isNull);
     final id = (linkless.value! as Map<String, Object?>)["id"]! as String;
-    expect(
-      ((await fetched(tester, api, id))["fields"]! as Map)["videoLink"],
-      "",
-    );
+    expect(((await fetched(tester, api, id))["fields"]! as Map)["link"], "");
   });
 
   testWidgets("A4 the validator requires start and end as a local "
@@ -593,7 +595,7 @@ void main() {
     final away = await stored(
       tester,
       api,
-      envelope(type: CalendarItemType.outOfOffice, start: 540, end: 600),
+      envelope(type: CalendarItemType.request, start: 540, end: 600),
     );
     // Monday 22:00 to Tuesday 02:00.
     final overnight = await stored(
@@ -602,7 +604,7 @@ void main() {
       timed(
         "2026-04-27T22:00",
         "2026-04-28T02:00",
-        type: CalendarItemType.meeting,
+        type: CalendarItemType.request,
       ),
     );
     final single = await stored(
@@ -638,7 +640,7 @@ void main() {
         timed(
           "2026-04-22T15:00",
           "2026-04-23T15:30",
-          type: CalendarItemType.meeting,
+          type: CalendarItemType.request,
         ),
       ),
       overlapWith(<String>[single]),
@@ -665,22 +667,14 @@ void main() {
     final allDay = await answer(
       tester,
       api.create(
-        allDayItem(
-          "2026-04-23",
-          "2026-04-24",
-          type: CalendarItemType.outOfOffice,
-        ),
+        allDayItem("2026-04-23", "2026-04-24", type: CalendarItemType.request),
       ),
     );
     expect(allDay.error, isNull);
     final trip = await answer(
       tester,
       api.create(
-        allDayItem(
-          "2026-04-27",
-          "2026-04-29",
-          type: CalendarItemType.outOfOffice,
-        ),
+        allDayItem("2026-04-27", "2026-04-29", type: CalendarItemType.request),
       ),
     );
     expect(trip.error, isNull);
@@ -695,7 +689,7 @@ void main() {
       api.update(
         away,
         envelope(
-          type: CalendarItemType.outOfOffice,
+          type: CalendarItemType.request,
           title: "Dentist",
           start: 540,
           end: 600,
@@ -708,7 +702,7 @@ void main() {
       api.update(
         away,
         envelope(
-          type: CalendarItemType.outOfOffice,
+          type: CalendarItemType.request,
           title: "Dentist",
           start: 540,
           end: 585,
@@ -868,25 +862,26 @@ void main() {
   testWidgets("A7 returned maps are copies", (tester) async {
     final api = MockCalendarApi(latency: latency);
     final input = envelope(
-      type: CalendarItemType.meeting,
+      type: CalendarItemType.request,
       fields: <String, Object?>{
-        "attendees": <String>["Ana", "Ben"],
+        "kind": "review",
+        "approvers": <String>["Ana", "Ben"],
       },
     );
     final call = api.create(input);
     input["title"] = "Changed";
-    (input["fields"]! as Map<String, Object?>)["attendees"] = <String>["Zed"];
+    (input["fields"]! as Map<String, Object?>)["approvers"] = <String>["Zed"];
     final created = await answer(tester, call);
     final id = (created.value! as Map<String, Object?>)["id"]! as String;
     final first = await fetched(tester, api, id);
     expect(first["title"], "Item");
-    expect((first["fields"]! as Map)["attendees"], <String>["Ana", "Ben"]);
+    expect((first["fields"]! as Map)["approvers"], <String>["Ana", "Ben"]);
 
     first["title"] = "Mutated";
-    ((first["fields"]! as Map)["attendees"]! as List).add("Chen");
+    ((first["fields"]! as Map)["approvers"]! as List).add("Chen");
     final second = await fetched(tester, api, id);
     expect(second["title"], "Item");
-    expect((second["fields"]! as Map)["attendees"], <String>["Ana", "Ben"]);
+    expect((second["fields"]! as Map)["approvers"], <String>["Ana", "Ben"]);
   });
 
   testWidgets("A8 the seed", (tester) async {
@@ -898,8 +893,8 @@ void main() {
     expect(() {
       return MockCalendarApi(
         seed: <Map<String, Object?>>[
-          envelope(type: CalendarItemType.outOfOffice, start: 540, end: 660),
-          envelope(type: CalendarItemType.outOfOffice, start: 600, end: 720),
+          envelope(type: CalendarItemType.request, start: 540, end: 660),
+          envelope(type: CalendarItemType.request, start: 600, end: 720),
         ],
       );
     }, throwsArgumentError);
@@ -925,7 +920,7 @@ void main() {
       <String>{for (final type in CalendarItemType.values) type.id},
     );
     final dayOff = week.singleWhere((item) => item["title"] == "Day off");
-    expect(dayOff["type"], CalendarItemType.outOfOffice.id);
+    expect(dayOff["type"], CalendarItemType.request.id);
     expect(dayOff["start"], utcText("2026-04-20T09:00"));
     expect(dayOff["end"], utcText("2026-04-20T17:00"));
   });
@@ -940,7 +935,7 @@ void main() {
       DateTime(2026, 5, 31),
     );
     final trip = may.singleWhere((item) => item["title"] == "Conference trip");
-    expect(trip["type"], CalendarItemType.outOfOffice.id);
+    expect(trip["type"], CalendarItemType.request.id);
     expect(trip["start"], "2026-05-11");
     expect(trip["end"], "2026-05-16");
     final id = trip["id"]! as String;
@@ -1046,7 +1041,7 @@ void main() {
       api,
       allDayItem("2026-04-21", "2026-04-22"),
     );
-    final meeting = await stored(
+    final timedItem = await stored(
       tester,
       api,
       timed("2026-04-21T10:00", "2026-04-21T11:00"),
@@ -1056,7 +1051,7 @@ void main() {
         tester,
         api.update(allDay, timed("2026-04-21T00:00", "2026-04-22T00:00")),
       ),
-      overlapWith(<String>[meeting]),
+      overlapWith(<String>[timedItem]),
     );
     final kept = await fetched(tester, api, allDay);
     expect(kept["start"], "2026-04-21");
@@ -1092,9 +1087,8 @@ void main() {
   test("A9 the schemas' summary keys", () {
     final expected = <CalendarItemType, List<String>>{
       CalendarItemType.task: <String>["status", "priority"],
-      CalendarItemType.meeting: <String>["location", "attendees"],
-      CalendarItemType.outOfOffice: <String>["reason"],
-      CalendarItemType.deadline: <String>["project", "met"],
+      CalendarItemType.risk: <String>["severity", "mitigated"],
+      CalendarItemType.request: <String>["status", "kind"],
     };
     for (final type in CalendarItemType.values) {
       final schema = schemaOf(type);

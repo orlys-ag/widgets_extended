@@ -62,56 +62,6 @@ Future<void> createAt(
   await tester.pumpAndSettle();
 }
 
-Finder fieldFinder(String label) {
-  return find.widgetWithText(TextField, label);
-}
-
-String fieldText(WidgetTester tester, String label) {
-  return tester.widget<TextField>(fieldFinder(label)).controller!.text;
-}
-
-/// The text a dropdown labelled [label] shows as its value.
-Finder dropdownFinder(String label) {
-  return find.ancestor(
-    of: find.text(label),
-    matching: find.byWidgetPredicate((widget) {
-      return widget is DropdownButtonFormField;
-    }),
-  );
-}
-
-Finder saveFinder() {
-  return find.byType(FilledButton);
-}
-
-Finder formButton(String label) {
-  return find.widgetWithText(TextButton, label);
-}
-
-bool isEnabled(WidgetTester tester, Finder button) {
-  return tester.widget<ButtonStyleButton>(button).onPressed != null;
-}
-
-/// Picks [option] in the dropdown labelled [label], scrolling its menu by
-/// [delta] until the option shows.
-Future<void> chooseOption(
-  WidgetTester tester,
-  String label,
-  String option, {
-  double delta = -100.0,
-}) async {
-  await tester.tap(dropdownFinder(label));
-  await tester.pumpAndSettle();
-  final menu = find.byType(Scrollable).last;
-  final item = find.descendant(of: menu, matching: find.text(option));
-  await tester.scrollUntilVisible(item, delta, scrollable: menu);
-  // Centred, as an item scrolled to the menu's edge can sit under it.
-  await Scrollable.ensureVisible(tester.element(item), alignment: 0.5);
-  await tester.pumpAndSettle();
-  await tester.tap(item);
-  await tester.pumpAndSettle();
-}
-
 /// The opacity the pending fade gives [finder]'s content: the first
 /// [Opacity] under it, or 1.0 when there is none.
 double fadeOf(WidgetTester tester, Finder finder) {
@@ -185,11 +135,11 @@ void main() {
     final api = MockCalendarApi.seeded(today, latency: harnessLatency);
     await createBeforePump(tester, api, taskJson("Night deploy", today, 0, 60));
     await createBeforePump(tester, api, <String, Object?>{
-      "type": "meeting",
+      "type": "request",
       "title": "Pairing",
       "start": "2026-04-22T08:15",
       "end": "2026-04-22T09:00",
-      "fields": <String, Object?>{"location": "Lab"},
+      "fields": <String, Object?>{"status": "approved", "kind": "review"},
     });
     final week = await listAll(
       tester,
@@ -297,15 +247,15 @@ void main() {
     final pairing = week.singleWhere((item) => item["title"] == "Pairing");
     expect(
       find.descendant(
-        of: blockFinder(designCritiqueId),
-        matching: find.text("Studio"),
+        of: blockFinder(releaseRiskId),
+        matching: find.text("Medium"),
       ),
       findsOneWidget,
     );
     expect(
       find.descendant(
         of: blockFinder(pairing["id"]! as String),
-        matching: find.text("Lab"),
+        matching: find.text("Approved"),
       ),
       findsOneWidget,
     );
@@ -365,7 +315,7 @@ void main() {
     expect(find.text("Apr 2026"), findsOneWidget);
   });
 
-  testWidgets("W2 a tap on an empty slot creates a Meeting", (tester) async {
+  testWidgets("W2 a tap on an empty slot creates a Task", (tester) async {
     const latency = Duration(seconds: 1);
     final api = await pumpCalendar(
       tester,
@@ -375,8 +325,8 @@ void main() {
     );
     await pickMode(tester, "Week");
 
-    await createAt(tester, rowOf(14 * 60), colOf(2), "Meeting");
-    expect(find.text("New Meeting"), findsOneWidget);
+    await createAt(tester, rowOf(14 * 60), colOf(2), "Task");
+    expect(find.text("New item"), findsOneWidget);
     expectFormDays("2026-04-22", 1);
     expect(
       find.descendant(
@@ -407,10 +357,10 @@ void main() {
     expect(isEnabled(tester, formButton("Cancel")), isFalse);
     await tester.binding.handlePopRoute();
     await tester.pump();
-    expect(find.text("New Meeting"), findsOneWidget);
+    expect(find.text("New item"), findsOneWidget);
 
     await tester.pump(const Duration(milliseconds: 998));
-    expect(find.text("New Meeting"), findsOneWidget);
+    expect(find.text("New item"), findsOneWidget);
     expect(
       find.descendant(
         of: saveFinder(),
@@ -430,7 +380,7 @@ void main() {
             .value;
     final created = key.substring("block-".length, key.indexOf("@"));
     await tester.pumpAndSettle();
-    expect(find.text("New Meeting"), findsNothing);
+    expect(find.text("New item"), findsNothing);
     final slot = cellRect(tester, rowOf(14 * 60), colOf(2));
     final rect = tester.getRect(blockFinder(created));
     expect(rect.topLeft, nearOffset(slot.topLeft));
@@ -748,7 +698,7 @@ void main() {
     await pickMode(tester, "Week");
     final requests = api.requests.length;
 
-    await createAt(tester, rowOf(14 * 60), colOf(5), "Deadline");
+    await createAt(tester, rowOf(14 * 60), colOf(5), "Risk");
     await tester.enterText(fieldFinder("Title"), "Ship");
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
@@ -762,7 +712,7 @@ void main() {
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
-    await createAt(tester, rowOf(14 * 60), colOf(5), "Meeting");
+    await createAt(tester, rowOf(14 * 60), colOf(5), "Task");
     await tester.enterText(fieldFinder("Title"), "  ");
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
@@ -776,18 +726,20 @@ void main() {
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
-    await createAt(tester, rowOf(14 * 60), colOf(5), "Meeting");
-    await tester.enterText(fieldFinder("Title"), "Review");
-    await chooseOption(tester, "End time", "13:00");
-    await tester.tap(saveFinder());
-    await tester.pumpAndSettle();
-    expect(
+    // End time offers only times after the start, so an end before it
+    // cannot be picked.
+    await createAt(tester, rowOf(14 * 60), colOf(5), "Task");
+    expect(optionEnabled(tester, "End time", "14:15"), isTrue);
+    final ends = tester.widget<DropdownButton<int>>(
       find.descendant(
         of: dropdownFinder("End time"),
-        matching: find.text("The end must be after the start."),
+        matching: find.byType(DropdownButton<int>),
       ),
-      findsOneWidget,
     );
+    expect(<int>[
+      for (final item in ends.items!)
+        if (item.value! <= 14 * 60) item.value!,
+    ], isEmpty);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
     expect(api.requests, hasLength(requests));
@@ -952,13 +904,13 @@ void main() {
     );
     await pickMode(tester, "Week");
 
-    await tester.tap(blockFinder(designCritiqueId));
+    await tester.tap(blockFinder(releaseRiskId));
     await tester.pumpAndSettle();
-    expect(find.text("Edit Meeting"), findsOneWidget);
-    expect(textColorOf(tester, find.text("Meeting")), HarborColors.text);
+    expect(find.text("Edit Risk"), findsOneWidget);
+    expect(textColorOf(tester, find.text("Risk")), HarborColors.text);
     expect(
       find.ancestor(
-        of: find.text("Meeting"),
+        of: find.text("Risk"),
         matching: find.byWidgetPredicate((widget) {
           return widget is DropdownButtonFormField || widget is DropdownButton;
         }),
@@ -984,17 +936,17 @@ void main() {
     // While the save runs the block shows the stored item.
     expect(
       find.descendant(
-        of: blockFinder(designCritiqueId),
-        matching: find.text("Design critique"),
+        of: blockFinder(releaseRiskId),
+        matching: find.text("Release notes incomplete"),
       ),
       findsOneWidget,
     );
     await tester.pump(latency);
     await tester.pumpAndSettle();
-    expect(find.text("Edit Meeting"), findsNothing);
+    expect(find.text("Edit Risk"), findsNothing);
     expect(
       find.descendant(
-        of: blockFinder(designCritiqueId),
+        of: blockFinder(releaseRiskId),
         matching: find.text("Design review"),
       ),
       findsOneWidget,
@@ -1004,21 +956,21 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       find.descendant(
-        of: find.byKey(entryCardKey(designCritiqueId)),
+        of: find.byKey(entryCardKey(releaseRiskId)),
         matching: find.text("Design review"),
       ),
       findsOneWidget,
     );
 
     await pickMode(tester, "Week");
-    await tester.tap(blockFinder(designCritiqueId));
+    await tester.tap(blockFinder(releaseRiskId));
     await tester.pumpAndSettle();
     await tester.tap(formButton("Delete"));
     await tester.pumpAndSettle();
     expect(find.text("Delete item?"), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, "Cancel").last);
     await tester.pumpAndSettle();
-    expect(find.text("Edit Meeting"), findsOneWidget);
+    expect(find.text("Edit Risk"), findsOneWidget);
     await tester.tap(formButton("Delete"));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(TextButton, "Delete").last);
@@ -1026,11 +978,11 @@ void main() {
     // through the delete's latency.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text("Edit Meeting"), findsNothing);
-    expect(fadeOf(tester, blockFinder(designCritiqueId)), 0.5);
+    expect(find.text("Edit Risk"), findsNothing);
+    expect(fadeOf(tester, blockFinder(releaseRiskId)), 0.5);
     await tester.pump(latency);
     await tester.pumpAndSettle();
-    expect(blockFinder(designCritiqueId), findsNothing);
+    expect(blockFinder(releaseRiskId), findsNothing);
     expect(api.requests.last.method, CalendarMethod.delete);
   });
 
@@ -1041,7 +993,7 @@ void main() {
     expect(find.byType(FloatingActionButton), findsOneWidget);
 
     await pickMode(tester, "Week");
-    expect(blockFinder(designCritiqueId), findsOneWidget);
+    expect(blockFinder(releaseRiskId), findsOneWidget);
     expect(find.byType(FloatingActionButton), findsOneWidget);
   });
 
@@ -1219,7 +1171,7 @@ void main() {
     // A new week settles an exit in flight.
     await tester.tap(find.byTooltip("Previous week"));
     await tester.pumpAndSettle();
-    await tester.tap(blockFinder(designCritiqueId));
+    await tester.tap(blockFinder(releaseRiskId));
     await tester.pumpAndSettle();
     await tester.tap(formButton("Delete"));
     await tester.pumpAndSettle();
@@ -1229,20 +1181,20 @@ void main() {
     await tester.pump(enterExit ~/ 3);
     final dayWidth = cellRect(tester, rowOf(15 * 60), colOf(3)).width;
     expect(
-      tester.getSize(blockFinder(designCritiqueId)).width,
+      tester.getSize(blockFinder(releaseRiskId)).width,
       lessThan(dayWidth - 1.0),
       reason: "mid-exit",
     );
     await tester.tap(find.byTooltip("Next week"));
     await tester.pump();
     await tester.pump(oneFrame);
-    expect(blockFinder(designCritiqueId), findsNothing);
+    expect(blockFinder(releaseRiskId), findsNothing);
     await tester.pumpAndSettle();
 
     // A new week settles an enter in flight.
     await tester.tap(find.byTooltip("Previous week"));
     await tester.pumpAndSettle();
-    await createAt(tester, rowOf(14 * 60), colOf(2), "Meeting");
+    await createAt(tester, rowOf(14 * 60), colOf(2), "Task");
     await tester.enterText(fieldFinder("Title"), "Sync");
     await tester.tap(saveFinder());
     await tester.pump();
@@ -1337,19 +1289,18 @@ void main() {
     await tester.enterText(fieldFinder("Title"), "Dentist");
     await chooseOption(tester, "Start time", "10:00");
     await chooseOption(tester, "End time", "11:00");
+    // Monday 10:00 lies in "Day off": the form refuses the overlap the
+    // settings' policy refuses before it sends anything.
+    final sent = api.requests.length;
     await tester.tap(saveFinder());
-    await tester.pump();
-    await tester.pump(api.latency);
     await tester.pumpAndSettle();
-    expect(
-      find.text(const CalendarOverlapException(<String>[]).message),
-      findsOneWidget,
-    );
-    expect(find.text("New Task"), findsOneWidget);
+    expect(find.text("Overlaps Day off."), findsOneWidget);
+    expect(api.requests, hasLength(sent));
+    expect(find.text("New item"), findsOneWidget);
     expect(fieldText(tester, "Title"), "Dentist");
 
-    await chooseOption(tester, "Start time", "18:00", delta: 100.0);
-    await chooseOption(tester, "End time", "19:00", delta: 100.0);
+    await chooseOption(tester, "Start time", "18:00");
+    await chooseOption(tester, "End time", "19:00");
     api.failurePolicy = (request) {
       return "The server is down.";
     };
@@ -1366,7 +1317,7 @@ void main() {
     await tester.pump();
     await tester.pump(api.latency);
     await tester.pumpAndSettle();
-    expect(find.text("New Task"), findsNothing);
+    expect(find.text("New item"), findsNothing);
   });
 
   testWidgets("W14 the resize strips, and no shared time", (tester) async {
@@ -1613,46 +1564,52 @@ void main() {
     expect(task.fields["assignee"], "Sam");
     expect(task.fields["notes"], "a");
 
-    await createAt(tester, rowOf(16 * 60), colOf(2), "Meeting");
-    expect(tester.widget<TextField>(fieldFinder("Video link")).maxLines, 1);
+    await createAt(tester, rowOf(16 * 60), colOf(2), "Request");
+    expect(tester.widget<TextField>(fieldFinder("Link")).maxLines, 1);
     await tester.enterText(fieldFinder("Title"), "Huddle");
-    await tester.enterText(fieldFinder("Attendees"), " Ana, Ben ,, ");
-    await tester.enterText(fieldFinder("Video link"), "https://x.example");
+    await chooseOption(tester, "Kind", "Review");
+    await tester.enterText(fieldFinder("Approvers"), " Ana, Ben ,, ");
+    await tester.enterText(fieldFinder("Link"), "https://x.example");
     await tester.tap(saveFinder());
     await tester.pump();
     await tester.pump(api.latency);
     await tester.pumpAndSettle();
     final huddleId = await idOn(tester, api, wednesday, "Huddle");
     final huddle = await stored(tester, api, huddleId);
-    expect(huddle.fields["attendees"], <String>["Ana", "Ben"]);
+    expect(huddle.fields["approvers"], <String>["Ana", "Ben"]);
     await tester.tap(blockFinder(huddleId));
     await tester.pumpAndSettle();
-    expect(fieldText(tester, "Attendees"), "Ana, Ben");
+    expect(fieldText(tester, "Approvers"), "Ana, Ben");
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
-    await createAt(tester, rowOf(12 * 60), colOf(2), "Deadline");
+    await createAt(tester, rowOf(12 * 60), colOf(2), "Risk");
     expect(
       find.descendant(
-        of: find.widgetWithText(SwitchListTile, "Met"),
+        of: find.widgetWithText(SwitchListTile, "Mitigated"),
         matching: find.byType(Switch),
       ),
       findsOneWidget,
     );
     await tester.enterText(fieldFinder("Title"), "Ship it");
     await tester.enterText(fieldFinder("Project"), "P");
-    await tester.tap(find.widgetWithText(SwitchListTile, "Met"));
+    // The sheet scrolls its fields; the switch lies below its first view.
+    await tester.ensureVisible(
+      find.widgetWithText(SwitchListTile, "Mitigated"),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(SwitchListTile, "Mitigated"));
     await tester.pumpAndSettle();
     await tester.tap(saveFinder());
     await tester.pump();
     await tester.pump(api.latency);
     await tester.pumpAndSettle();
-    final deadline = await stored(
+    final risk = await stored(
       tester,
       api,
       await idOn(tester, api, wednesday, "Ship it"),
     );
-    expect(deadline.fields["met"], true);
+    expect(risk.fields["mitigated"], true);
   });
 
   testWidgets("W18 the painter paints only what shows, with the same paints "
@@ -1766,6 +1723,11 @@ void main() {
       tester,
       api,
       taskJson("Summit", DateTime(2026, 4, 25), 19 * 60, 20 * 60, dayCount: 2),
+    );
+    await createBeforePump(
+      tester,
+      api,
+      taskJson("Weekly planning", monday, 8 * 60, 9 * 60),
     );
     final longHaul = await idOn(
       tester,
@@ -2439,7 +2401,7 @@ void main() {
     await pickMode(tester, "Week");
     await tester.tap(blockFinder(brainstormId));
     await tester.pumpAndSettle();
-    final dialog = find.byType(Dialog);
+    final dialog = find.byType(BottomSheet);
     Finder inDialog(Finder finder) {
       return find.descendant(of: dialog, matching: finder);
     }
@@ -2471,11 +2433,13 @@ void main() {
           }),
       <bool>[true, true, true, true],
     );
-    for (final label in <String>["Start date", "End date"]) {
-      await tester.tap(inDialog(find.widgetWithText(InputDecorator, label)));
-      await tester.pumpAndSettle();
-      expect(find.byType(DatePickerDialog), findsNothing, reason: label);
-    }
+    // A timed item on one day shows no End date.
+    expect(inDialog(find.text("End date")), findsNothing);
+    await tester.tap(
+      inDialog(find.widgetWithText(InputDecorator, "Start date")),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsNothing);
     expect(
       tester
           .widget<SwitchListTile>(inDialog(find.byType(SwitchListTile)))
@@ -2489,11 +2453,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(dialog, findsNothing);
 
-    await tester.tap(blockTitled("Roadmap draft due"));
+    await tester.tap(blockTitled("Roadmap draft may slip"));
     await tester.pumpAndSettle();
     expect(
       tester
-          .widget<SwitchListTile>(find.widgetWithText(SwitchListTile, "Met"))
+          .widget<SwitchListTile>(
+            find.widgetWithText(SwitchListTile, "Mitigated"),
+          )
           .onChanged,
       isNull,
     );
@@ -2699,7 +2665,7 @@ void main() {
     final slot = viewport.rectOfCell(rowOf(20 * 60), colOf(6))!;
     expect(marks().single, rectMoreOrLessEquals(slot.deflate(1.0)));
 
-    await tester.tapAt(const Offset(10.0, 10.0));
+    await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
     expect(marks(), isEmpty);

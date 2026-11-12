@@ -410,14 +410,6 @@ int listCalls(MockCalendarApi api) {
   }).length;
 }
 
-/// The text of the form's field labelled [label].
-String fieldText(WidgetTester tester, String label) {
-  return tester
-      .widget<TextField>(find.widgetWithText(TextField, label))
-      .controller!
-      .text;
-}
-
 /// 11:07 on [today]: after [endedId] ends, while [runningId] runs and
 /// before [laterId] starts.
 DateTime midMorning() {

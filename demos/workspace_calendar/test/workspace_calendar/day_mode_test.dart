@@ -63,51 +63,6 @@ Offset centerOf(WidgetTester tester, int row) {
   return cellRect(tester, row, dayColumn).center;
 }
 
-Finder dropdownFinder(String label) {
-  return find.ancestor(
-    of: find.text(label),
-    matching: find.byWidgetPredicate((widget) {
-      return widget is DropdownButtonFormField;
-    }),
-  );
-}
-
-String fieldText(WidgetTester tester, String label) {
-  return tester
-      .widget<TextField>(find.widgetWithText(TextField, label))
-      .controller!
-      .text;
-}
-
-/// Expects the create flow's picker, picks [type], and expects its form
-/// prefilled with [day], [start] to [end], ending on [day]; then cancels
-/// it.
-Future<void> expectCreateForm(
-  WidgetTester tester, {
-  required String type,
-  required String day,
-  required String start,
-  required String end,
-}) async {
-  expect(find.text("New item"), findsOneWidget);
-  await tester.tap(find.text(type).last);
-  await tester.pumpAndSettle();
-  expectFormDays(day, 1);
-  expect(
-    find.descendant(
-      of: dropdownFinder("Start time"),
-      matching: find.text(start),
-    ),
-    findsOneWidget,
-  );
-  expect(
-    find.descendant(of: dropdownFinder("End time"), matching: find.text(end)),
-    findsOneWidget,
-  );
-  await tester.tap(find.widgetWithText(TextButton, "Cancel"));
-  await tester.pumpAndSettle();
-}
-
 /// The item [id] as [api] holds it, through a `get` pumped past its
 /// latency.
 Future<CalendarItem> stored(
@@ -299,7 +254,7 @@ void main() {
     await tester.pumpAndSettle();
     await expectCreateForm(
       tester,
-      type: "Meeting",
+      type: "Request",
       day: "2026-04-21",
       start: "16:00",
       end: "16:15",
@@ -552,7 +507,7 @@ void main() {
     await tester.pumpAndSettle();
     await expectCreateForm(
       tester,
-      type: "Meeting",
+      type: "Request",
       day: "2026-04-21",
       start: "08:00",
       end: "08:15",

@@ -58,23 +58,17 @@ HarborTypeStyle harborTypeStyleOf(CalendarItemType type) {
         tint: Color(0xFFE0E6EF),
         icon: Icons.task_alt,
       );
-    case CalendarItemType.meeting:
-      return const HarborTypeStyle(
-        edge: Color(0xFF1F7A72),
-        tint: Color(0xFFE0ECEB),
-        icon: Icons.groups,
-      );
-    case CalendarItemType.outOfOffice:
-      return const HarborTypeStyle(
-        edge: Color(0xFF5B5FA8),
-        tint: Color(0xFFE8E9F3),
-        icon: Icons.flight_takeoff,
-      );
-    case CalendarItemType.deadline:
+    case CalendarItemType.risk:
       return const HarborTypeStyle(
         edge: Color(0xFFC2503A),
         tint: Color(0xFFF6E6E3),
-        icon: Icons.flag,
+        icon: Icons.warning_amber,
+      );
+    case CalendarItemType.request:
+      return const HarborTypeStyle(
+        edge: Color(0xFF5B5FA8),
+        tint: Color(0xFFE8E9F3),
+        icon: Icons.assignment,
       );
   }
 }
