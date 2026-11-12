@@ -16,7 +16,8 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'calendar_settings.dart';
 import 'harbor_theme.dart';
 
-/// The key of the sheet's chips of the zones the calendar can read.
+/// The key of the sheet's chips of the zones the calendar can read, which
+/// end with the Manage chip.
 const ValueKey<String> zoneChoicesKey = ValueKey<String>("settings-zones");
 
 /// The key of the sheet's chip of the zone named [name], or with the empty
@@ -25,14 +26,11 @@ ValueKey<String> zoneChipKey(String name) {
   return ValueKey<String>("settings-zone-$name");
 }
 
-/// The key of the sheet's chip that turns its manage mode on and off.
+/// The key of the sheet's Manage chip, the last of its zone chips, that
+/// turns its manage mode on and off.
 const ValueKey<String> manageZonesKey = ValueKey<String>(
   "settings-manage-zones",
 );
-
-/// The key of the manage mode's back button, which shows the settings
-/// again.
-const ValueKey<String> zonesBackKey = ValueKey<String>("settings-zones-back");
 
 /// The key of the manage mode's search field.
 const ValueKey<String> zoneSearchKey = ValueKey<String>("settings-zone-search");
@@ -118,10 +116,11 @@ Future<void> showCalendarSettings(
 /// The sheet [showCalendarSettings] opens.
 ///
 /// First, in compact rows of a title with its control at the row's
-/// end: the time zone, named with its offset from UTC, with a Manage pill
-/// at the row's end that turns the manage mode on and off, over a chip for
+/// end: the time zone, named with its offset from UTC, over a chip for
 /// the device's zone and one for each zone of [zones], the chip of the
-/// chosen zone selected, a tap on one choosing its zone; the days, a menu
+/// chosen zone selected, a tap on one choosing its zone, and last a Manage
+/// chip, drawn as a button, that turns the manage mode on and off; the
+/// days, a menu
 /// of the weekday a week starts on over a button for each weekday, in the
 /// week's order, that shows or hides it, never hiding the last one shown;
 /// the slot length, a button for each of [slotMinuteChoices], choosing
@@ -133,8 +132,8 @@ Future<void> showCalendarSettings(
 ///
 /// Under them, a switch that lets items overlap.
 ///
-/// The manage mode, titled "Time zone selection" beside a back button that
-/// ends it, keeps the time zone part, the Manage chip selected and each
+/// The manage mode, titled "Time zone selection", keeps the time zone
+/// part, the Manage chip reading "Done", a tap on it ending the mode, and each
 /// chip of [zones] holding a button that removes its zone, which grows in
 /// and out over Harbor's motion; a removal of the chosen zone chooses the
 /// device's. In place of the settings under the
@@ -463,54 +462,29 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
   static const double _zoneRowHeight = 56.0;
 
   /// The sheet's title, "Calendar settings", or in the manage mode "Time
-  /// zone selection" after the back button that ends it.
+  /// zone selection".
   Widget _buildTitle() {
-    const style = TextStyle(
-      fontSize: 20.0,
-      fontWeight: FontWeight.w600,
-      color: HarborColors.text,
-    );
-    final Widget title;
-    if (_managing) {
-      title = Row(
-        key: const ValueKey<String>("settings-title-managing"),
-        children: <Widget>[
-          IconButton(
-            key: zonesBackKey,
-            icon: const Icon(Icons.arrow_back),
-            tooltip: "Back to settings",
-            color: HarborColors.text,
-            visualDensity: VisualDensity.compact,
-            onPressed: _closeManaging,
-          ),
-          const SizedBox(width: 4.0),
-          const Expanded(
-            child: Text(
-              "Time zone selection",
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: style,
-            ),
-          ),
-        ],
-      );
-    } else {
-      title = const Align(
-        key: ValueKey<String>("settings-title-settings"),
-        alignment: AlignmentDirectional.centerStart,
-        child: Text(
-          "Calendar settings",
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: style,
+    final title = Align(
+      key: ValueKey<String>(
+        _managing ? "settings-title-managing" : "settings-title-settings",
+      ),
+      alignment: AlignmentDirectional.centerStart,
+      child: Text(
+        _managing ? "Time zone selection" : "Calendar settings",
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 20.0,
+          fontWeight: FontWeight.w600,
+          color: HarborColors.text,
         ),
-      );
-    }
+      ),
+    );
     return SizedBox(height: 40.0, child: _Switched(child: title));
   }
 
-  /// The time zone part: the chosen zone and its offset, with the Manage
-  /// pill at the row's end, over the chips.
+  /// The time zone part: the chosen zone and its offset over the chips, the
+  /// last of them the Manage chip, which turns the manage mode on and off.
   Widget _buildZonePart(CalendarLocalizations strings) {
     final chosen = _zone;
     final offset = CalendarDates.inZone(
@@ -523,26 +497,6 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
     return _Part(
       title: "Time zone",
       value: "$name, ${strings.utcOffset(offset)}",
-      trailing: FilterChip(
-        key: manageZonesKey,
-        avatar: const Icon(Icons.edit_location_alt_outlined),
-        label: const Text("Manage"),
-        tooltip: _managing
-            ? "Done with time zones"
-            : "Add or remove time zones",
-        selected: _managing,
-        showCheckmark: false,
-        shape: const StadiumBorder(),
-        visualDensity: VisualDensity.compact,
-        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        onSelected: (selected) {
-          if (selected) {
-            _openManaging();
-          } else {
-            _closeManaging();
-          }
-        },
-      ),
       child: AnimatedSize(
         duration: harborMotionDuration,
         curve: harborMotionCurve,
@@ -554,9 +508,38 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
           children: <Widget>[
             for (final zone in <Location?>[null, ...widget.zones.zones])
               _buildZoneChip(zone, chosen),
+            _buildManageChip(),
           ],
         ),
       ),
+    );
+  }
+
+  /// The Manage chip, which turns the manage mode on and off. It is drawn
+  /// as a button rather than as a zone: borderless, its add icon and label
+  /// in Harbor's primary, and in the manage mode filled with that primary
+  /// around a check icon and "Done", where a chosen zone's chip is tinted.
+  /// Its side is transparent rather than none: a chip given no side draws
+  /// the theme's outline, and its [Ink] pads it by its shape's
+  /// [ShapeBorder.dimensions], so a side as wide as the zone chips' keeps
+  /// their height.
+  Widget _buildManageChip() {
+    final foreground = _managing
+        ? HarborColors.onPrimary
+        : HarborColors.primary;
+    return ActionChip(
+      key: manageZonesKey,
+      avatar: Icon(_managing ? Icons.check : Icons.add),
+      label: Text(_managing ? "Done" : "Manage"),
+      labelStyle: TextStyle(color: foreground),
+      iconTheme: IconThemeData(color: foreground),
+      backgroundColor: _managing ? HarborColors.primary : Colors.transparent,
+      side: const BorderSide(color: Colors.transparent),
+      tooltip: _managing ? "Done with time zones" : "Add or remove time zones",
+      shape: const StadiumBorder(),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      onPressed: _managing ? _closeManaging : _openManaging,
     );
   }
 

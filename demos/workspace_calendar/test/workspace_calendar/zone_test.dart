@@ -262,7 +262,7 @@ void main() {
       await tester.pumpAndSettle();
       await addZone(tester, "havana", "America/Havana");
       await addZone(tester, "tokyo", "Asia/Tokyo");
-      await tester.tap(find.byKey(zonesBackKey));
+      await tester.tap(find.byKey(manageZonesKey));
       await tester.pumpAndSettle();
       // Setup sanity: the adds chose no zone.
       expect(store.zone, isNull);
@@ -298,15 +298,19 @@ void main() {
   );
 
   testWidgets(
-    "MZ1 the Manage chip turns the manage mode on: the title reads Time zone "
-    "selection after a back button, the time zone part stays with Manage "
-    "selected, and a search field over the zone list takes the place of the "
-    "settings under it; the back button and Manage each end it",
+    "MZ1 the Manage chip turns the manage mode on and off: the title reads "
+    "Time zone selection, with no back button before or beside it, the time "
+    "zone part stays with Manage reading Done, and a search field over the "
+    "zone list takes the place of the settings under it",
     (tester) async {
       await pumpCalendar(tester, clock: noonClock);
       await openSettings(tester);
-      bool manageSelected() {
-        return tester.widget<FilterChip>(find.byKey(manageZonesKey)).selected;
+      final sheet = find.byType(CalendarSettingsSheet);
+      Finder manageReading(String label) {
+        return find.descendant(
+          of: find.byKey(manageZonesKey),
+          matching: find.text(label),
+        );
       }
 
       Rect rectOf(Key key) {
@@ -315,8 +319,7 @@ void main() {
 
       void expectSettings() {
         expect(find.text("Calendar settings"), findsOneWidget);
-        expect(find.byKey(zonesBackKey), findsNothing);
-        expect(manageSelected(), isFalse);
+        expect(manageReading("Manage"), findsOneWidget);
         expect(find.byKey(slotLengthKey), findsOneWidget);
         expect(find.byKey(allowsOverlapsKey), findsOneWidget);
         expect(find.byKey(zoneSearchKey), findsNothing);
@@ -326,14 +329,17 @@ void main() {
       void expectManaging() {
         expect(find.text("Time zone selection"), findsOneWidget);
         expect(find.text("Calendar settings"), findsNothing);
+        // The sheet pads its content 24 px from its edges.
         expect(
-          rectOf(zonesBackKey).right,
-          lessThanOrEqualTo(
-            tester.getRect(find.text("Time zone selection")).left,
-          ),
+          tester.getRect(find.text("Time zone selection")).left,
+          tester.getRect(sheet).left + 24.0,
+        );
+        expect(
+          find.descendant(of: sheet, matching: find.byIcon(Icons.arrow_back)),
+          findsNothing,
         );
         expect(zoneChip(""), findsOneWidget);
-        expect(manageSelected(), isTrue);
+        expect(manageReading("Done"), findsOneWidget);
         expect(find.byKey(slotLengthKey), findsNothing);
         expect(find.byKey(allowsOverlapsKey), findsNothing);
         expect(
@@ -343,12 +349,6 @@ void main() {
         expect(rectOf(zoneSearchKey).bottom, lessThan(rectOf(zoneListKey).top));
       }
 
-      expectSettings();
-      await tester.tap(find.byKey(manageZonesKey));
-      await tester.pumpAndSettle();
-      expectManaging();
-      await tester.tap(find.byKey(zonesBackKey));
-      await tester.pumpAndSettle();
       expectSettings();
       await tester.tap(find.byKey(manageZonesKey));
       await tester.pumpAndSettle();
@@ -474,7 +474,7 @@ void main() {
       await openManaging(tester);
       await addZone(tester, "havana", "America/Havana");
       await addZone(tester, "tokyo", "Asia/Tokyo");
-      await tester.tap(find.byKey(zonesBackKey));
+      await tester.tap(find.byKey(manageZonesKey));
       await tester.pumpAndSettle();
       expect(chipOf("America/Havana").onDeleted, isNull);
       await tester.tap(zoneChip("America/Havana"));
@@ -710,42 +710,80 @@ void main() {
   );
 
   testWidgets(
-    "MZ5 the Manage chip is a pill at the right end of the time zone row, "
-    "level with the chosen zone's name above the zone chips, in the manage "
-    "mode too",
+    "MZ5 the Manage chip, the last of the zone chips, 8 px after the last "
+    "zone's chip, as tall as it and level with it, is drawn as a button: a "
+    "borderless pill of an 18 px add icon and Manage in Harbor's primary, "
+    "in the manage mode filled with that primary around a check icon and "
+    "Done in white",
     (tester) async {
-      await pumpCalendar(tester, clock: noonClock);
-      await openSettings(tester);
+      // Wide enough that the chips share one line in the test font.
+      await pumpCalendar(
+        tester,
+        clock: noonClock,
+        size: const Size(800.0, 844.0),
+      );
+      await openManaging(tester);
+      await addZone(tester, "havana", "America/Havana");
       final manage = find.byKey(manageZonesKey);
-      final sheet = find.byType(CalendarSettingsSheet);
-      for (final managing in <bool>[false, true]) {
-        if (managing) {
+      final last = zoneChip("America/Havana");
+      Finder inManage(Finder finder) {
+        return find.descendant(of: manage, matching: finder);
+      }
+
+      /// The color [finder]'s text or icon draws in.
+      Color? colorOf(Finder finder) {
+        return tester
+            .widget<RichText>(
+              find.descendant(of: finder, matching: find.byType(RichText)),
+            )
+            .text
+            .style
+            ?.color;
+      }
+
+      for (final managing in <bool>[true, false]) {
+        if (!managing) {
           await tester.tap(manage);
           await tester.pumpAndSettle();
-          // Setup sanity: the manage mode shows.
-          expect(find.byKey(zoneSearchKey), findsOneWidget);
+          // Setup sanity: the manage mode ended.
+          expect(find.byKey(zoneSearchKey), findsNothing);
         }
         final reason = managing ? "managing" : "settings";
         final rect = tester.getRect(manage);
-        // The sheet pads its content 24 px from its edges.
-        expect(rect.right, tester.getRect(sheet).right - 24.0, reason: reason);
+        final label = inManage(find.text(managing ? "Done" : "Manage"));
+        final icon = inManage(find.byIcon(managing ? Icons.check : Icons.add));
+        final foreground = managing
+            ? HarborColors.onPrimary
+            : HarborColors.primary;
         expect(
-          rect.center.dy,
-          moreOrLessEquals(
-            tester.getCenter(find.textContaining("This device, ")).dy,
-            epsilon: 0.5,
+          tester.widget<Material>(inManage(find.byType(Material)).first).shape,
+          isA<StadiumBorder>().having(
+            (shape) => shape.side.color,
+            "side color",
+            Colors.transparent,
           ),
           reason: reason,
         );
         expect(
-          tester
-              .widget<Material>(
-                find
-                    .descendant(of: manage, matching: find.byType(Material))
-                    .first,
-              )
-              .shape,
-          isA<StadiumBorder>(),
+          (tester.widget<Ink>(inManage(find.byType(Ink))).decoration!
+                  as ShapeDecoration)
+              .color,
+          managing ? HarborColors.primary : Colors.transparent,
+          reason: reason,
+        );
+        expect(label, findsOneWidget, reason: reason);
+        expect(colorOf(label), foreground, reason: reason);
+        expect(tester.getSize(icon), const Size.square(18.0), reason: reason);
+        expect(colorOf(icon), foreground, reason: reason);
+        expect(
+          rect.left,
+          moreOrLessEquals(tester.getRect(last).right + 8.0),
+          reason: reason,
+        );
+        expect(rect.height, tester.getSize(last).height, reason: reason);
+        expect(
+          rect.center.dy,
+          moreOrLessEquals(tester.getCenter(last).dy, epsilon: 0.5),
           reason: reason,
         );
       }
