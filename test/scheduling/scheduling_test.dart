@@ -190,8 +190,103 @@ void main() {
         calendar.MemoryCalendarStore,
         widgets_extended.MemoryCalendarStore,
       ],
+      "CalendarSchedule": <Object>[
+        scheduling.CalendarSchedule,
+        calendar.CalendarSchedule,
+        widgets_extended.CalendarSchedule,
+      ],
+      "CalendarScheduleAllDayNotAllowed": <Object>[
+        scheduling.CalendarScheduleAllDayNotAllowed,
+        calendar.CalendarScheduleAllDayNotAllowed,
+        widgets_extended.CalendarScheduleAllDayNotAllowed,
+      ],
+      "CalendarScheduleBeforeEarliest": <Object>[
+        scheduling.CalendarScheduleBeforeEarliest,
+        calendar.CalendarScheduleBeforeEarliest,
+        widgets_extended.CalendarScheduleBeforeEarliest,
+      ],
+      "CalendarScheduleCheck": <Object>[
+        scheduling.CalendarScheduleCheck,
+        calendar.CalendarScheduleCheck,
+        widgets_extended.CalendarScheduleCheck,
+      ],
+      "CalendarScheduleEndInPast": <Object>[
+        scheduling.CalendarScheduleEndInPast,
+        calendar.CalendarScheduleEndInPast,
+        widgets_extended.CalendarScheduleEndInPast,
+      ],
+      "CalendarScheduleEndNotAfterStart": <Object>[
+        scheduling.CalendarScheduleEndNotAfterStart,
+        calendar.CalendarScheduleEndNotAfterStart,
+        widgets_extended.CalendarScheduleEndNotAfterStart,
+      ],
+      "CalendarScheduleEndSkipped": <Object>[
+        scheduling.CalendarScheduleEndSkipped,
+        calendar.CalendarScheduleEndSkipped,
+        widgets_extended.CalendarScheduleEndSkipped,
+      ],
+      "CalendarScheduleKindKept": <Object>[
+        scheduling.CalendarScheduleKindKept,
+        calendar.CalendarScheduleKindKept,
+        widgets_extended.CalendarScheduleKindKept,
+      ],
+      "CalendarScheduleLocked": <Object>[
+        scheduling.CalendarScheduleLocked,
+        calendar.CalendarScheduleLocked,
+        widgets_extended.CalendarScheduleLocked,
+      ],
+      "CalendarScheduleOptions": <Object>[
+        scheduling.CalendarScheduleOptions,
+        calendar.CalendarScheduleOptions,
+        widgets_extended.CalendarScheduleOptions,
+      ],
+      "CalendarScheduleOutsideHours": <Object>[
+        scheduling.CalendarScheduleOutsideHours,
+        calendar.CalendarScheduleOutsideHours,
+        widgets_extended.CalendarScheduleOutsideHours,
+      ],
+      "CalendarScheduleOverlapRefused": <Object>[
+        scheduling.CalendarScheduleOverlapRefused,
+        calendar.CalendarScheduleOverlapRefused,
+        widgets_extended.CalendarScheduleOverlapRefused,
+      ],
+      "CalendarSchedulePastDay": <Object>[
+        scheduling.CalendarSchedulePastDay,
+        calendar.CalendarSchedulePastDay,
+        widgets_extended.CalendarSchedulePastDay,
+      ],
+      "CalendarScheduleProblem": <Object>[
+        scheduling.CalendarScheduleProblem,
+        calendar.CalendarScheduleProblem,
+        widgets_extended.CalendarScheduleProblem,
+      ],
+      "CalendarScheduleRefused": <Object>[
+        scheduling.CalendarScheduleRefused,
+        calendar.CalendarScheduleRefused,
+        widgets_extended.CalendarScheduleRefused,
+      ],
+      "CalendarScheduleSpansDays": <Object>[
+        scheduling.CalendarScheduleSpansDays,
+        calendar.CalendarScheduleSpansDays,
+        widgets_extended.CalendarScheduleSpansDays,
+      ],
+      "CalendarScheduleStartKept": <Object>[
+        scheduling.CalendarScheduleStartKept,
+        calendar.CalendarScheduleStartKept,
+        widgets_extended.CalendarScheduleStartKept,
+      ],
+      "CalendarScheduleStartSkipped": <Object>[
+        scheduling.CalendarScheduleStartSkipped,
+        calendar.CalendarScheduleStartSkipped,
+        widgets_extended.CalendarScheduleStartSkipped,
+      ],
+      "CalendarScheduleTooManyDays": <Object>[
+        scheduling.CalendarScheduleTooManyDays,
+        calendar.CalendarScheduleTooManyDays,
+        widgets_extended.CalendarScheduleTooManyDays,
+      ],
     };
-    expect(names, hasLength(34));
+    expect(names, hasLength(53));
     for (final MapEntry(key: name, value: values) in names.entries) {
       expect(values[1], values[0], reason: "calendar: $name");
       expect(values[2], values[0], reason: "package: $name");

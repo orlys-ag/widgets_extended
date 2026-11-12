@@ -770,7 +770,8 @@ bool isLaterMidnight(DateTime time) {
       CalendarDates.isLaterOccurrence(time);
 }
 
-/// The first slot of [slotMinutes] on [day] whose start its clock reads
+/// The first range of [length] wall minutes, [slotMinutes] where it is
+/// null, on [day] whose start its clock reads
 /// ([CalendarDates.timeAtWallMinute]) and whose end converts
 /// ([CalendarDates.rangeEndAtWallMinute]), that [isFree] takes where it is
 /// given, and that ends by its minute [until]: the one from its minute
@@ -784,13 +785,15 @@ bool isLaterMidnight(DateTime time) {
   int from,
   int until,
   int slotMinutes, {
+  int? length,
   DateTime? occurrence,
   bool Function(DateTime start, DateTime end)? isFree,
 }) {
   final zone = zoneOf(day);
   final base = CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay;
+  final span = length ?? slotMinutes;
   var minute = from;
-  while (minute + slotMinutes <= until) {
+  while (minute + span <= until) {
     final start = CalendarDates.timeAtWallMinute(
       base + minute,
       from: occurrence,
@@ -800,7 +803,7 @@ bool isLaterMidnight(DateTime time) {
         ? null
         : CalendarDates.rangeEndAtWallMinute(
             start,
-            base + minute + slotMinutes,
+            base + minute + span,
             from: occurrence,
           );
     if (start != null && end != null && (isFree?.call(start, end) ?? true)) {
