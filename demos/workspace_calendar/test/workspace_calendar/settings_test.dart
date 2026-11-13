@@ -4,8 +4,6 @@
 /// grids' cells.
 library;
 
-import 'dart:ui' show Tristate;
-
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
@@ -20,10 +18,11 @@ import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/time_picker.dart'
     show
         timePickerAmKey,
-        timePickerBandKey,
+        timePickerAmPmColumnKey,
         timePickerHourColumnKey,
+        timePickerHourPillKey,
         timePickerHourRowKey,
-        timePickerToggleKey;
+        timePickerPmKey;
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 
 import 'calendar_harness.dart';
@@ -349,9 +348,16 @@ void main() {
 
     await openTimePicker(tester, "Start time");
     expect(offeredTimes(tester, "Start time"), <int>[
-      7 * 60,
       for (var minute = 8 * 60; minute < 18 * 60; minute += 15) minute,
     ]);
+    // The start, 07:00, lies before the hours: shown, not offered.
+    expect(
+      find.descendant(
+        of: timePickerFinder("Start time"),
+        matching: find.byKey(timePickerHourRowKey(7)),
+      ),
+      findsOneWidget,
+    );
     await openTimePicker(tester, "End time");
     expect(offeredTimes(tester, "End time"), <int>[
       for (var minute = 8 * 60 + 15; minute <= 18 * 60; minute += 15) minute,
@@ -606,7 +612,8 @@ void main() {
   );
 
   testWidgets("TF7 with the settings' 12-hour clock, the form's pickers "
-      "show the AM/PM toggle, on AM for a morning time", (tester) async {
+      "show the AM/PM column, on AM for a morning time, and a tap on PM moves "
+      "the start and the end to the evening", (tester) async {
     final api = MockCalendarApi.seeded(today, latency: harnessLatency);
     final nine = await store(
       tester,
@@ -635,17 +642,43 @@ void main() {
         );
       }
 
-      expect(inPicker(timePickerToggleKey), findsOneWidget, reason: label);
+      expect(inPicker(timePickerAmPmColumnKey), findsOneWidget, reason: label);
       expect(
-        tester
-            .getSemantics(inPicker(timePickerAmKey))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected,
-        Tristate.isTrue,
-        reason: label,
+        (tester.getCenter(inPicker(timePickerAmKey)).dy -
+                tester.getCenter(inPicker(timePickerAmPmColumnKey)).dy)
+            .abs(),
+        lessThan(0.5),
+        reason: "$label: AM on the pill",
       );
+      final grouped = <String>[
+        for (final element in find
+            .descendant(
+              of: timePickerFinder(label),
+              matching: find.byType(Semantics),
+            )
+            .evaluate())
+          if (tester
+              .getSemantics(find.byElementPredicate((candidate) {
+                return identical(candidate, element);
+              }))
+              .getSemanticsData()
+              .flagsCollection
+              .isInMutuallyExclusiveGroup)
+            "$element",
+      ];
+      expect(grouped, isEmpty, reason: label);
     }
+
+    await openTimePicker(tester, "Start time");
+    await tester.tap(
+      find.descendant(
+        of: timePickerFinder("Start time"),
+        matching: find.byKey(timePickerPmKey),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(timeFieldShows("Start time", "9 PM"), findsOneWidget);
+    expect(timeFieldShows("End time", "10 PM"), findsOneWidget);
   });
 
   testWidgets("TF10 Save tapped while the start's Hour column still moves "
@@ -676,9 +709,9 @@ void main() {
       );
     }
 
-    double offBand() {
+    double offPill() {
       return (tester.getCenter(inPicker(timePickerHourRowKey(9))).dy -
-              tester.getCenter(inPicker(timePickerBandKey)).dy)
+              tester.getCenter(inPicker(timePickerHourPillKey)).dy)
           .abs();
     }
 
@@ -691,7 +724,7 @@ void main() {
     );
     await tester.pump();
     // Setup sanity: the fling moved the column off 09.
-    expect(offBand(), greaterThan(0.5));
+    expect(offPill(), greaterThan(0.5));
     final updates = updateCount(api);
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pump();
@@ -706,7 +739,7 @@ void main() {
     // Within the write's latency, past the theme's motion.
     await tester.pump(api.latency ~/ 2);
     await tester.pump(api.latency ~/ 4);
-    expect(offBand(), lessThanOrEqualTo(0.5));
+    expect(offPill(), lessThanOrEqualTo(0.5));
     expect(tester.widget<Text>(find.byKey(scheduleSummaryKey)).data, summary);
 
     await tester.pump(api.latency);

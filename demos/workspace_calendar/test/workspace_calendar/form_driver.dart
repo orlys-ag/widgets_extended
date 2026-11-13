@@ -4,6 +4,16 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/views/time_picker.dart'
+    show
+        TimePickerRules,
+        timePickerAmKey,
+        timePickerAmPmColumnKey,
+        timePickerHourColumnKey,
+        timePickerHourRowKey,
+        timePickerMinuteColumnKey,
+        timePickerMinuteRowKey,
+        timePickerPmKey;
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart'
     show parseIsoDate;
 import 'package:widgets_extended/widgets_extended.dart';
@@ -142,42 +152,36 @@ CalendarTimePicker _openPicker(WidgetTester tester, String label) {
   return tester.widget<CalendarTimePicker>(timePickerFinder(label));
 }
 
-/// Whether the open picker of the form's time field labelled [label] takes
-/// [time]: it lies in the picker's range, on its step, and the picker's
-/// `isEnabled` accepts it.
+/// Whether the open picker of the form's time field labelled [label]
+/// offers [time], as the [TimePickerRules] it builds its rows from give it:
+/// in its range, on its steps, and accepted by its own check. The read
+/// builds nothing and leaves the form as it is.
 bool timeEnabled(WidgetTester tester, String label, String time) {
-  final picker = _openPicker(tester, label);
-  final minute = clockMinute(time);
-  return minute >= picker.min &&
-      minute <= picker.max &&
-      minute % picker.minuteStep == 0 &&
-      (picker.isEnabled?.call(minute) ?? true);
+  return TimePickerRules.of(
+    _openPicker(tester, label),
+  ).offers(clockMinute(time));
 }
 
 /// The minutes the open picker of the form's time field labelled [label]
-/// has rows for, ascending: its step's multiples in its range, and its
-/// value.
+/// offers, ascending, as the [TimePickerRules] it builds its rows from give
+/// them: neither a value it shows out of range or off its steps nor a time
+/// it refuses is among them. The read builds nothing and leaves the form as
+/// it is.
 List<int> offeredTimes(WidgetTester tester, String label) {
-  final picker = _openPicker(tester, label);
-  final step = picker.minuteStep;
-  final value = picker.value;
-  final times = <int>{
-    for (
-      var minute = (picker.min + step - 1) ~/ step * step;
-      minute <= picker.max;
-      minute += step
-    )
-      minute,
-    ?value,
-  }.toList();
-  times.sort();
-  return times;
+  return TimePickerRules.of(_openPicker(tester, label)).offeredTimes().toList();
 }
 
-/// Picks [time] in the form's time field labelled [label]: opens its
-/// picker, expects the picker to take [time], reports it through the
-/// picker's own callback, as the picker does once its columns come to rest
-/// on it, and closes the picker.
+/// Picks [time] in the form's time field labelled [label] as a user does:
+/// opens its picker, expects it to offer [time], brings it into view, and
+/// drags onto its pill each of its rows of [time] that lies off it, the
+/// AM/PM column's on the 12-hour clock, then the Hour column's and the
+/// Minute column's, each column's pick settling before the next drag. It
+/// expects the picker's value to be [time] after the last, brings the field
+/// back into view, and closes the picker.
+///
+/// Each drag is a pick the form takes, so the form passes through the
+/// times between, and a time the picker offers only while the form holds
+/// it cannot be picked back once a drag has left it.
 Future<void> pickTime(WidgetTester tester, String label, String time) async {
   await openTimePicker(tester, label);
   expect(
@@ -185,9 +189,87 @@ Future<void> pickTime(WidgetTester tester, String label, String time) async {
     isTrue,
     reason: "$label takes $time",
   );
-  _openPicker(tester, label).onChanged!(clockMinute(time));
+  await tester.ensureVisible(timePickerFinder(label));
+  await tester.pumpAndSettle();
+  final minute = clockMinute(time);
+  final rules = TimePickerRules.of(_openPicker(tester, label));
+  if (rules.twelveHour) {
+    await _dragToPill(
+      tester,
+      label,
+      timePickerAmPmColumnKey,
+      TimePickerRules.isPm(minute) ? timePickerPmKey : timePickerAmKey,
+    );
+  }
+  await _dragToPill(
+    tester,
+    label,
+    timePickerHourColumnKey,
+    timePickerHourRowKey(rules.hourOf(minute)),
+  );
+  await _dragToPill(
+    tester,
+    label,
+    timePickerMinuteColumnKey,
+    timePickerMinuteRowKey(minute % 60),
+  );
+  expect(
+    _openPicker(tester, label).value,
+    minute,
+    reason: "$label shows $time",
+  );
+  // Bringing the picker into view can scroll its field out of the form's
+  // view, where the tap that closes the picker would miss it.
+  await tester.ensureVisible(timeFieldFinder(label));
   await tester.pumpAndSettle();
   await closeTimePicker(tester, label);
+}
+
+/// Drags the column keyed [columnKey] of the open picker of the form's
+/// time field labelled [label] until its row keyed [rowKey] lies on the
+/// column's centre, where its pill is, and lets the pick settle; a row
+/// within 0.5 px of the centre is left.
+///
+/// The finger goes down on the column's centre row and moves 20 px up and
+/// back, past the touch slop, so the column takes the drag. It then moves
+/// by the row's distance to the centre, read as the row lies then, in
+/// steps of at most 8 px 50 ms apart, and rests 200 ms before its lift, so
+/// it lifts with no speed and the column lands on the row. A row the
+/// column does not paint has a centre too, through the column's paint
+/// transform.
+Future<void> _dragToPill(
+  WidgetTester tester,
+  String label,
+  Key columnKey,
+  Key rowKey,
+) async {
+  final column = find.descendant(
+    of: timePickerFinder(label),
+    matching: find.byKey(columnKey),
+  );
+  final row = find.descendant(
+    of: timePickerFinder(label),
+    matching: find.byKey(rowKey),
+  );
+  final centre = tester.getCenter(column).dy;
+  if ((tester.getCenter(row).dy - centre).abs() < 0.5) {
+    return;
+  }
+  final gesture = await tester.startGesture(tester.getCenter(column));
+  await gesture.moveBy(const Offset(0.0, -20.0));
+  await tester.pump(const Duration(milliseconds: 50));
+  await gesture.moveBy(const Offset(0.0, 20.0));
+  await tester.pump(const Duration(milliseconds: 50));
+  var left = centre - tester.getCenter(row).dy;
+  while (left.abs() > 0.0) {
+    final step = left.abs() > 8.0 ? 8.0 * left.sign : left;
+    await gesture.moveBy(Offset(0.0, step));
+    await tester.pump(const Duration(milliseconds: 50));
+    left -= step;
+  }
+  await tester.pump(const Duration(milliseconds: 200));
+  await gesture.up();
+  await tester.pumpAndSettle();
 }
 
 /// Picks [option] in the form's dropdown labelled [label]: opens its menu,

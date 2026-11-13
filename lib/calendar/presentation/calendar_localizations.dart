@@ -327,12 +327,20 @@ abstract base class CalendarLocalizations {
     return "Minute";
   }
 
-  /// The time picker's toggle half for the hours before noon: "AM".
+  /// The header of the time picker's AM/PM column, which a screen reader
+  /// hears as the column's name: "AM/PM".
+  String get timePickerAmPmLabel {
+    return "AM/PM";
+  }
+
+  /// The row of the time picker's AM/PM column for the hours before noon:
+  /// "AM".
   String get timePickerAmLabel {
     return "AM";
   }
 
-  /// The time picker's toggle half for the hours from noon: "PM".
+  /// The row of the time picker's AM/PM column for the hours from noon:
+  /// "PM".
   String get timePickerPmLabel {
     return "PM";
   }

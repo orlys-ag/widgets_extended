@@ -370,6 +370,11 @@ final class _Marked extends DefaultCalendarLocalizations {
   }
 
   @override
+  String get timePickerAmPmLabel {
+    return bracketed(super.timePickerAmPmLabel);
+  }
+
+  @override
   String get timePickerAmLabel {
     return bracketed(super.timePickerAmLabel);
   }
@@ -940,7 +945,8 @@ void main() {
 
     await tester.pumpWidget(pickers(marked: true));
     await tester.pumpAndSettle();
-    expect(find.byKey(timePickerToggleKey), findsOneWidget);
+    expect(find.byKey(timePickerAmPmColumnKey), findsOneWidget);
+    expect(find.text("[AM/PM]"), findsOneWidget);
     expect(find.byKey(timePickerNowKey), findsOneWidget);
     expect(find.byKey(timePickerClearKey), findsOneWidget);
     expectMarked(tester, "the time pickers", from: first);
@@ -973,6 +979,11 @@ void main() {
     expect(minute.value, "[30]");
     expect(minute.increasedValue, "[45]");
     expect(minute.decreasedValue, "[15]");
+    final amPm = tester
+        .getSemantics(find.byKey(timePickerAmPmColumnKey))
+        .getSemanticsData();
+    expect(amPm.label, "[AM/PM]");
+    expect(amPm.value, "[PM]");
     semantics.dispose();
   });
 }

@@ -447,8 +447,8 @@ final class CalendarThemeData with Diagnosticable {
   final Color onPrimary;
 
   /// A light form of [primary]: a selected day header, today's column and
-  /// the marked slots, the hidden-days pill, the duration chip and the add
-  /// button.
+  /// the marked slots, the hidden-days pill, the duration chip, the add
+  /// button and the time picker's selection pills.
   final Color primaryTint;
 
   /// Weekend columns, Month's days of other months, a day's circle, the
@@ -510,8 +510,8 @@ final class CalendarThemeData with Diagnosticable {
   final double pendingEntryOpacity;
 
   /// The opacity of what the time picker draws disabled, from 0 to 1: the
-  /// [text] of a row no time of which may be picked, a toggle half with no
-  /// such time, and Now or Clear while they take no tap.
+  /// [text] of a row, in any of its columns, no time of which may be
+  /// picked, and Now or Clear while they take no tap.
   final double disabledOpacity;
 
   /// The shadows under each grip of the selected block on the timed grid,
@@ -683,10 +683,9 @@ final class CalendarThemeData with Diagnosticable {
   /// and Clear. Its colour is not used: it draws in [primary].
   final TextStyle actionLabelStyle;
 
-  /// The rows of the time picker's Hour and Minute columns and the halves
-  /// of its AM/PM toggle; the height of "00" in it sets the height of a
-  /// row. Its colour is not used: the rows draw in [text], the selected
-  /// half in [onPrimary] and the other in [text].
+  /// The rows of the time picker's columns, the height of "00" in it
+  /// setting a row's height. Its colour is not used: the rows draw in
+  /// [text].
   final TextStyle timePickerRowStyle;
 
   /// The headers over the time picker's columns. Its colour is not used:

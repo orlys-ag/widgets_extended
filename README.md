@@ -530,14 +530,25 @@ final app = MaterialApp(
 ```
 
 `CalendarTimePicker` is an inline panel from which a user picks a time of
-day: an Hour column and a Minute column that scroll and snap to a band
-across its middle, an AM/PM toggle on the 12-hour clock, and Now and Clear
-where you give `now` or set `clearable`. Its value is a minute after
+day: an Hour column, a Minute column and on the 12-hour clock an AM/PM
+column, each scrolling and snapping its selected row onto a pill behind its
+centre row, and Now and Clear where you give `now` or set `clearable`. The
+AM/PM column takes the gestures and keys the other columns take, so Space
+and Enter do not switch its half. Set `showMinutes` to false to pick whole
+hours, or `showHours` to false to pick minutes within the value's hour, or
+`min`'s where the value is null, with no AM/PM column; one of the two must
+show. Its value is a minute after
 midnight, 0 to 1440, where 1440 is the 24:00 that ends a day, or null for no
-time. It offers only the times from `min` to `max` on its `minuteStep`, draws
+time. It offers only the times from `min` to `max` whose hour is a multiple
+of its `hourStep` (1 to 23, counted from midnight) and whose minute is a
+multiple of its `minuteStep`, and 24:00 whatever the `hourStep`; it draws
 the ones your `isEnabled` refuses disabled, always shows its value, and
-reports a pick through `onChanged` once its columns come to rest. It opens
-no route: put it where your form shows it. It draws in the theme
+reports a pick through `onChanged` once its columns come to rest. Now picks
+the latest time at or before `now` on both steps, where it is offered. It opens
+no route: put it where your form shows it, a parent that asks its intrinsic
+sizes, such as a dialog, included. Its columns share a bounded width
+equally, and are otherwise 72 logical pixels wide each, or as wide as the
+AM/PM column's rows where they are wider. It draws in the theme
 `CalendarTheme.of` gives, the nearest `CalendarTheme` or the built-in one,
 and reads no Material theme, so in a Material app put a `CalendarTheme`
 above it, of your `CalendarThemeExtension`'s `data` or of
