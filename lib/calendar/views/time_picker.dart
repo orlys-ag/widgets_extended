@@ -413,20 +413,22 @@ final class TimePickerRules {
   }
 
   /// Whether [time] lies on the grid of times the rows offer: on both
-  /// steps, and where [onlyHour] is set, in that hour.
+  /// steps; where [onlyHour] is set, in that hour; and on the 12-hour
+  /// clock, of 0 and 1440 only the one 12 AM 00 is ([compose]), as the
+  /// other has no row.
   bool onGrid(int time) {
     final onlyHour = this.onlyHour;
+    if (twelveHour &&
+        (time == 0 || time == CalendarDates.minutesPerDay) &&
+        time != compose(0, 0)) {
+      return false;
+    }
     return _onSteps(time) && (onlyHour == null || hourOf(time) == onlyHour);
   }
 
   /// Whether the picker offers [time]: it lies in range, on the grid, and
   /// [CalendarTimePicker.isEnabled] accepts it, which is asked only once
   /// the first two hold.
-  ///
-  /// On the 12-hour clock with a range holding both 0 and 1440, 12 AM 00
-  /// picks 1440 only while the picker's value is 1440 ([compose]), so
-  /// there whichever of 0 and 1440 it does not pick has no row, though
-  /// [offers] may take it.
   bool offers(int time) {
     if (!inRange(time) || !onGrid(time)) {
       return false;
@@ -1324,6 +1326,11 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   /// it accepts, the earlier on a tie; a half whose hour accepts none, the
   /// half's nearest; an hour that accepts none, the value. With the Hour
   /// column hidden the hour is [TimePickerRules.onlyHour].
+  ///
+  /// Where [TimePickerRules.hourStep] does not divide 12 the halves list
+  /// different hours, so a change of half takes the hour in the new half
+  /// only where it lies on the step, and otherwise the new half's enabled
+  /// Hour row nearest it, the earlier on a tie.
   int? _composeTargets() {
     final rules = _rules;
     final pm = _targets[_amPmColumn] == 1;
@@ -1336,6 +1343,15 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
       hour = _rows[_hourColumn][hourTarget].number;
       if (rules.twelveHour) {
         hour = hour % 12 + (pm ? 12 : 0);
+        if (pm != _rowsPm && hour % rules.hourStep != 0) {
+          final rows = _hourRows(pm);
+          final nearest = _nearestBy(_hourColumn, rows, hour, (row) {
+            return row.enabled;
+          });
+          if (nearest != null) {
+            hour = rows[nearest].number;
+          }
+        }
       }
     }
     final minuteTarget = _targets[_minuteColumn];

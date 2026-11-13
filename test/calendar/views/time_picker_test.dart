@@ -2872,11 +2872,16 @@ void main() {
     }) async {
       for (final format in CalendarHourLabelFormat.values) {
         final twelve = format == CalendarHourLabelFormat.twelveHour;
-        final last = !twelve && max == CalendarDates.minutesPerDay ? 24 : 23;
+        const day = CalendarDates.minutesPerDay;
+        final last = !twelve && max == day ? 24 : 23;
         await tester.pumpWidget(Container());
-        for (var hour = 0; hour <= last; hour++) {
+        for (final value in <int>[
+          for (var hour = 0; hour <= last; hour++) hour * 60,
+          // On the 12-hour clock 1440 shows on the hour row 0, 12 AM.
+          if (twelve && max == day) day,
+        ]) {
           final picker = CalendarTimePicker(
-            value: hour * 60,
+            value: value,
             hourLabelFormat: format,
             minuteStep: minuteStep,
             hourStep: hourStep,
@@ -2887,14 +2892,23 @@ void main() {
           );
           await tester.pumpWidget(host(picker));
           final rules = TimePickerRules.of(picker);
+          final hour = rules.hourOf(value);
           final offered = rules.offeredTimes().toList();
-          final pm = TimePickerRules.isPm(hour * 60);
-          final reason = "$setting, ${format.name}, hour $hour";
+          final pm = TimePickerRules.isPm(value);
+          final reason = "$setting, ${format.name}, value $value";
+          // Times, not minutes: 0 and 1440 share the minute 00.
           expect(
-            tappableRows(tester, timePickerMinuteRowKey, 59),
+            <int>{
+              for (final minute in tappableRows(
+                tester,
+                timePickerMinuteRowKey,
+                59,
+              ))
+                rules.compose(hour, minute),
+            },
             <int>{
               for (final time in offered)
-                if (rules.hourOf(time) == hour) time % 60,
+                if (rules.hourOf(time) == hour) time,
             },
             reason: "Minute rows: $reason",
           );
@@ -2947,5 +2961,47 @@ void main() {
         return minute % 30 != 0;
       },
     );
+    // A range holding both 0 and 1440, where 12 AM 00 is one of them.
+    await expectRowsOffered("6", minuteStep: 15, min: 0, max: 1440);
   });
+
+  // One test per case, so that each case is seen to fail on its own.
+  for (final (name, hourStep, value, toPm, expected, isEnabled)
+      in <(String, int, int, bool, int, bool Function(int minute)?)>[
+        ("05:00 AM to 03:00 PM, the nearer row", 5, 300, true, 900, null),
+        ("10:30 AM to 08:30 PM, the minute kept", 5, 630, true, 1230, null),
+        ("03:30 PM to 05:30 AM, the nearer row", 5, 930, false, 330, null),
+        ("04:00 PM to 12:00 AM, the earlier on a tie", 8, 960, false, 0, null),
+        (
+          "10:30 AM to 03:30 PM, the nearest enabled row",
+          5,
+          630,
+          true,
+          930,
+          (minute) {
+            return minute < 1200 || minute >= 1260;
+          },
+        ),
+      ]) {
+    testWidgets("PK49 a change of half under an hourStep that does not "
+        "divide 12 picks the new half's nearest enabled Hour row, the "
+        "earlier on a tie, and keeps the minute: $name", (tester) async {
+      final calls = <int?>[];
+      await tester.pumpWidget(
+        host(
+          CalendarTimePicker(
+            value: value,
+            hourLabelFormat: CalendarHourLabelFormat.twelveHour,
+            minuteStep: 15,
+            hourStep: hourStep,
+            isEnabled: isEnabled,
+            onChanged: calls.add,
+          ),
+        ),
+      );
+      await tester.tap(toPm ? pmRow() : amRow());
+      await tester.pumpAndSettle();
+      expect(calls, <int?>[expected]);
+    });
+  }
 }

@@ -111,8 +111,8 @@ Minute column and on the 12-hour clock (`hourLabelFormat`) an AM/PM column,
 five rows tall, each scrolling and snapping its selected row onto a pill
 behind its centre row, and a footer of Now (`now`, the current minute on
 the host's clock: Now picks the latest time at or before it on both steps,
-where that time is offered) and Clear
-(`clearable`, which reports null) where either is given. Its `value` is a minute after midnight on the
+where that time is offered) and Clear (`clearable`, which reports null)
+where either is given. Its `value` is a minute after midnight on the
 host's clock, 0 to 1440, where 1440 is the 24:00 that ends a day, or null
 for no time. Only the times from `min` to `max` whose hour is a multiple of
 `hourStep` (1 to 23, counted from midnight) and whose minute is a multiple
@@ -126,21 +126,21 @@ keys or a screen reader's increase and decrease move a column, and a pick
 is reported through `onChanged` once the columns come to rest; a new
 `value` moves them over the theme's motion and reports nothing. The AM/PM
 column takes the gestures and keys of the other columns, so Space and Enter
-do not switch its half. With a null `onChanged` it takes no input. It lays out under a parent that asks
-its intrinsic sizes, such as a dialog, its columns sharing a bounded width
-equally and otherwise 72 logical pixels wide each, or as wide as the AM/PM
-column's rows where they are wider. It draws in the theme
-`CalendarTheme.of` gives and reads no Material theme, so a Material app
-puts a `CalendarTheme` above it of its `CalendarThemeExtension`'s `data`
-or of `CalendarThemeExtension.fromColorScheme(scheme).data`. Its
-constructor throws an `ArgumentError`, in every build, naming a
-`minuteStep` that does not divide 60, an `hourStep` outside 1 to 23, a
-`min` or `max` outside 0 to 1440, a `max` below `min`, a `value` outside 0
-to 1440, or a false `showMinutes` while `showHours` is false.
-`CalendarThemeData`
-gains `disabledOpacity` (0.38 built in), `timePickerRowStyle` and
-`timePickerHeaderStyle`, and `CalendarLocalizations` gains nine members
-with English defaults: `timePickerHourLabel`, `timePickerMinuteLabel`,
+do not switch its half. With a null `onChanged` it takes no input. It lays
+out under a parent that asks its intrinsic sizes, such as a dialog, its
+columns sharing a bounded width equally and otherwise 72 logical pixels wide
+each, or as wide as the AM/PM column's rows where they are wider. It draws
+in the theme `CalendarTheme.of` gives and reads no Material theme, so a
+Material app puts a `CalendarTheme` above it of its
+`CalendarThemeExtension`'s `data` or of
+`CalendarThemeExtension.fromColorScheme(scheme).data`. Its constructor
+throws an `ArgumentError`, in every build, naming a `minuteStep` that does
+not divide 60, an `hourStep` outside 1 to 23, a `min` or `max` outside 0 to
+1440, a `max` below `min`, a `value` outside 0 to 1440, or a false
+`showMinutes` while `showHours` is false. `CalendarThemeData` gains
+`disabledOpacity` (0.38 built in), `timePickerRowStyle` and
+`timePickerHeaderStyle`, and `CalendarLocalizations` gains nine members with
+English defaults: `timePickerHourLabel`, `timePickerMinuteLabel`,
 `timePickerAmPmLabel`, `timePickerAmLabel`, `timePickerPmLabel`,
 `timePickerNowLabel`, `timePickerClearLabel`, `timePickerHour` and
 `timePickerMinute`.
