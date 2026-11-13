@@ -179,6 +179,26 @@ bool isAtOrAbove(Element ancestor, Element element) {
   return found;
 }
 
+/// Runs [body] and returns the elements at or under [picker] that rebuilt
+/// meanwhile, as [debugOnRebuildDirtyWidget] reports them.
+Future<List<Element>> rebuildsUnder(
+  Element picker,
+  Future<void> Function() body,
+) async {
+  final rebuilt = <Element>[];
+  debugOnRebuildDirtyWidget = (element, builtOnce) {
+    if (isAtOrAbove(picker, element)) {
+      rebuilt.add(element);
+    }
+  };
+  try {
+    await body();
+  } finally {
+    debugOnRebuildDirtyWidget = null;
+  }
+  return rebuilt;
+}
+
 /// Whether the primary focus belongs to the control [finder] finds: its
 /// node's widget lies at, above or under it, with no other control
 /// between them.
@@ -1669,4 +1689,114 @@ void main() {
     expect(calls, <int?>[21 * 60 + 30]);
     expectOnBand(tester, 21, 30);
   });
+
+  testWidgets("PK33 under a parent that asks its intrinsic sizes the picker "
+      "lays out at its natural size, and a new width lays it out again "
+      "building nothing", (tester) async {
+    Widget under(Widget child) {
+      return MediaQuery(
+        data: const MediaQueryData(),
+        child: Directionality(
+          textDirection: TextDirection.ltr,
+          child: CalendarTheme(
+            data: steady,
+            child: Align(alignment: Alignment.topLeft, child: child),
+          ),
+        ),
+      );
+    }
+
+    final picker = CalendarTimePicker(value: 570, onChanged: (value) {});
+    await tester.pumpWidget(under(IntrinsicWidth(child: picker)));
+    expect(tester.takeException(), isNull);
+    // Two columns of 72 and the panel's padding of 8 each side.
+    expect(tester.getSize(find.byType(CalendarTimePicker)).width, 160.0);
+
+    Widget sized(double width) {
+      return under(
+        SizedBox(width: width, child: IntrinsicHeight(child: picker)),
+      );
+    }
+
+    await tester.pumpWidget(sized(300.0));
+    expect(tester.takeException(), isNull);
+    expect(tester.getSize(hourColumn()).height, 200.0);
+    final wide = tester.getSize(hourColumn()).width;
+    final rebuilt = await rebuildsUnder(
+      tester.element(find.byType(CalendarTimePicker)),
+      () {
+        return tester.pumpWidget(sized(260.0));
+      },
+    );
+    expect(tester.takeException(), isNull);
+    expect(rebuilt, isEmpty);
+    // Setup sanity: the new width reached the columns.
+    expect(tester.getSize(hourColumn()).width, isNot(wide));
+  }, skip: true);
+
+  testWidgets("PK34 a new width lays the columns out again and builds no "
+      "element under the picker", (tester) async {
+    final picker = CalendarTimePicker(value: 570, onChanged: (value) {});
+    await tester.pumpWidget(host(picker));
+    final wide = tester.getSize(hourRow(9)).width;
+    var narrow = wide;
+    final rebuilt = await rebuildsUnder(
+      tester.element(find.byType(CalendarTimePicker)),
+      () async {
+        await tester.pumpWidget(host(picker, width: 260.0));
+        narrow = tester.getSize(hourRow(9)).width;
+        await tester.pumpWidget(host(picker, width: 360.0));
+      },
+    );
+    expect(rebuilt, isEmpty);
+    // Setup sanity: the new width reached the rows.
+    expect(narrow, isNot(wide));
+  }, skip: true);
+
+  testWidgets("PK35 Now and Clear end a finger's hold on a column: its lift "
+      "neither picks from where it lies nor taps its row, and a pointer "
+      "down after the pick taps as before", (tester) async {
+    final calls = <int?>[];
+    await tester.pumpWidget(
+      host(
+        CalendarTimePicker(
+          value: 570,
+          now: () {
+            return 853;
+          },
+          clearable: true,
+          onChanged: calls.add,
+        ),
+      ),
+    );
+    final now = await tester.startGesture(
+      tester.getCenter(hourRow(9)),
+      pointer: 9,
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.byKey(timePickerNowKey), pointer: 10);
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[840]);
+    await now.up();
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[840]);
+    expectOnBand(tester, 14, 0);
+
+    calls.clear();
+    final clear = await tester.startGesture(
+      tester.getCenter(hourRow(14)),
+      pointer: 11,
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.byKey(timePickerClearKey), pointer: 12);
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[null]);
+    await clear.up();
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[null]);
+
+    await tester.tap(hourRow(1));
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[null, 60]);
+  }, skip: true);
 }
