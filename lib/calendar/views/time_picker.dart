@@ -1,6 +1,6 @@
-/// The time picker: an Hour column and a Minute column that scroll and snap
-/// their selected rows to a pill across each column's middle, an AM/PM
-/// toggle on the 12-hour clock, and optional Now and Clear actions.
+/// The time picker: an Hour column, a Minute column and on the 12-hour
+/// clock an AM/PM column, which scroll and snap their selected rows to a
+/// pill across each column's middle, and optional Now and Clear actions.
 library;
 
 import 'dart:async';
@@ -27,15 +27,15 @@ const ValueKey<String> timePickerMinuteColumnKey = ValueKey<String>(
   "time-picker-minute-column",
 );
 
-/// The key of a [CalendarTimePicker]'s AM/PM toggle.
-const ValueKey<String> timePickerToggleKey = ValueKey<String>(
-  "time-picker-toggle",
+/// The key of a [CalendarTimePicker]'s AM/PM column.
+const ValueKey<String> timePickerAmPmColumnKey = ValueKey<String>(
+  "time-picker-am-pm-column",
 );
 
-/// The key of the AM half of a [CalendarTimePicker]'s toggle.
+/// The key of the AM row of a [CalendarTimePicker]'s AM/PM column.
 const ValueKey<String> timePickerAmKey = ValueKey<String>("time-picker-am");
 
-/// The key of the PM half of a [CalendarTimePicker]'s toggle.
+/// The key of the PM row of a [CalendarTimePicker]'s AM/PM column.
 const ValueKey<String> timePickerPmKey = ValueKey<String>("time-picker-pm");
 
 /// The key of the pill a [CalendarTimePicker] draws behind its Hour
@@ -48,6 +48,12 @@ const ValueKey<String> timePickerHourPillKey = ValueKey<String>(
 /// column's selected row.
 const ValueKey<String> timePickerMinutePillKey = ValueKey<String>(
   "time-picker-minute-pill",
+);
+
+/// The key of the pill a [CalendarTimePicker] draws behind its AM/PM
+/// column's selected row.
+const ValueKey<String> timePickerAmPmPillKey = ValueKey<String>(
+  "time-picker-am-pm-pill",
 );
 
 /// The key of a [CalendarTimePicker]'s footer, which holds Now and Clear.
@@ -77,12 +83,27 @@ ValueKey<String> timePickerMinuteRowKey(int minute) {
 const int _hourColumn = 0;
 const int _minuteColumn = 1;
 
-/// The strip's cell of the AM/PM control, right of the Minute column.
+/// The AM/PM column, right of the Minute column: its row 0 is AM and its
+/// row 1 PM.
 const int _amPmColumn = 2;
 
 /// The columns the per-column state holds, which every per-column loop
 /// runs over.
-const int _columnCount = 2;
+const int _columnCount = 3;
+
+/// Each column's key, by column.
+const List<Key> _columnKeys = <Key>[
+  timePickerHourColumnKey,
+  timePickerMinuteColumnKey,
+  timePickerAmPmColumnKey,
+];
+
+/// The key of each column's pill, by column.
+const List<Key> _pillKeys = <Key>[
+  timePickerHourPillKey,
+  timePickerMinutePillKey,
+  timePickerAmPmPillKey,
+];
 
 /// The rows a column shows; its pill lies across the middle one.
 const int _shownRows = 5;
@@ -90,7 +111,7 @@ const int _shownRows = 5;
 const double _leastRowExtent = 40.0;
 const double _rowPadding = 12.0;
 const double _unboundedColumnWidth = 72.0;
-const double _togglePadding = 24.0;
+const double _amPmPadding = 24.0;
 
 /// The space between a pill and each side of its column, so neighbouring
 /// pills lie twice it apart.
@@ -99,30 +120,30 @@ const double _controlRadius = 8.0;
 const double _ringWidth = 2.0;
 const Duration _digitWait = Duration(seconds: 1);
 
-/// An inline time picker: an Hour column and a Minute column, five rows
-/// tall, each scrolling and snapping its selected row to a pill across its
-/// middle; on the 12-hour clock an AM/PM toggle right of the Minute column;
+/// An inline time picker: an Hour column, a Minute column and on the
+/// 12-hour clock an AM/PM column right of them, five rows tall, each
+/// scrolling and snapping its selected row to a pill across its middle;
 /// and a footer of Now and Clear where either is given.
 ///
-/// Under a bounded width the columns, the toggle's included, share it
-/// equally. Under an unbounded width, and to a parent that asks its
-/// intrinsic sizes, each is 72 logical pixels wide, or on the 12-hour clock
-/// as wide as the toggle where that is wider, inside the panel's padding of
-/// 8 on each side.
+/// Under a bounded width the columns share it equally. Under an unbounded
+/// width, and to a parent that asks its intrinsic sizes, each is 72 logical
+/// pixels wide, or on the 12-hour clock as wide as the wider of the AM and
+/// PM rows with their padding where that is wider, inside the panel's
+/// padding of 8 on each side.
 ///
 /// [value] is a minute after midnight on the host's clock: 0 to 1439, or
 /// 1440 for the 24:00 that ends a day; null selects no time and draws no
 /// pill. On the 24-hour clock the Hour column runs from 00 to 23, and to 24,
 /// whose one minute is 00, where [max] is 1440. On the 12-hour clock it runs
-/// 12, 01 to 11 in the toggle's half; 12 AM 00 picks 1440 where the range
-/// holds 1440 and not 0, as an end's does, and where it holds both, picks
-/// 1440 while [value] is 1440.
+/// 12, 01 to 11 in the half the AM/PM column rests on; 12 AM 00 picks 1440
+/// where the range holds 1440 and not 0, as an end's does, and where it
+/// holds both, picks 1440 while [value] is 1440.
 ///
 /// The rows are the times from [min] to [max] that are multiples of
 /// [minuteStep]: an hour has a row where one of its times lies in range,
 /// and the Minute column lists the selected hour's. A time [isEnabled]
 /// refuses draws disabled and takes no pick, as does an hour with no time
-/// it accepts and a toggle half with none. [isEnabled] is asked only of a
+/// it accepts and an AM or PM row with none. [isEnabled] is asked only of a
 /// multiple of [minuteStep] from [min] to [max], each such time at most
 /// once until the picker is given new parameters or its dependencies
 /// change, and never per frame of a motion: only as the picker is built
@@ -135,12 +156,13 @@ const Duration _digitWait = Duration(seconds: 1);
 /// A drag or fling snaps a column to a row, a tap picks a row, a mouse
 /// wheel moves a column one row, and the keys move over the rows: Up and
 /// Down, Home and End, Page Up and Page Down five rows, two digits typed
-/// within a second, Left and Right between the columns and the toggle, and
-/// A and P on the 12-hour clock. A pick is reported through [onChanged]
-/// once, after every column has come to rest; a new [value] moves the
-/// columns to it over the theme's motion and reports nothing, waiting while
-/// a column is held in a drag. With a null [onChanged] the picker shows
-/// its value and takes no input.
+/// within a second on the Hour and Minute columns, Left and Right between
+/// the shown columns, and A and P on the 12-hour clock; Space and Enter
+/// move no column. A pick is reported through [onChanged] once, after every
+/// column has come to rest; a new [value] moves the columns to it over the
+/// theme's motion and reports nothing, waiting while a column is held in a
+/// drag. With a null [onChanged] the picker shows its value and takes no
+/// input.
 ///
 /// [now] gives the current minute after midnight on the host's clock; with
 /// it, the footer's Now picks that minute rounded down to [minuteStep],
@@ -184,7 +206,7 @@ class CalendarTimePicker extends StatefulWidget {
   /// midnight, or null from Clear. Null makes the picker take no input.
   final ValueChanged<int?>? onChanged;
 
-  /// The clock the Hour column follows, and whether the toggle shows.
+  /// The clock the Hour column follows, and whether the AM/PM column shows.
   final CalendarHourLabelFormat hourLabelFormat;
 
   /// The minutes between the Minute column's rows; it divides 60.
@@ -488,7 +510,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   final List<double> _offsetAtDown = List<double>.filled(_columnCount, 0.0);
 
   /// Whether a held column's release picks even where it moved nothing,
-  /// as a settle or the toggle ran while it was held.
+  /// as a settle ran while it was held.
   final List<bool> _picksAtRelease = List<bool>.filled(_columnCount, false);
 
   /// The pointers down on the columns.
@@ -510,10 +532,8 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
 
   bool _started = false;
 
-  /// The toggle's half: PM where true.
-  bool _pm = false;
-
-  /// The half the Hour column's rows are of.
+  /// The half the Hour column's rows are of; the half picked is the AM/PM
+  /// column's target.
   bool _rowsPm = false;
 
   /// The hour the Minute column's rows are of.
@@ -528,13 +548,15 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   bool _nowEnabled = false;
 
   double _rowExtent = _leastRowExtent;
-  double _toggleWidth = 0.0;
+
+  /// The AM/PM column's natural width: its wider row's text and padding.
+  double _amPmWidth = 0.0;
   Duration _motionDuration = Duration.zero;
   Curve _motionCurve = Curves.linear;
 
-  FocusNode? _ownedHourNode;
+  FocusNode? _ownedFirstNode;
   late final FocusNode _minuteNode = FocusNode(debugLabel: "Minute column");
-  late final FocusNode _toggleNode = FocusNode(debugLabel: "AM/PM toggle");
+  late final FocusNode _amPmNode = FocusNode(debugLabel: "AM/PM column");
 
   /// Whether the focus manager draws focus, so a focused control shows its
   /// ring.
@@ -546,9 +568,46 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   int? _digitColumn;
   int? _firstDigit;
 
-  FocusNode get _hourNode {
+  /// The first shown column's node: [CalendarTimePicker.focusNode], or
+  /// the picker's own where it is null.
+  FocusNode get _firstNode {
     return widget.focusNode ??
-        (_ownedHourNode ??= FocusNode(debugLabel: "Hour column"));
+        (_ownedFirstNode ??= FocusNode(debugLabel: "First column"));
+  }
+
+  /// Whether [picker] shows [column]: Hour and Minute always, and AM/PM on
+  /// the 12-hour clock.
+  static bool _shows(CalendarTimePicker picker, int column) {
+    if (column == _amPmColumn) {
+      return picker.hourLabelFormat == CalendarHourLabelFormat.twelveHour;
+    }
+    return true;
+  }
+
+  static bool _sameColumns(CalendarTimePicker a, CalendarTimePicker b) {
+    for (var column = 0; column < _columnCount; column++) {
+      if (_shows(a, column) != _shows(b, column)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// The node [column] has where [picker] is the widget: the first shown
+  /// column's is [_firstNode]'s, null where the picker has not made its
+  /// own yet.
+  FocusNode? _nodeIn(CalendarTimePicker picker, int column) {
+    if (column == _amPmColumn) {
+      return _amPmNode;
+    }
+    if (column == _minuteColumn && _shows(picker, _hourColumn)) {
+      return _minuteNode;
+    }
+    return picker.focusNode ?? _ownedFirstNode;
+  }
+
+  FocusNode _nodeOf(int column) {
+    return _nodeIn(widget, column) ?? _firstNode;
   }
 
   bool get _twelveHour {
@@ -581,20 +640,55 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   void didUpdateWidget(CalendarTimePicker oldWidget) {
     super.didUpdateWidget(oldWidget);
     _resolveMotion();
+    final columnsChanged = !_sameColumns(oldWidget, widget);
+    if (columnsChanged) {
+      _handOverFocus(oldWidget);
+    }
     if (oldWidget.focusNode != widget.focusNode) {
       if (widget.focusNode != null) {
-        _ownedHourNode?.dispose();
-        _ownedHourNode = null;
+        _ownedFirstNode?.dispose();
+        _ownedFirstNode = null;
       }
     }
-    if (oldWidget.onChanged != null && widget.onChanged == null) {
+    if (columnsChanged ||
+        (oldWidget.onChanged != null && widget.onChanged == null)) {
       _cancelDigitWait();
       _endHolds();
       _resetRules();
-      _applyTime(widget.value, jump: false);
+      // A change of the columns renumbers the rows, as _keyOf reads the
+      // clock, and adds or removes a column, so no row keeps a place to
+      // move from: the columns show the value at once. Where only onChanged
+      // turns null they move to it over the theme's motion.
+      _applyTime(widget.value, jump: columnsChanged);
       return;
     }
     _sync();
+  }
+
+  /// Gives the focus a column of [oldWidget] holds to the node that column
+  /// has now, or where the column is gone to the last one shown, before
+  /// each cell's [Focus] takes its node: a [Focus] that loses a focused
+  /// node detaches it, which moves the focus to its scope's last focused
+  /// node, the one asked for here.
+  void _handOverFocus(CalendarTimePicker oldWidget) {
+    for (var column = 0; column < _columnCount; column++) {
+      final old = _shows(oldWidget, column) ? _nodeIn(oldWidget, column) : null;
+      if (old == null || !old.hasFocus) {
+        continue;
+      }
+      var next = column;
+      if (!_shows(widget, next)) {
+        next = _columnCount - 1;
+        while (!_shows(widget, next)) {
+          next--;
+        }
+      }
+      final node = _nodeOf(next);
+      if (!identical(node, old)) {
+        node.requestFocus();
+      }
+      return;
+    }
   }
 
   @override
@@ -611,9 +705,9 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     for (final offset in _offsets) {
       offset.dispose();
     }
-    _ownedHourNode?.dispose();
+    _ownedFirstNode?.dispose();
     _minuteNode.dispose();
-    _toggleNode.dispose();
+    _amPmNode.dispose();
     super.dispose();
   }
 
@@ -628,8 +722,8 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     _motionCurve = theme.motionCurve;
   }
 
-  /// Measures the row extent and the toggle's width, rescaling the columns
-  /// where the extent changes.
+  /// Measures the row extent and the AM/PM column's natural width,
+  /// rescaling the columns where the extent changes.
   void _measure() {
     final theme = CalendarTheme.of(context);
     final strings = CalendarLocalizations.of(context);
@@ -657,7 +751,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
       widest = math.max(widest, painter.width);
     }
     painter.dispose();
-    _toggleWidth = widest + _togglePadding;
+    _amPmWidth = widest + _amPmPadding;
     if (extent != _rowExtent) {
       _rescale(extent);
     }
@@ -894,8 +988,9 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     }
     _time = time;
     final pm = time == null ? _nullHalf() : TimePickerRules.isPm(time);
-    _pm = pm;
     _rowsPm = pm;
+    final amPmRows = _amPmRows();
+    final amPmTarget = amPmRows.isEmpty ? null : (pm ? 1 : 0);
     final hourRows = _rowsOf(_hourColumn, pm: pm, hour: 0);
     var hourTarget = time == null
         ? null
@@ -912,12 +1007,21 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     _minuteRowsHour = hour;
     _setRows(_hourColumn, hourRows, hourTarget, jump: jump);
     _setRows(_minuteColumn, minuteRows, minuteTarget, jump: jump);
+    _setRows(_amPmColumn, amPmRows, amPmTarget, jump: jump);
   }
 
   /// Computes the rows of the current targets again, as the bounds,
-  /// [CalendarTimePicker.isEnabled] or the value may have changed.
+  /// [CalendarTimePicker.isEnabled] or the value may have changed: the
+  /// Hour column's of the half the AM/PM column's target names.
   void _refreshRows() {
-    final pm = _pm;
+    final amPmRows = _amPmRows();
+    final amPmTarget = _retarget(
+      _amPmColumn,
+      _rows[_amPmColumn],
+      _targets[_amPmColumn],
+      amPmRows,
+    );
+    final pm = amPmTarget == 1;
     final hourRows = _rowsOf(_hourColumn, pm: pm, hour: 0);
     final hourTarget = _retarget(
       _hourColumn,
@@ -939,6 +1043,21 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     _minuteRowsHour = hour;
     _setRows(_hourColumn, hourRows, hourTarget, jump: false);
     _setRows(_minuteColumn, minuteRows, minuteTarget, jump: false);
+    _setRows(_amPmColumn, amPmRows, amPmTarget, jump: false);
+  }
+
+  /// The AM/PM column's rows on the 12-hour clock, AM and then PM, each
+  /// enabled where its half has a time the picker offers; none otherwise.
+  List<_Row> _amPmRows() {
+    if (!_twelveHour) {
+      return const <_Row>[];
+    }
+    final value = widget.value;
+    final valuePm = value == null ? null : TimePickerRules.isPm(value);
+    return <_Row>[
+      _Row(0, enabled: _amEnabled, isValue: valuePm == false),
+      _Row(1, enabled: _pmEnabled, isValue: valuePm == true),
+    ];
   }
 
   /// Gives [column] [rows] and [target]: a held column keeps its rows
@@ -1103,9 +1222,10 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     if (hourTarget == null) {
       return _time;
     }
+    final pm = _targets[_amPmColumn] == 1;
     var hour = _rows[_hourColumn][hourTarget].number;
     if (rules.twelveHour) {
-      hour = hour % 12 + (_pm ? 12 : 0);
+      hour = hour % 12 + (pm ? 12 : 0);
     }
     final minuteTarget = _targets[_minuteColumn];
     final minute = minuteTarget == null
@@ -1131,10 +1251,10 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     if (nearest != null) {
       return nearest;
     }
-    if (rules.twelveHour && _pm != _rowsPm) {
+    if (rules.twelveHour && pm != _rowsPm) {
       for (final time in rules.offeredTimes()) {
         final next = (time - kept).abs();
-        if (TimePickerRules.isPm(time) == _pm &&
+        if (TimePickerRules.isPm(time) == pm &&
             (nearest == null || next < distance)) {
           nearest = time;
           distance = next;
@@ -1186,23 +1306,20 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     }
   }
 
-  /// Picks the half [pm] from the toggle, settling at once.
+  /// Picks the half [pm], from the A and P keys: moves the AM/PM column to
+  /// its row as a user motion, where the row is enabled and the column is
+  /// not at rest on it with a time shown.
   void _pickHalf(bool pm) {
-    if (!_takesInput || !(pm ? _pmEnabled : _amEnabled)) {
+    final rows = _rows[_amPmColumn];
+    final row = pm ? 1 : 0;
+    if (!_takesInput || row >= rows.length || !rows[row].enabled) {
       return;
     }
-    if (pm == _pm && pm == _rowsPm) {
-      return;
+    if (row != _targets[_amPmColumn] ||
+        _time == null ||
+        _offsets[_amPmColumn].isAnimating) {
+      _startUserMotion(_amPmColumn, row);
     }
-    if (_held.contains(true) || _moving.contains(true)) {
-      _deferToRelease();
-      setState(() {
-        _pm = pm;
-      });
-      return;
-    }
-    _pm = pm;
-    _commit();
   }
 
   // Gestures.
@@ -1453,14 +1570,20 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     }
   }
 
+  /// The node of the shown column next to [column] on its right, or on
+  /// its left; null where none lies that way.
   FocusNode? _neighbourOf(int column, {required bool right}) {
-    if (column == _hourColumn) {
-      return right ? _minuteNode : null;
+    final step = right ? 1 : -1;
+    for (
+      var next = column + step;
+      next >= 0 && next < _columnCount;
+      next += step
+    ) {
+      if (_shows(widget, next)) {
+        return _nodeOf(next);
+      }
     }
-    if (right) {
-      return _twelveHour ? _toggleNode : null;
-    }
-    return _hourNode;
+    return null;
   }
 
   static int? _digitOf(LogicalKeyboardKey key) {
@@ -1528,7 +1651,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     }
     final digit = _digitOf(key);
     if (digit != null) {
-      if (_takesInput && event is KeyDownEvent) {
+      if (_takesInput && event is KeyDownEvent && column != _amPmColumn) {
         _typeDigit(column, digit);
       }
       return KeyEventResult.handled;
@@ -1612,42 +1735,16 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     _digitColumn = null;
   }
 
-  KeyEventResult _handleToggleKey(KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-      return KeyEventResult.ignored;
-    }
-    final key = event.logicalKey;
-    if (key == LogicalKeyboardKey.arrowLeft) {
-      if (_takesInput) {
-        _minuteNode.requestFocus();
-      }
-      return KeyEventResult.handled;
-    }
-    bool? pm;
-    if (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.keyA) {
-      pm = false;
-    } else if (key == LogicalKeyboardKey.arrowDown ||
-        key == LogicalKeyboardKey.keyP) {
-      pm = true;
-    } else if (key == LogicalKeyboardKey.space ||
-        key == LogicalKeyboardKey.enter ||
-        key == LogicalKeyboardKey.numpadEnter) {
-      pm = !_pm;
-    } else {
-      return KeyEventResult.ignored;
-    }
-    if (event is KeyDownEvent) {
-      _pickHalf(pm);
-    }
-    return KeyEventResult.handled;
-  }
-
   // Building.
 
   String _labelOf(CalendarLocalizations strings, int column, int number) {
-    return column == _hourColumn
-        ? strings.timePickerHour(number, widget.hourLabelFormat)
-        : strings.timePickerMinute(number);
+    switch (column) {
+      case _hourColumn:
+        return strings.timePickerHour(number, widget.hourLabelFormat);
+      case _minuteColumn:
+        return strings.timePickerMinute(number);
+    }
+    return number == 0 ? strings.timePickerAmLabel : strings.timePickerPmLabel;
   }
 
   /// [colour] at the theme's disabled opacity where not [enabled].
@@ -1697,6 +1794,27 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     );
   }
 
+  /// The header of [column], which a screen reader hears as its name.
+  static String _headerOf(CalendarLocalizations strings, int column) {
+    switch (column) {
+      case _hourColumn:
+        return strings.timePickerHourLabel;
+      case _minuteColumn:
+        return strings.timePickerMinuteLabel;
+    }
+    return strings.timePickerAmPmLabel;
+  }
+
+  static Key _rowKeyOf(int column, int number) {
+    switch (column) {
+      case _hourColumn:
+        return timePickerHourRowKey(number);
+      case _minuteColumn:
+        return timePickerMinuteRowKey(number);
+    }
+    return number == 0 ? timePickerAmKey : timePickerPmKey;
+  }
+
   Widget _column(
     CalendarThemeData theme,
     CalendarLocalizations strings,
@@ -1715,9 +1833,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
       children: <Widget>[
         for (final row in rows)
           GestureDetector(
-            key: column == _hourColumn
-                ? timePickerHourRowKey(row.number)
-                : timePickerMinuteRowKey(row.number),
+            key: _rowKeyOf(column, row.number),
             behavior: HitTestBehavior.opaque,
             onTap: takesInput && row.enabled
                 ? () {
@@ -1736,9 +1852,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
         children: <Widget>[
           if (_time != null)
             Positioned(
-              key: column == _hourColumn
-                  ? timePickerHourPillKey
-                  : timePickerMinutePillKey,
+              key: _pillKeys[column],
               left: _pillInset,
               right: _pillInset,
               top: 2 * _rowExtent,
@@ -1778,13 +1892,9 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
       child: box,
     );
     return Semantics(
-      key: column == _hourColumn
-          ? timePickerHourColumnKey
-          : timePickerMinuteColumnKey,
+      key: _columnKeys[column],
       container: true,
-      label: column == _hourColumn
-          ? strings.timePickerHourLabel
-          : strings.timePickerMinuteLabel,
+      label: _headerOf(strings, column),
       value: shows ? _labelOf(strings, column, rows[target].number) : null,
       increasedValue: next == null
           ? null
@@ -1805,76 +1915,12 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
       child: FocusTraversalOrder(
         order: NumericFocusOrder(column + 1.0),
         child: Focus(
-          focusNode: column == _hourColumn ? _hourNode : _minuteNode,
+          focusNode: _nodeOf(column),
           skipTraversal: !_takesInput,
           onKeyEvent: (node, event) {
             return _handleColumnKey(column, event);
           },
           child: _ring(box),
-        ),
-      ),
-    );
-  }
-
-  Widget _toggle(CalendarThemeData theme, CalendarLocalizations strings) {
-    Widget half(bool pm) {
-      final selected = _pm == pm;
-      final enabled = pm ? _pmEnabled : _amEnabled;
-      final colour = selected ? theme.onPrimary : theme.text;
-      return Semantics(
-        key: pm ? timePickerPmKey : timePickerAmKey,
-        container: true,
-        button: true,
-        inMutuallyExclusiveGroup: true,
-        selected: selected,
-        enabled: enabled,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: _takesInput && enabled
-              ? () {
-                  _pickHalf(pm);
-                }
-              : null,
-          child: Container(
-            width: _toggleWidth,
-            height: _rowExtent,
-            alignment: Alignment.center,
-            decoration: selected
-                ? BoxDecoration(
-                    color: theme.primary,
-                    borderRadius: BorderRadius.circular(_controlRadius),
-                  )
-                : null,
-            child: Text(
-              pm ? strings.timePickerPmLabel : strings.timePickerAmLabel,
-              maxLines: 1,
-              softWrap: false,
-              style: theme.timePickerRowStyle.copyWith(
-                color: _faded(theme, colour, enabled),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return FocusTraversalOrder(
-      order: const NumericFocusOrder(3.0),
-      child: Focus(
-        focusNode: _toggleNode,
-        skipTraversal: !_takesInput,
-        onKeyEvent: (node, event) {
-          return _handleToggleKey(event);
-        },
-        child: _ring(
-          Semantics(
-            key: timePickerToggleKey,
-            container: true,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[half(false), half(true)],
-            ),
-          ),
         ),
       ),
     );
@@ -1966,7 +2012,6 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
       color: theme.textSecondary,
     );
     final hasFooter = widget.now != null || widget.clearable;
-    final twelveHour = _twelveHour;
     return FocusTraversalGroup(
       policy: OrderedTraversalPolicy(),
       child: DecoratedBox(
@@ -1988,29 +2033,18 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
                 child: Directionality(
                   textDirection: TextDirection.ltr,
                   child: _TimeColumns(
-                    columnWidth: twelveHour
-                        ? math.max(_unboundedColumnWidth, _toggleWidth)
+                    columnWidth: _shows(widget, _amPmColumn)
+                        ? math.max(_unboundedColumnWidth, _amPmWidth)
                         : _unboundedColumnWidth,
                     children: <Widget>[
-                      _cell(
-                        _hourColumn,
-                        strings.timePickerHourLabel,
-                        headerStyle,
-                        _column(theme, strings, _hourColumn),
-                      ),
-                      _cell(
-                        _minuteColumn,
-                        strings.timePickerMinuteLabel,
-                        headerStyle,
-                        _column(theme, strings, _minuteColumn),
-                      ),
-                      if (twelveHour)
-                        _cell(
-                          _amPmColumn,
-                          strings.timePickerAmPmLabel,
-                          headerStyle,
-                          Center(child: _toggle(theme, strings)),
-                        ),
+                      for (var column = 0; column < _columnCount; column++)
+                        if (_shows(widget, column))
+                          _cell(
+                            column,
+                            _headerOf(strings, column),
+                            headerStyle,
+                            _column(theme, strings, column),
+                          ),
                     ],
                   ),
                 ),

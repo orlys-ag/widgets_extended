@@ -106,22 +106,24 @@ draws in the calendar's theme, shows each zone's offset from UTC, and takes
 its words from seven `CalendarLocalizations` members with English defaults:
 `deviceZoneName`, `utcOffset`, `addZonesLabel`, `searchZonesHint`,
 `noZonesMessage`, `removeZoneTooltip` and `zonesBackTooltip`.
-- Added `CalendarTimePicker`, an inline time panel: an Hour column and a
-Minute column, five rows tall, each scrolling and snapping its selected row
-onto a pill behind its centre row, an AM/PM toggle on the 12-hour clock
-(`hourLabelFormat`), and a footer of Now (`now`, the current minute on the
-host's clock, picked rounded down to `minuteStep`) and Clear (`clearable`,
-which reports null) where either is given. Its `value` is a minute after midnight on the
+- Added `CalendarTimePicker`, an inline time panel: an Hour column, a
+Minute column and on the 12-hour clock (`hourLabelFormat`) an AM/PM column,
+five rows tall, each scrolling and snapping its selected row onto a pill
+behind its centre row, and a footer of Now (`now`, the current minute on
+the host's clock, picked rounded down to `minuteStep`) and Clear
+(`clearable`, which reports null) where either is given. Its `value` is a minute after midnight on the
 host's clock, 0 to 1440, where 1440 is the 24:00 that ends a day, or null
 for no time. Only the times from `min` to `max` on `minuteStep` have rows,
 a time `isEnabled` refuses draws disabled and takes no pick, and the
 value always shows, selected. A drag, a fling, a tap, a mouse wheel, the
 keys or a screen reader's increase and decrease move a column, and a pick
 is reported through `onChanged` once the columns come to rest; a new
-`value` moves them over the theme's motion and reports nothing. With a
-null `onChanged` it takes no input. It lays out under a parent that asks
+`value` moves them over the theme's motion and reports nothing. The AM/PM
+column takes the gestures and keys of the other columns, so Space and Enter
+do not switch its half. With a null `onChanged` it takes no input. It lays out under a parent that asks
 its intrinsic sizes, such as a dialog, its columns sharing a bounded width
-equally and otherwise 72 logical pixels wide each. It draws in the theme
+equally and otherwise 72 logical pixels wide each, or as wide as the AM/PM
+column's rows where they are wider. It draws in the theme
 `CalendarTheme.of` gives and reads no Material theme, so a Material app
 puts a `CalendarTheme` above it of its `CalendarThemeExtension`'s `data`
 or of `CalendarThemeExtension.fromColorScheme(scheme).data`. Its

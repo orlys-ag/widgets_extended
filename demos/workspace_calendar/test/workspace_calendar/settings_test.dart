@@ -4,8 +4,6 @@
 /// grids' cells.
 library;
 
-import 'dart:ui' show Tristate;
-
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
@@ -20,10 +18,11 @@ import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/time_picker.dart'
     show
         timePickerAmKey,
+        timePickerAmPmColumnKey,
         timePickerHourColumnKey,
         timePickerHourPillKey,
         timePickerHourRowKey,
-        timePickerToggleKey;
+        timePickerPmKey;
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 
 import 'calendar_harness.dart';
@@ -606,7 +605,8 @@ void main() {
   );
 
   testWidgets("TF7 with the settings' 12-hour clock, the form's pickers "
-      "show the AM/PM toggle, on AM for a morning time", (tester) async {
+      "show the AM/PM column, on AM for a morning time, and a tap on PM moves "
+      "the start and the end to the evening", (tester) async {
     final api = MockCalendarApi.seeded(today, latency: harnessLatency);
     final nine = await store(
       tester,
@@ -635,17 +635,43 @@ void main() {
         );
       }
 
-      expect(inPicker(timePickerToggleKey), findsOneWidget, reason: label);
+      expect(inPicker(timePickerAmPmColumnKey), findsOneWidget, reason: label);
       expect(
-        tester
-            .getSemantics(inPicker(timePickerAmKey))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected,
-        Tristate.isTrue,
-        reason: label,
+        (tester.getCenter(inPicker(timePickerAmKey)).dy -
+                tester.getCenter(inPicker(timePickerAmPmColumnKey)).dy)
+            .abs(),
+        lessThan(0.5),
+        reason: "$label: AM on the pill",
       );
+      final grouped = <String>[
+        for (final element in find
+            .descendant(
+              of: timePickerFinder(label),
+              matching: find.byType(Semantics),
+            )
+            .evaluate())
+          if (tester
+              .getSemantics(find.byElementPredicate((candidate) {
+                return identical(candidate, element);
+              }))
+              .getSemanticsData()
+              .flagsCollection
+              .isInMutuallyExclusiveGroup)
+            "$element",
+      ];
+      expect(grouped, isEmpty, reason: label);
     }
+
+    await openTimePicker(tester, "Start time");
+    await tester.tap(
+      find.descendant(
+        of: timePickerFinder("Start time"),
+        matching: find.byKey(timePickerPmKey),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(timeFieldShows("Start time", "9 PM"), findsOneWidget);
+    expect(timeFieldShows("End time", "10 PM"), findsOneWidget);
   });
 
   testWidgets("TF10 Save tapped while the start's Hour column still moves "

@@ -14,6 +14,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/views/time_picker.dart'
     show
         timePickerAmKey,
+        timePickerAmPmColumnKey,
+        timePickerAmPmPillKey,
         timePickerClearKey,
         timePickerFooterKey,
         timePickerHourColumnKey,
@@ -24,7 +26,6 @@ import 'package:widgets_extended/calendar/views/time_picker.dart'
         timePickerMinuteRowKey,
         timePickerNowKey,
         timePickerPmKey,
-        timePickerToggleKey,
         TimePickerRules;
 import 'package:widgets_extended/widgets_extended.dart';
 
@@ -74,6 +75,18 @@ Finder hourColumn() {
 
 Finder minuteColumn() {
   return find.byKey(timePickerMinuteColumnKey);
+}
+
+Finder amPmColumn() {
+  return find.byKey(timePickerAmPmColumnKey);
+}
+
+Finder amRow() {
+  return find.byKey(timePickerAmKey);
+}
+
+Finder pmRow() {
+  return find.byKey(timePickerPmKey);
 }
 
 /// The y of a pill's centre, the middle of a column's five rows, in
@@ -300,8 +313,10 @@ void main() {
   });
 
   testWidgets("PK2 the 24-hour clock lists 00 to 23 and the step's minutes, "
-      "the value's on the pills and no toggle; the 12-hour clock lists 12 and "
-      "01 to 11 in the value's half, the toggle on it", (tester) async {
+      "the value's on the pills and no AM/PM column; the 12-hour clock lists "
+      "12 and 01 to 11 in the value's half, the AM/PM column on it", (
+    tester,
+  ) async {
     await tester.pumpWidget(
       host(CalendarTimePicker(value: 570, onChanged: (value) {})),
     );
@@ -313,7 +328,7 @@ void main() {
     expect(find.text("09"), findsOneWidget);
     expectOnPill(tester, 9, 30);
     expect(onPill(tester, hourRow(10)), isFalse);
-    expect(find.byKey(timePickerToggleKey), findsNothing);
+    expect(find.byKey(timePickerAmPmColumnKey), findsNothing);
     expect(find.byKey(timePickerHourPillKey), findsOneWidget);
     expect(find.byKey(timePickerMinutePillKey), findsOneWidget);
 
@@ -339,15 +354,9 @@ void main() {
     }
     expect(find.text("13"), findsNothing);
     expectOnPill(tester, 14, 30);
-    expect(find.byKey(timePickerToggleKey), findsOneWidget);
-    expect(
-      semanticsOf(tester, find.byKey(timePickerPmKey)).flagsCollection.isSelected,
-      Tristate.isTrue,
-    );
-    expect(
-      semanticsOf(tester, find.byKey(timePickerAmKey)).flagsCollection.isSelected,
-      Tristate.isFalse,
-    );
+    expect(find.byKey(timePickerAmPmColumnKey), findsOneWidget);
+    expect(onPill(tester, find.byKey(timePickerPmKey)), isTrue);
+    expect(onPill(tester, find.byKey(timePickerAmKey)), isFalse);
   });
 
   testWidgets("PK3 a max of 1440 adds the hour 24, whose one minute reports "
@@ -383,10 +392,7 @@ void main() {
     await tester.pumpWidget(Container());
     await tester.pumpWidget(picker(15, min: 1, format: twelve));
     expectOnPill(tester, 0, 15);
-    expect(
-      semanticsOf(tester, find.byKey(timePickerAmKey)).flagsCollection.isSelected,
-      Tristate.isTrue,
-    );
+    expect(onPill(tester, find.byKey(timePickerAmKey)), isTrue);
     await tester.tap(minuteRow(0));
     await tester.pumpAndSettle();
     expect(calls, <int?>[1440]);
@@ -475,8 +481,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls, isEmpty);
     expect(
-      semanticsOf(tester, find.byKey(timePickerPmKey)).flagsCollection.isEnabled,
-      Tristate.isFalse,
+      tester.widget<GestureDetector>(find.byKey(timePickerPmKey)).onTap,
+      isNull,
+    );
+    expect(
+      rowStyle(tester, find.byKey(timePickerPmKey)).color!.a,
+      moreOrLessEquals(steady.text.a * steady.disabledOpacity),
     );
   });
 
@@ -958,10 +968,7 @@ void main() {
     await tester.tap(find.byKey(timePickerNowKey));
     await tester.pumpAndSettle();
     expect(calls, <int?>[840]);
-    expect(
-      semanticsOf(tester, find.byKey(timePickerPmKey)).flagsCollection.isSelected,
-      Tristate.isTrue,
-    );
+    expect(onPill(tester, find.byKey(timePickerPmKey)), isTrue);
     expectOnPill(tester, 14, 0);
 
     calls.clear();
@@ -1002,7 +1009,7 @@ void main() {
 
   testWidgets("PK12 with a null onChanged no tap, fling, key or semantics "
       "action reports, the focused Hour keeps the focus, and Tab passes "
-      "the picker by; with one, Tab visits Hour, Minute, the toggle, Now "
+      "the picker by; with one, Tab visits Hour, Minute, AM/PM, Now "
       "and Clear in that order", (tester) async {
     final semantics = tester.ensureSemantics();
     final calls = <int?>[];
@@ -1086,8 +1093,8 @@ void main() {
         visited.add("after");
       } else if (focusedUnder(minuteColumn())) {
         visited.add("Minute");
-      } else if (focusedUnder(find.byKey(timePickerToggleKey))) {
-        visited.add("toggle");
+      } else if (focusedUnder(find.byKey(timePickerAmPmColumnKey))) {
+        visited.add("AM/PM");
       } else if (focusedUnder(find.byKey(timePickerNowKey))) {
         visited.add("Now");
       } else if (focusedUnder(find.byKey(timePickerClearKey))) {
@@ -1096,7 +1103,14 @@ void main() {
         visited.add("other");
       }
     }
-    expect(visited, <String>["Hour", "Minute", "toggle", "Now", "Clear", "after"]);
+    expect(visited, <String>[
+      "Hour",
+      "Minute",
+      "AM/PM",
+      "Now",
+      "Clear",
+      "after",
+    ]);
     semantics.dispose();
   });
 
@@ -1465,10 +1479,7 @@ void main() {
     await tester.pumpWidget(
       picker(min: 780, max: 1080, format: CalendarHourLabelFormat.twelveHour),
     );
-    expect(
-      semanticsOf(tester, find.byKey(timePickerPmKey)).flagsCollection.isSelected,
-      Tristate.isTrue,
-    );
+    expect(onPill(tester, find.byKey(timePickerPmKey)), isTrue);
     expect(rowNumbers(timePickerHourRowKey), <int>[13, 14, 15, 16, 17, 18]);
     semantics.dispose();
   });
@@ -1696,8 +1707,10 @@ void main() {
   });
 
   testWidgets("PK31 onChanged turning null ends a fling and a held drag "
-      "without a report, the value's rows on the pills, and a tap after it "
-      "returns reports once", (tester) async {
+      "without a report, the value's rows moving onto the pills over the "
+      "theme's motion, and a tap after it returns reports once", (
+    tester,
+  ) async {
     final calls = <int?>[];
     Widget picker(bool takes) {
       return host(
@@ -1709,6 +1722,9 @@ void main() {
     await tester.fling(hourColumn(), const Offset(0.0, -120.0), 800.0);
     await tester.pump(const Duration(milliseconds: 16));
     await tester.pumpWidget(picker(false));
+    // Halfway through the theme's 200 ms motion back to the value.
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(onPill(tester, hourRow(9)), isFalse);
     await tester.pumpAndSettle();
     expect(calls, isEmpty);
     expectOnPill(tester, 9, 30);
@@ -1737,8 +1753,8 @@ void main() {
   });
 
   testWidgets("PK32 a column held without moving while the other column or "
-      "the toggle picks: the other column's pick and the toggle's wait for "
-      "its release, and the release picks from where it lies", (
+      "the AM/PM column picks: each pick waits for its release, and the "
+      "release picks from where it lies", (
     tester,
   ) async {
     final calls = <int?>[];
@@ -1914,6 +1930,22 @@ void main() {
       (timePickerMinutePillKey, minuteColumn()),
     ]);
 
+    await tester.pumpWidget(Container());
+    await tester.pumpWidget(
+      host(
+        CalendarTimePicker(
+          value: 570,
+          hourLabelFormat: CalendarHourLabelFormat.twelveHour,
+          onChanged: (value) {},
+        ),
+      ),
+    );
+    expectPills(tester, <(Key, Finder)>[
+      (timePickerHourPillKey, hourColumn()),
+      (timePickerMinutePillKey, minuteColumn()),
+      (timePickerAmPmPillKey, amPmColumn()),
+    ]);
+
     for (final format in CalendarHourLabelFormat.values) {
       await tester.pumpWidget(Container());
       await tester.pumpWidget(
@@ -1927,7 +1959,485 @@ void main() {
       );
       expect(find.byKey(timePickerHourPillKey), findsNothing);
       expect(find.byKey(timePickerMinutePillKey), findsNothing);
+      if (format == CalendarHourLabelFormat.twelveHour) {
+        expect(amPmColumn(), findsOneWidget);
+        expect(find.byKey(timePickerAmPmPillKey), findsNothing);
+      }
     }
+  });
+
+  testWidgets("PK37 on the 12-hour clock AM/PM is a third column: a tap, a "
+      "drag and the keys move it and report once it settles, Space and "
+      "Enter move nothing, a half with no time takes no input, and a host "
+      "value moves it, waiting while it is held", (tester) async {
+    const twelve = CalendarHourLabelFormat.twelveHour;
+    final calls = <int?>[];
+    final hour = FocusNode();
+    addTearDown(hour.dispose);
+    Widget picker(
+      int value, {
+      CalendarHourLabelFormat format = twelve,
+      bool Function(int minute)? isEnabled,
+    }) {
+      return host(
+        CalendarTimePicker(
+          value: value,
+          hourLabelFormat: format,
+          isEnabled: isEnabled,
+          focusNode: hour,
+          onChanged: calls.add,
+        ),
+      );
+    }
+
+    Future<void> press(LogicalKeyboardKey key) async {
+      await tester.sendKeyEvent(key);
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> focusAmPm() async {
+      hour.requestFocus();
+      await tester.pump();
+      await press(LogicalKeyboardKey.arrowRight);
+      await press(LogicalKeyboardKey.arrowRight);
+      // Setup sanity: Right twice from Hour reaches the AM/PM column.
+      expect(focusedUnder(amPmColumn()), isTrue);
+    }
+
+    await tester.pumpWidget(picker(570));
+    expect(amPmColumn(), findsOneWidget);
+    expect(
+      find.descendant(of: amRow(), matching: find.text("AM")),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: pmRow(), matching: find.text("PM")),
+      findsOneWidget,
+    );
+    expect(onPill(tester, amRow()), isTrue);
+
+    await tester.tap(pmRow());
+    await pumpFrames(
+      tester,
+      onFrame: (frame) {
+        if (!onPill(tester, pmRow())) {
+          expect(calls, isEmpty, reason: "frame $frame");
+        }
+      },
+    );
+    expect(calls, <int?>[1290]);
+
+    calls.clear();
+    await tester.pumpWidget(picker(570));
+    await tester.pumpAndSettle();
+    final drag = await holdOn(tester, pmRow());
+    expect(calls, isEmpty);
+    await drag.up();
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[1290]);
+
+    calls.clear();
+    await tester.pumpWidget(picker(570));
+    await tester.pumpAndSettle();
+    await focusAmPm();
+    await press(LogicalKeyboardKey.arrowDown);
+    expect(calls, <int?>[1290]);
+    await press(LogicalKeyboardKey.arrowUp);
+    expect(calls, <int?>[1290, 570]);
+    await press(LogicalKeyboardKey.space);
+    await press(LogicalKeyboardKey.enter);
+    expect(calls, <int?>[1290, 570]);
+    expect(onPill(tester, amRow()), isTrue);
+
+    calls.clear();
+    await tester.pumpWidget(Container());
+    await tester.pumpWidget(
+      picker(
+        570,
+        isEnabled: (minute) {
+          return minute < 720;
+        },
+      ),
+    );
+    expect(
+      rowStyle(tester, pmRow()).color!.a,
+      moreOrLessEquals(steady.text.a * steady.disabledOpacity),
+    );
+    expect(tester.widget<GestureDetector>(pmRow()).onTap, isNull);
+    await tester.tap(pmRow());
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+    expect(onPill(tester, amRow()), isTrue);
+    final refused = await holdOn(tester, pmRow());
+    await refused.up();
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+    expect(onPill(tester, amRow()), isTrue);
+    await focusAmPm();
+    await press(LogicalKeyboardKey.arrowDown);
+    expect(calls, isEmpty);
+    expect(onPill(tester, amRow()), isTrue);
+
+    await tester.pumpWidget(Container());
+    await tester.pumpWidget(picker(570));
+    await tester.pumpWidget(picker(1290));
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+    expect(onPill(tester, pmRow()), isTrue);
+    await tester.pumpWidget(picker(570));
+    await tester.pumpAndSettle();
+    final held = await holdOn(tester, amRow());
+    final at = tester.getCenter(amRow());
+    await tester.pumpWidget(picker(1290));
+    expect(tester.getCenter(amRow()), at);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.getCenter(amRow()), at);
+    await held.up();
+    await tester.pumpAndSettle();
+    expect(onPill(tester, pmRow()), isTrue);
+    expect(calls, isEmpty);
+
+    await tester.pumpWidget(
+      picker(570, format: CalendarHourLabelFormat.twentyFourHour),
+    );
+    expect(amPmColumn(), findsNothing);
+  });
+
+  testWidgets("PK38 the AM/PM column is one adjustable node named AM/PM, "
+      "whose increase and decrease move between AM and PM", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final calls = <int?>[];
+    Widget picker(int value) {
+      return host(
+        CalendarTimePicker(
+          value: value,
+          hourLabelFormat: CalendarHourLabelFormat.twelveHour,
+          onChanged: calls.add,
+        ),
+      );
+    }
+
+    await tester.pumpWidget(picker(570));
+    final am = semanticsOf(tester, amPmColumn());
+    expect(am.label, "AM/PM");
+    expect(am.value, "AM");
+    expect(am.increasedValue, "PM");
+    expect(am.hasAction(SemanticsAction.increase), isTrue);
+    expect(am.hasAction(SemanticsAction.decrease), isFalse);
+    performAction(tester, amPmColumn(), SemanticsAction.increase);
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[1290]);
+
+    calls.clear();
+    await tester.pumpWidget(Container());
+    await tester.pumpWidget(picker(1290));
+    final pm = semanticsOf(tester, amPmColumn());
+    expect(pm.value, "PM");
+    expect(pm.decreasedValue, "AM");
+    expect(pm.hasAction(SemanticsAction.decrease), isTrue);
+    expect(pm.hasAction(SemanticsAction.increase), isFalse);
+    performAction(tester, amPmColumn(), SemanticsAction.decrease);
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[570]);
+    semantics.dispose();
+  });
+
+  testWidgets("PK39 Left and Right move between the shown columns, A and P "
+      "on Hour pick the half, and Tab visits Hour, Minute, AM/PM, Now and "
+      "Clear", (tester) async {
+    final calls = <int?>[];
+    final hour = FocusNode();
+    final before = FocusNode();
+    addTearDown(hour.dispose);
+    addTearDown(before.dispose);
+    await tester.pumpWidget(
+      Shortcuts(
+        shortcuts: WidgetsApp.defaultShortcuts,
+        child: Actions(
+          actions: WidgetsApp.defaultActions,
+          child: host(
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Focus(focusNode: before, child: const SizedBox(height: 10.0)),
+                CalendarTimePicker(
+                  value: 570,
+                  focusNode: hour,
+                  hourLabelFormat: CalendarHourLabelFormat.twelveHour,
+                  now: () {
+                    return 853;
+                  },
+                  clearable: true,
+                  onChanged: calls.add,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    hour.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(focusedUnder(minuteColumn()), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(focusedUnder(amPmColumn()), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(hour.hasPrimaryFocus, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyP);
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[1290]);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[1290, 570]);
+
+    before.requestFocus();
+    await tester.pump();
+    final visited = <String>[];
+    for (var press = 0; press < 5; press++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      if (hour.hasPrimaryFocus) {
+        visited.add("Hour");
+      } else if (focusedUnder(minuteColumn())) {
+        visited.add("Minute");
+      } else if (focusedUnder(amPmColumn())) {
+        visited.add("AM/PM");
+      } else if (focusedUnder(find.byKey(timePickerNowKey))) {
+        visited.add("Now");
+      } else if (focusedUnder(find.byKey(timePickerClearKey))) {
+        visited.add("Clear");
+      } else {
+        visited.add("other");
+      }
+    }
+    expect(visited, <String>["Hour", "Minute", "AM/PM", "Now", "Clear"]);
+  });
+
+  testWidgets("PK40 a drag's pointer moves on the AM/PM column and the "
+      "frames until its report build nothing, lay out nothing and ask "
+      "isEnabled nothing, and it reports once", (tester) async {
+    final calls = <int?>[];
+    var asked = 0;
+    await tester.pumpWidget(
+      host(
+        CalendarTimePicker(
+          value: 570,
+          hourLabelFormat: CalendarHourLabelFormat.twelveHour,
+          isEnabled: (minute) {
+            asked++;
+            return true;
+          },
+          onChanged: calls.add,
+        ),
+      ),
+    );
+    final asks = asked;
+    final pickerElement = tester.element(find.byType(CalendarTimePicker));
+    final rebuilt = <Element>[];
+    final logged = <String>[];
+    final print = debugPrint;
+    debugOnRebuildDirtyWidget = (element, builtOnce) {
+      if (isAtOrAbove(pickerElement, element)) {
+        rebuilt.add(element);
+      }
+    };
+    debugPrint = (String? message, {int? wrapWidth}) {
+      logged.add(message ?? "");
+    };
+    debugPrintLayouts = true;
+    var frames = 0;
+    try {
+      // PM left 0.3 rows below its pill, from where the lift, with no
+      // velocity, lands on it.
+      final gesture = await holdOn(tester, pmRow(), rows: 0.3);
+      expect(asked, asks);
+      expect(rebuilt, isEmpty);
+      expect(
+        logged.where((line) {
+          return line.contains("Laying out");
+        }),
+        isEmpty,
+      );
+      await gesture.up();
+      while (calls.isEmpty) {
+        expect(asked, asks);
+        expect(rebuilt, isEmpty);
+        expect(
+          logged.where((line) {
+            return line.contains("Laying out");
+          }),
+          isEmpty,
+        );
+        await tester.pump(const Duration(milliseconds: 16));
+        frames++;
+        expect(frames, lessThan(500));
+      }
+    } finally {
+      debugOnRebuildDirtyWidget = null;
+      debugPrint = print;
+      debugPrintLayouts = false;
+    }
+    // Setup sanity: the landing ran frames, and the rebuild hook saw the
+    // settle's rebuild.
+    expect(frames, greaterThan(1));
+    expect(rebuilt, isNotEmpty);
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[1290]);
+  });
+
+  testWidgets("PK41 a change of the clock shows the value at once with no "
+      "report, the focus on a column it removes moving to the last column "
+      "left, and shows it at once as onChanged turns null in the same "
+      "update", (tester) async {
+    const twelve = CalendarHourLabelFormat.twelveHour;
+    const twentyFour = CalendarHourLabelFormat.twentyFourHour;
+    final calls = <int?>[];
+    final hour = FocusNode();
+    addTearDown(hour.dispose);
+    Widget picker(CalendarHourLabelFormat format, {bool takes = true}) {
+      return host(
+        CalendarTimePicker(
+          value: 870,
+          hourLabelFormat: format,
+          focusNode: hour,
+          onChanged: takes ? calls.add : null,
+        ),
+      );
+    }
+
+    await tester.pumpWidget(picker(twentyFour));
+    await tester.pumpWidget(picker(twelve));
+    await tester.pump();
+    expect(calls, isEmpty);
+    expect(onPill(tester, hourRow(14)), isTrue);
+    expect(
+      find.descendant(of: hourRow(14), matching: find.text("02")),
+      findsOneWidget,
+    );
+    expect(onPill(tester, pmRow()), isTrue);
+
+    await tester.pumpWidget(picker(twentyFour));
+    await tester.pump();
+    expect(onPill(tester, hourRow(14)), isTrue);
+    expect(
+      find.descendant(of: hourRow(14), matching: find.text("14")),
+      findsOneWidget,
+    );
+    expect(amPmColumn(), findsNothing);
+    expect(calls, isEmpty);
+
+    await tester.pumpWidget(picker(twelve));
+    await tester.pumpAndSettle();
+    hour.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    // Setup sanity: Right twice from Hour reaches the AM/PM column.
+    expect(focusedUnder(amPmColumn()), isTrue);
+    await tester.pumpWidget(picker(twentyFour));
+    await tester.pump();
+    expect(focusedUnder(minuteColumn()), isTrue);
+
+    // A fresh picker, whose AM/PM column has never left AM: a motion to PM
+    // would start there, so PM on the pill before a frame of motion shows
+    // the columns jumped.
+    await tester.pumpWidget(Container());
+    await tester.pumpWidget(picker(twentyFour));
+    await tester.pumpWidget(picker(twelve, takes: false));
+    await tester.pump();
+    expect(onPill(tester, pmRow()), isTrue);
+    expect(calls, isEmpty);
+  });
+
+  testWidgets("PK48 the AM/PM column follows every per-column rule: a pick "
+      "waits for its hold, a clock change ends its hold, a new text scaler "
+      "keeps it on its row, and Clear ends its motion", (tester) async {
+    final calls = <int?>[];
+    Widget picker({
+      int value = 570,
+      CalendarHourLabelFormat format = CalendarHourLabelFormat.twelveHour,
+      bool Function(int minute)? isEnabled,
+      double scale = 1.0,
+      bool clearable = false,
+    }) {
+      return host(
+        CalendarTimePicker(
+          value: value,
+          hourLabelFormat: format,
+          isEnabled: isEnabled,
+          clearable: clearable,
+          onChanged: calls.add,
+        ),
+        textScaler: TextScaler.linear(scale),
+      );
+    }
+
+    // A finger resting on the AM/PM column's PM row, which takes no tap.
+    await tester.pumpWidget(
+      picker(
+        isEnabled: (minute) {
+          return minute < 720;
+        },
+      ),
+    );
+    final resting = await tester.startGesture(
+      tester.getCenter(pmRow()),
+      pointer: 7,
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(minuteRow(45), pointer: 8);
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+    await resting.up();
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[585]);
+
+    // A drag on the AM/PM column, which a change to the 24-hour clock
+    // removes while the finger is down.
+    calls.clear();
+    await tester.pumpWidget(Container());
+    await tester.pumpWidget(picker());
+    final moved = await tester.startGesture(tester.getCenter(amRow()));
+    await moved.moveBy(const Offset(0.0, -30.0));
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pumpWidget(
+      picker(format: CalendarHourLabelFormat.twentyFourHour),
+    );
+    await moved.up();
+    await tester.pumpAndSettle();
+    await tester.tap(minuteRow(45));
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[585]);
+
+    // A new text scaler, read at the rebuild's own frame.
+    calls.clear();
+    await tester.pumpWidget(Container());
+    await tester.pumpWidget(picker(value: 1290));
+    final extent = extentOf(tester);
+    await tester.pumpWidget(picker(value: 1290, scale: 2.0));
+    // Setup sanity: the scaler changed the row extent.
+    expect(extentOf(tester), isNot(extent));
+    expect(onPill(tester, pmRow()), isTrue);
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+
+    // Clear while the AM/PM column moves to PM.
+    await tester.pumpWidget(Container());
+    await tester.pumpWidget(picker(clearable: true));
+    await tester.tap(pmRow());
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.byKey(timePickerClearKey));
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[null]);
   });
 
   testWidgets("PK47 the rows that take a tap are those of the times the "
