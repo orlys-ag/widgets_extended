@@ -213,6 +213,7 @@ void main() {
       CalendarMoveKind,
       CalendarHourLabelFormat,
       CalendarMonthLayout,
+      CalendarTimePicker,
       CalendarController.minDayWidthLow,
       CalendarController.minDayWidthHigh,
       CalendarController.minSlotHeightLow,
@@ -223,9 +224,10 @@ void main() {
   });
 
   test("B2 the barrel shows by name: the scheduling barrel's every name, "
-      "through one export of that barrel; of the views only the types the "
-      "calendar's signatures use, and no view; and of the localizations "
-      "file the localizations and their English default", () {
+      "through one export of that barrel; of the views the types the "
+      "calendar's signatures use and CalendarTimePicker, and no other view; "
+      "and of the localizations file the localizations and their English "
+      "default", () {
     final source = File(barrelPath).readAsStringSync();
     final exports = exportsOf(source, barrelPath);
     // Every directive the barrel holds was read.
@@ -256,6 +258,7 @@ void main() {
         "CalendarMoveKind",
         "CalendarMoveRequest",
       },
+      "lib/calendar/views/time_picker.dart": <String>{"CalendarTimePicker"},
     });
     expect(
       <List<String>?>[
@@ -325,6 +328,7 @@ void main() {
       "CalendarActivityIndicator",
       "CalendarTheme",
       "CalendarZonePanel",
+      "CalendarTimePicker",
     };
     const bases = <String>{
       "CalendarController",
@@ -546,6 +550,10 @@ void main() {
         path: "lib/calendar/composition/calendar_controller.dart",
         name: "CalendarController",
       ),
+      (
+        path: "lib/calendar/views/time_picker.dart",
+        name: "CalendarTimePicker",
+      ),
     ];
     final asserts = RegExp(r"\bassert\(");
     for (final (:path, :name) in classes) {
@@ -576,6 +584,7 @@ void main() {
         "CalendarThemeData copyWith(",
       ],
       "views/move_request.dart": <String>["CalendarMoveRequest({"],
+      "views/time_picker.dart": <String>["CalendarTimePicker({"],
       "composition/calendar_controller.dart": <String>[
         "CalendarController({",
         "double get minDayWidth",

@@ -515,6 +515,27 @@ void main() {
     );
   });
 
+  test("LC4 the time picker's headers, halves, actions and row numbers", () {
+    const twentyFour = CalendarHourLabelFormat.twentyFourHour;
+    const twelve = CalendarHourLabelFormat.twelveHour;
+    expect(english.timePickerHourLabel, "Hour");
+    expect(english.timePickerMinuteLabel, "Minute");
+    expect(english.timePickerAmLabel, "AM");
+    expect(english.timePickerPmLabel, "PM");
+    expect(english.timePickerNowLabel, "Now");
+    expect(english.timePickerClearLabel, "Clear");
+    expect(english.timePickerHour(9, twentyFour), "09");
+    expect(english.timePickerHour(0, twentyFour), "00");
+    expect(english.timePickerHour(24, twentyFour), "24");
+    expect(english.timePickerHour(0, twelve), "12");
+    expect(english.timePickerHour(12, twelve), "12");
+    expect(english.timePickerHour(24, twelve), "12");
+    expect(english.timePickerHour(14, twelve), "02");
+    expect(english.timePickerHour(9, twelve), "09");
+    expect(english.timePickerMinute(5), "05");
+    expect(english.timePickerMinute(45), "45");
+  });
+
   group("LC2 the lookup", () {
     testWidgets("finds the English default with no Localizations above, and "
         "the localizations a Localizations above loaded, rebuilding a "

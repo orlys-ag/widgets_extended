@@ -4,16 +4,26 @@
 /// grids' cells.
 library;
 
+import 'dart:ui' show Tristate;
+
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/schedule_section.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
+import 'package:widgets_extended/calendar/views/time_picker.dart'
+    show
+        timePickerAmKey,
+        timePickerBandKey,
+        timePickerHourColumnKey,
+        timePickerHourRowKey,
+        timePickerToggleKey;
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 
 import 'calendar_harness.dart';
@@ -85,30 +95,6 @@ Future<void> pickHours(WidgetTester tester, int start, int end) async {
   await openSettings(tester);
   await setHours(tester, start, end);
   await closeSettings(tester);
-}
-
-/// The minutes the form's [label] time field offers, in order.
-List<int?> offeredMinutes(WidgetTester tester, String label) {
-  final button = tester.widget<DropdownButton<int>>(
-    find.descendant(
-      of: dropdownFinder(label),
-      matching: find.byType(DropdownButton<int>),
-    ),
-  );
-  return <int?>[for (final item in button.items!) item.value];
-}
-
-/// Picks [minute] in the form's [label] time field through the field's own
-/// callback, as a pick in its menu does.
-Future<void> chooseMinute(WidgetTester tester, String label, int minute) async {
-  final button = tester.widget<DropdownButton<int>>(
-    find.descendant(
-      of: dropdownFinder(label),
-      matching: find.byType(DropdownButton<int>),
-    ),
-  );
-  button.onChanged!(minute);
-  await tester.pumpAndSettle();
 }
 
 Finder arrowIn(String id, IconData icon) {
@@ -336,20 +322,8 @@ void main() {
     expect(find.text("New item"), findsOneWidget);
     await tester.tap(find.text("Task").last);
     await tester.pumpAndSettle();
-    expect(
-      find.descendant(
-        of: dropdownFinder("Start time"),
-        matching: find.text("17:45"),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: dropdownFinder("End time"),
-        matching: find.text("18:00"),
-      ),
-      findsOneWidget,
-    );
+    expect(timeFieldShows("Start time", "17:45"), findsOneWidget);
+    expect(timeFieldShows("End time", "18:00"), findsOneWidget);
   });
 
   testWidgets("H6 the form offers the hours' times and holds a change of "
@@ -373,16 +347,18 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text("Edit Task"), findsOneWidget);
 
-    expect(offeredMinutes(tester, "Start time"), <int>[
+    await openTimePicker(tester, "Start time");
+    expect(offeredTimes(tester, "Start time"), <int>[
       7 * 60,
       for (var minute = 8 * 60; minute < 18 * 60; minute += 15) minute,
     ]);
-    expect(offeredMinutes(tester, "End time"), <int>[
+    await openTimePicker(tester, "End time");
+    expect(offeredTimes(tester, "End time"), <int>[
       for (var minute = 8 * 60 + 15; minute <= 18 * 60; minute += 15) minute,
     ]);
 
     final updates = updateCount(api);
-    await chooseMinute(tester, "End time", 10 * 60);
+    await pickTime(tester, "End time", "10:00");
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pumpAndSettle();
     expect(
@@ -395,7 +371,7 @@ void main() {
     expect(updateCount(api), updates);
 
     // Keeping the stored times, a new title saves.
-    await chooseMinute(tester, "End time", 9 * 60);
+    await pickTime(tester, "End time", "09:00");
     await tester.enterText(find.widgetWithText(TextField, "Title"), "Earlier");
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pump(api.latency);
@@ -580,6 +556,161 @@ void main() {
     expect(slider().semanticFormatterCallback!(8.0), "8 AM");
     await setHours(tester, 8, 18);
     expect(find.textContaining("8 AM - 6 PM"), findsOneWidget);
+  });
+
+  testWidgets(
+    "TF6 with the settings' 12-hour clock, the form's time fields and "
+    "summary line write 12-hour times",
+    (tester) async {
+      final api = MockCalendarApi.seeded(today, latency: harnessLatency);
+      final nine = await store(
+        tester,
+        api,
+        taskJson("Nine", today, 9 * 60, 10 * 60),
+      );
+      await pumpCalendar(
+        tester,
+        editing: true,
+        api: api,
+        size: tall,
+        readAhead: 0,
+        settings: const CalendarSettings(
+          hourLabelFormat: CalendarHourLabelFormat.twelveHour,
+        ),
+      );
+      await pickMode(tester, "Week");
+      await tester.tap(blockFinder(nine));
+      await tester.pumpAndSettle();
+      expect(find.text("Edit Task"), findsOneWidget);
+
+      Finder field(String label) {
+        return find.ancestor(
+          of: find.text(label),
+          matching: find.byType(InputDecorator),
+        );
+      }
+
+      expect(
+        find.descendant(of: field("Start time"), matching: find.text("9 AM")),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: field("End time"), matching: find.text("10 AM")),
+        findsOneWidget,
+      );
+      expect(
+        tester.widget<Text>(find.byKey(scheduleSummaryKey)).data,
+        contains("9 AM - 10 AM"),
+      );
+    },
+  );
+
+  testWidgets("TF7 with the settings' 12-hour clock, the form's pickers "
+      "show the AM/PM toggle, on AM for a morning time", (tester) async {
+    final api = MockCalendarApi.seeded(today, latency: harnessLatency);
+    final nine = await store(
+      tester,
+      api,
+      taskJson("Nine", today, 9 * 60, 10 * 60),
+    );
+    await pumpCalendar(
+      tester,
+      editing: true,
+      api: api,
+      size: tall,
+      readAhead: 0,
+      settings: const CalendarSettings(
+        hourLabelFormat: CalendarHourLabelFormat.twelveHour,
+      ),
+    );
+    await pickMode(tester, "Week");
+    await tester.tap(blockFinder(nine));
+    await tester.pumpAndSettle();
+    for (final label in <String>["Start time", "End time"]) {
+      await openTimePicker(tester, label);
+      Finder inPicker(Key key) {
+        return find.descendant(
+          of: timePickerFinder(label),
+          matching: find.byKey(key),
+        );
+      }
+
+      expect(inPicker(timePickerToggleKey), findsOneWidget, reason: label);
+      expect(
+        tester
+            .getSemantics(inPicker(timePickerAmKey))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected,
+        Tristate.isTrue,
+        reason: label,
+      );
+    }
+  });
+
+  testWidgets("TF10 Save tapped while the start's Hour column still moves "
+      "saves the start the form holds, and the column comes to rest on it "
+      "while the write is pending", (tester) async {
+    final api = MockCalendarApi.seeded(today);
+    final nine = await store(
+      tester,
+      api,
+      taskJson("Nine", today, 9 * 60, 10 * 60),
+    );
+    await pumpCalendar(
+      tester,
+      editing: true,
+      api: api,
+      size: tall,
+      readAhead: 0,
+    );
+    await pickMode(tester, "Week");
+    await tester.tap(blockFinder(nine));
+    await tester.pumpAndSettle();
+    await openTimePicker(tester, "Start time");
+    final summary = tester.widget<Text>(find.byKey(scheduleSummaryKey)).data;
+    Finder inPicker(Key key) {
+      return find.descendant(
+        of: timePickerFinder("Start time"),
+        matching: find.byKey(key),
+      );
+    }
+
+    double offBand() {
+      return (tester.getCenter(inPicker(timePickerHourRowKey(9))).dy -
+              tester.getCenter(inPicker(timePickerBandKey)).dy)
+          .abs();
+    }
+
+    // Slow enough that the column would come to rest, and report, within
+    // the write's latency were Save to leave it taking input.
+    await tester.fling(
+      inPicker(timePickerHourColumnKey),
+      const Offset(0.0, -60.0),
+      400.0,
+    );
+    await tester.pump();
+    // Setup sanity: the fling moved the column off 09.
+    expect(offBand(), greaterThan(0.5));
+    final updates = updateCount(api);
+    await tester.tap(find.widgetWithText(FilledButton, "Save"));
+    await tester.pump();
+    expect(updateCount(api), updates + 1);
+    expect(
+      DateTime.parse(
+        api.requests.last.body!["start"]! as String,
+      ).isAtSameMomentAs(DateTime(today.year, today.month, today.day, 9)),
+      isTrue,
+    );
+
+    // Within the write's latency, past the theme's motion.
+    await tester.pump(api.latency ~/ 2);
+    await tester.pump(api.latency ~/ 4);
+    expect(offBand(), lessThanOrEqualTo(0.5));
+    expect(tester.widget<Text>(find.byKey(scheduleSummaryKey)).data, summary);
+
+    await tester.pump(api.latency);
+    await tester.pumpAndSettle();
   });
 
   testWidgets("W1 hiding the weekends leaves the week's five weekdays", (

@@ -8,6 +8,7 @@ import 'package:widgets_extended/scheduling/dates/calendar_dates.dart'
     show parseIsoDate;
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/item_form.dart';
+import 'package:workspace_calendar/workspace_calendar/schedule_section.dart';
 
 /// The form's text field labelled [label].
 Finder fieldFinder(String label) {
@@ -29,9 +30,12 @@ Finder dropdownFinder(String label) {
   );
 }
 
-/// The text [time] in the form's dropdown labelled [label].
-Finder dropdownShows(String label, String time) {
-  return find.descendant(of: dropdownFinder(label), matching: find.text(time));
+/// The text [option] in the form's dropdown labelled [label].
+Finder dropdownShows(String label, String option) {
+  return find.descendant(
+    of: dropdownFinder(label),
+    matching: find.text(option),
+  );
 }
 
 /// The form's Save button.
@@ -49,26 +53,141 @@ bool isEnabled(WidgetTester tester, Finder button) {
   return tester.widget<ButtonStyleButton>(button).onPressed != null;
 }
 
-/// Whether the dropdown labelled [label] offers [option] enabled, as the
-/// schedule section offers a start time the policy refuses disabled.
-bool optionEnabled(WidgetTester tester, String label, String option) {
-  final button =
-      find
-              .descendant(
-                of: dropdownFinder(label),
-                matching: find.byWidgetPredicate((widget) {
-                  return widget is DropdownButton;
-                }),
-              )
-              .evaluate()
-              .single
-              .widget
-          as DropdownButton;
-  final item = button.items!.singleWhere((item) {
-    final child = item.child;
-    return child is Text && child.data == option;
-  });
-  return item.enabled;
+/// The key of the form's time field labelled [label].
+ValueKey<String> _timeFieldKey(String label) {
+  switch (label) {
+    case "Start time":
+      return scheduleStartTimeKey;
+    case "End time":
+      return scheduleEndTimeKey;
+  }
+  throw ArgumentError.value(label, "label", "names no time field");
+}
+
+/// The key of the picker the form's time field labelled [label] opens.
+ValueKey<String> _timePickerKey(String label) {
+  switch (label) {
+    case "Start time":
+      return scheduleStartPickerKey;
+    case "End time":
+      return scheduleEndPickerKey;
+  }
+  throw ArgumentError.value(label, "label", "names no time field");
+}
+
+/// The form's time field labelled [label], "Start time" or "End time".
+Finder timeFieldFinder(String label) {
+  return find.byKey(_timeFieldKey(label));
+}
+
+/// The text [time] in the form's time field labelled [label].
+Finder timeFieldShows(String label, String time) {
+  return find.descendant(of: timeFieldFinder(label), matching: find.text(time));
+}
+
+/// Whether the [InkWell] of the form's time field labelled [label] has a
+/// tap, which a field whose picker is closed has where it takes input.
+bool timeFieldTakesInput(WidgetTester tester, String label) {
+  return tester
+          .widget<InkWell>(
+            find.descendant(
+              of: timeFieldFinder(label),
+              matching: find.byType(InkWell),
+            ),
+          )
+          .onTap !=
+      null;
+}
+
+/// The picker open under the form's time field labelled [label].
+Finder timePickerFinder(String label) {
+  return find.descendant(
+    of: find.byKey(_timePickerKey(label)),
+    matching: find.byType(CalendarTimePicker),
+  );
+}
+
+/// The minute after midnight [time] names, written "HH:MM" on the 24-hour
+/// clock: "09:30" is 570, and "24:00" is 1440.
+int clockMinute(String time) {
+  final match = RegExp(r"^(\d{2}):(\d{2})$").firstMatch(time);
+  if (match == null) {
+    throw ArgumentError.value(time, "time", "is not HH:MM");
+  }
+  return int.parse(match.group(1)!) * 60 + int.parse(match.group(2)!);
+}
+
+/// Opens the picker of the form's time field labelled [label] with a tap
+/// on the field where it is closed, and lets it settle.
+Future<void> openTimePicker(WidgetTester tester, String label) async {
+  if (timePickerFinder(label).evaluate().isNotEmpty) {
+    return;
+  }
+  await tester.tap(timeFieldFinder(label));
+  await tester.pumpAndSettle();
+}
+
+/// Closes the picker of the form's time field labelled [label] with a tap
+/// on the field where it is open, and lets it settle.
+Future<void> closeTimePicker(WidgetTester tester, String label) async {
+  if (timePickerFinder(label).evaluate().isEmpty) {
+    return;
+  }
+  await tester.tap(timeFieldFinder(label));
+  await tester.pumpAndSettle();
+}
+
+/// The open picker of the form's time field labelled [label].
+CalendarTimePicker _openPicker(WidgetTester tester, String label) {
+  return tester.widget<CalendarTimePicker>(timePickerFinder(label));
+}
+
+/// Whether the open picker of the form's time field labelled [label] takes
+/// [time]: it lies in the picker's range, on its step, and the picker's
+/// `isEnabled` accepts it.
+bool timeEnabled(WidgetTester tester, String label, String time) {
+  final picker = _openPicker(tester, label);
+  final minute = clockMinute(time);
+  return minute >= picker.min &&
+      minute <= picker.max &&
+      minute % picker.minuteStep == 0 &&
+      (picker.isEnabled?.call(minute) ?? true);
+}
+
+/// The minutes the open picker of the form's time field labelled [label]
+/// has rows for, ascending: its step's multiples in its range, and its
+/// value.
+List<int> offeredTimes(WidgetTester tester, String label) {
+  final picker = _openPicker(tester, label);
+  final step = picker.minuteStep;
+  final value = picker.value;
+  final times = <int>{
+    for (
+      var minute = (picker.min + step - 1) ~/ step * step;
+      minute <= picker.max;
+      minute += step
+    )
+      minute,
+    ?value,
+  }.toList();
+  times.sort();
+  return times;
+}
+
+/// Picks [time] in the form's time field labelled [label]: opens its
+/// picker, expects the picker to take [time], reports it through the
+/// picker's own callback, as the picker does once its columns come to rest
+/// on it, and closes the picker.
+Future<void> pickTime(WidgetTester tester, String label, String time) async {
+  await openTimePicker(tester, label);
+  expect(
+    timeEnabled(tester, label, time),
+    isTrue,
+    reason: "$label takes $time",
+  );
+  _openPicker(tester, label).onChanged!(clockMinute(time));
+  await tester.pumpAndSettle();
+  await closeTimePicker(tester, label);
 }
 
 /// Picks [option] in the form's dropdown labelled [label]: opens its menu,
@@ -172,8 +291,8 @@ Future<void> expectCreateForm(
   await tester.tap(find.text(type).last);
   await tester.pumpAndSettle();
   expectFormDays(day, 1);
-  expect(dropdownShows("Start time", start), findsOneWidget);
-  expect(dropdownShows("End time", end), findsOneWidget);
+  expect(timeFieldShows("Start time", start), findsOneWidget);
+  expect(timeFieldShows("End time", end), findsOneWidget);
   await tester.tap(formButton("Cancel"));
   await tester.pumpAndSettle();
 }

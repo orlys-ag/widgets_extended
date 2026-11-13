@@ -23,7 +23,10 @@ import 'package:flutter/widgets.dart';
 /// [entryTintOpacity], [pendingEntryOpacity] and [actionLabelStyle] are
 /// read by the module's default builders: the tint they fill an entry's
 /// box with, the opacity they draw a pending entry at, and the Retry of a
-/// failed read.
+/// failed read. [disabledOpacity], [timePickerRowStyle] and
+/// [timePickerHeaderStyle] are read by the time picker,
+/// `CalendarTimePicker`, which draws its Now and Clear in
+/// [actionLabelStyle].
 ///
 /// [CalendarTheme] hands a theme down the tree, and [CalendarTheme.of]
 /// reads it.
@@ -34,8 +37,9 @@ final class CalendarThemeData with Diagnosticable {
   /// Throws an [ArgumentError], in every build, naming the first field, in
   /// the order the fields are declared, outside its domain: a
   /// [todayRingWidth] under 0 or NaN; a [draggedBlockOpacity],
-  /// [entryTintOpacity] or [pendingEntryOpacity] outside 0 to 1 or NaN; a
-  /// negative [motionDuration]; and a text style with `inherit: false`.
+  /// [entryTintOpacity], [pendingEntryOpacity] or [disabledOpacity] outside
+  /// 0 to 1 or NaN; a negative [motionDuration]; and a text style with
+  /// `inherit: false`.
   CalendarThemeData({
     this.primary = _primary,
     this.onPrimary = _onPrimary,
@@ -55,6 +59,7 @@ final class CalendarThemeData with Diagnosticable {
     this.draggedBlockOpacity = _draggedBlockOpacity,
     this.entryTintOpacity = _entryTintOpacity,
     this.pendingEntryOpacity = _pendingEntryOpacity,
+    this.disabledOpacity = _disabledOpacity,
     this.gripShadows = _gripShadows,
     this.liftedBlockShadows = _liftedBlockShadows,
     this.motionDuration = _motionDuration,
@@ -96,6 +101,8 @@ final class CalendarThemeData with Diagnosticable {
     this.monthNameStyle = _monthNameStyle,
     this.monthNameMarkedStyle = _monthNameMarkedStyle,
     this.actionLabelStyle = _actionLabelStyle,
+    this.timePickerRowStyle = _timePickerRowStyle,
+    this.timePickerHeaderStyle = _timePickerHeaderStyle,
   }) {
     // Each test asks for the domain, so a NaN, which fails every
     // comparison, lies outside it.
@@ -109,6 +116,7 @@ final class CalendarThemeData with Diagnosticable {
     _checkOpacity(draggedBlockOpacity, "draggedBlockOpacity");
     _checkOpacity(entryTintOpacity, "entryTintOpacity");
     _checkOpacity(pendingEntryOpacity, "pendingEntryOpacity");
+    _checkOpacity(disabledOpacity, "disabledOpacity");
     if (motionDuration.isNegative) {
       throw ArgumentError.value(
         motionDuration,
@@ -148,6 +156,8 @@ final class CalendarThemeData with Diagnosticable {
     _checkStyle(monthNameStyle, "monthNameStyle");
     _checkStyle(monthNameMarkedStyle, "monthNameMarkedStyle");
     _checkStyle(actionLabelStyle, "actionLabelStyle");
+    _checkStyle(timePickerRowStyle, "timePickerRowStyle");
+    _checkStyle(timePickerHeaderStyle, "timePickerHeaderStyle");
   }
 
   /// [builtIn]: each field at the value the public constructor defaults it
@@ -171,6 +181,7 @@ final class CalendarThemeData with Diagnosticable {
       draggedBlockOpacity = _draggedBlockOpacity,
       entryTintOpacity = _entryTintOpacity,
       pendingEntryOpacity = _pendingEntryOpacity,
+      disabledOpacity = _disabledOpacity,
       gripShadows = _gripShadows,
       liftedBlockShadows = _liftedBlockShadows,
       motionDuration = _motionDuration,
@@ -211,7 +222,9 @@ final class CalendarThemeData with Diagnosticable {
       weekdayLetterStyle = _weekdayLetterStyle,
       monthNameStyle = _monthNameStyle,
       monthNameMarkedStyle = _monthNameMarkedStyle,
-      actionLabelStyle = _actionLabelStyle;
+      actionLabelStyle = _actionLabelStyle,
+      timePickerRowStyle = _timePickerRowStyle,
+      timePickerHeaderStyle = _timePickerHeaderStyle;
 
   /// The built-in theme, a const value equal to `CalendarThemeData()`.
   static const CalendarThemeData builtIn = CalendarThemeData._builtIn();
@@ -255,6 +268,7 @@ final class CalendarThemeData with Diagnosticable {
   static const double _draggedBlockOpacity = 0.66;
   static const double _entryTintOpacity = 0.14;
   static const double _pendingEntryOpacity = 0.5;
+  static const double _disabledOpacity = 0.38;
   static const List<BoxShadow> _gripShadows = <BoxShadow>[
     BoxShadow(
       color: Color(0x33000000),
@@ -411,6 +425,15 @@ final class CalendarThemeData with Diagnosticable {
     fontSize: 14.0,
     fontWeight: FontWeight.w600,
   );
+  static const TextStyle _timePickerRowStyle = TextStyle(
+    fontSize: 16.0,
+    fontWeight: FontWeight.w500,
+    fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+  );
+  static const TextStyle _timePickerHeaderStyle = TextStyle(
+    fontSize: 12.0,
+    fontWeight: FontWeight.w600,
+  );
 
   /// The accent: a selected day's fill and badge, Month's selected pill, the
   /// month picker's selected pill, today's number and current month, the
@@ -485,6 +508,11 @@ final class CalendarThemeData with Diagnosticable {
   /// The opacity the default builders draw a pending entry at; from 0 to
   /// 1.
   final double pendingEntryOpacity;
+
+  /// The opacity of what the time picker draws disabled, from 0 to 1: the
+  /// [text] of a row no time of which may be picked, a toggle half with no
+  /// such time, and Now or Clear while they take no tap.
+  final double disabledOpacity;
 
   /// The shadows under each grip of the selected block on the timed grid,
   /// their offsets and radii in logical pixels of the grip's own space.
@@ -651,11 +679,21 @@ final class CalendarThemeData with Diagnosticable {
   /// month.
   final TextStyle monthNameMarkedStyle;
 
-  /// The Retry of the default failure builder. Its colour is not used: it
-  /// draws in [primary].
+  /// The Retry of the default failure builder, and the time picker's Now
+  /// and Clear. Its colour is not used: it draws in [primary].
   final TextStyle actionLabelStyle;
 
-  /// The 32 text styles, in the order the fields are declared.
+  /// The rows of the time picker's Hour and Minute columns and the halves
+  /// of its AM/PM toggle; the height of "00" in it sets the height of a
+  /// row. Its colour is not used: the rows draw in [text], the selected
+  /// half in [onPrimary] and the other in [text].
+  final TextStyle timePickerRowStyle;
+
+  /// The headers over the time picker's columns. Its colour is not used:
+  /// they draw in [textSecondary].
+  final TextStyle timePickerHeaderStyle;
+
+  /// The 34 text styles, in the order the fields are declared.
   List<TextStyle> get _textStyles {
     return <TextStyle>[
       hourLabelStyle,
@@ -690,6 +728,8 @@ final class CalendarThemeData with Diagnosticable {
       monthNameStyle,
       monthNameMarkedStyle,
       actionLabelStyle,
+      timePickerRowStyle,
+      timePickerHeaderStyle,
     ];
   }
 
@@ -715,6 +755,7 @@ final class CalendarThemeData with Diagnosticable {
     double? draggedBlockOpacity,
     double? entryTintOpacity,
     double? pendingEntryOpacity,
+    double? disabledOpacity,
     List<BoxShadow>? gripShadows,
     List<BoxShadow>? liftedBlockShadows,
     Duration? motionDuration,
@@ -756,6 +797,8 @@ final class CalendarThemeData with Diagnosticable {
     TextStyle? monthNameStyle,
     TextStyle? monthNameMarkedStyle,
     TextStyle? actionLabelStyle,
+    TextStyle? timePickerRowStyle,
+    TextStyle? timePickerHeaderStyle,
   }) {
     return CalendarThemeData(
       primary: primary ?? this.primary,
@@ -776,6 +819,7 @@ final class CalendarThemeData with Diagnosticable {
       draggedBlockOpacity: draggedBlockOpacity ?? this.draggedBlockOpacity,
       entryTintOpacity: entryTintOpacity ?? this.entryTintOpacity,
       pendingEntryOpacity: pendingEntryOpacity ?? this.pendingEntryOpacity,
+      disabledOpacity: disabledOpacity ?? this.disabledOpacity,
       gripShadows: gripShadows ?? this.gripShadows,
       liftedBlockShadows: liftedBlockShadows ?? this.liftedBlockShadows,
       motionDuration: motionDuration ?? this.motionDuration,
@@ -826,6 +870,9 @@ final class CalendarThemeData with Diagnosticable {
       monthNameStyle: monthNameStyle ?? this.monthNameStyle,
       monthNameMarkedStyle: monthNameMarkedStyle ?? this.monthNameMarkedStyle,
       actionLabelStyle: actionLabelStyle ?? this.actionLabelStyle,
+      timePickerRowStyle: timePickerRowStyle ?? this.timePickerRowStyle,
+      timePickerHeaderStyle:
+          timePickerHeaderStyle ?? this.timePickerHeaderStyle,
     );
   }
 
@@ -834,11 +881,12 @@ final class CalendarThemeData with Diagnosticable {
   ///
   /// Colours interpolate with [Color.lerp], text styles with
   /// [TextStyle.lerp], the shadows with [BoxShadow.lerpList], the duration
-  /// with [lerpDuration] and the four doubles with [lerpDouble]; the icons
+  /// with [lerpDuration] and the five doubles with [lerpDouble]; the icons
   /// and the curve are [a]'s below 0.5 and [b]'s from it. A [t] outside 0
   /// to 1, as an overshooting curve gives, may take the duration,
-  /// [todayRingWidth], [draggedBlockOpacity], [entryTintOpacity] or
-  /// [pendingEntryOpacity] out of its domain, so each is clamped into it;
+  /// [todayRingWidth], [draggedBlockOpacity], [entryTintOpacity],
+  /// [pendingEntryOpacity] or [disabledOpacity] out of its domain, so each
+  /// is clamped into it;
   /// and [TextStyle.lerp] of two styles that inherit inherits, so for a
   /// finite [t] it throws none of the constructor's errors.
   static CalendarThemeData lerp(
@@ -883,6 +931,11 @@ final class CalendarThemeData with Diagnosticable {
       ),
       pendingEntryOpacity: clampDouble(
         lerpDouble(a.pendingEntryOpacity, b.pendingEntryOpacity, t)!,
+        0.0,
+        1.0,
+      ),
+      disabledOpacity: clampDouble(
+        lerpDouble(a.disabledOpacity, b.disabledOpacity, t)!,
         0.0,
         1.0,
       ),
@@ -1019,6 +1072,16 @@ final class CalendarThemeData with Diagnosticable {
         b.actionLabelStyle,
         t,
       )!,
+      timePickerRowStyle: TextStyle.lerp(
+        a.timePickerRowStyle,
+        b.timePickerRowStyle,
+        t,
+      )!,
+      timePickerHeaderStyle: TextStyle.lerp(
+        a.timePickerHeaderStyle,
+        b.timePickerHeaderStyle,
+        t,
+      )!,
     );
   }
 
@@ -1049,6 +1112,7 @@ final class CalendarThemeData with Diagnosticable {
         other.draggedBlockOpacity == draggedBlockOpacity &&
         other.entryTintOpacity == entryTintOpacity &&
         other.pendingEntryOpacity == pendingEntryOpacity &&
+        other.disabledOpacity == disabledOpacity &&
         listEquals(other.gripShadows, gripShadows) &&
         listEquals(other.liftedBlockShadows, liftedBlockShadows) &&
         other.motionDuration == motionDuration &&
@@ -1089,7 +1153,9 @@ final class CalendarThemeData with Diagnosticable {
         other.weekdayLetterStyle == weekdayLetterStyle &&
         other.monthNameStyle == monthNameStyle &&
         other.monthNameMarkedStyle == monthNameMarkedStyle &&
-        other.actionLabelStyle == actionLabelStyle;
+        other.actionLabelStyle == actionLabelStyle &&
+        other.timePickerRowStyle == timePickerRowStyle &&
+        other.timePickerHeaderStyle == timePickerHeaderStyle;
   }
 
   @override
@@ -1113,6 +1179,7 @@ final class CalendarThemeData with Diagnosticable {
       draggedBlockOpacity,
       entryTintOpacity,
       pendingEntryOpacity,
+      disabledOpacity,
       Object.hashAll(gripShadows),
       Object.hashAll(liftedBlockShadows),
       motionDuration,
@@ -1184,6 +1251,13 @@ final class CalendarThemeData with Diagnosticable {
           "pendingEntryOpacity",
           pendingEntryOpacity,
           defaultValue: _pendingEntryOpacity,
+        ),
+      )
+      ..add(
+        DoubleProperty(
+          "disabledOpacity",
+          disabledOpacity,
+          defaultValue: _disabledOpacity,
         ),
       )
       ..add(
@@ -1335,6 +1409,12 @@ final class CalendarThemeData with Diagnosticable {
       _monthNameMarkedStyle,
     );
     addStyle("actionLabelStyle", actionLabelStyle, _actionLabelStyle);
+    addStyle("timePickerRowStyle", timePickerRowStyle, _timePickerRowStyle);
+    addStyle(
+      "timePickerHeaderStyle",
+      timePickerHeaderStyle,
+      _timePickerHeaderStyle,
+    );
   }
 }
 

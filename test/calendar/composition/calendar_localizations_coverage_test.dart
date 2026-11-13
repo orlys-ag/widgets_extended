@@ -4,7 +4,9 @@
 /// localizations that bracket every string they write, and then each line,
 /// its bracketed spans taken out, holds nothing but the commas and spaces
 /// that joined them, entry content and bare numbers, in the views, the
-/// header, the calendar card, the month picker and the default builders.
+/// header, the calendar card, the month picker, the default builders and
+/// the time picker, whose row labels and columns' values are checked
+/// bracketed whole.
 library;
 
 import 'package:flutter/foundation.dart';
@@ -27,6 +29,7 @@ import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/month_picker.dart';
+import 'package:widgets_extended/calendar/views/time_picker.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 
 /// [text] between the brackets [_Marked] puts around each string it
@@ -355,6 +358,46 @@ final class _Marked extends DefaultCalendarLocalizations {
   String get editModeTooltip {
     return bracketed(super.editModeTooltip);
   }
+
+  @override
+  String get timePickerHourLabel {
+    return bracketed(super.timePickerHourLabel);
+  }
+
+  @override
+  String get timePickerMinuteLabel {
+    return bracketed(super.timePickerMinuteLabel);
+  }
+
+  @override
+  String get timePickerAmLabel {
+    return bracketed(super.timePickerAmLabel);
+  }
+
+  @override
+  String get timePickerPmLabel {
+    return bracketed(super.timePickerPmLabel);
+  }
+
+  @override
+  String get timePickerNowLabel {
+    return bracketed(super.timePickerNowLabel);
+  }
+
+  @override
+  String get timePickerClearLabel {
+    return bracketed(super.timePickerClearLabel);
+  }
+
+  @override
+  String timePickerHour(int hour, CalendarHourLabelFormat format) {
+    return bracketed(super.timePickerHour(hour, format));
+  }
+
+  @override
+  String timePickerMinute(int minuteOfHour) {
+    return bracketed(super.timePickerMinute(minuteOfHour));
+  }
 }
 
 class _MarkedDelegate extends LocalizationsDelegate<CalendarLocalizations> {
@@ -515,13 +558,21 @@ List<String> shownTexts(WidgetTester tester) {
   ];
 }
 
-/// The label, value, hint, tooltip and hint overrides of every node of the
-/// semantics tree.
-List<String> heardTexts(WidgetTester tester) {
+/// The label, value, increased and decreased values, hint, tooltip and
+/// hint overrides of every node of the semantics tree, which it climbs to
+/// the root of from the node of [from], by default the calendar's.
+List<String> heardTexts(WidgetTester tester, {Finder? from}) {
   final texts = <String>[];
   bool visit(SemanticsNode node) {
     final data = node.getSemanticsData();
-    texts.addAll(<String>[data.label, data.value, data.hint, data.tooltip]);
+    texts.addAll(<String>[
+      data.label,
+      data.value,
+      data.increasedValue,
+      data.decreasedValue,
+      data.hint,
+      data.tooltip,
+    ]);
     final overrides = node.hintOverrides;
     if (overrides != null) {
       texts.addAll(<String>[
@@ -533,7 +584,7 @@ List<String> heardTexts(WidgetTester tester) {
     return true;
   }
 
-  var root = tester.getSemantics(find.byType(CalendarView<String>));
+  var root = tester.getSemantics(from ?? find.byType(CalendarView<String>));
   while (root.parent != null) {
     root = root.parent!;
   }
@@ -577,13 +628,15 @@ List<String> unmarked(Iterable<String> texts) {
   ];
 }
 
-/// Expects no line on stage or in the semantics tree to be [unmarked]; a
-/// line that is is named with where it was found.
-void expectMarked(WidgetTester tester, String where) {
+/// Expects no line on stage or in the semantics tree, which
+/// [heardTexts] reads from the node of [from], to be [unmarked]; a line
+/// that is is named with where it was found.
+void expectMarked(WidgetTester tester, String where, {Finder? from}) {
   expect(
     <String>[
       for (final line in unmarked(shownTexts(tester))) "shown: $line",
-      for (final line in unmarked(heardTexts(tester))) "heard: $line",
+      for (final line in unmarked(heardTexts(tester, from: from)))
+        "heard: $line",
     ],
     isEmpty,
     reason: where,
@@ -844,6 +897,82 @@ void main() {
       controller.dispose();
       store.dispose();
     }
+    semantics.dispose();
+  });
+
+  testWidgets("LZ6 the time picker's headers, rows, halves, actions and "
+      "columns' values switch to the localizations above it", (tester) async {
+    useView(tester, 800.0, 1200.0);
+    final semantics = tester.ensureSemantics();
+    Widget pickers({required bool marked}) {
+      return app(
+        Column(
+          children: <Widget>[
+            SizedBox(
+              width: 320.0,
+              child: CalendarTimePicker(
+                value: 570,
+                now: () {
+                  return 853;
+                },
+                clearable: true,
+                onChanged: (value) {},
+              ),
+            ),
+            SizedBox(
+              width: 320.0,
+              child: CalendarTimePicker(
+                value: 870,
+                hourLabelFormat: CalendarHourLabelFormat.twelveHour,
+                onChanged: (value) {},
+              ),
+            ),
+          ],
+        ),
+        marked: marked,
+      );
+    }
+
+    final first = find.byType(CalendarTimePicker).first;
+    await tester.pumpWidget(pickers(marked: false));
+    expect(unmarked(shownTexts(tester)), isNotEmpty);
+    expect(unmarked(heardTexts(tester, from: first)), isNotEmpty);
+
+    await tester.pumpWidget(pickers(marked: true));
+    await tester.pumpAndSettle();
+    expect(find.byKey(timePickerToggleKey), findsOneWidget);
+    expect(find.byKey(timePickerNowKey), findsOneWidget);
+    expect(find.byKey(timePickerClearKey), findsOneWidget);
+    expectMarked(tester, "the time pickers", from: first);
+    // A row label or a column's value the picker wrote itself would be a
+    // bare number, which unmarked passes, so they are read whole.
+    expect(
+      find.descendant(
+        of: find.byKey(timePickerHourRowKey(9)),
+        matching: find.text("[09]"),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(timePickerMinuteRowKey(30)).first,
+        matching: find.text("[30]"),
+      ),
+      findsOneWidget,
+    );
+    final hour = tester
+        .getSemantics(find.byKey(timePickerHourColumnKey).first)
+        .getSemanticsData();
+    expect(hour.label, "[Hour]");
+    expect(hour.value, "[09]");
+    expect(hour.increasedValue, "[10]");
+    expect(hour.decreasedValue, "[08]");
+    final minute = tester
+        .getSemantics(find.byKey(timePickerMinuteColumnKey).first)
+        .getSemanticsData();
+    expect(minute.value, "[30]");
+    expect(minute.increasedValue, "[45]");
+    expect(minute.decreasedValue, "[15]");
     semantics.dispose();
   });
 }

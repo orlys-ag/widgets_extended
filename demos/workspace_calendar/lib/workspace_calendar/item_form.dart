@@ -21,15 +21,16 @@ import 'schedule_section.dart';
 
 /// Opens the form for a new item over the range [range] picked, with All
 /// day on for an all-day range, its type chosen in the form, Task first;
-/// its Save [policy] checks at the time [now] reads then, and its times
-/// step by [slotMinutes]. Completes when the form closes, whether or not
-/// an item was created.
+/// its Save [policy] checks at the time [now] reads then, its times step
+/// by [slotMinutes], and it writes them on [hourLabelFormat]'s clock.
+/// Completes when the form closes, whether or not an item was created.
 Future<void> showCreateFlow(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
   required CalendarCreateRange range,
   required CalendarEditPolicy<ItemPayload> policy,
   required ValueGetter<CalendarNow> now,
+  required CalendarHourLabelFormat hourLabelFormat,
   int slotMinutes = CalendarDates.defaultSlotMinutes,
 }) {
   const type = CalendarItemType.task;
@@ -47,22 +48,25 @@ Future<void> showCreateFlow(
     item: draft,
     policy: policy,
     now: now,
+    hourLabelFormat: hourLabelFormat,
     slotMinutes: slotMinutes,
   );
 }
 
 /// Opens the form for the stored item [id], whose Save [policy] checks at
-/// the time [now] reads then, and whose times step by [slotMinutes]. Of an
-/// item [policy], when the form opens, lets neither move nor resize its
-/// start, the start date, the start time and All day take no input; and
-/// the form offers Delete only where [policy] then lets the item be
-/// deleted. Does nothing when the store does not hold it.
+/// the time [now] reads then, whose times step by [slotMinutes], and which
+/// writes them on [hourLabelFormat]'s clock. Of an item [policy], when the
+/// form opens, lets neither move nor resize its start, the start date, the
+/// start time and All day take no input; and the form offers Delete only
+/// where [policy] then lets the item be deleted. Does nothing when the
+/// store does not hold it.
 Future<void> showEditForm(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
   required String id,
   required CalendarEditPolicy<ItemPayload> policy,
   required ValueGetter<CalendarNow> now,
+  required CalendarHourLabelFormat hourLabelFormat,
   int slotMinutes = CalendarDates.defaultSlotMinutes,
 }) async {
   final item = store.storedEntry(id);
@@ -75,23 +79,32 @@ Future<void> showEditForm(
     item: item,
     policy: policy,
     now: now,
+    hourLabelFormat: hourLabelFormat,
     slotMinutes: slotMinutes,
   );
 }
 
 /// Opens the form for the stored item [id] read-only: it shows the item's
-/// schedule and fields, takes no input and has Close for its one action.
-/// Does nothing when the store does not hold it.
+/// schedule, its times on [hourLabelFormat]'s clock, and its fields, takes
+/// no input and has Close for its one action. Does nothing when the store
+/// does not hold it.
 Future<void> showItemDetails(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
   required String id,
+  required CalendarHourLabelFormat hourLabelFormat,
 }) async {
   final item = store.storedEntry(id);
   if (item == null) {
     return;
   }
-  await _showForm(context, store: store, item: item, readOnly: true);
+  await _showForm(
+    context,
+    store: store,
+    item: item,
+    readOnly: true,
+    hourLabelFormat: hourLabelFormat,
+  );
 }
 
 /// Asks whether to delete an item. True when Delete was pressed.
@@ -177,6 +190,7 @@ Future<void> _showForm(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
   required CalendarItem item,
+  required CalendarHourLabelFormat hourLabelFormat,
   bool readOnly = false,
   CalendarEditPolicy<ItemPayload>? policy,
   ValueGetter<CalendarNow>? now,
@@ -199,6 +213,7 @@ Future<void> _showForm(
         readOnly: readOnly,
         policy: policy ?? const UnrestrictedEditPolicy<ItemPayload>(),
         now: now ?? _clockNow,
+        hourLabelFormat: hourLabelFormat,
         slotMinutes: slotMinutes,
       );
     },
@@ -224,6 +239,7 @@ class _ItemForm extends StatefulWidget {
     required this.readOnly,
     required this.policy,
     required this.now,
+    required this.hourLabelFormat,
     required this.slotMinutes,
   });
 
@@ -232,6 +248,9 @@ class _ItemForm extends StatefulWidget {
 
   /// The step of the time fields' slot boundaries.
   final int slotMinutes;
+
+  /// The clock the schedule section writes times on.
+  final CalendarHourLabelFormat hourLabelFormat;
 
   /// Whether every control is disabled and Close is the one action.
   final bool readOnly;
@@ -680,6 +699,8 @@ class _ItemFormState extends State<_ItemForm> {
             check: _check(),
             hours: widget.store.hours,
             slotMinutes: widget.slotMinutes,
+            hourLabelFormat: widget.hourLabelFormat,
+            now: widget.now,
             zone: widget.store.zone,
             locked: _locked,
             errors: _errors,
@@ -695,10 +716,7 @@ class _ItemFormState extends State<_ItemForm> {
     ];
     return PopScope(
       canPop: !_saving,
-      child: Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(context).bottom,
-        ),
+      child: _KeyboardInset(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 12.0),
           child: Column(
@@ -782,6 +800,24 @@ class _ItemFormState extends State<_ItemForm> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// [child] padded by the keyboard's bottom inset. It alone reads the inset,
+/// so a keyboard that slides in or out rebuilds it and not the form, whose
+/// open time picker asks its `isEnabled` of every time again as it is
+/// rebuilt.
+class _KeyboardInset extends StatelessWidget {
+  const _KeyboardInset({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: child,
     );
   }
 }

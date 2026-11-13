@@ -106,6 +106,31 @@ draws in the calendar's theme, shows each zone's offset from UTC, and takes
 its words from seven `CalendarLocalizations` members with English defaults:
 `deviceZoneName`, `utcOffset`, `addZonesLabel`, `searchZonesHint`,
 `noZonesMessage`, `removeZoneTooltip` and `zonesBackTooltip`.
+- Added `CalendarTimePicker`, an inline time panel: an Hour column and a
+Minute column, five rows tall, that scroll and snap to a band across its
+middle, an AM/PM toggle on the 12-hour clock (`hourLabelFormat`), and a
+footer of Now (`now`, the current minute on the host's clock, picked
+rounded down to `minuteStep`) and Clear (`clearable`, which reports null)
+where either is given. Its `value` is a minute after midnight on the
+host's clock, 0 to 1440, where 1440 is the 24:00 that ends a day, or null
+for no time. Only the times from `min` to `max` on `minuteStep` have rows,
+a time `isEnabled` refuses draws disabled and takes no pick, and the
+value always shows, selected. A drag, a fling, a tap, a mouse wheel, the
+keys or a screen reader's increase and decrease move a column, and a pick
+is reported through `onChanged` once the columns come to rest; a new
+`value` moves them over the theme's motion and reports nothing. With a
+null `onChanged` it takes no input. It draws in the theme
+`CalendarTheme.of` gives and reads no Material theme, so a Material app
+puts a `CalendarTheme` above it of its `CalendarThemeExtension`'s `data`
+or of `CalendarThemeExtension.fromColorScheme(scheme).data`. Its
+constructor throws an `ArgumentError`, in every build, naming a
+`minuteStep` that does not divide 60, a `min` or `max` outside 0 to 1440,
+a `max` below `min`, or a `value` outside 0 to 1440. `CalendarThemeData`
+gains `disabledOpacity` (0.38 built in), `timePickerRowStyle` and
+`timePickerHeaderStyle`, and `CalendarLocalizations` gains eight members
+with English defaults: `timePickerHourLabel`, `timePickerMinuteLabel`,
+`timePickerAmLabel`, `timePickerPmLabel`, `timePickerNowLabel`,
+`timePickerClearLabel`, `timePickerHour` and `timePickerMinute`.
 - Added `CalendarController.createOn`, which reports a create on a day
 through `CalendarView.onCreateRange`, as Month's long press does, in any
 view and out of edit mode too: one slot, at the first free slot from the

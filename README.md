@@ -529,6 +529,20 @@ final app = MaterialApp(
 );
 ```
 
+`CalendarTimePicker` is an inline panel from which a user picks a time of
+day: an Hour column and a Minute column that scroll and snap to a band
+across its middle, an AM/PM toggle on the 12-hour clock, and Now and Clear
+where you give `now` or set `clearable`. Its value is a minute after
+midnight, 0 to 1440, where 1440 is the 24:00 that ends a day, or null for no
+time. It offers only the times from `min` to `max` on its `minuteStep`, draws
+the ones your `isEnabled` refuses disabled, always shows its value, and
+reports a pick through `onChanged` once its columns come to rest. It opens
+no route: put it where your form shows it. It draws in the theme
+`CalendarTheme.of` gives, the nearest `CalendarTheme` or the built-in one,
+and reads no Material theme, so in a Material app put a `CalendarTheme`
+above it, of your `CalendarThemeExtension`'s `data` or of
+`CalendarThemeExtension.fromColorScheme(scheme).data`.
+
 **Editing.** With `editable: true`, Week's and Day's blocks move and
 resize, and a create gesture reports a `CalendarCreateDetails` through
 `onCreateRange`: the range it picked, where its mark is on screen when it
@@ -556,7 +570,9 @@ of the change's times and the entry it changes.
 motion and icon the views draw. Give it through a `CalendarTheme`, or in a
 Material app through a `CalendarThemeExtension`. A Material app with
 neither gets one derived from its `ColorScheme`, and an app with no
-Material theme the built-in one. In an app with no `Material` above the
+Material theme the built-in one. `CalendarTimePicker`, which stands apart
+from `CalendarView`, reads only a `CalendarTheme` above it, and the
+built-in theme where there is none. In an app with no `Material` above the
 calendar, the built-in header puts a transparent one above itself; its
 view menu, shown where the calendar lists more than one view, needs
 `MaterialLocalizations`, which a `MaterialApp` gives and another app adds

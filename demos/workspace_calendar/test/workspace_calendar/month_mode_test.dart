@@ -518,8 +518,8 @@ void main() {
       );
       await longPressDay(tester, april(21));
       await pickTask(tester);
-      await chooseOption(tester, "Start time", "08:00");
-      await chooseOption(tester, "End time", "09:00");
+      await pickTime(tester, "Start time", "08:00");
+      await pickTime(tester, "End time", "09:00");
       await tester.enterText(fieldFinder("Title"), "Early");
       await tester.tap(saveFinder());
       await tester.pump(harnessLatency);
@@ -714,8 +714,8 @@ void main() {
       await longPressDay(tester, april(22));
       await pickTask(tester);
       expectFormDays("2026-04-22", 1);
-      expect(dropdownShows("Start time", "01:00"), findsOneWidget);
-      expect(dropdownShows("End time", "01:15"), findsOneWidget);
+      expect(timeFieldShows("Start time", "01:00"), findsOneWidget);
+      expect(timeFieldShows("End time", "01:15"), findsOneWidget);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
       expect(pilledDays(tester), <DateTime>[april(22)]);
@@ -734,8 +734,8 @@ void main() {
       );
       await longPressDay(tester, april(22));
       await pickTask(tester);
-      expect(dropdownShows("Start time", "23:45"), findsOneWidget);
-      expect(dropdownShows("End time", "24:00"), findsOneWidget);
+      expect(timeFieldShows("Start time", "23:45"), findsOneWidget);
+      expect(timeFieldShows("End time", "24:00"), findsOneWidget);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     },
@@ -751,8 +751,8 @@ void main() {
       );
       await longPressDay(tester, april(22));
       await pickTask(tester);
-      expect(dropdownShows("Start time", "00:00"), findsOneWidget);
-      expect(dropdownShows("End time", "00:15"), findsOneWidget);
+      expect(timeFieldShows("Start time", "00:00"), findsOneWidget);
+      expect(timeFieldShows("End time", "00:15"), findsOneWidget);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     },
@@ -916,8 +916,8 @@ void main() {
       await tester.tap(chipFinder("item-2", monday));
       await tester.pumpAndSettle();
       expect(find.text("Edit Task"), findsOneWidget);
-      await chooseOption(tester, "Start time", "08:00");
-      await chooseOption(tester, "End time", "09:00");
+      await pickTime(tester, "Start time", "08:00");
+      await pickTime(tester, "End time", "09:00");
 
       final reported = <String>{};
       addTearDown(() {
@@ -1219,8 +1219,8 @@ void main() {
       await tester.longPress(stripFinder(april(28)));
       await tester.pumpAndSettle();
       await pickTask(tester);
-      await chooseOption(tester, "Start time", "16:00");
-      await chooseOption(tester, "End time", "17:00");
+      await pickTime(tester, "Start time", "16:00");
+      await pickTime(tester, "End time", "17:00");
       await tester.enterText(fieldFinder("Title"), "Late");
       await tester.tap(saveFinder());
       await tester.pump(latency);

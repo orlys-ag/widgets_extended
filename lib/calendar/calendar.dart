@@ -112,3 +112,4 @@ export 'presentation/calendar_theme.dart' show CalendarTheme, CalendarThemeData;
 export 'views/create_details.dart' show CalendarCreateDetails;
 export 'views/month_board.dart' show CalendarMonthLayout;
 export 'views/move_request.dart' show CalendarMoveKind, CalendarMoveRequest;
+export 'views/time_picker.dart' show CalendarTimePicker;

@@ -328,20 +328,8 @@ void main() {
     await createAt(tester, rowOf(14 * 60), colOf(2), "Task");
     expect(find.text("New item"), findsOneWidget);
     expectFormDays("2026-04-22", 1);
-    expect(
-      find.descendant(
-        of: dropdownFinder("Start time"),
-        matching: find.text("14:00"),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: dropdownFinder("End time"),
-        matching: find.text("14:15"),
-      ),
-      findsOneWidget,
-    );
+    expect(timeFieldShows("Start time", "14:00"), findsOneWidget);
+    expect(timeFieldShows("End time", "14:15"), findsOneWidget);
     expect(formButton("Delete"), findsNothing);
 
     await tester.enterText(fieldFinder("Title"), "Design sync");
@@ -403,20 +391,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     await createAt(tester, rowOf(23 * 60 + 45), colOf(2), "Task");
-    expect(
-      find.descendant(
-        of: dropdownFinder("Start time"),
-        matching: find.text("23:45"),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: dropdownFinder("End time"),
-        matching: find.text("24:00"),
-      ),
-      findsOneWidget,
-    );
+    expect(timeFieldShows("Start time", "23:45"), findsOneWidget);
+    expect(timeFieldShows("End time", "24:00"), findsOneWidget);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
   });
@@ -441,20 +417,8 @@ void main() {
       await tester.tap(find.text("Task").last);
       await tester.pumpAndSettle();
       expectFormDays(day, int.parse(days));
-      expect(
-        find.descendant(
-          of: dropdownFinder("Start time"),
-          matching: find.text(start),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(
-          of: dropdownFinder("End time"),
-          matching: find.text(end),
-        ),
-        findsOneWidget,
-      );
+      expect(timeFieldShows("Start time", start), findsOneWidget);
+      expect(timeFieldShows("End time", end), findsOneWidget);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     }
@@ -729,16 +693,11 @@ void main() {
     // End time offers only times after the start, so an end before it
     // cannot be picked.
     await createAt(tester, rowOf(14 * 60), colOf(5), "Task");
-    expect(optionEnabled(tester, "End time", "14:15"), isTrue);
-    final ends = tester.widget<DropdownButton<int>>(
-      find.descendant(
-        of: dropdownFinder("End time"),
-        matching: find.byType(DropdownButton<int>),
-      ),
-    );
+    await openTimePicker(tester, "End time");
+    expect(timeEnabled(tester, "End time", "14:15"), isTrue);
     expect(<int>[
-      for (final item in ends.items!)
-        if (item.value! <= 14 * 60) item.value!,
+      for (final minute in offeredTimes(tester, "End time"))
+        if (minute <= 14 * 60) minute,
     ], isEmpty);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
@@ -1287,8 +1246,8 @@ void main() {
 
     await createAt(tester, rowOf(18 * 60), colOf(0), "Task");
     await tester.enterText(fieldFinder("Title"), "Dentist");
-    await chooseOption(tester, "Start time", "10:00");
-    await chooseOption(tester, "End time", "11:00");
+    await pickTime(tester, "Start time", "10:00");
+    await pickTime(tester, "End time", "11:00");
     // Monday 10:00 lies in "Day off": the form refuses the overlap the
     // settings' policy refuses before it sends anything.
     final sent = api.requests.length;
@@ -1299,8 +1258,8 @@ void main() {
     expect(find.text("New item"), findsOneWidget);
     expect(fieldText(tester, "Title"), "Dentist");
 
-    await chooseOption(tester, "Start time", "18:00");
-    await chooseOption(tester, "End time", "19:00");
+    await pickTime(tester, "Start time", "18:00");
+    await pickTime(tester, "End time", "19:00");
     api.failurePolicy = (request) {
       return "The server is down.";
     };
@@ -2418,7 +2377,7 @@ void main() {
       }),
       <bool>[false, false, false],
     );
-    // Start time, End time, Status and Priority.
+    // Status and Priority.
     expect(
       tester
           .widgetList<DropdownButtonFormField<Object>>(
@@ -2431,8 +2390,10 @@ void main() {
           .map((dropdown) {
             return dropdown.onChanged == null;
           }),
-      <bool>[true, true, true, true],
+      <bool>[true, true],
     );
+    expect(timeFieldTakesInput(tester, "Start time"), isFalse);
+    expect(timeFieldTakesInput(tester, "End time"), isFalse);
     // A timed item on one day shows no End date.
     expect(inDialog(find.text("End date")), findsNothing);
     await tester.tap(
@@ -2715,20 +2676,8 @@ void main() {
       await tester.tap(find.text("Task").last);
       await tester.pumpAndSettle();
       expectFormDays(day, int.parse(days));
-      expect(
-        find.descendant(
-          of: dropdownFinder("Start time"),
-          matching: find.text(start),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(
-          of: dropdownFinder("End time"),
-          matching: find.text(end),
-        ),
-        findsOneWidget,
-      );
+      expect(timeFieldShows("Start time", start), findsOneWidget);
+      expect(timeFieldShows("End time", end), findsOneWidget);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     }

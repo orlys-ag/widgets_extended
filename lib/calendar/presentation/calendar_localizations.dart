@@ -10,7 +10,8 @@ import '../../scheduling/scheduling.dart';
 
 /// Every text the calendar shows or a screen reader hears: the names of the
 /// months and weekdays, the times and dates, and the views', the header's,
-/// the zone panel's and the default builders' labels, sentences and hints.
+/// the zone panel's, the time picker's and the default builders' labels,
+/// sentences and hints.
 ///
 /// [CalendarLocalizations.of] reads the instance the nearest [Localizations]
 /// loaded, and [DefaultCalendarLocalizations] where it loaded none. To
@@ -312,6 +313,56 @@ abstract base class CalendarLocalizations {
   /// The tooltip of the header's edit mode toggle: "Edit mode".
   String get editModeTooltip {
     return "Edit mode";
+  }
+
+  /// The header of the time picker's hour column, which a screen reader
+  /// hears as the column's name: "Hour".
+  String get timePickerHourLabel {
+    return "Hour";
+  }
+
+  /// The header of the time picker's minute column, which a screen reader
+  /// hears as the column's name: "Minute".
+  String get timePickerMinuteLabel {
+    return "Minute";
+  }
+
+  /// The time picker's toggle half for the hours before noon: "AM".
+  String get timePickerAmLabel {
+    return "AM";
+  }
+
+  /// The time picker's toggle half for the hours from noon: "PM".
+  String get timePickerPmLabel {
+    return "PM";
+  }
+
+  /// The time picker's action that picks the current time: "Now".
+  String get timePickerNowLabel {
+    return "Now";
+  }
+
+  /// The time picker's action that picks no time: "Clear".
+  String get timePickerClearLabel {
+    return "Clear";
+  }
+
+  /// The number of the time picker's hour row for [hour], 0 to 24, as the
+  /// row shows it and a screen reader hears it: on the 24-hour clock "00"
+  /// to "24"; on the 12-hour clock "12" for 0, 12 and 24, and otherwise
+  /// `hour % 12` in two digits, "01" to "11".
+  String timePickerHour(int hour, CalendarHourLabelFormat format) {
+    if (format == CalendarHourLabelFormat.twentyFourHour) {
+      return hour.toString().padLeft(2, "0");
+    }
+    final shown = hour % 12 == 0 ? 12 : hour % 12;
+    return shown.toString().padLeft(2, "0");
+  }
+
+  /// The number of the time picker's minute row for [minuteOfHour], 0 to
+  /// 59, as the row shows it and a screen reader hears it: "00" to "59".
+  String timePickerMinute(int minuteOfHour) {
+    return minuteOfHour.toString().padLeft(2, "0");
   }
 }
 
