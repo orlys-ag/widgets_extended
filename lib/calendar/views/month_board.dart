@@ -1341,11 +1341,15 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     widget.onOpenDay(day);
   }
 
+  /// Reports a create on [day] for a long press on its cell, or for a
+  /// screen reader's long press, with the platform's long-press feedback
+  /// ([Feedback.forLongPress]) for both, as Material's `InkWell` gives.
   void _createOnDay(DateTime day, Rect globalRect) {
     final create = widget.onCreateOnDay;
     if (create == null || _pinch.pinched.value) {
       return;
     }
+    Feedback.forLongPress(context);
     _focusNode.requestFocus();
     final created = create(day, globalRect);
     if (created == null) {

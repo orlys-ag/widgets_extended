@@ -21,6 +21,7 @@ import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import 'answer_builder.dart';
 import 'create_details.dart';
+import 'create_press.dart';
 import 'entry_split.dart';
 import 'move_request.dart';
 import 'pinch_zoom.dart';
@@ -465,8 +466,8 @@ int slotWallMinuteOf(GridTracks tracks, ({int row, int col}) cell) {
       tracks.minuteAt(cell.row);
 }
 
-/// What a tap on the body [cell] creates: its one slot, or null where its
-/// start or its end is a time the clock skips. On a day whose clock
+/// What a create range let go on the body [cell] it began on creates: its
+/// one slot, or null where its start or its end is a time the clock skips. On a day whose clock
 /// repeats a stretch, each end is the earlier instant of its time, or the
 /// later where [occurrence] is a later instant on that day
 /// ([CalendarDates.timeAtWallMinute]), as an earliest start in the stretch's
@@ -642,7 +643,7 @@ CalendarCreateRange? _createRangeOf(
 /// landing outline while the pointer is there; and a block dropped with the
 /// pointer over a day's strip cell makes its entry all-day on that day, the
 /// strip marking that day while the pointer is there. A drag across empty strip
-/// cells creates an all-day range of their days, as a tap on one creates its
+/// cells creates an all-day range of their days, as a hold on one creates its
 /// day. A line over the blocks marks the time [now] holds in its day's column,
 /// and the grid opens scrolled to the hour before it when it shows that day, at
 /// 08:00 otherwise, with that hour's label whole below the top edge. Each whole
@@ -660,11 +661,15 @@ CalendarCreateRange? _createRangeOf(
 /// frozen against the last slot does; the hour gutter runs on beside both. An
 /// entry on no shown day has no block either, and a pill in the day header's
 /// corner counts it. In edit mode empty body cells take a create gesture,
-/// reported through [onCreate]: a drag picks one continuous range from the
-/// earlier of its two slots to the later, across days too, at once with a mouse
-/// or a stylus and after a press and hold on touch, so a touch drag without one
-/// scrolls the grid, and a tap, or a hold let go where it began, picks its one
-/// slot. Where [editPolicy] forbids overlaps, a slot that shares time with an
+/// reported through [onCreate], which a press starts once held for the
+/// long-press timeout ([kLongPressTimeout]), with the platform's long-press
+/// feedback ([Feedback.forLongPress]), or, with a mouse, a stylus or a
+/// trackpad, once moved more than 4 logical pixels, whichever comes first; a
+/// touch that moves first scrolls the grid, and a press let go before either,
+/// a tap or a click, creates nothing. The drag that follows picks one
+/// continuous range from the earlier of its two slots to the later, across
+/// days too, and one let go on the slot it began on picks that slot. Where
+/// [editPolicy] forbids overlaps, a slot that shares time with an
 /// entry [CalendarEditPolicy.mayOverlap] does not let a create of the slot
 /// share takes no create gesture, and a press on a block starts none,
 /// whatever the policy answers about it. The range picked stays marked, as a
@@ -686,8 +691,8 @@ CalendarCreateRange? _createRangeOf(
 /// [minDayWidthHigh]. While two fingers are down the grid does not scroll,
 /// and a finger that pinched clears no selection when it lifts off the
 /// selected block. The grid runs one gesture at a time: while a block or a bar
-/// moves or resizes, a create range runs or a pinch zooms, no pinch starts and
-/// no create range or tap creates, and a block or a bar lifted meanwhile ends a
+/// moves or resizes, a create range runs or a pinch zooms, no pinch or create
+/// range starts, and a block or a bar lifted meanwhile ends a
 /// create range, which then creates nothing, or a pinch, which then zooms
 /// nothing more. New days, which a new [firstDay], [dayCount] or [weekdays]
 /// gives, cancel a move or a resize in flight, which then requests nothing, and
@@ -814,10 +819,10 @@ class TimedGrid<T> extends StatefulWidget {
   /// empty slots take a create gesture, as [editPolicy] lets them. Out of
   /// it the grid is read-only, and asks [editPolicy] nothing. Leaving it
   /// ends the gestures that edit: a move or a resize under way writes
-  /// nothing, a create range under way reports nothing, and a tap or a
-  /// touch hold pressed in it creates nothing, the held finger scrolling
-  /// the grid; a create flow already reported keeps its range marked until
-  /// it closes.
+  /// nothing, a create range under way reports nothing, and a press in it
+  /// that has not yet started a create range starts none, a held finger
+  /// scrolling the grid; a create flow already reported keeps its range
+  /// marked until it closes.
   final bool editable;
 
   /// What the gestures may change in edit mode ([CalendarEditPolicy]);
@@ -858,7 +863,7 @@ class TimedGrid<T> extends StatefulWidget {
   /// ([BoardDragConfig.canDropAt]); one that throws while a create range
   /// tests its range, at a pointer move, a store notify or a new minute,
   /// is reported and ends the range, which then creates nothing; and one
-  /// that throws in a build, a press or a tap goes through.
+  /// that throws in a build or a press goes through.
   final CalendarEditPolicy<T>? editPolicy;
 
   /// The weekdays whose days the grid shows. At least one day of the range
@@ -1482,11 +1487,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   );
 
   /// The presses that went down off the selected entry's blocks, by
-  /// pointer: where each went down, and the entry selected then. One let
-  /// go within its slop of there, with that entry still selected, is a tap
-  /// elsewhere, which clears the selection.
-  final Map<int, ({Offset at, String id})> _pressesOff =
-      <int, ({Offset at, String id})>{};
+  /// pointer: where each went down, the entry selected then, and whether it
+  /// went down on another block or bar. One let go within its slop of
+  /// there, with that entry still selected, is a tap elsewhere, which
+  /// clears the selection. Off every block, a pointer [_pressRange] takes
+  /// has [createPressSlop] as its slop, the move past which its press
+  /// starts a create range instead.
+  final Map<int, ({Offset at, String id, bool onBlock})> _pressesOff =
+      <int, ({Offset at, String id, bool onBlock})>{};
 
   /// The gesture the grid runs: [_Idle] until a pinch ([_startPinch]), a
   /// create range ([_beginRange]) or the board's drag ([_handleDragStart])
@@ -1614,9 +1622,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// armed only for a press on an empty body cell, so a press on a block
   /// leaves the arena to the block's own move and resize gestures. Made
   /// anew on leaving edit mode ([_resetCreateGestures]).
-  late TapGestureRecognizer _tap;
-  late ImmediateMultiDragGestureRecognizer _immediateRange;
+  late CreatePressGestureRecognizer _pressRange;
   late DelayedMultiDragGestureRecognizer _delayedRange;
+
+  /// The pointer kinds whose presses [_pressRange] takes; [_delayedRange]
+  /// takes the others.
+  static const Set<PointerDeviceKind> _pressKinds = <PointerDeviceKind>{
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.stylus,
+    PointerDeviceKind.invertedStylus,
+    PointerDeviceKind.trackpad,
+  };
 
   /// The device's gesture settings as [didChangeDependencies] last read
   /// them, which the create gestures take.
@@ -1941,25 +1957,19 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// Makes the create gestures, with the device's gesture settings as
   /// [didChangeDependencies] last read them.
   void _makeCreateGestures() {
-    _tap = TapGestureRecognizer(debugOwner: this)
-      ..onTapUp = _handleTapUp
-      ..gestureSettings = _gestureSettings;
-    // Each pointer kind goes to one range recognizer. A precise pointer
-    // starts a range once it passes its hit slop, before the scrollable's
-    // pan reaches its own, and the pan never takes a mouse. Touch starts
-    // one only after a hold: the delayed recognizer rejects a pointer that
-    // moves first, leaving the drag to the scrollable.
-    _immediateRange =
-        ImmediateMultiDragGestureRecognizer(
+    // Each pointer kind goes to one range recognizer, and a press let go
+    // before it starts a range creates nothing. A precise pointer starts
+    // one once held or once it passes [createPressSlop], before the
+    // scrollable's pan passes its own slop, and the pan never takes a
+    // mouse. Touch starts one only after a hold: the delayed recognizer
+    // rejects a pointer that moves first, leaving the drag to the
+    // scrollable.
+    _pressRange =
+        CreatePressGestureRecognizer(
             debugOwner: this,
-            supportedDevices: const <PointerDeviceKind>{
-              PointerDeviceKind.mouse,
-              PointerDeviceKind.stylus,
-              PointerDeviceKind.invertedStylus,
-              PointerDeviceKind.trackpad,
-            },
+            supportedDevices: _pressKinds,
           )
-          ..onStart = _beginRange
+          ..onStart = _beginPressRange
           ..gestureSettings = _gestureSettings;
     _delayedRange =
         DelayedMultiDragGestureRecognizer(
@@ -1969,20 +1979,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
               PointerDeviceKind.unknown,
             },
           )
-          ..onStart = _beginRange
+          ..onStart = _beginHeldRange
           ..gestureSettings = _gestureSettings;
   }
 
   /// Disposes the create gestures and makes them anew. A disposed
   /// recognizer rejects each pointer it holds in that pointer's arena
-  /// ([OneSequenceGestureRecognizer.dispose],
-  /// [MultiDragGestureRecognizer.dispose]), so a tap or a touch hold
-  /// pressed in edit mode creates nothing once edit mode ends, and a held
-  /// finger is left to the scrollable; a range already begun is detached
-  /// by [_cancelEdits]. Runs on leaving edit mode.
+  /// ([MultiDragGestureRecognizer.dispose]), so a press in edit mode that
+  /// has not started a create range starts none once edit mode ends, and
+  /// a held finger is left to the scrollable; a range already begun is
+  /// detached by [_cancelEdits]. Runs on leaving edit mode.
   void _resetCreateGestures() {
-    _tap.dispose();
-    _immediateRange.dispose();
+    _pressRange.dispose();
     _delayedRange.dispose();
     _makeCreateGestures();
   }
@@ -2122,8 +2130,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     super.didChangeDependencies();
     final settings = MediaQuery.maybeGestureSettingsOf(context);
     _gestureSettings = settings;
-    _tap.gestureSettings = settings;
-    _immediateRange.gestureSettings = settings;
+    _pressRange.gestureSettings = settings;
     _delayedRange.gestureSettings = settings;
     _applyTheme();
   }
@@ -2174,8 +2181,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     widget.now.removeListener(_handleNow);
     _pinch.dispose();
     _scrollHold.release();
-    _tap.dispose();
-    _immediateRange.dispose();
+    _pressRange.dispose();
     _delayedRange.dispose();
     widget.store.removeListener(_handleStore);
     _header.dispose();
@@ -4773,14 +4779,17 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         }
       }
       if (under?.id != selected) {
-        _pressesOff[event.pointer] = (at: event.position, id: selected);
+        _pressesOff[event.pointer] = (
+          at: event.position,
+          id: selected,
+          onBlock: under != null,
+        );
       }
     }
     if (!widget.editable || !_admits(event.position)) {
       return;
     }
-    _tap.addPointer(event);
-    _immediateRange.addPointer(event);
+    _pressRange.addPointer(event);
     _delayedRange.addPointer(event);
   }
 
@@ -4822,10 +4831,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _selectedBlock.value != press.id) {
       return;
     }
-    final slop = computeHitSlop(
-      event.kind,
-      MediaQuery.maybeGestureSettingsOf(context),
-    );
+    final slop = !press.onBlock && _pressKinds.contains(event.kind)
+        ? createPressSlop
+        : computeHitSlop(
+            event.kind,
+            MediaQuery.maybeGestureSettingsOf(context),
+          );
     if ((event.position - press.at).distance <= slop) {
       _selectedBlock.value = null;
     }
@@ -4946,42 +4957,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _besideCursor.value = cursor;
   }
 
-  /// Creates at the slot or the strip cell a tap let go over, unless
-  /// another gesture runs by then.
-  void _handleTapUp(TapUpDetails details) {
-    if (_mode is! _Idle) {
-      return;
-    }
-    final global = details.globalPosition;
-    final strip = _stripCellAt(global);
-    if (strip != null) {
-      _create(
-        strip,
-        strip,
-        _stripRangeOver(strip.col, strip.col),
-        point: global,
-        strip: true,
-      );
-      return;
-    }
-    final cell = _bodyCellAt(global);
-    if (cell == null) {
-      return;
-    }
-    // The press was admitted ([_admits]); the slot's times take the
-    // occurrence of its day's earliest start.
-    final day = _tracks.dateAt(cell.col);
-    final range = createRangeAt(
-      _tracks,
-      cell,
-      occurrence: _rules.earliestStartOn(day, _calendarNow).occurrence,
-    );
-    if (range == null) {
-      return;
-    }
-    _create(cell, cell, range, point: global);
-  }
-
   /// Reports [range] through [TimedGrid.onCreate], marking until the
   /// create flow closes the range from the slot of [anchor] to that of
   /// [focus], or for a range across the strip, [strip], the strip cells of
@@ -5082,8 +5057,21 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// Begins a create range at [position], unless another gesture runs.
-  Drag? _beginRange(Offset position) {
+  /// Begins a create range for a touch held still ([_delayedRange]).
+  Drag? _beginHeldRange(Offset position) {
+    return _beginRange(position, held: true);
+  }
+
+  /// Begins a create range for a press of a precise pointer
+  /// ([_pressRange]), held or moved.
+  Drag? _beginPressRange(Offset position) {
+    return _beginRange(position, held: _pressRange.startsHeld);
+  }
+
+  /// Begins a create range at [position], unless another gesture runs; for
+  /// a press [held] still until it began, with the platform's long-press
+  /// feedback ([Feedback.forLongPress]).
+  Drag? _beginRange(Offset position, {required bool held}) {
     if (_mode is! _Idle) {
       return null;
     }
@@ -5103,6 +5091,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _mode = range;
     });
     _updateStripMark();
+    if (held) {
+      Feedback.forLongPress(context);
+    }
     return _RangeDrag<T>(this, range);
   }
 

@@ -49,14 +49,31 @@ Future<void> tapCell(WidgetTester tester, int row, int col) async {
   await tester.pumpAndSettle();
 }
 
-/// Taps an empty slot and picks [type] in the create flow's picker.
+/// Holds a press of [kind] on the cell at [row] and [col] for the
+/// long-press timeout and lets go where it began.
+Future<void> holdCell(
+  WidgetTester tester,
+  int row,
+  int col, {
+  PointerDeviceKind kind = PointerDeviceKind.touch,
+}) async {
+  final gesture = await tester.startGesture(
+    centerOf(tester, row, col),
+    kind: kind,
+  );
+  await tester.pump(kLongPressTimeout);
+  await gesture.up();
+  await tester.pumpAndSettle();
+}
+
+/// Holds an empty slot and picks [type] in the create flow's picker.
 Future<void> createAt(
   WidgetTester tester,
   int row,
   int col,
   String type,
 ) async {
-  await tapCell(tester, row, col);
+  await holdCell(tester, row, col);
   expect(find.text("New item"), findsOneWidget);
   await tester.tap(find.text(type).last);
   await tester.pumpAndSettle();
@@ -315,7 +332,7 @@ void main() {
     expect(find.text("Apr 2026"), findsOneWidget);
   });
 
-  testWidgets("W2 a tap on an empty slot creates a Task", (tester) async {
+  testWidgets("W2 a hold on an empty slot creates a Task", (tester) async {
     const latency = Duration(seconds: 1);
     final api = await pumpCalendar(
       tester,
@@ -492,12 +509,12 @@ void main() {
     await tester.pumpAndSettle();
     await expectForm("14:00", "15:00", "2");
 
-    // A mouse drag that stays in its cell is a tap.
+    // A mouse drag past 4 px that stays in its cell picks the cell's slot.
     gesture = await tester.startGesture(
       centerOf(tester, from, saturday),
       kind: PointerDeviceKind.mouse,
     );
-    await gesture.moveBy(const Offset(2.0, 0.0));
+    await gesture.moveBy(const Offset(5.0, 0.0));
     await tester.pump();
     await gesture.up();
     await tester.pumpAndSettle();
@@ -517,7 +534,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // A press on a flinging grid stops it and creates nothing, for a touch
-    // tap and for a mouse drag alike.
+    // hold and for a mouse drag alike.
     await tester.flingFrom(
       centerOf(tester, from, saturday),
       const Offset(0.0, -150.0),
@@ -526,7 +543,7 @@ void main() {
     await tester.pump(oneFrame);
     await tester.pump(oneFrame);
     expect(vertical.isScrollingNotifier.value, isTrue);
-    await tester.tapAt(centerOf(tester, from, saturday));
+    await tester.longPressAt(centerOf(tester, from, saturday));
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
     vertical.jumpTo(before);
@@ -1128,8 +1145,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
 
-    // A tap on the hour gutter beside an empty slot.
-    await tapCell(tester, rowOf(14 * 60), 0);
+    // A hold on the hour gutter beside an empty slot.
+    await holdCell(tester, rowOf(14 * 60), 0);
     expect(find.text("New item"), findsNothing);
   });
 
@@ -2377,11 +2394,11 @@ void main() {
     expect(handles, findsNothing);
   });
 
-  testWidgets("W34 out of edit mode a tap or a mouse drag on an empty slot "
+  testWidgets("W34 out of edit mode a hold or a mouse drag on an empty slot "
       "creates nothing", (tester) async {
     await pumpCalendar(tester);
     await pickMode(tester, "Week");
-    await tapCell(tester, rowOf(14 * 60), colOf(5));
+    await holdCell(tester, rowOf(14 * 60), colOf(5));
     expect(find.text("New item"), findsNothing);
 
     final gesture = await tester.startGesture(
@@ -2637,9 +2654,9 @@ void main() {
     expect(tester.getRect(block).top, near(before.top - cell.height));
   });
 
-  testWidgets("W41 in edit mode a tap on an empty slot, or a touch hold let "
-      "go where it began, marks the one slot it creates until the create "
-      "flow closes", (tester) async {
+  testWidgets("W41 in edit mode a mouse hold on an empty slot, or a touch "
+      "hold let go where it began, marks the one slot it creates until the "
+      "create flow closes", (tester) async {
     await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
 
@@ -2657,7 +2674,12 @@ void main() {
     }
 
     expect(marks(), isEmpty);
-    await tapCell(tester, rowOf(20 * 60), colOf(6));
+    await holdCell(
+      tester,
+      rowOf(20 * 60),
+      colOf(6),
+      kind: PointerDeviceKind.mouse,
+    );
     expect(find.text("New item"), findsOneWidget);
     final viewport = gridViewport(tester);
     final slot = viewport.rectOfCell(rowOf(20 * 60), colOf(6))!;

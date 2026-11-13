@@ -304,11 +304,12 @@ bool marksRange(WidgetTester tester) {
   });
 }
 
-/// A mouse press on the cell centred at [at] that moves 2 logical pixels
-/// within it and lets go: a create of the slot.
-Future<void> clickCell(WidgetTester tester, Offset at) async {
+/// A mouse press on the cell centred at [at] that moves 5 logical pixels
+/// within it, past the 4 a mouse press moves before it starts a create
+/// range, and lets go: a create of the slot.
+Future<void> dragInCell(WidgetTester tester, Offset at) async {
   final gesture = await tester.startGesture(at, kind: PointerDeviceKind.mouse);
-  await gesture.moveBy(const Offset(2.0, 0.0));
+  await gesture.moveBy(const Offset(5.0, 0.0));
   await tester.pump();
   await gesture.up();
 }
@@ -328,10 +329,14 @@ Future<void> mouseDrag(WidgetTester tester, Offset from, Offset to) async {
   await tester.pumpAndSettle();
 }
 
-/// A touch press at [at] held past the long-press timeout, then let go
+/// A press of [kind] at [at] held past the long-press timeout, then let go
 /// where it began.
-Future<void> holdInPlace(WidgetTester tester, Offset at) async {
-  final gesture = await tester.startGesture(at);
+Future<void> holdInPlace(
+  WidgetTester tester,
+  Offset at, {
+  PointerDeviceKind kind = PointerDeviceKind.touch,
+}) async {
+  final gesture = await tester.startGesture(at, kind: kind);
   await tester.pump(kLongPressTimeout + kPressTimeout);
   await gesture.up();
   await tester.pumpAndSettle();
@@ -1279,7 +1284,7 @@ void main() {
     await tester.pumpAndSettle();
     expectTap("later", editable: true);
     expect(marksRange(tester), isFalse);
-    await clickCell(
+    await dragInCell(
       tester,
       cellCenter(tester, weekRowOf(14 * 60), weekColOf(thursday)),
     );
@@ -1301,7 +1306,7 @@ void main() {
     await tester.tap(blockFinder("later"));
     await tester.pumpAndSettle();
     expectTap("later", editable: true);
-    await clickCell(tester, cellCenter(tester, dayRowOf(14 * 60), 1));
+    await dragInCell(tester, cellCenter(tester, dayRowOf(14 * 60), 1));
     await tester.pump();
     expect(
       creates.last,
@@ -1366,7 +1371,7 @@ void main() {
     expect(tester.takeException(), isNull);
     controller.view = CalendarViewKind.week;
     await tester.pumpAndSettle();
-    await clickCell(
+    await dragInCell(
       tester,
       cellCenter(tester, weekRowOf(14 * 60), weekColOf(thursday)),
     );
@@ -2543,8 +2548,9 @@ void main() {
 
   testWidgets("CV54 in Week and Day a create reports that the user chose its "
       "length where its range runs from one slot or strip cell to another, "
-      "and not for a tap, a hold or a click let go in place, a strip tap, or "
-      "a drag held at its first slot", (tester) async {
+      "and not for a mouse or a touch hold let go in place, a mouse drag let "
+      "go in its first slot, a strip hold, or a drag held at its first "
+      "slot", (tester) async {
     useTallView(tester);
     final friday = DateTime(2026, 4, 24);
     final empty = MemoryCalendarStore<String>();
@@ -2619,8 +2625,11 @@ void main() {
       CalendarCreateRange(start: tuesday, end: saturday, isAllDay: true),
       chose: true,
     );
-    await tester.tapAt(cellCenter(tester, weekRowOf(14 * 60), wednesdayCol));
-    await tester.pumpAndSettle();
+    await holdInPlace(
+      tester,
+      cellCenter(tester, weekRowOf(14 * 60), wednesdayCol),
+      kind: PointerDeviceKind.mouse,
+    );
     expectCreate(
       CalendarCreateRange(start: at(wednesday, 14), end: at(wednesday, 14, 15)),
       chose: false,
@@ -2633,7 +2642,7 @@ void main() {
       CalendarCreateRange(start: at(wednesday, 15), end: at(wednesday, 15, 15)),
       chose: false,
     );
-    await clickCell(
+    await dragInCell(
       tester,
       cellCenter(tester, weekRowOf(16 * 60), wednesdayCol),
     );
@@ -2642,8 +2651,7 @@ void main() {
       CalendarCreateRange(start: at(wednesday, 16), end: at(wednesday, 16, 15)),
       chose: false,
     );
-    await tester.tapAt(cellCenter(tester, weekStripRow, wednesdayCol));
-    await tester.pumpAndSettle();
+    await holdInPlace(tester, cellCenter(tester, weekStripRow, wednesdayCol));
     expectCreate(
       CalendarCreateRange(start: wednesday, end: thursday, isAllDay: true),
       chose: false,
@@ -2661,8 +2669,11 @@ void main() {
       CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 12, 15)),
       chose: true,
     );
-    await tester.tapAt(cellCenter(tester, dayRowOf(14 * 60), 1));
-    await tester.pumpAndSettle();
+    await holdInPlace(
+      tester,
+      cellCenter(tester, dayRowOf(14 * 60), 1),
+      kind: PointerDeviceKind.mouse,
+    );
     expectCreate(
       CalendarCreateRange(start: at(tuesday, 14), end: at(tuesday, 14, 15)),
       chose: false,
@@ -2672,14 +2683,13 @@ void main() {
       CalendarCreateRange(start: at(tuesday, 15), end: at(tuesday, 15, 15)),
       chose: false,
     );
-    await clickCell(tester, cellCenter(tester, dayRowOf(16 * 60), 1));
+    await dragInCell(tester, cellCenter(tester, dayRowOf(16 * 60), 1));
     await tester.pumpAndSettle();
     expectCreate(
       CalendarCreateRange(start: at(tuesday, 16), end: at(tuesday, 16, 15)),
       chose: false,
     );
-    await tester.tapAt(cellCenter(tester, dayStripRow, 1));
-    await tester.pumpAndSettle();
+    await holdInPlace(tester, cellCenter(tester, dayStripRow, 1));
     expectCreate(
       CalendarCreateRange(start: tuesday, end: wednesday, isAllDay: true),
       chose: false,
@@ -2803,7 +2813,7 @@ void main() {
     }
 
     testWidgets("in Week: a drag's slots, a cross-day drag's piece on its "
-        "last day, a tap's slot and a strip drag's last cell", (tester) async {
+        "last day, a hold's slot and a strip drag's last cell", (tester) async {
       useTallView(tester);
       final friday = DateTime(2026, 4, 24);
       final memory = MemoryCalendarStore<String>();
@@ -2853,7 +2863,7 @@ void main() {
       );
       expectRect(recorder, 1);
 
-      // 3. A tap on Thursday 09:00.
+      // 3. A hold on Thursday 09:00.
       recorder.expected = () {
         return gridRowsRect(
           tester,
@@ -2862,8 +2872,10 @@ void main() {
           thursdayCol,
         );
       };
-      await tester.tapAt(cellCenter(tester, weekRowOf(9 * 60), thursdayCol));
-      await tester.pumpAndSettle();
+      await holdInPlace(
+        tester,
+        cellCenter(tester, weekRowOf(9 * 60), thursdayCol),
+      );
       expectRect(recorder, 2);
 
       // 4. A strip drag from Tuesday to Friday, in the strip's row under
@@ -2914,7 +2926,7 @@ void main() {
       expectRect(recorder, 0);
     });
 
-    testWidgets("in Day: a drag's slots and a strip tap's cell", (
+    testWidgets("in Day: a drag's slots and a strip hold's cell", (
       tester,
     ) async {
       useTallView(tester);
@@ -2940,12 +2952,11 @@ void main() {
       );
       expectRect(recorder, 0);
 
-      // 7. A tap on the strip, under the room at Day's top.
+      // 7. A hold on the strip, under the room at Day's top.
       recorder.expected = () {
         return gridRowsRect(tester, dayStripRow, dayStripRow, 1);
       };
-      await tester.tapAt(cellCenter(tester, dayStripRow, 1));
-      await tester.pumpAndSettle();
+      await holdInPlace(tester, cellCenter(tester, dayStripRow, 1));
       expectRect(recorder, 1);
     });
 

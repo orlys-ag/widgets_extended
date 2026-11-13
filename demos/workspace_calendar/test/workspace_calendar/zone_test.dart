@@ -141,11 +141,11 @@ Future<void> showMinute(WidgetTester tester, int minute) async {
   await tester.pumpAndSettle();
 }
 
-/// Taps Tuesday's slot of [minute] in Week and picks Task in the create
+/// Holds Tuesday's slot of [minute] in Week and picks Task in the create
 /// flow, which opens the form of a new Task.
 Future<void> createTaskAt(WidgetTester tester, int minute) async {
   await showMinute(tester, minute);
-  await tester.tapAt(cellRect(tester, rowOf(minute), colOf(1)).center);
+  await tester.longPressAt(cellRect(tester, rowOf(minute), colOf(1)).center);
   await tester.pumpAndSettle();
   expect(find.text("New item"), findsOneWidget);
   await tester.tap(find.text("Task").last);

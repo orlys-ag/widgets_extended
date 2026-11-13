@@ -190,7 +190,7 @@ the rect of the slots or the strip cell it marks in the column where the
 gesture ended, in Agenda the gap row whose add button was pressed and in
 Month the long-pressed day; and `userChoseLength`, true where a drag in Week
 or Day let go of a range from one slot or strip cell to another, and false
-where the calendar chose the one slot or day: a tap, a hold or a drag let go
+where the calendar chose the one slot or day: a hold or a drag let go
 where it began, a drag the entries around it held there, Agenda's add button
 and Month's long press. The rect does not follow a later scroll; where Week's
 or Day's board is not laid out at the release, as after a build of the grid
@@ -224,8 +224,8 @@ end by the minutes dragged wherever the entry then still ends at the edge,
 so dragging it up shortens the entry.
 On a day whose clock repeats an hour, a range from the hour's first pass
 to the minute the hour ends ends with that pass, as the clock goes back: a
-tap on the hour's last slot, a create drag or an end resize to that edge,
-and `CalendarEditRules.firstSlot` give the slot's own minutes, so a tap on
+hold on the hour's last slot, a create drag or an end resize to that edge,
+and `CalendarEditRules.firstSlot` give the slot's own minutes, so a hold on
 New York's 01:45 slot gives 15 minutes, not 75, while a range to that edge
 from before the hour still runs through the second pass. Where the clock
 goes back from 24:00 to 23:00, as Santiago's does in April, Week and Day draw
@@ -292,9 +292,17 @@ strip expands or collapses, or a row counting the entries before the
 hours comes or goes; and when the slot length or the hours change, a time
 before the new hours giving their start, and one past them the end of the
 scroll.
+- In Week and Day, a press on an empty slot or strip day starts a create
+once held for the long-press timeout, with the platform's long-press
+feedback, or, with a mouse, a stylus or a trackpad, once it moves more than
+4 logical pixels, whichever comes first. A tap or a click creates nothing:
+it clears the selection, as a press of a mouse, a stylus or a trackpad off
+the blocks that moves no more than those 4 pixels does. Month's long press
+on a day gives the same feedback.
 - In Week and Day, leaving edit mode ends the gestures that edit: a move or
 a resize under way writes nothing, a create range under way reports
-nothing, and a tap or a touch hold pressed in edit mode creates nothing.
+nothing, and a press in edit mode that has not started a create range
+starts none.
 - In Agenda, a day selected while a drag or a fling scrolls the list is
 revealed at the list's top and stays selected, rather than giving way to
 the day the scroll shows.

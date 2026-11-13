@@ -323,13 +323,13 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets("H5 a tap on the last slot creates up to the end of the "
+  testWidgets("H5 a hold on the last slot creates up to the end of the "
       "hours", (tester) async {
     await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
     await pickHours(tester, 8, 18);
 
-    await tester.tapAt(
+    await tester.longPressAt(
       cellRect(tester, officeRow(17 * 60 + 45), colOf(3)).center,
     );
     await tester.pumpAndSettle();

@@ -244,13 +244,13 @@ void main() {
     expect(blockFinder(standupId), findsNothing);
   });
 
-  testWidgets("D2 a tap and a range drag create on the shown day", (
+  testWidgets("D2 a hold and a range drag create on the shown day", (
     tester,
   ) async {
     await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Day");
 
-    await tester.tapAt(centerOf(tester, dayRowOf(16 * 60)));
+    await tester.longPressAt(centerOf(tester, dayRowOf(16 * 60)));
     await tester.pumpAndSettle();
     await expectCreateForm(
       tester,
@@ -469,7 +469,7 @@ void main() {
     expect(grid.scrolledRegion.top, 40.0);
   });
 
-  testWidgets("D9 Day's first slot takes a tap and a drop, a drag's label "
+  testWidgets("D9 Day's first slot takes a hold and a drop, a drag's label "
       "sits at the grid's top, and the time line sits at its minute", (
     tester,
   ) async {
@@ -503,7 +503,7 @@ void main() {
         ..line(),
     );
 
-    await tester.tapAt(cellRect(tester, first, dayColumn).center);
+    await tester.longPressAt(cellRect(tester, first, dayColumn).center);
     await tester.pumpAndSettle();
     await expectCreateForm(
       tester,
@@ -765,10 +765,10 @@ void main() {
     await setHours(tester, 8, 14);
     final grid = gridViewport(tester);
 
-    await tester.tapAt(cellRect(tester, 0, dayColumn).center);
+    await tester.longPressAt(cellRect(tester, 0, dayColumn).center);
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
-    await tester.tapAt(cellRect(tester, 25, dayColumn).center);
+    await tester.longPressAt(cellRect(tester, 25, dayColumn).center);
     await tester.pumpAndSettle();
     expect(find.text("New item"), findsNothing);
 

@@ -12,6 +12,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/board/board.dart';
@@ -446,6 +447,54 @@ void main() {
       find.descendant(of: bar, matching: find.text("second")),
       findsOneWidget,
     );
+  });
+
+  testWidgets("MB4 a long press on a day asks for the long-press feedback "
+      "once and creates on that day", (tester) async {
+    final vibrations = <MethodCall>[];
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == "HapticFeedback.vibrate") {
+        vibrations.add(call);
+      }
+      return null;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+    final store = MemoryCalendarStore<String>();
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 21, 9), today: april(21)),
+    );
+    addTearDown(now.dispose);
+    final pressed = <DateTime>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MonthBoard<String>(
+          store: store,
+          grid: grid,
+          selectedDay: april(20),
+          now: now,
+          onSelectDay: (day) {},
+          onOpenDay: (day) {},
+          onCreateOnDay: (day, globalRect) {
+            pressed.add(day);
+            return (
+              start: DateTime(2026, 4, 21, 9),
+              done: Future<void>.value(),
+            );
+          },
+          onOpenEntry: (id) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(vibrations, isEmpty);
+    await tester.longPress(find.byKey(monthStripKey(april(21))));
+    await tester.pumpAndSettle();
+    expect(pressed, <DateTime>[april(21)]);
+    expect(vibrations, hasLength(1));
   });
 
   testWidgets("MB1 a month board whose grid the store does not show is "

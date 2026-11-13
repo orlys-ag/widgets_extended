@@ -40,8 +40,8 @@ final class CalendarCreateDetails {
 
   /// Whether the user chose the range's length: true where a gesture in
   /// Week or Day let go of a range from one slot or strip cell to another,
-  /// and false where the calendar chose the one slot or day: a tap, a hold
-  /// or a drag let go on the slot or strip cell it began on, a drag that
+  /// and false where the calendar chose the one slot or day: a hold or a
+  /// drag let go on the slot or strip cell it began on, a drag that
   /// the entries around it held on that slot, Agenda's add button and
   /// Month's long press.
   final bool userChoseLength;

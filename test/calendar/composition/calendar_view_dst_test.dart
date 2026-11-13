@@ -216,7 +216,7 @@ void main() {
       expect(creates, <CalendarCreateRange>[secondSlot()]);
     });
 
-    testWidgets("CV32 under the lock at the second 01:30, a tap on Day's "
+    testWidgets("CV32 under the lock at the second 01:30, a hold on Day's "
         "01:30 row creates from the second 01:30", (tester) async {
       final day = longDayStart;
       final creates = await pumpCalendar(
@@ -225,7 +225,7 @@ void main() {
         day: day,
         now: secondHalfPastOne,
       );
-      await tester.tapAt(slotRect(tester, 90).center);
+      await tester.longPressAt(slotRect(tester, 90).center);
       await tester.pumpAndSettle();
       expect(creates, <CalendarCreateRange>[secondSlot()]);
     });
@@ -241,7 +241,7 @@ void main() {
       );
     }
 
-    testWidgets("CV34 under the lock at the second 01:30, a tap on Day's "
+    testWidgets("CV34 under the lock at the second 01:30, a hold on Day's "
         "01:30 row creates nothing where an entry from the first 01:45 to "
         "02:00 holds that time", (tester) async {
       final day = longDayStart;
@@ -253,7 +253,7 @@ void main() {
         entries: <CalendarEntry<String>>[across()],
         allowsOverlaps: false,
       );
-      await tester.tapAt(slotRect(tester, 90).center);
+      await tester.longPressAt(slotRect(tester, 90).center);
       await tester.pumpAndSettle();
       expect(creates, isEmpty);
     });
@@ -287,7 +287,7 @@ void main() {
       return entryOf("folds", day, day.add(const Duration(minutes: 135)));
     }
 
-    testWidgets("CV36 a tap on Day's 01:30 row creates nothing where an "
+    testWidgets("CV36 a hold on Day's 01:30 row creates nothing where an "
         "entry from 00:00 to the second 01:15 holds that time", (tester) async {
       final day = longDayStart;
       final creates = await pumpCalendar(
@@ -299,7 +299,7 @@ void main() {
         lock: false,
         allowsOverlaps: false,
       );
-      await tester.tapAt(slotRect(tester, 90).center);
+      await tester.longPressAt(slotRect(tester, 90).center);
       await tester.pumpAndSettle();
       expect(creates, isEmpty);
     });

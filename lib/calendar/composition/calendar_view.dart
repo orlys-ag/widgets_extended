@@ -161,9 +161,13 @@ final class CalendarEntryTapDetails<T> {
 /// move and resize by days. Each
 /// move and resize lands as a [CalendarMoveRequest], which [onMoveRequest]
 /// receives, or with none [store] writes ([CalendarStore.requestMove]). A
-/// drag over empty slots reports one continuous range through
-/// [onCreateRange], across days too, and one over the strip's empty days an
-/// all-day range of them, which stays marked until its future completes.
+/// press on an empty slot or strip day starts a create once held for the
+/// long-press timeout, or, with a mouse, a stylus or a trackpad, once moved
+/// more than 4 logical pixels; a tap or a click creates nothing. The drag
+/// that follows reports through [onCreateRange] one continuous range over
+/// the slots, across days too, or over the strip's empty days an all-day
+/// range of them, and one let go where it began reports that slot or day;
+/// the range stays marked until its future completes.
 /// Out of edit mode the calendar is read-only. In
 /// edit mode [editPolicy] limits what the gestures change and where a new
 /// entry may start ([CalendarEditPolicy]). A pinch of two
