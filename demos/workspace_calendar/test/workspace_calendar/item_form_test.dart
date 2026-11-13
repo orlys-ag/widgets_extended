@@ -299,7 +299,9 @@ void main() {
       findsOneWidget,
     );
     expect(
-      tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, "All day"))
+          .selected,
       isFalse,
     );
 
@@ -327,7 +329,9 @@ void main() {
     addTearDown(store.dispose);
     await openForm(tester, store);
     expect(
-      tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, "All day"))
+          .selected,
       isFalse,
     );
 
@@ -367,7 +371,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pumpAndSettle();
     expect(writes, hasLength(1));
-    expect(find.byType(SwitchListTile), findsOneWidget);
+    expect(find.widgetWithText(ChoiceChip, "All day"), findsOneWidget);
   });
 
   group(

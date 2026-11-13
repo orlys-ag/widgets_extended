@@ -205,6 +205,10 @@ Future<void> _showForm(
   );
 }
 
+/// The length of the times an all-day item takes when All day is turned
+/// off: an hour.
+const int _timedLengthMinutes = 60;
+
 CalendarNow _clockNow() {
   final time = DateTime.now();
   return CalendarNow(time: time, today: time);
@@ -252,11 +256,45 @@ class _ItemFormState extends State<_ItemForm> {
 
   late CalendarItemType _type = widget.item.type;
 
-  late CalendarSchedule _schedule = CalendarSchedule.of(
-    widget.item.start,
-    widget.item.end,
-    isAllDay: widget.item.isAllDay,
-  );
+  late CalendarSchedule _schedule = _openingSchedule();
+
+  /// The item's schedule. An all-day item has no times of its own for
+  /// [CalendarSchedule.withAllDay] off to restore, so it keeps, as its
+  /// timed ones, the first hour of the store's hours on its start day that
+  /// no shown item shares, or the first hour where each is shared, as
+  /// [CalendarEditRules.firstSlot] finds them; and its first day's 00:00 to
+  /// its last day's 24:00 where the start day leaves no hour.
+  CalendarSchedule _openingSchedule() {
+    final item = widget.item;
+    final schedule = CalendarSchedule.of(
+      item.start,
+      item.end,
+      isAllDay: item.isAllDay,
+    );
+    if (!item.isAllDay) {
+      return schedule;
+    }
+    final day = schedule.startDay;
+    final start = _rules.earliestStartOn(day, widget.now());
+    final shown = widget.store.entriesOn(day).map((shown) {
+      return shown.entry;
+    });
+    final slot =
+        _rules.firstSlot(
+          start,
+          clearOf: shown,
+          lengthMinutes: _timedLengthMinutes,
+        ) ??
+        _rules.firstSlot(start, lengthMinutes: _timedLengthMinutes);
+    if (slot == null) {
+      return schedule;
+    }
+    return CalendarSchedule.of(
+      slot.start,
+      slot.end,
+      isAllDay: false,
+    ).withEndDay(schedule.endDay).withAllDay(true);
+  }
 
   /// The rules the schedule is checked under: the policy, the store's
   /// hours when the form opened, and the slot length.

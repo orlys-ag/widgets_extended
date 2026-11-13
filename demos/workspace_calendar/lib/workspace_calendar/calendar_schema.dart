@@ -243,16 +243,21 @@ TypeSchema schemaOf(CalendarItemType type) {
 }
 
 /// The schedule options of [type]'s items, which the form's schedule
-/// section and its check read: the standard options for every type, so a
-/// Task, like the others, may span days and be all-day.
+/// section and its check read: the same for every type, so a Task, like
+/// the others, may span days and be all-day, and is offered the lengths
+/// 15 minutes, 30 and an hour.
 CalendarScheduleOptions scheduleOptionsOf(CalendarItemType type) {
   switch (type) {
     case CalendarItemType.task:
     case CalendarItemType.risk:
     case CalendarItemType.request:
-      return CalendarScheduleOptions.standard;
+      return _itemScheduleOptions;
   }
 }
+
+final CalendarScheduleOptions _itemScheduleOptions = CalendarScheduleOptions(
+  lengthChoices: const <int>[15, 30, 60],
+);
 
 /// The most days one item may cover.
 const int maxDayCount = 366;
