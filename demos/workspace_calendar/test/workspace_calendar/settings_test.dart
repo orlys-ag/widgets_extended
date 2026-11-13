@@ -8,6 +8,7 @@ import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/schedule_section.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -581,6 +582,54 @@ void main() {
     await setHours(tester, 8, 18);
     expect(find.textContaining("8 AM - 6 PM"), findsOneWidget);
   });
+
+  testWidgets(
+    "TF6 with the settings' 12-hour clock, the form's time fields and "
+    "summary line write 12-hour times",
+    (tester) async {
+      final api = MockCalendarApi.seeded(today, latency: harnessLatency);
+      final nine = await store(
+        tester,
+        api,
+        taskJson("Nine", today, 9 * 60, 10 * 60),
+      );
+      await pumpCalendar(
+        tester,
+        editing: true,
+        api: api,
+        size: tall,
+        readAhead: 0,
+        settings: const CalendarSettings(
+          hourLabelFormat: CalendarHourLabelFormat.twelveHour,
+        ),
+      );
+      await pickMode(tester, "Week");
+      await tester.tap(blockFinder(nine));
+      await tester.pumpAndSettle();
+      expect(find.text("Edit Task"), findsOneWidget);
+
+      Finder field(String label) {
+        return find.ancestor(
+          of: find.text(label),
+          matching: find.byType(InputDecorator),
+        );
+      }
+
+      expect(
+        find.descendant(of: field("Start time"), matching: find.text("9 AM")),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: field("End time"), matching: find.text("10 AM")),
+        findsOneWidget,
+      );
+      expect(
+        tester.widget<Text>(find.byKey(scheduleSummaryKey)).data,
+        contains("9 AM - 10 AM"),
+      );
+    },
+    skip: true,
+  );
 
   testWidgets("W1 hiding the weekends leaves the week's five weekdays", (
     tester,
