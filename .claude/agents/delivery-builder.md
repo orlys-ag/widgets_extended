@@ -30,9 +30,11 @@ cites.
    renumber the steps: match committed work by its content, not its number.
 2. Make each change in the style of the surrounding code and the house
    conventions.
-3. Run the step's signal exactly as written, and every gate its files trigger.
-   Commit with the step trailer only after you observe them pass: the trailer
-   is a claim.
+3. Run the step's signal exactly as written, and every step-scope gate its
+   files trigger. Commit with the step trailer only after you observe them
+   pass: the trailer is a claim. A gate of final scope runs only with the
+   final gates, even where the repository's guidance asks for its command
+   after any change.
 4. On a failure, find the root cause. Fix a failure inside the step's scope and
    run again. A failure that shows the plan wrong (a missing requirement, a
    contradiction, a wrong invariant, a citation that does not say what the plan
