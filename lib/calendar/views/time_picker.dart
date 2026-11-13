@@ -1,6 +1,7 @@
-/// The time picker: an Hour column, a Minute column and on the 12-hour
-/// clock an AM/PM column, which scroll and snap their selected rows to a
-/// pill across each column's middle, and optional Now and Clear actions.
+/// The time picker: up to three columns, an Hour column, a Minute column
+/// and on the 12-hour clock an AM/PM column, which scroll and snap their
+/// selected rows to a pill across each column's middle, and optional Now and
+/// Clear actions.
 library;
 
 import 'dart:async';
@@ -120,16 +121,18 @@ const double _controlRadius = 8.0;
 const double _ringWidth = 2.0;
 const Duration _digitWait = Duration(seconds: 1);
 
-/// An inline time picker: an Hour column, a Minute column and on the
-/// 12-hour clock an AM/PM column right of them, five rows tall, each
-/// scrolling and snapping its selected row to a pill across its middle;
-/// and a footer of Now and Clear where either is given.
+/// An inline time picker of up to three columns, five rows tall: an Hour
+/// column where [showHours], a Minute column where [showMinutes], and on the
+/// 12-hour clock, where the Hour column shows, an AM/PM column right of
+/// them. Each scrolls and snaps its selected row to a pill across its
+/// middle. A footer of Now and Clear shows where either is given.
 ///
-/// Under a bounded width the columns share it equally. Under an unbounded
-/// width, and to a parent that asks its intrinsic sizes, each is 72 logical
-/// pixels wide, or on the 12-hour clock as wide as the wider of the AM and
-/// PM rows with their padding where that is wider, inside the panel's
-/// padding of 8 on each side.
+/// Under a bounded width the shown columns share it equally. Under an
+/// unbounded width, and to a parent that asks its intrinsic sizes, each is
+/// 72 logical pixels wide, or where the AM/PM column shows as wide as the
+/// wider of the AM and PM rows with their padding where that is wider,
+/// inside the panel's padding of 8 on each side. So hiding a column widens
+/// the others under a bounded width and narrows the panel otherwise.
 ///
 /// [value] is a minute after midnight on the host's clock: 0 to 1439, or
 /// 1440 for the 24:00 that ends a day; null selects no time and draws no
@@ -139,36 +142,41 @@ const Duration _digitWait = Duration(seconds: 1);
 /// where the range holds 1440 and not 0, as an end's does, and where it
 /// holds both, picks 1440 while [value] is 1440.
 ///
-/// The rows are the times from [min] to [max] that are multiples of
-/// [minuteStep]: an hour has a row where one of its times lies in range,
-/// and the Minute column lists the selected hour's. A time [isEnabled]
-/// refuses draws disabled and takes no pick, as does an hour with no time
-/// it accepts and an AM or PM row with none. [isEnabled] is asked only of a
-/// multiple of [minuteStep] from [min] to [max], each such time at most
-/// once until the picker is given new parameters or its dependencies
-/// change, and never per frame of a motion: only as the picker is built
-/// anew, and as a pick, Now or Clear settles. The value always shows,
-/// selected, off the step, out of range or refused included. Changing the
-/// hour or the half keeps the minute where the new hour accepts it, and
-/// otherwise takes the accepted minute of that hour nearest it, the
-/// earlier on a tie.
+/// The picker offers the times from [min] to [max] on both steps: those
+/// whose hour is a multiple of [hourStep] and whose minute is a multiple of
+/// [minuteStep], or is 0 where the Minute column is hidden, and 1440
+/// whatever [hourStep]. An hour has a row where one of its times on both
+/// steps lies in range, and the Minute column lists the selected hour's.
+/// With the Hour column hidden the picker follows the 24-hour clock and
+/// picks within one hour, [value]'s, or [min]'s where [value] is null: it
+/// offers no time of another hour. A time [isEnabled] refuses draws
+/// disabled and takes no pick, as does an hour with no time it accepts and
+/// an AM or PM row with none. [isEnabled] is asked only of a time on both
+/// steps from [min] to [max], each such time at most once until the picker
+/// is given new parameters or its dependencies change, and never per frame
+/// of a motion: only as the picker is built anew, and as a pick, Now or
+/// Clear settles. The value always shows, selected, off either step, out
+/// of range or refused included. Changing the hour or the half keeps the
+/// minute where the new hour accepts it, and otherwise takes the accepted
+/// minute of that hour nearest it, the earlier on a tie.
 ///
 /// A drag or fling snaps a column to a row, a tap picks a row, a mouse
 /// wheel moves a column one row, and the keys move over the rows: Up and
 /// Down, Home and End, Page Up and Page Down five rows, two digits typed
 /// within a second on the Hour and Minute columns, Left and Right between
-/// the shown columns, and A and P on the 12-hour clock; Space and Enter
-/// move no column. A pick is reported through [onChanged] once, after every
-/// column has come to rest; a new [value] moves the columns to it over the
-/// theme's motion and reports nothing, waiting while a column is held in a
-/// drag. With a null [onChanged] the picker shows its value and takes no
-/// input.
+/// the shown columns, and A and P where the AM/PM column shows; Space and
+/// Enter move no column. A pick is reported through [onChanged] once, after
+/// every column has come to rest; a new [value] moves the columns to it
+/// over the theme's motion and reports nothing, waiting while a column is
+/// held in a drag. With a null [onChanged] the picker shows its value and
+/// takes no input.
 ///
 /// [now] gives the current minute after midnight on the host's clock; with
-/// it, the footer's Now picks that minute rounded down to [minuteStep],
-/// and draws disabled where that time cannot be picked. With [clearable],
-/// the footer's Clear reports null. With neither, the picker has no
-/// footer.
+/// it, the footer's Now picks the latest time at or before that minute on
+/// both steps, and draws disabled where the picker does not offer that
+/// time: out of range, refused, or with the Hour column hidden in another
+/// hour. With [clearable], the footer's Clear reports null. With neither,
+/// the picker has no footer.
 ///
 /// The picker draws in the theme [CalendarTheme.of] gives, the nearest
 /// [CalendarTheme] or the built-in one, and reads no Material theme: a
@@ -180,23 +188,27 @@ class CalendarTimePicker extends StatefulWidget {
   /// Creates a time picker of [value].
   ///
   /// Throws an [ArgumentError], in every build, naming the first of: a
-  /// [minuteStep] under 1 or not dividing 60; a [min] outside 0 to 1440; a
-  /// [max] outside 0 to 1440; a [max] below [min]; a [value] outside 0 to
-  /// 1440.
+  /// [minuteStep] under 1 or not dividing 60; an [hourStep] outside 1 to 23;
+  /// a [min] outside 0 to 1440; a [max] outside 0 to 1440; a [max] below
+  /// [min]; a [value] outside 0 to 1440; a false [showMinutes] while
+  /// [showHours] is false.
   CalendarTimePicker({
     super.key,
     required this.value,
     required this.onChanged,
     this.hourLabelFormat = CalendarHourLabelFormat.twentyFourHour,
     this.minuteStep = CalendarDates.defaultSlotMinutes,
+    this.hourStep = 1,
     this.min = 0,
     this.max = CalendarDates.minutesPerDay - 1,
     this.isEnabled,
     this.now,
     this.clearable = false,
+    this.showHours = true,
+    this.showMinutes = true,
     this.focusNode,
   }) {
-    _check(value, minuteStep, min, max);
+    _check(value, minuteStep, hourStep, min, max, showHours, showMinutes);
   }
 
   /// The selected minute after midnight, 0 to 1440, or null for none.
@@ -212,6 +224,11 @@ class CalendarTimePicker extends StatefulWidget {
   /// The minutes between the Minute column's rows; it divides 60.
   final int minuteStep;
 
+  /// The hours between the Hour column's rows, counted from midnight, 1 to
+  /// 23: a time is offered only where its hour is a multiple of it, 24:00
+  /// excepted.
+  final int hourStep;
+
   /// The earliest time with a row, 0 to 1440.
   final int min;
 
@@ -221,17 +238,35 @@ class CalendarTimePicker extends StatefulWidget {
   /// Whether a time may be picked; null accepts every time.
   final bool Function(int minute)? isEnabled;
 
-  /// The current minute after midnight on the host's clock, which Now
-  /// picks; null shows no Now.
+  /// The current minute after midnight on the host's clock: Now picks the
+  /// latest time at or before it on both steps, where the picker offers
+  /// that time. Null shows no Now.
   final ValueGetter<int>? now;
 
   /// Whether the footer shows Clear, which reports null.
   final bool clearable;
 
-  /// The Hour column's focus node; the picker makes its own where null.
+  /// Whether the Hour column shows, and with it the AM/PM column on the
+  /// 12-hour clock; hidden, the picker picks minutes of one hour, [value]'s,
+  /// or [min]'s where [value] is null.
+  final bool showHours;
+
+  /// Whether the Minute column shows; hidden, every pick has minute 0.
+  final bool showMinutes;
+
+  /// The first shown column's focus node, the Hour column's or, where it is
+  /// hidden, the Minute column's; the picker makes its own where null.
   final FocusNode? focusNode;
 
-  static void _check(int? value, int minuteStep, int min, int max) {
+  static void _check(
+    int? value,
+    int minuteStep,
+    int hourStep,
+    int min,
+    int max,
+    bool showHours,
+    bool showMinutes,
+  ) {
     const day = CalendarDates.minutesPerDay;
     if (minuteStep < 1 || 60 % minuteStep != 0) {
       throw ArgumentError.value(
@@ -239,6 +274,9 @@ class CalendarTimePicker extends StatefulWidget {
         "minuteStep",
         "is under 1 or does not divide 60",
       );
+    }
+    if (hourStep < 1 || hourStep > 23) {
+      throw ArgumentError.value(hourStep, "hourStep", "is outside 1 to 23");
     }
     if (min < 0 || min > day) {
       throw ArgumentError.value(min, "min", "is outside 0 to 1440");
@@ -251,6 +289,13 @@ class CalendarTimePicker extends StatefulWidget {
     }
     if (value != null && (value < 0 || value > day)) {
       throw ArgumentError.value(value, "value", "is outside 0 to 1440");
+    }
+    if (!showHours && !showMinutes) {
+      throw ArgumentError.value(
+        showMinutes,
+        "showMinutes",
+        "is false while showHours is false",
+      );
     }
   }
 
@@ -276,13 +321,22 @@ final class TimePickerRules {
   factory TimePickerRules.of(CalendarTimePicker picker) {
     const day = CalendarDates.minutesPerDay;
     final twelveHour =
+        picker.showHours &&
         picker.hourLabelFormat == CalendarHourLabelFormat.twelveHour;
+    final minuteStep = picker.showMinutes ? picker.minuteStep : 60;
+    int? onlyHour;
+    if (!picker.showHours) {
+      final time = picker.value ?? picker.min;
+      onlyHour = time == day ? 24 : time ~/ 60;
+    }
     final isEnabled = picker.isEnabled;
     return TimePickerRules._(
       min: picker.min,
       max: picker.max,
-      minuteStep: picker.minuteStep,
+      minuteStep: minuteStep,
+      hourStep: picker.hourStep,
       twelveHour: twelveHour,
+      onlyHour: onlyHour,
       midnightEnds:
           twelveHour &&
           picker.max == day &&
@@ -290,7 +344,7 @@ final class TimePickerRules {
       isEnabled: isEnabled,
       answers: isEnabled == null
           ? const <bool?>[]
-          : List<bool?>.filled(day ~/ picker.minuteStep + 1, null),
+          : List<bool?>.filled(day ~/ minuteStep + 1, null),
     );
   }
 
@@ -298,7 +352,9 @@ final class TimePickerRules {
     required this.min,
     required this.max,
     required this.minuteStep,
+    required this.hourStep,
     required this.twelveHour,
+    required this.onlyHour,
     required bool midnightEnds,
     required bool Function(int minute)? isEnabled,
     required List<bool?> answers,
@@ -312,12 +368,26 @@ final class TimePickerRules {
   /// The latest time in range, [min] to 1440.
   final int max;
 
-  /// The minutes between the Minute grid's times; it divides 60.
+  /// The minutes between the Minute grid's times, which divide 60: the
+  /// picker's [CalendarTimePicker.minuteStep] where its Minute column
+  /// shows, and 60 where it is hidden, so that every time on the grid then
+  /// has minute 0.
   final int minuteStep;
 
-  /// Whether the Hour column follows the 12-hour clock: its rows are of
-  /// one half of the day, which the AM/PM control picks.
+  /// The hours between the grid's hours, counted from midnight: a time
+  /// other than 1440 is on the grid only where its hour is a multiple of
+  /// it.
+  final int hourStep;
+
+  /// Whether the Hour column follows the 12-hour clock: it shows, and its
+  /// rows are of one half of the day, which the AM/PM column picks. False
+  /// where the Hour column is hidden.
   final bool twelveHour;
+
+  /// Where the picker's Hour column is hidden, the one hour whose times are
+  /// on the grid: the hour of the picker's value, or of [min] where the
+  /// value is null, 24 for 1440. Null where the Hour column shows.
+  final int? onlyHour;
 
   /// Whether 12 AM 00 is 1440 ([compose]).
   final bool _midnightEnds;
@@ -332,15 +402,21 @@ final class TimePickerRules {
     return time >= min && time <= max;
   }
 
-  /// Whether [time] lies on the steps of the grid: 1440, or a multiple of
+  /// Whether [time] lies on both steps of the grid: 1440, or a time whose
+  /// hour is a multiple of [hourStep] and whose minute is a multiple of
   /// [minuteStep].
   bool _onSteps(int time) {
-    return time == CalendarDates.minutesPerDay || time % 60 % minuteStep == 0;
+    if (time == CalendarDates.minutesPerDay) {
+      return true;
+    }
+    return (time ~/ 60) % hourStep == 0 && time % 60 % minuteStep == 0;
   }
 
-  /// Whether [time] lies on the grid of times the rows offer.
+  /// Whether [time] lies on the grid of times the rows offer: on both
+  /// steps, and where [onlyHour] is set, in that hour.
   bool onGrid(int time) {
-    return _onSteps(time);
+    final onlyHour = this.onlyHour;
+    return _onSteps(time) && (onlyHour == null || hourOf(time) == onlyHour);
   }
 
   /// Whether the picker offers [time]: it lies in range, on the grid, and
@@ -399,8 +475,12 @@ final class TimePickerRules {
     }
   }
 
-  /// Whether hour row [hour] has a time on the grid in range.
+  /// Whether hour row [hour] has a time on the grid in range: it is 24 or a
+  /// multiple of [hourStep], and one of its times lies on the grid in range.
   bool holdsHour(int hour) {
+    if (hour != 24 && hour % hourStep != 0) {
+      return false;
+    }
     for (final minute in minutesOf(hour)) {
       final time = compose(hour, minute);
       if (inRange(time) && onGrid(time)) {
@@ -436,13 +516,16 @@ final class TimePickerRules {
   }
 
   /// The time Now picks at the minute after midnight [minute]: the latest
-  /// time at or before it on the grid's steps, where the picker [offers]
-  /// it; null where it does not, or where [minute] lies outside 0 to 1439.
+  /// time at or before it on both steps of the grid, whatever [onlyHour],
+  /// where the picker [offers] it; null where it does not, or where
+  /// [minute] lies outside 0 to 1439.
   int? nowTime(int minute) {
     if (minute < 0 || minute >= CalendarDates.minutesPerDay) {
       return null;
     }
     var time = minute - minute % minuteStep;
+    // Minute 0 of hour 0 lies on both steps, so the scan ends within
+    // `60 * hourStep / minuteStep` steps.
     while (!_onSteps(time)) {
       time -= minuteStep;
     }
@@ -536,7 +619,8 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   /// column's target.
   bool _rowsPm = false;
 
-  /// The hour the Minute column's rows are of.
+  /// The hour the Minute column's rows are of: that of the Hour column's
+  /// target, or [TimePickerRules.onlyHour] where the Hour column is hidden.
   int? _minuteRowsHour;
 
   /// The rules of the widget since the last sync, which every row, target
@@ -575,13 +659,19 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
         (_ownedFirstNode ??= FocusNode(debugLabel: "First column"));
   }
 
-  /// Whether [picker] shows [column]: Hour and Minute always, and AM/PM on
-  /// the 12-hour clock.
+  /// Whether [picker] shows [column]: Hour where
+  /// [CalendarTimePicker.showHours], Minute where
+  /// [CalendarTimePicker.showMinutes], and AM/PM where Hour shows on the
+  /// 12-hour clock.
   static bool _shows(CalendarTimePicker picker, int column) {
-    if (column == _amPmColumn) {
-      return picker.hourLabelFormat == CalendarHourLabelFormat.twelveHour;
+    switch (column) {
+      case _hourColumn:
+        return picker.showHours;
+      case _minuteColumn:
+        return picker.showMinutes;
     }
-    return true;
+    return picker.showHours &&
+        picker.hourLabelFormat == CalendarHourLabelFormat.twelveHour;
   }
 
   static bool _sameColumns(CalendarTimePicker a, CalendarTimePicker b) {
@@ -991,15 +1081,15 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     _rowsPm = pm;
     final amPmRows = _amPmRows();
     final amPmTarget = amPmRows.isEmpty ? null : (pm ? 1 : 0);
-    final hourRows = _rowsOf(_hourColumn, pm: pm, hour: 0);
+    final hourRows = _hourRows(pm);
     var hourTarget = time == null
         ? null
         : _indexOf(_hourColumn, hourRows, _rules.hourOf(time));
     hourTarget ??= _firstResting(hourRows);
-    final hour = hourTarget == null ? null : hourRows[hourTarget].number;
-    final minuteRows = hour == null
-        ? const <_Row>[]
-        : _rowsOf(_minuteColumn, pm: pm, hour: hour);
+    final hour = hourTarget == null
+        ? _rules.onlyHour
+        : hourRows[hourTarget].number;
+    final minuteRows = _minuteRows(pm, hour);
     var minuteTarget = time == null
         ? null
         : _indexOf(_minuteColumn, minuteRows, _minuteOf(time));
@@ -1022,7 +1112,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
       amPmRows,
     );
     final pm = amPmTarget == 1;
-    final hourRows = _rowsOf(_hourColumn, pm: pm, hour: 0);
+    final hourRows = _hourRows(pm);
     final hourTarget = _retarget(
       _hourColumn,
       _rows[_hourColumn],
@@ -1030,10 +1120,10 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
       hourRows,
     );
     _rowsPm = pm;
-    final hour = hourTarget == null ? null : hourRows[hourTarget].number;
-    final minuteRows = hour == null
-        ? const <_Row>[]
-        : _rowsOf(_minuteColumn, pm: pm, hour: hour);
+    final hour = hourTarget == null
+        ? _rules.onlyHour
+        : hourRows[hourTarget].number;
+    final minuteRows = _minuteRows(pm, hour);
     final minuteTarget = _retarget(
       _minuteColumn,
       _rows[_minuteColumn],
@@ -1044,6 +1134,23 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     _setRows(_hourColumn, hourRows, hourTarget, jump: false);
     _setRows(_minuteColumn, minuteRows, minuteTarget, jump: false);
     _setRows(_amPmColumn, amPmRows, amPmTarget, jump: false);
+  }
+
+  /// The Hour column's rows of the half [pm]; none where it is hidden.
+  List<_Row> _hourRows(bool pm) {
+    if (!_shows(widget, _hourColumn)) {
+      return const <_Row>[];
+    }
+    return _rowsOf(_hourColumn, pm: pm, hour: 0);
+  }
+
+  /// The Minute column's rows of hour row [hour]; none where it is hidden
+  /// or there is no hour.
+  List<_Row> _minuteRows(bool pm, int? hour) {
+    if (hour == null || !_shows(widget, _minuteColumn)) {
+      return const <_Row>[];
+    }
+    return _rowsOf(_minuteColumn, pm: pm, hour: hour);
   }
 
   /// The AM/PM column's rows on the 12-hour clock, AM and then PM, each
@@ -1215,17 +1322,21 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   /// The time of the targets: where the hour or the half changed, the
   /// minute kept where the new hour accepts it and otherwise the nearest
   /// it accepts, the earlier on a tie; a half whose hour accepts none, the
-  /// half's nearest; an hour that accepts none, the value.
+  /// half's nearest; an hour that accepts none, the value. With the Hour
+  /// column hidden the hour is [TimePickerRules.onlyHour].
   int? _composeTargets() {
     final rules = _rules;
-    final hourTarget = _targets[_hourColumn];
-    if (hourTarget == null) {
-      return _time;
-    }
     final pm = _targets[_amPmColumn] == 1;
-    var hour = _rows[_hourColumn][hourTarget].number;
-    if (rules.twelveHour) {
-      hour = hour % 12 + (pm ? 12 : 0);
+    var hour = rules.onlyHour;
+    if (hour == null) {
+      final hourTarget = _targets[_hourColumn];
+      if (hourTarget == null) {
+        return _time;
+      }
+      hour = _rows[_hourColumn][hourTarget].number;
+      if (rules.twelveHour) {
+        hour = hour % 12 + (pm ? 12 : 0);
+      }
     }
     final minuteTarget = _targets[_minuteColumn];
     final minute = minuteTarget == null
