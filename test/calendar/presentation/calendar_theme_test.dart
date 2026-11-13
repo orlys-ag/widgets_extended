@@ -1,6 +1,7 @@
 /// [CalendarThemeData]'s fields, among them the entry tint and pending
-/// opacities and the action label style the default builders read and the
-/// timed grid's two shadows, its built-in values, value semantics, domains
+/// opacities and the action label style the default builders read, the
+/// timed grid's two shadows, and the disabled opacity and two text styles
+/// the time picker reads, its built-in values, value semantics, domains
 /// and diagnostics, and [CalendarTheme]'s lookup, notification and capture
 /// into a route.
 library;
@@ -39,7 +40,7 @@ const List<String> iconNames = <String>[
   "addEntryIcon",
 ];
 
-/// The thirty-two text style fields, in the order the theme declares them.
+/// The thirty-four text style fields, in the order the theme declares them.
 const List<String> styleNames = <String>[
   "hourLabelStyle",
   "dayHeaderWeekdayStyle",
@@ -73,20 +74,23 @@ const List<String> styleNames = <String>[
   "monthNameStyle",
   "monthNameMarkedStyle",
   "actionLabelStyle",
+  "timePickerRowStyle",
+  "timePickerHeaderStyle",
 ];
 
 /// The two shadow fields, in the order the theme declares them.
 const List<String> shadowNames = <String>["gripShadows", "liftedBlockShadows"];
 
 /// Every field: the colours, the ring width, the dragged block's, the entry
-/// tint's and the pending entry's opacities, the shadows, the motion, the
-/// icons and the text styles.
+/// tint's, the pending entry's and the disabled opacities, the shadows, the
+/// motion, the icons and the text styles.
 const List<String> fieldNames = <String>[
   ...colourNames,
   "todayRingWidth",
   "draggedBlockOpacity",
   "entryTintOpacity",
   "pendingEntryOpacity",
+  "disabledOpacity",
   ...shadowNames,
   "motionDuration",
   "motionCurve",
@@ -133,6 +137,8 @@ Object valueOf(CalendarThemeData theme, String name) {
       return theme.entryTintOpacity;
     case "pendingEntryOpacity":
       return theme.pendingEntryOpacity;
+    case "disabledOpacity":
+      return theme.disabledOpacity;
     case "gripShadows":
       return theme.gripShadows;
     case "liftedBlockShadows":
@@ -215,6 +221,10 @@ Object valueOf(CalendarThemeData theme, String name) {
       return theme.monthNameMarkedStyle;
     case "actionLabelStyle":
       return theme.actionLabelStyle;
+    case "timePickerRowStyle":
+      return theme.timePickerRowStyle;
+    case "timePickerHeaderStyle":
+      return theme.timePickerHeaderStyle;
   }
   throw ArgumentError.value(name, "name", "no such field");
 }
@@ -263,6 +273,8 @@ CalendarThemeData withValue(
       return theme.copyWith(entryTintOpacity: value as double);
     case "pendingEntryOpacity":
       return theme.copyWith(pendingEntryOpacity: value as double);
+    case "disabledOpacity":
+      return theme.copyWith(disabledOpacity: value as double);
     case "gripShadows":
       return theme.copyWith(gripShadows: value as List<BoxShadow>);
     case "liftedBlockShadows":
@@ -345,6 +357,10 @@ CalendarThemeData withValue(
       return theme.copyWith(monthNameMarkedStyle: value as TextStyle);
     case "actionLabelStyle":
       return theme.copyWith(actionLabelStyle: value as TextStyle);
+    case "timePickerRowStyle":
+      return theme.copyWith(timePickerRowStyle: value as TextStyle);
+    case "timePickerHeaderStyle":
+      return theme.copyWith(timePickerHeaderStyle: value as TextStyle);
   }
   throw ArgumentError.value(name, "name", "no such field");
 }
@@ -433,6 +449,16 @@ builtInTypography =
         height: null,
       ),
       "actionLabelStyle": (size: 14.0, weight: FontWeight.w600, height: null),
+      "timePickerRowStyle": (
+        size: 16.0,
+        weight: FontWeight.w500,
+        height: null,
+      ),
+      "timePickerHeaderStyle": (
+        size: 12.0,
+        weight: FontWeight.w600,
+        height: null,
+      ),
     };
 
 /// A value for the field [name] unlike its built-in one: for a text style,
@@ -464,6 +490,8 @@ Object fullValueOf(String name, int index) {
       return 0.3;
     case "pendingEntryOpacity":
       return 0.7;
+    case "disabledOpacity":
+      return 0.6;
     case "gripShadows":
       return const <BoxShadow>[
         BoxShadow(
@@ -526,6 +554,7 @@ CalendarThemeData fullTheme() {
     draggedBlockOpacity: full("draggedBlockOpacity"),
     entryTintOpacity: full("entryTintOpacity"),
     pendingEntryOpacity: full("pendingEntryOpacity"),
+    disabledOpacity: full("disabledOpacity"),
     gripShadows: full("gripShadows"),
     liftedBlockShadows: full("liftedBlockShadows"),
     motionDuration: full("motionDuration"),
@@ -567,6 +596,8 @@ CalendarThemeData fullTheme() {
     monthNameStyle: full("monthNameStyle"),
     monthNameMarkedStyle: full("monthNameMarkedStyle"),
     actionLabelStyle: full("actionLabelStyle"),
+    timePickerRowStyle: full("timePickerRowStyle"),
+    timePickerHeaderStyle: full("timePickerHeaderStyle"),
   );
 }
 
@@ -620,10 +651,10 @@ Widget themed(CalendarThemeData? data, Widget child) {
 void main() {
   final builtIn = CalendarThemeData();
 
-  test("the field lists name 59 distinct fields, 32 of them text styles", () {
-    expect(fieldNames.toSet(), hasLength(59));
+  test("the field lists name 62 distinct fields, 34 of them text styles", () {
+    expect(fieldNames.toSet(), hasLength(62));
     expect(colourNames, hasLength(14));
-    expect(styleNames, hasLength(32));
+    expect(styleNames, hasLength(34));
     final full = fullTheme();
     for (final name in fieldNames) {
       expect(valueOf(full, name), isNot(valueOf(builtIn, name)), reason: name);
@@ -750,6 +781,10 @@ void main() {
     expect(
       half.pendingEntryOpacity,
       moreOrLessEquals((a.pendingEntryOpacity + b.pendingEntryOpacity) / 2.0),
+    );
+    expect(
+      half.disabledOpacity,
+      moreOrLessEquals((a.disabledOpacity + b.disabledOpacity) / 2.0),
     );
     expect(half.motionCurve, b.motionCurve);
     for (final name in iconNames) {
@@ -879,6 +914,10 @@ void main() {
     expect(builtIn.draggedBlockOpacity, 0.66);
     expect(builtIn.entryTintOpacity, 0.14);
     expect(builtIn.pendingEntryOpacity, 0.5);
+    expect(builtIn.disabledOpacity, 0.38);
+    expect(builtIn.timePickerRowStyle.fontFeatures, const <FontFeature>[
+      FontFeature.tabularFigures(),
+    ]);
     expect(builtIn.gripShadows, const <BoxShadow>[
       BoxShadow(
         color: Color(0x33000000),
@@ -942,6 +981,12 @@ void main() {
       return CalendarThemeData(pendingEntryOpacity: -0.1);
     }, throwsArgumentNamed("pendingEntryOpacity"));
     expect(() {
+      return CalendarThemeData(disabledOpacity: 1.5);
+    }, throwsArgumentNamed("disabledOpacity"));
+    expect(() {
+      return CalendarThemeData(disabledOpacity: -0.1);
+    }, throwsArgumentNamed("disabledOpacity"));
+    expect(() {
       return CalendarThemeData(todayRingWidth: double.nan);
     }, throwsArgumentNamed("todayRingWidth"));
     expect(() {
@@ -953,6 +998,9 @@ void main() {
     expect(() {
       return CalendarThemeData(pendingEntryOpacity: double.nan);
     }, throwsArgumentNamed("pendingEntryOpacity"));
+    expect(() {
+      return CalendarThemeData(disabledOpacity: double.nan);
+    }, throwsArgumentNamed("disabledOpacity"));
     expect(() {
       return CalendarThemeData(
         motionDuration: const Duration(milliseconds: -1),
@@ -969,6 +1017,7 @@ void main() {
       draggedBlockOpacity: 0.2,
       entryTintOpacity: 0.2,
       pendingEntryOpacity: 0.2,
+      disabledOpacity: 0.2,
       todayRingWidth: 1.0,
     );
     final high = CalendarThemeData(
@@ -976,6 +1025,7 @@ void main() {
       draggedBlockOpacity: 0.9,
       entryTintOpacity: 0.9,
       pendingEntryOpacity: 0.9,
+      disabledOpacity: 0.9,
       todayRingWidth: 3.0,
     );
     final under = CalendarThemeData.lerp(low, high, -1.0);
@@ -983,11 +1033,13 @@ void main() {
     expect(under.draggedBlockOpacity, 0.0);
     expect(under.entryTintOpacity, 0.0);
     expect(under.pendingEntryOpacity, 0.0);
+    expect(under.disabledOpacity, 0.0);
     expect(under.todayRingWidth, 0.0);
     final over = CalendarThemeData.lerp(low, high, 2.0);
     expect(over.draggedBlockOpacity, 1.0);
     expect(over.entryTintOpacity, 1.0);
     expect(over.pendingEntryOpacity, 1.0);
+    expect(over.disabledOpacity, 1.0);
     expect(over.motionDuration, const Duration(milliseconds: 1700));
     expect(over.todayRingWidth, moreOrLessEquals(5.0));
   });
@@ -1030,6 +1082,7 @@ void main() {
         "draggedBlockOpacity",
         "entryTintOpacity",
         "pendingEntryOpacity",
+        "disabledOpacity",
       ]) ...<({String name, Object value})>[
         (name: name, value: 1.5),
         (name: name, value: -0.1),
@@ -1147,6 +1200,12 @@ void main() {
       },
       "actionLabelStyle": (style) {
         return CalendarThemeData(actionLabelStyle: style);
+      },
+      "timePickerRowStyle": (style) {
+        return CalendarThemeData(timePickerRowStyle: style);
+      },
+      "timePickerHeaderStyle": (style) {
+        return CalendarThemeData(timePickerHeaderStyle: style);
       },
     };
     expect(themeOf.keys.toList(), styleNames);

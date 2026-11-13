@@ -227,7 +227,7 @@ void main() {
       "lib/calendar/presentation/calendar_theme.dart",
       "CalendarThemeData copyWith({",
     );
-    expect(dataParameters, hasLength(59));
+    expect(dataParameters, hasLength(62));
     expect(extensionParameters, dataParameters);
 
     final other = CalendarThemeExtension(

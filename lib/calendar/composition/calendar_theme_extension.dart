@@ -171,6 +171,7 @@ final class CalendarThemeExtension
     double? draggedBlockOpacity,
     double? entryTintOpacity,
     double? pendingEntryOpacity,
+    double? disabledOpacity,
     List<BoxShadow>? gripShadows,
     List<BoxShadow>? liftedBlockShadows,
     Duration? motionDuration,
@@ -212,6 +213,8 @@ final class CalendarThemeExtension
     TextStyle? monthNameStyle,
     TextStyle? monthNameMarkedStyle,
     TextStyle? actionLabelStyle,
+    TextStyle? timePickerRowStyle,
+    TextStyle? timePickerHeaderStyle,
   }) {
     return CalendarThemeExtension(
       data: data.copyWith(
@@ -233,6 +236,7 @@ final class CalendarThemeExtension
         draggedBlockOpacity: draggedBlockOpacity,
         entryTintOpacity: entryTintOpacity,
         pendingEntryOpacity: pendingEntryOpacity,
+        disabledOpacity: disabledOpacity,
         gripShadows: gripShadows,
         liftedBlockShadows: liftedBlockShadows,
         motionDuration: motionDuration,
@@ -274,6 +278,8 @@ final class CalendarThemeExtension
         monthNameStyle: monthNameStyle,
         monthNameMarkedStyle: monthNameMarkedStyle,
         actionLabelStyle: actionLabelStyle,
+        timePickerRowStyle: timePickerRowStyle,
+        timePickerHeaderStyle: timePickerHeaderStyle,
       ),
     );
   }
