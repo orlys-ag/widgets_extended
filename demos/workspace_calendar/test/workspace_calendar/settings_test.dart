@@ -348,9 +348,16 @@ void main() {
 
     await openTimePicker(tester, "Start time");
     expect(offeredTimes(tester, "Start time"), <int>[
-      7 * 60,
       for (var minute = 8 * 60; minute < 18 * 60; minute += 15) minute,
     ]);
+    // The start, 07:00, lies before the hours: shown, not offered.
+    expect(
+      find.descendant(
+        of: timePickerFinder("Start time"),
+        matching: find.byKey(timePickerHourRowKey(7)),
+      ),
+      findsOneWidget,
+    );
     await openTimePicker(tester, "End time");
     expect(offeredTimes(tester, "End time"), <int>[
       for (var minute = 8 * 60 + 15; minute <= 18 * 60; minute += 15) minute,

@@ -667,10 +667,9 @@ void main() {
   });
 
   testWidgets("TF2 the pickers offer the hours' times: the start's to the "
-      "hours' last slot and its own, the end's after the hours' first slot, "
-      "and of an end on its start's day past the hours' end only its own", (
-    tester,
-  ) async {
+      "hours' last slot, its own time shown besides, the end's after the "
+      "hours' first slot, and of an end on its start's day past the hours' "
+      "end only its own", (tester) async {
     final store = MemoryCalendarStore<ItemPayload>(
       hours: CalendarDayHours(8 * 60, 18 * 60),
       entries: <CalendarItem>[
@@ -682,9 +681,10 @@ void main() {
     await openEdit(tester, store);
     await openTimePicker(tester, "Start time");
     expect(offeredTimes(tester, "Start time"), <int>[
-      7 * 60,
       for (var minute = 8 * 60; minute <= 17 * 60 + 45; minute += 15) minute,
     ]);
+    // The start, 07:00, lies before the hours: shown, not offered.
+    expect(hourRows("Start time"), contains(7));
     await openTimePicker(tester, "End time");
     expect(offeredTimes(tester, "End time"), <int>[
       for (var minute = 8 * 60 + 15; minute <= 18 * 60; minute += 15) minute,
