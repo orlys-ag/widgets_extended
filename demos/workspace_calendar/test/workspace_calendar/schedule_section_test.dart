@@ -1051,6 +1051,51 @@ void main() {
     expect(timePickerFinder("Start time"), findsNothing);
     expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
   });
+
+  testWidgets("TF14 the start's picker refuses each start before the first "
+      "the check allows, and takes the stored item's own start", (
+    tester,
+  ) async {
+    final item = task("item-1", "Write", at(9), at(10));
+    final check = checkOf(
+      CalendarSchedule.of(item.start, item.end, isAllDay: false),
+      policy: const _StartsFromTen(),
+      entry: item,
+    );
+    // Setup sanity: the check's first start lies after the item's start.
+    expect(check.firstStartMinute, 10 * 60);
+    await pumpSection(tester, check);
+    await openTimePicker(tester, "Start time");
+    expect(
+      rowTakesTap(tester, "Start time", timePickerMinuteRowKey(0)),
+      isTrue,
+    );
+    expect(rowTakesTap(tester, "Start time", timePickerHourRowKey(9)), isTrue);
+    for (var hour = 0; hour <= 8; hour++) {
+      expect(
+        rowTakesTap(tester, "Start time", timePickerHourRowKey(hour)),
+        isFalse,
+        reason: "hour $hour",
+      );
+    }
+    for (final minute in <int>[15, 30, 45]) {
+      expect(
+        rowTakesTap(tester, "Start time", timePickerMinuteRowKey(minute)),
+        isFalse,
+        reason: "minute $minute",
+      );
+    }
+  });
+}
+
+/// A policy whose earliest start on a day is 10:00 of it.
+final class _StartsFromTen extends CalendarEditPolicy<ItemPayload> {
+  const _StartsFromTen();
+
+  @override
+  DateTime? earliestStartOn(DateTime day, CalendarNow now) {
+    return DateTime(day.year, day.month, day.day, 10);
+  }
 }
 
 /// A problem the form has no message of its own for.

@@ -1131,9 +1131,9 @@ void main() {
       "on its curve, at once under a zero duration, and reports "
       "nothing", (tester) async {
     final calls = <int?>[];
-    final linear = CalendarThemeData(
+    final easeIn = CalendarThemeData(
       motionDuration: const Duration(seconds: 1),
-      motionCurve: Curves.linear,
+      motionCurve: Curves.easeIn,
     );
     Widget picker(int value, CalendarThemeData theme) {
       return host(
@@ -1142,13 +1142,18 @@ void main() {
       );
     }
 
-    await tester.pumpWidget(picker(570, linear));
-    await tester.pumpWidget(picker(870, linear));
+    await tester.pumpWidget(picker(570, easeIn));
+    await tester.pumpWidget(picker(870, easeIn));
     await tester.pump(const Duration(milliseconds: 500));
     final extent = extentOf(tester);
+    // Halfway through the five rows from 09 to 14 on the theme's curve; a
+    // linear or any symmetric curve puts 09 2.5 rows above the band.
     expect(
       tester.getCenter(hourRow(9)).dy - bandY(tester),
-      moreOrLessEquals(-2.5 * extent, epsilon: 0.5),
+      moreOrLessEquals(
+        -5 * Curves.easeIn.transform(0.5) * extent,
+        epsilon: 0.5,
+      ),
     );
     await tester.pump(const Duration(milliseconds: 500));
     expectOnBand(tester, 14, 30);
