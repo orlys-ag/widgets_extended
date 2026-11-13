@@ -71,6 +71,10 @@ ValueKey<String> timePickerMinuteRowKey(int minute) {
 const int _hourColumn = 0;
 const int _minuteColumn = 1;
 
+/// The columns the per-column state holds, which every per-column loop
+/// runs over.
+const int _columnCount = 2;
+
 /// The rows a column shows; the band lies across the middle one.
 const int _shownRows = 5;
 
@@ -428,39 +432,56 @@ class _Row {
 class _CalendarTimePickerState extends State<CalendarTimePicker>
     with TickerProviderStateMixin {
   /// Each column's offset: `k * _rowExtent` puts row `k` on the band.
-  late final List<AnimationController> _offsets = <AnimationController>[
-    AnimationController.unbounded(vsync: this),
-    AnimationController.unbounded(vsync: this),
-  ];
+  late final List<AnimationController> _offsets =
+      List<AnimationController>.generate(_columnCount, (column) {
+        return AnimationController.unbounded(vsync: this);
+      });
 
   /// Each column's rows, the rows a held column had at the drag's down.
-  final List<List<_Row>> _rows = <List<_Row>>[const <_Row>[], const <_Row>[]];
+  final List<List<_Row>> _rows = List<List<_Row>>.filled(
+    _columnCount,
+    const <_Row>[],
+  );
 
   /// The rows a sync computed for a held column, which its release takes.
-  final List<List<_Row>?> _syncedRows = <List<_Row>?>[null, null];
+  final List<List<_Row>?> _syncedRows = List<List<_Row>?>.filled(
+    _columnCount,
+    null,
+  );
 
   /// The row each column rests on or moves to; null for a column with no
   /// rows.
-  final List<int?> _targets = <int?>[null, null];
+  final List<int?> _targets = List<int?>.filled(_columnCount, null);
 
   /// The offset each column's running motion ends at.
-  final List<double?> _ends = <double?>[null, null];
+  final List<double?> _ends = List<double?>.filled(_columnCount, null);
 
-  final List<bool> _held = <bool>[false, false];
+  final List<bool> _held = List<bool>.filled(_columnCount, false);
 
   /// Whether a user motion runs: one whose settle composes and reports.
-  final List<bool> _moving = <bool>[false, false];
+  final List<bool> _moving = List<bool>.filled(_columnCount, false);
 
   /// Bumped as a user motion starts or ends, so the settle of a motion
   /// that was replaced or ended never runs.
-  final List<int> _motionCounts = <int>[0, 0];
+  final List<int> _motionCounts = List<int>.filled(_columnCount, 0);
 
-  final List<bool> _restAtDown = <bool>[false, false];
-  final List<double> _offsetAtDown = <double>[0.0, 0.0];
+  final List<bool> _restAtDown = List<bool>.filled(_columnCount, false);
+  final List<double> _offsetAtDown = List<double>.filled(_columnCount, 0.0);
 
   /// Whether a held column's release picks even where it moved nothing,
-  /// as a settle, the toggle, Now or Clear ran while it was held.
-  final List<bool> _picksAtRelease = <bool>[false, false];
+  /// as a settle or the toggle ran while it was held.
+  final List<bool> _picksAtRelease = List<bool>.filled(_columnCount, false);
+
+  /// The pointers down on the columns.
+  final Set<int> _pointersDown = <int>{};
+
+  /// The pointers down on the columns as [_endHolds] ended their holds,
+  /// whose lift taps no row.
+  final Set<int> _voidedPointers = <int>{};
+
+  /// Whether the pointer last lifted from the columns was voided, so the
+  /// row tap its lift fires picks nothing.
+  bool _tapVoided = false;
 
   /// The time the picker shows.
   int? _time;
@@ -549,12 +570,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     }
     if (oldWidget.onChanged != null && widget.onChanged == null) {
       _cancelDigitWait();
-      for (var column = 0; column < 2; column++) {
-        _held[column] = false;
-        _syncedRows[column] = null;
-        _picksAtRelease[column] = false;
-      }
-      _valueWaits = false;
+      _endHolds();
       _resetRules();
       _applyTime(widget.value, jump: false);
       return;
@@ -637,7 +653,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     if (!_started) {
       return;
     }
-    for (var column = 0; column < 2; column++) {
+    for (var column = 0; column < _columnCount; column++) {
       final offset = _offsets[column];
       final target = _targets[column];
       if (_held[column]) {
@@ -851,7 +867,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   /// half, the rows and the targets, and moves each column that is not
   /// held to its row, at once where [jump].
   void _applyTime(int? time, {required bool jump}) {
-    for (var column = 0; column < 2; column++) {
+    for (var column = 0; column < _columnCount; column++) {
       if (!_held[column]) {
         _motionCounts[column]++;
         _moving[column] = false;
@@ -1025,11 +1041,24 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   }
 
   void _deferToRelease() {
-    for (var column = 0; column < 2; column++) {
+    for (var column = 0; column < _columnCount; column++) {
       if (_held[column]) {
         _picksAtRelease[column] = true;
       }
     }
+  }
+
+  /// Ends every hold without a report: no release then picks or shows a
+  /// value that waited for it, and no pointer down on the columns now taps
+  /// a row at its lift.
+  void _endHolds() {
+    for (var column = 0; column < _columnCount; column++) {
+      _held[column] = false;
+      _syncedRows[column] = null;
+      _picksAtRelease[column] = false;
+    }
+    _valueWaits = false;
+    _voidedPointers.addAll(_pointersDown);
   }
 
   /// Composes the time from the targets, shows it, and reports it where
@@ -1099,11 +1128,11 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     return widget.value;
   }
 
-  /// Shows and reports [time], from Now or Clear: every user motion ends
-  /// without a report, and a held column's release picks again.
+  /// Shows and reports [time], from Now or Clear: every hold and user
+  /// motion ends without a report.
   void _pickTime(int? time) {
     final before = _time;
-    _deferToRelease();
+    _endHolds();
     setState(() {
       _applyTime(time, jump: false);
     });
@@ -1158,6 +1187,20 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   }
 
   // Gestures.
+
+  void _pointerDown(PointerDownEvent event) {
+    _pointersDown.add(event.pointer);
+  }
+
+  /// Forgets a lifted or cancelled pointer, noting whether [_endHolds]
+  /// voided it. A lift reaches the columns' [Listener] before
+  /// [GestureBinding.handleEvent], the last entry of its hit-test path,
+  /// fires the row tap it makes, so that tap reads [_tapVoided] for its own
+  /// pointer.
+  void _pointerGone(PointerEvent event) {
+    _pointersDown.remove(event.pointer);
+    _tapVoided = _voidedPointers.remove(event.pointer);
+  }
 
   void _dragDown(int column) {
     if (!_takesInput || _rows[column].isEmpty) {
@@ -1300,7 +1343,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   }
 
   void _tapRow(int column, int number) {
-    if (!_takesInput) {
+    if (!_takesInput || _tapVoided) {
       return;
     }
     final index = _indexOf(column, _rows[column], number);
@@ -1895,63 +1938,70 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
                     ? CrossAxisAlignment.stretch
                     : CrossAxisAlignment.center,
                 children: <Widget>[
-                  Directionality(
-                    textDirection: TextDirection.ltr,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        Row(
-                          mainAxisSize: bounded
-                              ? MainAxisSize.max
-                              : MainAxisSize.min,
-                          children: <Widget>[
-                            header(strings.timePickerHourLabel),
-                            header(strings.timePickerMinuteLabel),
-                            if (_twelveHour) SizedBox(width: _toggleWidth),
-                          ],
-                        ),
-                        SizedBox(
-                          height: _shownRows * extent,
-                          child: Stack(
+                  Listener(
+                    onPointerDown: _pointerDown,
+                    onPointerUp: _pointerGone,
+                    onPointerCancel: _pointerGone,
+                    child: Directionality(
+                      textDirection: TextDirection.ltr,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Row(
+                            mainAxisSize: bounded
+                                ? MainAxisSize.max
+                                : MainAxisSize.min,
                             children: <Widget>[
-                              if (_time != null)
-                                Positioned(
-                                  key: timePickerBandKey,
-                                  left: 0.0,
-                                  right: 0.0,
-                                  top: 2 * extent,
-                                  height: extent,
-                                  child: DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      color: theme.primaryTint,
-                                      borderRadius: BorderRadius.circular(
-                                        _controlRadius,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              Row(
-                                mainAxisSize: bounded
-                                    ? MainAxisSize.max
-                                    : MainAxisSize.min,
-                                children: <Widget>[
-                                  sized(_column(theme, strings, _hourColumn)),
-                                  sized(
-                                    _column(theme, strings, _minuteColumn),
-                                  ),
-                                  if (_twelveHour)
-                                    SizedBox(
-                                      width: _toggleWidth,
-                                      child: Center(
-                                        child: _toggle(theme, strings),
-                                      ),
-                                    ),
-                                ],
-                              ),
+                              header(strings.timePickerHourLabel),
+                              header(strings.timePickerMinuteLabel),
+                              if (_twelveHour) SizedBox(width: _toggleWidth),
                             ],
                           ),
-                        ),
-                      ],
+                          SizedBox(
+                            height: _shownRows * extent,
+                            child: Stack(
+                              children: <Widget>[
+                                if (_time != null)
+                                  Positioned(
+                                    key: timePickerBandKey,
+                                    left: 0.0,
+                                    right: 0.0,
+                                    top: 2 * extent,
+                                    height: extent,
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        color: theme.primaryTint,
+                                        borderRadius: BorderRadius.circular(
+                                          _controlRadius,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                Row(
+                                  mainAxisSize: bounded
+                                      ? MainAxisSize.max
+                                      : MainAxisSize.min,
+                                  children: <Widget>[
+                                    sized(
+                                      _column(theme, strings, _hourColumn),
+                                    ),
+                                    sized(
+                                      _column(theme, strings, _minuteColumn),
+                                    ),
+                                    if (_twelveHour)
+                                      SizedBox(
+                                        width: _toggleWidth,
+                                        child: Center(
+                                          child: _toggle(theme, strings),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   if (hasFooter)

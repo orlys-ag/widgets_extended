@@ -1643,10 +1643,11 @@ void main() {
     expect(calls, <int?>[690]);
   });
 
-  testWidgets("PK32 a column held without moving while the other column, "
-      "the toggle or Now picks: the other column's pick and the toggle's "
-      "wait for its release, Now reports at once, and the release picks "
-      "from where it lies", (tester) async {
+  testWidgets("PK32 a column held without moving while the other column or "
+      "the toggle picks: the other column's pick and the toggle's wait for "
+      "its release, and the release picks from where it lies", (
+    tester,
+  ) async {
     final calls = <int?>[];
     Widget picker({
       CalendarHourLabelFormat format = CalendarHourLabelFormat.twentyFourHour,
@@ -1655,9 +1656,6 @@ void main() {
         CalendarTimePicker(
           value: 570,
           hourLabelFormat: format,
-          now: () {
-            return 853;
-          },
           // Row 8 takes no tap, so a touch on it holds the column alone.
           isEnabled: (minute) {
             return minute ~/ 60 != 8;
@@ -1686,16 +1684,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls, <int?>[585]);
     expectOnBand(tester, 9, 45);
-
-    calls.clear();
-    final again = await holdHour(9);
-    await tester.tap(find.byKey(timePickerNowKey), pointer: 10);
-    await tester.pumpAndSettle();
-    expect(calls, <int?>[840]);
-    await again.up();
-    await tester.pumpAndSettle();
-    expect(calls, <int?>[840, 540]);
-    expectOnBand(tester, 9, 0);
 
     calls.clear();
     await tester.pumpWidget(Container());
@@ -1820,7 +1808,7 @@ void main() {
     await tester.tap(hourRow(1));
     await tester.pumpAndSettle();
     expect(calls, <int?>[null, 60]);
-  }, skip: true);
+  });
 
   testWidgets("PK47 the rows that take a tap are those of the times the "
       "rules of the picker's widget offer, on either clock", (tester) async {
