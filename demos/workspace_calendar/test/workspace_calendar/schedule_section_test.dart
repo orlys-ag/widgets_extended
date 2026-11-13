@@ -1,13 +1,20 @@
 /// The item form's sheet and its schedule section: the sheet's container
 /// and type selector, the message of each schedule problem, and the
 /// section's summary, length and All day chips, End date, next free time,
-/// zone, options and kept kind.
+/// zone, options and kept kind, and its time fields, the pickers they open,
+/// what each picker refuses, and where the focus goes.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
+import 'package:widgets_extended/calendar/views/time_picker.dart'
+    show
+        timePickerHourColumnKey,
+        timePickerHourRowKey,
+        timePickerMinuteRowKey,
+        timePickerNowKey;
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
@@ -84,6 +91,7 @@ Future<void> openEdit(
       id: id,
       policy: const UnrestrictedEditPolicy<ItemPayload>(),
       now: wednesdayStart,
+      hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
     );
   });
 }
@@ -101,6 +109,7 @@ Future<void> openCreate(
       range: range,
       policy: const UnrestrictedEditPolicy<ItemPayload>(),
       now: wednesdayStart,
+      hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
     );
   });
 }
@@ -136,11 +145,18 @@ CalendarScheduleCheck<ItemPayload> checkOf(
   );
 }
 
-/// Pumps the section of [check] alone.
+/// Pumps the section of [check] alone, in the calendar's whole day of
+/// 15-minute slots on the 24-hour clock, on [zone]'s clock, its pickers'
+/// Now reading [now] or else Wednesday's start, its edits going to
+/// [onChanged] or else nowhere, and locked where [locked].
 Future<void> pumpSection(
   WidgetTester tester,
-  CalendarScheduleCheck<ItemPayload> check,
-) {
+  CalendarScheduleCheck<ItemPayload> check, {
+  Location? zone,
+  ValueGetter<CalendarNow>? now,
+  ValueChanged<CalendarSchedule>? onChanged,
+  bool locked = false,
+}) {
   return tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
@@ -149,12 +165,74 @@ Future<void> pumpSection(
             check: check,
             hours: CalendarDayHours.allDay,
             slotMinutes: 15,
-            onChanged: (schedule) {},
+            hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+            now: now ?? wednesdayStart,
+            zone: zone,
+            locked: locked,
+            onChanged: onChanged ?? (schedule) {},
           ),
         ),
       ),
     ),
   );
+}
+
+/// What [finder] finds in the open picker of the form's time field
+/// labelled [label].
+Finder inPicker(String label, Finder finder) {
+  return find.descendant(of: timePickerFinder(label), matching: finder);
+}
+
+/// Whether the row keyed [key] of the picker of the time field labelled
+/// [label] takes a tap, which a row with no time the picker may pick, in a
+/// picker that takes input, does not.
+bool rowTakesTap(WidgetTester tester, String label, Key key) {
+  return tester
+          .widget<GestureDetector>(inPicker(label, find.byKey(key)))
+          .onTap !=
+      null;
+}
+
+/// The hours the Hour column of the picker of the time field labelled
+/// [label] has rows for.
+List<int> hourRows(String label) {
+  return <int>[
+    for (var hour = 0; hour <= 24; hour++)
+      if (inPicker(
+        label,
+        find.byKey(timePickerHourRowKey(hour)),
+      ).evaluate().isNotEmpty)
+        hour,
+  ];
+}
+
+/// The minutes the Minute column of the picker of the time field labelled
+/// [label] has rows for.
+List<int> minuteRows(String label) {
+  return <int>[
+    for (var minute = 0; minute < 60; minute++)
+      if (inPicker(
+        label,
+        find.byKey(timePickerMinuteRowKey(minute)),
+      ).evaluate().isNotEmpty)
+        minute,
+  ];
+}
+
+/// Whether the primary focus lies on or under the one element [finder]
+/// finds.
+bool focusUnder(Finder finder) {
+  final target = finder.evaluate().single;
+  final focused = FocusManager.instance.primaryFocus?.context;
+  if (focused == null) {
+    return false;
+  }
+  var under = identical(focused, target);
+  focused.visitAncestorElements((ancestor) {
+    under = under || identical(ancestor, target);
+    return !under;
+  });
+  return under;
 }
 
 void main() {
@@ -201,12 +279,15 @@ void main() {
     expect(dropdownFinder("Status"), findsOneWidget);
 
     await tester.enterText(fieldFinder("Title"), "Launch");
-    await chooseOption(tester, "Start time", "11:00");
+    await pickTime(tester, "Start time", "11:00");
+    // The open picker scrolled the form to reveal it.
+    await tester.ensureVisible(find.text("Risk").last);
+    await tester.pumpAndSettle();
     await tester.tap(find.text("Risk").last);
     await tester.pumpAndSettle();
     expect(fieldText(tester, "Title"), "Launch");
-    expect(dropdownShows("Start time", "11:00"), findsOneWidget);
-    expect(dropdownShows("End time", "12:00"), findsOneWidget);
+    expect(timeFieldShows("Start time", "11:00"), findsOneWidget);
+    expect(timeFieldShows("End time", "12:00"), findsOneWidget);
     expect(fieldFinder("Project"), findsOneWidget);
     expect(dropdownFinder("Status"), findsNothing);
     expect(dropdownShows("Severity", "Medium"), findsOneWidget);
@@ -225,7 +306,12 @@ void main() {
     await tester.pumpAndSettle();
 
     await openWith(tester, (context) {
-      showItemDetails(context, store: store, id: "item-1");
+      showItemDetails(
+        context,
+        store: store,
+        id: "item-1",
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+      );
     });
     expect(find.byType(SegmentedButton<CalendarItemType>), findsNothing);
     expect(summary(tester), "Wed, Apr 22, 09:00 - 10:00 (1h)");
@@ -288,7 +374,7 @@ void main() {
 
     await tester.tap(find.widgetWithText(ChoiceChip, "30m"));
     await tester.pumpAndSettle();
-    expect(dropdownShows("End time", "09:30"), findsOneWidget);
+    expect(timeFieldShows("End time", "09:30"), findsOneWidget);
     expect(summary(tester), "Wed, Apr 22, 09:00 - 09:30 (30m)");
     expect(
       tester
@@ -299,7 +385,7 @@ void main() {
 
     await tester.tap(find.widgetWithText(ChoiceChip, "1h"));
     await tester.pumpAndSettle();
-    expect(dropdownShows("End time", "10:00"), findsOneWidget);
+    expect(timeFieldShows("End time", "10:00"), findsOneWidget);
   });
 
   testWidgets("SS3 End date shows for a multi-day or all-day item, or after "
@@ -328,7 +414,7 @@ void main() {
     await tester.tap(find.text("All day"));
     await tester.pumpAndSettle();
     expect(formDateShows("End date", "2026-04-22"), findsOneWidget);
-    expect(dropdownFinder("Start time"), findsNothing);
+    expect(timeFieldFinder("Start time"), findsNothing);
     expect(summary(tester), "Wed, Apr 22, all day");
   });
 
@@ -351,8 +437,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text("Next free time"));
     await tester.pumpAndSettle();
-    expect(dropdownShows("Start time", "10:30"), findsOneWidget);
-    expect(dropdownShows("End time", "11:30"), findsOneWidget);
+    expect(timeFieldShows("Start time", "10:30"), findsOneWidget);
+    expect(timeFieldShows("End time", "11:30"), findsOneWidget);
     expect(find.byKey(scheduleOverlapKey), findsNothing);
   });
 
@@ -439,7 +525,7 @@ void main() {
     await tester.tap(allDayChip());
     await tester.pumpAndSettle();
     expect(summary(tester), "Wed, Apr 22, all day");
-    expect(dropdownFinder("Start time"), findsNothing);
+    expect(timeFieldFinder("Start time"), findsNothing);
     expect(chipLabels(tester), <String>["15m", "30m", "1h", "All day"]);
     expect(chipLabels(tester, selectedOnly: true), <String>["All day"]);
 
@@ -453,7 +539,7 @@ void main() {
     await tester.tap(find.widgetWithText(ChoiceChip, "30m"));
     await tester.pumpAndSettle();
     expect(summary(tester), "Wed, Apr 22, 09:00 - 09:30 (30m)");
-    expect(dropdownShows("Start time", "09:00"), findsOneWidget);
+    expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
     expect(chipLabels(tester, selectedOnly: true), <String>["30m"]);
   });
 
@@ -529,6 +615,441 @@ void main() {
     await tester.tap(find.widgetWithText(ChoiceChip, "30m"));
     await tester.pumpAndSettle();
     expect(summary(tester), "Wed, Apr 22, 09:30 - 10:00 (30m)");
+  });
+
+  testWidgets("TF1 a tap on Start time opens its picker under the time row, "
+      "a pick there settles into the schedule, a tap on End time opens the "
+      "end's picker alone and a second tap closes it; a fixed start's field "
+      "opens none", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    expect(find.byKey(scheduleStartPickerKey), findsNothing);
+
+    await tester.tap(timeFieldFinder("Start time"));
+    await tester.pumpAndSettle();
+    expect(find.byKey(scheduleStartPickerKey), findsOneWidget);
+    expect(
+      tester.getRect(find.byKey(scheduleStartPickerKey)).top,
+      greaterThan(tester.getRect(timeFieldFinder("Start time")).bottom),
+    );
+    await tester.tap(
+      inPicker("Start time", find.byKey(timePickerMinuteRowKey(30))),
+    );
+    await tester.pumpAndSettle();
+    expect(summary(tester), "Wed, Apr 22, 09:30 - 10:30 (1h)");
+
+    await tester.tap(timeFieldFinder("End time"));
+    await tester.pumpAndSettle();
+    expect(find.byKey(scheduleEndPickerKey), findsOneWidget);
+    expect(find.byKey(scheduleStartPickerKey), findsNothing);
+    await tester.tap(timeFieldFinder("End time"));
+    await tester.pumpAndSettle();
+    expect(find.byKey(scheduleEndPickerKey), findsNothing);
+    expect(find.byKey(scheduleStartPickerKey), findsNothing);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    const lock = HistoryLockPolicy<ItemPayload>();
+    final timed = task("item-2", "Write", DateTime(2026, 4, 21, 22), at(10));
+    final fixed = checkOf(
+      CalendarSchedule.of(timed.start, timed.end, isAllDay: false),
+      policy: lock,
+      entry: timed,
+    );
+    expect(fixed.startFixed, isTrue);
+    await pumpSection(tester, fixed);
+    await tester.tap(timeFieldFinder("Start time"));
+    await tester.pumpAndSettle();
+    expect(find.byKey(scheduleStartPickerKey), findsNothing);
+  });
+
+  testWidgets("TF2 the pickers offer the hours' times: the start's to the "
+      "hours' last slot and its own, the end's after the hours' first slot, "
+      "and of an end on its start's day past the hours' end only its own", (
+    tester,
+  ) async {
+    final store = MemoryCalendarStore<ItemPayload>(
+      hours: CalendarDayHours(8 * 60, 18 * 60),
+      entries: <CalendarItem>[
+        task("item-1", "Early", at(7), at(9)),
+        task("item-2", "Late", at(19), at(20)),
+      ],
+    );
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    await openTimePicker(tester, "Start time");
+    expect(offeredTimes(tester, "Start time"), <int>[
+      7 * 60,
+      for (var minute = 8 * 60; minute <= 17 * 60 + 45; minute += 15) minute,
+    ]);
+    await openTimePicker(tester, "End time");
+    expect(offeredTimes(tester, "End time"), <int>[
+      for (var minute = 8 * 60 + 15; minute <= 18 * 60; minute += 15) minute,
+    ]);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    await openEdit(tester, store, id: "item-2");
+    await openTimePicker(tester, "End time");
+    expect(hourRows("End time"), <int>[20]);
+    expect(minuteRows("End time"), <int>[0]);
+    final end = tester.widget<CalendarTimePicker>(timePickerFinder("End time"));
+    expect(end.min, 20 * 60);
+    expect(end.max, 20 * 60);
+    expect(rowTakesTap(tester, "End time", timePickerHourRowKey(20)), isTrue);
+    expect(rowTakesTap(tester, "End time", timePickerMinuteRowKey(0)), isTrue);
+  });
+
+  testWidgets("TF3 the pickers refuse what the schedule check refuses: a "
+      "start before now under the history lock, and on a clock that skips "
+      "its midnight hour a start or an end in that hour, but not the 24:00 "
+      "before it", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Later", at(12), at(13)),
+    ]);
+    addTearDown(store.dispose);
+    await openWith(tester, (context) {
+      showEditForm(
+        context,
+        store: store,
+        id: "item-1",
+        policy: const HistoryLockPolicy<ItemPayload>(lockEarlierToday: true),
+        now: () {
+          return CalendarNow(time: at(10, 20), today: wednesday);
+        },
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+      );
+    });
+    await openTimePicker(tester, "Start time");
+    expect(timeEnabled(tester, "Start time", "10:00"), isFalse);
+    expect(timeEnabled(tester, "Start time", "11:15"), isTrue);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    final havana = tz.getLocation("America/Havana");
+    // Setup sanity: Havana's clock never reads 00:30 on 2026-03-08.
+    expect(tz.TZDateTime(havana, 2026, 3, 8, 0, 30).hour, isNot(0));
+    await pumpSection(
+      tester,
+      checkOf(
+        CalendarSchedule.of(
+          DateTime(2026, 3, 8, 1),
+          DateTime(2026, 3, 8, 2),
+          isAllDay: false,
+        ),
+      ),
+      zone: havana,
+    );
+    await openTimePicker(tester, "Start time");
+    for (final time in <String>["00:00", "00:15", "00:30", "00:45"]) {
+      expect(timeEnabled(tester, "Start time", time), isFalse, reason: time);
+    }
+    expect(rowTakesTap(tester, "Start time", timePickerHourRowKey(0)), isFalse);
+    expect(timeEnabled(tester, "Start time", "01:00"), isTrue);
+    await closeTimePicker(tester, "Start time");
+
+    await pumpSection(
+      tester,
+      checkOf(
+        CalendarSchedule.of(
+          DateTime(2026, 3, 7, 22),
+          DateTime(2026, 3, 8, 2),
+          isAllDay: false,
+        ),
+      ),
+      zone: havana,
+    );
+    await openTimePicker(tester, "End time");
+    for (final time in <String>["00:15", "00:30", "00:45"]) {
+      expect(timeEnabled(tester, "End time", time), isFalse, reason: time);
+    }
+    expect(rowTakesTap(tester, "End time", timePickerHourRowKey(0)), isFalse);
+    expect(timeEnabled(tester, "End time", "01:00"), isTrue);
+    await closeTimePicker(tester, "End time");
+
+    await pumpSection(
+      tester,
+      checkOf(
+        CalendarSchedule.of(
+          DateTime(2026, 3, 7, 22),
+          DateTime(2026, 3, 7, 23),
+          isAllDay: false,
+        ).withEndMinute(CalendarDates.minutesPerDay),
+      ),
+      zone: havana,
+    );
+    await openTimePicker(tester, "End time");
+    expect(rowTakesTap(tester, "End time", timePickerHourRowKey(24)), isTrue);
+    expect(timeEnabled(tester, "End time", "24:00"), isTrue);
+  });
+
+  testWidgets("TF4 the form's Now picks the minute the form's now reads on "
+      "the store's clock, rounded down to the slot", (tester) async {
+    final kolkata = tz.getLocation("Asia/Kolkata");
+    final store = MemoryCalendarStore<ItemPayload>(
+      zone: kolkata,
+      entries: <CalendarItem>[
+        task(
+          "item-1",
+          "Write",
+          tz.TZDateTime(kolkata, 2026, 4, 22, 11),
+          tz.TZDateTime(kolkata, 2026, 4, 22, 12),
+        ),
+      ],
+    );
+    addTearDown(store.dispose);
+    await openWith(tester, (context) {
+      showEditForm(
+        context,
+        store: store,
+        id: "item-1",
+        policy: const UnrestrictedEditPolicy<ItemPayload>(),
+        now: () {
+          // 09:13 in Kolkata.
+          return CalendarNow(
+            time: DateTime.utc(2026, 4, 22, 3, 43),
+            today: wednesday,
+          );
+        },
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+      );
+    });
+    expect(summary(tester), "Wed, Apr 22, 11:00 - 12:00 (1h)");
+    await openTimePicker(tester, "Start time");
+    await tester.tap(inPicker("Start time", find.byKey(timePickerNowKey)));
+    await tester.pumpAndSettle();
+    // The nearest slot would be 09:15.
+    expect(summary(tester), "Wed, Apr 22, 09:00 - 10:00 (1h)");
+  });
+
+  testWidgets("TF5 the start's picker stays open across Next free time, a "
+      "length chip and a new start date, and All day closes it and focuses "
+      "the chip", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+      task("item-2", "Standup", at(9, 30), at(10, 30)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    await openTimePicker(tester, "Start time");
+
+    await tester.ensureVisible(find.text("Next free time"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text("Next free time"));
+    await tester.pumpAndSettle();
+    expect(summary(tester), "Wed, Apr 22, 10:30 - 11:30 (1h)");
+    expect(find.byKey(scheduleStartPickerKey), findsOneWidget);
+
+    await tester.ensureVisible(find.widgetWithText(ChoiceChip, "30m"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ChoiceChip, "30m"));
+    await tester.pumpAndSettle();
+    expect(summary(tester), "Wed, Apr 22, 10:30 - 11:00 (30m)");
+    expect(find.byKey(scheduleStartPickerKey), findsOneWidget);
+
+    await tester.ensureVisible(formDateFinder("Start date"));
+    await tester.pumpAndSettle();
+    await tester.tap(formDateFinder("Start date"));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(DatePickerDialog),
+        matching: find.text("23"),
+      ),
+    );
+    await tester.tap(find.text("OK"));
+    await tester.pumpAndSettle();
+    expect(summary(tester), "Thu, Apr 23, 10:30 - 11:00 (30m)");
+    expect(find.byKey(scheduleStartPickerKey), findsOneWidget);
+
+    await tester.ensureVisible(allDayChip());
+    await tester.pumpAndSettle();
+    await tester.tap(allDayChip());
+    await tester.pumpAndSettle();
+    expect(summary(tester), "Thu, Apr 23, all day");
+    expect(find.byKey(scheduleStartPickerKey), findsNothing);
+    expect(focusUnder(allDayChip()), isTrue);
+  });
+
+  testWidgets("TF8 the focus follows the open picker: its Hour column takes "
+      "it as the picker opens, from the other picker too, and its field as "
+      "it closes", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    await tester.tap(timeFieldFinder("Start time"));
+    await tester.pumpAndSettle();
+    expect(
+      focusUnder(inPicker("Start time", find.byKey(timePickerHourColumnKey))),
+      isTrue,
+    );
+
+    await tester.tap(timeFieldFinder("End time"));
+    await tester.pumpAndSettle();
+    expect(
+      focusUnder(inPicker("End time", find.byKey(timePickerHourColumnKey))),
+      isTrue,
+    );
+
+    await tester.tap(timeFieldFinder("End time"));
+    await tester.pumpAndSettle();
+    expect(timePickerFinder("End time"), findsNothing);
+    expect(focusUnder(timeFieldFinder("End time")), isTrue);
+  });
+
+  testWidgets("TF9 a picker opened past the bottom of the view scrolls into "
+      "it in the next frame", (tester) async {
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(390.0, 300.0);
+    addTearDown(tester.view.reset);
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
+    );
+    final position = tester
+        .state<ScrollableState>(find.byType(Scrollable).first)
+        .position;
+    expect(position.pixels, 0.0);
+
+    await tester.tap(timeFieldFinder("Start time"));
+    await tester.pump();
+    // Setup sanity: the picker opened past the view's bottom, so the view
+    // scrolled to reveal it.
+    expect(position.pixels, greaterThan(0.0));
+    final picker = tester.getRect(find.byKey(scheduleStartPickerKey));
+    expect(picker.top, greaterThanOrEqualTo(0.0));
+    expect(picker.bottom, lessThanOrEqualTo(300.0));
+  });
+
+  testWidgets("TF11 an open picker stays open as its field locks and takes "
+      "no pick, and closed from its field gives the field the focus", (
+    tester,
+  ) async {
+    final timed = task("item-2", "Write", DateTime(2026, 4, 21, 22), at(10));
+    final schedule = CalendarSchedule.of(
+      timed.start,
+      timed.end,
+      isAllDay: false,
+    );
+    final changes = <CalendarSchedule>[];
+    await pumpSection(
+      tester,
+      checkOf(schedule, entry: timed),
+      onChanged: changes.add,
+    );
+    await openTimePicker(tester, "Start time");
+    expect(timePickerFinder("Start time"), findsOneWidget);
+
+    final fixed = checkOf(
+      schedule,
+      policy: const HistoryLockPolicy<ItemPayload>(),
+      entry: timed,
+    );
+    expect(fixed.startFixed, isTrue);
+    await pumpSection(tester, fixed, onChanged: changes.add);
+    await tester.pumpAndSettle();
+    expect(timePickerFinder("Start time"), findsOneWidget);
+    await tester.tap(
+      inPicker("Start time", find.byKey(timePickerHourRowKey(23))),
+    );
+    await tester.pumpAndSettle();
+    expect(changes, isEmpty);
+    expect(
+      focusUnder(inPicker("Start time", find.byKey(timePickerHourColumnKey))),
+      isTrue,
+    );
+
+    await tester.tap(timeFieldFinder("Start time"));
+    await tester.pumpAndSettle();
+    expect(timePickerFinder("Start time"), findsNothing);
+    expect(
+      FocusManager.instance.primaryFocus?.context,
+      same(tester.element(timeFieldFinder("Start time"))),
+    );
+
+    await openTimePicker(tester, "End time");
+    expect(timePickerFinder("End time"), findsOneWidget);
+    await pumpSection(tester, fixed, onChanged: changes.add, locked: true);
+    await tester.pumpAndSettle();
+    expect(timePickerFinder("End time"), findsOneWidget);
+    await tester.tap(timeFieldFinder("End time"));
+    await tester.pumpAndSettle();
+    expect(timePickerFinder("End time"), findsNothing);
+    expect(
+      FocusManager.instance.primaryFocus?.context,
+      same(tester.element(timeFieldFinder("End time"))),
+    );
+  });
+
+  testWidgets("TF12 a keyboard sliding in under the form does not rebuild "
+      "its open picker", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    addTearDown(tester.view.resetViewInsets);
+    await openEdit(tester, store);
+    await openTimePicker(tester, "Start time");
+    final picker = tester.element(timePickerFinder("Start time"));
+    final save = tester.getRect(saveFinder()).bottom;
+    final ratio = tester.view.devicePixelRatio;
+    final rebuilt = <Element>[];
+    debugOnRebuildDirtyWidget = (element, builtOnce) {
+      if (identical(element, picker)) {
+        rebuilt.add(element);
+      }
+    };
+    try {
+      for (var frame = 1; frame <= 5; frame++) {
+        tester.view.viewInsets = FakeViewPadding(
+          bottom: 300.0 * ratio * frame / 5,
+        );
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+    } finally {
+      debugOnRebuildDirtyWidget = null;
+    }
+    // Setup sanity: the inset reached the form, which it lifted.
+    expect(tester.getRect(saveFinder()).bottom, moreOrLessEquals(save - 300.0));
+    expect(rebuilt, isEmpty);
+  });
+
+  testWidgets("TF13 a picker closed while its column still moves drops "
+      "that motion's pick, and its field keeps its time", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    final hourColumn = inPicker(
+      "Start time",
+      find.byKey(timePickerHourColumnKey),
+    );
+    await openEdit(tester, store);
+    await openTimePicker(tester, "Start time");
+    // Setup sanity: left to settle, the fling picks another start.
+    await tester.fling(hourColumn, const Offset(0.0, -120.0), 1000.0);
+    await tester.pumpAndSettle();
+    expect(timeFieldShows("Start time", "09:00"), findsNothing);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    await openEdit(tester, store);
+    await openTimePicker(tester, "Start time");
+    await tester.fling(hourColumn, const Offset(0.0, -120.0), 1000.0);
+    await tester.pump();
+    await tester.pump();
+    // Setup sanity: the motion still runs, its pick not yet reported.
+    expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
+    await tester.tap(timeFieldFinder("End time"));
+    await tester.pumpAndSettle();
+    expect(timePickerFinder("End time"), findsOneWidget);
+    expect(timePickerFinder("Start time"), findsNothing);
+    expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
   });
 }
 

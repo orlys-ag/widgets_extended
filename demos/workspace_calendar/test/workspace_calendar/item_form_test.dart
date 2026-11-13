@@ -9,6 +9,7 @@ import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/item_form.dart';
 
+import 'form_driver.dart';
 import 'midnight_days.dart';
 
 final DateTime wednesday = DateTime(2026, 4, 22);
@@ -55,6 +56,7 @@ Future<void> openForm(
                       today: wednesday,
                     );
                   },
+                  hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
                   slotMinutes: slotMinutes,
                 );
               },
@@ -66,56 +68,6 @@ Future<void> openForm(
     ),
   );
   await tester.tap(find.text("Open"));
-  await tester.pumpAndSettle();
-}
-
-/// The form's time field labelled [label].
-Finder timeField(String label) {
-  return find.ancestor(
-    of: find.text(label),
-    matching: find.byType(DropdownButtonFormField<int>),
-  );
-}
-
-/// The labels of the times the form's time field labelled [label] offers.
-List<String> timeChoices(WidgetTester tester, String label) {
-  final dropdown = tester.widget<DropdownButton<int>>(
-    find.descendant(
-      of: timeField(label),
-      matching: find.byType(DropdownButton<int>),
-    ),
-  );
-  return <String>[
-    for (final item in dropdown.items!)
-      english.formatTime(item.value!, CalendarHourLabelFormat.twentyFourHour),
-  ];
-}
-
-const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
-
-/// The menu item of [minute] in the form's time field labelled [label].
-DropdownMenuItem<int> timeItem(WidgetTester tester, String label, int minute) {
-  final dropdown = tester.widget<DropdownButton<int>>(
-    find.descendant(
-      of: timeField(label),
-      matching: find.byType(DropdownButton<int>),
-    ),
-  );
-  return dropdown.items!.singleWhere((item) {
-    return item.value == minute;
-  });
-}
-
-/// Picks [time] in the form's time field labelled [label].
-Future<void> pickTime(WidgetTester tester, String label, String time) async {
-  await tester.tap(timeField(label));
-  await tester.pumpAndSettle();
-  final menu = find.byType(Scrollable).last;
-  final item = find.descendant(of: menu, matching: find.text(time));
-  await tester.scrollUntilVisible(item, 100.0, scrollable: menu);
-  await Scrollable.ensureVisible(tester.element(item), alignment: 0.5);
-  await tester.pumpAndSettle();
-  await tester.tap(item);
   await tester.pumpAndSettle();
 }
 
@@ -153,17 +105,8 @@ void main() {
     addTearDown(store.dispose);
     await openForm(tester, store);
     await pickTime(tester, "Start time", "11:00");
-    expect(
-      find.descendant(
-        of: timeField("Start time"),
-        matching: find.text("11:00"),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: timeField("End time"), matching: find.text("12:00")),
-      findsOneWidget,
-    );
+    expect(timeFieldShows("Start time", "11:00"), findsOneWidget);
+    expect(timeFieldShows("End time", "12:00"), findsOneWidget);
   });
 
   testWidgets("R2 under the history lock a start before now is disabled, "
@@ -180,9 +123,10 @@ void main() {
       policy: const HistoryLockPolicy<ItemPayload>(lockEarlierToday: true),
       now: DateTime(2026, 4, 22, 9, 30),
     );
-    expect(timeItem(tester, "Start time", 9 * 60).enabled, isFalse);
-    expect(timeItem(tester, "Start time", 9 * 60 + 30).enabled, isTrue);
-    expect(timeItem(tester, "Start time", 11 * 60).enabled, isTrue);
+    await openTimePicker(tester, "Start time");
+    expect(timeEnabled(tester, "Start time", "09:00"), isFalse);
+    expect(timeEnabled(tester, "Start time", "09:30"), isTrue);
+    expect(timeEnabled(tester, "Start time", "11:00"), isTrue);
   });
 
   testWidgets("R3 an item sharing time with another names it before Save", (
@@ -234,8 +178,8 @@ void main() {
 
     await tester.tap(find.text("All day"));
     await tester.pumpAndSettle();
-    expect(timeField("Start time"), findsNothing);
-    expect(timeField("End time"), findsNothing);
+    expect(timeFieldFinder("Start time"), findsNothing);
+    expect(timeFieldFinder("End time"), findsNothing);
     expect(find.text("Start date"), findsOneWidget);
     expect(find.text("End date"), findsOneWidget);
 
@@ -259,20 +203,23 @@ void main() {
     );
     addTearDown(store.dispose);
     await openForm(tester, store, slotMinutes: 30);
-    final starts = timeChoices(tester, "Start time");
-    expect(starts, containsAll(<String>["09:00", "09:30", "10:00"]));
-    expect(starts, isNot(contains("09:15")));
+    await openTimePicker(tester, "Start time");
+    final starts = offeredTimes(tester, "Start time");
+    expect(starts, containsAll(<int>[9 * 60, 9 * 60 + 30, 10 * 60]));
+    expect(starts, isNot(contains(9 * 60 + 15)));
     expect(starts, hasLength(48));
     // On the start day the ends are the slots after the 09:00 start.
-    final ends = timeChoices(tester, "End time");
-    expect(ends.first, "09:30");
-    expect(ends, isNot(contains("09:45")));
+    await openTimePicker(tester, "End time");
+    final ends = offeredTimes(tester, "End time");
+    expect(ends.first, 9 * 60 + 30);
+    expect(ends, isNot(contains(9 * 60 + 45)));
 
     // At the default 15 minutes the form offers the quarter hours.
     await tester.pumpWidget(const SizedBox());
     await openForm(tester, store);
-    expect(timeChoices(tester, "Start time"), contains("09:15"));
-    expect(timeChoices(tester, "Start time"), hasLength(96));
+    await openTimePicker(tester, "Start time");
+    expect(offeredTimes(tester, "Start time"), contains(9 * 60 + 15));
+    expect(offeredTimes(tester, "Start time"), hasLength(96));
   });
 
   testWidgets("IF3 an entry at 09:10 shows 09:10, and a save that changes "
@@ -287,17 +234,8 @@ void main() {
       },
     );
     await openForm(tester, store);
-    expect(
-      find.descendant(
-        of: timeField("Start time"),
-        matching: find.text("09:10"),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: timeField("End time"), matching: find.text("09:50")),
-      findsOneWidget,
-    );
+    expect(timeFieldShows("Start time", "09:10"), findsOneWidget);
+    expect(timeFieldShows("End time", "09:50"), findsOneWidget);
     expect(
       tester
           .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, "All day"))
@@ -393,27 +331,15 @@ void main() {
         );
         addTearDown(store.dispose);
         await openForm(tester, store);
-        await tester.tap(timeField("Start time"));
+        await openTimePicker(tester, "Start time");
+        // The picker refuses the start the day's clock skips.
+        expect(timeEnabled(tester, "Start time", "00:00"), isFalse);
+        tester
+            .widget<CalendarTimePicker>(timePickerFinder("Start time"))
+            .onChanged!(0);
         await tester.pumpAndSettle();
-        // The menu opens scrolled to the selected 01:00, which builds the
-        // 00:00 item above it offstage, in its list's cache extent.
-        final item = find.text("00:00", skipOffstage: false).last;
-        await tester.ensureVisible(item);
-        await tester.pumpAndSettle();
-        await tester.tap(item);
-        await tester.pumpAndSettle();
-        // Setup sanity: the pick took.
-        expect(
-          tester
-              .widget<DropdownButton<int>>(
-                find.descendant(
-                  of: timeField("Start time"),
-                  matching: find.byType(DropdownButton<int>),
-                ),
-              )
-              .value,
-          0,
-        );
+        // Setup sanity: the start took.
+        expect(timeFieldShows("Start time", "00:00"), findsOneWidget);
         await tester.tap(find.widgetWithText(FilledButton, "Save"));
         await tester.pumpAndSettle();
         // Guard: red also when the start converts as an end, which reads

@@ -169,13 +169,7 @@ Future<({String id, MockCalendarApi api})> createAtNine(
   await zoneStore(tester, api, zone);
   await pickMode(tester, "Week");
   await createTaskAt(tester, 9 * 60);
-  expect(
-    find.descendant(
-      of: dropdownFinder("Start time"),
-      matching: find.text("09:00"),
-    ),
-    findsOneWidget,
-  );
+  expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
   await tester.enterText(find.widgetWithText(TextField, "Title"), "Zoned");
   await tester.tap(find.widgetWithText(FilledButton, "Save"));
   await tester.pump(api.latency);
@@ -534,18 +528,12 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text("Edit Task"), findsOneWidget, reason: zone.name);
         expect(
-          find.descendant(
-            of: dropdownFinder("Start time"),
-            matching: find.text("09:00"),
-          ),
+          timeFieldShows("Start time", "09:00"),
           findsOneWidget,
           reason: zone.name,
         );
         expect(
-          find.descendant(
-            of: dropdownFinder("End time"),
-            matching: find.text("09:15"),
-          ),
+          timeFieldShows("End time", "09:15"),
           findsOneWidget,
           reason: zone.name,
         );
@@ -663,11 +651,12 @@ void main() {
       }
 
       // The zone's clock, not the device's, refuses the earlier start,
-      // which the form offers disabled.
-      expect(optionEnabled(tester, "Start time", hourText(hour - 1)), isFalse);
-      expect(optionEnabled(tester, "Start time", hourText(hour + 1)), isTrue);
+      // which the form's picker refuses.
+      await openTimePicker(tester, "Start time");
+      expect(timeEnabled(tester, "Start time", hourText(hour - 1)), isFalse);
+      expect(timeEnabled(tester, "Start time", hourText(hour + 1)), isTrue);
 
-      await chooseOption(tester, "Start time", hourText(hour + 1));
+      await pickTime(tester, "Start time", hourText(hour + 1));
       await tester.tap(find.widgetWithText(FilledButton, "Save"));
       await tester.pump();
       expect(find.text("The start can't be in the past."), findsNothing);

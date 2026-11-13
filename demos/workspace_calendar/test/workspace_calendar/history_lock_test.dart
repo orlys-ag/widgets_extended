@@ -358,7 +358,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text("Task").last);
     await tester.pumpAndSettle();
-    expect(dropdownShows("Start time", "12:45"), findsOneWidget);
+    expect(timeFieldShows("Start time", "12:45"), findsOneWidget);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
@@ -370,7 +370,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text("Task").last);
     await tester.pumpAndSettle();
-    expect(dropdownShows("Start time", "12:45"), findsOneWidget);
+    expect(timeFieldShows("Start time", "12:45"), findsOneWidget);
   });
 
   testWidgets("K11 a past item's form is read-only; a running one's keeps "
@@ -387,10 +387,7 @@ void main() {
     await tester.tap(blockFinder(runningId));
     await tester.pumpAndSettle();
     expect(formButton("Delete"), findsNothing);
-    final start = tester.widget<DropdownButtonFormField<int>>(
-      dropdownFinder("Start time"),
-    );
-    expect(start.onChanged, isNull);
+    expect(timeFieldTakesInput(tester, "Start time"), isFalse);
     final day = tester.widget<InkWell>(
       find.ancestor(
         of: find.text("Start date"),
@@ -398,7 +395,7 @@ void main() {
       ),
     );
     expect(day.onTap, isNull);
-    await chooseOption(tester, "End time", "11:00");
+    await pickTime(tester, "End time", "11:00");
     await tester.tap(find.byType(FilledButton));
     await tester.pumpAndSettle();
     expect(find.text("The end can't be in the past."), findsOneWidget);
@@ -408,9 +405,10 @@ void main() {
     await tester.tap(blockFinder(laterId));
     await tester.pumpAndSettle();
     expect(formButton("Delete"), findsOneWidget);
-    // A start before now is offered disabled; one after it is not.
-    expect(optionEnabled(tester, "Start time", "10:00"), isFalse);
-    expect(optionEnabled(tester, "Start time", "11:15"), isTrue);
+    // A start before now is refused; one after it is not.
+    await openTimePicker(tester, "Start time");
+    expect(timeEnabled(tester, "Start time", "10:00"), isFalse);
+    expect(timeEnabled(tester, "Start time", "11:15"), isTrue);
   });
 
   testWidgets("K12 in Agenda an ended item's card has no menu, a running "
@@ -443,7 +441,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text("Task").last);
     await tester.pumpAndSettle();
-    expect(dropdownShows("Start time", "09:45"), findsOneWidget);
+    expect(timeFieldShows("Start time", "09:45"), findsOneWidget);
   });
 
   testWidgets("K14 as now passes an item's start, its Agenda card loses "

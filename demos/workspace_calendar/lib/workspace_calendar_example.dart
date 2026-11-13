@@ -396,10 +396,16 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
         id: id,
         policy: _settings.editPolicy,
         now: _currentNow,
+        hourLabelFormat: _settings.hourLabelFormat,
         slotMinutes: _settings.slotMinutes,
       );
     } else {
-      showItemDetails(context, store: _store, id: id);
+      showItemDetails(
+        context,
+        store: _store,
+        id: id,
+        hourLabelFormat: _settings.hourLabelFormat,
+      );
     }
   }
 
@@ -410,6 +416,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
       range: details.range,
       policy: _settings.editPolicy,
       now: _currentNow,
+      hourLabelFormat: _settings.hourLabelFormat,
       slotMinutes: _settings.slotMinutes,
     );
   }
@@ -421,6 +428,7 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
       id: item.id!,
       policy: _settings.editPolicy,
       now: _currentNow,
+      hourLabelFormat: _settings.hourLabelFormat,
       slotMinutes: _settings.slotMinutes,
     );
   }

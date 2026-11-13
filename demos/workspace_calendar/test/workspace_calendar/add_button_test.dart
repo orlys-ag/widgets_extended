@@ -43,8 +43,8 @@ Future<void> expectCreateOn(
   await tester.pumpAndSettle();
   await pickTask(tester);
   expectFormDays(day, 1);
-  expect(dropdownShows("Start time", start), findsOneWidget);
-  expect(dropdownShows("End time", end), findsOneWidget);
+  expect(timeFieldShows("Start time", start), findsOneWidget);
+  expect(timeFieldShows("End time", end), findsOneWidget);
 }
 
 void main() {
