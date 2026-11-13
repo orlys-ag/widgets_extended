@@ -2030,10 +2030,20 @@ void main() {
     calls.clear();
     await tester.pumpWidget(picker(570));
     await tester.pumpAndSettle();
-    final drag = await holdOn(tester, pmRow());
+    // PM left 0.3 rows below its pill, so the landing takes frames.
+    final drag = await holdOn(tester, pmRow(), rows: 0.3);
     expect(calls, isEmpty);
     await drag.up();
-    await tester.pumpAndSettle();
+    final landing = await pumpFrames(
+      tester,
+      onFrame: (frame) {
+        if (!onPill(tester, pmRow())) {
+          expect(calls, isEmpty, reason: "frame $frame");
+        }
+      },
+    );
+    // Setup sanity: the landing ran frames before the column came to rest.
+    expect(landing, greaterThan(1));
     expect(calls, <int?>[1290]);
 
     calls.clear();
