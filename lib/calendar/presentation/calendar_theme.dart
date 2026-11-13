@@ -447,8 +447,8 @@ final class CalendarThemeData with Diagnosticable {
   final Color onPrimary;
 
   /// A light form of [primary]: a selected day header, today's column and
-  /// the marked slots, the hidden-days pill, the duration chip and the add
-  /// button.
+  /// the marked slots, the hidden-days pill, the duration chip, the add
+  /// button and the time picker's selection pills.
   final Color primaryTint;
 
   /// Weekend columns, Month's days of other months, a day's circle, the

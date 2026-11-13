@@ -520,6 +520,7 @@ void main() {
     const twelve = CalendarHourLabelFormat.twelveHour;
     expect(english.timePickerHourLabel, "Hour");
     expect(english.timePickerMinuteLabel, "Minute");
+    expect(english.timePickerAmPmLabel, "AM/PM");
     expect(english.timePickerAmLabel, "AM");
     expect(english.timePickerPmLabel, "PM");
     expect(english.timePickerNowLabel, "Now");

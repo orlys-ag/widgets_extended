@@ -14,12 +14,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/views/time_picker.dart'
     show
         timePickerAmKey,
-        timePickerBandKey,
         timePickerClearKey,
         timePickerFooterKey,
         timePickerHourColumnKey,
+        timePickerHourPillKey,
         timePickerHourRowKey,
         timePickerMinuteColumnKey,
+        timePickerMinutePillKey,
         timePickerMinuteRowKey,
         timePickerNowKey,
         timePickerPmKey,
@@ -75,9 +76,9 @@ Finder minuteColumn() {
   return find.byKey(timePickerMinuteColumnKey);
 }
 
-/// The y of the band's centre, the middle of a column's five rows, in
+/// The y of a pill's centre, the middle of a column's five rows, in
 /// global logical pixels.
-double bandY(WidgetTester tester) {
+double pillY(WidgetTester tester) {
   return tester.getCenter(hourColumn()).dy;
 }
 
@@ -86,15 +87,15 @@ double extentOf(WidgetTester tester) {
   return tester.getSize(hourColumn()).height / 5.0;
 }
 
-/// Whether [row]'s centre lies within 0.5 px of the band's.
-bool onBand(WidgetTester tester, Finder row) {
-  return (tester.getCenter(row).dy - bandY(tester)).abs() < 0.5;
+/// Whether [row]'s centre lies within 0.5 px of its pill's.
+bool onPill(WidgetTester tester, Finder row) {
+  return (tester.getCenter(row).dy - pillY(tester)).abs() < 0.5;
 }
 
-/// Expects the hour row [hour] and the minute row [minute] on the band.
-void expectOnBand(WidgetTester tester, int hour, int minute) {
-  expect(onBand(tester, hourRow(hour)), isTrue, reason: "hour $hour");
-  expect(onBand(tester, minuteRow(minute)), isTrue, reason: "minute $minute");
+/// Expects the hour row [hour] and the minute row [minute] on their pills.
+void expectOnPill(WidgetTester tester, int hour, int minute) {
+  expect(onPill(tester, hourRow(hour)), isTrue, reason: "hour $hour");
+  expect(onPill(tester, minuteRow(minute)), isTrue, reason: "minute $minute");
 }
 
 /// The numbers of the rows of the column whose row keys [keyOf] makes,
@@ -104,6 +105,53 @@ List<int> rowNumbers(ValueKey<String> Function(int number) keyOf) {
     for (var number = 0; number < 60; number++)
       if (find.byKey(keyOf(number)).evaluate().isNotEmpty) number,
   ];
+}
+
+/// Expects each of [columns], a pill's key and its column, left to right,
+/// to show its one pill inside the column and centred on it, the columns
+/// of equal width, and neighbouring pills 8.0 apart.
+void expectPills(WidgetTester tester, List<(Key, Finder)> columns) {
+  for (final (pill, column) in columns) {
+    expect(find.byKey(pill), findsOneWidget, reason: "$pill");
+    final rect = tester.getRect(find.byKey(pill));
+    final bounds = tester.getRect(column).inflate(0.01);
+    expect(
+      bounds.contains(rect.topLeft) && bounds.contains(rect.bottomRight),
+      isTrue,
+      reason: "$pill lies inside its column",
+    );
+    expect(
+      (rect.center - tester.getCenter(column)).distance,
+      lessThan(0.5),
+      reason: "$pill is centred on its column",
+    );
+  }
+  final width = tester.getSize(columns.first.$2).width;
+  for (final (pill, column) in columns) {
+    expect(
+      tester.getSize(column).width,
+      moreOrLessEquals(width, epsilon: 0.5),
+      reason: "the width of the column of $pill",
+    );
+  }
+  for (var left = 0; left < columns.length; left++) {
+    final leftRect = tester.getRect(find.byKey(columns[left].$1));
+    for (var right = left + 1; right < columns.length; right++) {
+      final rightRect = tester.getRect(find.byKey(columns[right].$1));
+      expect(
+        leftRect.overlaps(rightRect),
+        isFalse,
+        reason: "${columns[left].$1} and ${columns[right].$1}",
+      );
+    }
+    if (left + 1 < columns.length) {
+      expect(
+        tester.getRect(find.byKey(columns[left + 1].$1)).left - leftRect.right,
+        moreOrLessEquals(8.0, epsilon: 0.5),
+        reason: "the gap right of ${columns[left].$1}",
+      );
+    }
+  }
 }
 
 /// The numbers, 0 to [last], of the rows keyed by [keyOf] whose
@@ -170,7 +218,7 @@ Future<void> slowMove(WidgetTester tester, TestGesture gesture, double dy) async
 }
 
 /// Holds a drag on [row], moved past the drag slop and then so that [row]
-/// lies [rows] row extents below the band, and returns the gesture.
+/// lies [rows] row extents below its pill, and returns the gesture.
 Future<TestGesture> holdOn(
   WidgetTester tester,
   Finder row, {
@@ -181,7 +229,7 @@ Future<TestGesture> holdOn(
   await tester.pump(const Duration(milliseconds: 50));
   await gesture.moveBy(const Offset(0.0, 20.0));
   await tester.pump(const Duration(milliseconds: 50));
-  final to = bandY(tester) + rows * extentOf(tester);
+  final to = pillY(tester) + rows * extentOf(tester);
   await slowMove(tester, gesture, to - tester.getCenter(row).dy);
   return gesture;
 }
@@ -252,7 +300,7 @@ void main() {
   });
 
   testWidgets("PK2 the 24-hour clock lists 00 to 23 and the step's minutes, "
-      "the value's on the band and no toggle; the 12-hour clock lists 12 and "
+      "the value's on the pills and no toggle; the 12-hour clock lists 12 and "
       "01 to 11 in the value's half, the toggle on it", (tester) async {
     await tester.pumpWidget(
       host(CalendarTimePicker(value: 570, onChanged: (value) {})),
@@ -263,10 +311,11 @@ void main() {
     expect(hourRow(24), findsNothing);
     expect(rowNumbers(timePickerMinuteRowKey), <int>[0, 15, 30, 45]);
     expect(find.text("09"), findsOneWidget);
-    expectOnBand(tester, 9, 30);
-    expect(onBand(tester, hourRow(10)), isFalse);
+    expectOnPill(tester, 9, 30);
+    expect(onPill(tester, hourRow(10)), isFalse);
     expect(find.byKey(timePickerToggleKey), findsNothing);
-    expect(find.byKey(timePickerBandKey), findsOneWidget);
+    expect(find.byKey(timePickerHourPillKey), findsOneWidget);
+    expect(find.byKey(timePickerMinutePillKey), findsOneWidget);
 
     await tester.pumpWidget(Container());
     await tester.pumpWidget(
@@ -289,7 +338,7 @@ void main() {
       );
     }
     expect(find.text("13"), findsNothing);
-    expectOnBand(tester, 14, 30);
+    expectOnPill(tester, 14, 30);
     expect(find.byKey(timePickerToggleKey), findsOneWidget);
     expect(
       semanticsOf(tester, find.byKey(timePickerPmKey)).flagsCollection.isSelected,
@@ -327,13 +376,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls, <int?>[1440]);
     expect(rowNumbers(timePickerMinuteRowKey), <int>[0]);
-    expectOnBand(tester, 24, 0);
+    expectOnPill(tester, 24, 0);
 
     calls.clear();
     const twelve = CalendarHourLabelFormat.twelveHour;
     await tester.pumpWidget(Container());
     await tester.pumpWidget(picker(15, min: 1, format: twelve));
-    expectOnBand(tester, 0, 15);
+    expectOnPill(tester, 0, 15);
     expect(
       semanticsOf(tester, find.byKey(timePickerAmKey)).flagsCollection.isSelected,
       Tristate.isTrue,
@@ -343,7 +392,7 @@ void main() {
     expect(calls, <int?>[1440]);
     await tester.pumpWidget(picker(1440, min: 1, format: twelve));
     await tester.pumpAndSettle();
-    expectOnBand(tester, 0, 0);
+    expectOnPill(tester, 0, 0);
     await tester.tap(minuteRow(15));
     await tester.pumpAndSettle();
     expect(calls, <int?>[1440, 15]);
@@ -351,7 +400,7 @@ void main() {
     calls.clear();
     await tester.pumpWidget(Container());
     await tester.pumpWidget(picker(1440, format: twelve));
-    expectOnBand(tester, 0, 0);
+    expectOnPill(tester, 0, 0);
     await tester.tap(minuteRow(0));
     await tester.pumpAndSettle();
     expect(calls, isEmpty);
@@ -384,29 +433,29 @@ void main() {
     await tester.tap(hourRow(10), warnIfMissed: false);
     await tester.pumpAndSettle();
     expect(calls, isEmpty);
-    expectOnBand(tester, 9, 15);
+    expectOnPill(tester, 9, 15);
 
     hour.requestFocus();
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     expect(calls, <int?>[675]);
-    expectOnBand(tester, 11, 15);
+    expectOnPill(tester, 11, 15);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pumpAndSettle();
     expect(calls, <int?>[675, 555]);
-    expectOnBand(tester, 9, 15);
+    expectOnPill(tester, 9, 15);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     expect(calls.last, 585);
-    expectOnBand(tester, 9, 45);
+    expectOnPill(tester, 9, 45);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pumpAndSettle();
     expect(calls.last, 555);
-    expectOnBand(tester, 9, 15);
+    expectOnPill(tester, 9, 15);
 
     calls.clear();
     await tester.pumpWidget(Container());
@@ -438,7 +487,7 @@ void main() {
       host(CalendarTimePicker(value: 550, onChanged: calls.add)),
     );
     expect(rowNumbers(timePickerMinuteRowKey), <int>[0, 10, 15, 30, 45]);
-    expectOnBand(tester, 9, 10);
+    expectOnPill(tester, 9, 10);
 
     bool refuses(int minute) {
       return minute != 570;
@@ -456,7 +505,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expectOnBand(tester, 9, 30);
+    expectOnPill(tester, 9, 30);
     await tester.pumpWidget(
       host(
         CalendarTimePicker(
@@ -469,7 +518,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expectOnBand(tester, 9, 30);
+    expectOnPill(tester, 9, 30);
     expect(calls, isEmpty);
   });
 
@@ -492,7 +541,7 @@ void main() {
     await tester.tap(hourRow(11));
     await tester.pumpAndSettle();
     expect(calls, <int?>[660]);
-    expectOnBand(tester, 11, 0);
+    expectOnPill(tester, 11, 0);
 
     calls.clear();
     await tester.pumpWidget(Container());
@@ -511,7 +560,7 @@ void main() {
     await tester.tap(find.byKey(timePickerPmKey));
     await tester.pumpAndSettle();
     expect(calls, <int?>[1350]);
-    expectOnBand(tester, 22, 30);
+    expectOnPill(tester, 22, 30);
   });
 
   testWidgets("PK7 a fling reports once, after the column settles, the row "
@@ -536,7 +585,7 @@ void main() {
     final picked = calls.single!;
     expect(picked % 60, 30);
     expect(picked ~/ 60, greaterThan(10));
-    expectOnBand(tester, picked ~/ 60, 30);
+    expectOnPill(tester, picked ~/ 60, 30);
 
     calls.clear();
     await tester.tap(minuteRow(45));
@@ -562,12 +611,13 @@ void main() {
     expect(calls, hasLength(1));
     expect(calls.single! % 60, 15);
     expect(calls.single! ~/ 60, lessThan(hour));
-    expectOnBand(tester, calls.single! ~/ 60, 15);
+    expectOnPill(tester, calls.single! ~/ 60, 15);
   });
 
   testWidgets("PK8 a drag's pointer moves and the frames of its landing "
-      "build nothing, lay out nothing and ask isEnabled nothing; a host "
-      "value's motion paints a row once a frame", (tester) async {
+      "build nothing, lay out nothing, paint neither pill nor the other "
+      "column's rows and ask isEnabled nothing; a host value's motion paints "
+      "a row once a frame", (tester) async {
     final calls = <int?>[];
     var asked = 0;
     Widget picker(int value) {
@@ -604,16 +654,41 @@ void main() {
       logged.add(message ?? "");
     };
     debugPrintLayouts = true;
+    // The pills and a row of the Minute column, which a frame of the Hour
+    // column's motion leaves unpainted, and a row of the Hour column.
+    final neighbours = <RenderObject>[
+      for (final key in <Key>[timePickerHourPillKey, timePickerMinutePillKey])
+        tester.renderObject(
+          find.descendant(
+            of: find.byKey(key),
+            matching: find.byType(DecoratedBox),
+          ),
+        ),
+      tester.renderObject(minuteRow(30)),
+    ];
+    final draggedRow = tester.renderObject(hourRow(9));
+    final painted = <RenderObject>[];
+    var draggedPaints = 0;
+    debugOnProfilePaint = (renderObject) {
+      if (neighbours.contains(renderObject)) {
+        painted.add(renderObject);
+      }
+      if (identical(renderObject, draggedRow)) {
+        draggedPaints++;
+      }
+    };
     try {
       final gesture = await tester.startGesture(tester.getCenter(hourColumn()));
       for (var move = 0; move < 10; move++) {
         await gesture.moveBy(const Offset(0.0, -12.0));
         await tester.pump(const Duration(milliseconds: 16));
+        expect(painted, isEmpty);
       }
       await gesture.up();
       while (calls.isEmpty) {
         expect(asked, asks);
         expect(rebuilt, isEmpty);
+        expect(painted, isEmpty);
         expect(
           logged.where((line) {
             return line.contains("Laying out");
@@ -624,11 +699,14 @@ void main() {
       }
     } finally {
       debugOnRebuildDirtyWidget = null;
+      debugOnProfilePaint = null;
       debugPrint = print;
       debugPrintLayouts = false;
     }
-    // Setup sanity: the rebuild hook saw the settle's rebuild.
+    // Setup sanity: the rebuild hook saw the settle's rebuild, and the paint
+    // hook the dragged column's rows.
     expect(rebuilt, isNotEmpty);
+    expect(draggedPaints, greaterThan(0));
     expect(calls, hasLength(1));
     await tester.pumpAndSettle();
 
@@ -695,7 +773,7 @@ void main() {
     await press(LogicalKeyboardKey.arrowDown);
     await press(LogicalKeyboardKey.pageDown);
     expect(calls, hasLength(count));
-    expectOnBand(tester, 23, 30);
+    expectOnPill(tester, 23, 30);
     await press(LogicalKeyboardKey.pageUp);
     expect(calls.last, 18 * 60 + 30);
     await press(LogicalKeyboardKey.arrowUp);
@@ -714,7 +792,7 @@ void main() {
     await press(LogicalKeyboardKey.arrowUp);
     await press(LogicalKeyboardKey.pageUp);
     expect(calls, hasLength(atStart));
-    expectOnBand(tester, 0, 30);
+    expectOnPill(tester, 0, 30);
     await press(LogicalKeyboardKey.arrowDown);
     await press(LogicalKeyboardKey.arrowDown);
     expect(calls.last, 2 * 60 + 30);
@@ -726,7 +804,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.digit4);
     await tester.pumpAndSettle();
     expect(calls.last, 14 * 60 + 30);
-    expectOnBand(tester, 14, 30);
+    expectOnPill(tester, 14, 30);
     await tester.sendKeyEvent(LogicalKeyboardKey.digit7);
     await tester.pumpAndSettle();
     expect(calls.last, 7 * 60 + 30);
@@ -839,7 +917,7 @@ void main() {
     await tester.tap(find.byKey(timePickerNowKey));
     await tester.pumpAndSettle();
     expect(calls, <int?>[840]);
-    expectOnBand(tester, 14, 0);
+    expectOnPill(tester, 14, 0);
 
     calls.clear();
     await tester.pumpWidget(Container());
@@ -864,7 +942,8 @@ void main() {
     await tester.tap(find.byKey(timePickerClearKey));
     await tester.pumpAndSettle();
     expect(calls, <int?>[null]);
-    expect(find.byKey(timePickerBandKey), findsNothing);
+    expect(find.byKey(timePickerHourPillKey), findsNothing);
+    expect(find.byKey(timePickerMinutePillKey), findsNothing);
 
     await tester.pumpWidget(Container());
     await tester.pumpWidget(picker(withNow: false));
@@ -883,7 +962,7 @@ void main() {
       semanticsOf(tester, find.byKey(timePickerPmKey)).flagsCollection.isSelected,
       Tristate.isTrue,
     );
-    expectOnBand(tester, 14, 0);
+    expectOnPill(tester, 14, 0);
 
     calls.clear();
     await tester.pumpWidget(Container());
@@ -892,7 +971,7 @@ void main() {
     await tester.tap(find.byKey(timePickerNowKey));
     await tester.pumpAndSettle();
     expect(calls, <int?>[840]);
-    expectOnBand(tester, 14, 0);
+    expectOnPill(tester, 14, 0);
 
     final slow = CalendarThemeData(
       motionDuration: const Duration(seconds: 1),
@@ -907,7 +986,7 @@ void main() {
     await tester.tap(find.byKey(timePickerNowKey));
     await tester.pumpAndSettle();
     expect(calls, <int?>[840]);
-    expectOnBand(tester, 14, 0);
+    expectOnPill(tester, 14, 0);
 
     calls.clear();
     await tester.fling(hourColumn(), const Offset(0.0, -60.0), 800.0);
@@ -916,7 +995,8 @@ void main() {
     await tester.tap(find.byKey(timePickerClearKey));
     await tester.pumpAndSettle();
     expect(calls, <int?>[null]);
-    expect(find.byKey(timePickerBandKey), findsNothing);
+    expect(find.byKey(timePickerHourPillKey), findsNothing);
+    expect(find.byKey(timePickerMinutePillKey), findsNothing);
     semantics.dispose();
   });
 
@@ -984,7 +1064,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(hour.hasPrimaryFocus, isTrue);
     expect(calls, isEmpty);
-    expectOnBand(tester, 9, 30);
+    expectOnPill(tester, 9, 30);
 
     before.requestFocus();
     await tester.pump();
@@ -1020,7 +1100,7 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets("PK13 the picker draws its panel, band, rows and headers in "
+  testWidgets("PK13 the picker draws its panel, pills, rows and headers in "
       "the theme above it", (tester) async {
     final theme = CalendarThemeData(
       surface: const Color(0xFF101820),
@@ -1050,13 +1130,24 @@ void main() {
         theme: theme,
       ),
     );
-    final band = tester.widget<DecoratedBox>(
-      find.descendant(
-        of: find.byKey(timePickerBandKey),
-        matching: find.byType(DecoratedBox),
-      ),
-    );
-    expect((band.decoration as BoxDecoration).color, theme.primaryTint);
+    for (final key in <Key>[timePickerHourPillKey, timePickerMinutePillKey]) {
+      final pill =
+          tester
+                  .widget<DecoratedBox>(
+                    find.descendant(
+                      of: find.byKey(key),
+                      matching: find.byType(DecoratedBox),
+                    ),
+                  )
+                  .decoration
+              as BoxDecoration;
+      expect(pill.color, theme.primaryTint, reason: "$key");
+      expect(
+        pill.borderRadius,
+        BorderRadius.circular(8.0),
+        reason: "$key",
+      );
+    }
     final enabled = rowStyle(tester, hourRow(9));
     expect(enabled.fontSize, 18.0);
     expect(enabled.fontWeight, FontWeight.w300);
@@ -1141,7 +1232,7 @@ void main() {
       for (var hour = 7; hour <= 18; hour++) hour,
     ]);
     expect(rowNumbers(timePickerMinuteRowKey), <int>[0]);
-    expectOnBand(tester, 7, 0);
+    expectOnPill(tester, 7, 0);
   });
 
   testWidgets("PK21 a host value moves the columns over the theme's motion "
@@ -1164,23 +1255,23 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     final extent = extentOf(tester);
     // Halfway through the five rows from 09 to 14 on the theme's curve; a
-    // linear or any symmetric curve puts 09 2.5 rows above the band.
+    // linear or any symmetric curve puts 09 2.5 rows above its pill.
     expect(
-      tester.getCenter(hourRow(9)).dy - bandY(tester),
+      tester.getCenter(hourRow(9)).dy - pillY(tester),
       moreOrLessEquals(
         -5 * Curves.easeIn.transform(0.5) * extent,
         epsilon: 0.5,
       ),
     );
     await tester.pump(const Duration(milliseconds: 500));
-    expectOnBand(tester, 14, 30);
+    expectOnPill(tester, 14, 30);
 
     final off = CalendarThemeData(motionDuration: Duration.zero);
     await tester.pumpWidget(picker(870, off));
     await tester.pumpWidget(picker(1230, off));
-    expectOnBand(tester, 20, 30);
+    expectOnPill(tester, 20, 30);
     await tester.pump();
-    expectOnBand(tester, 20, 30);
+    expectOnPill(tester, 20, 30);
     expect(calls, isEmpty);
   });
 
@@ -1206,7 +1297,7 @@ void main() {
     expect(tester.getCenter(hourRow(9)), held);
     await gesture.up();
     await tester.pumpAndSettle();
-    expectOnBand(tester, 14, 30);
+    expectOnPill(tester, 14, 30);
     expect(calls, isEmpty);
   });
 
@@ -1251,7 +1342,7 @@ void main() {
     await tester.pumpAndSettle();
     final gesture = await holdOn(tester, hourRow(0), rows: -2.5);
     expect(
-      tester.getCenter(hourRow(0)).dy - bandY(tester),
+      tester.getCenter(hourRow(0)).dy - pillY(tester),
       moreOrLessEquals(-2.5 * extent),
     );
     expect(
@@ -1278,7 +1369,7 @@ void main() {
     expect(calls, isEmpty);
     await tester.pumpAndSettle();
     expect(calls, <int?>[630]);
-    expectOnBand(tester, 10, 30);
+    expectOnPill(tester, 10, 30);
   });
 
   testWidgets("PK25 right to left, Hour still lies left of Minute and Right "
@@ -1303,7 +1394,7 @@ void main() {
     expect(focusedUnder(minuteColumn()), isTrue);
   });
 
-  testWidgets("PK26 with a null value no band and no semantics value, a tap "
+  testWidgets("PK26 with a null value no pill and no semantics value, a tap "
       "reports once, a touch on a disabled row reports nothing, a range "
       "with no row takes a drag and a release, and the 12-hour half is the "
       "first time's", (tester) async {
@@ -1328,7 +1419,8 @@ void main() {
     }
 
     await tester.pumpWidget(picker(isEnabled: (minute) => minute != 30));
-    expect(find.byKey(timePickerBandKey), findsNothing);
+    expect(find.byKey(timePickerHourPillKey), findsNothing);
+    expect(find.byKey(timePickerMinutePillKey), findsNothing);
     expect(semanticsOf(tester, hourColumn()).value, "");
     expect(semanticsOf(tester, minuteColumn()).value, "");
     final touch = await tester.startGesture(tester.getCenter(minuteRow(30)));
@@ -1339,7 +1431,8 @@ void main() {
     await tester.tap(minuteRow(15));
     await tester.pumpAndSettle();
     expect(calls, <int?>[15]);
-    expect(find.byKey(timePickerBandKey), findsOneWidget);
+    expect(find.byKey(timePickerHourPillKey), findsOneWidget);
+    expect(find.byKey(timePickerMinutePillKey), findsOneWidget);
 
     calls.clear();
     await tester.pumpWidget(Container());
@@ -1360,7 +1453,7 @@ void main() {
     await held.moveBy(const Offset(0.0, -30.0));
     await tester.pump(const Duration(milliseconds: 16));
     // Setup sanity: the drag moved the column off its row.
-    expect(onBand(tester, hourRow(0)), isFalse);
+    expect(onPill(tester, hourRow(0)), isFalse);
     await tester.pumpWidget(picker(min: 5, max: 10));
     await held.up();
     await tester.pumpAndSettle();
@@ -1399,14 +1492,14 @@ void main() {
     expect(extentOf(tester), 40.0);
     await tester.pumpWidget(picker(570, 2.0));
     expect(extentOf(tester), 44.0);
-    expectOnBand(tester, 9, 30);
-    expect(tester.getCenter(hourRow(9)).dy, bandY(tester));
+    expectOnPill(tester, 9, 30);
+    expect(tester.getCenter(hourRow(9)).dy, pillY(tester));
     await tester.pumpAndSettle();
 
     await tester.pumpWidget(picker(570, 1.0));
     await tester.pumpWidget(picker(870, 2.0));
     await tester.pumpAndSettle();
-    expectOnBand(tester, 14, 30);
+    expectOnPill(tester, 14, 30);
     expect(calls, isEmpty);
 
     // A tap's motion across a new scaler.
@@ -1417,7 +1510,7 @@ void main() {
     await tester.pumpWidget(picker(570, 2.0));
     await tester.pumpAndSettle();
     expect(calls, <int?>[630]);
-    expectOnBand(tester, 10, 30);
+    expectOnPill(tester, 10, 30);
     await tester.tap(hourRow(11));
     await tester.pumpAndSettle();
     expect(calls, <int?>[630, 690]);
@@ -1434,7 +1527,7 @@ void main() {
     await tester.pumpWidget(picker(null, 1.0, isEnabled: fromNine));
     await tester.pumpWidget(picker(null, 2.0, isEnabled: fromNine));
     await tester.pumpAndSettle();
-    expect(onBand(tester, hourRow(9)), isTrue);
+    expect(onPill(tester, hourRow(9)), isTrue);
     final touch = await tester.startGesture(tester.getCenter(hourRow(8)));
     await tester.pump(const Duration(milliseconds: 100));
     await touch.up();
@@ -1467,7 +1560,7 @@ void main() {
     expect(hourRow(8), findsOneWidget);
     await tester.pumpAndSettle();
     expect(calls, <int?>[660]);
-    expectOnBand(tester, 11, 0);
+    expectOnPill(tester, 11, 0);
 
     calls.clear();
     await tester.pumpWidget(Container());
@@ -1477,18 +1570,18 @@ void main() {
     await tester.pumpWidget(picker(540, isEnabled: notEleven));
     await tester.pumpAndSettle();
     expect(calls, <int?>[600]);
-    expectOnBand(tester, 10, 0);
+    expectOnPill(tester, 10, 0);
 
     calls.clear();
     await tester.pumpWidget(Container());
     await tester.pumpWidget(picker(540));
     final gesture = await holdOn(tester, hourRow(11));
-    expect(tester.getCenter(hourRow(11)).dy, moreOrLessEquals(bandY(tester)));
+    expect(tester.getCenter(hourRow(11)).dy, moreOrLessEquals(pillY(tester)));
     await tester.pumpWidget(picker(540, isEnabled: notEleven));
     await gesture.up();
     await tester.pumpAndSettle();
     expect(calls, <int?>[600]);
-    expectOnBand(tester, 10, 0);
+    expectOnPill(tester, 10, 0);
   });
 
   testWidgets("PK29 under a zero motion a fling, a tap and Down each land "
@@ -1505,7 +1598,7 @@ void main() {
     await tester.fling(hourColumn(), const Offset(0.0, -120.0), 800.0);
     await tester.pump();
     expect(calls, hasLength(1));
-    expect(onBand(tester, hourRow(calls.single! ~/ 60)), isTrue);
+    expect(onPill(tester, hourRow(calls.single! ~/ 60)), isTrue);
     expect(tester.binding.hasScheduledFrame, isFalse);
 
     final flung = calls.single! ~/ 60;
@@ -1514,7 +1607,7 @@ void main() {
     await tester.tap(minuteRow(45));
     await tester.pump();
     expect(calls, <int?>[flung * 60 + 45]);
-    expect(onBand(tester, minuteRow(45)), isTrue);
+    expect(onPill(tester, minuteRow(45)), isTrue);
 
     calls.clear();
     hour.requestFocus();
@@ -1522,7 +1615,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
     expect(calls, <int?>[(flung + 1) * 60 + 45]);
-    expect(onBand(tester, hourRow(flung + 1)), isTrue);
+    expect(onPill(tester, hourRow(flung + 1)), isTrue);
   });
 
   testWidgets("PK30 while a column flings, a tap on an enabled row picks "
@@ -1546,7 +1639,7 @@ void main() {
       );
     }
 
-    /// Flings Hour up until row 9 lies more than two rows off the band,
+    /// Flings Hour up until row 9 lies more than two rows off its pill,
     /// and returns a row [want] takes that lies within 1.5 rows of it.
     Future<int> flingAndFind(bool Function(int hour) want) async {
       await tester.fling(hourColumn(), const Offset(0.0, -150.0), 1500.0);
@@ -1554,14 +1647,14 @@ void main() {
       expect(calls, isEmpty);
       final extent = extentOf(tester);
       expect(
-        (tester.getCenter(hourRow(9)).dy - bandY(tester)).abs(),
+        (tester.getCenter(hourRow(9)).dy - pillY(tester)).abs(),
         greaterThan(2 * extent),
       );
       expect(tester.binding.hasScheduledFrame, isTrue);
       final shown = <int>[
         for (var hour = 0; hour < 24; hour++)
           if (want(hour) &&
-              (tester.getCenter(hourRow(hour)).dy - bandY(tester)).abs() <
+              (tester.getCenter(hourRow(hour)).dy - pillY(tester)).abs() <
                   1.5 * extent)
             hour,
       ];
@@ -1574,7 +1667,7 @@ void main() {
     await tester.tap(hourRow(odd));
     await tester.pumpAndSettle();
     expect(calls, <int?>[odd * 60 + 30]);
-    expectOnBand(tester, odd, 30);
+    expectOnPill(tester, odd, 30);
 
     calls.clear();
     await tester.pumpWidget(Container());
@@ -1586,7 +1679,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls, hasLength(1));
     expect((calls.single! ~/ 60).isOdd, isTrue);
-    expectOnBand(tester, calls.single! ~/ 60, 30);
+    expectOnPill(tester, calls.single! ~/ 60, 30);
 
     calls.clear();
     await tester.pumpWidget(Container());
@@ -1599,11 +1692,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls, hasLength(1));
     expect((calls.single! ~/ 60).isOdd, isTrue);
-    expectOnBand(tester, calls.single! ~/ 60, 30);
+    expectOnPill(tester, calls.single! ~/ 60, 30);
   });
 
   testWidgets("PK31 onChanged turning null ends a fling and a held drag "
-      "without a report, the value's rows on the band, and a tap after it "
+      "without a report, the value's rows on the pills, and a tap after it "
       "returns reports once", (tester) async {
     final calls = <int?>[];
     Widget picker(bool takes) {
@@ -1618,7 +1711,7 @@ void main() {
     await tester.pumpWidget(picker(false));
     await tester.pumpAndSettle();
     expect(calls, isEmpty);
-    expectOnBand(tester, 9, 30);
+    expectOnPill(tester, 9, 30);
     await tester.pumpWidget(picker(true));
     await tester.tap(hourRow(10));
     await tester.pumpAndSettle();
@@ -1637,7 +1730,7 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
     expect(calls, isEmpty);
-    expectOnBand(tester, 9, 30);
+    expectOnPill(tester, 9, 30);
     await tester.tap(hourRow(11));
     await tester.pumpAndSettle();
     expect(calls, <int?>[690]);
@@ -1679,11 +1772,11 @@ void main() {
     await tester.tap(minuteRow(45), pointer: 8);
     await tester.pumpAndSettle();
     expect(calls, isEmpty);
-    expectOnBand(tester, 9, 45);
+    expectOnPill(tester, 9, 45);
     await hold.up();
     await tester.pumpAndSettle();
     expect(calls, <int?>[585]);
-    expectOnBand(tester, 9, 45);
+    expectOnPill(tester, 9, 45);
 
     calls.clear();
     await tester.pumpWidget(Container());
@@ -1697,7 +1790,7 @@ void main() {
     await half.up();
     await tester.pumpAndSettle();
     expect(calls, <int?>[21 * 60 + 30]);
-    expectOnBand(tester, 21, 30);
+    expectOnPill(tester, 21, 30);
   });
 
   testWidgets("PK33 under a parent that asks its intrinsic sizes the picker "
@@ -1742,7 +1835,7 @@ void main() {
     expect(rebuilt, isEmpty);
     // Setup sanity: the new width reached the columns.
     expect(tester.getSize(hourColumn()).width, isNot(wide));
-  }, skip: true);
+  });
 
   testWidgets("PK34 a new width lays the columns out again and builds no "
       "element under the picker", (tester) async {
@@ -1761,7 +1854,7 @@ void main() {
     expect(rebuilt, isEmpty);
     // Setup sanity: the new width reached the rows.
     expect(narrow, isNot(wide));
-  }, skip: true);
+  });
 
   testWidgets("PK35 Now and Clear end a finger's hold on a column: its lift "
       "neither picks from where it lies nor taps its row, and a pointer "
@@ -1790,7 +1883,7 @@ void main() {
     await now.up();
     await tester.pumpAndSettle();
     expect(calls, <int?>[840]);
-    expectOnBand(tester, 14, 0);
+    expectOnPill(tester, 14, 0);
 
     calls.clear();
     final clear = await tester.startGesture(
@@ -1808,6 +1901,33 @@ void main() {
     await tester.tap(hourRow(1));
     await tester.pumpAndSettle();
     expect(calls, <int?>[null, 60]);
+  });
+
+  testWidgets("PK36 each column draws its own pill behind its centre row, "
+      "the columns sharing the panel's width equally, and a null value "
+      "draws none", (tester) async {
+    await tester.pumpWidget(
+      host(CalendarTimePicker(value: 570, onChanged: (value) {})),
+    );
+    expectPills(tester, <(Key, Finder)>[
+      (timePickerHourPillKey, hourColumn()),
+      (timePickerMinutePillKey, minuteColumn()),
+    ]);
+
+    for (final format in CalendarHourLabelFormat.values) {
+      await tester.pumpWidget(Container());
+      await tester.pumpWidget(
+        host(
+          CalendarTimePicker(
+            value: null,
+            hourLabelFormat: format,
+            onChanged: (value) {},
+          ),
+        ),
+      );
+      expect(find.byKey(timePickerHourPillKey), findsNothing);
+      expect(find.byKey(timePickerMinutePillKey), findsNothing);
+    }
   });
 
   testWidgets("PK47 the rows that take a tap are those of the times the "

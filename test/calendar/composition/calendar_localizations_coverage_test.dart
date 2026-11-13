@@ -370,6 +370,11 @@ final class _Marked extends DefaultCalendarLocalizations {
   }
 
   @override
+  String get timePickerAmPmLabel {
+    return bracketed(super.timePickerAmPmLabel);
+  }
+
+  @override
   String get timePickerAmLabel {
     return bracketed(super.timePickerAmLabel);
   }
@@ -941,6 +946,7 @@ void main() {
     await tester.pumpWidget(pickers(marked: true));
     await tester.pumpAndSettle();
     expect(find.byKey(timePickerToggleKey), findsOneWidget);
+    expect(find.text("[AM/PM]"), findsOneWidget);
     expect(find.byKey(timePickerNowKey), findsOneWidget);
     expect(find.byKey(timePickerClearKey), findsOneWidget);
     expectMarked(tester, "the time pickers", from: first);

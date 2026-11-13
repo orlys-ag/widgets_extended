@@ -1,6 +1,6 @@
 /// The time picker: an Hour column and a Minute column that scroll and snap
-/// to a band across the panel's middle, an AM/PM toggle on the 12-hour
-/// clock, and optional Now and Clear actions.
+/// their selected rows to a pill across each column's middle, an AM/PM
+/// toggle on the 12-hour clock, and optional Now and Clear actions.
 library;
 
 import 'dart:async';
@@ -38,10 +38,16 @@ const ValueKey<String> timePickerAmKey = ValueKey<String>("time-picker-am");
 /// The key of the PM half of a [CalendarTimePicker]'s toggle.
 const ValueKey<String> timePickerPmKey = ValueKey<String>("time-picker-pm");
 
-/// The key of the band a [CalendarTimePicker] draws behind its selected
-/// rows.
-const ValueKey<String> timePickerBandKey = ValueKey<String>(
-  "time-picker-band",
+/// The key of the pill a [CalendarTimePicker] draws behind its Hour
+/// column's selected row.
+const ValueKey<String> timePickerHourPillKey = ValueKey<String>(
+  "time-picker-hour-pill",
+);
+
+/// The key of the pill a [CalendarTimePicker] draws behind its Minute
+/// column's selected row.
+const ValueKey<String> timePickerMinutePillKey = ValueKey<String>(
+  "time-picker-minute-pill",
 );
 
 /// The key of a [CalendarTimePicker]'s footer, which holds Now and Clear.
@@ -71,29 +77,42 @@ ValueKey<String> timePickerMinuteRowKey(int minute) {
 const int _hourColumn = 0;
 const int _minuteColumn = 1;
 
+/// The strip's cell of the AM/PM control, right of the Minute column.
+const int _amPmColumn = 2;
+
 /// The columns the per-column state holds, which every per-column loop
 /// runs over.
 const int _columnCount = 2;
 
-/// The rows a column shows; the band lies across the middle one.
+/// The rows a column shows; its pill lies across the middle one.
 const int _shownRows = 5;
 
 const double _leastRowExtent = 40.0;
 const double _rowPadding = 12.0;
 const double _unboundedColumnWidth = 72.0;
 const double _togglePadding = 24.0;
+
+/// The space between a pill and each side of its column, so neighbouring
+/// pills lie twice it apart.
+const double _pillInset = 4.0;
 const double _controlRadius = 8.0;
 const double _ringWidth = 2.0;
 const Duration _digitWait = Duration(seconds: 1);
 
 /// An inline time picker: an Hour column and a Minute column, five rows
-/// tall, each scrolling and snapping its selected row to a band across the
-/// panel's middle; on the 12-hour clock an AM/PM toggle right of the
-/// Minute column; and a footer of Now and Clear where either is given.
+/// tall, each scrolling and snapping its selected row to a pill across its
+/// middle; on the 12-hour clock an AM/PM toggle right of the Minute column;
+/// and a footer of Now and Clear where either is given.
+///
+/// Under a bounded width the columns, the toggle's included, share it
+/// equally. Under an unbounded width, and to a parent that asks its
+/// intrinsic sizes, each is 72 logical pixels wide, or on the 12-hour clock
+/// as wide as the toggle where that is wider, inside the panel's padding of
+/// 8 on each side.
 ///
 /// [value] is a minute after midnight on the host's clock: 0 to 1439, or
 /// 1440 for the 24:00 that ends a day; null selects no time and draws no
-/// band. On the 24-hour clock the Hour column runs from 00 to 23, and to 24,
+/// pill. On the 24-hour clock the Hour column runs from 00 to 23, and to 24,
 /// whose one minute is 00, where [max] is 1440. On the 12-hour clock it runs
 /// 12, 01 to 11 in the toggle's half; 12 AM 00 picks 1440 where the range
 /// holds 1440 and not 0, as an end's does, and where it holds both, picks
@@ -431,7 +450,7 @@ class _Row {
 
 class _CalendarTimePickerState extends State<CalendarTimePicker>
     with TickerProviderStateMixin {
-  /// Each column's offset: `k * _rowExtent` puts row `k` on the band.
+  /// Each column's offset: `k * _rowExtent` puts row `k` on its pill.
   late final List<AnimationController> _offsets =
       List<AnimationController>.generate(_columnCount, (column) {
         return AnimationController.unbounded(vsync: this);
@@ -923,7 +942,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   }
 
   /// Gives [column] [rows] and [target]: a held column keeps its rows
-  /// until its release; any other keeps the row nearest the band in place
+  /// until its release; any other keeps the row nearest its pill in place
   /// and moves to [target], unless [move] is false.
   void _setRows(
     int column,
@@ -1709,7 +1728,32 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
           ),
       ],
     );
-    box = ExcludeSemantics(child: box);
+    // The column paints over its pill and takes every hit first; its
+    // offset repaints the column alone, a repaint boundary, not the pill.
+    box = ExcludeSemantics(
+      child: Stack(
+        fit: StackFit.passthrough,
+        children: <Widget>[
+          if (_time != null)
+            Positioned(
+              key: column == _hourColumn
+                  ? timePickerHourPillKey
+                  : timePickerMinutePillKey,
+              left: _pillInset,
+              right: _pillInset,
+              top: 2 * _rowExtent,
+              height: _rowExtent,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: theme.primaryTint,
+                  borderRadius: BorderRadius.circular(_controlRadius),
+                ),
+              ),
+            ),
+          box,
+        ],
+      ),
+    );
     if (takesInput) {
       box = GestureDetector(
         onVerticalDragDown: (details) {
@@ -1891,15 +1935,38 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     );
   }
 
+  /// The strip's cell of [column]: its header [label] over [body], five
+  /// rows tall.
+  Widget _cell(int column, String label, TextStyle headerStyle, Widget body) {
+    return KeyedSubtree(
+      key: ValueKey<int>(column),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          ExcludeSemantics(
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              style: headerStyle,
+            ),
+          ),
+          SizedBox(height: _shownRows * _rowExtent, child: body),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = CalendarTheme.of(context);
     final strings = CalendarLocalizations.of(context);
-    final extent = _rowExtent;
     final headerStyle = theme.timePickerHeaderStyle.copyWith(
       color: theme.textSecondary,
     );
     final hasFooter = widget.now != null || widget.clearable;
+    final twelveHour = _twelveHour;
     return FocusTraversalGroup(
       policy: OrderedTraversalPolicy(),
       child: DecoratedBox(
@@ -1910,135 +1977,215 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
         ),
         child: Padding(
           padding: const EdgeInsets.all(8.0),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final bounded = constraints.hasBoundedWidth;
-              Widget sized(Widget child) {
-                return bounded
-                    ? Expanded(child: child)
-                    : SizedBox(width: _unboundedColumnWidth, child: child);
-              }
-
-              Widget header(String label) {
-                return sized(
-                  ExcludeSemantics(
-                    child: Text(
-                      label,
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      style: headerStyle,
-                    ),
-                  ),
-                );
-              }
-
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: bounded
-                    ? CrossAxisAlignment.stretch
-                    : CrossAxisAlignment.center,
-                children: <Widget>[
-                  Listener(
-                    onPointerDown: _pointerDown,
-                    onPointerUp: _pointerGone,
-                    onPointerCancel: _pointerGone,
-                    child: Directionality(
-                      textDirection: TextDirection.ltr,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
-                          Row(
-                            mainAxisSize: bounded
-                                ? MainAxisSize.max
-                                : MainAxisSize.min,
-                            children: <Widget>[
-                              header(strings.timePickerHourLabel),
-                              header(strings.timePickerMinuteLabel),
-                              if (_twelveHour) SizedBox(width: _toggleWidth),
-                            ],
-                          ),
-                          SizedBox(
-                            height: _shownRows * extent,
-                            child: Stack(
-                              children: <Widget>[
-                                if (_time != null)
-                                  Positioned(
-                                    key: timePickerBandKey,
-                                    left: 0.0,
-                                    right: 0.0,
-                                    top: 2 * extent,
-                                    height: extent,
-                                    child: DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        color: theme.primaryTint,
-                                        borderRadius: BorderRadius.circular(
-                                          _controlRadius,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                Row(
-                                  mainAxisSize: bounded
-                                      ? MainAxisSize.max
-                                      : MainAxisSize.min,
-                                  children: <Widget>[
-                                    sized(
-                                      _column(theme, strings, _hourColumn),
-                                    ),
-                                    sized(
-                                      _column(theme, strings, _minuteColumn),
-                                    ),
-                                    if (_twelveHour)
-                                      SizedBox(
-                                        width: _toggleWidth,
-                                        child: Center(
-                                          child: _toggle(theme, strings),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              Listener(
+                onPointerDown: _pointerDown,
+                onPointerUp: _pointerGone,
+                onPointerCancel: _pointerGone,
+                child: Directionality(
+                  textDirection: TextDirection.ltr,
+                  child: _TimeColumns(
+                    columnWidth: twelveHour
+                        ? math.max(_unboundedColumnWidth, _toggleWidth)
+                        : _unboundedColumnWidth,
+                    children: <Widget>[
+                      _cell(
+                        _hourColumn,
+                        strings.timePickerHourLabel,
+                        headerStyle,
+                        _column(theme, strings, _hourColumn),
                       ),
-                    ),
+                      _cell(
+                        _minuteColumn,
+                        strings.timePickerMinuteLabel,
+                        headerStyle,
+                        _column(theme, strings, _minuteColumn),
+                      ),
+                      if (twelveHour)
+                        _cell(
+                          _amPmColumn,
+                          strings.timePickerAmPmLabel,
+                          headerStyle,
+                          Center(child: _toggle(theme, strings)),
+                        ),
+                    ],
                   ),
-                  if (hasFooter)
-                    Row(
-                      key: timePickerFooterKey,
-                      mainAxisSize: bounded
-                          ? MainAxisSize.max
-                          : MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: <Widget>[
-                        if (widget.now != null)
-                          _action(
-                            theme: theme,
-                            key: timePickerNowKey,
-                            label: strings.timePickerNowLabel,
-                            order: 4.0,
-                            enabled: _takesInput && _nowEnabled,
-                            onTap: _pickNow,
-                          ),
-                        if (widget.clearable)
-                          _action(
-                            theme: theme,
-                            key: timePickerClearKey,
-                            label: strings.timePickerClearLabel,
-                            order: 5.0,
-                            enabled: _takesInput,
-                            onTap: _pickClear,
-                          ),
-                      ],
-                    ),
-                ],
-              );
-            },
+                ),
+              ),
+              if (hasFooter)
+                Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: Row(
+                    key: timePickerFooterKey,
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      if (widget.now != null)
+                        _action(
+                          theme: theme,
+                          key: timePickerNowKey,
+                          label: strings.timePickerNowLabel,
+                          order: 4.0,
+                          enabled: _takesInput && _nowEnabled,
+                          onTap: _pickNow,
+                        ),
+                      if (widget.clearable)
+                        _action(
+                          theme: theme,
+                          key: timePickerClearKey,
+                          label: strings.timePickerClearLabel,
+                          order: 5.0,
+                          enabled: _takesInput,
+                          onTap: _pickClear,
+                        ),
+                    ],
+                  ),
+                ),
+            ],
           ),
         ),
       ),
     );
+  }
+}
+
+/// The picker's strip of cells, left to right whatever the ambient
+/// direction, which lays them out without building them: under a bounded
+/// width the cells share it equally, and otherwise each is [columnWidth]
+/// wide, the width it gives a parent that asks its intrinsic sizes.
+class _TimeColumns extends MultiChildRenderObjectWidget {
+  const _TimeColumns({required this.columnWidth, required super.children});
+
+  final double columnWidth;
+
+  @override
+  _RenderTimeColumns createRenderObject(BuildContext context) {
+    return _RenderTimeColumns(columnWidth: columnWidth);
+  }
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderTimeColumns renderObject,
+  ) {
+    renderObject.columnWidth = columnWidth;
+  }
+}
+
+class _CellParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _RenderTimeColumns extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _CellParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _CellParentData> {
+  _RenderTimeColumns({required double columnWidth})
+    : _columnWidth = columnWidth;
+
+  double _columnWidth;
+
+  set columnWidth(double value) {
+    if (value == _columnWidth) {
+      return;
+    }
+    _columnWidth = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _CellParentData) {
+      child.parentData = _CellParentData();
+    }
+  }
+
+  /// The strip's width under [constraints]: the bounded maximum, or each
+  /// cell's natural width.
+  double _widthFor(BoxConstraints constraints) {
+    return constraints.constrainWidth(
+      constraints.hasBoundedWidth
+          ? constraints.maxWidth
+          : childCount * _columnWidth,
+    );
+  }
+
+  @override
+  double computeMinIntrinsicWidth(double height) {
+    return childCount * _columnWidth;
+  }
+
+  @override
+  double computeMaxIntrinsicWidth(double height) {
+    return childCount * _columnWidth;
+  }
+
+  @override
+  double computeMinIntrinsicHeight(double width) {
+    return computeMaxIntrinsicHeight(width);
+  }
+
+  @override
+  double computeMaxIntrinsicHeight(double width) {
+    final count = childCount;
+    if (count == 0) {
+      return 0.0;
+    }
+    final cellWidth = width.isFinite ? width / count : _columnWidth;
+    var height = 0.0;
+    var child = firstChild;
+    while (child != null) {
+      height = math.max(height, child.getMaxIntrinsicHeight(cellWidth));
+      child = childAfter(child);
+    }
+    return height;
+  }
+
+  @override
+  Size computeDryLayout(covariant BoxConstraints constraints) {
+    final width = _widthFor(constraints);
+    final count = childCount;
+    final cellConstraints = BoxConstraints.tightFor(
+      width: count == 0 ? 0.0 : width / count,
+    );
+    var height = 0.0;
+    var child = firstChild;
+    while (child != null) {
+      height = math.max(height, child.getDryLayout(cellConstraints).height);
+      child = childAfter(child);
+    }
+    return constraints.constrain(Size(width, height));
+  }
+
+  @override
+  void performLayout() {
+    final constraints = this.constraints;
+    final width = _widthFor(constraints);
+    final count = childCount;
+    final cellWidth = count == 0 ? 0.0 : width / count;
+    final cellConstraints = BoxConstraints.tightFor(width: cellWidth);
+    var height = 0.0;
+    var index = 0;
+    var child = firstChild;
+    while (child != null) {
+      child.layout(cellConstraints, parentUsesSize: true);
+      final parentData = child.parentData! as _CellParentData;
+      parentData.offset = Offset(index * cellWidth, 0.0);
+      height = math.max(height, child.size.height);
+      index++;
+      child = parentData.nextSibling;
+    }
+    size = constraints.constrain(Size(width, height));
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    defaultPaint(context, offset);
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
+    return defaultHitTestChildren(result, position: position);
   }
 }
 

@@ -20,8 +20,8 @@ import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/time_picker.dart'
     show
         timePickerAmKey,
-        timePickerBandKey,
         timePickerHourColumnKey,
+        timePickerHourPillKey,
         timePickerHourRowKey,
         timePickerToggleKey;
 import 'package:widgets_extended/calendar/views/week_strip.dart';
@@ -676,9 +676,9 @@ void main() {
       );
     }
 
-    double offBand() {
+    double offPill() {
       return (tester.getCenter(inPicker(timePickerHourRowKey(9))).dy -
-              tester.getCenter(inPicker(timePickerBandKey)).dy)
+              tester.getCenter(inPicker(timePickerHourPillKey)).dy)
           .abs();
     }
 
@@ -691,7 +691,7 @@ void main() {
     );
     await tester.pump();
     // Setup sanity: the fling moved the column off 09.
-    expect(offBand(), greaterThan(0.5));
+    expect(offPill(), greaterThan(0.5));
     final updates = updateCount(api);
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pump();
@@ -706,7 +706,7 @@ void main() {
     // Within the write's latency, past the theme's motion.
     await tester.pump(api.latency ~/ 2);
     await tester.pump(api.latency ~/ 4);
-    expect(offBand(), lessThanOrEqualTo(0.5));
+    expect(offPill(), lessThanOrEqualTo(0.5));
     expect(tester.widget<Text>(find.byKey(scheduleSummaryKey)).data, summary);
 
     await tester.pump(api.latency);
