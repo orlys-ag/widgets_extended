@@ -215,6 +215,196 @@ class CalendarTimePicker extends StatefulWidget {
   }
 }
 
+/// Which times a [CalendarTimePicker] offers, read from its parameters
+/// when made: the grid of times its rows lie on, its range, and the times
+/// [CalendarTimePicker.isEnabled] accepts. The picker builds its rows from
+/// the one it makes of its widget, so any reader of [TimePickerRules.of] a
+/// picker gets the answers its rows give.
+///
+/// Times are minutes after midnight, 0 to 1440; an hour is an hour row's
+/// number, 0 to 24, as [timePickerHourRowKey] takes it. It holds no value
+/// and no state of the picker's columns. It asks
+/// [CalendarTimePicker.isEnabled] only of a time in range on the grid, each
+/// at most once in its life.
+final class TimePickerRules {
+  /// The rules of [picker]'s parameters.
+  factory TimePickerRules.of(CalendarTimePicker picker) {
+    const day = CalendarDates.minutesPerDay;
+    final twelveHour =
+        picker.hourLabelFormat == CalendarHourLabelFormat.twelveHour;
+    final isEnabled = picker.isEnabled;
+    return TimePickerRules._(
+      min: picker.min,
+      max: picker.max,
+      minuteStep: picker.minuteStep,
+      twelveHour: twelveHour,
+      midnightEnds:
+          twelveHour &&
+          picker.max == day &&
+          (picker.min > 0 || picker.value == day),
+      isEnabled: isEnabled,
+      answers: isEnabled == null
+          ? const <bool?>[]
+          : List<bool?>.filled(day ~/ picker.minuteStep + 1, null),
+    );
+  }
+
+  TimePickerRules._({
+    required this.min,
+    required this.max,
+    required this.minuteStep,
+    required this.twelveHour,
+    required bool midnightEnds,
+    required bool Function(int minute)? isEnabled,
+    required List<bool?> answers,
+  }) : _midnightEnds = midnightEnds,
+       _isEnabled = isEnabled,
+       _answers = answers;
+
+  /// The earliest time in range, 0 to 1440.
+  final int min;
+
+  /// The latest time in range, [min] to 1440.
+  final int max;
+
+  /// The minutes between the Minute grid's times; it divides 60.
+  final int minuteStep;
+
+  /// Whether the Hour column follows the 12-hour clock: its rows are of
+  /// one half of the day, which the AM/PM control picks.
+  final bool twelveHour;
+
+  /// Whether 12 AM 00 is 1440 ([compose]).
+  final bool _midnightEnds;
+
+  final bool Function(int minute)? _isEnabled;
+
+  /// [_isEnabled]'s answers, by time over [minuteStep]; empty without it.
+  final List<bool?> _answers;
+
+  /// Whether [time] lies from [min] to [max].
+  bool inRange(int time) {
+    return time >= min && time <= max;
+  }
+
+  /// Whether [time] lies on the steps of the grid: 1440, or a multiple of
+  /// [minuteStep].
+  bool _onSteps(int time) {
+    return time == CalendarDates.minutesPerDay || time % 60 % minuteStep == 0;
+  }
+
+  /// Whether [time] lies on the grid of times the rows offer.
+  bool onGrid(int time) {
+    return _onSteps(time);
+  }
+
+  /// Whether the picker offers [time]: it lies in range, on the grid, and
+  /// [CalendarTimePicker.isEnabled] accepts it, which is asked only once
+  /// the first two hold.
+  ///
+  /// On the 12-hour clock with a range holding both 0 and 1440, 12 AM 00
+  /// picks 1440 only while the picker's value is 1440 ([compose]), so
+  /// there whichever of 0 and 1440 it does not pick has no row, though
+  /// [offers] may take it.
+  bool offers(int time) {
+    if (!inRange(time) || !onGrid(time)) {
+      return false;
+    }
+    final isEnabled = _isEnabled;
+    if (isEnabled == null) {
+      return true;
+    }
+    return _answers[time ~/ minuteStep] ??= isEnabled(time);
+  }
+
+  /// The time of hour row [hour] and minute [minute]: on the 12-hour clock
+  /// 12 AM 00 is 1440 where the range holds 1440 and not 0, and where it
+  /// holds both while the picker's value is 1440.
+  int compose(int hour, int minute) {
+    final time = hour * 60 + minute;
+    if (time == 0 && _midnightEnds) {
+      return CalendarDates.minutesPerDay;
+    }
+    return time;
+  }
+
+  /// The hour row of [time]: its hour of the day, and for 1440 the row 24
+  /// on the 24-hour clock and 12 AM, 0, on the 12-hour clock.
+  int hourOf(int time) {
+    if (time == CalendarDates.minutesPerDay) {
+      return twelveHour ? 0 : 24;
+    }
+    return time ~/ 60;
+  }
+
+  /// Whether [time] lies in the PM half, 720 to 1439; 1440 shows as 12 AM.
+  static bool isPm(int time) {
+    return time >= 12 * 60 && time < CalendarDates.minutesPerDay;
+  }
+
+  /// The minutes of hour row [hour] on the Minute grid, ascending; the row
+  /// 24 holds 0 alone.
+  Iterable<int> minutesOf(int hour) sync* {
+    if (hour == 24) {
+      yield 0;
+      return;
+    }
+    for (var minute = 0; minute < 60; minute += minuteStep) {
+      yield minute;
+    }
+  }
+
+  /// Whether hour row [hour] has a time on the grid in range.
+  bool holdsHour(int hour) {
+    for (final minute in minutesOf(hour)) {
+      final time = compose(hour, minute);
+      if (inRange(time) && onGrid(time)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Whether hour row [hour] has a time the picker [offers].
+  bool offersHour(int hour) {
+    for (final minute in minutesOf(hour)) {
+      if (offers(compose(hour, minute))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// The times on the grid from [min] to [max], ascending.
+  Iterable<int> gridTimes() sync* {
+    final step = minuteStep;
+    for (var time = (min + step - 1) ~/ step * step; time <= max; time += step) {
+      if (onGrid(time)) {
+        yield time;
+      }
+    }
+  }
+
+  /// The [gridTimes] the picker [offers], ascending.
+  Iterable<int> offeredTimes() {
+    return gridTimes().where(offers);
+  }
+
+  /// The time Now picks at the minute after midnight [minute]: the latest
+  /// time at or before it on the grid's steps, where the picker [offers]
+  /// it; null where it does not, or where [minute] lies outside 0 to 1439.
+  int? nowTime(int minute) {
+    if (minute < 0 || minute >= CalendarDates.minutesPerDay) {
+      return null;
+    }
+    var time = minute - minute % minuteStep;
+    while (!_onSteps(time)) {
+      time -= minuteStep;
+    }
+    return offers(time) ? time : null;
+  }
+}
+
 /// One row of a column: an hour of the day (24 for the hour that holds
 /// only 1440 on the 24-hour clock) or a minute of the hour.
 @immutable
@@ -289,9 +479,9 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   /// The hour the Minute column's rows are of.
   int? _minuteRowsHour;
 
-  /// [CalendarTimePicker.isEnabled]'s answers since the last sync, by
-  /// multiple of the step.
-  List<bool?> _accepts = const <bool?>[];
+  /// The rules of the widget since the last sync, which every row, target
+  /// and flag reads the offered times from.
+  late TimePickerRules _rules;
 
   bool _amEnabled = false;
   bool _pmEnabled = false;
@@ -322,7 +512,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   }
 
   bool get _twelveHour {
-    return widget.hourLabelFormat == CalendarHourLabelFormat.twelveHour;
+    return _rules.twelveHour;
   }
 
   bool get _takesInput {
@@ -365,9 +555,8 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
         _picksAtRelease[column] = false;
       }
       _valueWaits = false;
-      _resetAccepts();
+      _resetRules();
       _applyTime(widget.value, jump: false);
-      _computeFlags();
       return;
     }
     _sync();
@@ -470,19 +659,35 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     }
   }
 
-  void _resetAccepts() {
-    _accepts = widget.isEnabled == null
-        ? const <bool?>[]
-        : List<bool?>.filled(
-            CalendarDates.minutesPerDay ~/ widget.minuteStep + 1,
-            null,
-          );
+  /// Makes the rules of the widget, and from them which halves of the day
+  /// have a time the picker offers, on the 12-hour clock, and whether
+  /// Now's time is offered.
+  void _resetRules() {
+    final rules = TimePickerRules.of(widget);
+    _rules = rules;
+    var am = false;
+    var pm = false;
+    if (rules.twelveHour) {
+      for (final time in rules.offeredTimes()) {
+        if (TimePickerRules.isPm(time)) {
+          pm = true;
+        } else {
+          am = true;
+        }
+        if (am && pm) {
+          break;
+        }
+      }
+    }
+    _amEnabled = am;
+    _pmEnabled = pm;
+    _nowEnabled = _nowTime() != null;
   }
 
   /// Brings the picker to its widget: a new value, or with none the rows
   /// of the current targets.
   void _sync() {
-    _resetAccepts();
+    _resetRules();
     if (!_started) {
       _applyTime(widget.value, jump: true);
       _started = true;
@@ -498,144 +703,56 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
       _valueWaits = false;
       _refreshRows();
     }
-    _computeFlags();
-  }
-
-  /// Which halves of the day have a time that may be picked, and whether
-  /// Now's may be.
-  void _computeFlags() {
-    var am = false;
-    var pm = false;
-    final step = widget.minuteStep;
-    var time = (widget.min + step - 1) ~/ step * step;
-    for (; time <= widget.max && !(am && pm); time += step) {
-      if (_pickable(time)) {
-        if (_isPm(time)) {
-          pm = true;
-        } else {
-          am = true;
-        }
-      }
-    }
-    _amEnabled = am;
-    _pmEnabled = pm;
-    _nowEnabled = _nowTime() != null;
   }
 
   // The times and the rows.
 
-  bool _inRange(int time) {
-    return time >= widget.min && time <= widget.max;
-  }
-
-  /// Whether [time] lies in range, on the step, and is accepted; asks
-  /// [CalendarTimePicker.isEnabled] only of such a multiple, once per sync.
-  bool _pickable(int time) {
-    if (!_inRange(time) || time % widget.minuteStep != 0) {
-      return false;
-    }
-    final isEnabled = widget.isEnabled;
-    if (isEnabled == null) {
-      return true;
-    }
-    final index = time ~/ widget.minuteStep;
-    return _accepts[index] ??= isEnabled(time);
-  }
-
-  /// The time of hour row [hour] and minute [minute]: on the 12-hour clock
-  /// 12 AM 00 is 1440 where the range holds 1440 and not 0, and where it
-  /// holds both while the value is 1440.
-  int _compose(int hour, int minute) {
-    const day = CalendarDates.minutesPerDay;
-    final time = hour * 60 + minute;
-    if (_twelveHour &&
-        time == 0 &&
-        widget.max == day &&
-        (widget.min > 0 || widget.value == day)) {
-      return day;
-    }
-    return time;
-  }
-
-  /// The hour row of [time]: its hour of the day, and for 1440 the row 24
-  /// on the 24-hour clock and 12 AM on the 12-hour clock.
-  int _hourOf(int time) {
-    if (time == CalendarDates.minutesPerDay) {
-      return _twelveHour ? 0 : 24;
-    }
-    return time ~/ 60;
-  }
-
   int _minuteOf(int time) {
     return time % 60;
-  }
-
-  /// Whether [time] lies in the PM half; 1440 shows as 12 AM.
-  bool _isPm(int time) {
-    return time >= 12 * 60 && time < CalendarDates.minutesPerDay;
-  }
-
-  /// The minutes of hour row [hour] on the step: the row 24 holds 00 alone.
-  Iterable<int> _minutesOf(int hour) sync* {
-    if (hour == 24) {
-      yield 0;
-      return;
-    }
-    for (var minute = 0; minute < 60; minute += widget.minuteStep) {
-      yield minute;
-    }
   }
 
   /// The rows of [column]: the Hour column's of the half [pm], the Minute
   /// column's of hour row [hour], each the value's row added where it is
   /// missing.
   List<_Row> _rowsOf(int column, {required bool pm, required int hour}) {
+    final rules = _rules;
     final value = widget.value;
     final rows = <_Row>[];
     if (column == _hourColumn) {
-      final valueHour = value == null || (_twelveHour && _isPm(value) != pm)
+      final valueHour =
+          value == null ||
+              (rules.twelveHour && TimePickerRules.isPm(value) != pm)
           ? null
-          : _hourOf(value);
-      final first = _twelveHour && pm ? 12 : 0;
-      final last = _twelveHour
+          : rules.hourOf(value);
+      final first = rules.twelveHour && pm ? 12 : 0;
+      final last = rules.twelveHour
           ? first + 11
-          : (widget.max == CalendarDates.minutesPerDay || valueHour == 24
+          : (rules.max == CalendarDates.minutesPerDay || valueHour == 24
                 ? 24
                 : 23);
       for (var number = first; number <= last; number++) {
-        var shown = false;
-        var enabled = false;
-        for (final minute in _minutesOf(number)) {
-          final time = _compose(number, minute);
-          if (_inRange(time)) {
-            shown = true;
-            if (_pickable(time)) {
-              enabled = true;
-              break;
-            }
-          }
-        }
-        if (shown || number == valueHour) {
+        final isValue = number == valueHour;
+        if (rules.holdsHour(number) || isValue) {
           rows.add(
-            _Row(number, enabled: enabled, isValue: number == valueHour),
+            _Row(number, enabled: rules.offersHour(number), isValue: isValue),
           );
         }
       }
       return rows;
     }
-    final valueMinute = value != null && _hourOf(value) == hour
+    final valueMinute = value != null && rules.hourOf(value) == hour
         ? _minuteOf(value)
         : null;
     var valueAdded = valueMinute == null;
-    for (final minute in _minutesOf(hour)) {
+    for (final minute in rules.minutesOf(hour)) {
       if (!valueAdded && valueMinute! < minute) {
         rows.add(_Row(valueMinute, enabled: false, isValue: true));
         valueAdded = true;
       }
-      final time = _compose(hour, minute);
+      final time = rules.compose(hour, minute);
       final isValue = minute == valueMinute;
-      if (_inRange(time) || isValue) {
-        rows.add(_Row(minute, enabled: _pickable(time), isValue: isValue));
+      if (rules.inRange(time) || isValue) {
+        rows.add(_Row(minute, enabled: rules.offers(time), isValue: isValue));
       }
       if (isValue) {
         valueAdded = true;
@@ -647,17 +764,12 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     return rows;
   }
 
-  /// The half of a null value: that of the first time that may be picked,
-  /// or with none of the first with a row, or AM.
+  /// The half of a null value: that of the first time offered, or with
+  /// none of the first on the grid in range, or AM.
   bool _nullHalf() {
-    final step = widget.minuteStep;
-    final first = (widget.min + step - 1) ~/ step * step;
-    for (var time = first; time <= widget.max; time += step) {
-      if (_pickable(time)) {
-        return _isPm(time);
-      }
-    }
-    return first <= widget.max && _isPm(first);
+    final time =
+        _rules.offeredTimes().firstOrNull ?? _rules.gridTimes().firstOrNull;
+    return time != null && TimePickerRules.isPm(time);
   }
 
   /// What [number] compares by between rows: on the 12-hour clock an hour
@@ -746,13 +858,13 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
       }
     }
     _time = time;
-    final pm = time == null ? _nullHalf() : _isPm(time);
+    final pm = time == null ? _nullHalf() : TimePickerRules.isPm(time);
     _pm = pm;
     _rowsPm = pm;
     final hourRows = _rowsOf(_hourColumn, pm: pm, hour: 0);
     var hourTarget = time == null
         ? null
-        : _indexOf(_hourColumn, hourRows, _hourOf(time));
+        : _indexOf(_hourColumn, hourRows, _rules.hourOf(time));
     hourTarget ??= _firstResting(hourRows);
     final hour = hourTarget == null ? null : hourRows[hourTarget].number;
     final minuteRows = hour == null
@@ -938,31 +1050,32 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   /// it accepts, the earlier on a tie; a half whose hour accepts none, the
   /// half's nearest; an hour that accepts none, the value.
   int? _composeTargets() {
+    final rules = _rules;
     final hourTarget = _targets[_hourColumn];
     if (hourTarget == null) {
       return _time;
     }
     var hour = _rows[_hourColumn][hourTarget].number;
-    if (_twelveHour) {
+    if (rules.twelveHour) {
       hour = hour % 12 + (_pm ? 12 : 0);
     }
     final minuteTarget = _targets[_minuteColumn];
     final minute = minuteTarget == null
         ? 0
         : _rows[_minuteColumn][minuteTarget].number;
-    final kept = _compose(hour, minute);
+    final kept = rules.compose(hour, minute);
     if (hour == _minuteRowsHour && minuteTarget != null) {
-      return _pickable(kept) ? kept : widget.value;
+      return rules.offers(kept) ? kept : widget.value;
     }
-    if (_pickable(kept)) {
+    if (rules.offers(kept)) {
       return kept;
     }
     int? nearest;
     var distance = 0;
-    for (final other in _minutesOf(hour)) {
-      final time = _compose(hour, other);
+    for (final other in rules.minutesOf(hour)) {
+      final time = rules.compose(hour, other);
       final next = (other - minute).abs();
-      if (_pickable(time) && (nearest == null || next < distance)) {
+      if (rules.offers(time) && (nearest == null || next < distance)) {
         nearest = time;
         distance = next;
       }
@@ -970,13 +1083,10 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     if (nearest != null) {
       return nearest;
     }
-    if (_twelveHour && _pm != _rowsPm) {
-      final step = widget.minuteStep;
-      var time = (widget.min + step - 1) ~/ step * step;
-      for (; time <= widget.max; time += step) {
+    if (rules.twelveHour && _pm != _rowsPm) {
+      for (final time in rules.offeredTimes()) {
         final next = (time - kept).abs();
-        if (_isPm(time) == _pm &&
-            _pickable(time) &&
+        if (TimePickerRules.isPm(time) == _pm &&
             (nearest == null || next < distance)) {
           nearest = time;
           distance = next;
@@ -1002,19 +1112,14 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     }
   }
 
-  /// Now's time, the current minute rounded down to the step, where it may
-  /// be picked.
+  /// Now's time ([TimePickerRules.nowTime]), or null with no
+  /// [CalendarTimePicker.now].
   int? _nowTime() {
     final now = widget.now;
     if (now == null) {
       return null;
     }
-    final minute = now();
-    if (minute < 0 || minute >= CalendarDates.minutesPerDay) {
-      return null;
-    }
-    final time = minute - minute % widget.minuteStep;
-    return _pickable(time) ? time : null;
+    return _rules.nowTime(now());
   }
 
   void _pickNow() {

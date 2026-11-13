@@ -23,7 +23,8 @@ import 'package:widgets_extended/calendar/views/time_picker.dart'
         timePickerMinuteRowKey,
         timePickerNowKey,
         timePickerPmKey,
-        timePickerToggleKey;
+        timePickerToggleKey,
+        TimePickerRules;
 import 'package:widgets_extended/widgets_extended.dart';
 
 /// A theme whose motion no built-in value matches: 200 ms on an ease-in
@@ -103,6 +104,22 @@ List<int> rowNumbers(ValueKey<String> Function(int number) keyOf) {
     for (var number = 0; number < 60; number++)
       if (find.byKey(keyOf(number)).evaluate().isNotEmpty) number,
   ];
+}
+
+/// The numbers, 0 to [last], of the rows keyed by [keyOf] whose
+/// [GestureDetector.onTap] is set.
+Set<int> tappableRows(
+  WidgetTester tester,
+  ValueKey<String> Function(int number) keyOf,
+  int last,
+) {
+  return <int>{
+    for (var number = 0; number <= last; number++)
+      if (find.byKey(keyOf(number)).evaluate().isNotEmpty &&
+          tester.widget<GestureDetector>(find.byKey(keyOf(number))).onTap !=
+              null)
+        number,
+  };
 }
 
 /// The style the [RichText] of [row] paints in.
@@ -1804,4 +1821,74 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls, <int?>[null, 60]);
   }, skip: true);
+
+  testWidgets("PK47 the rows that take a tap are those of the times the "
+      "rules of the picker's widget offer, on either clock", (tester) async {
+    Future<void> expectRowsOffered(
+      String setting, {
+      required int minuteStep,
+      required int min,
+      required int max,
+      bool Function(int minute)? isEnabled,
+    }) async {
+      for (final format in CalendarHourLabelFormat.values) {
+        final twelve = format == CalendarHourLabelFormat.twelveHour;
+        final last = !twelve && max == CalendarDates.minutesPerDay ? 24 : 23;
+        await tester.pumpWidget(Container());
+        for (var hour = 0; hour <= last; hour++) {
+          final picker = CalendarTimePicker(
+            value: hour * 60,
+            hourLabelFormat: format,
+            minuteStep: minuteStep,
+            min: min,
+            max: max,
+            isEnabled: isEnabled,
+            onChanged: (value) {},
+          );
+          await tester.pumpWidget(host(picker));
+          final rules = TimePickerRules.of(picker);
+          final offered = rules.offeredTimes().toList();
+          final pm = TimePickerRules.isPm(hour * 60);
+          final reason = "$setting, ${format.name}, hour $hour";
+          expect(
+            tappableRows(tester, timePickerMinuteRowKey, 59),
+            <int>{
+              for (final time in offered)
+                if (rules.hourOf(time) == hour) time % 60,
+            },
+            reason: "Minute rows: $reason",
+          );
+          expect(
+            tappableRows(tester, timePickerHourRowKey, 24),
+            <int>{
+              for (final time in offered)
+                if (!twelve || TimePickerRules.isPm(time) == pm)
+                  rules.hourOf(time),
+            },
+            reason: "Hour rows: $reason",
+          );
+        }
+      }
+    }
+
+    await expectRowsOffered("1", minuteStep: 15, min: 0, max: 1439);
+    await expectRowsOffered(
+      "2",
+      minuteStep: 20,
+      min: 130,
+      max: 1000,
+      isEnabled: (minute) {
+        return minute % 40 != 0;
+      },
+    );
+    await expectRowsOffered(
+      "3",
+      minuteStep: 15,
+      min: 370,
+      max: 1440,
+      isEnabled: (minute) {
+        return minute < 420 || minute > 479;
+      },
+    );
+  });
 }
