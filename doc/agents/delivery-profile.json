@@ -184,7 +184,7 @@
           "^tool/test_calendar_in_zone\\.sh$"
         ]
       },
-      "scope": "step"
+      "scope": "final"
     },
     {
       "name": "demo-havana",
@@ -200,7 +200,7 @@
           "^tool/test_calendar_in_zone\\.sh$"
         ]
       },
-      "scope": "step"
+      "scope": "final"
     },
     {
       "name": "calendar-santiago",
@@ -217,7 +217,7 @@
           "^tool/test_calendar_in_zone\\.sh$"
         ]
       },
-      "scope": "step"
+      "scope": "final"
     },
     {
       "name": "demo-santiago",
@@ -233,7 +233,7 @@
           "^tool/test_calendar_in_zone\\.sh$"
         ]
       },
-      "scope": "step"
+      "scope": "final"
     },
     {
       "name": "delivery-harness",
