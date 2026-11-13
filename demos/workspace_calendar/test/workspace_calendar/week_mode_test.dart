@@ -2441,9 +2441,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(DatePickerDialog), findsNothing);
     expect(
-      tester
-          .widget<SwitchListTile>(inDialog(find.byType(SwitchListTile)))
-          .onChanged,
+      tester.widget<ChoiceChip>(inDialog(allDayChip())).onSelected,
       isNull,
     );
     expect(saveFinder(), findsNothing);

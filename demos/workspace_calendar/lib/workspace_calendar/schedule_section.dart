@@ -23,8 +23,9 @@ const ValueKey<String> scheduleOverlapKey = ValueKey<String>(
 /// time and End time, the start's minutes before the first a start may
 /// take disabled, and on the start day only ends after the start; an End
 /// date for an all-day or a multi-day schedule, or after "Ends on another
-/// day"; length chips; All day; an overlap notice with "Next free time";
-/// and the store's zone where it has one.
+/// day"; a row of length chips and, after them, All day, where a length
+/// makes an all-day schedule timed at that length; an overlap notice with
+/// "Next free time"; and the store's zone where it has one.
 ///
 /// Every edit goes to [onChanged] as a new schedule. A [locked] section
 /// takes no input; a [CalendarScheduleCheck.startFixed] one takes none at
@@ -262,6 +263,7 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     final slot = widget.slotMinutes;
     final first = check.firstStartMinute;
     final timed = !schedule.isAllDay;
+    final offersAllDay = _options.allowsAllDay || schedule.isAllDay;
     final showsEndDay =
         schedule.isAllDay ||
         schedule.spansDays ||
@@ -352,7 +354,7 @@ class _ScheduleSectionState extends State<ScheduleSection> {
             label: const Text("Ends on another day"),
           ),
         ),
-      if (timed && _options.lengthChoices.isNotEmpty)
+      if (_options.lengthChoices.isNotEmpty || offersAllDay)
         Wrap(
           spacing: 8.0,
           runSpacing: 4.0,
@@ -360,25 +362,26 @@ class _ScheduleSectionState extends State<ScheduleSection> {
             for (final minutes in _options.lengthChoices)
               ChoiceChip(
                 label: Text(_lengthLabel(minutes)),
-                selected: schedule.lengthMinutes == minutes,
-                onSelected: locked
+                selected: timed && schedule.lengthMinutes == minutes,
+                // Of an all-day schedule a length changes the kind, which a
+                // fixed start keeps.
+                onSelected: locked || (!timed && startLocked)
                     ? null
                     : (on) {
-                        _change(schedule.withLength(minutes));
+                        _change(schedule.withAllDay(false).withLength(minutes));
+                      },
+              ),
+            if (offersAllDay)
+              ChoiceChip(
+                label: const Text("All day"),
+                selected: schedule.isAllDay,
+                onSelected: startLocked
+                    ? null
+                    : (on) {
+                        _change(schedule.withAllDay(on));
                       },
               ),
           ],
-        ),
-      if (_options.allowsAllDay || schedule.isAllDay)
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text("All day"),
-          value: schedule.isAllDay,
-          onChanged: locked || startLocked
-              ? null
-              : (on) {
-                  _change(schedule.withAllDay(on));
-                },
         ),
       if (check.overlaps.isNotEmpty) _overlapNotice(check),
       if (zone != null)

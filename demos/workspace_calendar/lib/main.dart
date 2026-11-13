@@ -26,8 +26,20 @@ class WorkspaceCalendarApp extends StatelessWidget {
   // goal is to declutter zoomed out views that draw too many hour labels and cell slots
 
   // access calendar from within workspace; Luisa has started some designs
+  //
+  // remove edit toggle; make behavior = always on
+  // adjust padding of calendar cards
+  // card colors: based on lookups that have associated colors
+  //  will have picker to select lookup field (which determines color)
+  //  FAB should default to today; user can change date
+  //
+  // Custom color coding per user, saved to device?
+  // Have a list of users to assign tasks, risks, and requests to, etc.?
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(debugShowCheckedModeBanner: false, home: WorkspaceCalendarExample());
+    return const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: WorkspaceCalendarExample(),
+    );
   }
 }
