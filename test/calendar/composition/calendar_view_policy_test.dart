@@ -698,7 +698,7 @@ void main() {
       final free = Offset(nine.center.dx, nine.top + 2.0);
       // Setup sanity: the press lies above U's block, over no item.
       expect(free.dy, lessThan(tester.getRect(blockFinder("U")).top));
-      await tester.tapAt(free);
+      await tester.longPressAt(free);
       await tester.pumpAndSettle();
       expect(host.creates, <CalendarCreateRange>[
         CalendarCreateRange(start: at(friday, 9), end: at(friday, 9, 15)),
@@ -1185,7 +1185,7 @@ void main() {
         final gesture = await holdRange(
           tester,
           from,
-          from + const Offset(2.0, 0.0),
+          from + const Offset(5.0, 0.0),
         );
         host.time = at(tuesday, 14, 0, 30);
         await tester.pump(const Duration(minutes: 1));
@@ -1326,7 +1326,7 @@ void main() {
           final gesture = await holdRange(
             tester,
             from,
-            from + const Offset(2.0, 0.0),
+            from + const Offset(5.0, 0.0),
           );
           if (minutePasses) {
             host.time = at(tuesday, 14, 0, 30);

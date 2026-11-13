@@ -2943,8 +2943,9 @@ void main() {
     }
   });
 
-  testWidgets("TS33 a tap pressed in edit mode and let go after it ends "
-      "creates nothing; and a touch held in edit mode whose hold ends after "
+  testWidgets("TS33 a mouse press in edit mode held past the hold's delay "
+      "after it ends creates nothing; and a touch held in edit mode whose "
+      "hold ends after "
       "it, then dragged, asks the policy nothing, marks and creates "
       "nothing, and scrolls the grid", (tester) async {
     for (final shown in bothGrids()) {
@@ -2960,14 +2961,23 @@ void main() {
         );
         await harness.pump(tester);
         final at = slotRect(tester, shown, tuesday, 10 * 60).center;
-        await tester.tapAt(at);
+        final hold = await tester.startGesture(
+          at,
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pump(kLongPressTimeout);
+        await hold.up();
         await tester.pumpAndSettle();
-        // Setup sanity: a tap there in edit mode creates.
+        // Setup sanity: a mouse hold there in edit mode creates.
         expect(harness.creates, hasLength(1), reason: reason);
         harness.creates.clear();
-        final gesture = await tester.startGesture(at);
+        final gesture = await tester.startGesture(
+          at,
+          kind: PointerDeviceKind.mouse,
+        );
         harness.editable = false;
         await harness.rebuild(tester);
+        await tester.pump(kLongPressTimeout);
         await gesture.up();
         await tester.pumpAndSettle();
         expect(harness.creates, isEmpty, reason: reason);
@@ -6384,7 +6394,7 @@ void main() {
         final free = Offset(nine.center.dx, nine.top + 2.0);
         // Setup sanity: the press lies above the block, over no item.
         expect(free.dy, lessThan(tester.getRect(blockFinder(id, tuesday)).top));
-        await tester.tapAt(free);
+        await tester.longPressAt(free);
         await tester.pumpAndSettle();
         expectSitePairs(policy);
         expect(
@@ -6840,7 +6850,13 @@ void main() {
         "edge, a bar landing and a press over times no entry shares build no "
         "candidate", (tester) async {
       final shown = Shown.week(monday);
-      for (final name in const <String>["move", "start", "end", "bar", "tap"]) {
+      for (final name in const <String>[
+        "move",
+        "start",
+        "end",
+        "bar",
+        "hold",
+      ]) {
         final harness = Harness(
           packedStore(0),
           shown,
@@ -6851,8 +6867,10 @@ void main() {
         await harness.pump(tester);
         final built = debugOverlapCandidateCount;
         final gates = debugDropGateCount;
-        if (name == "tap") {
-          await tester.tapAt(slotRect(tester, shown, tuesday, 10 * 60).center);
+        if (name == "hold") {
+          await tester.longPressAt(
+            slotRect(tester, shown, tuesday, 10 * 60).center,
+          );
           await tester.pumpAndSettle();
           // Setup sanity: the press created.
           expect(harness.creates, hasLength(1), reason: name);
@@ -8682,10 +8700,10 @@ void main() {
     }
   });
 
-  testWidgets("GM1 while a block is lifted nothing creates: no drag or tap "
+  testWidgets("GM1 while a block is lifted nothing creates: no drag or hold "
       "pressed during the lift, and none pressed before it whose drag or "
       "release comes during it; once the block is let go the same drag and "
-      "the same tap create", (tester) async {
+      "a hold at its start create", (tester) async {
     final shown = Shown.week(monday);
     final store = storeOf(<CalendarEntry<String>>[
       entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
@@ -8702,7 +8720,7 @@ void main() {
       (false, true),
     ]) {
       final reason =
-          "${drags ? "drag" : "tap"} pressed "
+          "${drags ? "drag" : "hold"} pressed "
           "${before ? "before" : "during"} the lift";
       TestGesture? creating;
       if (before) {
@@ -8724,6 +8742,8 @@ void main() {
         await tester.pump();
         await creating.moveTo(to);
         await tester.pump();
+      } else {
+        await tester.pump(kLongPressTimeout);
       }
       await creating.up();
       await tester.pump();
@@ -8733,7 +8753,7 @@ void main() {
     }
 
     await createDrag(tester, from, to);
-    await tester.tapAt(from);
+    await tester.longPressAt(from);
     await tester.pumpAndSettle();
     expect(harness.creates, <CalendarCreateRange>[
       CalendarCreateRange(start: at(thursday, 14), end: at(thursday, 16, 15)),
@@ -9442,7 +9462,7 @@ void main() {
       });
 
       testWidgets("OP8 in Day under the lock of earlier today at the second "
-          "00:20, a tap on the 00:30 row, in the second pass, beside an "
+          "00:20, a hold on the 00:30 row, in the second pass, beside an "
           "entry whose block lies off that row, asks the policy about it and "
           "creates only where the policy lets a create of the slot share its "
           "time", (tester) async {
@@ -9482,7 +9502,7 @@ void main() {
             greaterThanOrEqualTo(row.bottom),
             reason: id,
           );
-          await tester.tapAt(row.center);
+          await tester.longPressAt(row.center);
           await tester.pumpAndSettle();
           expectSitePairs(policy);
           expect(

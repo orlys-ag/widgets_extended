@@ -12,6 +12,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
@@ -411,6 +412,48 @@ Future<void> resizeStart(WidgetTester tester, Finder block, Offset by) async {
   await tester.pump();
   await gesture.up();
   await tester.pumpAndSettle();
+}
+
+/// The global rect of the all-day strip's cell in [day]'s column, on an
+/// editable grid with no bar: the row under the day header in Week and
+/// the room above the strip.
+Rect stripRect(WidgetTester tester, Shown shown, DateTime day) {
+  return cellRect(tester, (shown.week ? 1 : 0) + 1, shown.colOf(day));
+}
+
+/// A press of [kind] at [at], moved by [by] right after the down, held
+/// down [held] from there, and let go, the frames after it settled.
+Future<void> pressAt(
+  WidgetTester tester,
+  Offset at, {
+  PointerDeviceKind kind = PointerDeviceKind.touch,
+  Offset by = Offset.zero,
+  Duration held = Duration.zero,
+}) async {
+  final gesture = await tester.startGesture(at, kind: kind);
+  if (by != Offset.zero) {
+    await gesture.moveBy(by);
+  }
+  await tester.pump(held);
+  await gesture.up();
+  await tester.pumpAndSettle();
+}
+
+/// Records each `HapticFeedback.vibrate` call on the platform channel,
+/// which [Feedback.forLongPress] makes on the tests' platform, Android.
+List<MethodCall> recordVibrations(WidgetTester tester) {
+  final calls = <MethodCall>[];
+  final messenger = tester.binding.defaultBinaryMessenger;
+  messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+    if (call.method == "HapticFeedback.vibrate") {
+      calls.add(call);
+    }
+    return null;
+  });
+  addTearDown(() {
+    messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+  });
+  return calls;
 }
 
 /// A mouse drag from [from] to [to], let go there: a create drag.
@@ -927,15 +970,169 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets("TR1 a tap on an empty slot reports that slot", (tester) async {
+  testWidgets("TR1 a hold on an empty slot reports that slot", (tester) async {
     final shown = Shown.week(monday);
     final harness = Harness(storeOf(const <CalendarEntry<String>>[]), shown);
     await harness.pump(tester);
-    await tester.tapAt(slotRect(tester, shown, tuesday, 10 * 60).center);
+    await tester.longPressAt(slotRect(tester, shown, tuesday, 10 * 60).center);
     await tester.pumpAndSettle();
     expect(harness.creates, <CalendarCreateRange>[
       CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 10, 15)),
     ]);
+  });
+
+  testWidgets("CP1 a tap or a click on an empty slot or strip cell creates "
+      "nothing, in Week and in Day, where a hold there creates", (
+    tester,
+  ) async {
+    for (final shown in <Shown>[Shown.week(monday), Shown.day(tuesday)]) {
+      for (final kind in <PointerDeviceKind>[
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.stylus,
+      ]) {
+        for (final strip in <bool>[false, true]) {
+          final reason = "${shown.name}, $kind, ${strip ? "strip" : "slot"}";
+          final harness = Harness(
+            storeOf(const <CalendarEntry<String>>[]),
+            shown,
+          );
+          await harness.pump(tester);
+          final point = strip
+              ? stripRect(tester, shown, tuesday).center
+              : slotRect(tester, shown, tuesday, 10 * 60).center;
+          await pressAt(tester, point, kind: kind);
+          expect(harness.creates, isEmpty, reason: reason);
+          await pressAt(tester, point, kind: kind, held: kLongPressTimeout);
+          expect(harness.creates, <CalendarCreateRange>[
+            if (strip)
+              CalendarCreateRange(
+                start: tuesday,
+                end: wednesday,
+                isAllDay: true,
+              )
+            else
+              CalendarCreateRange(
+                start: at(tuesday, 10),
+                end: at(tuesday, 10, 15),
+              ),
+          ], reason: reason);
+        }
+      }
+    }
+  });
+
+  testWidgets("CP2 a mouse or a stylus press moved 4 px and let go before "
+      "500 ms marks and creates nothing; one moved 5 px marks its slot from "
+      "the move on and creates it", (tester) async {
+    final shown = Shown.week(monday);
+    for (final kind in <PointerDeviceKind>[
+      PointerDeviceKind.mouse,
+      PointerDeviceKind.stylus,
+    ]) {
+      final harness = Harness(storeOf(const <CalendarEntry<String>>[]), shown);
+      await harness.pump(tester);
+      final point = slotRect(tester, shown, tuesday, 10 * 60).center;
+      final short = await tester.startGesture(point, kind: kind);
+      await short.moveBy(const Offset(0.0, 4.0));
+      await tester.pump();
+      expect(marksSlots(tester), isFalse, reason: "$kind");
+      await short.up();
+      await tester.pumpAndSettle();
+      expect(harness.creates, isEmpty, reason: "$kind");
+
+      final long = await tester.startGesture(point, kind: kind);
+      await long.moveBy(const Offset(0.0, 5.0));
+      await tester.pump();
+      expect(marksSlots(tester), isTrue, reason: "$kind");
+      await long.up();
+      await tester.pumpAndSettle();
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 10, 15)),
+      ], reason: "$kind");
+    }
+  });
+
+  testWidgets("CP3 a mouse or a stylus press held 500 ms within 4 px of its "
+      "down marks its slot from then on and creates it", (tester) async {
+    final shown = Shown.week(monday);
+    for (final kind in <PointerDeviceKind>[
+      PointerDeviceKind.mouse,
+      PointerDeviceKind.stylus,
+    ]) {
+      final harness = Harness(storeOf(const <CalendarEntry<String>>[]), shown);
+      await harness.pump(tester);
+      final gesture = await tester.startGesture(
+        slotRect(tester, shown, tuesday, 10 * 60).center,
+        kind: kind,
+      );
+      await gesture.moveBy(const Offset(2.0, 2.0));
+      await tester.pump(kLongPressTimeout - const Duration(milliseconds: 1));
+      expect(marksSlots(tester), isFalse, reason: "$kind");
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(marksSlots(tester), isTrue, reason: "$kind");
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(harness.creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 10, 15)),
+      ], reason: "$kind");
+    }
+  });
+
+  testWidgets("CP4 a touch or a mouse press that creates by its hold asks "
+      "for the long-press feedback once, as its range starts, and a mouse "
+      "drag asks for none", (tester) async {
+    final vibrations = recordVibrations(tester);
+    final shown = Shown.week(monday);
+    final harness = Harness(storeOf(const <CalendarEntry<String>>[]), shown);
+    await harness.pump(tester);
+    final point = slotRect(tester, shown, tuesday, 10 * 60).center;
+    for (final kind in <PointerDeviceKind>[
+      PointerDeviceKind.touch,
+      PointerDeviceKind.mouse,
+    ]) {
+      final gesture = await tester.startGesture(point, kind: kind);
+      await tester.pump(kLongPressTimeout - const Duration(milliseconds: 1));
+      expect(vibrations, isEmpty, reason: "$kind");
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(vibrations, hasLength(1), reason: "$kind");
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(vibrations, hasLength(1), reason: "$kind");
+      vibrations.clear();
+    }
+    await createDrag(
+      tester,
+      point,
+      slotRect(tester, shown, tuesday, 11 * 60).center,
+    );
+    expect(vibrations, isEmpty);
+    expect(harness.creates, hasLength(3));
+  });
+
+  testWidgets("CP5 with a block selected, a mouse press on an empty slot "
+      "moved 3 px and let go clears the selection and creates nothing", (
+    tester,
+  ) async {
+    final shown = Shown.week(monday);
+    final harness = Harness(
+      storeOf(<CalendarEntry<String>>[
+        entryOf("talk", at(monday, 9), at(monday, 10)),
+      ]),
+      shown,
+    );
+    await harness.pump(tester);
+    final grip = find.byKey(blockGripKey("talk", AxisDirection.up));
+    await selectBlock(tester, blockFinder("talk", monday));
+    expect(grip, findsOneWidget);
+    await pressAt(
+      tester,
+      slotRect(tester, shown, tuesday, 10 * 60).center,
+      kind: PointerDeviceKind.mouse,
+      by: const Offset(0.0, 3.0),
+    );
+    expect(harness.creates, isEmpty);
+    expect(grip, findsNothing);
   });
 
   testWidgets("TR2 a create drag in Week from Monday 10:00 to Wednesday "
@@ -1034,11 +1231,13 @@ void main() {
     final free = Offset(nine.center.dx, nine.top + 2.0);
     // The press lies above the block, over no item.
     expect(free.dy < top, isTrue);
-    await tester.tapAt(free);
+    await tester.longPressAt(free);
     await tester.pumpAndSettle();
     expect(harness.creates, isEmpty);
     // A slot that shares no time takes the tap.
-    await tester.tapAt(slotRect(tester, shown, tuesday, 8 * 60 + 45).center);
+    await tester.longPressAt(
+      slotRect(tester, shown, tuesday, 8 * 60 + 45).center,
+    );
     await tester.pumpAndSettle();
     expect(harness.creates, <CalendarCreateRange>[
       CalendarCreateRange(start: at(tuesday, 8, 45), end: at(tuesday, 9)),
@@ -1103,7 +1302,7 @@ void main() {
   });
 
   testWidgets("TC1 at slot 30 over 00:00-24:00 the grid has 48 slot rows and "
-      "a tap reports 30 minutes", (tester) async {
+      "a hold reports 30 minutes", (tester) async {
     for (final shown in <Shown>[
       Shown.week(monday, slotMinutes: 30),
       Shown.day(tuesday, slotMinutes: 30),
@@ -1116,7 +1315,9 @@ void main() {
         shown.editLeadingRows + 48 + 1,
         reason: shown.name,
       );
-      await tester.tapAt(slotRect(tester, shown, tuesday, 10 * 60).center);
+      await tester.longPressAt(
+        slotRect(tester, shown, tuesday, 10 * 60).center,
+      );
       await tester.pumpAndSettle();
       expect(harness.creates, <CalendarCreateRange>[
         CalendarCreateRange(start: at(tuesday, 10), end: at(tuesday, 10, 30)),
@@ -1474,7 +1675,7 @@ void main() {
     });
 
     testWidgets("TP13 a move and a resize edge onto 02:00-02:59 and a create "
-        "drag ending there write and report nothing, and a tap there "
+        "drag ending there write and report nothing, and a hold there "
         "creates nothing", (tester) async {
       final day = shortDayStart;
       final shown = Shown.day(day);
@@ -1507,11 +1708,13 @@ void main() {
         slotRect(tester, shown, day, 2 * 60 + 30).center,
       );
       expect(harness.creates, isEmpty);
-      await tester.tapAt(slotRect(tester, shown, day, 2 * 60 + 30).center);
+      await tester.longPressAt(
+        slotRect(tester, shown, day, 2 * 60 + 30).center,
+      );
       await tester.pumpAndSettle();
       expect(harness.creates, isEmpty);
-      // A tap beside the skipped hour creates.
-      await tester.tapAt(slotRect(tester, shown, day, 3 * 60).center);
+      // A hold beside the skipped hour creates.
+      await tester.longPressAt(slotRect(tester, shown, day, 3 * 60).center);
       await tester.pumpAndSettle();
       expect(harness.creates, hasLength(1));
     });
@@ -1681,13 +1884,13 @@ void main() {
       expect(resized.end, secondHalfPastOne);
     });
 
-    testWidgets("TP19 a tap on the 01:30 row reports a range starting at the "
+    testWidgets("TP19 a hold on the 01:30 row reports a range starting at the "
         "first 01:30", (tester) async {
       final day = longDayStart;
       final shown = Shown.day(day);
       final harness = Harness(storeOf(const <CalendarEntry<String>>[]), shown);
       await harness.pump(tester);
-      await tester.tapAt(slotRect(tester, shown, day, 90).center);
+      await tester.longPressAt(slotRect(tester, shown, day, 90).center);
       await tester.pumpAndSettle();
       final first = day.add(const Duration(minutes: 90));
       expect(harness.creates, <CalendarCreateRange>[
@@ -1889,13 +2092,13 @@ void main() {
       ]);
     });
 
-    testWidgets("TP52 a tap on the 01:45 row reports a range from the first "
+    testWidgets("TP52 a hold on the 01:45 row reports a range from the first "
         "01:45 to the second 01:00, where the first pass ends", (tester) async {
       final day = longDayStart;
       final shown = Shown.day(day);
       final harness = Harness(storeOf(const <CalendarEntry<String>>[]), shown);
       await harness.pump(tester);
-      await tester.tapAt(slotRect(tester, shown, day, 105).center);
+      await tester.longPressAt(slotRect(tester, shown, day, 105).center);
       await tester.pumpAndSettle();
       final first = day.add(const Duration(minutes: 105));
       expect(harness.creates, <CalendarCreateRange>[
@@ -2227,7 +2430,7 @@ void main() {
       });
 
       testWidgets("TP37 in Day, a create drag between the 00:00 and the "
-          "01:00 slots reports nothing either way, and a tap on the 01:00 "
+          "01:00 slots reports nothing either way, and a hold on the 01:00 "
           "slot creates from the day's start", (tester) async {
         final day = shortDayStart;
         expectSkippedMidnight(day);
@@ -2252,7 +2455,7 @@ void main() {
         );
         expect(harness.creates, isEmpty);
         // Setup sanity: the 01:00 slot is the day's first.
-        await tester.tapAt(slotRect(tester, shown, day, 60).center);
+        await tester.longPressAt(slotRect(tester, shown, day, 60).center);
         await tester.pumpAndSettle();
         expect(harness.creates, <CalendarCreateRange>[
           CalendarCreateRange(
@@ -2547,7 +2750,7 @@ void main() {
         ]);
       });
 
-      testWidgets("TP53 in Day, a tap on the 00:45 row reports a range from "
+      testWidgets("TP53 in Day, a hold on the 00:45 row reports a range from "
           "the first 00:45 to the later 00:00, where the first pass ends", (
         tester,
       ) async {
@@ -2559,7 +2762,7 @@ void main() {
           shown,
         );
         await harness.pump(tester);
-        await tester.tapAt(slotRect(tester, shown, day, 45).center);
+        await tester.longPressAt(slotRect(tester, shown, day, 45).center);
         await tester.pumpAndSettle();
         expect(harness.creates, <CalendarCreateRange>[
           CalendarCreateRange(
@@ -2635,7 +2838,7 @@ void main() {
         ]);
       });
 
-      testWidgets("TP54 in Day, a tap on the 23:45 row reports a range from "
+      testWidgets("TP54 in Day, a hold on the 23:45 row reports a range from "
           "the first 23:45 to the later 23:00, where the first pass ends", (
         tester,
       ) async {
@@ -2647,7 +2850,9 @@ void main() {
           shown,
         );
         await harness.pump(tester);
-        await tester.tapAt(slotRect(tester, shown, day, 23 * 60 + 45).center);
+        await tester.longPressAt(
+          slotRect(tester, shown, day, 23 * 60 + 45).center,
+        );
         await tester.pumpAndSettle();
         expect(harness.creates, <CalendarCreateRange>[
           CalendarCreateRange(
