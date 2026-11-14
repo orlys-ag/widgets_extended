@@ -880,6 +880,12 @@ after its start and the clock reads both its times, so that its problems
 hold every rule's answer, and `CalendarScheduleCheck.withSchedule`, the
 check of another schedule under the same rules, time, entry, others and
 options.
+- Added `CalendarTimePicker.subject`, what the picker edits: a new subject
+ends every hold, user motion and typed digit without a report and moves
+the columns to the value over the theme's motion, so one picker can serve
+several fields; and `CalendarTimePicker.nowPicksLater`, under which Now,
+where the latest time at or before now is not offered, picks the first
+later time the picker offers.
 
 ## 0.0.35
 
