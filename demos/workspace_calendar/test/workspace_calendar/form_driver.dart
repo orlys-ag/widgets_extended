@@ -74,17 +74,6 @@ ValueKey<String> _timeFieldKey(String label) {
   throw ArgumentError.value(label, "label", "names no time field");
 }
 
-/// The key of the picker the form's time field labelled [label] opens.
-ValueKey<String> _timePickerKey(String label) {
-  switch (label) {
-    case "Start time":
-      return scheduleStartPickerKey;
-    case "End time":
-      return scheduleEndPickerKey;
-  }
-  throw ArgumentError.value(label, "label", "names no time field");
-}
-
 /// The form's time field labelled [label], "Start time" or "End time".
 Finder timeFieldFinder(String label) {
   return find.byKey(_timeFieldKey(label));
@@ -109,12 +98,14 @@ bool timeFieldTakesInput(WidgetTester tester, String label) {
       null;
 }
 
-/// The picker open under the form's time field labelled [label].
+/// The form's one time picker while it edits the time field labelled
+/// [label]: the [CalendarTimePicker] whose [CalendarTimePicker.subject] is
+/// that field's key.
 Finder timePickerFinder(String label) {
-  return find.descendant(
-    of: find.byKey(_timePickerKey(label)),
-    matching: find.byType(CalendarTimePicker),
-  );
+  final key = _timeFieldKey(label);
+  return find.byWidgetPredicate((widget) {
+    return widget is CalendarTimePicker && widget.subject == key;
+  }, description: "the time picker of $label");
 }
 
 /// The minute after midnight [time] names, written "HH:MM" on the 24-hour
