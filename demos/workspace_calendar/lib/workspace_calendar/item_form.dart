@@ -5,7 +5,10 @@
 /// cards: the schedule section, which every item type shares and which
 /// edits a [CalendarSchedule]; the schedule's summary, which shows what its
 /// [CalendarScheduleCheck] answers; and the item's own fields, generated
-/// from the item type's schema. The check is made again
+/// from the item type's schema. Once the schedule section has scrolled
+/// away, the summary stays at the page's top while the item's fields scroll
+/// under it, where it takes at most half of the page
+/// ([FittingPinnedHeaderSliver]). The check is made again
 /// at each edit, at each change of the store and at the start of each
 /// minute. Save sends nothing while the check names a problem
 /// ([scheduleErrorsOf]) or the validator the API runs refuses the item;
@@ -23,6 +26,7 @@ import 'calendar_api_source.dart';
 import 'calendar_item.dart';
 import 'calendar_settings.dart';
 import 'calendar_schema.dart';
+import 'fitting_pinned_header.dart';
 import 'harbor_theme.dart';
 import 'schedule_section.dart';
 
@@ -925,47 +929,50 @@ class _ItemFormState extends State<_ItemForm> {
       ),
       for (final field in _schema.fields) _fieldFor(field),
     ];
-    final cards = <Widget>[
-      // The section pads itself to the card's edges, so that its controls'
-      // touch targets can reach into the padding.
-      _card(
-        formSchedulingCardKey,
-        padding: EdgeInsets.zero,
-        ScheduleSection(
-          check: _scheduleCheck,
-          hours: widget.store.hours,
-          slotMinutes: widget.slotMinutes,
-          hourLabelFormat: widget.hourLabelFormat,
-          now: widget.now,
-          zone: widget.store.zone,
-          locked: _locked,
-          errors: _scheduleErrors(),
-          onChanged: _scheduleChanged,
-        ),
+    // The section pads itself to the card's edges, so that its controls'
+    // touch targets can reach into the padding.
+    final schedulingCard = _card(
+      formSchedulingCardKey,
+      padding: EdgeInsets.zero,
+      ScheduleSection(
+        check: _scheduleCheck,
+        hours: widget.store.hours,
+        slotMinutes: widget.slotMinutes,
+        hourLabelFormat: widget.hourLabelFormat,
+        now: widget.now,
+        zone: widget.store.zone,
+        locked: _locked,
+        errors: _scheduleErrors(),
+        onChanged: _scheduleChanged,
       ),
-      _card(
-        formSummaryCardKey,
-        ScheduleSummary(
-          check: _scheduleCheck,
-          hourLabelFormat: widget.hourLabelFormat,
-          zone: widget.store.zone,
-          locked: _locked,
-          onChanged: _scheduleChanged,
-        ),
+    );
+    final summaryCard = _card(
+      formSummaryCardKey,
+      ScheduleSummary(
+        check: _scheduleCheck,
+        hourLabelFormat: widget.hourLabelFormat,
+        zone: widget.store.zone,
+        locked: _locked,
+        onChanged: _scheduleChanged,
       ),
-      _card(
-        formItemCardKey,
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            for (var index = 0; index < itemFields.length; index++) ...<Widget>[
-              if (index > 0) const SizedBox(height: 12.0),
-              itemFields[index],
-            ],
+    );
+    final itemCard = _card(
+      formItemCardKey,
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          for (var index = 0; index < itemFields.length; index++) ...<Widget>[
+            if (index > 0) const SizedBox(height: 12.0),
+            itemFields[index],
           ],
-        ),
+        ],
       ),
-    ];
+    );
+    // The sheet's own colour, which the summary's strip paints so that the
+    // item card scrolls out of sight under it.
+    final sheetColor =
+        Material.of(context).color ??
+        Theme.of(context).colorScheme.surfaceContainerLow;
     return PopScope(
       canPop: !_saving,
       child: _KeyboardInset(
@@ -987,23 +994,50 @@ class _ItemFormState extends State<_ItemForm> {
                 ),
               ),
               // The page's padding lies inside its scroll view, so a drag
-              // anywhere across the sheet's width scrolls it.
+              // anywhere across the sheet's width scrolls it. The view
+              // shrink-wraps, so the sheet is no taller than its page. The
+              // summary's strip holds the 12-pixel gaps above and below its
+              // card, and pins at the page's top while it takes at most
+              // half of the page.
               Flexible(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(24.0, 12.0, 24.0, 12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      for (
-                        var index = 0;
-                        index < cards.length;
-                        index++
-                      ) ...<Widget>[
-                        if (index > 0) const SizedBox(height: 12.0),
-                        cards[index],
-                      ],
-                    ],
-                  ),
+                child: CustomScrollView(
+                  shrinkWrap: true,
+                  slivers: <Widget>[
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          24.0,
+                          12.0,
+                          24.0,
+                          0.0,
+                        ),
+                        child: schedulingCard,
+                      ),
+                    ),
+                    FittingPinnedHeaderSliver(
+                      child: ColoredBox(
+                        color: sheetColor,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24.0,
+                            vertical: 12.0,
+                          ),
+                          child: summaryCard,
+                        ),
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          24.0,
+                          0.0,
+                          24.0,
+                          12.0,
+                        ),
+                        child: itemCard,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               if (message != null)
