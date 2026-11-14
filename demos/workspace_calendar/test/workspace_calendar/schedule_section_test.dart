@@ -1,8 +1,9 @@
 /// The item form's sheet and its schedule section: the sheet's container
-/// and type selector, the message of each schedule problem, and the
-/// section's summary, length and All day chips, End date, next free time,
-/// zone, options and kept kind, and its time fields, the pickers they open,
-/// what each picker refuses, and where the focus goes.
+/// and type selector, the message of each schedule problem, the messages
+/// after a failed Save, and the section's summary, All day switch, End
+/// date, next free time, zone, options and kept kind, and its time fields,
+/// the pickers they open, what each picker refuses, and where the focus
+/// goes.
 library;
 
 import 'package:flutter/material.dart';
@@ -150,7 +151,11 @@ CalendarScheduleCheck<ItemPayload> checkOf(
 /// Pumps the section of [check] alone, in the calendar's whole day of
 /// 15-minute slots on the 24-hour clock, on [zone]'s clock, its pickers'
 /// Now reading [now] or else Wednesday's start, its edits going to
-/// [onChanged] or else nowhere, and locked where [locked].
+/// [onChanged] or else nowhere, and locked where [locked]. Where [follows],
+/// each edit also makes the section's check that of the edited schedule
+/// ([CalendarScheduleCheck.withSchedule]) before it goes to [onChanged], so
+/// the next frame builds the section of the edit, as the form's does;
+/// otherwise the section keeps [check].
 Future<void> pumpSection(
   WidgetTester tester,
   CalendarScheduleCheck<ItemPayload> check, {
@@ -158,21 +163,36 @@ Future<void> pumpSection(
   ValueGetter<CalendarNow>? now,
   ValueChanged<CalendarSchedule>? onChanged,
   bool locked = false,
+  bool follows = false,
 }) {
+  Widget sectionOf(
+    CalendarScheduleCheck<ItemPayload> check,
+    ValueChanged<CalendarSchedule> onChanged,
+  ) {
+    return ScheduleSection(
+      check: check,
+      hours: CalendarDayHours.allDay,
+      slotMinutes: 15,
+      hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+      now: now ?? wednesdayStart,
+      zone: zone,
+      locked: locked,
+      onChanged: onChanged,
+    );
+  }
+
+  final report = onChanged ?? (schedule) {};
   return tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
         body: SingleChildScrollView(
-          child: ScheduleSection(
-            check: check,
-            hours: CalendarDayHours.allDay,
-            slotMinutes: 15,
-            hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
-            now: now ?? wednesdayStart,
-            zone: zone,
-            locked: locked,
-            onChanged: onChanged ?? (schedule) {},
-          ),
+          child: follows
+              ? _FollowingSection(
+                  check: check,
+                  onChanged: report,
+                  builder: sectionOf,
+                )
+              : sectionOf(check, report),
         ),
       ),
     ),
@@ -364,30 +384,22 @@ void main() {
     );
   });
 
-  testWidgets("SS1 SS2 the summary reads the schedule, the chips are 15m, "
-      "30m, 1h and All day, and a length chip sets the end", (tester) async {
+  testWidgets("SS1 SS2 the summary reads the schedule and its length, "
+      "which a new end changes, and the section offers no length chips", (
+    tester,
+  ) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10, 30)),
     ]);
     addTearDown(store.dispose);
     await openEdit(tester, store);
     expect(summary(tester), "Wed, Apr 22, 09:00 - 10:30 (1h 30m)");
-    expect(chipLabels(tester), <String>["15m", "30m", "1h", "All day"]);
+    expect(find.byType(ChoiceChip), findsNothing);
 
-    await tester.tap(find.widgetWithText(ChoiceChip, "30m"));
-    await tester.pumpAndSettle();
-    expect(timeFieldShows("End time", "09:30"), findsOneWidget);
+    await pickTime(tester, "End time", "09:30");
     expect(summary(tester), "Wed, Apr 22, 09:00 - 09:30 (30m)");
-    expect(
-      tester
-          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, "30m"))
-          .selected,
-      isTrue,
-    );
-
-    await tester.tap(find.widgetWithText(ChoiceChip, "1h"));
-    await tester.pumpAndSettle();
-    expect(timeFieldShows("End time", "10:00"), findsOneWidget);
+    await pickTime(tester, "End time", "10:00");
+    expect(summary(tester), "Wed, Apr 22, 09:00 - 10:00 (1h)");
   });
 
   testWidgets("SS3 End date shows for a multi-day or all-day item, or after "
@@ -472,83 +484,52 @@ void main() {
   });
 
   testWidgets("SS6 options that refuse all-day and spanning days show no All "
-      "day chip and no Ends on another day, and options with neither "
-      "lengths nor all-day no chip row", (tester) async {
+      "day switch and no Ends on another day", (tester) async {
     final schedule = CalendarSchedule.of(at(9), at(10), isAllDay: false);
     await pumpSection(tester, checkOf(schedule));
     expect(find.text("Ends on another day"), findsOneWidget);
-    expect(chipLabels(tester), <String>["15m", "30m", "1h", "All day"]);
+    expect(allDaySwitch(), findsOneWidget);
 
     await pumpSection(
       tester,
       checkOf(
         schedule,
-        options: CalendarScheduleOptions(
+        options: const CalendarScheduleOptions(
           allowsAllDay: false,
           spansDays: false,
-          lengthChoices: const <int>[45],
         ),
       ),
     );
+    expect(allDaySwitch(), findsNothing);
     expect(find.text("All day"), findsNothing);
     expect(find.text("Ends on another day"), findsNothing);
-    expect(chipLabels(tester), <String>["45m"]);
-
-    await pumpSection(
-      tester,
-      checkOf(
-        schedule,
-        options: CalendarScheduleOptions(
-          allowsAllDay: false,
-          lengthChoices: const <int>[],
-        ),
-      ),
-    );
-    expect(find.byType(ChoiceChip), findsNothing);
-    expect(
-      find.descendant(
-        of: find.byType(ScheduleSection),
-        matching: find.byType(Wrap),
-      ),
-      findsNothing,
-    );
   });
 
-  testWidgets("SS7 All day is the last chip: it hides the times and selects "
-      "no length, tapped again it restores the times, and a length chip "
-      "makes the item timed at that length", (tester) async {
+  testWidgets("SS7 the All day switch turned on hides the times, and turned "
+      "off restores them", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10, 30)),
     ]);
     addTearDown(store.dispose);
     await openEdit(tester, store);
+    expect(allDaySwitch(), findsOneWidget);
     expect(formAllDayOn(), isFalse);
 
-    await tester.tap(allDayChip());
+    await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
     expect(summary(tester), "Wed, Apr 22, all day");
     expect(timeFieldFinder("Start time"), findsNothing);
-    expect(chipLabels(tester), <String>["15m", "30m", "1h", "All day"]);
-    expect(chipLabels(tester, selectedOnly: true), <String>["All day"]);
+    expect(formAllDayOn(), isTrue);
 
-    await tester.tap(allDayChip());
+    await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
     expect(summary(tester), "Wed, Apr 22, 09:00 - 10:30 (1h 30m)");
-    expect(formAllDayOn(), isFalse);
-
-    await tester.tap(allDayChip());
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ChoiceChip, "30m"));
-    await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22, 09:00 - 09:30 (30m)");
     expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
-    expect(chipLabels(tester, selectedOnly: true), <String>["30m"]);
+    expect(formAllDayOn(), isFalse);
   });
 
-  testWidgets("SS8 an item in progress keeps its kind: All day takes no "
-      "tap, nor do an all-day item's lengths, and a timed item's do", (
-    tester,
-  ) async {
+  testWidgets("SS8 an item in progress keeps its kind: the All day switch "
+      "takes no tap, of an all-day item or a timed one", (tester) async {
     const lock = HistoryLockPolicy<ItemPayload>();
     final allDay = task(
       "item-1",
@@ -564,8 +545,8 @@ void main() {
     );
     expect(allDayCheck.startFixed, isTrue);
     await pumpSection(tester, allDayCheck);
-    expect(chipLabels(tester), <String>["15m", "30m", "1h", "All day"]);
-    expect(chipsEnabled(tester), <bool>[false, false, false, false]);
+    expect(formAllDayOn(), isTrue);
+    expect(tester.widget<SwitchListTile>(allDaySwitch()).onChanged, isNull);
 
     final timed = task("item-2", "Write", DateTime(2026, 4, 21, 22), at(10));
     final timedCheck = checkOf(
@@ -575,13 +556,13 @@ void main() {
     );
     expect(timedCheck.startFixed, isTrue);
     await pumpSection(tester, timedCheck);
-    expect(chipLabels(tester), <String>["15m", "30m", "1h", "All day"]);
-    expect(chipsEnabled(tester), <bool>[true, true, true, false]);
+    expect(formAllDayOn(), isFalse);
+    expect(tester.widget<SwitchListTile>(allDaySwitch()).onChanged, isNull);
   });
 
   testWidgets("SS9 an all-day item made timed starts at the first free hour "
       "of the store's hours on its start day: All day off gives that hour, "
-      "and a length chip that start", (tester) async {
+      "of a stored item and of a new one", (tester) async {
     final store = MemoryCalendarStore<ItemPayload>(
       hours: CalendarDayHours(8 * 60, 18 * 60),
       entries: <CalendarItem>[
@@ -598,7 +579,7 @@ void main() {
     addTearDown(store.dispose);
     await openEdit(tester, store);
     expect(summary(tester), "Wed, Apr 22, all day");
-    await tester.tap(allDayChip());
+    await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
     expect(summary(tester), "Wed, Apr 22, 09:30 - 10:30 (1h)");
     await tester.tap(formButton("Cancel"));
@@ -614,9 +595,9 @@ void main() {
       ),
     );
     expect(summary(tester), "Wed, Apr 22, all day");
-    await tester.tap(find.widgetWithText(ChoiceChip, "30m"));
+    await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22, 09:30 - 10:00 (30m)");
+    expect(summary(tester), "Wed, Apr 22, 09:30 - 10:30 (1h)");
   });
 
   testWidgets("TF1 a tap on Start time opens its picker under the time row, "
@@ -836,9 +817,9 @@ void main() {
     expect(summary(tester), "Wed, Apr 22, 09:00 - 10:00 (1h)");
   });
 
-  testWidgets("TF5 the start's picker stays open across Next free time, a "
-      "length chip and a new start date, and All day closes it and focuses "
-      "the chip", (tester) async {
+  testWidgets("TF5 the start's picker stays open across Next free time and a "
+      "new start date, and the All day switch closes it and takes the "
+      "focus", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task("item-2", "Standup", at(9, 30), at(10, 30)),
@@ -854,13 +835,6 @@ void main() {
     expect(summary(tester), "Wed, Apr 22, 10:30 - 11:30 (1h)");
     expect(find.byKey(scheduleStartPickerKey), findsOneWidget);
 
-    await tester.ensureVisible(find.widgetWithText(ChoiceChip, "30m"));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ChoiceChip, "30m"));
-    await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22, 10:30 - 11:00 (30m)");
-    expect(find.byKey(scheduleStartPickerKey), findsOneWidget);
-
     await tester.ensureVisible(formDateFinder("Start date"));
     await tester.pumpAndSettle();
     await tester.tap(formDateFinder("Start date"));
@@ -873,16 +847,16 @@ void main() {
     );
     await tester.tap(find.text("OK"));
     await tester.pumpAndSettle();
-    expect(summary(tester), "Thu, Apr 23, 10:30 - 11:00 (30m)");
+    expect(summary(tester), "Thu, Apr 23, 10:30 - 11:30 (1h)");
     expect(find.byKey(scheduleStartPickerKey), findsOneWidget);
 
-    await tester.ensureVisible(allDayChip());
+    await tester.ensureVisible(allDaySwitch());
     await tester.pumpAndSettle();
-    await tester.tap(allDayChip());
+    await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
     expect(summary(tester), "Thu, Apr 23, all day");
     expect(find.byKey(scheduleStartPickerKey), findsNothing);
-    expect(focusUnder(allDayChip()), isTrue);
+    expect(focusUnder(allDaySwitch()), isTrue);
   });
 
   testWidgets("TF8 the focus follows the open picker: its Hour column takes "
@@ -1531,6 +1505,117 @@ void main() {
     await tester.pumpAndSettle();
     expect(asked.length, greaterThan(checks));
   });
+
+  testWidgets("FW1 All day is a switch, no chip, above Start date: turned "
+      "on it closes an open picker and takes the focus, turned off it "
+      "restores the times; it takes no tap for a kept kind, and shows where "
+      "the kind takes all-day or the schedule is all-day", (tester) async {
+    final schedule = CalendarSchedule.of(at(9), at(10), isAllDay: false);
+    await pumpSection(tester, checkOf(schedule), follows: true);
+    expect(
+      find.descendant(
+        of: find.byType(ScheduleSection),
+        matching: find.byType(ChoiceChip),
+      ),
+      findsNothing,
+    );
+    expect(
+      tester.getRect(allDaySwitch()).bottom,
+      lessThanOrEqualTo(tester.getRect(formDateFinder("Start date")).top),
+    );
+
+    await openTimePicker(tester, "Start time");
+    // Setup sanity: Start's picker is open.
+    expect(timePickerFinder("Start time"), findsOneWidget);
+    await tester.tap(allDaySwitch());
+    await tester.pumpAndSettle();
+    expect(timeFieldFinder("Start time"), findsNothing);
+    expect(timeFieldFinder("End time"), findsNothing);
+    expect(find.byType(CalendarTimePicker), findsNothing);
+    expect(focusUnder(allDaySwitch()), isTrue);
+    await tester.tap(allDaySwitch());
+    await tester.pumpAndSettle();
+    expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
+    expect(timeFieldShows("End time", "10:00"), findsOneWidget);
+
+    // TF1's running item under the lock keeps its kind.
+    final running = task("item-2", "Write", DateTime(2026, 4, 21, 22), at(10));
+    final fixed = checkOf(
+      CalendarSchedule.of(running.start, running.end, isAllDay: false),
+      policy: const HistoryLockPolicy<ItemPayload>(),
+      entry: running,
+    );
+    expect(fixed.startFixed, isTrue);
+    final reports = <CalendarSchedule>[];
+    await pumpSection(tester, fixed, onChanged: reports.add, follows: true);
+    expect(tester.widget<SwitchListTile>(allDaySwitch()).onChanged, isNull);
+    await tester.tap(allDaySwitch());
+    await tester.pumpAndSettle();
+    expect(reports, isEmpty);
+
+    const noAllDay = CalendarScheduleOptions(allowsAllDay: false);
+    await pumpSection(
+      tester,
+      checkOf(schedule, options: noAllDay),
+      follows: true,
+    );
+    expect(allDaySwitch(), findsNothing);
+    await pumpSection(
+      tester,
+      checkOf(schedule.withAllDay(true), options: noAllDay),
+      follows: true,
+    );
+    expect(allDaySwitch(), findsOneWidget);
+  });
+}
+
+/// A [ScheduleSection], built by [builder], whose check follows its edits:
+/// each report makes the check that of the reported schedule
+/// ([CalendarScheduleCheck.withSchedule]) and then goes to [onChanged]. A
+/// new [check] replaces the one it holds.
+class _FollowingSection extends StatefulWidget {
+  const _FollowingSection({
+    required this.check,
+    required this.onChanged,
+    required this.builder,
+  });
+
+  final CalendarScheduleCheck<ItemPayload> check;
+  final ValueChanged<CalendarSchedule> onChanged;
+  final Widget Function(
+    CalendarScheduleCheck<ItemPayload> check,
+    ValueChanged<CalendarSchedule> onChanged,
+  )
+  builder;
+
+  @override
+  State<_FollowingSection> createState() {
+    return _FollowingSectionState();
+  }
+}
+
+class _FollowingSectionState extends State<_FollowingSection> {
+  late CalendarScheduleCheck<ItemPayload> _check = widget.check;
+
+  @override
+  void didUpdateWidget(_FollowingSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.check, widget.check)) {
+      _check = widget.check;
+    }
+  }
+
+  void _report(CalendarSchedule schedule) {
+    setState(() {
+      _check = _check.withSchedule(schedule);
+    });
+    widget.onChanged(schedule);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.builder(_check, _report);
+  }
 }
 
 /// A policy that records each day it is asked the earliest start of in

@@ -2413,7 +2413,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(DatePickerDialog), findsNothing);
     expect(
-      tester.widget<ChoiceChip>(inDialog(allDayChip())).onSelected,
+      tester.widget<SwitchListTile>(inDialog(allDaySwitch())).onChanged,
       isNull,
     );
     expect(saveFinder(), findsNothing);

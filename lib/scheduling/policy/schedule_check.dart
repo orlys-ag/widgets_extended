@@ -7,39 +7,21 @@ import 'edit_policy.dart';
 import 'edit_rules.dart';
 
 /// What a form offers one kind of entry for its schedule: whether it takes
-/// all-day, whether it may span days, and the lengths, in minutes, it
-/// offers to pick directly.
+/// all-day and whether it may span days.
 ///
 /// Compared by value.
 @immutable
 final class CalendarScheduleOptions {
-  /// Options that take all-day where [allowsAllDay], span days where
-  /// [spansDays], and offer [lengthChoices].
-  ///
-  /// Throws an [ArgumentError], in every build, for a length choice under
-  /// 1.
-  CalendarScheduleOptions({
+  /// Options that take all-day where [allowsAllDay] and span days where
+  /// [spansDays].
+  const CalendarScheduleOptions({
     this.allowsAllDay = true,
     this.spansDays = true,
-    List<int> lengthChoices = defaultLengthChoices,
-  }) : lengthChoices = List<int>.unmodifiable(lengthChoices) {
-    for (final minutes in lengthChoices) {
-      if (minutes < 1) {
-        throw ArgumentError.value(
-          lengthChoices,
-          "lengthChoices",
-          "holds $minutes, under 1",
-        );
-      }
-    }
-  }
+  });
 
-  /// The options every kind takes unless it is given others: all-day,
-  /// spanning days, and [defaultLengthChoices].
-  static final CalendarScheduleOptions standard = CalendarScheduleOptions();
-
-  /// 15 minutes, 30, an hour and two.
-  static const List<int> defaultLengthChoices = <int>[15, 30, 60, 120];
+  /// The options every kind takes unless it is given others: all-day and
+  /// spanning days.
+  static const CalendarScheduleOptions standard = CalendarScheduleOptions();
 
   /// Whether the kind may be all-day.
   final bool allowsAllDay;
@@ -47,26 +29,22 @@ final class CalendarScheduleOptions {
   /// Whether the kind may have a part in more than one day.
   final bool spansDays;
 
-  /// The lengths a form offers to pick, in minutes. Unmodifiable.
-  final List<int> lengthChoices;
-
   @override
   bool operator ==(Object other) {
     return other is CalendarScheduleOptions &&
         other.allowsAllDay == allowsAllDay &&
-        other.spansDays == spansDays &&
-        listEquals(other.lengthChoices, lengthChoices);
+        other.spansDays == spansDays;
   }
 
   @override
   int get hashCode {
-    return Object.hash(allowsAllDay, spansDays, Object.hashAll(lengthChoices));
+    return Object.hash(allowsAllDay, spansDays);
   }
 
   @override
   String toString() {
     return "CalendarScheduleOptions(allowsAllDay: $allowsAllDay, "
-        "spansDays: $spansDays, lengthChoices: $lengthChoices)";
+        "spansDays: $spansDays)";
   }
 }
 

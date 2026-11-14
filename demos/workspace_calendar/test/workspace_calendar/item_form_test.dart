@@ -236,12 +236,8 @@ void main() {
     await openForm(tester, store);
     expect(timeFieldShows("Start time", "09:10"), findsOneWidget);
     expect(timeFieldShows("End time", "09:50"), findsOneWidget);
-    expect(
-      tester
-          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, "All day"))
-          .selected,
-      isFalse,
-    );
+    expect(allDaySwitch(), findsOneWidget);
+    expect(formAllDayOn(), isFalse);
 
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pumpAndSettle();
@@ -266,12 +262,8 @@ void main() {
     );
     addTearDown(store.dispose);
     await openForm(tester, store);
-    expect(
-      tester
-          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, "All day"))
-          .selected,
-      isFalse,
-    );
+    expect(allDaySwitch(), findsOneWidget);
+    expect(formAllDayOn(), isFalse);
 
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pumpAndSettle();
@@ -309,7 +301,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pumpAndSettle();
     expect(writes, hasLength(1));
-    expect(find.widgetWithText(ChoiceChip, "All day"), findsOneWidget);
+    expect(allDaySwitch(), findsOneWidget);
   });
 
   group(

@@ -886,6 +886,11 @@ the columns to the value over the theme's motion, so one picker can serve
 several fields; and `CalendarTimePicker.nowPicksLater`, under which Now,
 where the latest time at or before now is not offered, picks the first
 later time the picker offers.
+- Removed `CalendarScheduleOptions.lengthChoices` and
+`CalendarScheduleOptions.defaultLengthChoices`, with the constructor's
+`lengthChoices` parameter: the options hold `allowsAllDay` and `spansDays`
+alone, the constructor is `const`, and `CalendarScheduleOptions.standard`
+is a `static const`.
 
 ## 0.0.35
 

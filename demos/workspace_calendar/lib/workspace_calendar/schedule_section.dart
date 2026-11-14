@@ -31,6 +31,9 @@ const ValueKey<String> scheduleEndTimeKey = ValueKey<String>(
   "schedule-end-time",
 );
 
+/// The key of the All day switch.
+const ValueKey<String> scheduleAllDayKey = ValueKey<String>("schedule-all-day");
+
 /// The key of the start's picker, open under the time row.
 const ValueKey<String> scheduleStartPickerKey = ValueKey<String>(
   "schedule-start-picker",
@@ -41,14 +44,14 @@ const ValueKey<String> scheduleEndPickerKey = ValueKey<String>(
   "schedule-end-picker",
 );
 
-/// The section of [check]'s schedule: a summary line; Start date; Start
-/// time and End time, each a field whose tap opens a [CalendarTimePicker]
-/// under their row, one at a time, with its haptic feedback on; an End
-/// date for an all-day or a multi-day schedule, or after "Ends on another
-/// day"; a row of length chips and, after them, All day, where a length
-/// makes an all-day schedule timed at that length; an overlap notice with
-/// "Next free time"; and the store's zone where it has one. Times are
-/// written on [hourLabelFormat]'s clock.
+/// The section of [check]'s schedule: a summary line; an All day switch,
+/// where the kind takes all-day or the schedule is all-day, which turned
+/// off restores the times the schedule keeps; Start date; Start time and
+/// End time, each a field whose tap opens a [CalendarTimePicker] under
+/// their row, one at a time, with its haptic feedback on; an End date for
+/// an all-day or a multi-day schedule, or after "Ends on another day"; an
+/// overlap notice with "Next free time"; and the store's zone where it has
+/// one. Times are written on [hourLabelFormat]'s clock.
 ///
 /// A picker refuses a time only for a problem some other time of it
 /// avoids: of the check of the schedule with each of the picker's times
@@ -64,8 +67,8 @@ const ValueKey<String> scheduleEndPickerKey = ValueKey<String>(
 /// Every edit goes to [onChanged] as a new schedule. A [locked] section
 /// takes no input; a [CalendarScheduleCheck.startFixed] one takes none at
 /// its start or kind. An open picker stays open as its field locks, taking
-/// no pick, until its field's tap or All day closes it. [errors] holds the
-/// form's messages keyed `start` and `end`.
+/// no pick, until its field's tap or the All day switch closes it.
+/// [errors] holds the form's messages keyed `start` and `end`.
 class ScheduleSection extends StatefulWidget {
   const ScheduleSection({
     super.key,
@@ -571,7 +574,6 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     final startLocked = _startLocked;
     final open = _open;
     final timed = !schedule.isAllDay;
-    final offersAllDay = _options.allowsAllDay || schedule.isAllDay;
     final showsEndDay =
         schedule.isAllDay ||
         schedule.spansDays ||
@@ -587,6 +589,28 @@ class _ScheduleSectionState extends State<ScheduleSection> {
           color: HarborColors.text,
         ),
       ),
+      if (_options.allowsAllDay || schedule.isAllDay)
+        SwitchListTile(
+          key: scheduleAllDayKey,
+          contentPadding: EdgeInsets.zero,
+          title: const Text("All day"),
+          value: schedule.isAllDay,
+          focusNode: _allDayNode,
+          onChanged: startLocked
+              ? null
+              : (on) {
+                  if (on) {
+                    // The time row and its open picker go away; the focus
+                    // their Hour column held moves to the switch, not to
+                    // the scope's last focused node.
+                    setState(() {
+                      _open = null;
+                    });
+                    _allDayNode.requestFocus();
+                  }
+                  _change(schedule.withAllDay(on));
+                },
+        ),
       _dateField(
         label: "Start date",
         date: schedule.startDay,
@@ -652,45 +676,6 @@ class _ScheduleSectionState extends State<ScheduleSection> {
             icon: const Icon(Icons.add),
             label: const Text("Ends on another day"),
           ),
-        ),
-      if (_options.lengthChoices.isNotEmpty || offersAllDay)
-        Wrap(
-          spacing: 8.0,
-          runSpacing: 4.0,
-          children: <Widget>[
-            for (final minutes in _options.lengthChoices)
-              ChoiceChip(
-                label: Text(_lengthLabel(minutes)),
-                selected: timed && schedule.lengthMinutes == minutes,
-                // Of an all-day schedule a length changes the kind, which a
-                // fixed start keeps.
-                onSelected: locked || (!timed && startLocked)
-                    ? null
-                    : (on) {
-                        _change(schedule.withAllDay(false).withLength(minutes));
-                      },
-              ),
-            if (offersAllDay)
-              ChoiceChip(
-                focusNode: _allDayNode,
-                label: const Text("All day"),
-                selected: schedule.isAllDay,
-                onSelected: startLocked
-                    ? null
-                    : (on) {
-                        // The time row and its open picker go away; the
-                        // focus their Hour column held moves to the chip,
-                        // not to the scope's last focused node.
-                        if (on && _open != null) {
-                          setState(() {
-                            _open = null;
-                          });
-                          _allDayNode.requestFocus();
-                        }
-                        _change(schedule.withAllDay(on));
-                      },
-              ),
-          ],
         ),
       if (check.overlaps.isNotEmpty) _overlapNotice(check),
       if (zone != null)

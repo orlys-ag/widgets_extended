@@ -327,37 +327,16 @@ void expectFormDays(String day, int days) {
   }
 }
 
-/// The form's All day chip, the last of its length chips.
-Finder allDayChip() {
-  return find.widgetWithText(ChoiceChip, "All day");
+/// The form's All day switch.
+Finder allDaySwitch() {
+  return find.byKey(scheduleAllDayKey);
 }
 
-/// Whether the form's All day chip is selected.
+/// Whether the form's All day switch is on; false where it does not show.
 bool formAllDayOn() {
-  final chips = allDayChip().evaluate();
-  return chips.isNotEmpty && (chips.single.widget as ChoiceChip).selected;
-}
-
-/// The labels of the form's length chips, All day among them, in order;
-/// only the selected ones where [selectedOnly].
-List<String> chipLabels(WidgetTester tester, {bool selectedOnly = false}) {
-  return tester
-      .widgetList<ChoiceChip>(find.byType(ChoiceChip))
-      .where((chip) {
-        return !selectedOnly || chip.selected;
-      })
-      .map((chip) {
-        return (chip.label as Text).data!;
-      })
-      .toList();
-}
-
-/// Whether each of the form's length chips, All day among them, takes a
-/// tap, in order.
-List<bool> chipsEnabled(WidgetTester tester) {
-  return tester.widgetList<ChoiceChip>(find.byType(ChoiceChip)).map((chip) {
-    return chip.onSelected != null;
-  }).toList();
+  final switches = allDaySwitch().evaluate();
+  return switches.isNotEmpty &&
+      (switches.single.widget as SwitchListTile).value;
 }
 
 /// Expects the create flow, picks [type], and expects its form prefilled
