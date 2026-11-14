@@ -428,6 +428,16 @@ const Set<String> _envelopeKeys = <String>{
   "fields",
 };
 
+/// The error of an item's [title]: "Enter a title." where it is not a
+/// [String] or is blank, and null otherwise. [validateItemJson] reports it
+/// keyed `title`.
+String? titleErrorOf(Object? title) {
+  if (title is! String || title.trim().isEmpty) {
+    return "Enter a title.";
+  }
+  return null;
+}
+
 /// Every rule [json] breaks, keyed by the envelope key or by
 /// [fieldErrorKey] of the payload key it concerns; a start and an end that
 /// [parseItemTime] reads in two forms, a date and a date-time, key `end`.
@@ -440,9 +450,9 @@ Map<String, String> validateItemJson(Map<String, Object?> json) {
       errors[key] = "Unknown key.";
     }
   }
-  final title = json["title"];
-  if (title is! String || title.trim().isEmpty) {
-    errors["title"] = "Enter a title.";
+  final titleError = titleErrorOf(json["title"]);
+  if (titleError != null) {
+    errors["title"] = titleError;
   }
   final typeId = json["type"];
   final type = typeId is String ? CalendarItemType.fromId(typeId) : null;

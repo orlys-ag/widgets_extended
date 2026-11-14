@@ -5,7 +5,9 @@
 /// every item type shares, edits a [CalendarSchedule] and shows what its
 /// [CalendarScheduleCheck] answers; its details are generated from the item
 /// type's schema. Save sends nothing while the check names a problem
-/// ([scheduleErrorsOf]) or the validator the API runs refuses the item.
+/// ([scheduleErrorsOf]) or the validator the API runs refuses the item;
+/// after a failed Save the title's and the times' messages follow the
+/// edits.
 library;
 
 import 'package:flutter/material.dart';
@@ -339,8 +341,31 @@ class _ItemFormState extends State<_ItemForm> {
   /// The values of the schema's choice and bool fields, by key.
   final Map<String, Object?> _values = <String, Object?>{};
 
-  /// The errors the last Save found, keyed as the validator keys them.
-  Map<String, String> _errors = const <String, String>{};
+  /// The schedule's check, which the schedule section reads: made in
+  /// [initState] and again by [_recheck] only.
+  late CalendarScheduleCheck<ItemPayload> _scheduleCheck;
+
+  /// The errors [_errorsOf] finds of [_scheduleCheck] and the form's item,
+  /// made at the first read after each [_recheck].
+  Map<String, String>? _liveErrors;
+
+  /// Whether a Save failed, by a failed validation or a refused send, so
+  /// that the title's and the times' messages show, following the edits.
+  bool _saveFailed = false;
+
+  /// The errors the last failed validation found, or a refused send's field
+  /// errors, keyed as the validator keys them; the type fields show theirs
+  /// until the next Save or a type change. Replaced, never changed in
+  /// place.
+  Map<String, String> _saveErrors = const <String, String>{};
+
+  /// A refused send's messages of the title, the start and the end, each
+  /// shown until an edit changes what it reads. Replaced, never changed in
+  /// place.
+  Map<String, String> _refusal = const <String, String>{};
+
+  /// The title's text as [_titleChanged] last saw it.
+  late String _titleText;
 
   /// A failure that names no field: an overlap, the network, a lock.
   String? _message;
@@ -365,6 +390,19 @@ class _ItemFormState extends State<_ItemForm> {
   void initState() {
     super.initState();
     _initFields(widget.item.fields);
+    _scheduleCheck = _checkNow();
+    _titleText = _title.text;
+    _title.addListener(_titleChanged);
+    widget.store.addListener(_storeChanged);
+  }
+
+  @override
+  void didUpdateWidget(_ItemForm oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.store, widget.store)) {
+      oldWidget.store.removeListener(_storeChanged);
+      widget.store.addListener(_storeChanged);
+    }
   }
 
   /// The details' controls for [_type], at [fields] with the type's
@@ -398,6 +436,8 @@ class _ItemFormState extends State<_ItemForm> {
 
   @override
   void dispose() {
+    widget.store.removeListener(_storeChanged);
+    _title.removeListener(_titleChanged);
     _title.dispose();
     for (final controller in _texts.values) {
       controller.dispose();
@@ -405,11 +445,75 @@ class _ItemFormState extends State<_ItemForm> {
     super.dispose();
   }
 
+  /// Checks the schedule again, so an item another write puts over its time
+  /// shows while the form is open; but not while a send is in flight, whose
+  /// own write notifies before it completes, and which a draft's check
+  /// would count as an overlap of its own.
+  void _storeChanged() {
+    if (_saving) {
+      return;
+    }
+    setState(_recheck);
+  }
+
+  /// Drops the refusal's title message at a change of the title's text;
+  /// the title's [ListenableBuilder] shows it, rebuilding nothing else.
+  void _titleChanged() {
+    final text = _title.text;
+    if (text == _titleText) {
+      return;
+    }
+    _titleText = text;
+    if (_refusal.containsKey("title")) {
+      _refusal = _without(_refusal, const <String>["title"]);
+    }
+  }
+
+  /// [map] without [keys], as a new map.
+  static Map<String, String> _without(
+    Map<String, String> map,
+    List<String> keys,
+  ) {
+    return <String, String>{
+      for (final entry in map.entries)
+        if (!keys.contains(entry.key)) entry.key: entry.value,
+    };
+  }
+
+  /// Makes [_scheduleCheck] anew at the time now, and drops the live errors
+  /// of the last one.
+  void _recheck() {
+    _scheduleCheck = _checkNow();
+    _liveErrors = null;
+  }
+
+  /// Takes [schedule], the section's edit: drops the refusal's start
+  /// message where it moves the start, and its end message where it moves
+  /// either time, and checks again.
+  void _scheduleChanged(CalendarSchedule schedule) {
+    final old = _schedule;
+    final startMoved =
+        schedule.startDay != old.startDay ||
+        schedule.startMinute != old.startMinute ||
+        schedule.isAllDay != old.isAllDay;
+    final endMoved =
+        startMoved ||
+        schedule.endDay != old.endDay ||
+        schedule.endMinute != old.endMinute;
+    setState(() {
+      _schedule = schedule;
+      if (endMoved) {
+        _refusal = _without(_refusal, <String>[if (startMoved) "start", "end"]);
+      }
+      _recheck();
+    });
+  }
+
   /// The check of the schedule now, against the entries the store shows
   /// from its first day to the day after its last, so that the checks the
   /// schedule section makes of its pickers' times, an end moved onto the
   /// next day among them, see that day's entries too.
-  CalendarScheduleCheck<ItemPayload> _check() {
+  CalendarScheduleCheck<ItemPayload> _checkNow() {
     return CalendarScheduleCheck<ItemPayload>(
       schedule: _schedule,
       rules: _rules,
@@ -478,36 +582,56 @@ class _ItemFormState extends State<_ItemForm> {
     };
   }
 
-  /// Validates and sends. Nothing is sent while the schedule's check names
-  /// a problem or a field breaks a rule; the form stays open, with every
-  /// control disabled, until the API answers, and closes on success.
-  Future<void> _save() async {
-    if (_saving) {
-      return;
-    }
-    final json = _envelope();
-    final problems = _check().problems;
-    final times = _schedule.timesOn(widget.store.zone);
-    final errors = <String, String>{
+  /// The errors of [json], the form's item as an envelope, under [check],
+  /// keyed as the validator keys them: the validator's, the check's
+  /// ([scheduleErrorsOf]), and where the hours refuse the times, their own
+  /// words, as the store's refusal of them reads. Save's errors, and the
+  /// live start and end messages after a failed Save.
+  Map<String, String> _errorsOf(
+    CalendarScheduleCheck<ItemPayload> check,
+    Map<String, Object?> json,
+  ) {
+    final problems = check.problems;
+    final times = check.schedule.timesOn(widget.store.zone);
+    return <String, String>{
       ...validateItemJson(json),
       ...scheduleErrorsOf(problems),
-      // The hours' own words, as the store's refusal of them reads.
       if (times != null &&
           problems.any((problem) {
             return problem is CalendarScheduleOutsideHours;
           }))
         ...hoursErrorsOf(times.start, times.end, widget.store.hours),
     };
+  }
+
+  /// Checks at the time now, validates and sends. Nothing is sent while the
+  /// schedule's check names a problem or a field breaks a rule; the form
+  /// stays open, with every control disabled, until the API answers, and
+  /// closes on success.
+  Future<void> _save() async {
+    if (_saving) {
+      return;
+    }
+    final json = _envelope();
+    final check = _checkNow();
+    final errors = _errorsOf(check, json);
     if (errors.isNotEmpty) {
       setState(() {
-        _errors = errors;
+        _scheduleCheck = check;
+        _liveErrors = null;
+        _saveFailed = true;
+        _saveErrors = errors;
+        _refusal = const <String, String>{};
         _message = null;
       });
       return;
     }
     setState(() {
+      _scheduleCheck = check;
+      _liveErrors = null;
       _saving = true;
-      _errors = const <String, String>{};
+      _saveErrors = const <String, String>{};
+      _refusal = const <String, String>{};
       _message = null;
     });
     final item = itemFromJson(json);
@@ -527,11 +651,18 @@ class _ItemFormState extends State<_ItemForm> {
       if (mounted) {
         setState(() {
           _saving = false;
+          _saveFailed = true;
           if (fieldErrors != null) {
-            _errors = fieldErrors;
+            _saveErrors = fieldErrors;
+            _refusal = <String, String>{
+              for (final key in const <String>["title", "start", "end"])
+                key: ?fieldErrors[key],
+            };
           } else {
             _message = writeFailureMessage(error);
           }
+          // The store may have changed while the send was in flight.
+          _recheck();
         });
       }
       return;
@@ -568,13 +699,38 @@ class _ItemFormState extends State<_ItemForm> {
     setState(() {
       _type = type;
       _initFields(const <String, Object?>{});
-      _errors = const <String, String>{};
+      _saveErrors = const <String, String>{};
+      _recheck();
     });
+  }
+
+  /// The title's message: the refusal's, or after a failed Save the title
+  /// rule's of the text now ([titleErrorOf]).
+  String? _titleError() {
+    return _refusal["title"] ??
+        (_saveFailed ? titleErrorOf(_title.text) : null);
+  }
+
+  /// The start's and the end's messages, each the refusal's, or after a
+  /// failed Save that of [_errorsOf] of the check and the item now.
+  Map<String, String> _scheduleErrors() {
+    final errors = <String, String>{};
+    for (final key in const <String>["start", "end"]) {
+      final message =
+          _refusal[key] ??
+          (_saveFailed
+              ? (_liveErrors ??= _errorsOf(_scheduleCheck, _envelope()))[key]
+              : null);
+      if (message != null) {
+        errors[key] = message;
+      }
+    }
+    return errors;
   }
 
   /// The control for one schema field, by its kind.
   Widget _fieldFor(FieldSpec field) {
-    final error = _errors[fieldErrorKey(field.key)];
+    final error = _saveErrors[fieldErrorKey(field.key)];
     switch (field.kind) {
       case FieldKind.choice:
         final value = _values[field.key];
@@ -688,35 +844,30 @@ class _ItemFormState extends State<_ItemForm> {
     }
     final fields = <Widget>[
       if (_isDraft && !widget.readOnly) _typeSelector() else _typeRow(),
-      TextField(
-        controller: _title,
-        enabled: !_locked,
-        decoration: InputDecoration(
-          labelText: "Title",
-          errorText: _errors["title"],
-        ),
-      ),
-      // The store's notifications check the schedule again, so an item
-      // another write puts over its time shows while the form is open.
+      // A keystroke rebuilds the title alone, whose message follows it.
       ListenableBuilder(
-        listenable: widget.store,
+        listenable: _title,
         builder: (context, child) {
-          return ScheduleSection(
-            check: _check(),
-            hours: widget.store.hours,
-            slotMinutes: widget.slotMinutes,
-            hourLabelFormat: widget.hourLabelFormat,
-            now: widget.now,
-            zone: widget.store.zone,
-            locked: _locked,
-            errors: _errors,
-            onChanged: (schedule) {
-              setState(() {
-                _schedule = schedule;
-              });
-            },
+          return TextField(
+            controller: _title,
+            enabled: !_locked,
+            decoration: InputDecoration(
+              labelText: "Title",
+              errorText: _titleError(),
+            ),
           );
         },
+      ),
+      ScheduleSection(
+        check: _scheduleCheck,
+        hours: widget.store.hours,
+        slotMinutes: widget.slotMinutes,
+        hourLabelFormat: widget.hourLabelFormat,
+        now: widget.now,
+        zone: widget.store.zone,
+        locked: _locked,
+        errors: _scheduleErrors(),
+        onChanged: _scheduleChanged,
       ),
       for (final field in _schema.fields) _fieldFor(field),
     ];

@@ -1147,7 +1147,7 @@ void main() {
     await tester.enterText(fieldFinder("Title"), "Plan");
     await tester.pump();
     expect(find.text("Enter a title."), findsNothing);
-  }, skip: true);
+  });
 
   testWidgets("FA3 a type change keeps the title's message, and the start "
       "message of a store's refusal stays through a title or an end edit "
@@ -1189,13 +1189,79 @@ void main() {
     );
     expect(onStart, findsOneWidget);
     await tester.enterText(fieldFinder("Title"), "Write more");
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(onStart, findsOneWidget);
     await pickTime(tester, "End time", "11:00");
     expect(onStart, findsOneWidget);
     await pickTime(tester, "Start time", "10:00");
     expect(find.text(startMessage), findsNothing);
-  }, skip: true);
+  });
+
+  testWidgets("FA2 a type field's message shows from one Save to the next, "
+      "whatever is typed meanwhile", (tester) async {
+    final store = storeOf(<CalendarItem>[]);
+    addTearDown(store.dispose);
+    await openCreate(
+      tester,
+      store,
+      CalendarCreateRange(start: at(9), end: at(10)),
+    );
+    await tester.tap(find.text("Risk").last);
+    await tester.pumpAndSettle();
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    expect(find.text("Project is required."), findsOneWidget);
+    await tester.enterText(fieldFinder("Project"), "Apollo");
+    await tester.pump();
+    expect(find.text("Project is required."), findsOneWidget);
+
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    // Setup sanity: the Save is refused for the title alone.
+    expect(find.text("Enter a title."), findsOneWidget);
+    expect(find.text("Project is required."), findsNothing);
+  });
+
+  testWidgets("FA4 a Save after a failed one shows no message of the item it "
+      "writes while the sheet closes", (tester) async {
+    final store = storeOf(<CalendarItem>[]);
+    addTearDown(store.dispose);
+    await openWith(tester, (context) {
+      showCreateFlow(
+        context,
+        store: store,
+        range: CalendarCreateRange(start: at(9), end: at(10)),
+        policy: const NoOverlapsPolicy<ItemPayload>(),
+        now: wednesdayStart,
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+      );
+    });
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    expect(find.text("Enter a title."), findsOneWidget);
+
+    await tester.enterText(fieldFinder("Title"), "Plan");
+    await tester.tap(saveFinder());
+    var frame = 0;
+    do {
+      await tester.pump(const Duration(milliseconds: 16));
+      frame++;
+      expect(find.byKey(scheduleOverlapKey), findsNothing, reason: "$frame");
+      expect(
+        find.textContaining("Overlaps Plan"),
+        findsNothing,
+        reason: "$frame",
+      );
+      expect(frame, lessThan(200));
+    } while (find.text("New item").evaluate().isNotEmpty);
+    // Setup sanity: the second Save wrote the item.
+    expect(
+      store.entriesOn(wednesday).map((shown) {
+        return shown.entry.title;
+      }),
+      <String>["Plan"],
+    );
+  });
 
   testWidgets("FB1 the start's picker refuses a start whose range would end "
       "past the hours", (tester) async {
