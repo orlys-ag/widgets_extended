@@ -43,14 +43,23 @@ const ValueKey<String> scheduleEndPickerKey = ValueKey<String>(
 
 /// The section of [check]'s schedule: a summary line; Start date; Start
 /// time and End time, each a field whose tap opens a [CalendarTimePicker]
-/// under their row, one at a time, with its haptic feedback on, the
-/// start's times before the first a start may take refused, on the start
-/// day only ends after the start offered, and every time [zone]'s clock
-/// skips refused; an End date for an all-day or a multi-day schedule, or
-/// after "Ends on another day"; a row of length chips and, after them,
-/// All day, where a length makes an all-day schedule timed at that length;
-/// an overlap notice with "Next free time"; and the store's zone where it
-/// has one. Times are written on [hourLabelFormat]'s clock.
+/// under their row, one at a time, with its haptic feedback on; an End
+/// date for an all-day or a multi-day schedule, or after "Ends on another
+/// day"; a row of length chips and, after them, All day, where a length
+/// makes an all-day schedule timed at that length; an overlap notice with
+/// "Next free time"; and the store's zone where it has one. Times are
+/// written on [hourLabelFormat]'s clock.
+///
+/// A picker refuses a time only for a problem some other time of it
+/// avoids: of the check of the schedule with each of the picker's times
+/// ([CalendarScheduleCheck.withSchedule]), it takes as witnesses those whose
+/// times are checked ([CalendarScheduleCheck.timesChecked]), or every time
+/// where none is, and refuses a time whose check names a problem that not
+/// every witness's check names. The start's picker offers the hours'
+/// starts, the end's its ends, on the start day only those after the
+/// start. A picker's Now shows only on a field whose day is [now]'s today,
+/// and where the time at or before now is refused picks the first later
+/// time the picker offers.
 ///
 /// Every edit goes to [onChanged] as a new schedule. A [locked] section
 /// takes no input; a [CalendarScheduleCheck.startFixed] one takes none at
@@ -83,7 +92,8 @@ class ScheduleSection extends StatefulWidget {
   final CalendarHourLabelFormat hourLabelFormat;
 
   /// The current time, whose minute on [zone]'s clock the pickers' Now
-  /// picks.
+  /// picks; Now shows only on a field whose day is its
+  /// [CalendarNow.today].
   final ValueGetter<CalendarNow> now;
 
   final ValueChanged<CalendarSchedule> onChanged;
@@ -105,6 +115,104 @@ class ScheduleSection extends StatefulWidget {
 /// A time field of the section.
 enum _TimeField { start, end }
 
+/// The lookups the open picker has made of its [_TimeTable], in debug
+/// builds; the release build counts none.
+int debugSchedulePickerAsks = 0;
+
+/// Which times of [field]'s picker, from [min] to [max] on the [slot]
+/// grid, the picker offers under [check]: each time's check is
+/// [CalendarScheduleCheck.withSchedule] of the schedule with that time, or
+/// [check] itself at the field's own time; the witnesses are the times
+/// whose check has [CalendarScheduleCheck.timesChecked], or every time
+/// where none has; and a time is offered where each of its problems is a
+/// problem of every witness. Computed at the first lookup, and kept while
+/// the picker's [check], [field], [min], [max] and [slot] stay.
+class _TimeTable {
+  _TimeTable({
+    required this.check,
+    required this.field,
+    required this.min,
+    required this.max,
+    required this.slot,
+  });
+
+  final CalendarScheduleCheck<ItemPayload> check;
+  final _TimeField field;
+  final int min;
+  final int max;
+  final int slot;
+
+  List<bool>? _offered;
+
+  /// The first time on the grid at or after [min].
+  int get _first {
+    return (min + slot - 1) ~/ slot * slot;
+  }
+
+  /// Whether the table answers for these parameters.
+  bool holds(
+    CalendarScheduleCheck<ItemPayload> check,
+    _TimeField field,
+    int min,
+    int max,
+    int slot,
+  ) {
+    return identical(this.check, check) &&
+        this.field == field &&
+        this.min == min &&
+        this.max == max &&
+        this.slot == slot;
+  }
+
+  /// Whether the picker offers [minute], a time on the grid from [min] to
+  /// [max].
+  bool offers(int minute) {
+    assert(() {
+      debugSchedulePickerAsks++;
+      return true;
+    }());
+    final first = _first;
+    assert(
+      minute >= first && minute <= max && (minute - first) % slot == 0,
+      "$minute lies off the table of $first to $max by $slot",
+    );
+    final offered = _offered ??= _compute();
+    return offered[(minute - first) ~/ slot];
+  }
+
+  List<bool> _compute() {
+    final schedule = check.schedule;
+    final start = field == _TimeField.start;
+    final own = start ? schedule.startMinute : schedule.endMinute;
+    final checks = <CalendarScheduleCheck<ItemPayload>>[
+      for (var time = _first; time <= max; time += slot)
+        if (time == own)
+          check
+        else
+          check.withSchedule(
+            start
+                ? schedule.withStartMinute(time)
+                : schedule.withEndMinute(time),
+          ),
+    ];
+    var witnesses = checks.where((each) {
+      return each.timesChecked;
+    });
+    if (witnesses.isEmpty) {
+      witnesses = checks;
+    }
+    Set<CalendarScheduleProblem>? shared;
+    for (final witness in witnesses) {
+      final problems = witness.problems.toSet();
+      shared = shared == null ? problems : shared.intersection(problems);
+    }
+    final every = shared ?? const <CalendarScheduleProblem>{};
+    return <bool>[
+      for (final each in checks) each.problems.every(every.contains),
+    ];
+  }
+}
+
 class _ScheduleSectionState extends State<ScheduleSection> {
   /// Whether "Ends on another day" showed the End date of a schedule that
   /// ends on its start day.
@@ -112,6 +220,9 @@ class _ScheduleSectionState extends State<ScheduleSection> {
 
   /// The field whose picker is open; none where null.
   _TimeField? _open;
+
+  /// The open picker's table, kept across builds while it holds.
+  _TimeTable? _table;
 
   final FocusNode _startFieldNode = FocusNode(debugLabel: "Start time");
   final FocusNode _endFieldNode = FocusNode(debugLabel: "End time");
@@ -279,14 +390,43 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     );
   }
 
-  /// The start's picker: the hours' times a start may take, each refused
-  /// before the first start the check allows, other than the start itself,
-  /// and where the schedule's own reading of it finds the clock skips it.
+  /// The table of [field]'s picker from [min] to [max]: the kept one where
+  /// it holds for the section's check, these bounds and the slot, and a new
+  /// one otherwise.
+  _TimeTable _tableFor(_TimeField field, int min, int max) {
+    final check = widget.check;
+    final slot = widget.slotMinutes;
+    final table = _table;
+    if (table != null && table.holds(check, field, min, max, slot)) {
+      return table;
+    }
+    return _table = _TimeTable(
+      check: check,
+      field: field,
+      min: min,
+      max: max,
+      slot: slot,
+    );
+  }
+
+  /// The current minute for a picker whose field lies on [day]: Now shows
+  /// only where [day] is the [CalendarNow.today] of [ScheduleSection.now].
+  ValueGetter<int>? _nowOn(DateTime day) {
+    final today = widget.now().today;
+    if (CalendarDates.dayNumber(day) != CalendarDates.dayNumber(today)) {
+      return null;
+    }
+    return _nowMinute;
+  }
+
+  /// The start's picker: the hours' starts, each offered as its
+  /// [_TimeTable] answers, so a start is refused only for a problem some
+  /// other start avoids.
   Widget _startPicker(CalendarSchedule schedule) {
     final hours = widget.hours;
     final slot = widget.slotMinutes;
-    final first = widget.check.firstStartMinute;
-    final zone = widget.zone;
+    final min = hours.start;
+    final max = math.max(hours.start, hours.end - slot);
     return CalendarTimePicker(
       value: schedule.startMinute,
       onChanged: _startLocked
@@ -298,32 +438,27 @@ class _ScheduleSectionState extends State<ScheduleSection> {
             },
       hourLabelFormat: widget.hourLabelFormat,
       minuteStep: slot,
-      min: hours.start,
-      max: math.max(hours.start, hours.end - slot),
-      isEnabled: (minute) {
-        return (first == null ||
-                minute >= first ||
-                minute == schedule.startMinute) &&
-            !schedule.withStartMinute(minute).startSkippedOn(zone);
-      },
-      now: _nowMinute,
+      min: min,
+      max: max,
+      isEnabled: _tableFor(_TimeField.start, min, max).offers,
+      now: _nowOn(schedule.startDay),
+      nowPicksLater: true,
       focusNode: _startHourNode,
       hapticFeedback: true,
     );
   }
 
   /// The end's picker: the hours' ends, on the start's day only those after
-  /// the start, each refused where the schedule's own reading of it finds
-  /// the clock skips it. An end on its start's day whose start leaves no
-  /// such end in the hours has a row for its own time alone.
+  /// the start, each offered as its [_TimeTable] answers, so an end is
+  /// refused only for a problem some other end avoids. An end on its
+  /// start's day whose start leaves no such end in the hours has a row for
+  /// its own time alone.
   Widget _endPicker(CalendarSchedule schedule) {
     final hours = widget.hours;
     final slot = widget.slotMinutes;
-    final zone = widget.zone;
-    final spans = schedule.spansDays;
     var min = hours.start + slot;
     var max = hours.end;
-    if (!spans) {
+    if (!schedule.spansDays) {
       min = math.max(min, schedule.startMinute + 1);
     }
     if (min > max) {
@@ -343,11 +478,9 @@ class _ScheduleSectionState extends State<ScheduleSection> {
       minuteStep: slot,
       min: min,
       max: max,
-      isEnabled: (minute) {
-        return (spans || minute > schedule.startMinute) &&
-            !schedule.withEndMinute(minute).endSkippedOn(zone);
-      },
-      now: _nowMinute,
+      isEnabled: _tableFor(_TimeField.end, min, max).offers,
+      now: _nowOn(schedule.endDay),
+      nowPicksLater: true,
       focusNode: _endHourNode,
       hapticFeedback: true,
     );

@@ -398,20 +398,21 @@ void main() {
       ),
     );
     expect(day.onTap, isNull);
-    await pickTime(tester, "End time", "11:00");
-    await tester.tap(find.byType(FilledButton));
-    await tester.pumpAndSettle();
-    expect(find.text("The end can't be in the past."), findsOneWidget);
+    // An end before now is refused; one after it is not.
+    await openTimePicker(tester, "End time");
+    expect(timeEnabled(tester, "End time", "11:00"), isFalse);
+    expect(timeEnabled(tester, "End time", "11:15"), isTrue);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
     await tester.tap(blockFinder(laterId));
     await tester.pumpAndSettle();
     expect(formButton("Delete"), findsOneWidget);
-    // A start before now is refused; one after it is not.
+    // A start before now is refused; one after it, whose hour shares no
+    // time with the running item, is not.
     await openTimePicker(tester, "Start time");
     expect(timeEnabled(tester, "Start time", "10:00"), isFalse);
-    expect(timeEnabled(tester, "Start time", "11:15"), isTrue);
+    expect(timeEnabled(tester, "Start time", "12:00"), isTrue);
   });
 
   testWidgets("K12 in Agenda an ended item's card has no menu, a running "

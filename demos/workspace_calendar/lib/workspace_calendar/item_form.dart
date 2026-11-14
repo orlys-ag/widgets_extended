@@ -406,17 +406,23 @@ class _ItemFormState extends State<_ItemForm> {
   }
 
   /// The check of the schedule now, against the entries the store shows
-  /// over its days.
+  /// from its first day to the day after its last, so that the checks the
+  /// schedule section makes of its pickers' times, an end moved onto the
+  /// next day among them, see that day's entries too.
   CalendarScheduleCheck<ItemPayload> _check() {
     return CalendarScheduleCheck<ItemPayload>(
       schedule: _schedule,
       rules: _rules,
       now: widget.now(),
       others: widget.store
-          .entriesBetween(_schedule.startDay, _schedule.endDay)
+          .entriesBetween(
+            _schedule.startDay,
+            CalendarDates.addDays(_schedule.endDay, 1),
+          )
           .map((shown) {
             return shown.entry;
-          }),
+          })
+          .toList(),
       entry: _isDraft ? null : widget.item,
       options: scheduleOptionsOf(_type),
     );

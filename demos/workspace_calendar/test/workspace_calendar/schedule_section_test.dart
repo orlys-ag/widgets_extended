@@ -122,15 +122,17 @@ MemoryCalendarStore<ItemPayload> storeOf(List<CalendarItem> items) {
   return MemoryCalendarStore<ItemPayload>(entries: items);
 }
 
-/// The check of [schedule] under [policy] at Wednesday's start, in the
-/// calendar's whole day of 15-minute slots, for the stored [entry] or a new
-/// one, with [options] or a Task's.
+/// The check of [schedule] under [policy] at [now] or else Wednesday's
+/// start, in the calendar's whole day of 15-minute slots, for the stored
+/// [entry] or a new one, with [options] or a Task's. The check reads its
+/// times on the clock of [now]'s time.
 CalendarScheduleCheck<ItemPayload> checkOf(
   CalendarSchedule schedule, {
   CalendarEditPolicy<ItemPayload> policy =
       const UnrestrictedEditPolicy<ItemPayload>(),
   CalendarItem? entry,
   CalendarScheduleOptions? options,
+  CalendarNow? now,
 }) {
   return CalendarScheduleCheck<ItemPayload>(
     schedule: schedule,
@@ -139,7 +141,7 @@ CalendarScheduleCheck<ItemPayload> checkOf(
       hours: CalendarDayHours.allDay,
       slotMinutes: 15,
     ),
-    now: wednesdayStart(),
+    now: now ?? wednesdayStart(),
     entry: entry,
     options: options ?? scheduleOptionsOf(CalendarItemType.task),
   );
@@ -666,9 +668,10 @@ void main() {
     expect(find.byKey(scheduleStartPickerKey), findsNothing);
   });
 
-  testWidgets("TF2 the pickers offer the hours' times: the start's to the "
-      "hours' last slot, its own time shown besides, the end's after the "
-      "hours' first slot, and of an end on its start's day past the hours' "
+  testWidgets("TF2 the pickers offer the hours' times the check takes: the "
+      "start's those from which the hours hold the item's length, its own "
+      "time shown besides, the end's only the stored one where the start lies "
+      "outside the hours, and of an end on its start's day past the hours' "
       "end only its own", (tester) async {
     final store = MemoryCalendarStore<ItemPayload>(
       hours: CalendarDayHours(8 * 60, 18 * 60),
@@ -681,14 +684,14 @@ void main() {
     await openEdit(tester, store);
     await openTimePicker(tester, "Start time");
     expect(offeredTimes(tester, "Start time"), <int>[
-      for (var minute = 8 * 60; minute <= 17 * 60 + 45; minute += 15) minute,
+      for (var minute = 8 * 60; minute <= 16 * 60; minute += 15) minute,
     ]);
     // The start, 07:00, lies before the hours: shown, not offered.
     expect(hourRows("Start time"), contains(7));
+    // A stored item keeps its times outside the hours; any other end with
+    // its start, 07:00, is refused.
     await openTimePicker(tester, "End time");
-    expect(offeredTimes(tester, "End time"), <int>[
-      for (var minute = 8 * 60 + 15; minute <= 18 * 60; minute += 15) minute,
-    ]);
+    expect(offeredTimes(tester, "End time"), <int>[9 * 60]);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
@@ -732,6 +735,11 @@ void main() {
     final havana = tz.getLocation("America/Havana");
     // Setup sanity: Havana's clock never reads 00:30 on 2026-03-08.
     expect(tz.TZDateTime(havana, 2026, 3, 8, 0, 30).hour, isNot(0));
+    // The check reads the times on the clock of its now's time.
+    final inHavana = CalendarNow(
+      time: tz.TZDateTime(havana, 2026, 3, 1, 9),
+      today: tz.TZDateTime(havana, 2026, 3, 1),
+    );
     await pumpSection(
       tester,
       checkOf(
@@ -740,6 +748,7 @@ void main() {
           DateTime(2026, 3, 8, 2),
           isAllDay: false,
         ),
+        now: inHavana,
       ),
       zone: havana,
     );
@@ -759,6 +768,7 @@ void main() {
           DateTime(2026, 3, 8, 2),
           isAllDay: false,
         ),
+        now: inHavana,
       ),
       zone: havana,
     );
@@ -778,6 +788,7 @@ void main() {
           DateTime(2026, 3, 7, 23),
           isAllDay: false,
         ).withEndMinute(CalendarDates.minutesPerDay),
+        now: inHavana,
       ),
       zone: havana,
     );
@@ -1052,39 +1063,37 @@ void main() {
     expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
   });
 
-  testWidgets("TF14 the start's picker refuses each start before the first "
-      "the check allows, and takes the stored item's own start", (
-    tester,
-  ) async {
+  testWidgets("TF14 a stored item's start picker offers every start its "
+      "policy admits a change to, and a new entry's refuses each start "
+      "before the first the check allows, its own included, which still "
+      "shows selected", (tester) async {
     final item = task("item-1", "Write", at(9), at(10));
-    final check = checkOf(
-      CalendarSchedule.of(item.start, item.end, isAllDay: false),
+    final schedule = CalendarSchedule.of(item.start, item.end, isAllDay: false);
+    final stored = checkOf(
+      schedule,
       policy: const _StartsFromTen(),
       entry: item,
     );
     // Setup sanity: the check's first start lies after the item's start.
-    expect(check.firstStartMinute, 10 * 60);
-    await pumpSection(tester, check);
+    expect(stored.firstStartMinute, 10 * 60);
+    await pumpSection(tester, stored);
     await openTimePicker(tester, "Start time");
-    expect(
-      rowTakesTap(tester, "Start time", timePickerMinuteRowKey(0)),
-      isTrue,
+    // The policy keeps the default admitsChange, which takes every change
+    // of a stored item.
+    expect(offeredTimes(tester, "Start time"), <int>[
+      for (var minute = 0; minute <= 23 * 60 + 45; minute += 15) minute,
+    ]);
+
+    await pumpSection(
+      tester,
+      checkOf(schedule, policy: const _StartsFromTen()),
     );
-    expect(rowTakesTap(tester, "Start time", timePickerHourRowKey(9)), isTrue);
-    for (var hour = 0; hour <= 8; hour++) {
-      expect(
-        rowTakesTap(tester, "Start time", timePickerHourRowKey(hour)),
-        isFalse,
-        reason: "hour $hour",
-      );
-    }
-    for (final minute in <int>[15, 30, 45]) {
-      expect(
-        rowTakesTap(tester, "Start time", timePickerMinuteRowKey(minute)),
-        isFalse,
-        reason: "minute $minute",
-      );
-    }
+    await tester.pumpAndSettle();
+    expect(offeredTimes(tester, "Start time"), <int>[
+      for (var minute = 10 * 60; minute <= 23 * 60 + 45; minute += 15) minute,
+    ]);
+    // The start, 09:00, still shows, refused.
+    expect(rowTakesTap(tester, "Start time", timePickerHourRowKey(9)), isFalse);
   });
 
   testWidgets("TF15 the start's and the end's pickers play haptic "
@@ -1209,7 +1218,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(timeFieldShows("Start time", "17:00"), findsOneWidget);
-  }, skip: true);
+  });
 
   testWidgets("FB2 under a policy that refuses overlaps the end's picker "
       "refuses an end that overlaps another item and takes one that touches "
@@ -1233,13 +1242,13 @@ void main() {
     expect(timeEnabled(tester, "End time", "11:00"), isTrue);
     expect(timeEnabled(tester, "End time", "11:15"), isFalse);
     expect(timeEnabled(tester, "End time", "12:30"), isFalse);
-  }, skip: true);
+  });
 
   testWidgets("FN1 Now picks the first start offered after now where the "
       "time before it is refused: under the lock of earlier today, with "
-      "today pinned to another day than now's time, and before the hours", (
-    tester,
-  ) async {
+      "today pinned to another day than now's time, and before the hours; "
+      "and a start the lock passed since the last check, which Now can then "
+      "pick, Save refuses", (tester) async {
     Future<void> openAt(
       CalendarStore<ItemPayload> store,
       CalendarEditPolicy<ItemPayload> policy,
@@ -1302,7 +1311,34 @@ void main() {
     );
     await tapNow();
     expect(timeFieldShows("Start time", "08:00"), findsOneWidget);
-  }, skip: true);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    // The pickers read the last check made, at 09:07 here, whose lock
+    // takes 09:15 though the clock has since passed it.
+    var clock = at(9, 7);
+    await openWith(tester, (context) {
+      showEditForm(
+        context,
+        store: store,
+        id: "item-1",
+        policy: lock,
+        now: () {
+          return CalendarNow(time: clock, today: wednesday);
+        },
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+      );
+    });
+    await openTimePicker(tester, "Start time");
+    clock = at(9, 16);
+    await tapNow();
+    // Setup sanity: Now took the 09:15 the check made at 09:07 offers.
+    expect(timeFieldShows("Start time", "09:15"), findsOneWidget);
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    expect(find.text("The start can't be in the past."), findsOneWidget);
+    expect(store.storedEntry("item-1")!.start, at(10));
+  });
 
   testWidgets("FD1 Now shows only in the picker of a field whose day is "
       "today", (tester) async {
@@ -1327,7 +1363,122 @@ void main() {
     expect(inPicker("End time", find.byKey(timePickerNowKey)), findsOneWidget);
     await openTimePicker(tester, "Start time");
     expect(inPicker("Start time", find.byKey(timePickerNowKey)), findsNothing);
-  }, skip: true);
+  });
+
+  testWidgets("FB3 a picker refuses no time for a problem every checked time "
+      "of it shares, and takes as witnesses only the times whose check "
+      "reads both times", (tester) async {
+    const lock = HistoryLockPolicy<ItemPayload>(lockEarlierToday: true);
+    final store = storeOf(<CalendarItem>[]);
+    addTearDown(store.dispose);
+    await openWith(tester, (context) {
+      showCreateFlow(
+        context,
+        store: store,
+        range: CalendarCreateRange(start: at(9), end: at(10)),
+        policy: lock,
+        now: () {
+          return CalendarNow(time: at(10, 20), today: wednesday);
+        },
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+      );
+    });
+    await openTimePicker(tester, "Start time");
+    // Setup sanity: the start lies before now, which the lock refuses.
+    expect(timeEnabled(tester, "Start time", "09:00"), isFalse);
+    // Every end keeps that start, so no end avoids its problem.
+    await openTimePicker(tester, "End time");
+    expect(offeredTimes(tester, "End time"), <int>[
+      for (var minute = 9 * 60 + 15; minute <= 24 * 60; minute += 15) minute,
+    ]);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    final havana = tz.getLocation("America/Havana");
+    await pumpSection(
+      tester,
+      checkOf(
+        CalendarSchedule.of(
+          DateTime(2026, 3, 7, 22),
+          DateTime(2026, 3, 8, 2),
+          isAllDay: false,
+        ),
+        policy: lock,
+        now: CalendarNow(
+          time: tz.TZDateTime(havana, 2026, 3, 7, 23),
+          today: tz.TZDateTime(havana, 2026, 3, 7),
+        ),
+      ),
+      zone: havana,
+    );
+    await openTimePicker(tester, "End time");
+    // Havana's clock skips 00:00 to 01:00 on 2026-03-08: an end there is
+    // refused, though its check stops before the lock's problem.
+    for (final time in <String>["00:15", "00:30", "00:45"]) {
+      expect(timeEnabled(tester, "End time", time), isFalse, reason: time);
+    }
+    for (final time in <String>["01:00", "02:00"]) {
+      expect(timeEnabled(tester, "End time", time), isTrue, reason: time);
+    }
+  });
+
+  testWidgets("FK1 typing in the form's text fields after a failed Save "
+      "checks the schedule nowhere and asks the open picker nothing", (
+    tester,
+  ) async {
+    final store = storeOf(<CalendarItem>[]);
+    addTearDown(store.dispose);
+    final asked = <DateTime>[];
+    await openWith(tester, (context) {
+      showCreateFlow(
+        context,
+        store: store,
+        range: CalendarCreateRange(start: at(9), end: at(10)),
+        policy: _CountingPolicy(asked),
+        now: wednesdayStart,
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+      );
+    });
+    await openTimePicker(tester, "Start time");
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    // Setup sanity: the Save failed.
+    expect(find.text("Enter a title."), findsOneWidget);
+    final checks = asked.length;
+    final asks = debugSchedulePickerAsks;
+    for (final (label, text) in <(String, String)>[
+      ("Title", "P"),
+      ("Title", "Pl"),
+      ("Assignee", "Sam"),
+    ]) {
+      await tester.enterText(fieldFinder(label), text);
+      await tester.pump();
+    }
+    expect(asked, hasLength(checks));
+    expect(debugSchedulePickerAsks, asks);
+
+    // Setup sanity: a pick checks the schedule again.
+    final row = inPicker("Start time", find.byKey(timePickerMinuteRowKey(30)));
+    await tester.ensureVisible(row);
+    await tester.pumpAndSettle();
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+    expect(asked.length, greaterThan(checks));
+  });
+}
+
+/// A policy that records each day it is asked the earliest start of in
+/// [asked], and answers the day's start.
+final class _CountingPolicy extends CalendarEditPolicy<ItemPayload> {
+  const _CountingPolicy(this.asked);
+
+  final List<DateTime> asked;
+
+  @override
+  DateTime? earliestStartOn(DateTime day, CalendarNow now) {
+    asked.add(day);
+    return day;
+  }
 }
 
 /// A policy whose earliest start on a day is 10:00 of it.

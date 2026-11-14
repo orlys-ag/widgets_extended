@@ -1263,17 +1263,11 @@ void main() {
 
     await createAt(tester, rowOf(18 * 60), colOf(0), "Task");
     await tester.enterText(fieldFinder("Title"), "Dentist");
-    await pickTime(tester, "Start time", "10:00");
-    await pickTime(tester, "End time", "11:00");
-    // Monday 10:00 lies in "Day off": the form refuses the overlap the
-    // settings' policy refuses before it sends anything.
-    final sent = api.requests.length;
-    await tester.tap(saveFinder());
-    await tester.pumpAndSettle();
-    expect(find.text("Overlaps Day off."), findsOneWidget);
-    expect(api.requests, hasLength(sent));
-    expect(find.text("New item"), findsOneWidget);
-    expect(fieldText(tester, "Title"), "Dentist");
+    // Monday 10:00 lies in "Day off", whose overlap the settings' policy
+    // refuses: the start's picker refuses it.
+    await openTimePicker(tester, "Start time");
+    expect(timeEnabled(tester, "Start time", "10:00"), isFalse);
+    await closeTimePicker(tester, "Start time");
 
     await pickTime(tester, "Start time", "18:00");
     await pickTime(tester, "End time", "19:00");
