@@ -1,10 +1,11 @@
 /// The calendar's create flow, its item form, which also shows an item
 /// read-only, and the delete confirmation.
 ///
-/// The form opens in a modal bottom sheet. Its schedule section, which
-/// every item type shares, edits a [CalendarSchedule] and shows what its
-/// [CalendarScheduleCheck] answers; its details are generated from the item
-/// type's schema. Save sends nothing while the check names a problem
+/// The form opens in a modal bottom sheet, a scrolling page of three
+/// cards: the schedule's summary, which shows what its
+/// [CalendarScheduleCheck] answers; the schedule section, which every item
+/// type shares and which edits a [CalendarSchedule]; and the item's own
+/// fields, generated from the item type's schema. Save sends nothing while the check names a problem
 /// ([scheduleErrorsOf]) or the validator the API runs refuses the item;
 /// after a failed Save the title's and the times' messages follow the
 /// edits.
@@ -20,6 +21,21 @@ import 'calendar_settings.dart';
 import 'calendar_schema.dart';
 import 'harbor_theme.dart';
 import 'schedule_section.dart';
+
+/// The key of the form's summary card, which holds the [ScheduleSummary].
+const ValueKey<String> formSummaryCardKey = ValueKey<String>(
+  "form-summary-card",
+);
+
+/// The key of the form's scheduling card, which holds the
+/// [ScheduleSection].
+const ValueKey<String> formSchedulingCardKey = ValueKey<String>(
+  "form-scheduling-card",
+);
+
+/// The key of the form's item card, which holds the item's type, title and
+/// type fields.
+const ValueKey<String> formItemCardKey = ValueKey<String>("form-item-card");
 
 /// Opens the form for a new item over the range [range] picked, with All
 /// day on for an all-day range, its type chosen in the form, Task first;
@@ -251,7 +267,7 @@ class _ItemForm extends StatefulWidget {
   /// The step of the time fields' slot boundaries.
   final int slotMinutes;
 
-  /// The clock the schedule section writes times on.
+  /// The clock the schedule's summary and section write times on.
   final CalendarHourLabelFormat hourLabelFormat;
 
   /// Whether every control is disabled and Close is the one action.
@@ -341,7 +357,7 @@ class _ItemFormState extends State<_ItemForm> {
   /// The values of the schema's choice and bool fields, by key.
   final Map<String, Object?> _values = <String, Object?>{};
 
-  /// The schedule's check, which the schedule section reads: made in
+  /// The schedule's check, which the summary and the section read: made in
   /// [initState] and again by [_recheck] only.
   late CalendarScheduleCheck<ItemPayload> _scheduleCheck;
 
@@ -797,6 +813,15 @@ class _ItemFormState extends State<_ItemForm> {
     }
   }
 
+  /// An outlined card keyed [key], with no heading, holding [child].
+  Widget _card(Key key, Widget child) {
+    return Card.outlined(
+      key: key,
+      margin: EdgeInsets.zero,
+      child: Padding(padding: const EdgeInsets.all(16.0), child: child),
+    );
+  }
+
   Widget _typeSelector() {
     return SegmentedButton<CalendarItemType>(
       showSelectedIcon: false,
@@ -842,7 +867,7 @@ class _ItemFormState extends State<_ItemForm> {
     } else {
       heading = "Edit ${_type.label}";
     }
-    final fields = <Widget>[
+    final itemFields = <Widget>[
       if (_isDraft && !widget.readOnly) _typeSelector() else _typeRow(),
       // A keystroke rebuilds the title alone, whose message follows it.
       ListenableBuilder(
@@ -858,18 +883,45 @@ class _ItemFormState extends State<_ItemForm> {
           );
         },
       ),
-      ScheduleSection(
-        check: _scheduleCheck,
-        hours: widget.store.hours,
-        slotMinutes: widget.slotMinutes,
-        hourLabelFormat: widget.hourLabelFormat,
-        now: widget.now,
-        zone: widget.store.zone,
-        locked: _locked,
-        errors: _scheduleErrors(),
-        onChanged: _scheduleChanged,
-      ),
       for (final field in _schema.fields) _fieldFor(field),
+    ];
+    final cards = <Widget>[
+      _card(
+        formSummaryCardKey,
+        ScheduleSummary(
+          check: _scheduleCheck,
+          hourLabelFormat: widget.hourLabelFormat,
+          zone: widget.store.zone,
+          locked: _locked,
+          onChanged: _scheduleChanged,
+        ),
+      ),
+      _card(
+        formSchedulingCardKey,
+        ScheduleSection(
+          check: _scheduleCheck,
+          hours: widget.store.hours,
+          slotMinutes: widget.slotMinutes,
+          hourLabelFormat: widget.hourLabelFormat,
+          now: widget.now,
+          zone: widget.store.zone,
+          locked: _locked,
+          errors: _scheduleErrors(),
+          onChanged: _scheduleChanged,
+        ),
+      ),
+      _card(
+        formItemCardKey,
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            for (var index = 0; index < itemFields.length; index++) ...<Widget>[
+              if (index > 0) const SizedBox(height: 12.0),
+              itemFields[index],
+            ],
+          ],
+        ),
+      ),
     ];
     return PopScope(
       canPop: !_saving,
@@ -894,10 +946,10 @@ class _ItemFormState extends State<_ItemForm> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
-                      for (final field in fields)
+                      for (final card in cards)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 12.0),
-                          child: field,
+                          child: card,
                         ),
                     ],
                   ),

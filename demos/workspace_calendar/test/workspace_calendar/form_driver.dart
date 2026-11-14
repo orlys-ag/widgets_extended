@@ -340,6 +340,10 @@ Future<void> expectCreateForm(
   required String end,
 }) async {
   expect(find.text("New item"), findsOneWidget);
+  // The type selector sits in the item card, the page's last, which can
+  // lie below the form's view.
+  await tester.ensureVisible(find.text(type).last);
+  await tester.pumpAndSettle();
   await tester.tap(find.text(type).last);
   await tester.pumpAndSettle();
   expectFormDays(day, 1);

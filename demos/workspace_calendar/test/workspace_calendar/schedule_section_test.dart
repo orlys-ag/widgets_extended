@@ -1,9 +1,9 @@
-/// The item form's sheet and its schedule section: the sheet's container
-/// and type selector, the message of each schedule problem, the messages
-/// after a failed Save, and the section's summary, All day switch, End
-/// date, next free time, zone, options and kept kind, and its time fields,
-/// the pickers they open, what each picker refuses, and where the focus
-/// goes.
+/// The item form's sheet, its summary card and its schedule section: the
+/// sheet's container and type selector, the message of each schedule
+/// problem, the messages after a failed Save, the summary's lines, overlap
+/// notice, next free time and zone, and the section's All day switch, End
+/// date, options and kept kind, and its time fields, the pickers they open,
+/// what each picker refuses, and where the focus goes.
 library;
 
 import 'package:flutter/material.dart';
@@ -115,8 +115,18 @@ Future<void> openCreate(
   });
 }
 
+/// The summary's lines: its first, its second and, where it shows, its
+/// length, joined by "\n".
 String summary(WidgetTester tester) {
-  return tester.widget<Text>(find.byKey(scheduleSummaryKey)).data!;
+  return <String>[
+    for (final key in <Key>[
+      scheduleSummaryFirstLineKey,
+      scheduleSummarySecondLineKey,
+      scheduleSummaryLengthKey,
+    ])
+      if (find.byKey(key).evaluate().isNotEmpty)
+        tester.widget<Text>(find.byKey(key)).data!,
+  ].join("\n");
 }
 
 MemoryCalendarStore<ItemPayload> storeOf(List<CalendarItem> items) {
@@ -148,15 +158,16 @@ CalendarScheduleCheck<ItemPayload> checkOf(
   );
 }
 
-/// Pumps the section of [check] alone, in the calendar's whole day of
-/// 15-minute slots on the 24-hour clock, on [zone]'s clock, its pickers'
-/// Now reading [now] or else Wednesday's start, its edits going to
-/// [onChanged] or else nowhere, and locked where [locked]. Where [follows],
-/// each edit also makes the section's check that of the edited schedule
+/// Pumps the [ScheduleSummary] of [check] above its section, without the
+/// form, in the calendar's whole day of 15-minute slots on the 24-hour
+/// clock, on [zone]'s clock, the pickers' Now reading [now] or else
+/// Wednesday's start, the edits of both going to [onChanged] or else
+/// nowhere, and locked where [locked]. Where [follows], each edit also makes
+/// their check that of the edited schedule
 /// ([CalendarScheduleCheck.withSchedule]) before it goes to [onChanged], so
-/// the next frame builds the section of the edit, as the form's does;
-/// otherwise the section keeps [check]. Under [theme], where given, the
-/// section draws and moves as that [CalendarTheme] says.
+/// the next frame builds the summary and the section of the edit, as the
+/// form's does; otherwise they keep [check]. Under [theme], where given,
+/// they draw and move as that [CalendarTheme] says.
 Future<void> pumpSection(
   WidgetTester tester,
   CalendarScheduleCheck<ItemPayload> check, {
@@ -171,15 +182,27 @@ Future<void> pumpSection(
     CalendarScheduleCheck<ItemPayload> check,
     ValueChanged<CalendarSchedule> onChanged,
   ) {
-    return ScheduleSection(
-      check: check,
-      hours: CalendarDayHours.allDay,
-      slotMinutes: 15,
-      hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
-      now: now ?? wednesdayStart,
-      zone: zone,
-      locked: locked,
-      onChanged: onChanged,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        ScheduleSummary(
+          check: check,
+          hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+          zone: zone,
+          locked: locked,
+          onChanged: onChanged,
+        ),
+        ScheduleSection(
+          check: check,
+          hours: CalendarDayHours.allDay,
+          slotMinutes: 15,
+          hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+          now: now ?? wednesdayStart,
+          zone: zone,
+          locked: locked,
+          onChanged: onChanged,
+        ),
+      ],
     );
   }
 
@@ -393,8 +416,8 @@ void main() {
     expect(dropdownShows("Severity", "Medium"), findsOneWidget);
   });
 
-  testWidgets("SF3 an edit shows no type selector, and a read-only item its "
-      "summary and Close alone", (tester) async {
+  testWidgets("SF3 an edit shows no type selector but its type in the item "
+      "card, and a read-only item its summary and Close alone", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
     ]);
@@ -402,6 +425,13 @@ void main() {
     await openEdit(tester, store);
     expect(find.text("Edit Task"), findsOneWidget);
     expect(find.byType(SegmentedButton<CalendarItemType>), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(formItemCardKey),
+        matching: find.text("Task"),
+      ),
+      findsOneWidget,
+    );
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
@@ -414,7 +444,7 @@ void main() {
       );
     });
     expect(find.byType(SegmentedButton<CalendarItemType>), findsNothing);
-    expect(summary(tester), "Wed, Apr 22, 09:00 - 10:00 (1h)");
+    expect(summary(tester), "Wed, Apr 22\n09:00 - 10:00\n1h");
     expect(formButton("Close"), findsOneWidget);
     expect(formButton("Cancel"), findsNothing);
     expect(saveFinder(), findsNothing);
@@ -471,13 +501,13 @@ void main() {
     ]);
     addTearDown(store.dispose);
     await openEdit(tester, store);
-    expect(summary(tester), "Wed, Apr 22, 09:00 - 10:30 (1h 30m)");
+    expect(summary(tester), "Wed, Apr 22\n09:00 - 10:30\n1h 30m");
     expect(find.byType(ChoiceChip), findsNothing);
 
     await pickTime(tester, "End time", "09:30");
-    expect(summary(tester), "Wed, Apr 22, 09:00 - 09:30 (30m)");
+    expect(summary(tester), "Wed, Apr 22\n09:00 - 09:30\n30m");
     await pickTime(tester, "End time", "10:00");
-    expect(summary(tester), "Wed, Apr 22, 09:00 - 10:00 (1h)");
+    expect(summary(tester), "Wed, Apr 22\n09:00 - 10:00\n1h");
   });
 
   testWidgets("SS3 End date shows for a multi-day or all-day item, or after "
@@ -498,7 +528,7 @@ void main() {
 
     await openEdit(tester, store, id: "item-2");
     expect(formDateShows("End date", "2026-04-23"), findsOneWidget);
-    expect(summary(tester), "Wed, Apr 22 22:00 - Thu, Apr 23 02:00 (4h)");
+    expect(summary(tester), "Wed, Apr 22, 22:00 -\nThu, Apr 23, 02:00\n4h");
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
@@ -507,7 +537,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(formDateShows("End date", "2026-04-22"), findsOneWidget);
     expect(timeFieldFinder("Start time"), findsNothing);
-    expect(summary(tester), "Wed, Apr 22, all day");
+    expect(summary(tester), "Wed, Apr 22\nAll day");
   });
 
   testWidgets("SS4 an overlap shows before Save, and Next free time moves "
@@ -534,7 +564,7 @@ void main() {
     expect(find.byKey(scheduleOverlapKey), findsNothing);
   });
 
-  testWidgets("SS5 a store on a zone names it in the section", (tester) async {
+  testWidgets("SS5 a store on a zone names it in the summary", (tester) async {
     final havana = tz.getLocation("America/Havana");
     final zoned = MemoryCalendarStore<ItemPayload>(
       zone: havana,
@@ -595,13 +625,13 @@ void main() {
 
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22, all day");
+    expect(summary(tester), "Wed, Apr 22\nAll day");
     expect(timeFieldFinder("Start time"), findsNothing);
     expect(formAllDayOn(), isTrue);
 
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22, 09:00 - 10:30 (1h 30m)");
+    expect(summary(tester), "Wed, Apr 22\n09:00 - 10:30\n1h 30m");
     expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
     expect(formAllDayOn(), isFalse);
   });
@@ -656,10 +686,10 @@ void main() {
     );
     addTearDown(store.dispose);
     await openEdit(tester, store);
-    expect(summary(tester), "Wed, Apr 22, all day");
+    expect(summary(tester), "Wed, Apr 22\nAll day");
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22, 09:30 - 10:30 (1h)");
+    expect(summary(tester), "Wed, Apr 22\n09:30 - 10:30\n1h");
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
@@ -672,10 +702,10 @@ void main() {
         isAllDay: true,
       ),
     );
-    expect(summary(tester), "Wed, Apr 22, all day");
+    expect(summary(tester), "Wed, Apr 22\nAll day");
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22, 09:30 - 10:30 (1h)");
+    expect(summary(tester), "Wed, Apr 22\n09:30 - 10:30\n1h");
   });
 
   testWidgets("TF1 a tap on Start time opens its picker in the panel under "
@@ -706,7 +736,7 @@ void main() {
       inPicker("Start time", find.byKey(timePickerMinuteRowKey(30))),
     );
     await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22, 09:30 - 10:30 (1h)");
+    expect(summary(tester), "Wed, Apr 22\n09:30 - 10:30\n1h");
 
     final panel = tester.state(pickerPanel());
     await tester.tap(timeFieldFinder("End time"));
@@ -901,12 +931,12 @@ void main() {
         hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
       );
     });
-    expect(summary(tester), "Wed, Apr 22, 11:00 - 12:00 (1h)");
+    expect(summary(tester), "Wed, Apr 22\n11:00 - 12:00\n1h");
     await openTimePicker(tester, "Start time");
     await tester.tap(inPicker("Start time", find.byKey(timePickerNowKey)));
     await tester.pumpAndSettle();
     // The nearest slot would be 09:15.
-    expect(summary(tester), "Wed, Apr 22, 09:00 - 10:00 (1h)");
+    expect(summary(tester), "Wed, Apr 22\n09:00 - 10:00\n1h");
   });
 
   testWidgets("TF5 the start's picker stays open across Next free time and a "
@@ -924,7 +954,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text("Next free time"));
     await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22, 10:30 - 11:30 (1h)");
+    expect(summary(tester), "Wed, Apr 22\n10:30 - 11:30\n1h");
     expect(timePickerFinder("Start time"), findsOneWidget);
 
     await tester.ensureVisible(formDateFinder("Start date"));
@@ -939,14 +969,14 @@ void main() {
     );
     await tester.tap(find.text("OK"));
     await tester.pumpAndSettle();
-    expect(summary(tester), "Thu, Apr 23, 10:30 - 11:30 (1h)");
+    expect(summary(tester), "Thu, Apr 23\n10:30 - 11:30\n1h");
     expect(timePickerFinder("Start time"), findsOneWidget);
 
     await tester.ensureVisible(allDaySwitch());
     await tester.pumpAndSettle();
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
-    expect(summary(tester), "Thu, Apr 23, all day");
+    expect(summary(tester), "Thu, Apr 23\nAll day");
     expect(timePickerFinder("Start time"), findsNothing);
     expect(focusUnder(allDaySwitch()), isTrue);
   });
@@ -1750,6 +1780,15 @@ void main() {
       expect(tester.takeException(), isNull, reason: "at $elapsed ms");
       expect(pickerPanel(), findsNothing, reason: "at $elapsed ms");
     }
+
+    // In the form, the switch lies in the scheduling card.
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    final card = tester.getRect(find.byKey(formSchedulingCardKey));
+    expect(card.expandToInclude(tester.getRect(allDaySwitch())), card);
   });
 
   testWidgets("FP1 the panel grows and fades in over the theme's motion as "
@@ -1929,6 +1968,125 @@ void main() {
     );
     expect(now.top, greaterThanOrEqualTo(0.0));
     expect(now.bottom, lessThanOrEqualTo(300.0));
+  });
+
+  testWidgets("FS1 the summary card shows a one-day schedule's date above "
+      "its times and its length below them, and holds the zone line and the "
+      "overlap notice", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10, 30)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    final first = find.byKey(scheduleSummaryFirstLineKey);
+    final second = find.byKey(scheduleSummarySecondLineKey);
+    final length = find.byKey(scheduleSummaryLengthKey);
+    expect(tester.widget<Text>(first).data, "Wed, Apr 22");
+    expect(tester.widget<Text>(second).data, "09:00 - 10:30");
+    expect(tester.widget<Text>(length).data, "1h 30m");
+    expect(
+      tester.getRect(first).bottom,
+      lessThanOrEqualTo(tester.getRect(second).top),
+    );
+    expect(
+      tester.getRect(second).bottom,
+      lessThanOrEqualTo(tester.getRect(length).top),
+    );
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    final kolkata = tz.getLocation("Asia/Kolkata");
+    final zoned = MemoryCalendarStore<ItemPayload>(
+      zone: kolkata,
+      entries: <CalendarItem>[
+        task(
+          "item-1",
+          "Write",
+          tz.TZDateTime(kolkata, 2026, 4, 22, 9),
+          tz.TZDateTime(kolkata, 2026, 4, 22, 10, 30),
+        ),
+        task(
+          "item-2",
+          "Standup",
+          tz.TZDateTime(kolkata, 2026, 4, 22, 10),
+          tz.TZDateTime(kolkata, 2026, 4, 22, 11),
+        ),
+      ],
+    );
+    addTearDown(zoned.dispose);
+    // The form's check reads the times on the clock of its now's time, so
+    // its now is on Kolkata's, as the app's is on the store's zone.
+    await openWith(tester, (context) {
+      showEditForm(
+        context,
+        store: zoned,
+        id: "item-1",
+        policy: const UnrestrictedEditPolicy<ItemPayload>(),
+        now: () {
+          return CalendarNow(
+            time: tz.TZDateTime(kolkata, 2026, 4, 22),
+            today: wednesday,
+          );
+        },
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+      );
+    });
+    final card = tester.getRect(find.byKey(formSummaryCardKey));
+    for (final part in <Finder>[
+      find.text("Times in Asia/Kolkata"),
+      find.byKey(scheduleOverlapKey),
+      find.text("Next free time"),
+    ]) {
+      expect(part, findsOneWidget);
+      expect(card.expandToInclude(tester.getRect(part)), card, reason: "$part");
+    }
+  });
+
+  testWidgets("FS2 the summary names an all-day schedule's days and All "
+      "day, and a timed one that spans days its start above its end, each "
+      "with its date, then its length", (tester) async {
+    Future<void> expectSummary(
+      CalendarSchedule schedule,
+      String first,
+      String second,
+    ) async {
+      await pumpSection(tester, checkOf(schedule));
+      expect(
+        tester.widget<Text>(find.byKey(scheduleSummaryFirstLineKey)).data,
+        first,
+      );
+      expect(
+        tester.widget<Text>(find.byKey(scheduleSummarySecondLineKey)).data,
+        second,
+      );
+    }
+
+    await expectSummary(
+      CalendarSchedule.of(wednesday, DateTime(2026, 4, 25), isAllDay: true),
+      "Wed, Apr 22 - Fri, Apr 24",
+      "All day",
+    );
+    expect(find.byKey(scheduleSummaryLengthKey), findsNothing);
+    await expectSummary(
+      CalendarSchedule.of(wednesday, DateTime(2026, 4, 23), isAllDay: true),
+      "Wed, Apr 22",
+      "All day",
+    );
+    expect(find.byKey(scheduleSummaryLengthKey), findsNothing);
+
+    await expectSummary(
+      CalendarSchedule.of(DateTime(2026, 4, 21, 22), at(2), isAllDay: false),
+      "Tue, Apr 21, 22:00 -",
+      "Wed, Apr 22, 02:00",
+    );
+    final length = find.byKey(scheduleSummaryLengthKey);
+    expect(tester.widget<Text>(length).data, "4h");
+    final second = tester.getRect(find.byKey(scheduleSummarySecondLineKey));
+    expect(
+      tester.getRect(find.byKey(scheduleSummaryFirstLineKey)).bottom,
+      lessThanOrEqualTo(second.top),
+    );
+    expect(second.bottom, lessThanOrEqualTo(tester.getRect(length).top));
   });
 }
 

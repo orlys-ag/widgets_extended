@@ -557,7 +557,7 @@ void main() {
 
   testWidgets(
     "TF6 with the settings' 12-hour clock, the form's time fields and "
-    "summary line write 12-hour times",
+    "summary write 12-hour times",
     (tester) async {
       final api = MockCalendarApi.seeded(today, latency: harnessLatency);
       final nine = await store(
@@ -596,8 +596,8 @@ void main() {
         findsOneWidget,
       );
       expect(
-        tester.widget<Text>(find.byKey(scheduleSummaryKey)).data,
-        contains("9 AM - 10 AM"),
+        tester.widget<Text>(find.byKey(scheduleSummarySecondLineKey)).data,
+        "9 AM - 10 AM",
       );
     },
   );
@@ -695,7 +695,19 @@ void main() {
     await tester.tap(blockFinder(nine));
     await tester.pumpAndSettle();
     await openTimePicker(tester, "Start time");
-    final summary = tester.widget<Text>(find.byKey(scheduleSummaryKey)).data;
+    // The summary's lines: the day, the times and the length.
+    List<String?> summaryLines() {
+      return <String?>[
+        for (final key in <Key>[
+          scheduleSummaryFirstLineKey,
+          scheduleSummarySecondLineKey,
+          scheduleSummaryLengthKey,
+        ])
+          tester.widget<Text>(find.byKey(key)).data,
+      ];
+    }
+
+    final summary = summaryLines();
     Finder inPicker(Key key) {
       return find.descendant(
         of: timePickerFinder("Start time"),
@@ -734,7 +746,7 @@ void main() {
     await tester.pump(api.latency ~/ 2);
     await tester.pump(api.latency ~/ 4);
     expect(offPill(), lessThanOrEqualTo(0.5));
-    expect(tester.widget<Text>(find.byKey(scheduleSummaryKey)).data, summary);
+    expect(summaryLines(), summary);
 
     await tester.pump(api.latency);
     await tester.pumpAndSettle();

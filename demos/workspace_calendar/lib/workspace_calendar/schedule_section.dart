@@ -1,6 +1,7 @@
-/// The item form's schedule section: the part of the form any item type
-/// shares, which edits a [CalendarSchedule] and shows what its
-/// [CalendarScheduleCheck] answers as the user edits.
+/// The item form's schedule summary and schedule section, the parts of the
+/// form any item type shares: the section edits a [CalendarSchedule], and
+/// the summary shows it and what its [CalendarScheduleCheck] answers as the
+/// user edits.
 library;
 
 import 'dart:math' as math;
@@ -11,12 +12,25 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'calendar_item.dart';
 import 'harbor_theme.dart';
 
-/// The key of the section's summary line.
-const ValueKey<String> scheduleSummaryKey = ValueKey<String>(
-  "schedule-summary",
+/// The key of the summary's first line: the schedule's date, or its days,
+/// or the start of a timed schedule that spans days.
+const ValueKey<String> scheduleSummaryFirstLineKey = ValueKey<String>(
+  "schedule-summary-first-line",
 );
 
-/// The key of the section's overlap notice.
+/// The key of the summary's second line: the schedule's times, "All day",
+/// or the end of a timed schedule that spans days.
+const ValueKey<String> scheduleSummarySecondLineKey = ValueKey<String>(
+  "schedule-summary-second-line",
+);
+
+/// The key of the summary's length line, which a timed schedule of a
+/// positive length shows.
+const ValueKey<String> scheduleSummaryLengthKey = ValueKey<String>(
+  "schedule-summary-length",
+);
+
+/// The key of the summary's overlap notice.
 const ValueKey<String> scheduleOverlapKey = ValueKey<String>(
   "schedule-overlap",
 );
@@ -38,14 +52,14 @@ const ValueKey<String> scheduleAllDayKey = ValueKey<String>("schedule-all-day");
 /// time picker.
 const ValueKey<String> schedulePickerKey = ValueKey<String>("schedule-picker");
 
-/// The section of [check]'s schedule: a summary line; an All day switch,
-/// where the kind takes all-day or the schedule is all-day, which turned
-/// off restores the times the schedule keeps; Start date; Start time and
-/// End time, each a field whose tap opens the one [CalendarTimePicker], with
-/// its haptic feedback on, in a panel under their row; an End date for an
-/// all-day or a multi-day schedule, or after "Ends on another day"; an
-/// overlap notice with "Next free time"; and the store's zone where it has
-/// one. Times are written on [hourLabelFormat]'s clock.
+/// The section of [check]'s schedule: an All day switch, where the kind
+/// takes all-day or the schedule is all-day, which turned off restores the
+/// times the schedule keeps; Start date; Start time and End time, each a
+/// field whose tap opens the one [CalendarTimePicker], with its haptic
+/// feedback on, in a panel under their row; and an End date for an all-day
+/// or a multi-day schedule, or after "Ends on another day". Times are
+/// written on [hourLabelFormat]'s clock. [ScheduleSummary] shows the
+/// schedule, its overlaps and its zone.
 ///
 /// The panel grows and fades in as a field's tap opens it, and shrinks and
 /// fades out as the open field's tap closes it, over the [CalendarTheme]'s
@@ -92,7 +106,7 @@ class ScheduleSection extends StatefulWidget {
   /// The step of the pickers' times.
   final int slotMinutes;
 
-  /// The clock the summary, the time fields and the pickers write times on.
+  /// The clock the time fields and the pickers write times on.
   final CalendarHourLabelFormat hourLabelFormat;
 
   /// The current time, whose minute on [zone]'s clock the pickers' Now
@@ -102,8 +116,8 @@ class ScheduleSection extends StatefulWidget {
 
   final ValueChanged<CalendarSchedule> onChanged;
 
-  /// The zone the times are on, which the section names; none for the
-  /// device's.
+  /// The zone the times are on, on whose clock the pickers' Now reads the
+  /// current minute; none for the device's.
   final Location? zone;
 
   final bool locked;
@@ -488,86 +502,9 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     );
   }
 
-  String _lengthLabel(int minutes) {
-    final hours = minutes ~/ 60;
-    final rest = minutes % 60;
-    if (hours == 0) {
-      return "${rest}m";
-    }
-    if (rest == 0) {
-      return "${hours}h";
-    }
-    return "${hours}h ${rest}m";
-  }
-
-  String _summary(BuildContext context) {
-    final dates = MaterialLocalizations.of(context);
-    final strings = CalendarLocalizations.of(context);
-    final schedule = _schedule;
-    final startDay = dates.formatMediumDate(schedule.startDay);
-    final endDay = dates.formatMediumDate(schedule.endDay);
-    if (schedule.isAllDay) {
-      return schedule.spansDays
-          ? "$startDay - $endDay, all day"
-          : "$startDay, all day";
-    }
-    final start = strings.formatTime(
-      schedule.startMinute,
-      widget.hourLabelFormat,
-    );
-    final end = strings.formatTime(schedule.endMinute, widget.hourLabelFormat);
-    final length = schedule.lengthMinutes > 0
-        ? " (${_lengthLabel(schedule.lengthMinutes)})"
-        : "";
-    return schedule.spansDays
-        ? "$startDay $start - $endDay $end$length"
-        : "$startDay, $start - $end$length";
-  }
-
-  Widget _overlapNotice(CalendarScheduleCheck<ItemPayload> check) {
-    final next = check.nextFree;
-    return DecoratedBox(
-      key: scheduleOverlapKey,
-      decoration: BoxDecoration(
-        color: HarborColors.notice,
-        border: Border.all(color: HarborColors.noticeEdge),
-        borderRadius: BorderRadius.circular(8.0),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12.0, 8.0, 8.0, 8.0),
-        child: Row(
-          children: <Widget>[
-            const Icon(
-              Icons.warning_amber,
-              size: 18.0,
-              color: HarborColors.onNotice,
-            ),
-            const SizedBox(width: 8.0),
-            Expanded(
-              child: Text(
-                "Overlaps ${check.overlaps.map((other) {
-                  return other.title;
-                }).join(", ")}",
-                style: const TextStyle(color: HarborColors.onNotice),
-              ),
-            ),
-            if (next != null && next != check.schedule && !_startLocked)
-              TextButton(
-                onPressed: () {
-                  _change(next);
-                },
-                child: const Text("Next free time"),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final schedule = _schedule;
-    final check = widget.check;
     final errors = widget.errors;
     final locked = widget.locked;
     final startLocked = _startLocked;
@@ -578,17 +515,7 @@ class _ScheduleSectionState extends State<ScheduleSection> {
         schedule.isAllDay ||
         schedule.spansDays ||
         (_endDayShown && _options.spansDays);
-    final zone = widget.zone;
     final children = <Widget>[
-      Text(
-        _summary(context),
-        key: scheduleSummaryKey,
-        style: const TextStyle(
-          fontSize: 15.0,
-          fontWeight: FontWeight.w600,
-          color: HarborColors.text,
-        ),
-      ),
       if (_options.allowsAllDay || schedule.isAllDay)
         SwitchListTile(
           key: scheduleAllDayKey,
@@ -681,18 +608,189 @@ class _ScheduleSectionState extends State<ScheduleSection> {
             label: const Text("Ends on another day"),
           ),
         ),
-      if (check.overlaps.isNotEmpty) _overlapNotice(check),
-      if (zone != null)
-        Text(
-          "Times in ${zone.name}",
-          style: const TextStyle(color: HarborColors.textMuted),
-        ),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         for (final child in children)
           Padding(padding: const EdgeInsets.only(bottom: 12.0), child: child),
+      ],
+    );
+  }
+}
+
+/// [minutes] written in hours and minutes, as "1h 30m", "2h" or "45m".
+String _lengthLabel(int minutes) {
+  final hours = minutes ~/ 60;
+  final rest = minutes % 60;
+  if (hours == 0) {
+    return "${rest}m";
+  }
+  if (rest == 0) {
+    return "${hours}h";
+  }
+  return "${hours}h ${rest}m";
+}
+
+/// The summary of [check]'s schedule, top to bottom: its date, or for an
+/// all-day schedule that spans days its first and last; its times, or "All
+/// day"; for a timed schedule that spans days, its start and its end
+/// instead, each with its date; its length, where a timed schedule has a
+/// positive one; "Times in" [zone]'s name, where a zone is given; and,
+/// while [CalendarScheduleCheck.overlaps] is not empty, an overlap notice
+/// naming them, whose "Next free time" sends
+/// [CalendarScheduleCheck.nextFree] to [onChanged] unless the form is
+/// [locked] or the check's start is fixed. Times are written on
+/// [hourLabelFormat]'s clock.
+class ScheduleSummary extends StatelessWidget {
+  const ScheduleSummary({
+    super.key,
+    required this.check,
+    required this.hourLabelFormat,
+    required this.onChanged,
+    this.zone,
+    this.locked = false,
+  });
+
+  final CalendarScheduleCheck<ItemPayload> check;
+
+  /// The clock the summary writes times on.
+  final CalendarHourLabelFormat hourLabelFormat;
+
+  /// Takes the schedule "Next free time" moves to.
+  final ValueChanged<CalendarSchedule> onChanged;
+
+  /// The zone the times are on, which the summary names; none for the
+  /// device's.
+  final Location? zone;
+
+  /// Whether the form takes no input, under which "Next free time" does
+  /// not show.
+  final bool locked;
+
+  /// The first line of a schedule on one day or of an all-day one.
+  static const TextStyle _dayStyle = TextStyle(
+    fontSize: 15.0,
+    fontWeight: FontWeight.w500,
+    color: HarborColors.textMuted,
+  );
+
+  /// The second line of a schedule on one day or of an all-day one.
+  static const TextStyle _timesStyle = TextStyle(
+    fontSize: 22.0,
+    fontWeight: FontWeight.w600,
+    color: HarborColors.text,
+  );
+
+  /// Both lines of a timed schedule that spans days.
+  static const TextStyle _spanStyle = TextStyle(
+    fontSize: 18.0,
+    fontWeight: FontWeight.w600,
+    color: HarborColors.text,
+  );
+
+  /// The length and the zone line.
+  static const TextStyle _detailStyle = TextStyle(
+    fontSize: 14.0,
+    color: HarborColors.textMuted,
+  );
+
+  Widget _overlapNotice() {
+    final next = check.nextFree;
+    return DecoratedBox(
+      key: scheduleOverlapKey,
+      decoration: BoxDecoration(
+        color: HarborColors.notice,
+        border: Border.all(color: HarborColors.noticeEdge),
+        borderRadius: BorderRadius.circular(8.0),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12.0, 8.0, 8.0, 8.0),
+        child: Row(
+          children: <Widget>[
+            const Icon(
+              Icons.warning_amber,
+              size: 18.0,
+              color: HarborColors.onNotice,
+            ),
+            const SizedBox(width: 8.0),
+            Expanded(
+              child: Text(
+                "Overlaps ${check.overlaps.map((other) {
+                  return other.title;
+                }).join(", ")}",
+                style: const TextStyle(color: HarborColors.onNotice),
+              ),
+            ),
+            if (next != null &&
+                next != check.schedule &&
+                !(locked || check.startFixed))
+              TextButton(
+                onPressed: () {
+                  onChanged(next);
+                },
+                child: const Text("Next free time"),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dates = MaterialLocalizations.of(context);
+    final strings = CalendarLocalizations.of(context);
+    final schedule = check.schedule;
+    final startDay = dates.formatMediumDate(schedule.startDay);
+    final endDay = dates.formatMediumDate(schedule.endDay);
+    final start = strings.formatTime(schedule.startMinute, hourLabelFormat);
+    final end = strings.formatTime(schedule.endMinute, hourLabelFormat);
+    final timed = !schedule.isAllDay;
+    final timedDays = timed && schedule.spansDays;
+    final String first;
+    final String second;
+    if (!timed) {
+      first = schedule.spansDays ? "$startDay - $endDay" : startDay;
+      second = "All day";
+    } else if (timedDays) {
+      first = "$startDay, $start -";
+      second = "$endDay, $end";
+    } else {
+      first = startDay;
+      second = "$start - $end";
+    }
+    final zone = this.zone;
+    final lines = <Widget>[
+      Text(
+        first,
+        key: scheduleSummaryFirstLineKey,
+        style: timedDays ? _spanStyle : _dayStyle,
+      ),
+      Text(
+        second,
+        key: scheduleSummarySecondLineKey,
+        style: timedDays ? _spanStyle : _timesStyle,
+      ),
+      if (timed && schedule.lengthMinutes > 0)
+        Text(
+          _lengthLabel(schedule.lengthMinutes),
+          key: scheduleSummaryLengthKey,
+          style: _detailStyle,
+        ),
+      if (zone != null) Text("Times in ${zone.name}", style: _detailStyle),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        for (var index = 0; index < lines.length; index++) ...<Widget>[
+          if (index > 0) const SizedBox(height: 4.0),
+          lines[index],
+        ],
+        if (check.overlaps.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 12.0),
+          _overlapNotice(),
+        ],
       ],
     );
   }
