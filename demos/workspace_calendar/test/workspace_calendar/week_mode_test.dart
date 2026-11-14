@@ -2448,10 +2448,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(DatePickerDialog), findsNothing);
-    expect(
-      tester.widget<SwitchListTile>(inDialog(allDaySwitch())).onChanged,
-      isNull,
-    );
+    expect(tester.widget<Switch>(inDialog(allDaySwitch())).onChanged, isNull);
     expect(saveFinder(), findsNothing);
     expect(formButton("Cancel"), findsNothing);
     expect(formButton("Delete"), findsNothing);

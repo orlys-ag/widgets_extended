@@ -12,22 +12,31 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'calendar_item.dart';
 import 'harbor_theme.dart';
 
-/// The key of the summary's first line: the schedule's date, or its days,
-/// or the start of a timed schedule that spans days.
+/// The key of the summary's first line: the schedule's date, or the start
+/// of a schedule that spans days.
 const ValueKey<String> scheduleSummaryFirstLineKey = ValueKey<String>(
   "schedule-summary-first-line",
 );
 
-/// The key of the summary's second line: the schedule's times, "All day",
-/// or the end of a timed schedule that spans days.
+/// The key of the summary's second line: the schedule's times, or the end
+/// of a schedule that spans days. An all-day schedule on one day has none.
 const ValueKey<String> scheduleSummarySecondLineKey = ValueKey<String>(
   "schedule-summary-second-line",
 );
 
-/// The key of the summary's length line, which a timed schedule of a
-/// positive length shows.
+/// The key of the text of the summary's pill, in its top right corner under
+/// the zone: the length of a timed schedule of a positive length, or of an
+/// all-day schedule, "All day" for one day and its count of days, such as
+/// "3 days", for more.
 const ValueKey<String> scheduleSummaryLengthKey = ValueKey<String>(
   "schedule-summary-length",
+);
+
+/// The key of the summary's zone, the box at the top of its top right
+/// corner: the zone's city or the device's zone's name, above the zone's
+/// offset from UTC.
+const ValueKey<String> scheduleSummaryZoneKey = ValueKey<String>(
+  "schedule-summary-zone",
 );
 
 /// The key of the summary's overlap notice.
@@ -78,6 +87,11 @@ const ValueKey<String> schedulePickerKey = ValueKey<String>("schedule-picker");
 /// start. A picker's Now shows only on a field whose day is [now]'s today,
 /// and where the time at or before now is refused picks the first later
 /// time the picker offers.
+///
+/// The section pads what its controls show 16 pixels from its edges: the
+/// All day switch's touch target, and the button of "Ends on another day",
+/// reach into that padding, so the switch's track and the button's icon and
+/// label line up with the fields.
 ///
 /// Every edit goes to [onChanged] as a new schedule. A [locked] section
 /// takes no input; a [CalendarScheduleCheck.startFixed] one takes none at
@@ -132,6 +146,42 @@ class ScheduleSection extends StatefulWidget {
 
 /// A time field of the section.
 enum _TimeField { start, end }
+
+/// The space between the section's edges and what its controls show.
+const double _edge = 16.0;
+
+/// The All day switch's size, as a share of a [Switch]'s.
+const double _allDaySwitchScale = 0.75;
+
+/// The space above the All day switch's track, at its scale: a [Switch]
+/// given [MaterialTapTargetSize.padded] is [kMinInteractiveDimension] tall
+/// around Material 3's 32-pixel track.
+const double _allDaySwitchTop =
+    (kMinInteractiveDimension - 32.0) / 2.0 * _allDaySwitchScale;
+
+/// The space beside the All day switch's track, at its scale: the 4 pixels
+/// at each side of Material 3's default [SwitchThemeData.padding].
+const double _allDaySwitchSide = 4.0 * _allDaySwitchScale;
+
+/// The padding of the button of "Ends on another day" around its icon and
+/// label: at its sides, Material 3's for a [TextButton.icon]; above and
+/// below, what makes a touch target [kMinInteractiveDimension] tall around
+/// its 20-pixel label at the default text scale, and taller around a
+/// larger one.
+const EdgeInsetsDirectional _endButtonPadding = EdgeInsetsDirectional.fromSTEB(
+  12.0,
+  14.0,
+  16.0,
+  14.0,
+);
+
+/// [child] padded [_edge] pixels from the section's sides.
+Widget _sides(Widget child) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(horizontal: _edge),
+    child: child,
+  );
+}
 
 /// The lookups the open picker has made of its [_TimeTable], in debug
 /// builds; the release build counts none.
@@ -503,6 +553,56 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     );
   }
 
+  /// The All day switch, at [_allDaySwitchScale] of a [Switch]'s size, on
+  /// the right of its label, which takes no tap.
+  Widget _allDayRow(CalendarSchedule schedule, bool startLocked) {
+    final theme = Theme.of(context);
+    return MergeSemantics(
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(
+              "All day",
+              style: theme.textTheme.bodyLarge?.copyWith(
+                color: startLocked
+                    ? theme.disabledColor
+                    : theme.colorScheme.onSurface,
+              ),
+            ),
+          ),
+          // A FittedBox scales the switch, its layout and its touch target
+          // included, to the box's height.
+          SizedBox(
+            height: kMinInteractiveDimension * _allDaySwitchScale,
+            child: FittedBox(
+              child: Switch(
+                key: scheduleAllDayKey,
+                value: schedule.isAllDay,
+                focusNode: _allDayNode,
+                materialTapTargetSize: MaterialTapTargetSize.padded,
+                onChanged: startLocked
+                    ? null
+                    : (on) {
+                        if (on) {
+                          // The time row and its open picker go away; the
+                          // focus their Hour column held moves to the
+                          // switch, not to the scope's last focused node.
+                          setState(() {
+                            _open = null;
+                            _shown = null;
+                          });
+                          _allDayNode.requestFocus();
+                        }
+                        _change(schedule.withAllDay(on));
+                      },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final schedule = _schedule;
@@ -516,110 +616,124 @@ class _ScheduleSectionState extends State<ScheduleSection> {
         schedule.isAllDay ||
         schedule.spansDays ||
         (_endDayShown && _options.spansDays);
+    final allDayShows = _options.allowsAllDay || schedule.isAllDay;
+    final endButtonShows = !showsEndDay && _options.spansDays && !locked;
     final children = <Widget>[
-      if (_options.allowsAllDay || schedule.isAllDay)
-        SwitchListTile(
-          key: scheduleAllDayKey,
-          contentPadding: EdgeInsets.zero,
-          title: const Text("All day"),
-          value: schedule.isAllDay,
-          focusNode: _allDayNode,
-          onChanged: startLocked
-              ? null
-              : (on) {
-                  if (on) {
-                    // The time row and its open picker go away; the focus
-                    // their Hour column held moves to the switch, not to
-                    // the scope's last focused node.
-                    setState(() {
-                      _open = null;
-                      _shown = null;
-                    });
-                    _allDayNode.requestFocus();
-                  }
-                  _change(schedule.withAllDay(on));
-                },
+      if (allDayShows)
+        Padding(
+          padding: const EdgeInsetsDirectional.only(
+            start: _edge,
+            end: _edge - _allDaySwitchSide,
+          ),
+          child: _allDayRow(schedule, startLocked),
         ),
-      _dateField(
-        label: "Start date",
-        date: schedule.startDay,
-        error: timed ? null : errors["start"],
-        onPicked: startLocked
-            ? null
-            : (day) {
-                _change(schedule.withStartDay(day));
-              },
-      ),
-      if (timed)
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(
-                  child: _timeField(
-                    _TimeField.start,
-                    label: "Start time",
-                    minute: schedule.startMinute,
-                    error: errors["start"],
-                  ),
-                ),
-                const SizedBox(width: 12.0),
-                Expanded(
-                  child: _timeField(
-                    _TimeField.end,
-                    label: "End time",
-                    minute: schedule.endMinute,
-                    error: showsEndDay ? null : errors["end"],
-                  ),
-                ),
-              ],
-            ),
-            _PickerPanel(
-              key: schedulePickerKey,
-              open: open != null,
-              // The picker shows its footer, Now, only on today's field.
-              revealKey: open != null && _nowOn(_dayOf(open)) != null,
-              builder: shown == null
-                  ? null
-                  : (context) {
-                      return _picker(shown);
-                    },
-            ),
-          ],
-        ),
-      if (showsEndDay)
+      _sides(
         _dateField(
-          label: "End date",
-          date: schedule.endDay,
-          error: errors["end"],
-          onPicked: locked
+          label: "Start date",
+          date: schedule.startDay,
+          error: timed ? null : errors["start"],
+          onPicked: startLocked
               ? null
               : (day) {
-                  _change(schedule.withEndDay(day));
+                  _change(schedule.withStartDay(day));
                 },
+        ),
+      ),
+      if (timed)
+        _sides(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    child: _timeField(
+                      _TimeField.start,
+                      label: "Start time",
+                      minute: schedule.startMinute,
+                      error: errors["start"],
+                    ),
+                  ),
+                  const SizedBox(width: 12.0),
+                  Expanded(
+                    child: _timeField(
+                      _TimeField.end,
+                      label: "End time",
+                      minute: schedule.endMinute,
+                      error: showsEndDay ? null : errors["end"],
+                    ),
+                  ),
+                ],
+              ),
+              _PickerPanel(
+                key: schedulePickerKey,
+                open: open != null,
+                // The picker shows its footer, Now, only on today's field.
+                revealKey: open != null && _nowOn(_dayOf(open)) != null,
+                builder: shown == null
+                    ? null
+                    : (context) {
+                        return _picker(shown);
+                      },
+              ),
+            ],
+          ),
+        ),
+      if (showsEndDay)
+        _sides(
+          _dateField(
+            label: "End date",
+            date: schedule.endDay,
+            error: errors["end"],
+            onPicked: locked
+                ? null
+                : (day) {
+                    _change(schedule.withEndDay(day));
+                  },
+          ),
         )
-      else if (_options.spansDays && !locked)
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: () {
-              setState(() {
-                _endDayShown = true;
-              });
-            },
-            icon: const Icon(Icons.add),
-            label: const Text("Ends on another day"),
+      else if (endButtonShows)
+        Padding(
+          padding: EdgeInsetsDirectional.only(
+            start: _edge - _endButtonPadding.start,
+            end: _edge,
+          ),
+          child: Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton.icon(
+              style: TextButton.styleFrom(
+                padding: _endButtonPadding,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.standard,
+              ),
+              onPressed: () {
+                setState(() {
+                  _endDayShown = true;
+                });
+              },
+              icon: const Icon(Icons.add),
+              label: const Text("Ends on another day"),
+            ),
           ),
         ),
     ];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        for (final child in children)
-          Padding(padding: const EdgeInsets.only(bottom: 12.0), child: child),
-      ],
+    // The top and the bottom padding are measured to what the first and the
+    // last control show.
+    return Padding(
+      padding: EdgeInsets.only(
+        top: allDayShows ? _edge - _allDaySwitchTop : _edge,
+        bottom: endButtonShows ? _edge - _endButtonPadding.bottom : _edge,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          for (var index = 0; index < children.length; index++) ...<Widget>[
+            if (index > 0) const SizedBox(height: 12.0),
+            children[index],
+          ],
+        ],
+      ),
     );
   }
 }
@@ -637,16 +751,28 @@ String _lengthLabel(int minutes) {
   return "${hours}h ${rest}m";
 }
 
-/// The summary of [check]'s schedule, top to bottom: its date, or for an
-/// all-day schedule that spans days its first and last; its times, or "All
-/// day"; for a timed schedule that spans days, its start and its end
-/// instead, each with its date; its length, where a timed schedule has a
-/// positive one; "Times in" [zone]'s name, where a zone is given; and,
-/// while [CalendarScheduleCheck.overlaps] is not empty, an overlap notice
-/// naming them, whose "Next free time" sends
+/// The summary of [check]'s schedule, top to bottom: its date, and a timed
+/// schedule's times under it, or an all-day schedule's date alone, as large
+/// as times; for a schedule that spans days, its start and its end instead,
+/// each under its label, Start or End, in smaller type, and shrunk onto one
+/// line where its room is too narrow: a timed one's each a date and a
+/// time, an all-day one's its first and last day; and, while
+/// [CalendarScheduleCheck.overlaps] is not empty, an overlap
+/// notice naming them, whose "Next free time" sends
 /// [CalendarScheduleCheck.nextFree] to [onChanged] unless the form is
 /// [locked] or the check's start is fixed. Times are written on
 /// [hourLabelFormat]'s clock.
+///
+/// Its top right corner shows, in a light grey rounded box, [zone]'s name,
+/// its city ([CalendarZonePanel.cityOf]) or, for the device's zone,
+/// [CalendarLocalizations.deviceZoneName], above the zone's offset from UTC
+/// at the start ([CalendarLocalizations.utcOffset]), or at its day's start
+/// where the zone's clock skips the start; and under the box, a pill with a
+/// timer icon before the schedule's length: an all-day schedule's "All
+/// day" for one day, or its count of civil days, such as "3 days", for
+/// more; or a timed schedule's hours and minutes, where it is positive. The
+/// corner lies at the same place whatever lines the schedule shows beside
+/// it.
 class ScheduleSummary extends StatelessWidget {
   const ScheduleSummary({
     super.key,
@@ -687,18 +813,105 @@ class ScheduleSummary extends StatelessWidget {
     color: HarborColors.text,
   );
 
-  /// Both lines of a timed schedule that spans days.
+  /// Both lines of a schedule that spans days, each a date or a date and a
+  /// time, smaller than [_timesStyle] so that they fit beside the corner
+  /// on a narrow screen.
   static const TextStyle _spanStyle = TextStyle(
-    fontSize: 18.0,
+    fontSize: 14.0,
     fontWeight: FontWeight.w600,
     color: HarborColors.text,
   );
 
-  /// The length and the zone line.
-  static const TextStyle _detailStyle = TextStyle(
-    fontSize: 14.0,
+  /// The Start and End labels above the lines of a schedule that spans
+  /// days.
+  static const TextStyle _spanLabelStyle = TextStyle(
+    fontSize: 12.0,
+    fontWeight: FontWeight.w500,
     color: HarborColors.textMuted,
   );
+
+  /// The text of the pill.
+  static const TextStyle _lengthStyle = TextStyle(
+    fontSize: 12.0,
+    fontWeight: FontWeight.w600,
+    color: HarborColors.primary,
+  );
+
+  /// The zone's name in its box.
+  static const TextStyle _zoneNameStyle = TextStyle(
+    fontSize: 12.0,
+    fontWeight: FontWeight.w500,
+    color: HarborColors.textMuted,
+  );
+
+  /// The zone's offset under its name.
+  static const TextStyle _zoneOffsetStyle = TextStyle(
+    fontSize: 11.0,
+    color: HarborColors.textMuted,
+  );
+
+  /// [label] in a pill, a timer icon before it.
+  Widget _pill(String label) {
+    return DecoratedBox(
+      decoration: const ShapeDecoration(
+        color: HarborColors.primaryTint,
+        shape: StadiumBorder(),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8.0, 3.0, 10.0, 3.0),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Icon(
+              Icons.timer_outlined,
+              size: 14.0,
+              color: HarborColors.primary,
+            ),
+            const SizedBox(width: 4.0),
+            Text(label, key: scheduleSummaryLengthKey, style: _lengthStyle),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The zone's name above its offset from UTC at the schedule's start, in
+  /// a light grey rounded box.
+  Widget _zone(CalendarLocalizations strings) {
+    final zone = this.zone;
+    final schedule = check.schedule;
+    final day = CalendarDates.dayNumber(schedule.startDay);
+    final start =
+        CalendarDates.timeAtWallMinute(
+          day * CalendarDates.minutesPerDay + schedule.startMinute,
+          zone: zone,
+        ) ??
+        CalendarDates.dateOfDayNumber(day, zone: zone);
+    return Container(
+      key: scheduleSummaryZoneKey,
+      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(8.0),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: <Widget>[
+          Text(
+            zone == null
+                ? strings.deviceZoneName
+                : CalendarZonePanel.cityOf(zone),
+            style: _zoneNameStyle,
+          ),
+          Text(
+            strings.utcOffset(start.timeZoneOffset.inMinutes),
+            style: _zoneOffsetStyle,
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _overlapNotice() {
     final next = check.nextFree;
@@ -752,46 +965,109 @@ class ScheduleSummary extends StatelessWidget {
     final start = strings.formatTime(schedule.startMinute, hourLabelFormat);
     final end = strings.formatTime(schedule.endMinute, hourLabelFormat);
     final timed = !schedule.isAllDay;
-    final timedDays = timed && schedule.spansDays;
+    final spans = schedule.spansDays;
     final String first;
-    final String second;
+    final String? second;
     if (!timed) {
-      first = schedule.spansDays ? "$startDay - $endDay" : startDay;
-      second = "All day";
-    } else if (timedDays) {
-      first = "$startDay, $start -";
+      first = startDay;
+      second = spans ? endDay : null;
+    } else if (spans) {
+      first = "$startDay, $start";
       second = "$endDay, $end";
     } else {
       first = startDay;
       second = "$start - $end";
     }
-    final zone = this.zone;
+    final TextStyle firstStyle;
+    if (spans) {
+      firstStyle = _spanStyle;
+    } else if (timed) {
+      firstStyle = _dayStyle;
+    } else {
+      firstStyle = _timesStyle;
+    }
+    final firstLine = Text(
+      first,
+      key: scheduleSummaryFirstLineKey,
+      style: firstStyle,
+    );
+    final secondLine = second == null
+        ? null
+        : Text(
+            second,
+            key: scheduleSummarySecondLineKey,
+            style: spans ? _spanStyle : _timesStyle,
+          );
+    final String? pill;
+    if (!timed) {
+      final days =
+          CalendarDates.daysBetween(schedule.startDay, schedule.endDay) + 1;
+      pill = days > 1 ? "$days days" : "All day";
+    } else if (schedule.lengthMinutes > 0) {
+      pill = _lengthLabel(schedule.lengthMinutes);
+    } else {
+      pill = null;
+    }
+    // A line of a schedule that spans days sits under its label and, too
+    // wide for the room beside the corner, shrinks onto one line.
+    Widget spanLine(String label, Widget line) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text(label, style: _spanLabelStyle),
+          const SizedBox(height: 2.0),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: AlignmentDirectional.centerStart,
+            child: line,
+          ),
+        ],
+      );
+    }
+
     final lines = <Widget>[
-      Text(
-        first,
-        key: scheduleSummaryFirstLineKey,
-        style: timedDays ? _spanStyle : _dayStyle,
-      ),
-      Text(
-        second,
-        key: scheduleSummarySecondLineKey,
-        style: timedDays ? _spanStyle : _timesStyle,
-      ),
-      if (timed && schedule.lengthMinutes > 0)
-        Text(
-          _lengthLabel(schedule.lengthMinutes),
-          key: scheduleSummaryLengthKey,
-          style: _detailStyle,
-        ),
-      if (zone != null) Text("Times in ${zone.name}", style: _detailStyle),
+      if (secondLine == null)
+        firstLine
+      else if (spans) ...<Widget>[
+        spanLine("Start", firstLine),
+        spanLine("End", secondLine),
+      ] else ...<Widget>[firstLine, secondLine],
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        for (var index = 0; index < lines.length; index++) ...<Widget>[
-          if (index > 0) const SizedBox(height: 4.0),
-          lines[index],
-        ],
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  for (
+                    var index = 0;
+                    index < lines.length;
+                    index++
+                  ) ...<Widget>[
+                    if (index > 0) SizedBox(height: spans ? 8.0 : 4.0),
+                    lines[index],
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 12.0),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: <Widget>[
+                _zone(strings),
+                if (pill != null) ...<Widget>[
+                  const SizedBox(height: 6.0),
+                  _pill(pill),
+                ],
+              ],
+            ),
+          ],
+        ),
         if (check.overlaps.isNotEmpty) ...<Widget>[
           const SizedBox(height: 12.0),
           _overlapNotice(),

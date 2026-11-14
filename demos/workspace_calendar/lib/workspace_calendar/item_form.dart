@@ -2,10 +2,10 @@
 /// read-only, and the delete confirmation.
 ///
 /// The form opens in a modal bottom sheet, a scrolling page of three
-/// cards: the schedule's summary, which shows what its
-/// [CalendarScheduleCheck] answers; the schedule section, which every item
-/// type shares and which edits a [CalendarSchedule]; and the item's own
-/// fields, generated from the item type's schema. The check is made again
+/// cards: the schedule section, which every item type shares and which
+/// edits a [CalendarSchedule]; the schedule's summary, which shows what its
+/// [CalendarScheduleCheck] answers; and the item's own fields, generated
+/// from the item type's schema. The check is made again
 /// at each edit, at each change of the store and at the start of each
 /// minute. Save sends nothing while the check names a problem
 /// ([scheduleErrorsOf]) or the validator the API runs refuses the item;
@@ -848,12 +848,17 @@ class _ItemFormState extends State<_ItemForm> {
     }
   }
 
-  /// An outlined card keyed [key], with no heading, holding [child].
-  Widget _card(Key key, Widget child) {
+  /// An outlined card keyed [key], with no heading, holding [child] inside
+  /// [padding].
+  Widget _card(
+    Key key,
+    Widget child, {
+    EdgeInsetsGeometry padding = const EdgeInsets.all(16.0),
+  }) {
     return Card.outlined(
       key: key,
       margin: EdgeInsets.zero,
-      child: Padding(padding: const EdgeInsets.all(16.0), child: child),
+      child: Padding(padding: padding, child: child),
     );
   }
 
@@ -921,18 +926,11 @@ class _ItemFormState extends State<_ItemForm> {
       for (final field in _schema.fields) _fieldFor(field),
     ];
     final cards = <Widget>[
-      _card(
-        formSummaryCardKey,
-        ScheduleSummary(
-          check: _scheduleCheck,
-          hourLabelFormat: widget.hourLabelFormat,
-          zone: widget.store.zone,
-          locked: _locked,
-          onChanged: _scheduleChanged,
-        ),
-      ),
+      // The section pads itself to the card's edges, so that its controls'
+      // touch targets can reach into the padding.
       _card(
         formSchedulingCardKey,
+        padding: EdgeInsets.zero,
         ScheduleSection(
           check: _scheduleCheck,
           hours: widget.store.hours,
@@ -942,6 +940,16 @@ class _ItemFormState extends State<_ItemForm> {
           zone: widget.store.zone,
           locked: _locked,
           errors: _scheduleErrors(),
+          onChanged: _scheduleChanged,
+        ),
+      ),
+      _card(
+        formSummaryCardKey,
+        ScheduleSummary(
+          check: _scheduleCheck,
+          hourLabelFormat: widget.hourLabelFormat,
+          zone: widget.store.zone,
+          locked: _locked,
           onChanged: _scheduleChanged,
         ),
       ),
@@ -962,37 +970,45 @@ class _ItemFormState extends State<_ItemForm> {
       canPop: !_saving,
       child: _KeyboardInset(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 12.0),
+          padding: const EdgeInsets.only(top: 20.0, bottom: 12.0),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Text(
-                heading,
-                style: const TextStyle(
-                  fontSize: 20.0,
-                  fontWeight: FontWeight.w600,
-                  color: HarborColors.text,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                child: Text(
+                  heading,
+                  style: const TextStyle(
+                    fontSize: 20.0,
+                    fontWeight: FontWeight.w600,
+                    color: HarborColors.text,
+                  ),
                 ),
               ),
-              const SizedBox(height: 12.0),
+              // The page's padding lies inside its scroll view, so a drag
+              // anywhere across the sheet's width scrolls it.
               Flexible(
                 child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24.0, 12.0, 24.0, 12.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
-                      for (final card in cards)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12.0),
-                          child: card,
-                        ),
+                      for (
+                        var index = 0;
+                        index < cards.length;
+                        index++
+                      ) ...<Widget>[
+                        if (index > 0) const SizedBox(height: 12.0),
+                        cards[index],
+                      ],
                     ],
                   ),
                 ),
               ),
               if (message != null)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 8.0),
+                  padding: const EdgeInsets.fromLTRB(24.0, 0.0, 24.0, 8.0),
                   child: Text(
                     message,
                     style: const TextStyle(color: HarborColors.error),
@@ -1000,45 +1016,48 @@ class _ItemFormState extends State<_ItemForm> {
                 ),
               // Stacks the actions where a narrow screen cannot fit them in
               // a row.
-              OverflowBar(
-                alignment: MainAxisAlignment.end,
-                spacing: 8.0,
-                overflowAlignment: OverflowBarAlignment.end,
-                children: <Widget>[
-                  if (widget.readOnly)
-                    TextButton(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                      },
-                      child: const Text("Close"),
-                    ),
-                  if (_deletable)
-                    TextButton(
-                      onPressed: _saving ? null : _delete,
-                      child: const Text("Delete"),
-                    ),
-                  if (!widget.readOnly) ...<Widget>[
-                    TextButton(
-                      onPressed: _saving
-                          ? null
-                          : () {
-                              Navigator.of(context).pop();
-                            },
-                      child: const Text("Cancel"),
-                    ),
-                    FilledButton(
-                      onPressed: _saving ? null : _save,
-                      child: _saving
-                          ? const SizedBox.square(
-                              dimension: 16.0,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.0,
-                              ),
-                            )
-                          : const Text("Save"),
-                    ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                child: OverflowBar(
+                  alignment: MainAxisAlignment.end,
+                  spacing: 8.0,
+                  overflowAlignment: OverflowBarAlignment.end,
+                  children: <Widget>[
+                    if (widget.readOnly)
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                        },
+                        child: const Text("Close"),
+                      ),
+                    if (_deletable)
+                      TextButton(
+                        onPressed: _saving ? null : _delete,
+                        child: const Text("Delete"),
+                      ),
+                    if (!widget.readOnly) ...<Widget>[
+                      TextButton(
+                        onPressed: _saving
+                            ? null
+                            : () {
+                                Navigator.of(context).pop();
+                              },
+                        child: const Text("Cancel"),
+                      ),
+                      FilledButton(
+                        onPressed: _saving ? null : _save,
+                        child: _saving
+                            ? const SizedBox.square(
+                                dimension: 16.0,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.0,
+                                ),
+                              )
+                            : const Text("Save"),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ],
           ),
