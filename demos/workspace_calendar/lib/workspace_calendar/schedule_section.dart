@@ -1067,11 +1067,13 @@ class ScheduleSummary extends StatelessWidget {
 
 /// The panel under a Start or End row that holds its time field's picker,
 /// which [builder] builds, called only while the panel shows. As [open]
-/// turns true it grows from no height to the picker's and fades in, and as
-/// it turns false it shrinks and fades out, over the [CalendarTheme]'s
-/// motion, or at once where the platform asks for no animations
-/// ([MediaQuery.disableAnimationsOf]), a motion under way included; it
-/// shows nothing once closed. A panel made while [open] shows its picker at
+/// turns true it grows from no height to the picker's over the
+/// [CalendarTheme]'s motion, the picker fading in over the motion's first
+/// half, and as it turns false it plays that backwards: it shrinks over the
+/// motion, the picker fading out over its last half. Both happen at once
+/// where the platform asks for no animations
+/// ([MediaQuery.disableAnimationsOf]), a motion under way included; the
+/// panel shows nothing once closed. A panel made while [open] shows its picker at
 /// once. Once it has opened, and again where [revealKey] changes while it
 /// is open, as the picker's footer comes or goes, it scrolls into view: its
 /// time field, whose [Focus] has [field] for its node, where the field lies
@@ -1099,10 +1101,20 @@ class _PickerPanel extends StatefulWidget {
 
 class _PickerPanelState extends State<_PickerPanel>
     with SingleTickerProviderStateMixin {
+  /// The share of the motion, from the panel's closed end, over which the
+  /// picker fades.
+  static const double _fadeShare = 0.5;
+
   late final AnimationController _controller;
 
-  /// [_controller] on the theme's curve, which both transitions read.
+  /// [_controller] on the theme's curve, which the panel's height reads.
   late final CurvedAnimation _curved;
+
+  /// The first [_fadeShare] of [_controller] on the theme's curve, which
+  /// the picker's opacity reads. [CurvedAnimation] applies a curve with no
+  /// reverse curve both ways, so the opacity is one function of how far
+  /// open the panel is, and a reversal mid-motion keeps it continuous.
+  late final CurvedAnimation _fade;
 
   @override
   void initState() {
@@ -1111,9 +1123,10 @@ class _PickerPanelState extends State<_PickerPanel>
       vsync: this,
       value: widget.open ? 1.0 : 0.0,
     )..addStatusListener(_statusChanged);
-    // The theme's curve replaces this one in didChangeDependencies, which
+    // The theme's curve replaces these in didChangeDependencies, which
     // runs before the first build.
     _curved = CurvedAnimation(parent: _controller, curve: Curves.linear);
+    _fade = CurvedAnimation(parent: _controller, curve: Curves.linear);
   }
 
   @override
@@ -1121,6 +1134,7 @@ class _PickerPanelState extends State<_PickerPanel>
     super.didChangeDependencies();
     final theme = CalendarTheme.of(context);
     _curved.curve = theme.motionCurve;
+    _fade.curve = Interval(0.0, _fadeShare, curve: theme.motionCurve);
     final duration = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero
         : theme.motionDuration;
@@ -1158,6 +1172,7 @@ class _PickerPanelState extends State<_PickerPanel>
 
   @override
   void dispose() {
+    _fade.dispose();
     _curved.dispose();
     _controller.dispose();
     super.dispose();
@@ -1202,7 +1217,7 @@ class _PickerPanelState extends State<_PickerPanel>
       return const SizedBox.shrink();
     }
     return FadeTransition(
-      opacity: _curved,
+      opacity: _fade,
       child: SizeTransition(
         sizeFactor: _curved,
         alignment: Alignment.topCenter,

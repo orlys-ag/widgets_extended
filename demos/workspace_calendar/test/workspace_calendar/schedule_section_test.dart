@@ -2032,8 +2032,9 @@ void main() {
   });
 
   testWidgets("FR4 a tap on End time while Start's picker is open shrinks "
-      "and fades out Start's panel while End's grows and fades in, over the "
-      "theme's motion, the closing picker taking no pick; then End's picker "
+      "Start's panel while End's grows, over the theme's motion, Start's "
+      "picker fading out over the motion's last half as End's fades in over "
+      "its first, the closing picker taking no pick; then End's picker "
       "alone shows, its Hour column holding the focus", (tester) async {
     await pumpSection(
       tester,
@@ -2049,19 +2050,18 @@ void main() {
 
     await tester.tap(timeFieldFinder("End time"));
     await tester.pump();
-    // 240 ms after the tap's own frame, half the theme's 480 ms.
-    await tester.pump(const Duration(milliseconds: 240));
+    // 120 ms after the tap's own frame, a quarter of the theme's linear
+    // 480 ms.
+    await tester.pump(const Duration(milliseconds: 120));
+    final endFull = settledPanelHeight(tester, "End time");
     expect(
       panelHeight(tester, "Start time"),
-      moreOrLessEquals(startFull / 2, epsilon: 1.0),
+      moreOrLessEquals(startFull * 3 / 4, epsilon: 1.0),
     );
-    expect(
-      panelOpacity(tester, "Start time"),
-      moreOrLessEquals(0.5, epsilon: 0.01),
-    );
+    expect(panelOpacity(tester, "Start time"), 1.0);
     expect(
       panelHeight(tester, "End time"),
-      moreOrLessEquals(settledPanelHeight(tester, "End time") / 2, epsilon: 1),
+      moreOrLessEquals(endFull / 4, epsilon: 1.0),
     );
     expect(
       panelOpacity(tester, "End time"),
@@ -2073,6 +2073,21 @@ void main() {
           .onChanged,
       isNull,
     );
+    // Three quarters of the motion.
+    await tester.pump(const Duration(milliseconds: 240));
+    expect(
+      panelHeight(tester, "Start time"),
+      moreOrLessEquals(startFull / 4, epsilon: 1.0),
+    );
+    expect(
+      panelOpacity(tester, "Start time"),
+      moreOrLessEquals(0.5, epsilon: 0.01),
+    );
+    expect(
+      panelHeight(tester, "End time"),
+      moreOrLessEquals(endFull * 3 / 4, epsilon: 1.0),
+    );
+    expect(panelOpacity(tester, "End time"), 1.0);
 
     await tester.pumpAndSettle();
     expect(timePickerFinder("Start time"), findsNothing);
@@ -2176,9 +2191,11 @@ void main() {
     );
   });
 
-  testWidgets("FP1 the panel grows and fades in over the theme's motion as "
-      "Start time opens it, and shrinks and fades out as the field closes "
-      "it, its picker neither rebuilt nor asked in between", (tester) async {
+  testWidgets("FP1 the panel grows over the theme's motion as Start time "
+      "opens it, its picker fading in over the motion's first half, and "
+      "shrinks over it as the field closes it, the picker fading out over "
+      "the motion's last half, the picker neither rebuilt nor asked in "
+      "between", (tester) async {
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
@@ -2189,14 +2206,16 @@ void main() {
     var full = 0.0;
     var asks = debugSchedulePickerAsks;
     final opening = await pickerRebuildsDuring(() async {
-      await tester.pump(const Duration(milliseconds: 16));
+      // 120 ms after the tap's own frame, a quarter of the theme's linear
+      // 480 ms.
+      await tester.pump(const Duration(milliseconds: 120));
       full = settledPanelHeight(tester);
-      expect(panelHeight(tester), lessThan(full));
-      expect(panelOpacity(tester), lessThan(1.0));
-      // 240 ms after the tap's own frame, half the theme's 480 ms.
-      await tester.pump(const Duration(milliseconds: 224));
+      expect(panelHeight(tester), moreOrLessEquals(full / 4, epsilon: 1.0));
       expect(panelOpacity(tester), moreOrLessEquals(0.5, epsilon: 0.01));
+      // Half the motion.
+      await tester.pump(const Duration(milliseconds: 120));
       expect(panelHeight(tester), moreOrLessEquals(full / 2, epsilon: 1.0));
+      expect(panelOpacity(tester), 1.0);
       await tester.pump(const Duration(milliseconds: 240));
       expect(panelHeight(tester), full);
       expect(panelOpacity(tester), 1.0);
@@ -2208,11 +2227,15 @@ void main() {
     await tester.pump();
     asks = debugSchedulePickerAsks;
     final closing = await pickerRebuildsDuring(() async {
-      await tester.pump(const Duration(milliseconds: 16));
-      expect(panelHeight(tester), lessThan(full));
-      expect(panelHeight(tester), greaterThan(0.0));
-      expect(panelOpacity(tester), lessThan(1.0));
-      await tester.pump(const Duration(milliseconds: 464));
+      // Half the motion.
+      await tester.pump(const Duration(milliseconds: 240));
+      expect(panelHeight(tester), moreOrLessEquals(full / 2, epsilon: 1.0));
+      expect(panelOpacity(tester), 1.0);
+      // Three quarters of the motion.
+      await tester.pump(const Duration(milliseconds: 120));
+      expect(panelHeight(tester), moreOrLessEquals(full / 4, epsilon: 1.0));
+      expect(panelOpacity(tester), moreOrLessEquals(0.5, epsilon: 0.01));
+      await tester.pump(const Duration(milliseconds: 120));
       expect(panelHeight(tester), 0.0);
       // The motion is done, and drops the picker, in its first frame past
       // its duration: AnimationController's simulation is done only past it.
