@@ -74,17 +74,6 @@ ValueKey<String> _timeFieldKey(String label) {
   throw ArgumentError.value(label, "label", "names no time field");
 }
 
-/// The key of the picker the form's time field labelled [label] opens.
-ValueKey<String> _timePickerKey(String label) {
-  switch (label) {
-    case "Start time":
-      return scheduleStartPickerKey;
-    case "End time":
-      return scheduleEndPickerKey;
-  }
-  throw ArgumentError.value(label, "label", "names no time field");
-}
-
 /// The form's time field labelled [label], "Start time" or "End time".
 Finder timeFieldFinder(String label) {
   return find.byKey(_timeFieldKey(label));
@@ -109,12 +98,14 @@ bool timeFieldTakesInput(WidgetTester tester, String label) {
       null;
 }
 
-/// The picker open under the form's time field labelled [label].
+/// The form's one time picker while it edits the time field labelled
+/// [label]: the [CalendarTimePicker] whose [CalendarTimePicker.subject] is
+/// that field's key.
 Finder timePickerFinder(String label) {
-  return find.descendant(
-    of: find.byKey(_timePickerKey(label)),
-    matching: find.byType(CalendarTimePicker),
-  );
+  final key = _timeFieldKey(label);
+  return find.byWidgetPredicate((widget) {
+    return widget is CalendarTimePicker && widget.subject == key;
+  }, description: "the time picker of $label");
 }
 
 /// The minute after midnight [time] names, written "HH:MM" on the 24-hour
@@ -327,37 +318,16 @@ void expectFormDays(String day, int days) {
   }
 }
 
-/// The form's All day chip, the last of its length chips.
-Finder allDayChip() {
-  return find.widgetWithText(ChoiceChip, "All day");
+/// The form's All day switch.
+Finder allDaySwitch() {
+  return find.byKey(scheduleAllDayKey);
 }
 
-/// Whether the form's All day chip is selected.
+/// Whether the form's All day switch is on; false where it does not show.
 bool formAllDayOn() {
-  final chips = allDayChip().evaluate();
-  return chips.isNotEmpty && (chips.single.widget as ChoiceChip).selected;
-}
-
-/// The labels of the form's length chips, All day among them, in order;
-/// only the selected ones where [selectedOnly].
-List<String> chipLabels(WidgetTester tester, {bool selectedOnly = false}) {
-  return tester
-      .widgetList<ChoiceChip>(find.byType(ChoiceChip))
-      .where((chip) {
-        return !selectedOnly || chip.selected;
-      })
-      .map((chip) {
-        return (chip.label as Text).data!;
-      })
-      .toList();
-}
-
-/// Whether each of the form's length chips, All day among them, takes a
-/// tap, in order.
-List<bool> chipsEnabled(WidgetTester tester) {
-  return tester.widgetList<ChoiceChip>(find.byType(ChoiceChip)).map((chip) {
-    return chip.onSelected != null;
-  }).toList();
+  final switches = allDaySwitch().evaluate();
+  return switches.isNotEmpty &&
+      (switches.single.widget as SwitchListTile).value;
 }
 
 /// Expects the create flow, picks [type], and expects its form prefilled
@@ -370,6 +340,10 @@ Future<void> expectCreateForm(
   required String end,
 }) async {
   expect(find.text("New item"), findsOneWidget);
+  // The type selector sits in the item card, the page's last, which can
+  // lie below the form's view.
+  await tester.ensureVisible(find.text(type).last);
+  await tester.pumpAndSettle();
   await tester.tap(find.text(type).last);
   await tester.pumpAndSettle();
   expectFormDays(day, 1);

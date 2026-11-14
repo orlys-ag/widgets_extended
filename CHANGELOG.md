@@ -875,6 +875,22 @@ minute its start may take and the next free range of its length, under a
 kind's `CalendarScheduleOptions`. `CalendarEditRules.firstSlot` takes an
 optional `lengthMinutes`, the length of the range it finds, still
 stepping by the slot.
+- Added `CalendarScheduleCheck.timesChecked`, whether a schedule's end is
+after its start and the clock reads both its times, so that its problems
+hold every rule's answer, and `CalendarScheduleCheck.withSchedule`, the
+check of another schedule under the same rules, time, entry, others and
+options.
+- Added `CalendarTimePicker.subject`, what the picker edits: a new subject
+ends every hold, user motion and typed digit without a report and moves
+the columns to the value over the theme's motion, so one picker can serve
+several fields; and `CalendarTimePicker.nowPicksLater`, under which Now,
+where the latest time at or before now is not offered, picks the first
+later time the picker offers.
+- Removed `CalendarScheduleOptions.lengthChoices` and
+`CalendarScheduleOptions.defaultLengthChoices`, with the constructor's
+`lengthChoices` parameter: the options hold `allowsAllDay` and `spansDays`
+alone, the constructor is `const`, and `CalendarScheduleOptions.standard`
+is a `static const`.
 
 ## 0.0.35
 

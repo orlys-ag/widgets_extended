@@ -379,7 +379,13 @@ void main() {
   testWidgets("K11 a past item's form is read-only; a running one's keeps "
       "its day and start, has no Delete and refuses an end before now; a "
       "later one's refuses a start before now", (tester) async {
-    await pumpLocked(tester);
+    var now = midMorning;
+    final api = await pumpLocked(
+      tester,
+      clock: () {
+        return now;
+      },
+    );
     await pickMode(tester, "Week");
     await tester.tap(blockFinder(pastId));
     await tester.pumpAndSettle();
@@ -398,20 +404,31 @@ void main() {
       ),
     );
     expect(day.onTap, isNull);
-    await pickTime(tester, "End time", "11:00");
-    await tester.tap(find.byType(FilledButton));
+    // An end before now is refused; one after it is not.
+    await openTimePicker(tester, "End time");
+    expect(timeEnabled(tester, "End time", "11:00"), isFalse);
+    expect(timeEnabled(tester, "End time", "11:15"), isTrue);
+    // An end now passes while the form is open, Save refuses, sending
+    // nothing.
+    await pickTime(tester, "End time", "11:15");
+    now = DateTime(2026, 4, 21, 11, 20);
+    final sent = api.requests.length;
+    await tester.tap(saveFinder());
     await tester.pumpAndSettle();
     expect(find.text("The end can't be in the past."), findsOneWidget);
+    expect(api.requests, hasLength(sent));
+    now = midMorning;
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
     await tester.tap(blockFinder(laterId));
     await tester.pumpAndSettle();
     expect(formButton("Delete"), findsOneWidget);
-    // A start before now is refused; one after it is not.
+    // A start before now is refused; one after it, whose hour shares no
+    // time with the running item, is not.
     await openTimePicker(tester, "Start time");
     expect(timeEnabled(tester, "Start time", "10:00"), isFalse);
-    expect(timeEnabled(tester, "Start time", "11:15"), isTrue);
+    expect(timeEnabled(tester, "Start time", "12:00"), isTrue);
   });
 
   testWidgets("K12 in Agenda an ended item's card has no menu, a running "

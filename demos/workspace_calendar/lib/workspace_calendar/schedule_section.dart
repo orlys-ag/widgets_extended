@@ -1,6 +1,7 @@
-/// The item form's schedule section: the part of the form any item type
-/// shares, which edits a [CalendarSchedule] and shows what its
-/// [CalendarScheduleCheck] answers as the user edits.
+/// The item form's schedule summary and schedule section, the parts of the
+/// form any item type shares: the section edits a [CalendarSchedule], and
+/// the summary shows it and what its [CalendarScheduleCheck] answers as the
+/// user edits.
 library;
 
 import 'dart:math' as math;
@@ -11,12 +12,25 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'calendar_item.dart';
 import 'harbor_theme.dart';
 
-/// The key of the section's summary line.
-const ValueKey<String> scheduleSummaryKey = ValueKey<String>(
-  "schedule-summary",
+/// The key of the summary's first line: the schedule's date, or its days,
+/// or the start of a timed schedule that spans days.
+const ValueKey<String> scheduleSummaryFirstLineKey = ValueKey<String>(
+  "schedule-summary-first-line",
 );
 
-/// The key of the section's overlap notice.
+/// The key of the summary's second line: the schedule's times, "All day",
+/// or the end of a timed schedule that spans days.
+const ValueKey<String> scheduleSummarySecondLineKey = ValueKey<String>(
+  "schedule-summary-second-line",
+);
+
+/// The key of the summary's length line, which a timed schedule of a
+/// positive length shows.
+const ValueKey<String> scheduleSummaryLengthKey = ValueKey<String>(
+  "schedule-summary-length",
+);
+
+/// The key of the summary's overlap notice.
 const ValueKey<String> scheduleOverlapKey = ValueKey<String>(
   "schedule-overlap",
 );
@@ -31,32 +45,45 @@ const ValueKey<String> scheduleEndTimeKey = ValueKey<String>(
   "schedule-end-time",
 );
 
-/// The key of the start's picker, open under the time row.
-const ValueKey<String> scheduleStartPickerKey = ValueKey<String>(
-  "schedule-start-picker",
-);
+/// The key of the All day switch.
+const ValueKey<String> scheduleAllDayKey = ValueKey<String>("schedule-all-day");
 
-/// The key of the end's picker, open under the time row.
-const ValueKey<String> scheduleEndPickerKey = ValueKey<String>(
-  "schedule-end-picker",
-);
+/// The key of the panel under the time row that holds the section's one
+/// time picker.
+const ValueKey<String> schedulePickerKey = ValueKey<String>("schedule-picker");
 
-/// The section of [check]'s schedule: a summary line; Start date; Start
-/// time and End time, each a field whose tap opens a [CalendarTimePicker]
-/// under their row, one at a time, with its haptic feedback on, the
-/// start's times before the first a start may take refused, on the start
-/// day only ends after the start offered, and every time [zone]'s clock
-/// skips refused; an End date for an all-day or a multi-day schedule, or
-/// after "Ends on another day"; a row of length chips and, after them,
-/// All day, where a length makes an all-day schedule timed at that length;
-/// an overlap notice with "Next free time"; and the store's zone where it
-/// has one. Times are written on [hourLabelFormat]'s clock.
+/// The section of [check]'s schedule: an All day switch, where the kind
+/// takes all-day or the schedule is all-day, which turned off restores the
+/// times the schedule keeps; Start date; Start time and End time, each a
+/// field whose tap opens the one [CalendarTimePicker], with its haptic
+/// feedback on, in a panel under their row; and an End date for an all-day
+/// or a multi-day schedule, or after "Ends on another day". Times are
+/// written on [hourLabelFormat]'s clock. [ScheduleSummary] shows the
+/// schedule, its overlaps and its zone.
+///
+/// The panel grows and fades in as a field's tap opens it, and shrinks and
+/// fades out as the open field's tap closes it, over the [CalendarTheme]'s
+/// motion, or at once where the platform asks for no animations; it then
+/// scrolls into view. A tap on the other field while the panel is open hands
+/// the picker to that field: the panel stays, and the picker's columns move
+/// to the field's time.
+///
+/// A picker refuses a time only for a problem some other time of it
+/// avoids: of the check of the schedule with each of the picker's times
+/// ([CalendarScheduleCheck.withSchedule]), it takes as witnesses those whose
+/// times are checked ([CalendarScheduleCheck.timesChecked]), or every time
+/// where none is, and refuses a time whose check names a problem that not
+/// every witness's check names. The start's picker offers the hours'
+/// starts, the end's its ends, on the start day only those after the
+/// start. A picker's Now shows only on a field whose day is [now]'s today,
+/// and where the time at or before now is refused picks the first later
+/// time the picker offers.
 ///
 /// Every edit goes to [onChanged] as a new schedule. A [locked] section
 /// takes no input; a [CalendarScheduleCheck.startFixed] one takes none at
 /// its start or kind. An open picker stays open as its field locks, taking
-/// no pick, until its field's tap or All day closes it. [errors] holds the
-/// form's messages keyed `start` and `end`.
+/// no pick, until its field's tap or the All day switch closes it.
+/// [errors] holds the form's messages keyed `start` and `end`.
 class ScheduleSection extends StatefulWidget {
   const ScheduleSection({
     super.key,
@@ -79,17 +106,18 @@ class ScheduleSection extends StatefulWidget {
   /// The step of the pickers' times.
   final int slotMinutes;
 
-  /// The clock the summary, the time fields and the pickers write times on.
+  /// The clock the time fields and the pickers write times on.
   final CalendarHourLabelFormat hourLabelFormat;
 
   /// The current time, whose minute on [zone]'s clock the pickers' Now
-  /// picks.
+  /// picks; Now shows only on a field whose day is its
+  /// [CalendarNow.today].
   final ValueGetter<CalendarNow> now;
 
   final ValueChanged<CalendarSchedule> onChanged;
 
-  /// The zone the times are on, which the section names; none for the
-  /// device's.
+  /// The zone the times are on, on whose clock the pickers' Now reads the
+  /// current minute; none for the device's.
   final Location? zone;
 
   final bool locked;
@@ -105,6 +133,104 @@ class ScheduleSection extends StatefulWidget {
 /// A time field of the section.
 enum _TimeField { start, end }
 
+/// The lookups the open picker has made of its [_TimeTable], in debug
+/// builds; the release build counts none.
+int debugSchedulePickerAsks = 0;
+
+/// Which times of [field]'s picker, from [min] to [max] on the [slot]
+/// grid, the picker offers under [check]: each time's check is
+/// [CalendarScheduleCheck.withSchedule] of the schedule with that time, or
+/// [check] itself at the field's own time; the witnesses are the times
+/// whose check has [CalendarScheduleCheck.timesChecked], or every time
+/// where none has; and a time is offered where each of its problems is a
+/// problem of every witness. Computed at the first lookup, and kept while
+/// the picker's [check], [field], [min], [max] and [slot] stay.
+class _TimeTable {
+  _TimeTable({
+    required this.check,
+    required this.field,
+    required this.min,
+    required this.max,
+    required this.slot,
+  });
+
+  final CalendarScheduleCheck<ItemPayload> check;
+  final _TimeField field;
+  final int min;
+  final int max;
+  final int slot;
+
+  List<bool>? _offered;
+
+  /// The first time on the grid at or after [min].
+  int get _first {
+    return (min + slot - 1) ~/ slot * slot;
+  }
+
+  /// Whether the table answers for these parameters.
+  bool holds(
+    CalendarScheduleCheck<ItemPayload> check,
+    _TimeField field,
+    int min,
+    int max,
+    int slot,
+  ) {
+    return identical(this.check, check) &&
+        this.field == field &&
+        this.min == min &&
+        this.max == max &&
+        this.slot == slot;
+  }
+
+  /// Whether the picker offers [minute], a time on the grid from [min] to
+  /// [max].
+  bool offers(int minute) {
+    assert(() {
+      debugSchedulePickerAsks++;
+      return true;
+    }());
+    final first = _first;
+    assert(
+      minute >= first && minute <= max && (minute - first) % slot == 0,
+      "$minute lies off the table of $first to $max by $slot",
+    );
+    final offered = _offered ??= _compute();
+    return offered[(minute - first) ~/ slot];
+  }
+
+  List<bool> _compute() {
+    final schedule = check.schedule;
+    final start = field == _TimeField.start;
+    final own = start ? schedule.startMinute : schedule.endMinute;
+    final checks = <CalendarScheduleCheck<ItemPayload>>[
+      for (var time = _first; time <= max; time += slot)
+        if (time == own)
+          check
+        else
+          check.withSchedule(
+            start
+                ? schedule.withStartMinute(time)
+                : schedule.withEndMinute(time),
+          ),
+    ];
+    var witnesses = checks.where((each) {
+      return each.timesChecked;
+    });
+    if (witnesses.isEmpty) {
+      witnesses = checks;
+    }
+    Set<CalendarScheduleProblem>? shared;
+    for (final witness in witnesses) {
+      final problems = witness.problems.toSet();
+      shared = shared == null ? problems : shared.intersection(problems);
+    }
+    final every = shared ?? const <CalendarScheduleProblem>{};
+    return <bool>[
+      for (final each in checks) each.problems.every(every.contains),
+    ];
+  }
+}
+
 class _ScheduleSectionState extends State<ScheduleSection> {
   /// Whether "Ends on another day" showed the End date of a schedule that
   /// ends on its start day.
@@ -112,6 +238,14 @@ class _ScheduleSectionState extends State<ScheduleSection> {
 
   /// The field whose picker is open; none where null.
   _TimeField? _open;
+
+  /// The field the panel's picker edits: the open one, or else the last
+  /// open one, whose picker the panel builds only while it closes; none
+  /// where null.
+  _TimeField? _shown;
+
+  /// The open picker's table, kept across builds while it holds.
+  _TimeTable? _table;
 
   final FocusNode _startFieldNode = FocusNode(debugLabel: "Start time");
   final FocusNode _endFieldNode = FocusNode(debugLabel: "End time");
@@ -128,8 +262,8 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     skipTraversal: true,
   );
 
-  final FocusNode _startHourNode = FocusNode(debugLabel: "Start Hour column");
-  final FocusNode _endHourNode = FocusNode(debugLabel: "End Hour column");
+  /// The node of the picker's Hour column, whichever field it edits.
+  final FocusNode _pickerHourNode = FocusNode(debugLabel: "Hour column");
   final FocusNode _allDayNode = FocusNode(debugLabel: "All day");
 
   @override
@@ -137,6 +271,7 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     super.didUpdateWidget(oldWidget);
     if (_schedule.isAllDay) {
       _open = null;
+      _shown = null;
     }
   }
 
@@ -146,8 +281,7 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     _endFieldNode.dispose();
     _startRestNode.dispose();
     _endRestNode.dispose();
-    _startHourNode.dispose();
-    _endHourNode.dispose();
+    _pickerHourNode.dispose();
     _allDayNode.dispose();
     super.dispose();
   }
@@ -214,18 +348,19 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     return field == _TimeField.start ? !_startLocked : !widget.locked;
   }
 
-  /// Opens [field]'s picker, closing the other's, or closes it where it is
-  /// open. A picker closed while a column moves drops that motion's pick:
-  /// disposing the picker cancels the motion's [TickerFuture], so the time
-  /// it would come to rest on is never reported.
+  /// Opens the panel with [field]'s picker, hands the open picker to
+  /// [field] where the other field's is open, or closes the panel where
+  /// [field]'s is open. A spin of the picker's columns that the tap cuts off
+  /// reports nothing: a close gives the closing picker a null `onChanged`,
+  /// and a switch gives the picker a new [CalendarTimePicker.subject].
   void _tapTimeField(_TimeField field) {
     final start = field == _TimeField.start;
     if (_open == field) {
       setState(() {
         _open = null;
       });
-      // Made before the next frame, so the picker's Hour column no longer
-      // holds the focus as it leaves the tree.
+      // Made before the next frame, so the closing picker's Hour column no
+      // longer holds the focus as the panel shrinks and leaves the tree.
       if (_takesInput(field)) {
         (start ? _startFieldNode : _endFieldNode).requestFocus();
       } else {
@@ -235,11 +370,12 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     }
     setState(() {
       _open = field;
+      _shown = field;
     });
-    // The request waits for the new picker's Hour column to join the tree,
-    // and so wins over the focus the other picker's column drops as it
-    // leaves.
-    (start ? _startHourNode : _endHourNode).requestFocus();
+    // The picker's Hour column takes the focus as the panel opens, the
+    // request waiting for the column to join the tree where the panel was
+    // closed.
+    _pickerHourNode.requestFocus();
   }
 
   /// The Start time or End time field, showing [minute]; its tap opens or
@@ -279,117 +415,292 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     );
   }
 
-  /// The start's picker: the hours' times a start may take, each refused
-  /// before the first start the check allows, other than the start itself,
-  /// and where the schedule's own reading of it finds the clock skips it.
-  Widget _startPicker(CalendarSchedule schedule) {
-    final hours = widget.hours;
+  /// The table of [field]'s picker from [min] to [max]: the kept one where
+  /// it holds for the section's check, these bounds and the slot, and a new
+  /// one otherwise.
+  _TimeTable _tableFor(_TimeField field, int min, int max) {
+    final check = widget.check;
     final slot = widget.slotMinutes;
-    final first = widget.check.firstStartMinute;
-    final zone = widget.zone;
-    return CalendarTimePicker(
-      value: schedule.startMinute,
-      onChanged: _startLocked
-          ? null
-          : (minute) {
-              if (minute != null) {
-                _change(schedule.withStartMinute(minute));
-              }
-            },
-      hourLabelFormat: widget.hourLabelFormat,
-      minuteStep: slot,
-      min: hours.start,
-      max: math.max(hours.start, hours.end - slot),
-      isEnabled: (minute) {
-        return (first == null ||
-                minute >= first ||
-                minute == schedule.startMinute) &&
-            !schedule.withStartMinute(minute).startSkippedOn(zone);
-      },
-      now: _nowMinute,
-      focusNode: _startHourNode,
-      hapticFeedback: true,
+    final table = _table;
+    if (table != null && table.holds(check, field, min, max, slot)) {
+      return table;
+    }
+    return _table = _TimeTable(
+      check: check,
+      field: field,
+      min: min,
+      max: max,
+      slot: slot,
     );
   }
 
-  /// The end's picker: the hours' ends, on the start's day only those after
-  /// the start, each refused where the schedule's own reading of it finds
-  /// the clock skips it. An end on its start's day whose start leaves no
-  /// such end in the hours has a row for its own time alone.
-  Widget _endPicker(CalendarSchedule schedule) {
+  /// The current minute for a picker whose field lies on [day]: Now shows
+  /// only where [day] is the [CalendarNow.today] of [ScheduleSection.now].
+  ValueGetter<int>? _nowOn(DateTime day) {
+    final today = widget.now().today;
+    if (CalendarDates.dayNumber(day) != CalendarDates.dayNumber(today)) {
+      return null;
+    }
+    return _nowMinute;
+  }
+
+  /// The day of [field]'s time.
+  DateTime _dayOf(_TimeField field) {
+    return field == _TimeField.start ? _schedule.startDay : _schedule.endDay;
+  }
+
+  /// The panel's picker, editing [field], whose key is its
+  /// [CalendarTimePicker.subject]: the start's offers the hours' starts; the
+  /// end's the hours' ends, on the start's day only those after the start,
+  /// or where the start leaves no such end in the hours a row for its own
+  /// time alone. Each time is offered as its [_TimeTable] answers, so a time
+  /// is refused only for a problem some other time of the picker avoids. It
+  /// takes no pick while the panel closes or where [field] takes no input.
+  Widget _picker(_TimeField field) {
+    final schedule = _schedule;
     final hours = widget.hours;
     final slot = widget.slotMinutes;
-    final zone = widget.zone;
-    final spans = schedule.spansDays;
-    var min = hours.start + slot;
-    var max = hours.end;
-    if (!spans) {
-      min = math.max(min, schedule.startMinute + 1);
-    }
-    if (min > max) {
-      min = schedule.endMinute;
-      max = schedule.endMinute;
+    final start = field == _TimeField.start;
+    int min;
+    int max;
+    if (start) {
+      min = hours.start;
+      max = math.max(hours.start, hours.end - slot);
+    } else {
+      min = hours.start + slot;
+      max = hours.end;
+      if (!schedule.spansDays) {
+        min = math.max(min, schedule.startMinute + 1);
+      }
+      if (min > max) {
+        min = schedule.endMinute;
+        max = schedule.endMinute;
+      }
     }
     return CalendarTimePicker(
-      value: schedule.endMinute,
-      onChanged: widget.locked
+      subject: start ? scheduleStartTimeKey : scheduleEndTimeKey,
+      value: start ? schedule.startMinute : schedule.endMinute,
+      onChanged: _open == null || !_takesInput(field)
           ? null
           : (minute) {
               if (minute != null) {
-                _change(schedule.withEndMinute(minute));
+                _change(
+                  start
+                      ? schedule.withStartMinute(minute)
+                      : schedule.withEndMinute(minute),
+                );
               }
             },
       hourLabelFormat: widget.hourLabelFormat,
       minuteStep: slot,
       min: min,
       max: max,
-      isEnabled: (minute) {
-        return (spans || minute > schedule.startMinute) &&
-            !schedule.withEndMinute(minute).endSkippedOn(zone);
-      },
-      now: _nowMinute,
-      focusNode: _endHourNode,
+      isEnabled: _tableFor(field, min, max).offers,
+      now: _nowOn(_dayOf(field)),
+      nowPicksLater: true,
+      focusNode: _pickerHourNode,
       hapticFeedback: true,
     );
   }
 
-  String _lengthLabel(int minutes) {
-    final hours = minutes ~/ 60;
-    final rest = minutes % 60;
-    if (hours == 0) {
-      return "${rest}m";
-    }
-    if (rest == 0) {
-      return "${hours}h";
-    }
-    return "${hours}h ${rest}m";
-  }
-
-  String _summary(BuildContext context) {
-    final dates = MaterialLocalizations.of(context);
-    final strings = CalendarLocalizations.of(context);
+  @override
+  Widget build(BuildContext context) {
     final schedule = _schedule;
-    final startDay = dates.formatMediumDate(schedule.startDay);
-    final endDay = dates.formatMediumDate(schedule.endDay);
-    if (schedule.isAllDay) {
-      return schedule.spansDays
-          ? "$startDay - $endDay, all day"
-          : "$startDay, all day";
-    }
-    final start = strings.formatTime(
-      schedule.startMinute,
-      widget.hourLabelFormat,
+    final errors = widget.errors;
+    final locked = widget.locked;
+    final startLocked = _startLocked;
+    final open = _open;
+    final shown = _shown;
+    final timed = !schedule.isAllDay;
+    final showsEndDay =
+        schedule.isAllDay ||
+        schedule.spansDays ||
+        (_endDayShown && _options.spansDays);
+    final children = <Widget>[
+      if (_options.allowsAllDay || schedule.isAllDay)
+        SwitchListTile(
+          key: scheduleAllDayKey,
+          contentPadding: EdgeInsets.zero,
+          title: const Text("All day"),
+          value: schedule.isAllDay,
+          focusNode: _allDayNode,
+          onChanged: startLocked
+              ? null
+              : (on) {
+                  if (on) {
+                    // The time row and its open picker go away; the focus
+                    // their Hour column held moves to the switch, not to
+                    // the scope's last focused node.
+                    setState(() {
+                      _open = null;
+                      _shown = null;
+                    });
+                    _allDayNode.requestFocus();
+                  }
+                  _change(schedule.withAllDay(on));
+                },
+        ),
+      _dateField(
+        label: "Start date",
+        date: schedule.startDay,
+        error: timed ? null : errors["start"],
+        onPicked: startLocked
+            ? null
+            : (day) {
+                _change(schedule.withStartDay(day));
+              },
+      ),
+      if (timed)
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: _timeField(
+                    _TimeField.start,
+                    label: "Start time",
+                    minute: schedule.startMinute,
+                    error: errors["start"],
+                  ),
+                ),
+                const SizedBox(width: 12.0),
+                Expanded(
+                  child: _timeField(
+                    _TimeField.end,
+                    label: "End time",
+                    minute: schedule.endMinute,
+                    error: showsEndDay ? null : errors["end"],
+                  ),
+                ),
+              ],
+            ),
+            _PickerPanel(
+              key: schedulePickerKey,
+              open: open != null,
+              // The picker shows its footer, Now, only on today's field.
+              revealKey: open != null && _nowOn(_dayOf(open)) != null,
+              builder: shown == null
+                  ? null
+                  : (context) {
+                      return _picker(shown);
+                    },
+            ),
+          ],
+        ),
+      if (showsEndDay)
+        _dateField(
+          label: "End date",
+          date: schedule.endDay,
+          error: errors["end"],
+          onPicked: locked
+              ? null
+              : (day) {
+                  _change(schedule.withEndDay(day));
+                },
+        )
+      else if (_options.spansDays && !locked)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () {
+              setState(() {
+                _endDayShown = true;
+              });
+            },
+            icon: const Icon(Icons.add),
+            label: const Text("Ends on another day"),
+          ),
+        ),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        for (final child in children)
+          Padding(padding: const EdgeInsets.only(bottom: 12.0), child: child),
+      ],
     );
-    final end = strings.formatTime(schedule.endMinute, widget.hourLabelFormat);
-    final length = schedule.lengthMinutes > 0
-        ? " (${_lengthLabel(schedule.lengthMinutes)})"
-        : "";
-    return schedule.spansDays
-        ? "$startDay $start - $endDay $end$length"
-        : "$startDay, $start - $end$length";
   }
+}
 
-  Widget _overlapNotice(CalendarScheduleCheck<ItemPayload> check) {
+/// [minutes] written in hours and minutes, as "1h 30m", "2h" or "45m".
+String _lengthLabel(int minutes) {
+  final hours = minutes ~/ 60;
+  final rest = minutes % 60;
+  if (hours == 0) {
+    return "${rest}m";
+  }
+  if (rest == 0) {
+    return "${hours}h";
+  }
+  return "${hours}h ${rest}m";
+}
+
+/// The summary of [check]'s schedule, top to bottom: its date, or for an
+/// all-day schedule that spans days its first and last; its times, or "All
+/// day"; for a timed schedule that spans days, its start and its end
+/// instead, each with its date; its length, where a timed schedule has a
+/// positive one; "Times in" [zone]'s name, where a zone is given; and,
+/// while [CalendarScheduleCheck.overlaps] is not empty, an overlap notice
+/// naming them, whose "Next free time" sends
+/// [CalendarScheduleCheck.nextFree] to [onChanged] unless the form is
+/// [locked] or the check's start is fixed. Times are written on
+/// [hourLabelFormat]'s clock.
+class ScheduleSummary extends StatelessWidget {
+  const ScheduleSummary({
+    super.key,
+    required this.check,
+    required this.hourLabelFormat,
+    required this.onChanged,
+    this.zone,
+    this.locked = false,
+  });
+
+  final CalendarScheduleCheck<ItemPayload> check;
+
+  /// The clock the summary writes times on.
+  final CalendarHourLabelFormat hourLabelFormat;
+
+  /// Takes the schedule "Next free time" moves to.
+  final ValueChanged<CalendarSchedule> onChanged;
+
+  /// The zone the times are on, which the summary names; none for the
+  /// device's.
+  final Location? zone;
+
+  /// Whether the form takes no input, under which "Next free time" does
+  /// not show.
+  final bool locked;
+
+  /// The first line of a schedule on one day or of an all-day one.
+  static const TextStyle _dayStyle = TextStyle(
+    fontSize: 15.0,
+    fontWeight: FontWeight.w500,
+    color: HarborColors.textMuted,
+  );
+
+  /// The second line of a schedule on one day or of an all-day one.
+  static const TextStyle _timesStyle = TextStyle(
+    fontSize: 22.0,
+    fontWeight: FontWeight.w600,
+    color: HarborColors.text,
+  );
+
+  /// Both lines of a timed schedule that spans days.
+  static const TextStyle _spanStyle = TextStyle(
+    fontSize: 18.0,
+    fontWeight: FontWeight.w600,
+    color: HarborColors.text,
+  );
+
+  /// The length and the zone line.
+  static const TextStyle _detailStyle = TextStyle(
+    fontSize: 14.0,
+    color: HarborColors.textMuted,
+  );
+
+  Widget _overlapNotice() {
     final next = check.nextFree;
     return DecoratedBox(
       key: scheduleOverlapKey,
@@ -416,10 +727,12 @@ class _ScheduleSectionState extends State<ScheduleSection> {
                 style: const TextStyle(color: HarborColors.onNotice),
               ),
             ),
-            if (next != null && next != check.schedule && !_startLocked)
+            if (next != null &&
+                next != check.schedule &&
+                !(locked || check.startFixed))
               TextButton(
                 onPressed: () {
-                  _change(next);
+                  onChanged(next);
                 },
                 child: const Text("Next free time"),
               ),
@@ -431,168 +744,171 @@ class _ScheduleSectionState extends State<ScheduleSection> {
 
   @override
   Widget build(BuildContext context) {
-    final schedule = _schedule;
-    final check = widget.check;
-    final errors = widget.errors;
-    final locked = widget.locked;
-    final startLocked = _startLocked;
-    final open = _open;
+    final dates = MaterialLocalizations.of(context);
+    final strings = CalendarLocalizations.of(context);
+    final schedule = check.schedule;
+    final startDay = dates.formatMediumDate(schedule.startDay);
+    final endDay = dates.formatMediumDate(schedule.endDay);
+    final start = strings.formatTime(schedule.startMinute, hourLabelFormat);
+    final end = strings.formatTime(schedule.endMinute, hourLabelFormat);
     final timed = !schedule.isAllDay;
-    final offersAllDay = _options.allowsAllDay || schedule.isAllDay;
-    final showsEndDay =
-        schedule.isAllDay ||
-        schedule.spansDays ||
-        (_endDayShown && _options.spansDays);
-    final zone = widget.zone;
-    final children = <Widget>[
+    final timedDays = timed && schedule.spansDays;
+    final String first;
+    final String second;
+    if (!timed) {
+      first = schedule.spansDays ? "$startDay - $endDay" : startDay;
+      second = "All day";
+    } else if (timedDays) {
+      first = "$startDay, $start -";
+      second = "$endDay, $end";
+    } else {
+      first = startDay;
+      second = "$start - $end";
+    }
+    final zone = this.zone;
+    final lines = <Widget>[
       Text(
-        _summary(context),
-        key: scheduleSummaryKey,
-        style: const TextStyle(
-          fontSize: 15.0,
-          fontWeight: FontWeight.w600,
-          color: HarborColors.text,
-        ),
+        first,
+        key: scheduleSummaryFirstLineKey,
+        style: timedDays ? _spanStyle : _dayStyle,
       ),
-      _dateField(
-        label: "Start date",
-        date: schedule.startDay,
-        error: timed ? null : errors["start"],
-        onPicked: startLocked
-            ? null
-            : (day) {
-                _change(schedule.withStartDay(day));
-              },
+      Text(
+        second,
+        key: scheduleSummarySecondLineKey,
+        style: timedDays ? _spanStyle : _timesStyle,
       ),
-      if (timed)
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Expanded(
-              child: _timeField(
-                _TimeField.start,
-                label: "Start time",
-                minute: schedule.startMinute,
-                error: errors["start"],
-              ),
-            ),
-            const SizedBox(width: 12.0),
-            Expanded(
-              child: _timeField(
-                _TimeField.end,
-                label: "End time",
-                minute: schedule.endMinute,
-                error: showsEndDay ? null : errors["end"],
-              ),
-            ),
-          ],
-        ),
-      if (open != null)
-        _RevealedPicker(
-          key: open == _TimeField.start
-              ? scheduleStartPickerKey
-              : scheduleEndPickerKey,
-          child: open == _TimeField.start
-              ? _startPicker(schedule)
-              : _endPicker(schedule),
-        ),
-      if (showsEndDay)
-        _dateField(
-          label: "End date",
-          date: schedule.endDay,
-          error: errors["end"],
-          onPicked: locked
-              ? null
-              : (day) {
-                  _change(schedule.withEndDay(day));
-                },
-        )
-      else if (_options.spansDays && !locked)
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: () {
-              setState(() {
-                _endDayShown = true;
-              });
-            },
-            icon: const Icon(Icons.add),
-            label: const Text("Ends on another day"),
-          ),
-        ),
-      if (_options.lengthChoices.isNotEmpty || offersAllDay)
-        Wrap(
-          spacing: 8.0,
-          runSpacing: 4.0,
-          children: <Widget>[
-            for (final minutes in _options.lengthChoices)
-              ChoiceChip(
-                label: Text(_lengthLabel(minutes)),
-                selected: timed && schedule.lengthMinutes == minutes,
-                // Of an all-day schedule a length changes the kind, which a
-                // fixed start keeps.
-                onSelected: locked || (!timed && startLocked)
-                    ? null
-                    : (on) {
-                        _change(schedule.withAllDay(false).withLength(minutes));
-                      },
-              ),
-            if (offersAllDay)
-              ChoiceChip(
-                focusNode: _allDayNode,
-                label: const Text("All day"),
-                selected: schedule.isAllDay,
-                onSelected: startLocked
-                    ? null
-                    : (on) {
-                        // The time row and its open picker go away; the
-                        // focus their Hour column held moves to the chip,
-                        // not to the scope's last focused node.
-                        if (on && _open != null) {
-                          setState(() {
-                            _open = null;
-                          });
-                          _allDayNode.requestFocus();
-                        }
-                        _change(schedule.withAllDay(on));
-                      },
-              ),
-          ],
-        ),
-      if (check.overlaps.isNotEmpty) _overlapNotice(check),
-      if (zone != null)
+      if (timed && schedule.lengthMinutes > 0)
         Text(
-          "Times in ${zone.name}",
-          style: const TextStyle(color: HarborColors.textMuted),
+          _lengthLabel(schedule.lengthMinutes),
+          key: scheduleSummaryLengthKey,
+          style: _detailStyle,
         ),
+      if (zone != null) Text("Times in ${zone.name}", style: _detailStyle),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        for (final child in children)
-          Padding(padding: const EdgeInsets.only(bottom: 12.0), child: child),
+        for (var index = 0; index < lines.length; index++) ...<Widget>[
+          if (index > 0) const SizedBox(height: 4.0),
+          lines[index],
+        ],
+        if (check.overlaps.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 12.0),
+          _overlapNotice(),
+        ],
       ],
     );
   }
 }
 
-/// [child], an open picker, which the frame it first shows in scrolls
-/// into view where it lies past the visible part of the form.
-class _RevealedPicker extends StatefulWidget {
-  const _RevealedPicker({super.key, required this.child});
+/// The panel under the time row that holds the section's one picker, which
+/// [builder] builds, called only while the panel shows. As [open] turns
+/// true it grows from no height to the picker's and fades in, and as it
+/// turns false it shrinks and fades out, over the [CalendarTheme]'s
+/// motion, or at once where the platform asks for no animations
+/// ([MediaQuery.disableAnimationsOf]), a motion under way included; it
+/// shows nothing once closed or where [builder] is null. A panel made while
+/// [open] shows its picker at once. Once it has opened, it scrolls into
+/// view where it lies past the visible part of the form, and again where
+/// [revealKey] changes while it is open, as the picker's footer comes or
+/// goes.
+class _PickerPanel extends StatefulWidget {
+  const _PickerPanel({
+    super.key,
+    required this.open,
+    required this.revealKey,
+    required this.builder,
+  });
 
-  final Widget child;
+  final bool open;
+  final Object? revealKey;
+  final WidgetBuilder? builder;
 
   @override
-  State<_RevealedPicker> createState() {
-    return _RevealedPickerState();
+  State<_PickerPanel> createState() {
+    return _PickerPanelState();
   }
 }
 
-class _RevealedPickerState extends State<_RevealedPicker> {
+class _PickerPanelState extends State<_PickerPanel>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  /// [_controller] on the theme's curve, which both transitions read.
+  late final CurvedAnimation _curved;
+
   @override
   void initState() {
     super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      value: widget.open ? 1.0 : 0.0,
+    )..addStatusListener(_statusChanged);
+    // The theme's curve replaces this one in didChangeDependencies, which
+    // runs before the first build.
+    _curved = CurvedAnimation(parent: _controller, curve: Curves.linear);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final theme = CalendarTheme.of(context);
+    _curved.curve = theme.motionCurve;
+    final duration = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : theme.motionDuration;
+    if (duration == _controller.duration) {
+      return;
+    }
+    _controller.duration = duration;
+    // A running motion keeps the duration it started with, so it starts
+    // again from where it is, toward the same end, under the new one.
+    if (_controller.isAnimating) {
+      if (_controller.status == AnimationStatus.forward) {
+        _controller.forward();
+      } else {
+        _controller.reverse();
+      }
+    }
+  }
+
+  @override
+  void didUpdateWidget(_PickerPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.open != oldWidget.open) {
+      if (widget.open) {
+        _controller.forward();
+      } else {
+        _controller.reverse();
+      }
+    }
+    if (widget.revealKey != oldWidget.revealKey &&
+        widget.open &&
+        _controller.isCompleted) {
+      _revealAfterFrame();
+    }
+  }
+
+  @override
+  void dispose() {
+    _curved.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// Drops the picker once the panel has closed, and reveals the panel once
+  /// it has opened. Under a zero duration both come inside
+  /// [didUpdateWidget] or [didChangeDependencies], during a build.
+  void _statusChanged(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed) {
+      setState(() {});
+    } else if (status == AnimationStatus.completed && widget.open) {
+      _revealAfterFrame();
+    }
+  }
+
+  /// Scrolls the panel into view after the frame, once it has its height.
+  void _revealAfterFrame() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         Scrollable.ensureVisible(
@@ -605,6 +921,20 @@ class _RevealedPickerState extends State<_RevealedPicker> {
 
   @override
   Widget build(BuildContext context) {
-    return widget.child;
+    final builder = widget.builder;
+    if (builder == null || (!widget.open && _controller.isDismissed)) {
+      return const SizedBox.shrink();
+    }
+    return FadeTransition(
+      opacity: _curved,
+      child: SizeTransition(
+        sizeFactor: _curved,
+        alignment: Alignment.topCenter,
+        child: Padding(
+          padding: const EdgeInsets.only(top: 12.0),
+          child: builder(context),
+        ),
+      ),
+    );
   }
 }

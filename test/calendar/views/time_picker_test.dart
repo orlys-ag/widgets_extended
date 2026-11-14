@@ -3231,4 +3231,173 @@ void main() {
     expect(onPill(tester, hourRow(11)), isTrue);
     expect(clicks, isEmpty);
   }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+  testWidgets("PK54 a new subject ends a fling, a hold and a typed digit "
+      "without a report, keeps the picker's columns, and moves them back to "
+      "the same value, or on to a new one, over the theme's motion", (
+    tester,
+  ) async {
+    final calls = <int?>[];
+    final hour = FocusNode();
+    addTearDown(hour.dispose);
+    final linear = CalendarThemeData(
+      motionDuration: const Duration(seconds: 1),
+      motionCurve: Curves.linear,
+    );
+    var subject = 0;
+    var value = 570;
+    Widget picker() {
+      return host(
+        CalendarTimePicker(
+          value: value,
+          subject: subject,
+          focusNode: hour,
+          onChanged: calls.add,
+        ),
+        theme: linear,
+      );
+    }
+
+    double rowsFromPill(int number) {
+      return (tester.getCenter(hourRow(number)).dy - pillY(tester)) /
+          extentOf(tester);
+    }
+
+    await tester.pumpWidget(picker());
+    final column = tester.element(hourColumn());
+
+    await tester.fling(hourColumn(), const Offset(0.0, -120.0), 800.0);
+    await tester.pump(const Duration(milliseconds: 16));
+    // Setup sanity: the fling still moves, its pick not reported, more than
+    // a row from 09.
+    expect(calls, isEmpty);
+    final from = rowsFromPill(9);
+    expect(from.abs(), greaterThan(1.0));
+    subject++;
+    await tester.pumpWidget(picker());
+    // Halfway through the theme's linear second back to 09.
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(rowsFromPill(9), moreOrLessEquals(from / 2, epsilon: 0.02));
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+    expectOnPill(tester, 9, 30);
+
+    final gesture = await holdOn(tester, hourRow(11));
+    // Setup sanity: the held column rests 11 on its pill.
+    expect(onPill(tester, hourRow(11)), isTrue);
+    subject++;
+    await tester.pumpWidget(picker());
+    await tester.pump(const Duration(milliseconds: 500));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+    expectOnPill(tester, 9, 30);
+
+    hour.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
+    await tester.pump();
+    subject++;
+    await tester.pumpWidget(picker());
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+    expectOnPill(tester, 9, 30);
+
+    await tester.fling(hourColumn(), const Offset(0.0, -120.0), 800.0);
+    await tester.pump(const Duration(milliseconds: 16));
+    // Setup sanity: the fling still moves, its pick not reported, more than
+    // a row from 07.
+    expect(calls, isEmpty);
+    final toNew = rowsFromPill(7);
+    expect(toNew.abs(), greaterThan(1.0));
+    subject++;
+    value = 450;
+    await tester.pumpWidget(picker());
+    // Halfway through the theme's linear second on to 07, away from
+    // where the fling was going.
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(rowsFromPill(7), moreOrLessEquals(toNew / 2, epsilon: 0.02));
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+    expectOnPill(tester, 7, 30);
+    expect(tester.element(hourColumn()), same(column));
+  });
+
+  testWidgets("PK55 with nowPicksLater Now picks the first time after the "
+      "latest at or before now that the picker offers, where that one is not "
+      "offered, and draws disabled only where none is", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final calls = <int?>[];
+    var now = 9 * 60 + 7;
+    Widget picker({
+      bool later = true,
+      bool Function(int minute)? isEnabled,
+    }) {
+      return host(
+        CalendarTimePicker(
+          value: 600,
+          minuteStep: 15,
+          min: 8 * 60,
+          max: 18 * 60,
+          isEnabled:
+              isEnabled ??
+              (minute) {
+                return minute != 9 * 60;
+              },
+          now: () {
+            return now;
+          },
+          nowPicksLater: later,
+          onChanged: calls.add,
+        ),
+      );
+    }
+
+    Future<void> showAnew(Widget widget) async {
+      await tester.pumpWidget(Container());
+      await tester.pumpWidget(widget);
+    }
+
+    Tristate nowEnabled() {
+      return semanticsOf(
+        tester,
+        find.byKey(timePickerNowKey),
+      ).flagsCollection.isEnabled;
+    }
+
+    Future<void> tapNow() async {
+      await tester.tap(find.byKey(timePickerNowKey));
+      await tester.pumpAndSettle();
+    }
+
+    await tester.pumpWidget(picker());
+    await tapNow();
+    expect(calls, <int?>[9 * 60 + 15]);
+
+    calls.clear();
+    now = 7 * 60 + 30;
+    await showAnew(picker());
+    await tapNow();
+    expect(calls, <int?>[8 * 60]);
+
+    calls.clear();
+    now = 9 * 60 + 7;
+    await showAnew(
+      picker(
+        isEnabled: (minute) {
+          return minute < 9 * 60;
+        },
+      ),
+    );
+    expect(nowEnabled(), Tristate.isFalse);
+    await tapNow();
+    expect(calls, isEmpty);
+
+    await showAnew(picker(later: false));
+    expect(nowEnabled(), Tristate.isFalse);
+    await tapNow();
+    expect(calls, isEmpty);
+    semantics.dispose();
+  });
 }

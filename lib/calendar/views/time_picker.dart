@@ -172,8 +172,12 @@ const double _placeTolerance = 1e-6;
 /// Enter move no column. A pick is reported through [onChanged] once, after
 /// every column has come to rest; a new [value] moves the columns to it
 /// over the theme's motion and reports nothing, waiting while a column is
-/// held in a drag. With a null [onChanged] the picker shows its value and
-/// takes no input.
+/// held in a drag. A new [subject], by `==`, ends every hold, user motion
+/// and typed digit without a report and moves the columns to [value] over
+/// the theme's motion, the same value included, as a null [onChanged]
+/// does; so a host that hands one picker to another field drops what the
+/// user had begun on the last. With a null [onChanged] the picker shows its
+/// value and takes no input.
 ///
 /// With [hapticFeedback], on iOS and Android, a column plays a selection
 /// click ([HapticFeedback.selectionClick]) as a drag, the landing that ends
@@ -187,8 +191,11 @@ const double _placeTolerance = 1e-6;
 /// it, the footer's Now picks the latest time at or before that minute on
 /// both steps, and draws disabled where the picker does not offer that
 /// time: out of range, refused, or with the Hour column hidden in another
-/// hour. With [clearable], the footer's Clear reports null. With neither,
-/// the picker has no footer.
+/// hour. With [nowPicksLater], where the picker does not offer that time,
+/// Now picks the first time after it, by [minuteStep] up to [max], that the
+/// picker offers, and draws disabled only where it offers none. With
+/// [clearable], the footer's Clear reports null. With neither [now] nor
+/// [clearable], the picker has no footer.
 ///
 /// The picker draws in the theme [CalendarTheme.of] gives, the nearest
 /// [CalendarTheme] or the built-in one, and reads no Material theme: a
@@ -215,11 +222,13 @@ class CalendarTimePicker extends StatefulWidget {
     this.max = CalendarDates.minutesPerDay - 1,
     this.isEnabled,
     this.now,
+    this.nowPicksLater = false,
     this.clearable = false,
     this.showHours = true,
     this.showMinutes = true,
     this.focusNode,
     this.hapticFeedback = false,
+    this.subject,
   }) {
     _check(value, minuteStep, hourStep, min, max, showHours, showMinutes);
   }
@@ -253,8 +262,14 @@ class CalendarTimePicker extends StatefulWidget {
 
   /// The current minute after midnight on the host's clock: Now picks the
   /// latest time at or before it on both steps, where the picker offers
-  /// that time. Null shows no Now.
+  /// that time, and otherwise, under [nowPicksLater], the first time after
+  /// it that the picker offers. Null shows no Now.
   final ValueGetter<int>? now;
+
+  /// Whether Now, where the picker does not offer the latest time at or
+  /// before [now], picks the first time after it, by [minuteStep] up to
+  /// [max], that the picker offers; false leaves Now disabled there.
+  final bool nowPicksLater;
 
   /// Whether the footer shows Clear, which reports null.
   final bool clearable;
@@ -275,6 +290,12 @@ class CalendarTimePicker extends StatefulWidget {
   /// drag, its landing or a mouse wheel brings a row onto its pill; false
   /// plays none.
   final bool hapticFeedback;
+
+  /// What the picker edits, such as the field of a host's form; null where
+  /// it edits one thing. A new subject, by `==`, ends every hold, user
+  /// motion and typed digit without a report and moves the columns to
+  /// [value] over the theme's motion, as a null [onChanged] does.
+  final Object? subject;
 
   static void _check(
     int? value,
@@ -359,6 +380,7 @@ final class TimePickerRules {
           twelveHour &&
           picker.max == day &&
           (picker.min > 0 || picker.value == day),
+      nowPicksLater: picker.nowPicksLater,
       isEnabled: isEnabled,
       answers: isEnabled == null
           ? const <bool?>[]
@@ -373,6 +395,7 @@ final class TimePickerRules {
     required this.hourStep,
     required this.twelveHour,
     required this.onlyHour,
+    required this.nowPicksLater,
     required bool midnightEnds,
     required bool Function(int minute)? isEnabled,
     required List<bool?> answers,
@@ -406,6 +429,11 @@ final class TimePickerRules {
   /// on the grid: the hour of the picker's value, or of [min] where the
   /// value is null, 24 for 1440. Null where the Hour column shows.
   final int? onlyHour;
+
+  /// Whether [nowTime], where the latest time at or before the minute is
+  /// not offered, takes the first later one that is
+  /// ([CalendarTimePicker.nowPicksLater]).
+  final bool nowPicksLater;
 
   /// Whether 12 AM 00 is 1440 ([compose]).
   final bool _midnightEnds;
@@ -537,7 +565,9 @@ final class TimePickerRules {
 
   /// The time Now picks at the minute after midnight [minute]: the latest
   /// time at or before it on both steps of the grid, whatever [onlyHour],
-  /// where the picker [offers] it; null where it does not, or where
+  /// where the picker [offers] it; where it does not, under
+  /// [nowPicksLater], the first time after it, by [minuteStep] up to [max],
+  /// that the picker offers. Null where there is no such time, or where
   /// [minute] lies outside 0 to 1439.
   int? nowTime(int minute) {
     if (minute < 0 || minute >= CalendarDates.minutesPerDay) {
@@ -549,7 +579,18 @@ final class TimePickerRules {
     while (!_onSteps(time)) {
       time -= minuteStep;
     }
-    return offers(time) ? time : null;
+    if (offers(time)) {
+      return time;
+    }
+    if (!nowPicksLater) {
+      return null;
+    }
+    for (var later = time + minuteStep; later <= max; later += minuteStep) {
+      if (offers(later)) {
+        return later;
+      }
+    }
+    return null;
   }
 }
 
@@ -839,14 +880,16 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
       }
     }
     if (columnsChanged ||
-        (oldWidget.onChanged != null && widget.onChanged == null)) {
+        (oldWidget.onChanged != null && widget.onChanged == null) ||
+        oldWidget.subject != widget.subject) {
       _cancelDigitWait();
       _endHolds();
       _resetRules();
       // A change of the columns renumbers the rows, as _keyOf reads the
       // clock, and adds or removes a column, so no row keeps a place to
       // move from: the columns show the value at once. Where only onChanged
-      // turns null they move to it over the theme's motion.
+      // turns null or the subject changes they move to it over the theme's
+      // motion.
       _applyTime(widget.value, jump: columnsChanged);
       return;
     }

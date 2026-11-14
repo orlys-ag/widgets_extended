@@ -1,5 +1,5 @@
-/// The item form's times: its start and end dates and times, the slot
-/// length they step by, and its All day switch.
+/// The item form's page of cards and its times: its start and end dates
+/// and times, the slot length they step by, and its All day switch.
 library;
 
 import 'package:flutter/material.dart';
@@ -8,6 +8,7 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/item_form.dart';
+import 'package:workspace_calendar/workspace_calendar/schedule_section.dart';
 
 import 'form_driver.dart';
 import 'midnight_days.dart';
@@ -236,12 +237,8 @@ void main() {
     await openForm(tester, store);
     expect(timeFieldShows("Start time", "09:10"), findsOneWidget);
     expect(timeFieldShows("End time", "09:50"), findsOneWidget);
-    expect(
-      tester
-          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, "All day"))
-          .selected,
-      isFalse,
-    );
+    expect(allDaySwitch(), findsOneWidget);
+    expect(formAllDayOn(), isFalse);
 
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pumpAndSettle();
@@ -266,12 +263,8 @@ void main() {
     );
     addTearDown(store.dispose);
     await openForm(tester, store);
-    expect(
-      tester
-          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, "All day"))
-          .selected,
-      isFalse,
-    );
+    expect(allDaySwitch(), findsOneWidget);
+    expect(formAllDayOn(), isFalse);
 
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pumpAndSettle();
@@ -309,7 +302,58 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pumpAndSettle();
     expect(writes, hasLength(1));
-    expect(find.widgetWithText(ChoiceChip, "All day"), findsOneWidget);
+    expect(allDaySwitch(), findsOneWidget);
+  });
+
+  testWidgets("FC1 the form's page is three outlined cards, the summary's, "
+      "the scheduling and the item's, in that order between the heading and "
+      "the actions", (tester) async {
+    final store = MemoryCalendarStore<ItemPayload>(
+      entries: <CalendarItem>[
+        task(DateTime(2026, 4, 22, 9), DateTime(2026, 4, 22, 10)),
+      ],
+    );
+    addTearDown(store.dispose);
+    await openForm(tester, store);
+    final keys = <Key>[
+      formSummaryCardKey,
+      formSchedulingCardKey,
+      formItemCardKey,
+    ];
+    for (final key in keys) {
+      expect(find.byKey(key), findsOneWidget, reason: "$key");
+      expect(tester.widget(find.byKey(key)), isA<Card>(), reason: "$key");
+    }
+    final cards = <Rect>[
+      for (final key in keys) tester.getRect(find.byKey(key)),
+    ];
+    for (var index = 1; index < cards.length; index++) {
+      expect(cards[index - 1].top, lessThan(cards[index].top));
+      expect(cards[index - 1].bottom, lessThanOrEqualTo(cards[index].top));
+    }
+    for (final (key, part) in <(Key, Finder)>[
+      (formSummaryCardKey, find.byType(ScheduleSummary)),
+      (formSchedulingCardKey, find.byType(ScheduleSection)),
+      (formItemCardKey, fieldFinder("Title")),
+    ]) {
+      expect(
+        find.descendant(of: find.byKey(key), matching: part),
+        findsOneWidget,
+        reason: "$key",
+      );
+    }
+    expect(
+      tester.getRect(find.text("Edit Task")).bottom,
+      lessThanOrEqualTo(cards.first.top),
+    );
+    final page = find.descendant(
+      of: find.byType(BottomSheet),
+      matching: find.byType(SingleChildScrollView),
+    );
+    expect(
+      tester.getRect(saveFinder()).top,
+      greaterThanOrEqualTo(tester.getRect(page).bottom),
+    );
   });
 
   group(

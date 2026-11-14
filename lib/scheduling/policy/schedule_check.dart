@@ -7,39 +7,21 @@ import 'edit_policy.dart';
 import 'edit_rules.dart';
 
 /// What a form offers one kind of entry for its schedule: whether it takes
-/// all-day, whether it may span days, and the lengths, in minutes, it
-/// offers to pick directly.
+/// all-day and whether it may span days.
 ///
 /// Compared by value.
 @immutable
 final class CalendarScheduleOptions {
-  /// Options that take all-day where [allowsAllDay], span days where
-  /// [spansDays], and offer [lengthChoices].
-  ///
-  /// Throws an [ArgumentError], in every build, for a length choice under
-  /// 1.
-  CalendarScheduleOptions({
+  /// Options that take all-day where [allowsAllDay] and span days where
+  /// [spansDays].
+  const CalendarScheduleOptions({
     this.allowsAllDay = true,
     this.spansDays = true,
-    List<int> lengthChoices = defaultLengthChoices,
-  }) : lengthChoices = List<int>.unmodifiable(lengthChoices) {
-    for (final minutes in lengthChoices) {
-      if (minutes < 1) {
-        throw ArgumentError.value(
-          lengthChoices,
-          "lengthChoices",
-          "holds $minutes, under 1",
-        );
-      }
-    }
-  }
+  });
 
-  /// The options every kind takes unless it is given others: all-day,
-  /// spanning days, and [defaultLengthChoices].
-  static final CalendarScheduleOptions standard = CalendarScheduleOptions();
-
-  /// 15 minutes, 30, an hour and two.
-  static const List<int> defaultLengthChoices = <int>[15, 30, 60, 120];
+  /// The options every kind takes unless it is given others: all-day and
+  /// spanning days.
+  static const CalendarScheduleOptions standard = CalendarScheduleOptions();
 
   /// Whether the kind may be all-day.
   final bool allowsAllDay;
@@ -47,26 +29,22 @@ final class CalendarScheduleOptions {
   /// Whether the kind may have a part in more than one day.
   final bool spansDays;
 
-  /// The lengths a form offers to pick, in minutes. Unmodifiable.
-  final List<int> lengthChoices;
-
   @override
   bool operator ==(Object other) {
     return other is CalendarScheduleOptions &&
         other.allowsAllDay == allowsAllDay &&
-        other.spansDays == spansDays &&
-        listEquals(other.lengthChoices, lengthChoices);
+        other.spansDays == spansDays;
   }
 
   @override
   int get hashCode {
-    return Object.hash(allowsAllDay, spansDays, Object.hashAll(lengthChoices));
+    return Object.hash(allowsAllDay, spansDays);
   }
 
   @override
   String toString() {
     return "CalendarScheduleOptions(allowsAllDay: $allowsAllDay, "
-        "spansDays: $spansDays, lengthChoices: $lengthChoices)";
+        "spansDays: $spansDays)";
   }
 }
 
@@ -362,6 +340,27 @@ final class CalendarScheduleCheck<T> {
     return problems.isEmpty;
   }
 
+  /// Whether the schedule's end is after its start and [now]'s clock reads
+  /// both its times, so that [problems] holds every rule's answer. Where
+  /// false, [problems] holds at most end not after start, spanning days,
+  /// all-day not allowed, start skipped and end skipped.
+  bool get timesChecked {
+    return schedule.lengthMinutes > 0 && _times != null;
+  }
+
+  /// The check of [schedule] under this check's [rules] at its [now], for
+  /// its [entry], against its others and with its [options].
+  CalendarScheduleCheck<T> withSchedule(CalendarSchedule schedule) {
+    return CalendarScheduleCheck<T>(
+      schedule: schedule,
+      rules: rules,
+      now: now,
+      others: _others,
+      entry: entry,
+      options: options,
+    );
+  }
+
   /// Whether the stored entry may neither move nor resize at its start,
   /// so a form keeps its start and its kind; false for a new entry.
   late final bool startFixed = _fixesStart();
@@ -436,14 +435,13 @@ final class CalendarScheduleCheck<T> {
 
   List<CalendarScheduleProblem> _findProblems() {
     final found = <CalendarScheduleProblem>[];
-    final ordered = schedule.lengthMinutes > 0;
-    if (!ordered) {
+    if (schedule.lengthMinutes <= 0) {
       found.add(const CalendarScheduleEndNotAfterStart());
     }
     final zone = zoneOf(now.time);
-    final times = _times;
-    final checkable = ordered && times != null;
-    if (checkable && !rules.coversAtMost(times.start, times.end)) {
+    // Null where timesChecked is false, which ends the checks here.
+    final times = timesChecked ? _times : null;
+    if (times != null && !rules.coversAtMost(times.start, times.end)) {
       found.add(const CalendarScheduleTooManyDays());
     }
     if (schedule.spansDays && !options.spansDays) {
@@ -458,7 +456,7 @@ final class CalendarScheduleCheck<T> {
     if (schedule.endSkippedOn(zone)) {
       found.add(const CalendarScheduleEndSkipped());
     }
-    if (!checkable) {
+    if (times == null) {
       return found;
     }
     final isAllDay = schedule.isAllDay;

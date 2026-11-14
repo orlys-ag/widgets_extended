@@ -75,6 +75,10 @@ Future<void> createAt(
 ) async {
   await holdCell(tester, row, col);
   expect(find.text("New item"), findsOneWidget);
+  // The type selector sits in the item card, the page's last, which can
+  // lie below the form's view.
+  await tester.ensureVisible(find.text(type).last);
+  await tester.pumpAndSettle();
   await tester.tap(find.text(type).last);
   await tester.pumpAndSettle();
 }
@@ -1263,10 +1267,36 @@ void main() {
 
     await createAt(tester, rowOf(18 * 60), colOf(0), "Task");
     await tester.enterText(fieldFinder("Title"), "Dentist");
+    // Monday 10:00 lies in "Day off", whose overlap the settings' policy
+    // refuses: the start's picker refuses it.
+    await openTimePicker(tester, "Start time");
+    expect(timeEnabled(tester, "Start time", "10:00"), isFalse);
+    await closeTimePicker(tester, "Start time");
+
+    // A start picked on Wednesday, whose 10:00 is free, then moved onto
+    // Monday by its date, lies in "Day off" all the same: Save refuses the
+    // overlap before it sends anything.
+    Future<void> pickStartDay(String day) async {
+      await tester.ensureVisible(formDateFinder("Start date"));
+      await tester.pumpAndSettle();
+      await tester.tap(formDateFinder("Start date"));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(DatePickerDialog),
+          matching: find.text(day),
+        ),
+      );
+      await tester.tap(find.text("OK"));
+      await tester.pumpAndSettle();
+    }
+
+    await pickStartDay("22");
     await pickTime(tester, "Start time", "10:00");
-    await pickTime(tester, "End time", "11:00");
-    // Monday 10:00 lies in "Day off": the form refuses the overlap the
-    // settings' policy refuses before it sends anything.
+    await pickStartDay("20");
+    // Setup sanity: Monday 10:00 to 11:00.
+    expect(formDateShows("Start date", "2026-04-20"), findsOneWidget);
+    expect(timeFieldShows("Start time", "10:00"), findsOneWidget);
     final sent = api.requests.length;
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
@@ -2419,7 +2449,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(DatePickerDialog), findsNothing);
     expect(
-      tester.widget<ChoiceChip>(inDialog(allDayChip())).onSelected,
+      tester.widget<SwitchListTile>(inDialog(allDaySwitch())).onChanged,
       isNull,
     );
     expect(saveFinder(), findsNothing);
