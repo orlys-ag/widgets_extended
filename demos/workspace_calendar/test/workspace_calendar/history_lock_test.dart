@@ -85,7 +85,10 @@ Future<MockCalendarApi> pumpLocked(
         () {
           return midMorning;
         },
-    settings: CalendarSettings(lockPast: true, lockEarlierToday: earlierToday),
+    settings: harnessSettings.copyWith(
+      lockPast: true,
+      lockEarlierToday: earlierToday,
+    ),
   );
   return api;
 }
@@ -515,7 +518,7 @@ void main() {
         api: api,
         size: tall,
         editing: true,
-        settings: const CalendarSettings(
+        settings: harnessSettings.copyWith(
           lockPast: true,
           lockEarlierToday: true,
         ),

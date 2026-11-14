@@ -64,7 +64,12 @@ Future<void> pumpUnderHostTheme(WidgetTester tester) async {
       builder: (context, child) {
         return CalendarTheme(data: CalendarThemeData(), child: child!);
       },
-      home: WorkspaceCalendarExample(editing: true, today: today, api: api),
+      home: WorkspaceCalendarExample(
+        editing: true,
+        today: today,
+        api: api,
+        settings: harnessSettings,
+      ),
     ),
   );
   await tester.pump(api.latency);
@@ -84,7 +89,12 @@ void main() {
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         ),
-        home: WorkspaceCalendarExample(editing: true, today: today, api: api),
+        home: WorkspaceCalendarExample(
+          editing: true,
+          today: today,
+          api: api,
+          settings: harnessSettings,
+        ),
       ),
     );
     await tester.pump(api.latency);

@@ -17,7 +17,6 @@ import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
-import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/item_builders.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
@@ -335,6 +334,7 @@ Widget themedApp(
       api: api,
       clock: nineOClock,
       editing: true,
+      settings: harnessSettings,
       calendarTheme: theme,
       builders: builders,
     ),
@@ -444,7 +444,10 @@ Future<MockCalendarApi> pumpLocked(
     api: api,
     size: const Size(390.0, 1400.0),
     editing: editing,
-    settings: CalendarSettings(lockPast: editing, lockEarlierToday: editing),
+    settings: harnessSettings.copyWith(
+      lockPast: editing,
+      lockEarlierToday: editing,
+    ),
     clock: clock,
     builders: builders,
     readAhead: readAhead,

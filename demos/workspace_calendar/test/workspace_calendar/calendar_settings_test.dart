@@ -68,6 +68,10 @@ void main() {
       expect(settings.hours, CalendarDayHours.allDay);
     });
 
+    test("starts on 30-minute slots", () {
+      expect(const CalendarSettings().slotMinutes, 30);
+    });
+
     test("copyWith replaces the hours it is given", () {
       const settings = CalendarSettings();
       final office = CalendarDayHours(8 * 60, 18 * 60);
@@ -122,25 +126,28 @@ void main() {
   });
 
   group("C8 CalendarSettings hour label format", () {
-    test("starts on 24-hour and takes part in copyWith and ==", () {
+    test("starts on 12-hour and takes part in copyWith and ==", () {
       const settings = CalendarSettings();
-      expect(settings.hourLabelFormat, CalendarHourLabelFormat.twentyFourHour);
-      final twelve = settings.copyWith(
-        hourLabelFormat: CalendarHourLabelFormat.twelveHour,
+      expect(settings.hourLabelFormat, CalendarHourLabelFormat.twelveHour);
+      final twentyFour = settings.copyWith(
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
       );
-      expect(twelve.hourLabelFormat, CalendarHourLabelFormat.twelveHour);
       expect(
-        twelve
+        twentyFour.hourLabelFormat,
+        CalendarHourLabelFormat.twentyFourHour,
+      );
+      expect(
+        twentyFour
             .copyWith(hours: CalendarDayHours(8 * 60, 18 * 60))
             .hourLabelFormat,
-        CalendarHourLabelFormat.twelveHour,
+        CalendarHourLabelFormat.twentyFourHour,
       );
-      expect(twelve == settings, isFalse);
+      expect(twentyFour == settings, isFalse);
       final again = settings.copyWith(
-        hourLabelFormat: CalendarHourLabelFormat.twelveHour,
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
       );
-      expect(twelve == again, isTrue);
-      expect(twelve.hashCode == settings.hashCode, isFalse);
+      expect(twentyFour == again, isTrue);
+      expect(twentyFour.hashCode == settings.hashCode, isFalse);
     });
   });
 
@@ -180,7 +187,7 @@ void main() {
         settings.toString(),
         "CalendarSettings(viewing, "
         "CalendarWeekdaySet(Mo, Tu, We, Th, Fr, Sa, Su; from Mo), "
-        "CalendarDayHours(00:00-24:00), 15-minute slots, twentyFourHour, "
+        "CalendarDayHours(00:00-24:00), 30-minute slots, twelveHour, "
         "fitScreen)",
       );
       expect(allowing.toString(), contains("overlaps allowed"));

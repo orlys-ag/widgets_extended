@@ -113,7 +113,7 @@ Future<MockCalendarApi> pumpMonth(
 /// The settings a calendar opens on: on the Show all items layout where
 /// [showAll], and otherwise on Fit to screen.
 CalendarSettings layoutSettings({required bool showAll}) {
-  return CalendarSettings(
+  return harnessSettings.copyWith(
     monthLayout: showAll
         ? CalendarMonthLayout.showAll
         : CalendarMonthLayout.fitScreen,

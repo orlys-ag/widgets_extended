@@ -62,8 +62,8 @@ class CalendarSettings {
     this.allowsOverlaps = false,
     this.weekdays = CalendarWeekdaySet.all,
     this.hours = CalendarDayHours.allDay,
-    this.slotMinutes = CalendarDates.defaultSlotMinutes,
-    this.hourLabelFormat = CalendarHourLabelFormat.twentyFourHour,
+    this.slotMinutes = 30,
+    this.hourLabelFormat = CalendarHourLabelFormat.twelveHour,
     this.monthLayout = CalendarMonthLayout.fitScreen,
   });
 

@@ -437,6 +437,7 @@ Widget themedApp(
       today: today,
       clock: clockAtNineThirty,
       api: api,
+      settings: harnessSettings,
       calendarTheme: theme,
       readAhead: readAhead,
     ),
