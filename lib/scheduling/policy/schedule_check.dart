@@ -362,6 +362,27 @@ final class CalendarScheduleCheck<T> {
     return problems.isEmpty;
   }
 
+  /// Whether the schedule's end is after its start and [now]'s clock reads
+  /// both its times, so that [problems] holds every rule's answer. Where
+  /// false, [problems] holds at most end not after start, spanning days,
+  /// all-day not allowed, start skipped and end skipped.
+  bool get timesChecked {
+    return schedule.lengthMinutes > 0 && _times != null;
+  }
+
+  /// The check of [schedule] under this check's [rules] at its [now], for
+  /// its [entry], against its others and with its [options].
+  CalendarScheduleCheck<T> withSchedule(CalendarSchedule schedule) {
+    return CalendarScheduleCheck<T>(
+      schedule: schedule,
+      rules: rules,
+      now: now,
+      others: _others,
+      entry: entry,
+      options: options,
+    );
+  }
+
   /// Whether the stored entry may neither move nor resize at its start,
   /// so a form keeps its start and its kind; false for a new entry.
   late final bool startFixed = _fixesStart();
@@ -436,14 +457,13 @@ final class CalendarScheduleCheck<T> {
 
   List<CalendarScheduleProblem> _findProblems() {
     final found = <CalendarScheduleProblem>[];
-    final ordered = schedule.lengthMinutes > 0;
-    if (!ordered) {
+    if (schedule.lengthMinutes <= 0) {
       found.add(const CalendarScheduleEndNotAfterStart());
     }
     final zone = zoneOf(now.time);
-    final times = _times;
-    final checkable = ordered && times != null;
-    if (checkable && !rules.coversAtMost(times.start, times.end)) {
+    // Null where timesChecked is false, which ends the checks here.
+    final times = timesChecked ? _times : null;
+    if (times != null && !rules.coversAtMost(times.start, times.end)) {
       found.add(const CalendarScheduleTooManyDays());
     }
     if (schedule.spansDays && !options.spansDays) {
@@ -458,7 +478,7 @@ final class CalendarScheduleCheck<T> {
     if (schedule.endSkippedOn(zone)) {
       found.add(const CalendarScheduleEndSkipped());
     }
-    if (!checkable) {
+    if (times == null) {
       return found;
     }
     final isAllDay = schedule.isAllDay;

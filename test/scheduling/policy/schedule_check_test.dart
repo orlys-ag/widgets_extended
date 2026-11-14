@@ -458,4 +458,86 @@ void main() {
       <CalendarScheduleProblem>[const CalendarScheduleTooManyDays()],
     );
   });
+
+  test("SC8 the times are checked where the end is after the start and the "
+      "clock reads both", () {
+    CalendarScheduleCheck<String> checkOf(
+      CalendarSchedule schedule, {
+      CalendarNow? now,
+    }) {
+      return CalendarScheduleCheck<String>(
+        schedule: schedule,
+        rules: rulesOf(unrestricted),
+        now: now ?? elevenOhSeven,
+      );
+    }
+
+    expect(checkOf(timed(wednesday, 540, 600)).timesChecked, isTrue);
+    expect(
+      checkOf(timed(wednesday, 540, 600).withEndMinute(540)).timesChecked,
+      isFalse,
+    );
+
+    ensureZones();
+    final havana = tz.getLocation("America/Havana");
+    final inHavana = CalendarNow(
+      time: tz.TZDateTime(havana, 2026, 3, 1, 9),
+      today: tz.TZDateTime(havana, 2026, 3, 1),
+    );
+    // Havana's clock skips 00:00 to 01:00 on 2026-03-08, so this end, 00:30
+    // of the eighth, is no time on it.
+    final skippedEnd = checkOf(
+      timed(DateTime(2026, 3, 7), 23 * 60, 1440).withLength(90),
+      now: inHavana,
+    );
+    // Setup sanity: the clock skips the end, which is after the start.
+    expect(skippedEnd.problems, <CalendarScheduleProblem>[
+      const CalendarScheduleEndSkipped(),
+    ]);
+    expect(skippedEnd.timesChecked, isFalse);
+  });
+
+  test("SC9 a check of another schedule made from a check answers as a new "
+      "check of that schedule with the same inputs", () {
+    final policy = CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+      lock,
+      const NoOverlapsPolicy<String>(),
+    ]);
+    final running = entryOf("running", tuesday, 600, 720);
+    final others = <CalendarEntry<String>>[
+      running,
+      entryOf("shared", tuesday, 750, 810),
+    ];
+    final options = CalendarScheduleOptions(spansDays: false);
+    final rules = rulesOf(policy);
+    final from = CalendarScheduleCheck<String>(
+      schedule: timed(tuesday, 600, 720),
+      rules: rules,
+      now: elevenOhSeven,
+      others: others,
+      entry: running,
+      options: options,
+    );
+    for (final schedule in <CalendarSchedule>[
+      timed(tuesday, 600, 780),
+      timed(tuesday, 600, 780).withEndDay(wednesday),
+      timed(tuesday, 700, 760),
+    ]) {
+      final made = from.withSchedule(schedule);
+      final fresh = CalendarScheduleCheck<String>(
+        schedule: schedule,
+        rules: rules,
+        now: elevenOhSeven,
+        others: others,
+        entry: running,
+        options: options,
+      );
+      expect(made.schedule, schedule);
+      expect(made.problems, fresh.problems, reason: "$schedule");
+      expect(made.overlaps, fresh.overlaps, reason: "$schedule");
+      expect(made.firstStartMinute, fresh.firstStartMinute, reason: "$schedule");
+      expect(made.nextFree, fresh.nextFree, reason: "$schedule");
+      expect(made.startFixed, fresh.startFixed, reason: "$schedule");
+    }
+  });
 }

@@ -875,6 +875,11 @@ minute its start may take and the next free range of its length, under a
 kind's `CalendarScheduleOptions`. `CalendarEditRules.firstSlot` takes an
 optional `lengthMinutes`, the length of the range it finds, still
 stepping by the slot.
+- Added `CalendarScheduleCheck.timesChecked`, whether a schedule's end is
+after its start and the clock reads both its times, so that its problems
+hold every rule's answer, and `CalendarScheduleCheck.withSchedule`, the
+check of another schedule under the same rules, time, entry, others and
+options.
 
 ## 0.0.35
 
