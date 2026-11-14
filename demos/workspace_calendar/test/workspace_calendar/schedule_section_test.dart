@@ -1102,6 +1102,232 @@ void main() {
       );
     }
   });
+
+  testWidgets("FA1 after a failed Save the title's and the times' messages "
+      "follow the edits: none before Save, a start picked in the hours "
+      "clears the end's hours message, and a title clears its own", (
+    tester,
+  ) async {
+    final store = MemoryCalendarStore<ItemPayload>(
+      hours: CalendarDayHours(8 * 60, 18 * 60),
+    );
+    addTearDown(store.dispose);
+    await openCreate(
+      tester,
+      store,
+      CalendarCreateRange(start: at(17, 30), end: at(18, 30)),
+    );
+    const endMessage =
+        "The end is from after 08:00 to 18:00, inside the calendar's hours.";
+    expect(find.text("Enter a title."), findsNothing);
+    expect(find.text(endMessage), findsNothing);
+
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    expect(find.text("Enter a title."), findsOneWidget);
+    expect(
+      find.descendant(
+        of: timeFieldFinder("End time"),
+        matching: find.text(endMessage),
+      ),
+      findsOneWidget,
+    );
+
+    await pickTime(tester, "Start time", "09:00");
+    expect(find.text(endMessage), findsNothing);
+    await tester.enterText(fieldFinder("Title"), "Plan");
+    await tester.pump();
+    expect(find.text("Enter a title."), findsNothing);
+  }, skip: true);
+
+  testWidgets("FA3 a type change keeps the title's message, and the start "
+      "message of a store's refusal stays through a title or an end edit "
+      "until the start changes", (tester) async {
+    final empty = storeOf(<CalendarItem>[]);
+    addTearDown(empty.dispose);
+    await openCreate(
+      tester,
+      empty,
+      CalendarCreateRange(start: at(9), end: at(10)),
+    );
+    await tester.tap(find.text("Risk").last);
+    await tester.pumpAndSettle();
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    expect(find.text("Enter a title."), findsOneWidget);
+    await tester.tap(find.text("Task").last);
+    await tester.pumpAndSettle();
+    expect(find.text("Enter a title."), findsOneWidget);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    await pickTime(tester, "Start time", "09:15");
+    store.hours = CalendarDayHours(10 * 60, 18 * 60);
+    await tester.pump();
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    const startMessage =
+        "The start is from 10:00 to before 18:00, inside the calendar's "
+        "hours.";
+    final onStart = find.descendant(
+      of: timeFieldFinder("Start time"),
+      matching: find.text(startMessage),
+    );
+    expect(onStart, findsOneWidget);
+    await tester.enterText(fieldFinder("Title"), "Write more");
+    await tester.pump();
+    expect(onStart, findsOneWidget);
+    await pickTime(tester, "End time", "11:00");
+    expect(onStart, findsOneWidget);
+    await pickTime(tester, "Start time", "10:00");
+    expect(find.text(startMessage), findsNothing);
+  }, skip: true);
+
+  testWidgets("FB1 the start's picker refuses a start whose range would end "
+      "past the hours", (tester) async {
+    final store = MemoryCalendarStore<ItemPayload>(
+      hours: CalendarDayHours(8 * 60, 18 * 60),
+      entries: <CalendarItem>[task("item-1", "Write", at(17), at(18))],
+    );
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    await openTimePicker(tester, "Start time");
+    expect(offeredTimes(tester, "Start time"), <int>[
+      for (var minute = 8 * 60; minute <= 17 * 60; minute += 15) minute,
+    ]);
+    expect(
+      rowTakesTap(tester, "Start time", timePickerMinuteRowKey(30)),
+      isFalse,
+    );
+    await tester.tap(
+      inPicker("Start time", find.byKey(timePickerMinuteRowKey(30))),
+    );
+    await tester.pumpAndSettle();
+    expect(timeFieldShows("Start time", "17:00"), findsOneWidget);
+  }, skip: true);
+
+  testWidgets("FB2 under a policy that refuses overlaps the end's picker "
+      "refuses an end that overlaps another item and takes one that touches "
+      "it", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+      task("item-2", "Standup", at(11), at(12)),
+    ]);
+    addTearDown(store.dispose);
+    await openWith(tester, (context) {
+      showEditForm(
+        context,
+        store: store,
+        id: "item-1",
+        policy: const NoOverlapsPolicy<ItemPayload>(),
+        now: wednesdayStart,
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+      );
+    });
+    await openTimePicker(tester, "End time");
+    expect(timeEnabled(tester, "End time", "11:00"), isTrue);
+    expect(timeEnabled(tester, "End time", "11:15"), isFalse);
+    expect(timeEnabled(tester, "End time", "12:30"), isFalse);
+  }, skip: true);
+
+  testWidgets("FN1 Now picks the first start offered after now where the "
+      "time before it is refused: under the lock of earlier today, with "
+      "today pinned to another day than now's time, and before the hours", (
+    tester,
+  ) async {
+    Future<void> openAt(
+      CalendarStore<ItemPayload> store,
+      CalendarEditPolicy<ItemPayload> policy,
+      CalendarNow now,
+    ) {
+      return openWith(tester, (context) {
+        showEditForm(
+          context,
+          store: store,
+          id: "item-1",
+          policy: policy,
+          now: () {
+            return now;
+          },
+          hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+        );
+      });
+    }
+
+    Future<void> tapNow() async {
+      await openTimePicker(tester, "Start time");
+      final now = inPicker("Start time", find.byKey(timePickerNowKey));
+      await tester.ensureVisible(now);
+      await tester.pumpAndSettle();
+      await tester.tap(now);
+      await tester.pumpAndSettle();
+    }
+
+    const lock = HistoryLockPolicy<ItemPayload>(lockEarlierToday: true);
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(10), at(11)),
+    ]);
+    addTearDown(store.dispose);
+    await openAt(store, lock, CalendarNow(time: at(9, 7), today: wednesday));
+    await tapNow();
+    expect(timeFieldShows("Start time", "09:15"), findsOneWidget);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    // The app pins today, so the clock's date can differ from it.
+    await openAt(
+      store,
+      lock,
+      CalendarNow(time: DateTime(2026, 4, 23, 9, 7), today: wednesday),
+    );
+    await tapNow();
+    expect(timeFieldShows("Start time", "09:15"), findsOneWidget);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    final office = MemoryCalendarStore<ItemPayload>(
+      hours: CalendarDayHours(8 * 60, 18 * 60),
+      entries: <CalendarItem>[task("item-1", "Write", at(10), at(11))],
+    );
+    addTearDown(office.dispose);
+    await openAt(
+      office,
+      const UnrestrictedEditPolicy<ItemPayload>(),
+      CalendarNow(time: at(7, 30), today: wednesday),
+    );
+    await tapNow();
+    expect(timeFieldShows("Start time", "08:00"), findsOneWidget);
+  }, skip: true);
+
+  testWidgets("FD1 Now shows only in the picker of a field whose day is "
+      "today", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task(
+        "item-1",
+        "Write",
+        DateTime(2026, 4, 23, 9),
+        DateTime(2026, 4, 23, 10),
+      ),
+      task("item-2", "Trip", DateTime(2026, 4, 21, 22), at(2)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    await openTimePicker(tester, "Start time");
+    expect(inPicker("Start time", find.byKey(timePickerNowKey)), findsNothing);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    await openEdit(tester, store, id: "item-2");
+    await openTimePicker(tester, "End time");
+    expect(inPicker("End time", find.byKey(timePickerNowKey)), findsOneWidget);
+    await openTimePicker(tester, "Start time");
+    expect(inPicker("Start time", find.byKey(timePickerNowKey)), findsNothing);
+  }, skip: true);
 }
 
 /// A policy whose earliest start on a day is 10:00 of it.
