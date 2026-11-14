@@ -1086,6 +1086,22 @@ void main() {
       );
     }
   });
+
+  testWidgets("TF15 the start's and the end's pickers play haptic "
+      "feedback", (tester) async {
+    final schedule = CalendarSchedule.of(at(9), at(10), isAllDay: false);
+    await pumpSection(tester, checkOf(schedule));
+    for (final label in <String>["Start time", "End time"]) {
+      await openTimePicker(tester, label);
+      expect(
+        tester
+            .widget<CalendarTimePicker>(timePickerFinder(label))
+            .hapticFeedback,
+        isTrue,
+        reason: label,
+      );
+    }
+  });
 }
 
 /// A policy whose earliest start on a day is 10:00 of it.

@@ -126,7 +126,11 @@ keys or a screen reader's increase and decrease move a column, and a pick
 is reported through `onChanged` once the columns come to rest; a new
 `value` moves them over the theme's motion and reports nothing. The AM/PM
 column takes the gestures and keys of the other columns, so Space and Enter
-do not switch its half. With a null `onChanged` it takes no input. It lays
+do not switch its half. With a null `onChanged` it takes no input. With
+`hapticFeedback`, off by default, on iOS and Android a column plays a
+selection click (`HapticFeedback.selectionClick`) as a drag, its landing or
+a mouse wheel brings a row onto its pill; a tap, a key, Now, Clear and a
+new `value` play none. It lays
 out under a parent that asks its intrinsic sizes, such as a dialog, its
 columns sharing a bounded width equally and otherwise 72 logical pixels wide
 each, or as wide as the AM/PM column's rows where they are wider. It draws

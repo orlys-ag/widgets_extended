@@ -6,6 +6,7 @@ library;
 
 import 'dart:ui' show Tristate;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -198,6 +199,52 @@ SemanticsData semanticsOf(WidgetTester tester, Finder finder) {
 void performAction(WidgetTester tester, Finder finder, SemanticsAction action) {
   final node = tester.getSemantics(finder);
   node.owner!.performAction(node.id, action);
+}
+
+/// The argument of the platform message [HapticFeedback.selectionClick]
+/// sends.
+const String selectionClick = "HapticFeedbackType.selectionClick";
+
+/// Records the haptic feedback the platform is asked for until the test
+/// ends, each by its type's name.
+List<String> recordClicks(WidgetTester tester) {
+  final types = <String>[];
+  final messenger = tester.binding.defaultBinaryMessenger;
+  messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+    if (call.method == "HapticFeedback.vibrate") {
+      types.add(call.arguments as String);
+    }
+    return null;
+  });
+  addTearDown(() {
+    messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+  });
+  return types;
+}
+
+/// Puts a finger on [column] and moves it up past the touch slop, which a
+/// drag starting at the slop moves no column for, so that each later move
+/// moves the column by its own distance.
+Future<TestGesture> grab(WidgetTester tester, Finder column) async {
+  final gesture = await tester.startGesture(tester.getCenter(column));
+  await gesture.moveBy(const Offset(0.0, -(kTouchSlop + 2.0)));
+  await tester.pump();
+  return gesture;
+}
+
+/// Moves [gesture] [rows] rows' extents up, toward later rows, in [steps]
+/// equal moves with a frame after each.
+Future<void> dragRows(
+  WidgetTester tester,
+  TestGesture gesture,
+  double rows, {
+  required int steps,
+}) async {
+  final extent = extentOf(tester);
+  for (var step = 0; step < steps; step++) {
+    await gesture.moveBy(Offset(0.0, -rows * extent / steps));
+    await tester.pump();
+  }
 }
 
 /// Pumps frames of [interval] until none is scheduled, calling [onFrame]
@@ -3004,4 +3051,184 @@ void main() {
       expect(calls, <int?>[expected]);
     });
   }
+
+  testWidgets(
+    "PK50 with hapticFeedback a drag clicks once for each row "
+    "that reaches the pill, its landing for the row it lands on, and the "
+    "row it rested on not again until another reached the pill",
+    (tester) async {
+      final clicks = recordClicks(tester);
+      final calls = <int?>[];
+      await tester.pumpWidget(
+        host(
+          CalendarTimePicker(
+            value: 570,
+            hapticFeedback: true,
+            onChanged: calls.add,
+          ),
+        ),
+      );
+      final gesture = await grab(tester, hourColumn());
+      expect(onPill(tester, hourRow(9)), isTrue);
+
+      await dragRows(tester, gesture, 0.4, steps: 2);
+      await dragRows(tester, gesture, -0.4, steps: 2);
+      expect(onPill(tester, hourRow(9)), isTrue);
+      expect(clicks, isEmpty);
+
+      await dragRows(tester, gesture, 2.6, steps: 13);
+      expect(clicks, <String>[selectionClick, selectionClick]);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(calls, <int?>[750]);
+      expect(clicks, <String>[selectionClick, selectionClick, selectionClick]);
+    },
+    variant: TargetPlatformVariant(<TargetPlatform>{
+      TargetPlatform.iOS,
+      TargetPlatform.android,
+    }),
+  );
+
+  testWidgets("PK51 a fling clicks as it brings rows to the pill, at most "
+      "once a row, and a mouse wheel once for the row it brings; a tap, a "
+      "key, a screen reader's increase, Now, a new value and a value that "
+      "waited for a drag move the columns without a click", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final clicks = recordClicks(tester);
+    final calls = <int?>[];
+    final hour = FocusNode();
+    addTearDown(hour.dispose);
+    Widget picker(int value) {
+      return host(
+        CalendarTimePicker(
+          value: value,
+          hapticFeedback: true,
+          now: () {
+            return 14 * 60 + 5;
+          },
+          focusNode: hour,
+          onChanged: calls.add,
+        ),
+      );
+    }
+
+    await tester.pumpWidget(picker(570));
+    await tester.fling(hourColumn(), const Offset(0.0, -120.0), 600.0);
+    await tester.pumpAndSettle();
+    final flung = calls.single! ~/ 60;
+    expect(flung, greaterThan(10));
+    expect(clicks, everyElement(selectionClick));
+    expect(clicks.length, inInclusiveRange(2, flung - 9));
+    final flingClicks = clicks.length;
+    await tester.pumpWidget(picker(570));
+    await tester.pumpAndSettle();
+    expect(onPill(tester, hourRow(9)), isTrue);
+    expect(clicks, hasLength(flingClicks));
+
+    clicks.clear();
+    calls.clear();
+    final pointer = TestPointer(1, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(
+      pointer.hover(tester.getCenter(hourColumn())),
+    );
+    await tester.sendEventToBinding(pointer.scroll(const Offset(0.0, 20.0)));
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[630]);
+    expect(clicks, <String>[selectionClick]);
+    await tester.pumpWidget(picker(570));
+    await tester.pumpAndSettle();
+    expect(onPill(tester, hourRow(9)), isTrue);
+    expect(clicks, <String>[selectionClick]);
+
+    clicks.clear();
+    calls.clear();
+    await tester.tap(hourRow(11));
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[690]);
+    hour.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[690, 750]);
+    performAction(tester, hourColumn(), SemanticsAction.increase);
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[690, 750, 810]);
+    await tester.tap(find.byKey(timePickerNowKey));
+    await tester.pumpAndSettle();
+    expect(calls, <int?>[690, 750, 810, 840]);
+    await tester.pumpWidget(picker(570));
+    await tester.pumpAndSettle();
+    expect(onPill(tester, hourRow(9)), isTrue);
+    expect(clicks, isEmpty);
+
+    final gesture = await grab(tester, hourColumn());
+    await dragRows(tester, gesture, 0.3, steps: 1);
+    await tester.pumpWidget(picker(690));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(onPill(tester, hourRow(11)), isTrue);
+    expect(clicks, isEmpty);
+    semantics.dispose();
+  }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+  testWidgets("PK52 a drag clicks only with hapticFeedback, and only on iOS "
+      "and Android", (tester) async {
+    final clicks = recordClicks(tester);
+    for (final haptic in <bool>[false, true]) {
+      await tester.pumpWidget(
+        host(
+          CalendarTimePicker(
+            key: ValueKey<bool>(haptic),
+            value: 570,
+            hapticFeedback: haptic,
+            onChanged: (value) {},
+          ),
+        ),
+      );
+      final gesture = await grab(tester, hourColumn());
+      await dragRows(tester, gesture, 2.0, steps: 10);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(onPill(tester, hourRow(11)), isTrue, reason: "$haptic");
+    }
+    final mobile =
+        defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android;
+    expect(clicks, mobile ? <String>[selectionClick, selectionClick] : isEmpty);
+  }, variant: TargetPlatformVariant.all());
+
+  testWidgets("PK53 rows renumbered under a held column, as a new min "
+      "drops the hours above it, click nothing as it lands, nor does a new "
+      "value with a null onChanged, which ends the hold", (tester) async {
+    final clicks = recordClicks(tester);
+    Widget picker({int value = 570, int min = 0, bool takesInput = true}) {
+      return host(
+        CalendarTimePicker(
+          value: value,
+          min: min,
+          hapticFeedback: true,
+          onChanged: takesInput ? (value) {} : null,
+        ),
+      );
+    }
+
+    await tester.pumpWidget(picker());
+    var gesture = await grab(tester, hourColumn());
+    await dragRows(tester, gesture, 0.3, steps: 1);
+    await tester.pumpWidget(picker(min: 480));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(rowNumbers(timePickerHourRowKey).first, 8);
+    expect(onPill(tester, hourRow(9)), isTrue);
+    expect(clicks, isEmpty);
+
+    gesture = await grab(tester, hourColumn());
+    await dragRows(tester, gesture, 0.3, steps: 1);
+    await tester.pumpWidget(picker(value: 690, min: 480, takesInput: false));
+    await tester.pumpAndSettle();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(onPill(tester, hourRow(11)), isTrue);
+    expect(clicks, isEmpty);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 }
