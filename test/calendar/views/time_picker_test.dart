@@ -3234,7 +3234,9 @@ void main() {
 
   testWidgets("PK54 a new subject ends a fling, a hold and a typed digit "
       "without a report, keeps the picker's columns, and moves them back to "
-      "the same value over the theme's motion", (tester) async {
+      "the same value, or on to a new one, over the theme's motion", (
+    tester,
+  ) async {
     final calls = <int?>[];
     final hour = FocusNode();
     addTearDown(hour.dispose);
@@ -3243,10 +3245,11 @@ void main() {
       motionCurve: Curves.linear,
     );
     var subject = 0;
+    var value = 570;
     Widget picker() {
       return host(
         CalendarTimePicker(
-          value: 570,
+          value: value,
           subject: subject,
           focusNode: hour,
           onChanged: calls.add,
@@ -3300,6 +3303,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls, isEmpty);
     expectOnPill(tester, 9, 30);
+
+    await tester.fling(hourColumn(), const Offset(0.0, -120.0), 800.0);
+    await tester.pump(const Duration(milliseconds: 16));
+    // Setup sanity: the fling still moves, its pick not reported, more than
+    // a row from 07.
+    expect(calls, isEmpty);
+    final toNew = rowsFromPill(7);
+    expect(toNew.abs(), greaterThan(1.0));
+    subject++;
+    value = 450;
+    await tester.pumpWidget(picker());
+    // Halfway through the theme's linear second on to 07, away from
+    // where the fling was going.
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(rowsFromPill(7), moreOrLessEquals(toNew / 2, epsilon: 0.02));
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+    expectOnPill(tester, 7, 30);
     expect(tester.element(hourColumn()), same(column));
   });
 
