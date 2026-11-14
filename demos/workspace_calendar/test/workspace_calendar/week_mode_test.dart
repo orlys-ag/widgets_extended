@@ -2441,13 +2441,14 @@ void main() {
     );
     expect(timeFieldTakesInput(tester, "Start time"), isFalse);
     expect(timeFieldTakesInput(tester, "End time"), isFalse);
-    // A timed item on one day shows no End date.
-    expect(inDialog(find.text("End date")), findsNothing);
-    await tester.tap(
-      inDialog(find.widgetWithText(InputDecorator, "Start date")),
-    );
-    await tester.pumpAndSettle();
-    expect(find.byType(DatePickerDialog), findsNothing);
+    for (final label in <String>["Start date", "End date"]) {
+      final field = inDialog(find.widgetWithText(InputDecorator, label));
+      await tester.ensureVisible(field);
+      await tester.pumpAndSettle();
+      await tester.tap(field);
+      await tester.pumpAndSettle();
+      expect(find.byType(DatePickerDialog), findsNothing, reason: label);
+    }
     expect(tester.widget<Switch>(inDialog(allDaySwitch())).onChanged, isNull);
     expect(saveFinder(), findsNothing);
     expect(formButton("Cancel"), findsNothing);

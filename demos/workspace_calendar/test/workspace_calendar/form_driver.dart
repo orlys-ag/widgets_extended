@@ -98,9 +98,9 @@ bool timeFieldTakesInput(WidgetTester tester, String label) {
       null;
 }
 
-/// The form's one time picker while it edits the time field labelled
-/// [label]: the [CalendarTimePicker] whose [CalendarTimePicker.subject] is
-/// that field's key.
+/// The picker of the form's time field labelled [label]: the
+/// [CalendarTimePicker] whose [CalendarTimePicker.subject] is that field's
+/// key.
 Finder timePickerFinder(String label) {
   final key = _timeFieldKey(label);
   return find.byWidgetPredicate((widget) {
@@ -319,21 +319,18 @@ Finder formDateShows(String label, String date) {
 }
 
 /// Expects the form's Start date to name [day], and its End date the day
-/// [days] - 1 days after it, both as [CalendarDates.isoDate] writes them;
-/// a timed item on one day shows no End date, which the schedule section
-/// shows only for an all-day or a multi-day item.
+/// [days] - 1 days after it, both as [CalendarDates.isoDate] writes them.
 void expectFormDays(String day, int days) {
   expect(formDateShows("Start date", day), findsOneWidget);
-  final end = formDateShows(
-    "End date",
-    CalendarDates.isoDate(CalendarDates.addDays(parseIsoDate(day)!, days - 1)),
+  expect(
+    formDateShows(
+      "End date",
+      CalendarDates.isoDate(
+        CalendarDates.addDays(parseIsoDate(day)!, days - 1),
+      ),
+    ),
+    findsOneWidget,
   );
-  final allDay = formAllDayOn();
-  if (days == 1 && !allDay) {
-    expect(find.text("End date"), findsNothing);
-  } else {
-    expect(end, findsOneWidget);
-  }
 }
 
 /// The form's All day switch.

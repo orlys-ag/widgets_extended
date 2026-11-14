@@ -1,10 +1,13 @@
 /// The item form's sheet, its summary card and its schedule section: the
 /// sheet's container and type selector, the message of each schedule
 /// problem, the messages after a failed Save, the summary's lines, overlap
-/// notice, next free time and zone, and the section's All day switch, End
-/// date, options and kept kind, and its time fields, the pickers they open,
-/// what each picker refuses, and where the focus goes.
+/// notice, next free time and zone, and the section's All day switch, its
+/// Start and End rows, End date, options and kept kind, and its time
+/// fields, the pickers they open under their rows, what each picker
+/// refuses, and where the focus goes.
 library;
+
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -231,30 +234,34 @@ final CalendarThemeData motionTheme = CalendarThemeData.builtIn.copyWith(
   motionCurve: Curves.linear,
 );
 
-/// The panel under the time row that holds the section's one picker.
-Finder pickerPanel() {
-  return find.byKey(schedulePickerKey);
+/// The panel under the row of the time field labelled [label], "Start
+/// time" or "End time", that holds that field's picker.
+Finder pickerPanel([String label = "Start time"]) {
+  return find.byKey(
+    label == "Start time" ? scheduleStartPanelKey : scheduleEndPanelKey,
+  );
 }
 
-/// The height of the picker panel.
-double panelHeight(WidgetTester tester) {
-  return tester.getSize(pickerPanel()).height;
+/// The height of the picker panel of the time field labelled [label].
+double panelHeight(WidgetTester tester, [String label = "Start time"]) {
+  return tester.getSize(pickerPanel(label)).height;
 }
 
-/// The height of the open picker panel at rest: its picker's, which the
-/// panel lays out at full height while it grows or shrinks, and the gap
-/// above it.
-double settledPanelHeight(WidgetTester tester) {
-  return tester.getSize(find.byType(CalendarTimePicker)).height + 12.0;
+/// The height of the open picker panel of the time field labelled [label]
+/// at rest: its picker's, which the panel lays out at full height while it
+/// grows or shrinks, and the gap above it.
+double settledPanelHeight(WidgetTester tester, [String label = "Start time"]) {
+  return tester.getSize(timePickerFinder(label)).height + 12.0;
 }
 
-/// The opacity of the picker panel, the first [FadeTransition] under it.
-double panelOpacity(WidgetTester tester) {
+/// The opacity of the picker panel of the time field labelled [label], the
+/// first [FadeTransition] under it.
+double panelOpacity(WidgetTester tester, [String label = "Start time"]) {
   return tester
       .widget<FadeTransition>(
         find
             .descendant(
-              of: pickerPanel(),
+              of: pickerPanel(label),
               matching: find.byType(FadeTransition),
             )
             .first,
@@ -448,7 +455,6 @@ void main() {
     expect(formButton("Close"), findsOneWidget);
     expect(formButton("Cancel"), findsNothing);
     expect(saveFinder(), findsNothing);
-    expect(find.text("Ends on another day"), findsNothing);
   });
 
   test("SF4 every schedule problem has its own message in the form", () {
@@ -510,19 +516,27 @@ void main() {
     expect(summary(tester), "Wed, Apr 22\n09:00 - 10:00\n1h");
   });
 
-  testWidgets("SS3 End date shows for a multi-day or all-day item, or after "
-      "Ends on another day", (tester) async {
+  testWidgets("SS3 End date names the item's last day, and a later day "
+      "picked there makes a one-day item span days", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task("item-2", "Trip", at(22), DateTime(2026, 4, 23, 2)),
     ]);
     addTearDown(store.dispose);
     await openEdit(tester, store);
-    expect(find.text("End date"), findsNothing);
-    await tester.tap(find.text("Ends on another day"));
-    await tester.pumpAndSettle();
     expect(formDateShows("End date", "2026-04-22"), findsOneWidget);
-    expect(find.text("Ends on another day"), findsNothing);
+    await tester.tap(formDateFinder("End date"));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(DatePickerDialog),
+        matching: find.text("23"),
+      ),
+    );
+    await tester.tap(find.text("OK"));
+    await tester.pumpAndSettle();
+    expect(formDateShows("End date", "2026-04-23"), findsOneWidget);
+    expect(summary(tester), "Wed, Apr 22, 09:00\nThu, Apr 23, 10:00\n25h");
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
@@ -594,25 +608,47 @@ void main() {
   });
 
   testWidgets("SS6 options that refuse all-day and spanning days show no All "
-      "day switch and no Ends on another day", (tester) async {
+      "day switch, and their End date takes no tap while the item ends on "
+      "its start's day", (tester) async {
+    bool endDateTakesTap() {
+      return tester
+              .widget<InkWell>(
+                find
+                    .ancestor(
+                      of: formDateFinder("End date"),
+                      matching: find.byType(InkWell),
+                    )
+                    .first,
+              )
+              .onTap !=
+          null;
+    }
+
     final schedule = CalendarSchedule.of(at(9), at(10), isAllDay: false);
     await pumpSection(tester, checkOf(schedule));
-    expect(find.text("Ends on another day"), findsOneWidget);
     expect(allDaySwitch(), findsOneWidget);
+    // Setup sanity: under the standard options End date takes a tap.
+    expect(endDateTakesTap(), isTrue);
 
+    const options = CalendarScheduleOptions(
+      allowsAllDay: false,
+      spansDays: false,
+    );
+    await pumpSection(tester, checkOf(schedule, options: options));
+    expect(allDaySwitch(), findsNothing);
+    expect(find.text("All day"), findsNothing);
+    expect(endDateTakesTap(), isFalse);
+
+    // An item that spans days still takes its End date, which can bring it
+    // back onto one day.
     await pumpSection(
       tester,
       checkOf(
-        schedule,
-        options: const CalendarScheduleOptions(
-          allowsAllDay: false,
-          spansDays: false,
-        ),
+        CalendarSchedule.of(at(22), DateTime(2026, 4, 23, 2), isAllDay: false),
+        options: options,
       ),
     );
-    expect(allDaySwitch(), findsNothing);
-    expect(find.text("All day"), findsNothing);
-    expect(find.text("Ends on another day"), findsNothing);
+    expect(endDateTakesTap(), isTrue);
   });
 
   testWidgets("SS7 the All day switch turned on hides the times, and turned "
@@ -711,9 +747,10 @@ void main() {
   });
 
   testWidgets("TF1 a tap on Start time opens its picker in the panel under "
-      "the time row, a pick there settles into the schedule, a tap on End "
-      "time keeps the panel and shows the end's picker alone, and a second "
-      "tap closes it; a fixed start's field opens none", (tester) async {
+      "the Start row, a pick there settles into the schedule, a tap on End "
+      "time closes it and opens the end's picker alone in the panel under "
+      "the End row, and a second tap closes that; a fixed start's field "
+      "opens none", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
     ]);
@@ -740,22 +777,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(summary(tester), "Wed, Apr 22\n09:30 - 10:30\n1h");
 
-    final panel = tester.state(pickerPanel());
+    await tester.ensureVisible(timeFieldFinder("End time"));
+    await tester.pumpAndSettle();
     await tester.tap(timeFieldFinder("End time"));
     await tester.pumpAndSettle();
-    expect(tester.state(pickerPanel()), same(panel));
     expect(
       find.descendant(
-        of: pickerPanel(),
+        of: pickerPanel("End time"),
         matching: timePickerFinder("End time"),
       ),
       findsOneWidget,
     );
     expect(timePickerFinder("Start time"), findsNothing);
+    expect(panelHeight(tester), 0.0);
+    // The reveal of End's picker leaves its field where a tap misses it.
+    await tester.ensureVisible(timeFieldFinder("End time"));
+    await tester.pumpAndSettle();
     await tester.tap(timeFieldFinder("End time"));
     await tester.pumpAndSettle();
     expect(find.byType(CalendarTimePicker), findsNothing);
-    expect(panelHeight(tester), 0.0);
+    expect(panelHeight(tester, "End time"), 0.0);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
@@ -984,8 +1025,10 @@ void main() {
   });
 
   testWidgets("TF8 the focus follows the open picker: its Hour column takes "
-      "it as the picker opens, keeps it as the picker passes to the other "
-      "field, and its field takes it as it closes", (tester) async {
+      "it as the picker opens, the other picker's as a tap on the other "
+      "field opens that one, and the field takes it as its picker closes", (
+    tester,
+  ) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
     ]);
@@ -997,17 +1040,18 @@ void main() {
       focusUnder(inPicker("Start time", find.byKey(timePickerHourColumnKey))),
       isTrue,
     );
-    final hourNode = FocusManager.instance.primaryFocus;
 
+    await tester.ensureVisible(timeFieldFinder("End time"));
+    await tester.pumpAndSettle();
     await tester.tap(timeFieldFinder("End time"));
     await tester.pumpAndSettle();
     expect(
       focusUnder(inPicker("End time", find.byKey(timePickerHourColumnKey))),
       isTrue,
     );
-    // The one picker's Hour column keeps its node for either field.
-    expect(FocusManager.instance.primaryFocus, same(hourNode));
 
+    await tester.ensureVisible(timeFieldFinder("End time"));
+    await tester.pumpAndSettle();
     await tester.tap(timeFieldFinder("End time"));
     await tester.pumpAndSettle();
     expect(timePickerFinder("End time"), findsNothing);
@@ -1833,12 +1877,17 @@ void main() {
 
   testWidgets("FW3 what the scheduling card's controls show lies 16 pixels "
       "from its edges: All day's label and switch track at the top and "
-      "side, the fields at the sides, and at the bottom the label of Ends "
-      "on another day, whose icon lines up with the fields and whose button "
-      "keeps a full touch target, or End date's field", (tester) async {
+      "side, and at the bottom the End row's fields, or an all-day item's "
+      "End date", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
-      task("item-2", "Trip", at(22), DateTime(2026, 4, 23, 2)),
+      task(
+        "item-2",
+        "Off",
+        DateTime(2026, 4, 24),
+        DateTime(2026, 4, 25),
+        isAllDay: true,
+      ),
     ]);
     addTearDown(store.dispose);
     await openEdit(tester, store);
@@ -1847,30 +1896,19 @@ void main() {
     // A padded Switch pads its track 4 pixels at each side
     // (SwitchThemeData.padding), 3 at three quarters of its size.
     expect(tester.getRect(allDaySwitch()).right - 3.0, card.right - 16.0);
-    final startDate = tester.getRect(formDateFinder("Start date"));
-    expect(startDate.left, card.left + 16.0);
-    expect(startDate.right, card.right - 16.0);
-    final button = find.widgetWithText(TextButton, "Ends on another day");
     expect(
-      tester
-          .getRect(
-            find.descendant(of: button, matching: find.byIcon(Icons.add)),
-          )
-          .left,
-      startDate.left,
-    );
-    expect(
-      tester.getRect(find.text("Ends on another day")).bottom,
+      math.max(
+        tester.getRect(formDateFinder("End date")).bottom,
+        tester.getRect(timeFieldFinder("End time")).bottom,
+      ),
       card.bottom - 16.0,
-    );
-    expect(
-      tester.getRect(button).height,
-      greaterThanOrEqualTo(kMinInteractiveDimension),
     );
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
     await openEdit(tester, store, id: "item-2");
+    // Setup sanity: the item is all-day.
+    expect(formAllDayOn(), isTrue);
     card = tester.getRect(find.byKey(formSchedulingCardKey));
     expect(
       tester.getRect(formDateFinder("End date")).bottom,
@@ -1895,9 +1933,269 @@ void main() {
     );
   });
 
-  testWidgets("FP1 the panel grows and fades in over the theme's motion as "
-      "Start time opens it, and shrinks and fades out as the field closes "
-      "it, its picker neither rebuilt nor asked in between", (tester) async {
+  testWidgets("FR1 the scheduling card shows a Start row, Start date then "
+      "Start time, above an End row, End date then End time, each date "
+      "three fifths of its row and 12 pixels from its time, and no Ends on "
+      "another day: a one-day item's End date names its start's day", (
+    tester,
+  ) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    expect(formDateShows("End date", "2026-04-22"), findsOneWidget);
+    expect(find.text("Ends on another day"), findsNothing);
+    final card = tester.getRect(find.byKey(formSchedulingCardKey));
+    final dates = <Rect>[
+      tester.getRect(formDateFinder("Start date")),
+      tester.getRect(formDateFinder("End date")),
+    ];
+    final times = <Rect>[
+      tester.getRect(timeFieldFinder("Start time")),
+      tester.getRect(timeFieldFinder("End time")),
+    ];
+    for (var row = 0; row < 2; row++) {
+      final date = dates[row];
+      final time = times[row];
+      expect(date.top, time.top, reason: "row $row");
+      expect(date.left, card.left + 16.0, reason: "row $row");
+      expect(time.right, card.right - 16.0, reason: "row $row");
+      expect(time.left - date.right, 12.0, reason: "row $row");
+      expect(
+        date.width / (date.width + time.width),
+        moreOrLessEquals(0.6),
+        reason: "row $row",
+      );
+    }
+    expect(dates[0].bottom, lessThanOrEqualTo(dates[1].top));
+  });
+
+  testWidgets("FR2 an all-day item's Start date and End date each take a "
+      "row of their own across the card", (tester) async {
+    await pumpSection(
+      tester,
+      checkOf(
+        CalendarSchedule.of(wednesday, DateTime(2026, 4, 24), isAllDay: true),
+      ),
+    );
+    final section = tester.getRect(find.byType(ScheduleSection));
+    final start = tester.getRect(formDateFinder("Start date"));
+    final end = tester.getRect(formDateFinder("End date"));
+    for (final date in <Rect>[start, end]) {
+      expect(date.left, section.left + 16.0);
+      expect(date.right, section.right - 16.0);
+    }
+    expect(start.bottom, lessThanOrEqualTo(end.top));
+  });
+
+  testWidgets("FR3 Start time's picker opens in a panel between the Start "
+      "row and the End row, and End time's in a panel under the End row", (
+    tester,
+  ) async {
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
+    );
+    await openTimePicker(tester, "Start time");
+    final start = tester.getRect(timePickerFinder("Start time"));
+    expect(
+      start.top,
+      greaterThan(tester.getRect(timeFieldFinder("Start time")).bottom),
+    );
+    expect(
+      start.bottom,
+      lessThan(tester.getRect(timeFieldFinder("End time")).top),
+    );
+    expect(
+      find.descendant(
+        of: pickerPanel("Start time"),
+        matching: timePickerFinder("Start time"),
+      ),
+      findsOneWidget,
+    );
+    await closeTimePicker(tester, "Start time");
+
+    await openTimePicker(tester, "End time");
+    final end = tester.getRect(timePickerFinder("End time"));
+    expect(
+      end.top,
+      greaterThan(tester.getRect(timeFieldFinder("End time")).bottom),
+    );
+    expect(
+      find.descendant(
+        of: pickerPanel("End time"),
+        matching: timePickerFinder("End time"),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets("FR4 a tap on End time while Start's picker is open shrinks "
+      "Start's panel while End's grows, over the theme's motion, Start's "
+      "picker fading out over the motion's last half as End's fades in over "
+      "its first, the closing picker taking no pick; then End's picker "
+      "alone shows, its Hour column holding the focus", (tester) async {
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(9), at(12), isAllDay: false)),
+      theme: motionTheme,
+    );
+    await openTimePicker(tester, "Start time");
+    final startFull = settledPanelHeight(tester, "Start time");
+    // Setup sanity: Start's panel is open at rest.
+    expect(panelHeight(tester, "Start time"), startFull);
+    await tester.ensureVisible(timeFieldFinder("End time"));
+    await tester.pumpAndSettle();
+
+    await tester.tap(timeFieldFinder("End time"));
+    await tester.pump();
+    // 120 ms after the tap's own frame, a quarter of the theme's linear
+    // 480 ms.
+    await tester.pump(const Duration(milliseconds: 120));
+    final endFull = settledPanelHeight(tester, "End time");
+    expect(
+      panelHeight(tester, "Start time"),
+      moreOrLessEquals(startFull * 3 / 4, epsilon: 1.0),
+    );
+    expect(panelOpacity(tester, "Start time"), 1.0);
+    expect(
+      panelHeight(tester, "End time"),
+      moreOrLessEquals(endFull / 4, epsilon: 1.0),
+    );
+    expect(
+      panelOpacity(tester, "End time"),
+      moreOrLessEquals(0.5, epsilon: 0.01),
+    );
+    expect(
+      tester
+          .widget<CalendarTimePicker>(timePickerFinder("Start time"))
+          .onChanged,
+      isNull,
+    );
+    // Three quarters of the motion.
+    await tester.pump(const Duration(milliseconds: 240));
+    expect(
+      panelHeight(tester, "Start time"),
+      moreOrLessEquals(startFull / 4, epsilon: 1.0),
+    );
+    expect(
+      panelOpacity(tester, "Start time"),
+      moreOrLessEquals(0.5, epsilon: 0.01),
+    );
+    expect(
+      panelHeight(tester, "End time"),
+      moreOrLessEquals(endFull * 3 / 4, epsilon: 1.0),
+    );
+    expect(panelOpacity(tester, "End time"), 1.0);
+
+    await tester.pumpAndSettle();
+    expect(timePickerFinder("Start time"), findsNothing);
+    expect(panelHeight(tester, "Start time"), 0.0);
+    expect(
+      panelHeight(tester, "End time"),
+      settledPanelHeight(tester, "End time"),
+    );
+    expect(
+      focusUnder(inPicker("End time", find.byKey(timePickerHourColumnKey))),
+      isTrue,
+    );
+  });
+
+  testWidgets("FR5 where the platform asks for no animations a tap on End "
+      "time while Start's picker is open closes Start's panel and opens "
+      "End's at full height in the tap's own frame", (tester) async {
+    disableAnimations(tester);
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(9), at(12), isAllDay: false)),
+      theme: motionTheme,
+    );
+    await openTimePicker(tester, "Start time");
+    await tester.ensureVisible(timeFieldFinder("End time"));
+    await tester.pumpAndSettle();
+    await tester.tap(timeFieldFinder("End time"));
+    await tester.pump();
+    expect(timePickerFinder("Start time"), findsNothing);
+    expect(panelHeight(tester, "Start time"), 0.0);
+    expect(
+      panelHeight(tester, "End time"),
+      settledPanelHeight(tester, "End time"),
+    );
+  });
+
+  testWidgets("FR6 after a failed Save, the end's message of a timed item "
+      "that spans days shows on End time, not on End date", (tester) async {
+    final store = MemoryCalendarStore<ItemPayload>(
+      hours: CalendarDayHours(8 * 60, 18 * 60),
+    );
+    addTearDown(store.dispose);
+    await openCreate(
+      tester,
+      store,
+      CalendarCreateRange(start: at(17), end: DateTime(2026, 4, 23, 19)),
+    );
+    const endMessage =
+        "The end is from after 08:00 to 18:00, inside the calendar's hours.";
+    // Setup sanity: the item spans days.
+    expect(formDateShows("End date", "2026-04-23"), findsOneWidget);
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: timeFieldFinder("End time"),
+        matching: find.text(endMessage),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: formDateFinder("End date"),
+        matching: find.text(endMessage),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets("FR7 a tap on End time while Start's picker is open, with the "
+      "End row at the top of the form's view, brings End's field back into "
+      "view once End's panel has opened, as Start's panel above it closed", (
+    tester,
+  ) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    await openTimePicker(tester, "Start time");
+    final page = tester.getRect(
+      find
+          .descendant(
+            of: find.byType(BottomSheet),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await Scrollable.ensureVisible(tester.element(timeFieldFinder("End time")));
+    await tester.pumpAndSettle();
+    // Setup sanity: End's field lies at the top of the view, below Start's
+    // open panel.
+    expect(tester.getRect(timeFieldFinder("End time")).top, page.top);
+    expect(timePickerFinder("Start time"), findsOneWidget);
+
+    await tester.tap(timeFieldFinder("End time"));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getRect(timeFieldFinder("End time")).top,
+      greaterThanOrEqualTo(page.top),
+    );
+  });
+
+  testWidgets("FP1 the panel grows over the theme's motion as Start time "
+      "opens it, its picker fading in over the motion's first half, and "
+      "shrinks over it as the field closes it, the picker fading out over "
+      "the motion's last half, the picker neither rebuilt nor asked in "
+      "between", (tester) async {
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
@@ -1908,14 +2206,16 @@ void main() {
     var full = 0.0;
     var asks = debugSchedulePickerAsks;
     final opening = await pickerRebuildsDuring(() async {
-      await tester.pump(const Duration(milliseconds: 16));
+      // 120 ms after the tap's own frame, a quarter of the theme's linear
+      // 480 ms.
+      await tester.pump(const Duration(milliseconds: 120));
       full = settledPanelHeight(tester);
-      expect(panelHeight(tester), lessThan(full));
-      expect(panelOpacity(tester), lessThan(1.0));
-      // 240 ms after the tap's own frame, half the theme's 480 ms.
-      await tester.pump(const Duration(milliseconds: 224));
+      expect(panelHeight(tester), moreOrLessEquals(full / 4, epsilon: 1.0));
       expect(panelOpacity(tester), moreOrLessEquals(0.5, epsilon: 0.01));
+      // Half the motion.
+      await tester.pump(const Duration(milliseconds: 120));
       expect(panelHeight(tester), moreOrLessEquals(full / 2, epsilon: 1.0));
+      expect(panelOpacity(tester), 1.0);
       await tester.pump(const Duration(milliseconds: 240));
       expect(panelHeight(tester), full);
       expect(panelOpacity(tester), 1.0);
@@ -1927,11 +2227,15 @@ void main() {
     await tester.pump();
     asks = debugSchedulePickerAsks;
     final closing = await pickerRebuildsDuring(() async {
-      await tester.pump(const Duration(milliseconds: 16));
-      expect(panelHeight(tester), lessThan(full));
-      expect(panelHeight(tester), greaterThan(0.0));
-      expect(panelOpacity(tester), lessThan(1.0));
-      await tester.pump(const Duration(milliseconds: 464));
+      // Half the motion.
+      await tester.pump(const Duration(milliseconds: 240));
+      expect(panelHeight(tester), moreOrLessEquals(full / 2, epsilon: 1.0));
+      expect(panelOpacity(tester), 1.0);
+      // Three quarters of the motion.
+      await tester.pump(const Duration(milliseconds: 120));
+      expect(panelHeight(tester), moreOrLessEquals(full / 4, epsilon: 1.0));
+      expect(panelOpacity(tester), moreOrLessEquals(0.5, epsilon: 0.01));
+      await tester.pump(const Duration(milliseconds: 120));
       expect(panelHeight(tester), 0.0);
       // The motion is done, and drops the picker, in its first frame past
       // its duration: AnimationController's simulation is done only past it.
@@ -1992,7 +2296,7 @@ void main() {
     await pumpSection(tester, checkOf(schedule), theme: motionTheme);
     await openTimePicker(tester, "Start time");
     final before = tester.state(timePickerFinder("Start time"));
-    // Without the switch above the time row, the row and its panel are
+    // Without the switch above the Start row, the row and its panel are
     // made anew.
     await pumpSection(
       tester,
@@ -2068,44 +2372,21 @@ void main() {
     // Setup sanity: the panel has closed.
     expect(find.byType(CalendarTimePicker), findsNothing);
     reads = 0;
-    await tester.tap(find.text("Ends on another day"));
-    await tester.pump();
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(9), at(11), isAllDay: false)),
+      now: () {
+        reads++;
+        return wednesdayStart();
+      },
+    );
     // Setup sanity: the section built again.
-    expect(formDateFinder("End date"), findsOneWidget);
+    expect(timeFieldShows("End time", "11:00"), findsOneWidget);
     expect(reads, 0);
   });
 
-  testWidgets("FX1 a tap on End time while Start's picker is open keeps the "
-      "panel open and its picker, whose Hour column moves over the theme's "
-      "motion to the end's time, rebuilding and asking nothing as it "
-      "moves", (tester) async {
-    await pumpSection(
-      tester,
-      checkOf(CalendarSchedule.of(at(9), at(12), isAllDay: false)),
-      theme: motionTheme,
-    );
-    await expectPickerPassesToEnd(tester);
-  });
-
-  testWidgets("FX2 where the platform asks for no animations a tap on End "
-      "time while Start's picker is open keeps the panel open and its "
-      "picker, whose Hour column still moves to the end's time", (
-    tester,
-  ) async {
-    disableAnimations(tester);
-    await pumpSection(
-      tester,
-      checkOf(CalendarSchedule.of(at(9), at(12), isAllDay: false)),
-      theme: motionTheme,
-    );
-    // The picker's columns run on AnimationController.unbounded, whose
-    // AnimationBehavior.preserve keeps the theme's full 480 ms under the
-    // flag, so every 16 ms frame up to 464 ms lies between the rows.
-    await expectPickerPassesToEnd(tester);
-  });
-
-  testWidgets("FX3 the footer the picker gains as it passes to a field on "
-      "today grows the open panel at once and scrolls into view", (
+  testWidgets("FX3 the footer an open picker gains as its field's day "
+      "becomes today grows its panel at once and scrolls into view", (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1.0;
@@ -2123,13 +2404,18 @@ void main() {
     final height = panelHeight(tester);
     final picker = tester.state(timePickerFinder("Start time"));
 
-    await tester.tap(timeFieldFinder("End time"));
-    await tester.pump();
+    // The start moves onto Wednesday, today.
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(1), at(2), isAllDay: false)),
+      theme: motionTheme,
+    );
     expect(panelHeight(tester), greaterThan(height));
-    expect(tester.state(timePickerFinder("End time")), same(picker));
+    // Setup sanity: the panel kept its picker.
+    expect(tester.state(timePickerFinder("Start time")), same(picker));
     await tester.pumpAndSettle();
     final now = tester.getRect(
-      inPicker("End time", find.byKey(timePickerNowKey)),
+      inPicker("Start time", find.byKey(timePickerNowKey)),
     );
     expect(now.top, greaterThanOrEqualTo(0.0));
     expect(now.bottom, lessThanOrEqualTo(300.0));
@@ -2699,45 +2985,6 @@ String utcText(Duration offset) {
   final hours = (minutes.abs() ~/ 60).toString().padLeft(2, "0");
   final rest = (minutes.abs() % 60).toString().padLeft(2, "0");
   return "UTC$sign$hours:$rest";
-}
-
-/// Opens Start's picker on a section of 09:00 to 12:00 and taps End time:
-/// expects the panel to stay at full height with the same picker, whose
-/// Hour column shows the end's row of 12 three rows below its pill in the
-/// tap's own frame, between them in a later frame, and on the pill at rest,
-/// the picker rebuilt and asked nothing after the tap's own frame.
-Future<void> expectPickerPassesToEnd(WidgetTester tester) async {
-  await openTimePicker(tester, "Start time");
-  final full = panelHeight(tester);
-  // Setup sanity: the panel is open at rest.
-  expect(full, settledPanelHeight(tester));
-  final picker = tester.state(timePickerFinder("Start time"));
-  final row = hourRowFromPill(tester, "Start time", 10);
-  // Setup sanity: 09:00 lies on the pill.
-  expect(hourRowFromPill(tester, "Start time", 9).abs(), lessThan(0.5));
-
-  await tester.tap(timeFieldFinder("End time"));
-  await tester.pump();
-  expect(panelHeight(tester), full);
-  expect(tester.state(timePickerFinder("End time")), same(picker));
-  expect(
-    hourRowFromPill(tester, "End time", 12),
-    moreOrLessEquals(3 * row, epsilon: 0.5),
-  );
-  final asks = debugSchedulePickerAsks;
-  var between = false;
-  final rebuilt = await pickerRebuildsDuring(() async {
-    for (var frame = 0; frame < 40; frame++) {
-      await tester.pump(const Duration(milliseconds: 16));
-      final offset = hourRowFromPill(tester, "End time", 12);
-      between = between || (offset > 0.5 && offset < 3 * row - 0.5);
-      expect(panelHeight(tester), full);
-    }
-  });
-  expect(between, isTrue);
-  expect(hourRowFromPill(tester, "End time", 12).abs(), lessThan(0.5));
-  expect(rebuilt, isEmpty);
-  expect(debugSchedulePickerAsks, asks);
 }
 
 /// A [ScheduleSection], built by [builder], whose check follows its edits:
