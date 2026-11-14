@@ -118,22 +118,40 @@ int clockMinute(String time) {
   return int.parse(match.group(1)!) * 60 + int.parse(match.group(2)!);
 }
 
+/// Scrolls the time field labelled [label] into view where part of it lies
+/// outside, as a user does before a tap, and lets it settle; a field in
+/// view stays where it is.
+Future<void> _revealTimeField(WidgetTester tester, String label) async {
+  final field = tester.element(timeFieldFinder(label));
+  for (final policy in <ScrollPositionAlignmentPolicy>[
+    ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+    ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+  ]) {
+    await Scrollable.ensureVisible(field, alignmentPolicy: policy);
+  }
+  await tester.pumpAndSettle();
+}
+
 /// Opens the picker of the form's time field labelled [label] with a tap
-/// on the field where it is closed, and lets it settle.
+/// on the field where it is closed, brought into view first, and lets it
+/// settle.
 Future<void> openTimePicker(WidgetTester tester, String label) async {
   if (timePickerFinder(label).evaluate().isNotEmpty) {
     return;
   }
+  await _revealTimeField(tester, label);
   await tester.tap(timeFieldFinder(label));
   await tester.pumpAndSettle();
 }
 
 /// Closes the picker of the form's time field labelled [label] with a tap
-/// on the field where it is open, and lets it settle.
+/// on the field where it is open, brought into view first, and lets it
+/// settle.
 Future<void> closeTimePicker(WidgetTester tester, String label) async {
   if (timePickerFinder(label).evaluate().isEmpty) {
     return;
   }
+  await _revealTimeField(tester, label);
   await tester.tap(timeFieldFinder(label));
   await tester.pumpAndSettle();
 }
@@ -325,9 +343,14 @@ Finder allDaySwitch() {
 
 /// Whether the form's All day switch is on; false where it does not show.
 bool formAllDayOn() {
-  final switches = allDaySwitch().evaluate();
-  return switches.isNotEmpty &&
-      (switches.single.widget as SwitchListTile).value;
+  final switches = find
+      .descendant(
+        of: allDaySwitch(),
+        matching: find.byType(Switch),
+        matchRoot: true,
+      )
+      .evaluate();
+  return switches.isNotEmpty && (switches.single.widget as Switch).value;
 }
 
 /// Expects the create flow, picks [type], and expects its form prefilled

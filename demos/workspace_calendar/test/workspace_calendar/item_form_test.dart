@@ -177,7 +177,7 @@ void main() {
     expect(find.text("2026-04-22"), findsOneWidget);
     expect(find.text("2026-04-23"), findsOneWidget);
 
-    await tester.tap(find.text("All day"));
+    await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
     expect(timeFieldFinder("Start time"), findsNothing);
     expect(timeFieldFinder("End time"), findsNothing);
@@ -297,7 +297,7 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
     await openForm(tester, store, policy: policy);
-    await tester.tap(find.text("All day"));
+    await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pumpAndSettle();
@@ -305,8 +305,8 @@ void main() {
     expect(allDaySwitch(), findsOneWidget);
   });
 
-  testWidgets("FC1 the form's page is three outlined cards, the summary's, "
-      "the scheduling and the item's, in that order between the heading and "
+  testWidgets("FC1 the form's page is three outlined cards, the scheduling, "
+      "the summary's and the item's, in that order between the heading and "
       "the actions", (tester) async {
     final store = MemoryCalendarStore<ItemPayload>(
       entries: <CalendarItem>[
@@ -316,8 +316,8 @@ void main() {
     addTearDown(store.dispose);
     await openForm(tester, store);
     final keys = <Key>[
-      formSummaryCardKey,
       formSchedulingCardKey,
+      formSummaryCardKey,
       formItemCardKey,
     ];
     for (final key in keys) {
@@ -332,8 +332,8 @@ void main() {
       expect(cards[index - 1].bottom, lessThanOrEqualTo(cards[index].top));
     }
     for (final (key, part) in <(Key, Finder)>[
-      (formSummaryCardKey, find.byType(ScheduleSummary)),
       (formSchedulingCardKey, find.byType(ScheduleSection)),
+      (formSummaryCardKey, find.byType(ScheduleSummary)),
       (formItemCardKey, fieldFinder("Title")),
     ]) {
       expect(
@@ -354,6 +354,51 @@ void main() {
       tester.getRect(saveFinder()).top,
       greaterThanOrEqualTo(tester.getRect(page).bottom),
     );
+  });
+
+  testWidgets("FC2 the page's padding lies inside its scroll view: the page "
+      "spans the sheet's width, its cards keep 24 pixels from the sheet's "
+      "sides, and a drag that starts beside them scrolls it", (tester) async {
+    final store = MemoryCalendarStore<ItemPayload>(
+      entries: <CalendarItem>[
+        task(DateTime(2026, 4, 22, 9), DateTime(2026, 4, 22, 10)),
+      ],
+    );
+    addTearDown(store.dispose);
+    await openForm(tester, store);
+    // The sheet's Material, which a wide screen centres at its widest.
+    final sheet = tester.getRect(
+      find
+          .descendant(
+            of: find.byType(BottomSheet),
+            matching: find.byType(Material),
+          )
+          .first,
+    );
+    final page = tester.getRect(
+      find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.byType(SingleChildScrollView),
+      ),
+    );
+    expect(page.left, sheet.left);
+    expect(page.right, sheet.right);
+    final card = find.byKey(formSchedulingCardKey);
+    final before = tester.getRect(card);
+    expect(before.left, sheet.left + 24.0);
+    expect(before.right, sheet.right - 24.0);
+    // Setup sanity: the page holds more than its view shows.
+    expect(
+      tester.getRect(find.byKey(formItemCardKey)).bottom,
+      greaterThan(page.bottom),
+    );
+
+    await tester.dragFrom(
+      Offset(sheet.left + 8.0, page.center.dy),
+      const Offset(0.0, -120.0),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getRect(card).top, lessThan(before.top));
   });
 
   group(
