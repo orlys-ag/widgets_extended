@@ -15,12 +15,11 @@ void main() {
 /// The workspace calendar as a whole app.
 class WorkspaceCalendarApp extends StatelessWidget {
   const WorkspaceCalendarApp({super.key});
-  // defaults:
-  // make AM/PM default for hour labels
-  // slot length = 30m default
-  //
-  // change: item type: tasks, risks, requests
+  // What about a drag-mode for agenda view that allows re-scheduling through the drag?
+  // As you drag, the time would change, but the real issue is how to correctly communicate to the user that
+  // the time is changing (since agenda view does not draw all hours) in a visually clear and pleasing way.
 
+  // FEAT: SEPARATE DRAWN SLOT LENGTH FROM BOOKING SLOT LENGTH
   // zoom in/out: slot length must be larger,
   // separate booking slot length from view slot length
   // goal is to declutter zoomed out views that draw too many hour labels and cell slots
@@ -28,12 +27,11 @@ class WorkspaceCalendarApp extends StatelessWidget {
   // access calendar from within workspace; Luisa has started some designs
   //
   // remove edit toggle; make behavior = always on
-  // adjust padding of calendar cards
   // card colors: based on lookups that have associated colors
   //  will have picker to select lookup field (which determines color)
   //  FAB should default to today; user can change date
   //
-  // Custom color coding per user, saved to device?
+  // Custom color coding per user, saved to device?\
   // Have a list of users to assign tasks, risks, and requests to, etc.?
   @override
   Widget build(BuildContext context) {
