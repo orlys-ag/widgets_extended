@@ -314,7 +314,7 @@ void main() {
 
   testWidgets("PK2 the 24-hour clock lists 00 to 23 and the step's minutes, "
       "the value's on the pills and no AM/PM column; the 12-hour clock lists "
-      "12 and 01 to 11 in the value's half, the AM/PM column on it", (
+      "12 and 1 to 11 in the value's half, the AM/PM column on it", (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -345,7 +345,7 @@ void main() {
     expect(rowNumbers(timePickerHourRowKey), <int>[
       for (var hour = 12; hour < 24; hour++) hour,
     ]);
-    for (final label in <String>["12", "01", "02", "06", "11"]) {
+    for (final label in <String>["12", "1", "2", "6", "11"]) {
       expect(
         find.descendant(of: hourColumn(), matching: find.text(label)),
         findsOneWidget,
@@ -2362,7 +2362,7 @@ void main() {
     expect(calls, isEmpty);
     expect(onPill(tester, hourRow(14)), isTrue);
     expect(
-      find.descendant(of: hourRow(14), matching: find.text("02")),
+      find.descendant(of: hourRow(14), matching: find.text("2")),
       findsOneWidget,
     );
     expect(onPill(tester, pmRow()), isTrue);
@@ -2588,15 +2588,15 @@ void main() {
     );
     expect(rowNumbers(timePickerHourRowKey), <int>[0, 5, 10]);
     expectShows(0, "12");
-    expectShows(5, "05");
+    expectShows(5, "5");
     expectShows(10, "10");
     await tester.pumpWidget(Container());
     await tester.pumpWidget(
       picker(900, format: CalendarHourLabelFormat.twelveHour),
     );
     expect(rowNumbers(timePickerHourRowKey), <int>[15, 20]);
-    expectShows(15, "03");
-    expectShows(20, "08");
+    expectShows(15, "3");
+    expectShows(20, "8");
 
     await tester.pumpWidget(Container());
     await tester.pumpWidget(picker(570));

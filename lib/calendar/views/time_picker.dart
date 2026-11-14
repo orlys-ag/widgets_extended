@@ -138,7 +138,7 @@ const Duration _digitWait = Duration(seconds: 1);
 /// 1440 for the 24:00 that ends a day; null selects no time and draws no
 /// pill. On the 24-hour clock the Hour column runs from 00 to 23, and to 24,
 /// whose one minute is 00, where [max] is 1440. On the 12-hour clock it runs
-/// 12, 01 to 11 in the half the AM/PM column rests on; 12 AM 00 picks 1440
+/// 12, 1 to 11 in the half the AM/PM column rests on; 12 AM 00 picks 1440
 /// where the range holds 1440 and not 0, as an end's does, and where it
 /// holds both, picks 1440 while [value] is 1440.
 ///
