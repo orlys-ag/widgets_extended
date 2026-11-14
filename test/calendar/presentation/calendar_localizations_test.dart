@@ -531,8 +531,8 @@ void main() {
     expect(english.timePickerHour(0, twelve), "12");
     expect(english.timePickerHour(12, twelve), "12");
     expect(english.timePickerHour(24, twelve), "12");
-    expect(english.timePickerHour(14, twelve), "02");
-    expect(english.timePickerHour(9, twelve), "09");
+    expect(english.timePickerHour(14, twelve), "2");
+    expect(english.timePickerHour(9, twelve), "9");
     expect(english.timePickerMinute(5), "05");
     expect(english.timePickerMinute(45), "45");
   });

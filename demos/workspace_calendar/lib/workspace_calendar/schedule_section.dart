@@ -43,14 +43,14 @@ const ValueKey<String> scheduleEndPickerKey = ValueKey<String>(
 
 /// The section of [check]'s schedule: a summary line; Start date; Start
 /// time and End time, each a field whose tap opens a [CalendarTimePicker]
-/// under their row, one at a time, the start's times before the first a
-/// start may take refused, on the start day only ends after the start
-/// offered, and every time [zone]'s clock skips refused; an End date for
-/// an all-day or a multi-day schedule, or after "Ends on another day"; a
-/// row of length chips and, after them, All day, where a length makes an
-/// all-day schedule timed at that length; an overlap notice with "Next
-/// free time"; and the store's zone where it has one. Times are written
-/// on [hourLabelFormat]'s clock.
+/// under their row, one at a time, with its haptic feedback on, the
+/// start's times before the first a start may take refused, on the start
+/// day only ends after the start offered, and every time [zone]'s clock
+/// skips refused; an End date for an all-day or a multi-day schedule, or
+/// after "Ends on another day"; a row of length chips and, after them,
+/// All day, where a length makes an all-day schedule timed at that length;
+/// an overlap notice with "Next free time"; and the store's zone where it
+/// has one. Times are written on [hourLabelFormat]'s clock.
 ///
 /// Every edit goes to [onChanged] as a new schedule. A [locked] section
 /// takes no input; a [CalendarScheduleCheck.startFixed] one takes none at
@@ -308,6 +308,7 @@ class _ScheduleSectionState extends State<ScheduleSection> {
       },
       now: _nowMinute,
       focusNode: _startHourNode,
+      hapticFeedback: true,
     );
   }
 
@@ -348,6 +349,7 @@ class _ScheduleSectionState extends State<ScheduleSection> {
       },
       now: _nowMinute,
       focusNode: _endHourNode,
+      hapticFeedback: true,
     );
   }
 

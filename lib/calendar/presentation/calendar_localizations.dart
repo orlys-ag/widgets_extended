@@ -358,13 +358,13 @@ abstract base class CalendarLocalizations {
   /// The number of the time picker's hour row for [hour], 0 to 24, as the
   /// row shows it and a screen reader hears it: on the 24-hour clock "00"
   /// to "24"; on the 12-hour clock "12" for 0, 12 and 24, and otherwise
-  /// `hour % 12` in two digits, "01" to "11".
+  /// `hour % 12` with no leading zero, "1" to "11".
   String timePickerHour(int hour, CalendarHourLabelFormat format) {
     if (format == CalendarHourLabelFormat.twentyFourHour) {
       return hour.toString().padLeft(2, "0");
     }
     final shown = hour % 12 == 0 ? 12 : hour % 12;
-    return shown.toString().padLeft(2, "0");
+    return shown.toString();
   }
 
   /// The number of the time picker's minute row for [minuteOfHour], 0 to

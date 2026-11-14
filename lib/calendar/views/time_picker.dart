@@ -121,6 +121,10 @@ const double _controlRadius = 8.0;
 const double _ringWidth = 2.0;
 const Duration _digitWait = Duration(seconds: 1);
 
+/// How near a column's place may lie to a whole row and count as on it, so
+/// that the rounding of a rescale or a re-index plays no click.
+const double _placeTolerance = 1e-6;
+
 /// An inline time picker of up to three columns, five rows tall: an Hour
 /// column where [showHours], a Minute column where [showMinutes], and on the
 /// 12-hour clock, where the Hour column shows, an AM/PM column right of
@@ -138,7 +142,7 @@ const Duration _digitWait = Duration(seconds: 1);
 /// 1440 for the 24:00 that ends a day; null selects no time and draws no
 /// pill. On the 24-hour clock the Hour column runs from 00 to 23, and to 24,
 /// whose one minute is 00, where [max] is 1440. On the 12-hour clock it runs
-/// 12, 01 to 11 in the half the AM/PM column rests on; 12 AM 00 picks 1440
+/// 12, 1 to 11 in the half the AM/PM column rests on; 12 AM 00 picks 1440
 /// where the range holds 1440 and not 0, as an end's does, and where it
 /// holds both, picks 1440 while [value] is 1440.
 ///
@@ -170,6 +174,14 @@ const Duration _digitWait = Duration(seconds: 1);
 /// over the theme's motion and reports nothing, waiting while a column is
 /// held in a drag. With a null [onChanged] the picker shows its value and
 /// takes no input.
+///
+/// With [hapticFeedback], on iOS and Android, a column plays a selection
+/// click ([HapticFeedback.selectionClick]) as a drag, the landing that ends
+/// it, or a mouse wheel brings a row onto its pill: one for each pointer
+/// move or frame that brings one, however many rows it passed, and none
+/// for the row it last clicked for or rested on until another has reached
+/// the pill. A tap, a key, a screen reader's action, Now, Clear and a new
+/// [value] move the columns without a click.
 ///
 /// [now] gives the current minute after midnight on the host's clock; with
 /// it, the footer's Now picks the latest time at or before that minute on
@@ -207,6 +219,7 @@ class CalendarTimePicker extends StatefulWidget {
     this.showHours = true,
     this.showMinutes = true,
     this.focusNode,
+    this.hapticFeedback = false,
   }) {
     _check(value, minuteStep, hourStep, min, max, showHours, showMinutes);
   }
@@ -257,6 +270,11 @@ class CalendarTimePicker extends StatefulWidget {
   /// The first shown column's focus node, the Hour column's or, where it is
   /// hidden, the Minute column's; the picker makes its own where null.
   final FocusNode? focusNode;
+
+  /// Whether, on iOS and Android, a column plays a selection click as a
+  /// drag, its landing or a mouse wheel brings a row onto its pill; false
+  /// plays none.
+  final bool hapticFeedback;
 
   static void _check(
     int? value,
@@ -598,6 +616,18 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   /// as a settle ran while it was held.
   final List<bool> _picksAtRelease = List<bool>.filled(_columnCount, false);
 
+  /// Whether each column's motion plays a click as a row reaches its pill:
+  /// a drag, its landing, or a mouse wheel's motion, under [_clicks].
+  final List<bool> _clicking = List<bool>.filled(_columnCount, false);
+
+  /// Each clicking column's place, its offset in rows, as its offset last
+  /// moved.
+  final List<double> _clickPlaces = List<double>.filled(_columnCount, 0.0);
+
+  /// The row each column last clicked for or rested on, which reaching
+  /// the pill again does not click for; null for none.
+  final List<int?> _clickRows = List<int?>.filled(_columnCount, null);
+
   /// The pointers down on the columns.
   final Set<int> _pointersDown = <int>{};
 
@@ -710,6 +740,67 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     return widget.onChanged != null;
   }
 
+  /// Whether a drag, its landing or a mouse wheel plays clicks: under
+  /// [CalendarTimePicker.hapticFeedback], on iOS and Android.
+  bool get _clicks {
+    if (!widget.hapticFeedback) {
+      return false;
+    }
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.iOS:
+      case TargetPlatform.android:
+        return true;
+      case TargetPlatform.fuchsia:
+      case TargetPlatform.linux:
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+        return false;
+    }
+  }
+
+  /// [column]'s place, its offset in rows, taken as the whole row it lies
+  /// within [_placeTolerance] of.
+  double _placeOf(int column) {
+    final place = _offsets[column].value / _rowExtent;
+    final whole = place.roundToDouble();
+    return (place - whole).abs() < _placeTolerance ? whole : place;
+  }
+
+  /// Starts or stops [column]'s clicks, from where it lies now: a column
+  /// on a whole row takes that row as the one it last rested on.
+  void _setClicking(int column, bool clicking) {
+    _clicking[column] = clicking;
+    if (!clicking) {
+      return;
+    }
+    final place = _placeOf(column);
+    _clickPlaces[column] = place;
+    _clickRows[column] = place == place.roundToDouble() ? place.round() : null;
+  }
+
+  /// Plays a click where [column]'s motion brought a row other than its
+  /// last clicked or rested one onto the pill: the last whole row its
+  /// place passed or reached the way it moved.
+  void _offsetMoved(int column) {
+    if (!_clicking[column]) {
+      return;
+    }
+    final place = _placeOf(column);
+    final last = _clickPlaces[column];
+    _clickPlaces[column] = place;
+    int? reached;
+    if (place > last && place.floor() > last) {
+      reached = place.floor();
+    } else if (place < last && place.ceil() < last) {
+      reached = place.ceil();
+    }
+    if (reached == null || reached == _clickRows[column]) {
+      return;
+    }
+    _clickRows[column] = reached;
+    unawaited(HapticFeedback.selectionClick());
+  }
+
   static bool _isTraditional(FocusHighlightMode mode) {
     return mode == FocusHighlightMode.traditional;
   }
@@ -718,6 +809,11 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   void initState() {
     super.initState();
     FocusManager.instance.addHighlightModeListener(_highlightChanged);
+    for (var column = 0; column < _columnCount; column++) {
+      _offsets[column].addListener(() {
+        _offsetMoved(column);
+      });
+    }
   }
 
   @override
@@ -1207,6 +1303,13 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
               })!) -
           near;
       if (moved != 0) {
+        // The rows are renumbered under the pill, not passed, so the
+        // clicks' place and row move with them.
+        _clickPlaces[column] += moved;
+        final clickRow = _clickRows[column];
+        if (clickRow != null) {
+          _clickRows[column] = clickRow + moved;
+        }
         // Setting the value stops the running motion, whose future then
         // never completes, so _moveTo starts it again.
         offset.value += moved * _rowExtent;
@@ -1251,11 +1354,13 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
 
   // Motion and the settle.
 
-  /// Starts a user motion of [column] to row [target].
-  void _startUserMotion(int column, int target) {
+  /// Starts a user motion of [column] to row [target], playing clicks on
+  /// the way where [clicking] and [_clicks].
+  void _startUserMotion(int column, int target, {bool clicking = false}) {
     if (_held[column]) {
       return;
     }
+    _setClicking(column, clicking && _clicks);
     _targets[column] = target;
     final count = ++_motionCounts[column];
     _moving[column] = true;
@@ -1280,6 +1385,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
       _offsets[column].value = target * _rowExtent;
       _ends[column] = null;
     }
+    _setClicking(column, false);
     if (_held.contains(true) || _moving.contains(true)) {
       _deferToRelease();
       return;
@@ -1301,6 +1407,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   void _endHolds() {
     for (var column = 0; column < _columnCount; column++) {
       _held[column] = false;
+      _setClicking(column, false);
       _syncedRows[column] = null;
       _picksAtRelease[column] = false;
     }
@@ -1482,6 +1589,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     _held[column] = true;
     _picksAtRelease[column] = false;
     _offsetAtDown[column] = offset.value;
+    _setClicking(column, _clicks);
   }
 
   void _dragUpdate(int column, double delta) {
@@ -1500,6 +1608,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     }
     _held[column] = false;
     if (_valueWaits) {
+      _setClicking(column, false);
       if (!_held.contains(true)) {
         _valueWaits = false;
         setState(() {
@@ -1524,13 +1633,12 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
       });
     }
     final rows = _rows[column];
-    if (rows.isEmpty) {
-      return;
-    }
     final offset = _offsets[column];
-    if (!picks &&
-        _restAtDown[column] &&
-        offset.value == _offsetAtDown[column]) {
+    if (rows.isEmpty ||
+        (!picks &&
+            _restAtDown[column] &&
+            offset.value == _offsetAtDown[column])) {
+      _setClicking(column, false);
       return;
     }
     final place = offset.value / _rowExtent;
@@ -1626,7 +1734,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     GestureBinding.instance.pointerSignalResolver.register(event, (event) {
       final next = _enabledFrom(column, delta > 0.0 ? 1 : -1, 1);
       if (_takesInput && next != null) {
-        _startUserMotion(column, next);
+        _startUserMotion(column, next, clicking: true);
       }
     });
   }

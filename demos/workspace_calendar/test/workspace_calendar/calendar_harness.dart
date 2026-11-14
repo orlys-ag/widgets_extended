@@ -45,6 +45,14 @@ const Size roomyPhone = Size(390.0, 844.0 + addButtonRoom);
 /// The latency of the mock [pumpCalendar] builds when given none.
 const Duration harnessLatency = Duration(milliseconds: 100);
 
+/// The settings the suite's tests run under unless they choose others:
+/// the app's defaults on 15-minute slots and the 24-hour clock, which the
+/// tests' times and labels are written in.
+const CalendarSettings harnessSettings = CalendarSettings(
+  slotMinutes: 15,
+  hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+);
+
 // The ids of the seed around [today]: `defaultCalendarSeed` lists the kept
 // tasks first, then the week's risks, then "Day off" and
 // "Conference trip", and the mock numbers them in that order.
@@ -298,7 +306,7 @@ Widget calendarApp({
   DateTime? today,
   DateTime Function()? clock,
   bool editing = false,
-  CalendarSettings settings = const CalendarSettings(),
+  CalendarSettings settings = harnessSettings,
   ItemBuilders builders = harborItemBuilders,
   int readAhead = 2,
 }) {
@@ -343,7 +351,7 @@ Future<MockCalendarApi> pumpCalendar(
   DateTime Function()? clock,
   bool pinsToday = true,
   bool editing = false,
-  CalendarSettings settings = const CalendarSettings(),
+  CalendarSettings settings = harnessSettings,
   ItemBuilders builders = harborItemBuilders,
   int readAhead = 2,
 }) async {

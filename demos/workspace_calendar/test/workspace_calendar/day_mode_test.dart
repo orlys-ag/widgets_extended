@@ -719,7 +719,10 @@ void main() {
   ) async {
     final semantics = tester.ensureSemantics();
     // 08:30 to 12:00: 14 slots.
-    await pumpGrid(tester, CalendarSettings(hours: CalendarDayHours(510, 720)));
+    await pumpGrid(
+      tester,
+      harnessSettings.copyWith(hours: CalendarDayHours(510, 720)),
+    );
     final grid = gridViewport(tester);
     expect(grid.lastVisibleRow, 15);
     final labels = paintGridForeground(tester).paragraphs;
