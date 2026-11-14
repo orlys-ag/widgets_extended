@@ -2380,12 +2380,12 @@ void main() {
     }
   });
 
-  testWidgets("FS4 the summary card's top right corner shows the zone in a "
-      "light grey rounded box, padded around its name and offset, and under "
-      "it the length in a pill, a timer icon before it, or for an all-day "
-      "schedule All day, whose date on one day is as large as a timed "
-      "schedule's times; and the lines of a timed schedule that spans days "
-      "are written at 14 pixels", (tester) async {
+  testWidgets("FS4 the summary card's top right corner shows the length in "
+      "a pill, a timer icon before it, or for an all-day schedule All day, "
+      "and under it the zone in a light grey rounded box, padded around its "
+      "name and offset; an all-day schedule's date on one day is as large "
+      "as a timed schedule's times; and the lines of a timed schedule that "
+      "spans days are written at 14 pixels", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10, 30)),
       task("item-2", "Trip", at(22), DateTime(2026, 4, 23, 2)),
@@ -2420,7 +2420,6 @@ void main() {
           ),
     );
     final zone = tester.getRect(zoneBox);
-    expect(zone.topRight, card.topRight + const Offset(-16.0, 16.0));
     final texts = tester
         .widgetList<Text>(
           find.descendant(of: zoneBox, matching: find.byType(Text)),
@@ -2454,8 +2453,9 @@ void main() {
       ),
     );
     final pillRect = tester.getRect(pill);
-    expect(pillRect.top, greaterThanOrEqualTo(zone.bottom));
-    expect(pillRect.right, zone.right);
+    expect(pillRect.topRight, card.topRight + const Offset(-16.0, 16.0));
+    expect(zone.top, greaterThanOrEqualTo(pillRect.bottom));
+    expect(zone.right, pillRect.right);
     final icon = find.descendant(
       of: pill,
       matching: find.byIcon(Icons.timer_outlined),
@@ -2495,12 +2495,12 @@ void main() {
     );
     card = tester.getRect(find.byKey(formSummaryCardKey));
     final zoneRect = tester.getRect(find.byKey(scheduleSummaryZoneKey));
-    expect(zoneRect.topRight, card.topRight + const Offset(-16.0, 16.0));
     final allDayPill = tester.getRect(
       find.ancestor(of: length, matching: find.byType(DecoratedBox)).first,
     );
-    expect(allDayPill.top, greaterThanOrEqualTo(zoneRect.bottom));
-    expect(allDayPill.right, zoneRect.right);
+    expect(allDayPill.topRight, card.topRight + const Offset(-16.0, 16.0));
+    expect(zoneRect.top, greaterThanOrEqualTo(allDayPill.bottom));
+    expect(zoneRect.right, allDayPill.right);
   });
 
   testWidgets("FS5 a line of a timed schedule that spans days, too wide for "
@@ -2604,6 +2604,91 @@ void main() {
       expect(inSummary(find.text("Start")), findsNothing, reason: "$schedule");
       expect(inSummary(find.text("End")), findsNothing, reason: "$schedule");
     }
+  });
+
+  testWidgets("FS7 the overlap notice writes each overlapped item's title "
+      "in bold, and its other words not in bold", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+      task("item-2", "Standup", at(9, 30), at(10, 30)),
+      task("item-3", "Review", at(9, 45), at(10, 15)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    final notice = tester
+        .widgetList<RichText>(
+          find.descendant(
+            of: find.byKey(scheduleOverlapKey),
+            matching: find.byType(RichText),
+          ),
+        )
+        .singleWhere((text) {
+          return text.text.toPlainText().startsWith("Overlaps");
+        });
+    // Each run of the notice's text, and whether its style, merged down
+    // the spans from the root's, is bold.
+    final runs = <(String, bool)>[];
+    void collect(InlineSpan span, TextStyle inherited) {
+      final style = inherited.merge(span.style);
+      if (span is! TextSpan) {
+        return;
+      }
+      final text = span.text;
+      if (text != null && text.isNotEmpty) {
+        runs.add((text, style.fontWeight == FontWeight.bold));
+      }
+      for (final child in span.children ?? const <InlineSpan>[]) {
+        collect(child, style);
+      }
+    }
+
+    collect(notice.text, const TextStyle());
+    expect(runs, <(String, bool)>[
+      ("Overlaps ", false),
+      ("Standup", true),
+      (", ", false),
+      ("Review", true),
+    ]);
+  });
+
+  testWidgets("FS8 the overlap notice's warning icon lies at its top left: "
+      "before its text and level with the text's top, whether the text "
+      "takes one line or more", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+      task("item-2", "Standup", at(9, 30), at(10, 30)),
+      task("item-3", "Draft", at(14), at(15)),
+      task(
+        "item-4",
+        "Quarterly planning review with the whole team",
+        at(14, 30),
+        at(15, 30),
+      ),
+    ]);
+    addTearDown(store.dispose);
+    final notice = find.byKey(scheduleOverlapKey);
+    final icon = find.descendant(
+      of: notice,
+      matching: find.byIcon(Icons.warning_amber),
+    );
+    final text = find.descendant(
+      of: notice,
+      matching: find.textContaining("Overlaps"),
+    );
+    final heights = <double>[];
+    for (final id in <String>["item-1", "item-3"]) {
+      await openEdit(tester, store, id: id);
+      final iconRect = tester.getRect(icon);
+      final textRect = tester.getRect(text);
+      expect(iconRect.top, textRect.top, reason: id);
+      expect(iconRect.right, lessThanOrEqualTo(textRect.left), reason: id);
+      heights.add(textRect.height);
+      await tester.tap(formButton("Cancel"));
+      await tester.pumpAndSettle();
+    }
+    // Setup sanity: the second notice's text takes more lines than the
+    // first's.
+    expect(heights[1], greaterThanOrEqualTo(2 * heights[0]));
   });
 }
 

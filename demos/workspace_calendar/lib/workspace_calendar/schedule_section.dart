@@ -24,17 +24,17 @@ const ValueKey<String> scheduleSummarySecondLineKey = ValueKey<String>(
   "schedule-summary-second-line",
 );
 
-/// The key of the text of the summary's pill, in its top right corner under
-/// the zone: the length of a timed schedule of a positive length, or of an
-/// all-day schedule, "All day" for one day and its count of days, such as
-/// "3 days", for more.
+/// The key of the text of the summary's pill, at the top of its top right
+/// corner, above the zone: the length of a timed schedule of a positive
+/// length, or of an all-day schedule, "All day" for one day and its count
+/// of days, such as "3 days", for more.
 const ValueKey<String> scheduleSummaryLengthKey = ValueKey<String>(
   "schedule-summary-length",
 );
 
-/// The key of the summary's zone, the box at the top of its top right
-/// corner: the zone's city or the device's zone's name, above the zone's
-/// offset from UTC.
+/// The key of the summary's zone, the box in its top right corner, under
+/// the pill where the pill shows: the zone's city or the device's zone's
+/// name, above the zone's offset from UTC.
 const ValueKey<String> scheduleSummaryZoneKey = ValueKey<String>(
   "schedule-summary-zone",
 );
@@ -757,22 +757,23 @@ String _lengthLabel(int minutes) {
 /// each under its label, Start or End, in smaller type, and shrunk onto one
 /// line where its room is too narrow: a timed one's each a date and a
 /// time, an all-day one's its first and last day; and, while
-/// [CalendarScheduleCheck.overlaps] is not empty, an overlap
-/// notice naming them, whose "Next free time" sends
+/// [CalendarScheduleCheck.overlaps] is not empty, an overlap notice naming
+/// them, each title in bold, its warning icon beside the top of its text,
+/// whose "Next free time" sends
 /// [CalendarScheduleCheck.nextFree] to [onChanged] unless the form is
 /// [locked] or the check's start is fixed. Times are written on
 /// [hourLabelFormat]'s clock.
 ///
-/// Its top right corner shows, in a light grey rounded box, [zone]'s name,
+/// Its top right corner shows a pill with a timer icon before the
+/// schedule's length: an all-day schedule's "All day" for one day, or its
+/// count of civil days, such as "3 days", for more; or a timed schedule's
+/// hours and minutes, where it is positive. Under the pill, or at the top
+/// where it does not show, a light grey rounded box holds [zone]'s name,
 /// its city ([CalendarZonePanel.cityOf]) or, for the device's zone,
 /// [CalendarLocalizations.deviceZoneName], above the zone's offset from UTC
 /// at the start ([CalendarLocalizations.utcOffset]), or at its day's start
-/// where the zone's clock skips the start; and under the box, a pill with a
-/// timer icon before the schedule's length: an all-day schedule's "All
-/// day" for one day, or its count of civil days, such as "3 days", for
-/// more; or a timed schedule's hours and minutes, where it is positive. The
-/// corner lies at the same place whatever lines the schedule shows beside
-/// it.
+/// where the zone's clock skips the start. The corner lies at the same
+/// place whatever lines the schedule shows beside it.
 class ScheduleSummary extends StatelessWidget {
   const ScheduleSummary({
     super.key,
@@ -915,6 +916,7 @@ class ScheduleSummary extends StatelessWidget {
 
   Widget _overlapNotice() {
     final next = check.nextFree;
+    final overlaps = check.overlaps;
     return DecoratedBox(
       key: scheduleOverlapKey,
       decoration: BoxDecoration(
@@ -926,18 +928,42 @@ class ScheduleSummary extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(12.0, 8.0, 8.0, 8.0),
         child: Row(
           children: <Widget>[
-            const Icon(
-              Icons.warning_amber,
-              size: 18.0,
-              color: HarborColors.onNotice,
-            ),
-            const SizedBox(width: 8.0),
+            // The icon lies at the text's top, beside its first line; the
+            // two together centre on the button.
             Expanded(
-              child: Text(
-                "Overlaps ${check.overlaps.map((other) {
-                  return other.title;
-                }).join(", ")}",
-                style: const TextStyle(color: HarborColors.onNotice),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  const Icon(
+                    Icons.warning_amber,
+                    size: 18.0,
+                    color: HarborColors.onNotice,
+                  ),
+                  const SizedBox(width: 8.0),
+                  Expanded(
+                    child: Text.rich(
+                      TextSpan(
+                        text: "Overlaps ",
+                        children: <InlineSpan>[
+                          for (
+                            var index = 0;
+                            index < overlaps.length;
+                            index++
+                          ) ...<InlineSpan>[
+                            if (index > 0) const TextSpan(text: ", "),
+                            TextSpan(
+                              text: overlaps[index].title,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      style: const TextStyle(color: HarborColors.onNotice),
+                    ),
+                  ),
+                ],
               ),
             ),
             if (next != null &&
@@ -1059,11 +1085,11 @@ class ScheduleSummary extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: <Widget>[
-                _zone(strings),
                 if (pill != null) ...<Widget>[
-                  const SizedBox(height: 6.0),
                   _pill(pill),
+                  const SizedBox(height: 6.0),
                 ],
+                _zone(strings),
               ],
             ),
           ],
