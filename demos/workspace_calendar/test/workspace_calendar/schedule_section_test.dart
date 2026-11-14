@@ -1100,58 +1100,100 @@ void main() {
   });
 
   testWidgets("TF13 a spin of the start's picker cut off by a tap on End "
-      "time, moving or held, picks nothing, and both fields keep their "
-      "times", (tester) async {
-    final store = storeOf(<CalendarItem>[
-      task("item-1", "Write", at(9), at(10)),
-    ]);
-    addTearDown(store.dispose);
+      "time, moving or held, picks nothing: the end's picker shows, and both "
+      "fields keep their times, also where they share a minute", (
+    tester,
+  ) async {
+    final oneDay = task("item-1", "Write", at(9), at(10));
+    // Tue 09:00 to Wed 09:00: Start time and End time both read 09:00.
+    final twoDays = task("item-1", "Write", DateTime(2026, 4, 21, 9), at(9));
     final hourColumn = inPicker(
       "Start time",
       find.byKey(timePickerHourColumnKey),
     );
-    await openEdit(tester, store);
-    await openTimePicker(tester, "Start time");
-    // Setup sanity: left to settle, the fling picks another start.
+
+    Future<void> openStart(CalendarItem item) async {
+      final store = storeOf(<CalendarItem>[item]);
+      addTearDown(store.dispose);
+      await openEdit(tester, store);
+      await openTimePicker(tester, "Start time");
+    }
+
+    // Holds Start's Hour column still with its row of 11 on the pill, where
+    // a release picks 11:00, neither field's time.
+    Future<TestGesture> holdOnEleven() async {
+      final hold = await tester.startGesture(tester.getCenter(hourColumn));
+      await hold.moveBy(const Offset(0.0, -20.0));
+      await tester.pump(const Duration(milliseconds: 50));
+      await hold.moveBy(const Offset(0.0, 20.0));
+      await tester.pump(const Duration(milliseconds: 50));
+      var left = -hourRowFromPill(tester, "Start time", 11);
+      while (left.abs() > 0.0) {
+        final step = left.abs() > 8.0 ? 8.0 * left.sign : left;
+        await hold.moveBy(Offset(0.0, step));
+        await tester.pump(const Duration(milliseconds: 50));
+        left -= step;
+      }
+      await tester.pump(const Duration(milliseconds: 200));
+      return hold;
+    }
+
+    // Opens [item]'s Start time, spins its Hour column, a fling still
+    // moving or a hold resting on 11, cuts the spin off with a tap on End
+    // time, releases a held column and lets the form settle.
+    Future<void> cutOffSpin(CalendarItem item, {required bool held}) async {
+      await openStart(item);
+      TestGesture? hold;
+      if (held) {
+        hold = await holdOnEleven();
+        // Setup sanity: the held column rests on 11 and has picked nothing.
+        expect(hourRowFromPill(tester, "Start time", 11).abs(), lessThan(0.5));
+      } else {
+        await tester.fling(hourColumn, const Offset(0.0, -120.0), 1000.0);
+        await tester.pump();
+        await tester.pump();
+        // Setup sanity: the motion still runs, its pick not yet reported.
+        expect(
+          hourRowFromPill(tester, "Start time", 9).abs(),
+          greaterThan(0.5),
+        );
+      }
+      expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
+      await tester.tap(timeFieldFinder("End time"));
+      await tester.pump();
+      await hold?.up();
+      await tester.pumpAndSettle();
+    }
+
+    // Expects Start 09:00, End [end] and the end's picker alone, then
+    // cancels the form.
+    Future<void> expectDropped(String end) async {
+      expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
+      expect(timeFieldShows("End time", end), findsOneWidget);
+      expect(timePickerFinder("End time"), findsOneWidget);
+      expect(timePickerFinder("Start time"), findsNothing);
+      await tester.tap(formButton("Cancel"));
+      await tester.pumpAndSettle();
+    }
+
+    // Setup sanity: left to settle, the fling lands on neither field's
+    // time, so a spin reported to either would change it.
+    await openStart(oneDay);
     await tester.fling(hourColumn, const Offset(0.0, -120.0), 1000.0);
     await tester.pumpAndSettle();
     expect(timeFieldShows("Start time", "09:00"), findsNothing);
+    expect(timeFieldShows("Start time", "10:00"), findsNothing);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
-    await openEdit(tester, store);
-    await openTimePicker(tester, "Start time");
-    await tester.fling(hourColumn, const Offset(0.0, -120.0), 1000.0);
-    await tester.pump();
-    await tester.pump();
-    // Setup sanity: the motion still runs, its pick not yet reported.
-    expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
-    await tester.tap(timeFieldFinder("End time"));
-    await tester.pumpAndSettle();
-    expect(timePickerFinder("End time"), findsOneWidget);
-    expect(timePickerFinder("Start time"), findsNothing);
-    expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
-    expect(timeFieldShows("End time", "10:00"), findsOneWidget);
-    await tester.tap(formButton("Cancel"));
-    await tester.pumpAndSettle();
-
-    await openEdit(tester, store);
-    await openTimePicker(tester, "Start time");
-    final hold = await tester.startGesture(tester.getCenter(hourColumn));
-    await hold.moveBy(const Offset(0.0, -20.0));
-    await tester.pump(const Duration(milliseconds: 50));
-    await hold.moveBy(const Offset(0.0, -60.0));
-    await tester.pump(const Duration(milliseconds: 50));
-    // Setup sanity: the held column has moved off 09:00 and picked nothing.
-    expect(hourRowFromPill(tester, "Start time", 9), lessThan(-30.0));
-    expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
-    await tester.tap(timeFieldFinder("End time"));
-    await tester.pump();
-    await hold.up();
-    await tester.pumpAndSettle();
-    expect(timePickerFinder("End time"), findsOneWidget);
-    expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
-    expect(timeFieldShows("End time", "10:00"), findsOneWidget);
+    await cutOffSpin(oneDay, held: false);
+    await expectDropped("10:00");
+    await cutOffSpin(oneDay, held: true);
+    await expectDropped("10:00");
+    await cutOffSpin(twoDays, held: false);
+    await expectDropped("09:00");
+    await cutOffSpin(twoDays, held: true);
+    await expectDropped("09:00");
   });
 
   testWidgets("TF14 a stored item's start picker offers every start its "
@@ -1783,8 +1825,8 @@ void main() {
     await tester.pump();
     expect(panelHeight(tester), settledPanelHeight(tester));
     await tester.pump();
-    // Setup sanity: the picker opened past the view's bottom, so the view
-    // scrolled to reveal it.
+    // The panel completed inside the tap's own frame, and the frame after
+    // it scrolled the picker, opened past the view's bottom, into view.
     expect(position.pixels, greaterThan(0.0));
     final picker = tester.getRect(timePickerFinder("Start time"));
     expect(picker.top, greaterThanOrEqualTo(0.0));
@@ -1852,6 +1894,9 @@ void main() {
       checkOf(CalendarSchedule.of(at(9), at(12), isAllDay: false)),
       theme: motionTheme,
     );
+    // The picker's columns run on AnimationController.unbounded, whose
+    // AnimationBehavior.preserve keeps the theme's full 480 ms under the
+    // flag, so every 16 ms frame up to 464 ms lies between the rows.
     await expectPickerPassesToEnd(tester);
   });
 
