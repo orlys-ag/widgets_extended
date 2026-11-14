@@ -1476,8 +1476,9 @@ void main() {
   testWidgets("FN1 Now picks the first start offered after now where the "
       "time before it is refused: under the lock of earlier today, with "
       "today pinned to another day than now's time, and before the hours; "
-      "and a start the lock passed since the last check, which Now can then "
-      "pick, Save refuses", (tester) async {
+      "and as the clock's minute turns with the picker open, the picker "
+      "refuses a start the lock has passed, and Now picks one Save "
+      "takes", (tester) async {
     Future<void> openAt(
       CalendarStore<ItemPayload> store,
       CalendarEditPolicy<ItemPayload> policy,
@@ -1543,8 +1544,6 @@ void main() {
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
-    // The pickers read the last check made, at 09:07 here, whose lock
-    // takes 09:15 though the clock has since passed it.
     var clock = at(9, 7);
     await openWith(tester, (context) {
       showEditForm(
@@ -1559,14 +1558,16 @@ void main() {
       );
     });
     await openTimePicker(tester, "Start time");
+    // Setup sanity: at 09:07 the lock takes 09:15.
+    expect(timeEnabled(tester, "Start time", "09:15"), isTrue);
     clock = at(9, 16);
+    await tester.pump(const Duration(minutes: 1));
+    expect(timeEnabled(tester, "Start time", "09:15"), isFalse);
     await tapNow();
-    // Setup sanity: Now took the 09:15 the check made at 09:07 offers.
-    expect(timeFieldShows("Start time", "09:15"), findsOneWidget);
+    expect(timeFieldShows("Start time", "09:30"), findsOneWidget);
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
-    expect(find.text("The start can't be in the past."), findsOneWidget);
-    expect(store.storedEntry("item-1")!.start, at(10));
+    expect(store.storedEntry("item-1")!.start, at(9, 30));
   });
 
   testWidgets("FD1 Now shows only in the picker of a field whose day is "
@@ -1908,6 +1909,67 @@ void main() {
     await tester.pump(const Duration(milliseconds: 480));
     await tester.pump(const Duration(milliseconds: 16));
     expect(find.byType(CalendarTimePicker), findsNothing);
+  });
+
+  testWidgets("FP4 where the platform asks for no animations while the panel "
+      "grows or shrinks, the panel ends its motion in the next frame", (
+    tester,
+  ) async {
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
+      theme: motionTheme,
+    );
+    await tester.tap(timeFieldFinder("Start time"));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    // Setup sanity: the panel is growing.
+    expect(panelHeight(tester), lessThan(settledPanelHeight(tester)));
+    disableAnimations(tester);
+    await tester.pump();
+    expect(panelHeight(tester), settledPanelHeight(tester));
+    expect(panelOpacity(tester), 1.0);
+
+    tester.platformDispatcher.clearAccessibilityFeaturesTestValue();
+    await tester.pump();
+    await tester.tap(timeFieldFinder("Start time"));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    // Setup sanity: the panel is shrinking.
+    expect(panelHeight(tester), greaterThan(0.0));
+    expect(panelHeight(tester), lessThan(settledPanelHeight(tester)));
+    disableAnimations(tester);
+    await tester.pump();
+    expect(find.byType(CalendarTimePicker), findsNothing);
+    expect(panelHeight(tester), 0.0);
+  });
+
+  testWidgets("FP5 once the panel has closed, a build of the section makes no "
+      "picker: it reads no clock", (tester) async {
+    var reads = 0;
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
+      now: () {
+        reads++;
+        return wednesdayStart();
+      },
+    );
+    reads = 0;
+    await openTimePicker(tester, "Start time");
+    // Setup sanity: a build of the section with the panel open reads the
+    // clock, for the picker's Now.
+    expect(reads, greaterThan(0));
+
+    await closeTimePicker(tester, "Start time");
+    // Setup sanity: the panel has closed.
+    expect(find.byType(CalendarTimePicker), findsNothing);
+    reads = 0;
+    await tester.tap(find.text("Ends on another day"));
+    await tester.pump();
+    // Setup sanity: the section built again.
+    expect(formDateFinder("End date"), findsOneWidget);
+    expect(reads, 0);
   });
 
   testWidgets("FX1 a tap on End time while Start's picker is open keeps the "

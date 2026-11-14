@@ -1273,6 +1273,38 @@ void main() {
     expect(timeEnabled(tester, "Start time", "10:00"), isFalse);
     await closeTimePicker(tester, "Start time");
 
+    // A start picked on Wednesday, whose 10:00 is free, then moved onto
+    // Monday by its date, lies in "Day off" all the same: Save refuses the
+    // overlap before it sends anything.
+    Future<void> pickStartDay(String day) async {
+      await tester.ensureVisible(formDateFinder("Start date"));
+      await tester.pumpAndSettle();
+      await tester.tap(formDateFinder("Start date"));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(DatePickerDialog),
+          matching: find.text(day),
+        ),
+      );
+      await tester.tap(find.text("OK"));
+      await tester.pumpAndSettle();
+    }
+
+    await pickStartDay("22");
+    await pickTime(tester, "Start time", "10:00");
+    await pickStartDay("20");
+    // Setup sanity: Monday 10:00 to 11:00.
+    expect(formDateShows("Start date", "2026-04-20"), findsOneWidget);
+    expect(timeFieldShows("Start time", "10:00"), findsOneWidget);
+    final sent = api.requests.length;
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    expect(find.text("Overlaps Day off."), findsOneWidget);
+    expect(api.requests, hasLength(sent));
+    expect(find.text("New item"), findsOneWidget);
+    expect(fieldText(tester, "Title"), "Dentist");
+
     await pickTime(tester, "Start time", "18:00");
     await pickTime(tester, "End time", "19:00");
     api.failurePolicy = (request) {

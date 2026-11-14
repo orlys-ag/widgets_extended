@@ -239,8 +239,9 @@ class _ScheduleSectionState extends State<ScheduleSection> {
   /// The field whose picker is open; none where null.
   _TimeField? _open;
 
-  /// The field the panel's picker edits: the open one, kept while the panel
-  /// closes; none where null.
+  /// The field the panel's picker edits: the open one, or else the last
+  /// open one, whose picker the panel builds only while it closes; none
+  /// where null.
   _TimeField? _shown;
 
   /// The open picker's table, kept across builds while it holds.
@@ -579,8 +580,12 @@ class _ScheduleSectionState extends State<ScheduleSection> {
               key: schedulePickerKey,
               open: open != null,
               // The picker shows its footer, Now, only on today's field.
-              revealKey: shown != null && _nowOn(_dayOf(shown)) != null,
-              child: shown == null ? null : _picker(shown),
+              revealKey: open != null && _nowOn(_dayOf(open)) != null,
+              builder: shown == null
+                  ? null
+                  : (context) {
+                      return _picker(shown);
+                    },
             ),
           ],
         ),
@@ -796,26 +801,28 @@ class ScheduleSummary extends StatelessWidget {
   }
 }
 
-/// The panel under the time row that holds the section's one picker,
-/// [child]. As [open] turns true it grows from no height to the child's and
-/// fades in, and as it turns false it shrinks and fades out, over the
-/// [CalendarTheme]'s motion, or at once where the platform asks for no
-/// animations ([MediaQuery.disableAnimationsOf]); it shows nothing once
-/// closed or where [child] is null. A panel made while [open] shows its
-/// child at once. Once it has opened, it scrolls into view where it lies
-/// past the visible part of the form, and again where [revealKey] changes
-/// while it is open, as the picker's footer comes or goes.
+/// The panel under the time row that holds the section's one picker, which
+/// [builder] builds, called only while the panel shows. As [open] turns
+/// true it grows from no height to the picker's and fades in, and as it
+/// turns false it shrinks and fades out, over the [CalendarTheme]'s
+/// motion, or at once where the platform asks for no animations
+/// ([MediaQuery.disableAnimationsOf]), a motion under way included; it
+/// shows nothing once closed or where [builder] is null. A panel made while
+/// [open] shows its picker at once. Once it has opened, it scrolls into
+/// view where it lies past the visible part of the form, and again where
+/// [revealKey] changes while it is open, as the picker's footer comes or
+/// goes.
 class _PickerPanel extends StatefulWidget {
   const _PickerPanel({
     super.key,
     required this.open,
     required this.revealKey,
-    required this.child,
+    required this.builder,
   });
 
   final bool open;
   final Object? revealKey;
-  final Widget? child;
+  final WidgetBuilder? builder;
 
   @override
   State<_PickerPanel> createState() {
@@ -846,10 +853,23 @@ class _PickerPanelState extends State<_PickerPanel>
   void didChangeDependencies() {
     super.didChangeDependencies();
     final theme = CalendarTheme.of(context);
-    _controller.duration = MediaQuery.disableAnimationsOf(context)
+    _curved.curve = theme.motionCurve;
+    final duration = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero
         : theme.motionDuration;
-    _curved.curve = theme.motionCurve;
+    if (duration == _controller.duration) {
+      return;
+    }
+    _controller.duration = duration;
+    // A running motion keeps the duration it started with, so it starts
+    // again from where it is, toward the same end, under the new one.
+    if (_controller.isAnimating) {
+      if (_controller.status == AnimationStatus.forward) {
+        _controller.forward();
+      } else {
+        _controller.reverse();
+      }
+    }
   }
 
   @override
@@ -876,9 +896,9 @@ class _PickerPanelState extends State<_PickerPanel>
     super.dispose();
   }
 
-  /// Drops the child once the panel has closed, and reveals the panel once
+  /// Drops the picker once the panel has closed, and reveals the panel once
   /// it has opened. Under a zero duration both come inside
-  /// [didUpdateWidget], during the section's build.
+  /// [didUpdateWidget] or [didChangeDependencies], during a build.
   void _statusChanged(AnimationStatus status) {
     if (status == AnimationStatus.dismissed) {
       setState(() {});
@@ -901,8 +921,8 @@ class _PickerPanelState extends State<_PickerPanel>
 
   @override
   Widget build(BuildContext context) {
-    final child = widget.child;
-    if (child == null || (!widget.open && _controller.isDismissed)) {
+    final builder = widget.builder;
+    if (builder == null || (!widget.open && _controller.isDismissed)) {
       return const SizedBox.shrink();
     }
     return FadeTransition(
@@ -910,7 +930,10 @@ class _PickerPanelState extends State<_PickerPanel>
       child: SizeTransition(
         sizeFactor: _curved,
         alignment: Alignment.topCenter,
-        child: Padding(padding: const EdgeInsets.only(top: 12.0), child: child),
+        child: Padding(
+          padding: const EdgeInsets.only(top: 12.0),
+          child: builder(context),
+        ),
       ),
     );
   }

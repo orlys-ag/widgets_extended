@@ -5,11 +5,15 @@
 /// cards: the schedule's summary, which shows what its
 /// [CalendarScheduleCheck] answers; the schedule section, which every item
 /// type shares and which edits a [CalendarSchedule]; and the item's own
-/// fields, generated from the item type's schema. Save sends nothing while the check names a problem
+/// fields, generated from the item type's schema. The check is made again
+/// at each edit, at each change of the store and at the start of each
+/// minute. Save sends nothing while the check names a problem
 /// ([scheduleErrorsOf]) or the validator the API runs refuses the item;
 /// after a failed Save the title's and the times' messages follow the
 /// edits.
 library;
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/widgets_extended.dart';
@@ -388,6 +392,9 @@ class _ItemFormState extends State<_ItemForm> {
 
   bool _saving = false;
 
+  /// Fires at the start of the next minute, for [_minuteTurned].
+  Timer? _minuteTimer;
+
   /// Whether the controls take no input: while the form saves, and always
   /// when it is read-only.
   bool get _locked {
@@ -407,6 +414,7 @@ class _ItemFormState extends State<_ItemForm> {
     super.initState();
     _initFields(widget.item.fields);
     _scheduleCheck = _checkNow();
+    _scheduleMinute();
     _titleText = _title.text;
     _title.addListener(_titleChanged);
     widget.store.addListener(_storeChanged);
@@ -452,6 +460,7 @@ class _ItemFormState extends State<_ItemForm> {
 
   @override
   void dispose() {
+    _minuteTimer?.cancel();
     widget.store.removeListener(_storeChanged);
     _title.removeListener(_titleChanged);
     _title.dispose();
@@ -470,6 +479,32 @@ class _ItemFormState extends State<_ItemForm> {
       return;
     }
     setState(_recheck);
+  }
+
+  /// Sets [_minuteTimer] for the start of the minute after the time now.
+  void _scheduleMinute() {
+    final time = widget.now().time;
+    final intoMinute = Duration(
+      seconds: time.second,
+      milliseconds: time.millisecond,
+      microseconds: time.microsecond,
+    );
+    _minuteTimer = Timer(const Duration(minutes: 1) - intoMinute, () {
+      _minuteTurned();
+    });
+  }
+
+  /// Checks the schedule again as a minute starts, since the check's
+  /// answers move with the minute now
+  /// ([CalendarEarliestStart.firstWallMinute]), so the summary, the pickers,
+  /// their Now and the messages after a failed Save answer as Save's own
+  /// check does; but not while a send is in flight, which [_storeChanged]
+  /// skips too.
+  void _minuteTurned() {
+    if (!_saving) {
+      setState(_recheck);
+    }
+    _scheduleMinute();
   }
 
   /// Drops the refusal's title message at a change of the title's text;
