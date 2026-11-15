@@ -10,6 +10,8 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
+import 'package:widgets_extended/calendar/views/week_strip.dart'
+    show weekStripDayKey;
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 
@@ -582,5 +584,37 @@ void main() {
     await tester.tap(blockFinder(pastId));
     await tester.pumpAndSettle();
     expect(find.byType(FilledButton), findsNothing);
+  });
+
+  testWidgets("K19 a later item's day pickers draw a day before today "
+      "disabled, which takes no tap, and today enabled", (tester) async {
+    await pumpLocked(tester);
+    await pickMode(tester, "Week");
+    await tester.tap(blockFinder(laterId));
+    await tester.pumpAndSettle();
+    // Setup sanity: the later item's form is editable.
+    expect(formButton("Delete"), findsOneWidget);
+    for (final label in <String>["Start date", "End date"]) {
+      await openDayPicker(tester, label);
+      expect(dayEnabled(tester, label, monday), isFalse, reason: label);
+      expect(dayEnabled(tester, label, today), isTrue, reason: label);
+      await tester.tap(
+        find.descendant(
+          of: dayPickerFinder(label),
+          matching: find.byKey(weekStripDayKey(monday)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        formDateShows("Start date", "2026-04-21"),
+        findsOneWidget,
+        reason: label,
+      );
+      expect(
+        formDateShows("End date", "2026-04-21"),
+        findsOneWidget,
+        reason: label,
+      );
+    }
   });
 }

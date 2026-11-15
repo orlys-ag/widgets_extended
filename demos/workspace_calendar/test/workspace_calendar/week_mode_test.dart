@@ -8,6 +8,11 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
+import 'package:workspace_calendar/workspace_calendar/schedule_section.dart'
+    show
+        debugScheduleDayRangeAsks,
+        scheduleSummaryFirstLineKey,
+        scheduleSummarySecondLineKey;
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -2971,5 +2976,80 @@ void main() {
         reason: "$day",
       );
     }
+  });
+
+  testWidgets("W47 the form's day picker browsed to weeks the calendar has "
+      "not read reads and badges them, and checks the schedule no more", (
+    tester,
+  ) async {
+    // A clock that stands at a whole minute, so the form's minute timer, which
+    // checks the schedule again, fires a minute after the form opens and not
+    // while the test runs.
+    final api = await pumpCalendar(
+      tester,
+      editing: true,
+      size: tall,
+      clock: () {
+        return DateTime(2026, 4, 21, 8);
+      },
+    );
+    await pickMode(tester, "Week");
+    await tester.tap(blockFinder(brainstormId));
+    await tester.pumpAndSettle();
+    // Setup sanity: the block's form opened, editable.
+    expect(find.text("Edit Task"), findsOneWidget);
+    await openDayPicker(tester, "Start date");
+    String summary() {
+      return <String>[
+        for (final key in <Key>[
+          scheduleSummaryFirstLineKey,
+          scheduleSummarySecondLineKey,
+        ])
+          if (find.byKey(key).evaluate().isNotEmpty)
+            tester.widget<Text>(find.byKey(key)).data!,
+      ].join("\n");
+    }
+
+    final before = summary();
+    final requests = api.requests.length;
+    debugScheduleDayRangeAsks = 0;
+    final picker = dayPickerFinder("Start date");
+    for (var week = 0; week < 5; week++) {
+      await tester.tap(
+        find.descendant(of: picker, matching: find.byTooltip("Previous week")),
+      );
+      await tester.pumpAndSettle();
+      await tester.pump(harnessLatency);
+    }
+    await tester.pumpAndSettle();
+    final kickoff = DateTime(2026, 3, 17);
+    final kickoffCell = find.descendant(
+      of: picker,
+      matching: find.byKey(weekStripDayKey(kickoff)),
+    );
+    // Setup sanity: the week row shows 2026-03-16 to 2026-03-22, which the
+    // picker read, and the seed's item of the 17th carries a badge.
+    expect(
+      find
+          .descendant(
+            of: picker,
+            matching: find.byKey(weekStripDayKey(DateTime(2026, 3, 16))),
+          )
+          .hitTestable(),
+      findsOneWidget,
+    );
+    expect(api.requests.length, greaterThan(requests));
+    expect(
+      tester
+          .widget<DayCell>(
+            find.descendant(of: kickoffCell, matching: find.byType(DayCell)),
+          )
+          .badges,
+      isNotEmpty,
+    );
+    expect(debugScheduleDayRangeAsks, 0);
+    expect(summary(), before);
+    expect(formDateShows("Start date", "2026-04-21"), findsOneWidget);
+    expect(formDateShows("End date", "2026-04-21"), findsOneWidget);
   });
 }

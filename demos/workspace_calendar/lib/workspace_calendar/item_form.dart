@@ -9,8 +9,9 @@
 /// away, the summary stays at the page's top while the item's fields scroll
 /// under it, where it takes at most half of the page
 /// ([FittingPinnedHeaderSliver]). The check is made again
-/// at each edit, at each change of the store and at the start of each
-/// minute. Save sends nothing while the check names a problem
+/// at each edit, at each change of the store that moves the entries over
+/// the schedule's days, the store's zone or its hours, and at the start of
+/// each minute. Save sends nothing while the check names a problem
 /// ([scheduleErrorsOf]) or the validator the API runs refuses the item;
 /// after a failed Save the title's and the times' messages follow the
 /// edits.
@@ -18,6 +19,7 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
@@ -396,6 +398,14 @@ class _ItemFormState extends State<_ItemForm> {
   /// [initState] and again by [_recheck] only.
   late CalendarScheduleCheck<ItemPayload> _scheduleCheck;
 
+  /// What [_checkNow] read of the store for [_scheduleCheck], the last check
+  /// it made: the entries it gave the check as its others, and the store's
+  /// zone and hours, which the form's build reads.
+  List<CalendarEntry<ItemPayload>> _checkedOthers =
+      const <CalendarEntry<ItemPayload>>[];
+  Location? _checkedZone;
+  CalendarDayHours? _checkedHours;
+
   /// The errors [_errorsOf] finds of [_scheduleCheck] and the form's item,
   /// made at the first read after each [_recheck].
   Map<String, String>? _liveErrors;
@@ -501,12 +511,22 @@ class _ItemFormState extends State<_ItemForm> {
     super.dispose();
   }
 
-  /// Checks the schedule again, so an item another write puts over its time
-  /// shows while the form is open; but not while a send is in flight, whose
+  /// Checks the schedule again where the change moves what the check or
+  /// the build reads of the store: the entries from the schedule's first
+  /// day to the day after its last, compared by `==`, or the store's zone
+  /// or hours. So an item another write puts over or off the item's days
+  /// shows while the form is open, and a read of other days, as a day
+  /// picker browses, checks nothing. Not while a send is in flight, whose
   /// own write notifies before it completes, and which a draft's check
   /// would count as an overlap of its own.
   void _storeChanged() {
     if (_saving) {
+      return;
+    }
+    final store = widget.store;
+    if (store.zone == _checkedZone &&
+        store.hours == _checkedHours &&
+        listEquals(_othersNow(), _checkedOthers)) {
       return;
     }
     setState(_recheck);
@@ -591,24 +611,36 @@ class _ItemFormState extends State<_ItemForm> {
     });
   }
 
-  /// The check of the schedule now, against the entries the store shows
-  /// from its first day to the day after its last, so that the checks the
-  /// schedule section makes of its pickers' times, an end moved onto the
-  /// next day among them, see that day's entries too.
+  /// The entries the store shows from the schedule's first day to the day
+  /// after its last, so that the checks the schedule section makes of its
+  /// pickers' times, an end moved onto the next day among them, see that
+  /// day's entries too.
+  List<CalendarEntry<ItemPayload>> _othersNow() {
+    return widget.store
+        .entriesBetween(
+          _schedule.startDay,
+          CalendarDates.addDays(_schedule.endDay, 1),
+        )
+        .map((shown) {
+          return shown.entry;
+        })
+        .toList();
+  }
+
+  /// The check of the schedule now, against [_othersNow]; keeps what it
+  /// read of the store as [_checkedOthers], [_checkedZone] and
+  /// [_checkedHours]. Each check it makes becomes [_scheduleCheck].
   CalendarScheduleCheck<ItemPayload> _checkNow() {
+    final store = widget.store;
+    final others = _othersNow();
+    _checkedOthers = others;
+    _checkedZone = store.zone;
+    _checkedHours = store.hours;
     return CalendarScheduleCheck<ItemPayload>(
       schedule: _schedule,
       rules: _rules,
       now: widget.now(),
-      others: widget.store
-          .entriesBetween(
-            _schedule.startDay,
-            CalendarDates.addDays(_schedule.endDay, 1),
-          )
-          .map((shown) {
-            return shown.entry;
-          })
-          .toList(),
+      others: others,
       entry: _isDraft ? null : widget.item,
       options: scheduleOptionsOf(_type),
     );

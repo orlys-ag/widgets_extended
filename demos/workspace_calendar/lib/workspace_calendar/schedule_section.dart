@@ -95,9 +95,13 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// [store] badged as [dayBadges] marks them; the field keeps the focus. A
 /// tap on a day there moves the field's day to it and leaves the picker
 /// open, and its chevrons, swipes and month picks only browse. Each opening
-/// of a date field shows its picker folded. Times are written on
-/// [hourLabelFormat]'s clock. [ScheduleSummary] shows the schedule, its
-/// overlaps and its zone.
+/// of a date field shows its picker folded. A day picker draws disabled,
+/// and takes no tap on, the days its check's day answers rule out: Start
+/// date's those before [CalendarScheduleCheck.firstStartDay], End date's
+/// those outside [CalendarScheduleCheck.endDays]; the section reads them
+/// of each check once, as a day picker first builds under it. Times are
+/// written on [hourLabelFormat]'s clock. [ScheduleSummary] shows the
+/// schedule, its overlaps and its zone.
 ///
 /// A panel grows and fades in as its field's tap opens it, and shrinks and
 /// fades out as that field's tap closes it, over the [CalendarTheme]'s
@@ -268,6 +272,12 @@ Widget _sides(Widget child) {
 /// builds; the release build counts none.
 int debugSchedulePickerAsks = 0;
 
+/// The reads the section has made of its check's day ranges,
+/// [CalendarScheduleCheck.firstStartDay] and
+/// [CalendarScheduleCheck.endDays], in debug builds; the release build
+/// counts none.
+int debugScheduleDayRangeAsks = 0;
+
 /// Which times of [field]'s picker, from [min] to [max] on the [slot]
 /// grid, the picker offers under [check]: each time's check is
 /// [CalendarScheduleCheck.withSchedule] of the schedule with that time, or
@@ -373,6 +383,15 @@ class _ScheduleSectionState extends State<ScheduleSection> {
 
   /// Each field's picker's table, kept across builds while it holds.
   final Map<_TimeField, _TimeTable> _tables = <_TimeField, _TimeTable>{};
+
+  /// The check [_startRange] and [_endRange] were read of; none before a
+  /// day picker first builds.
+  CalendarScheduleCheck<ItemPayload>? _rangedCheck;
+
+  /// The first and last day the Start row's and the End row's day pickers
+  /// take, null for none.
+  ({DateTime? first, DateTime? last}) _startRange = (first: null, last: null);
+  ({DateTime? first, DateTime? last}) _endRange = (first: null, last: null);
 
   final FocusNode _startDateNode = FocusNode(debugLabel: "Start date");
   final FocusNode _endDateNode = FocusNode(debugLabel: "End date");
@@ -750,16 +769,36 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     );
   }
 
+  /// The first and last day [row]'s day picker takes: Start's from the
+  /// check's [CalendarScheduleCheck.firstStartDay] with no last day, End's
+  /// the check's [CalendarScheduleCheck.endDays]. Both rows' are read anew
+  /// only under a check other than the one they were read of.
+  ({DateTime? first, DateTime? last}) _dayRangeOf(_TimeField row) {
+    final check = widget.check;
+    if (!identical(check, _rangedCheck)) {
+      assert(() {
+        debugScheduleDayRangeAsks++;
+        return true;
+      }());
+      _rangedCheck = check;
+      _startRange = (first: check.firstStartDay, last: null);
+      final ends = check.endDays;
+      _endRange = (first: ends.first, last: ends.last);
+    }
+    return row == _TimeField.start ? _startRange : _endRange;
+  }
+
   /// [row]'s day picker, folded on the week of the row's day, that day
-  /// selected and [ScheduleSection.now]'s today ringed. Keyed by the row's
-  /// openings, so each opening of its date field builds a new one, folded,
-  /// whatever the last one showed. A tap on a day moves the row's day to
-  /// it; the picker takes no pick while its panel closes or swaps it out,
-  /// or where the field takes no input.
+  /// selected and [ScheduleSection.now]'s today ringed, taking the days of
+  /// [_dayRangeOf]. Keyed by the row's openings, so each opening of its
+  /// date field builds a new one, folded, whatever the last one showed. A
+  /// tap on a day moves the row's day to it; the picker takes no pick while
+  /// its panel closes or swaps it out, or where the field takes no input.
   Widget _dayPicker(_TimeField row) {
     final schedule = _schedule;
     final start = row == _TimeField.start;
     final field = row.dateField;
+    final range = _dayRangeOf(row);
     return CalendarDayPicker<ItemPayload>(
       key: ValueKey<int>(start ? _startDateOpenings : _endDateOpenings),
       value: start ? schedule.startDay : schedule.endDay,
@@ -773,6 +812,8 @@ class _ScheduleSectionState extends State<ScheduleSection> {
             },
       store: widget.store,
       today: widget.now().today,
+      firstDay: range.first,
+      lastDay: range.last,
       firstColumn: widget.firstColumn,
       dayBadges: widget.dayBadges,
     );

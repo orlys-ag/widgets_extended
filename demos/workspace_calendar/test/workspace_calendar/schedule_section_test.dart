@@ -3252,6 +3252,80 @@ void main() {
     expect(dayPickerFinder("End date"), findsOneWidget);
   });
 
+  testWidgets("IP5 a day picker draws disabled a day on which no time is "
+      "admitted, and enabled one some time is admitted on", (tester) async {
+    final thursday = DateTime(2026, 4, 23);
+    Finder cell(String label, DateTime day) {
+      return find.descendant(
+        of: dayPickerFinder(label),
+        matching: find.byKey(weekStripDayKey(day)),
+      );
+    }
+
+    // FW1's running item under the lock: Tuesday's 24:00 lies at the lock's
+    // boundary, the start of today, and an end in the past.
+    final running = task("item-2", "Write", DateTime(2026, 4, 21, 22), at(10));
+    await pumpSection(
+      tester,
+      checkOf(
+        CalendarSchedule.of(running.start, running.end, isAllDay: false),
+        policy: const HistoryLockPolicy<ItemPayload>(),
+        entry: running,
+      ),
+    );
+    await openDayPicker(tester, "End date");
+    expect(dayEnabled(tester, "End date", DateTime(2026, 4, 21)), isFalse);
+    expect(dayEnabled(tester, "End date", wednesday), isTrue);
+
+    // Two days at most: an end on Friday covers three.
+    await pumpSection(
+      tester,
+      checkOf(
+        CalendarSchedule.of(at(9), at(10), isAllDay: false),
+        policy: DayLimitPolicy<ItemPayload>(2),
+      ),
+    );
+    await openDayPicker(tester, "End date");
+    expect(dayEnabled(tester, "End date", DateTime(2026, 4, 24)), isFalse);
+    expect(dayEnabled(tester, "End date", thursday), isTrue);
+
+    // No spanning days: an end on Thursday spans two.
+    await pumpSection(
+      tester,
+      checkOf(
+        CalendarSchedule.of(at(22), DateTime(2026, 4, 23, 2), isAllDay: false),
+        options: const CalendarScheduleOptions(spansDays: false),
+      ),
+    );
+    await openDayPicker(tester, "End date");
+    expect(dayEnabled(tester, "End date", thursday), isFalse);
+    expect(dayEnabled(tester, "End date", wednesday), isTrue);
+
+    // An overlap depends on the times, so its day stays enabled, and the
+    // form names the overlap once the day is picked.
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+      task(
+        "item-2",
+        "Review",
+        DateTime(2026, 4, 23, 9),
+        DateTime(2026, 4, 23, 10),
+      ),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(
+      tester,
+      store,
+      policy: const NoOverlapsPolicy<ItemPayload>(),
+    );
+    await openDayPicker(tester, "Start date");
+    expect(dayEnabled(tester, "Start date", thursday), isTrue);
+    await tester.tap(cell("Start date", thursday));
+    await tester.pumpAndSettle();
+    expect(formDateShows("Start date", "2026-04-23"), findsOneWidget);
+    expect(find.byKey(scheduleOverlapKey), findsOneWidget);
+  });
+
   testWidgets("IP6 browsing Start date's picker, by its chevrons, a fling and "
       "a drag of its week row and its month picker, changes no date", (
     tester,
@@ -3525,6 +3599,100 @@ void main() {
     expectFolded("reopened while it swapped out");
   });
 
+  testWidgets("IP10 the section reads its check's day ranges once per "
+      "check, and no frame of the panel's motion or of the day picker's "
+      "unfold, slide, fold or fling checks the schedule", (tester) async {
+    final store = storeOf(<CalendarItem>[]);
+    addTearDown(store.dispose);
+    final asked = <DateTime>[];
+    await openWith(tester, (context) {
+      showCreateFlow(
+        context,
+        store: store,
+        range: CalendarCreateRange(start: at(9), end: at(10)),
+        policy: _CountingPolicy(asked),
+        now: wednesdayStart,
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+      );
+    }, theme: motionTheme);
+    final picker = dayPickerFinder("Start date");
+    Finder inDayPicker(Finder finder) {
+      return find.descendant(of: picker, matching: finder);
+    }
+
+    debugScheduleDayRangeAsks = 0;
+    await tester.tap(formDateFinder("Start date"));
+    await tester.pump();
+    expect(debugScheduleDayRangeAsks, 1);
+    final checks = asked.length;
+    // Pumps the frames of what [step] started, from the frame after the
+    // gesture's own, expecting after each pump no range read and no check
+    // made since the panel opened. Both counts only grow, so the first
+    // pump's reading covers the gesture's own frame too.
+    Future<void> expectNoCheckThrough(String step) async {
+      var frames = 0;
+      do {
+        await tester.pump(const Duration(milliseconds: 16));
+        frames++;
+        expect(debugScheduleDayRangeAsks, 1, reason: "$step, frame $frames");
+        expect(asked, hasLength(checks), reason: "$step, frame $frames");
+      } while (tester.binding.hasScheduledFrame && frames < 300);
+      // Setup sanity: a motion ran over several frames, and ended.
+      expect(frames, greaterThan(2), reason: step);
+      expect(tester.binding.hasScheduledFrame, isFalse, reason: step);
+    }
+
+    await expectNoCheckThrough("the panel's motion");
+
+    Future<void> tapThrough(Finder finder, String step) async {
+      await tester.tap(finder);
+      await tester.pump();
+      await expectNoCheckThrough(step);
+    }
+
+    await tapThrough(inDayPicker(find.byKey(calendarPullTabKey)), "unfold");
+    // Setup sanity: the picker shows its month.
+    expect(inDayPicker(find.byType(MonthStrip<ItemPayload>)), findsOneWidget);
+    await tapThrough(inDayPicker(find.byTooltip("Next month")), "slide");
+    await tapThrough(inDayPicker(find.byKey(calendarPullTabKey)), "fold");
+    // Setup sanity: the picker shows its week row.
+    expect(inDayPicker(find.byType(MonthStrip<ItemPayload>)), findsNothing);
+    await tester.fling(
+      inDayPicker(find.byType(WeekStrip<ItemPayload>)),
+      const Offset(-200.0, 0.0),
+      1000.0,
+    );
+    await tester.pump();
+    await expectNoCheckThrough("fling");
+
+    // A new day picker under the same check reads no range.
+    await openTimePicker(tester, "Start time");
+    expect(debugScheduleDayRangeAsks, 1);
+    await openDayPicker(tester, "Start date");
+    expect(debugScheduleDayRangeAsks, 1);
+
+    // A pick makes a new check, whose ranges the picker reads once.
+    final thursday = DateTime(2026, 4, 23);
+    await tester.tap(inDayPicker(find.byKey(weekStripDayKey(thursday))));
+    await tester.pumpAndSettle();
+    // Setup sanity: the tap picked Thursday.
+    expect(formDateShows("Start date", "2026-04-23"), findsOneWidget);
+    expect(debugScheduleDayRangeAsks, 2);
+    final reads = debugScheduleDayRangeAsks;
+    final picked = asked.length;
+    for (final (step, finder) in <(String, Finder)>[
+      ("unfold", inDayPicker(find.byKey(calendarPullTabKey))),
+      ("Next month", inDayPicker(find.byTooltip("Next month"))),
+      ("Next month again", inDayPicker(find.byTooltip("Next month"))),
+      ("fold", inDayPicker(find.byKey(calendarPullTabKey))),
+    ]) {
+      await tester.tap(finder);
+      await tester.pumpAndSettle();
+      expect(debugScheduleDayRangeAsks, reads, reason: step);
+      expect(asked, hasLength(picked), reason: step);
+    }
+  });
+
   testWidgets("IP11 a swipe of the week row of Start date's picker released "
       "with no speed comes to rest on any day, and changes no date", (
     tester,
@@ -3569,6 +3737,41 @@ void main() {
     expect(summary(tester), before);
     expect(formDateShows("Start date", "2026-04-22"), findsOneWidget);
     expect(formDateShows("End date", "2026-04-22"), findsOneWidget);
+  });
+
+  testWidgets("IP12 a store change checks the form again only where it moves "
+      "the entries over the item's days", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+      task(
+        "item-2",
+        "Review",
+        DateTime(2026, 4, 27, 9),
+        DateTime(2026, 4, 27, 10),
+      ),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(
+      tester,
+      store,
+      policy: const NoOverlapsPolicy<ItemPayload>(),
+    );
+    await openDayPicker(tester, "Start date");
+    debugScheduleDayRangeAsks = 0;
+    await store.update(
+      task(
+        "item-2",
+        "Review",
+        DateTime(2026, 5, 4, 9),
+        DateTime(2026, 5, 4, 10),
+      ),
+    );
+    await tester.pump();
+    expect(debugScheduleDayRangeAsks, 0);
+    await store.update(task("item-2", "Review", at(9), at(10)));
+    await tester.pump();
+    expect(debugScheduleDayRangeAsks, 1);
+    expect(find.byKey(scheduleOverlapKey), findsOneWidget);
   });
 
   testWidgets("IP13 End date's picker unfolded at the bottom of the form's "
