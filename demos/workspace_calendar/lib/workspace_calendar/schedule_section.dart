@@ -103,7 +103,8 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// those outside [CalendarScheduleCheck.endDays]; the section reads them
 /// of each check once, as a day picker first builds under it. Times are
 /// written on [hourLabelFormat]'s clock. [ScheduleSummary] shows the
-/// schedule, its overlaps and its zone.
+/// schedule, its overlaps and its zone. A date field writes its day as the
+/// summary does, with its weekday.
 ///
 /// A panel grows and fades in as its field's tap opens it, and shrinks and
 /// fades out as that field's tap closes it, over the [CalendarTheme]'s
@@ -553,8 +554,9 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     }
   }
 
-  /// The Start date or End date field of [row], showing the row's day; its
-  /// tap opens or closes its day picker.
+  /// The Start date or End date field of [row], showing the row's day with
+  /// its weekday ([MaterialLocalizations.formatMediumDate]); its tap opens
+  /// or closes its day picker.
   Widget _dateField(_TimeField row, {required String? error}) {
     final field = row.dateField;
     final start = row == _TimeField.start;
@@ -576,9 +578,9 @@ class _ScheduleSectionState extends State<ScheduleSection> {
             errorText: error,
           ),
           child: Text(
-            CalendarDates.isoDate(
-              start ? _schedule.startDay : _schedule.endDay,
-            ),
+            MaterialLocalizations.of(
+              context,
+            ).formatMediumDate(start ? _schedule.startDay : _schedule.endDay),
           ),
         ),
       ),
