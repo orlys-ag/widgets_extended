@@ -13,29 +13,29 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'calendar_item.dart';
 import 'harbor_theme.dart';
 
-/// The key of the summary's first line: the schedule's date, or the start
-/// of a schedule that spans days.
+/// The key of the summary's first line, under its Start label: a timed
+/// schedule's start date and time, or an all-day schedule's first day.
 const ValueKey<String> scheduleSummaryFirstLineKey = ValueKey<String>(
   "schedule-summary-first-line",
 );
 
-/// The key of the summary's second line: the schedule's times, or the end
-/// of a schedule that spans days. An all-day schedule on one day has none.
+/// The key of the summary's second line, under its End label: a timed
+/// schedule's end date and time, or an all-day schedule's last day.
 const ValueKey<String> scheduleSummarySecondLineKey = ValueKey<String>(
   "schedule-summary-second-line",
 );
 
-/// The key of the text of the summary's pill, at the top of its top right
-/// corner, above the zone: the length of a timed schedule of a positive
-/// length, or of an all-day schedule, "All day" for one day and its count
-/// of days, such as "3 days", for more.
+/// The key of the text of the summary's pill, in its top right corner
+/// under the zone: the length of a timed schedule of a positive length, or
+/// of an all-day schedule, "All day" for one day and its count of days,
+/// such as "3 days", for more.
 const ValueKey<String> scheduleSummaryLengthKey = ValueKey<String>(
   "schedule-summary-length",
 );
 
-/// The key of the summary's zone, the box in its top right corner, under
-/// the pill where the pill shows: the zone's city or the device's zone's
-/// name, above the zone's offset from UTC.
+/// The key of the summary's zone, the box at the top of its top right
+/// corner: the zone's city or the device's zone's name, above the zone's
+/// offset from UTC.
 const ValueKey<String> scheduleSummaryZoneKey = ValueKey<String>(
   "schedule-summary-zone",
 );
@@ -92,7 +92,9 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// a [CalendarDayPicker], folded on the week of the field's day, that day
 /// selected and the [CalendarNow.today] of [now] ringed, its weeks starting
 /// on the weekday column [firstColumn], and its days with entries of
-/// [store] badged as [dayBadges] marks them; the field keeps the focus. A
+/// [store] badged as [dayBadges] marks them, the circles of its first and
+/// last columns on the row's sides
+/// ([CalendarDayPicker.daysToEdges]); the field keeps the focus. A
 /// tap on a day there moves the field's day to it and leaves the picker
 /// open, and its chevrons, swipes and month picks only browse. Each opening
 /// of a date field shows its picker folded. A day picker draws disabled,
@@ -251,12 +253,8 @@ const double _allDaySwitchScale = 0.75;
 const double _allDaySwitchTop =
     (kMinInteractiveDimension - 32.0) / 2.0 * _allDaySwitchScale;
 
-/// The space beside the All day switch's track, at its scale: the 4 pixels
-/// at each side of Material 3's default [SwitchThemeData.padding].
-const double _allDaySwitchSide = 4.0 * _allDaySwitchScale;
-
 /// The shares of a Start or End row that its date and its time take: the
-/// date the larger, as its field holds a calendar icon beside its text.
+/// date three fifths, the time two.
 const int _dateFlex = 3;
 const int _timeFlex = 2;
 
@@ -576,7 +574,6 @@ class _ScheduleSectionState extends State<ScheduleSection> {
           decoration: InputDecoration(
             labelText: start ? "Start date" : "End date",
             errorText: error,
-            suffixIcon: const Icon(Icons.calendar_today),
           ),
           child: Text(
             CalendarDates.isoDate(
@@ -713,23 +710,22 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     );
   }
 
-  /// The All day switch, at [_allDaySwitchScale] of a [Switch]'s size, on
-  /// the right of its label, which takes no tap.
+  /// The All day switch, at [_allDaySwitchScale] of a [Switch]'s size, 8
+  /// pixels after its label, which takes no tap.
   Widget _allDayRow(CalendarSchedule schedule, bool startLocked) {
     final theme = Theme.of(context);
     return MergeSemantics(
       child: Row(
         children: <Widget>[
-          Expanded(
-            child: Text(
-              "All day",
-              style: theme.textTheme.bodyLarge?.copyWith(
-                color: startLocked
-                    ? theme.disabledColor
-                    : theme.colorScheme.onSurface,
-              ),
+          Text(
+            "All day",
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: startLocked
+                  ? theme.disabledColor
+                  : theme.colorScheme.onSurface,
             ),
           ),
+          const SizedBox(width: 8.0),
           // A FittedBox scales the switch, its layout and its touch target
           // included, to the box's height.
           SizedBox(
@@ -816,6 +812,7 @@ class _ScheduleSectionState extends State<ScheduleSection> {
       lastDay: range.last,
       firstColumn: widget.firstColumn,
       dayBadges: widget.dayBadges,
+      daysToEdges: true,
     );
   }
 
@@ -825,17 +822,20 @@ class _ScheduleSectionState extends State<ScheduleSection> {
   /// shows on the time field, or for an all-day schedule on the date field.
   /// The date field and the panel keep their places in the tree whichever
   /// way All day turns, and with them the panel's state and the field's
-  /// focus: a [Focus] that leaves the tree drops its focus.
+  /// focus: a [Focus] that leaves the tree drops its focus. So does each
+  /// row as the All day switch above it comes or goes: a row's outermost
+  /// widget is a [Column], and the switch's row a [Padding], which the
+  /// section's [Column] does not match to it.
   Widget _dateRow(_TimeField row, String? error) {
     final schedule = _schedule;
     final timed = !schedule.isAllDay;
     final start = row == _TimeField.start;
     final open = _open;
     final showsTime = open == row.timeField;
-    return _sides(
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _sides(
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
@@ -857,24 +857,24 @@ class _ScheduleSectionState extends State<ScheduleSection> {
               ],
             ],
           ),
-          _PickerPanel(
-            key: start ? scheduleStartPanelKey : scheduleEndPanelKey,
-            open: open != null && open.row == row,
-            showsTime: showsTime,
-            // The time picker shows its footer, Now, only on today's field.
-            revealKey: showsTime && _nowOn(_dayOf(row)) != null,
-            field: _restNodeOf(showsTime ? row.timeField : row.dateField),
-            dateBuilder: (context) {
-              return _dayPicker(row);
-            },
-            timeBuilder: timed
-                ? (context) {
-                    return _picker(row);
-                  }
-                : null,
-          ),
-        ],
-      ),
+        ),
+        _PickerPanel(
+          key: start ? scheduleStartPanelKey : scheduleEndPanelKey,
+          open: open != null && open.row == row,
+          showsTime: showsTime,
+          // The time picker shows its footer, Now, only on today's field.
+          revealKey: showsTime && _nowOn(_dayOf(row)) != null,
+          field: _restNodeOf(showsTime ? row.timeField : row.dateField),
+          dateBuilder: (context) {
+            return _dayPicker(row);
+          },
+          timeBuilder: timed
+              ? (context) {
+                  return _picker(row);
+                }
+              : null,
+        ),
+      ],
     );
   }
 
@@ -885,14 +885,7 @@ class _ScheduleSectionState extends State<ScheduleSection> {
     final startLocked = _startLocked;
     final allDayShows = _options.allowsAllDay || schedule.isAllDay;
     final children = <Widget>[
-      if (allDayShows)
-        Padding(
-          padding: const EdgeInsetsDirectional.only(
-            start: _edge,
-            end: _edge - _allDaySwitchSide,
-          ),
-          child: _allDayRow(schedule, startLocked),
-        ),
+      if (allDayShows) _sides(_allDayRow(schedule, startLocked)),
       _dateRow(_TimeField.start, errors["start"]),
       _dateRow(_TimeField.end, errors["end"]),
     ];
@@ -928,12 +921,11 @@ String _lengthLabel(int minutes) {
   return "${hours}h ${rest}m";
 }
 
-/// The summary of [check]'s schedule, top to bottom: its date, and a timed
-/// schedule's times under it, or an all-day schedule's date alone, as large
-/// as times; for a schedule that spans days, its start and its end instead,
-/// each under its label, Start or End, in smaller type, and shrunk onto one
-/// line where its room is too narrow: a timed one's each a date and a
-/// time, an all-day one's its first and last day; and, while
+/// The summary of [check]'s schedule, top to bottom: its start and its
+/// end, each under its label, Start or End, in smaller type, and shrunk
+/// onto one line where its room is too narrow: a timed schedule's each a
+/// date and a time, an all-day one's its first and last day, the same day
+/// for one day; and, while
 /// [CalendarScheduleCheck.overlaps] is not empty, an overlap notice naming
 /// them, each title in bold, its warning icon beside the top of its text,
 /// whose "Next free time" sends
@@ -941,16 +933,16 @@ String _lengthLabel(int minutes) {
 /// [locked] or the check's start is fixed. Times are written on
 /// [hourLabelFormat]'s clock.
 ///
-/// Its top right corner shows a pill with a timer icon before the
-/// schedule's length: an all-day schedule's "All day" for one day, or its
-/// count of civil days, such as "3 days", for more; or a timed schedule's
-/// hours and minutes, where it is positive. Under the pill, or at the top
-/// where it does not show, a light grey rounded box holds [zone]'s name,
+/// Its top right corner shows, in a light grey rounded box, [zone]'s name,
 /// its city ([CalendarZonePanel.cityOf]) or, for the device's zone,
 /// [CalendarLocalizations.deviceZoneName], above the zone's offset from UTC
 /// at the start ([CalendarLocalizations.utcOffset]), or at its day's start
-/// where the zone's clock skips the start. The corner lies at the same
-/// place whatever lines the schedule shows beside it.
+/// where the zone's clock skips the start; and under the box, a pill with a
+/// timer icon before the schedule's length: an all-day schedule's "All
+/// day" for one day, or its count of civil days, such as "3 days", for
+/// more; or a timed schedule's hours and minutes, where it is positive. The
+/// corner lies at the same place whatever lines the schedule shows beside
+/// it.
 class ScheduleSummary extends StatelessWidget {
   const ScheduleSummary({
     super.key,
@@ -977,32 +969,15 @@ class ScheduleSummary extends StatelessWidget {
   /// not show.
   final bool locked;
 
-  /// The first line of a schedule on one day or of an all-day one.
-  static const TextStyle _dayStyle = TextStyle(
-    fontSize: 15.0,
-    fontWeight: FontWeight.w500,
-    color: HarborColors.textMuted,
-  );
-
-  /// The second line of a schedule on one day or of an all-day one.
-  static const TextStyle _timesStyle = TextStyle(
-    fontSize: 22.0,
-    fontWeight: FontWeight.w600,
-    color: HarborColors.text,
-  );
-
-  /// Both lines of a schedule that spans days, each a date or a date and a
-  /// time, smaller than [_timesStyle] so that they fit beside the corner
-  /// on a narrow screen.
-  static const TextStyle _spanStyle = TextStyle(
+  /// The start and end lines, each a date or a date and a time.
+  static const TextStyle _lineStyle = TextStyle(
     fontSize: 14.0,
     fontWeight: FontWeight.w600,
     color: HarborColors.text,
   );
 
-  /// The Start and End labels above the lines of a schedule that spans
-  /// days.
-  static const TextStyle _spanLabelStyle = TextStyle(
+  /// The Start and End labels above the lines.
+  static const TextStyle _labelStyle = TextStyle(
     fontSize: 12.0,
     fontWeight: FontWeight.w500,
     color: HarborColors.textMuted,
@@ -1168,39 +1143,6 @@ class ScheduleSummary extends StatelessWidget {
     final start = strings.formatTime(schedule.startMinute, hourLabelFormat);
     final end = strings.formatTime(schedule.endMinute, hourLabelFormat);
     final timed = !schedule.isAllDay;
-    final spans = schedule.spansDays;
-    final String first;
-    final String? second;
-    if (!timed) {
-      first = startDay;
-      second = spans ? endDay : null;
-    } else if (spans) {
-      first = "$startDay, $start";
-      second = "$endDay, $end";
-    } else {
-      first = startDay;
-      second = "$start - $end";
-    }
-    final TextStyle firstStyle;
-    if (spans) {
-      firstStyle = _spanStyle;
-    } else if (timed) {
-      firstStyle = _dayStyle;
-    } else {
-      firstStyle = _timesStyle;
-    }
-    final firstLine = Text(
-      first,
-      key: scheduleSummaryFirstLineKey,
-      style: firstStyle,
-    );
-    final secondLine = second == null
-        ? null
-        : Text(
-            second,
-            key: scheduleSummarySecondLineKey,
-            style: spans ? _spanStyle : _timesStyle,
-          );
     final String? pill;
     if (!timed) {
       final days =
@@ -1211,31 +1153,27 @@ class ScheduleSummary extends StatelessWidget {
     } else {
       pill = null;
     }
-    // A line of a schedule that spans days sits under its label and, too
-    // wide for the room beside the corner, shrinks onto one line.
-    Widget spanLine(String label, Widget line) {
+    // A line sits under its label and, too wide for the room beside the
+    // corner, shrinks onto one line.
+    Widget line(String label, Key key, String day, String time) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Text(label, style: _spanLabelStyle),
+          Text(label, style: _labelStyle),
           const SizedBox(height: 2.0),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: AlignmentDirectional.centerStart,
-            child: line,
+            child: Text(
+              timed ? "$day, $time" : day,
+              key: key,
+              style: _lineStyle,
+            ),
           ),
         ],
       );
     }
 
-    final lines = <Widget>[
-      if (secondLine == null)
-        firstLine
-      else if (spans) ...<Widget>[
-        spanLine("Start", firstLine),
-        spanLine("End", secondLine),
-      ] else ...<Widget>[firstLine, secondLine],
-    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -1246,14 +1184,9 @@ class ScheduleSummary extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  for (
-                    var index = 0;
-                    index < lines.length;
-                    index++
-                  ) ...<Widget>[
-                    if (index > 0) SizedBox(height: spans ? 8.0 : 4.0),
-                    lines[index],
-                  ],
+                  line("Start", scheduleSummaryFirstLineKey, startDay, start),
+                  const SizedBox(height: 8.0),
+                  line("End", scheduleSummarySecondLineKey, endDay, end),
                 ],
               ),
             ),
@@ -1262,11 +1195,11 @@ class ScheduleSummary extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: <Widget>[
-                if (pill != null) ...<Widget>[
-                  _pill(pill),
-                  const SizedBox(height: 6.0),
-                ],
                 _zone(strings),
+                if (pill != null) ...<Widget>[
+                  const SizedBox(height: 6.0),
+                  _pill(pill),
+                ],
               ],
             ),
           ],
@@ -1284,9 +1217,11 @@ class ScheduleSummary extends StatelessWidget {
 /// open field: its date field's day picker, which [dateBuilder] builds, or
 /// where [showsTime] its time field's picker, which [timeBuilder] builds,
 /// null for an all-day row, which has no time field. Each is built only
-/// while the panel shows it. As [open] turns true the panel grows from no
-/// height to the picker's over the [CalendarTheme]'s motion, the picker
-/// fading in over the motion's first half, and as it turns false it plays
+/// while the panel shows it. The panel spans the section and clips at its
+/// sides, its pickers lying [_edge] inside them, as the row's fields do.
+/// As [open] turns true the panel grows from no height to the picker's
+/// over the [CalendarTheme]'s motion, the picker fading in over the
+/// motion's first half, and as it turns false it plays
 /// that backwards: it shrinks over the motion, the picker fading out over
 /// its last half, the closing panel keeping the picker it showed. As
 /// [showsTime] changes while [open], the panel swaps its pickers in place
@@ -1618,29 +1553,34 @@ class _PickerPanelState extends State<_PickerPanel>
         child: Padding(
           padding: const EdgeInsets.only(top: 12.0),
           child: ClipRect(
-            child: Listener(
-              onPointerDown: _pointerDown,
-              onPointerUp: _pointerUp,
-              onPointerCancel: _pointerUp,
-              child: _PanelSwap(
-                t: _swapCurved,
-                onGrow: _grew,
-                children: <Widget>[
-                  IgnorePointer(
-                    ignoring: _showsTime,
-                    child: FadeTransition(
-                      opacity: _dateOpacity,
-                      child: datePicker,
+            // Inside the clips, so what a picker paints past its sides
+            // shows, as the badges of a day picker's edge column do under
+            // CalendarDayPicker.daysToEdges.
+            child: _sides(
+              Listener(
+                onPointerDown: _pointerDown,
+                onPointerUp: _pointerUp,
+                onPointerCancel: _pointerUp,
+                child: _PanelSwap(
+                  t: _swapCurved,
+                  onGrow: _grew,
+                  children: <Widget>[
+                    IgnorePointer(
+                      ignoring: _showsTime,
+                      child: FadeTransition(
+                        opacity: _dateOpacity,
+                        child: datePicker,
+                      ),
                     ),
-                  ),
-                  IgnorePointer(
-                    ignoring: !_showsTime,
-                    child: FadeTransition(
-                      opacity: _timeOpacity,
-                      child: timePicker,
+                    IgnorePointer(
+                      ignoring: !_showsTime,
+                      child: FadeTransition(
+                        opacity: _timeOpacity,
+                        child: timePicker,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

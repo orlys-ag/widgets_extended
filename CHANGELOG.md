@@ -902,7 +902,9 @@ Agenda's. A day before `firstDay` or after `lastDay`, or one `isEnabled`
 refuses, draws disabled and takes no tap; `isEnabled` is asked of a day as
 its cell first builds, at most once per predicate and value. `store` and
 `dayBadges` badge the days with entries; its weeks start on `firstColumn`
-and show all seven weekdays.
+and show all seven weekdays. With `daysToEdges` it pads no side and
+spreads its columns so that the circles of the first and last columns
+reach its sides, lining its days up with the fields above and below it.
 - Added `CalendarScheduleCheck.firstStartDay`, the first day a new start
 may lie on as the policy's earliest starts of yesterday and today say, and
 `CalendarScheduleCheck.endDays`, the days the schedule's end may lie on:

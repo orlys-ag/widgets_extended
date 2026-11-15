@@ -3,6 +3,7 @@
 /// and Month's header card, each with the area the month picker comes into.
 library;
 
+import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
@@ -109,7 +110,11 @@ class CalendarHeaderCard extends StatelessWidget {
 /// builds it again at each of the controller's events.
 ///
 /// Its rows are as tall as a week strip's cell under the [CalendarTheme]
-/// above it ([stripCellHeight]).
+/// above it ([stripCellHeight]). The card pads its sides by 8 logical
+/// pixels, and each day's circle is centred in its column; where
+/// [daysToEdges], the card pads no side, and its weekday names and days lie
+/// in columns spread so that the circles of the first and last columns
+/// reach its sides (`_EdgeDays`).
 class CalendarCard<T> extends StatefulWidget {
   const CalendarCard({
     super.key,
@@ -124,6 +129,7 @@ class CalendarCard<T> extends StatefulWidget {
     required this.onSelectDay,
     this.dayBadges,
     this.isDayEnabled,
+    this.daysToEdges = false,
   });
 
   /// The card's fold, browse and month picker, and their motions.
@@ -156,6 +162,10 @@ class CalendarCard<T> extends StatefulWidget {
   /// cell, a plain day, as it builds ([WeekStrip.isDayEnabled],
   /// [MonthStrip.isDayEnabled]); null takes every day.
   final bool Function(DateTime day)? isDayEnabled;
+
+  /// Whether the circles of the first and last columns reach the card's
+  /// sides, the card padding no side.
+  final bool daysToEdges;
 
   @override
   State<CalendarCard<T>> createState() {
@@ -307,13 +317,25 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
       foldDay: controller.foldDay,
     );
     final header = widget.header;
+    Widget grid = AnimatedBuilder(
+      animation: controller.collapse,
+      child: months,
+      builder: (context, child) {
+        return _buildGrid(controller.collapse.value, child!);
+      },
+    );
+    if (widget.daysToEdges) {
+      grid = _EdgeDays(columns: widget.weekdays.columns.length, child: grid);
+    }
     return DecoratedBox(
       decoration: BoxDecoration(
         color: CalendarTheme.of(context).surface,
         borderRadius: BorderRadius.circular(16.0),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 0.0),
+        padding: widget.daysToEdges
+            ? const EdgeInsets.only(top: 8.0)
+            : const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 0.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -328,13 +350,7 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  AnimatedBuilder(
-                    animation: controller.collapse,
-                    child: months,
-                    builder: (context, child) {
-                      return _buildGrid(controller.collapse.value, child!);
-                    },
-                  ),
+                  grid,
                   _PullTab(
                     folded: controller.folded,
                     onDragStart: (details) {
@@ -364,6 +380,77 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
         ),
       ),
     );
+  }
+}
+
+/// [child], the weekday names over the days, in [columns] columns spread so
+/// that the circles of the first and last reach the box's sides: each
+/// column is `(width - dayCircleSize) / (columns - 1)` wide, never less
+/// than an equal share of the box, and the child, that many columns wide,
+/// is centred on the box, overhanging each side by half a column less half
+/// a circle. Past the box's sides it is clipped [dayBadgeReach] out, where
+/// an edge column's badges draw, so a slide shows no more of the columns
+/// beyond than that. Its [LayoutBuilder] runs its builder only as the
+/// box's constraints change, which a fold, changing the child's height
+/// alone, leaves as they are.
+class _EdgeDays extends StatelessWidget {
+  const _EdgeDays({required this.columns, required this.child});
+
+  final int columns;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        if (!width.isFinite || columns < 2) {
+          return child;
+        }
+        final spread = math.max(
+          width,
+          (width - dayCircleSize) / (columns - 1) * columns,
+        );
+        return ClipRect(
+          clipper: const _SideReach(),
+          child: OverflowBox(
+            minWidth: spread,
+            maxWidth: spread,
+            fit: OverflowBoxFit.deferToChild,
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// The box [dayBadgeReach] wider on each side, and as tall again above it
+/// and below it: a clip of the sides.
+class _SideReach extends CustomClipper<Rect> {
+  const _SideReach();
+
+  @override
+  Rect getClip(Size size) {
+    return Rect.fromLTRB(
+      -dayBadgeReach,
+      -size.height,
+      size.width + dayBadgeReach,
+      size.height * 2.0,
+    );
+  }
+
+  /// The clip itself, a rectangle, in place of the default box, so the
+  /// semantics layer and [RenderObject.describeApproximatePaintClip] see
+  /// the badges past the sides.
+  @override
+  Rect getApproximateClipRect(Size size) {
+    return getClip(size);
+  }
+
+  @override
+  bool shouldReclip(_SideReach oldClipper) {
+    return false;
   }
 }
 
