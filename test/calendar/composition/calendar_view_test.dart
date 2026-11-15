@@ -38,6 +38,7 @@ import 'package:widgets_extended/calendar/views/create_details.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
+import 'package:widgets_extended/calendar/views/month_picker.dart';
 import 'package:widgets_extended/calendar/views/month_strip.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
@@ -3202,6 +3203,46 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+  });
+
+  testWidgets("CV63 in Agenda's folded card Next week selects the day a "
+      "week on, and a month picked in the month picker the day a month step "
+      "reaches, each with one notify", (tester) async {
+    final controller = CalendarController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      app(
+        CalendarView<String>(
+          store: store,
+          controller: controller,
+          clock: fixedClock,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(calendarPullTabKey));
+    await tester.pumpAndSettle();
+    // Setup sanity: Agenda's card, folded on the selected day's week.
+    expect(controller.view, CalendarViewKind.agenda);
+    expect(controller.selectedDay, tuesday);
+    expect(find.byType(WeekStrip<String>), findsOneWidget);
+    var notifies = 0;
+    controller.addListener(() {
+      notifies++;
+    });
+
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pumpAndSettle();
+    expect(controller.selectedDay, DateTime(2026, 4, 28));
+    expect(notifies, 1);
+
+    await tester.tap(find.byTooltip("Pick a month"));
+    await tester.pumpAndSettle();
+    notifies = 0;
+    await tester.tap(find.byKey(monthPickerMonthKey(DateTime(2026, 6))));
+    await tester.pumpAndSettle();
+    expect(controller.selectedDay, DateTime(2026, 6, 28));
+    expect(notifies, 1);
   });
 
   group("CV59 Agenda marks the gap whose add button reported a create until "

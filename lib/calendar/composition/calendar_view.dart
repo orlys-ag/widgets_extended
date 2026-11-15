@@ -18,11 +18,11 @@ import '../views/create_details.dart';
 import '../views/day_list.dart';
 import '../views/month_board.dart';
 import '../views/month_picker.dart';
-import '../views/month_strip.dart' show monthFoldDay;
 import '../views/move_request.dart';
 import '../views/pinch_zoom.dart' as pinch;
 import '../views/timed_grid.dart';
 import 'calendar_card.dart';
+import 'calendar_card_controller.dart';
 import 'calendar_header.dart';
 import 'calendar_theme_extension.dart';
 
@@ -519,7 +519,8 @@ class CalendarView<T> extends StatefulWidget {
 }
 
 class _CalendarViewState<T> extends State<CalendarView<T>>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin
+    implements CalendarCardHost {
   /// The host's controller, or one of this state's own, which [dispose]
   /// disposes. The view and the selected day live on it alone.
   late CalendarController _controller;
@@ -632,47 +633,14 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
           );
   }
 
-  /// A day of the month the calendar card shows and the header names
-  /// since a slide of the month strip, a chevron or a drag of the week
-  /// strip moved the card off the selected day's month or week: the first
-  /// day of the month the month strip rests on, or the day at the middle
-  /// of the week strip. Null while the card shows the selected day.
-  DateTime? _browsedDay;
-
-  /// Whether a drag of the week strip set [_browsedDay], which is then the
-  /// day at the strip's middle, rather than a slide or a chevron. The
-  /// strip a switch to Week or Month takes away comes back with that day
-  /// at its middle. False once a fold short of the week ([_handleFold]) or
-  /// new weekdays end that strip, as the next one opens on the week of
-  /// [monthFoldDay].
-  bool _browsedByStrip = false;
-
   /// The month grid of the selected day.
   late CalendarMonthGrid _grid;
 
-  /// Whether the calendar card settles on its week strip rather than its
-  /// month. Only Agenda and Day show the card; Week and Month keep it as
-  /// it is for them.
-  bool _collapsed = false;
-
-  /// Whether the month picker shows, and the year it shows.
-  bool _picksMonth = false;
-  int _pickerYear = 0;
-
-  /// Counts the calls that bring the week strip back to the selected day,
-  /// which `WeekStrip.recalls` passes on.
-  int _stripRecalls = 0;
-
-  /// How far the calendar card has folded, 0 for the month and 1 for its
-  /// week: linear, so a drag on the pull tab moves it with the finger.
-  late final AnimationController _collapseController = AnimationController(
-    vsync: this,
-  );
-
-  /// How far the month picker has come in, 0 for out and 1 for in.
-  late final AnimationController _pickerShown = AnimationController(
-    vsync: this,
-  );
+  /// The calendar card's fold, browse and month picker. Only Agenda and
+  /// Day show the card; Week and Month keep it as it is for them, the
+  /// header card showing its month picker. This state runs each of its
+  /// events in [_event] ([runCardEvent]) and listens to it not at all.
+  late final CalendarCardController _card;
 
   /// Resolves the theme the state draws and animates its own parts with,
   /// and the one it puts above the views ([_resolveTheme]).
@@ -716,8 +684,10 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     _now = _CalendarNowNotifier(_nowAt(_clock()));
     final host = widget.controller;
     _ownsController = host == null;
+    // Before the bind, which can read what the card holds
+    // ([_showsSelectedDay]).
+    _card = CalendarCardController(vsync: this, host: this);
     _bind(host ?? CalendarController(), shown: null);
-    _collapseController.addListener(_handleFold);
     _scheduleMinute(_now.value.time);
     _storeHours = widget.store.hours;
     // Before any view's, which the views build after this, so at a notify
@@ -777,7 +747,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       _controller._selectedDay = day;
       _grid = CalendarMonthGrid.of(day, weekdays: widget.weekdays);
       // The card keys its week strip by its weekdays, so a new strip opens.
-      _browsedByStrip = false;
+      _card.endStripBrowse();
     }
     if (widget.store != oldWidget.store) {
       // Before the views' own updates, which run in the build after this.
@@ -803,8 +773,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     if (_ownsController) {
       _controller.dispose();
     }
-    _collapseController.dispose();
-    _pickerShown.dispose();
+    _card.dispose();
     // The views listening to it have unmounted by now: an element's
     // children unmount before it does.
     _now.dispose();
@@ -995,10 +964,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     _noteLifecycle();
     _storeZone = zone;
     _controller._selectedDay = _dayIn(_day);
-    final browsed = _browsedDay;
-    if (browsed != null) {
-      _browsedDay = _dayIn(browsed);
-    }
+    _card.retakeBrowse();
     _now.retake(_nowAt(CalendarDates.inZone(_now.value.time, zone: zone)));
     _scheduleAsk();
   }
@@ -1074,12 +1040,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   }
 
   /// Resolves the theme the views draw with, and whether a [Material] goes
-  /// above them ([CalendarThemeResolver.resolve]). Sets the fold's and the
-  /// picker's durations to the theme's.
+  /// above them ([CalendarThemeResolver.resolve]). Gives the card the
+  /// theme's motion.
   void _resolveTheme() {
     _themes.resolve(context);
-    _collapseController.duration = _theme.motionDuration;
-    _pickerShown.duration = _theme.motionDuration;
+    _card.setMotion(_theme.motionDuration, _theme.motionCurve);
   }
 
   /// The range of days the calendar asks the store to show: the month
@@ -1163,7 +1128,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       return;
     }
     _controller._selectedDay = day;
-    _browsedDay = null;
+    _card.forgetBrowse();
     if (!_grid.contains(day)) {
       _grid = CalendarMonthGrid.of(day, weekdays: widget.weekdays);
     }
@@ -1209,22 +1174,21 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// a chevron moved back to it, and otherwise selects it.
   void _goTo(DateTime day) {
     final target = CalendarDates.shownDayNear(_dayIn(day), widget.weekdays);
-    final closesPicker = _picksMonth;
-    final browsed = _browsedDay != null;
+    final closesPicker = _card.picksMonth;
+    final browsed = _card.browsedDay != null;
     if (!closesPicker && !browsed && target == _day) {
       return;
     }
     _event(() {
-      _picksMonth = false;
+      _card.hidePicker();
       if (target != _day) {
         _writeDay(target);
       } else if (browsed) {
-        _browsedDay = null;
-        _stripRecalls++;
+        _card.recall();
       }
     });
     if (closesPicker) {
-      _pickerShown.animateTo(0.0, curve: _theme.motionCurve);
+      _card.followPicker();
     }
   }
 
@@ -1242,110 +1206,26 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     });
   }
 
-  /// The first day of the month the calendar card shows.
-  DateTime get _cardMonth {
-    final day = _browsedDay ?? _day;
-    return DateTime(day.year, day.month);
-  }
-
-  /// Moves the calendar card to the month of [day], selecting nothing.
-  void _browse(DateTime day) {
-    _event(() {
-      _browsedDay = _dayIn(DateTime(day.year, day.month));
-      _browsedByStrip = false;
-    });
-  }
-
-  /// Notes [day], which a drag brought to the week strip's middle.
-  void _browseStrip(DateTime day) {
-    _event(() {
-      _browsedDay = _dayIn(day);
-      _browsedByStrip = true;
-    });
-  }
-
-  /// Ends a strip browse once the fold leaves the week: [CalendarCard]
-  /// builds its `WeekStrip` only at a full fold, so the strip a drag moved
-  /// is gone, and the one the card folds into next opens on the week of
-  /// [monthFoldDay].
-  void _handleFold() {
-    if (_browsedByStrip && _collapseController.value < 1.0) {
-      _event(() {
-        _browsedByStrip = false;
-      });
-    }
-  }
-
-  /// [_browsedDay] where the view shows the calendar card, and null in
-  /// Week and Month, which show the selected day's week or month while the
-  /// card waits.
-  DateTime? get _shownBrowse {
-    return _showsCalendarCard ? _browsedDay : null;
-  }
-
   /// [CalendarController.showsSelectedDay] of this calendar: false while
   /// the month picker shows.
   bool get _showsSelectedDay {
-    return !_picksMonth && _browseHoldsSelectedDay;
+    return !_card.picksMonth && _browseHoldsSelectedDay;
   }
 
   /// Whether the calendar card or the week strip, as a slide, a chevron or
   /// a drag left it, holds the selected day, whether the month picker shows
   /// over it or not; true in Week and Month, which show no card.
   bool get _browseHoldsSelectedDay {
-    final browsed = _shownBrowse;
-    if (browsed == null) {
-      return true;
-    }
-    final day = _day;
-    if (!_collapsed) {
-      return browsed.year == day.year && browsed.month == day.month;
-    }
-    final target = CalendarDates.dayNumber(day);
-    return _stripDays(browsed).any((shown) {
-      return CalendarDates.dayNumber(shown) == target;
-    });
-  }
-
-  /// The shown days the folded card's week strip holds while [browsed] is
-  /// [_browsedDay]: a week's count of them around [browsed], the day a
-  /// drag brought to the strip's middle, the first half of the count
-  /// before it, as `WeekStrip` finds its middle; or, where a slide or a
-  /// chevron browsed the card, the shown days of the week the strip opens
-  /// on ([monthFoldDay]).
-  List<DateTime> _stripDays(DateTime browsed) {
-    final weekdays = widget.weekdays;
-    if (!_browsedByStrip) {
-      return CalendarDates.shownDaysOfWeek(
-        monthFoldDay(
-          _cardMonth,
-          selectedDay: _day,
-          today: _now.value.today,
-          weekdays: weekdays,
-        ),
-        weekdays,
-      );
-    }
-    final count = weekdays.columns.length;
-    var shown = browsed;
-    for (var step = 0; step < count ~/ 2; step++) {
-      shown = CalendarDates.nextShownDay(shown, -1, weekdays);
-    }
-    final days = <DateTime>[];
-    for (var step = 0; step < count; step++) {
-      days.add(shown);
-      shown = CalendarDates.nextShownDay(shown, 1, weekdays);
-    }
-    return days;
+    return !_showsCalendarCard || _card.holdsSelectedDay;
   }
 
   CalendarStepUnit get _stepUnit {
-    if (_picksMonth) {
+    if (_card.picksMonth) {
       return CalendarStepUnit.year;
     }
     switch (_view) {
       case CalendarViewKind.agenda:
-        return _collapsed ? CalendarStepUnit.week : CalendarStepUnit.month;
+        return _card.stepUnit;
       case CalendarViewKind.month:
         return CalendarStepUnit.month;
       case CalendarViewKind.week:
@@ -1358,30 +1238,30 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// Steps by [_stepUnit] over the shown weekdays: a day step skips the
   /// hidden ones, and a month step keeps the day of the month where it can
   /// and takes the nearest shown day of that month where it lands on a
-  /// hidden one. A year step moves the month picker alone, and a month step
-  /// in Agenda the calendar card alone.
+  /// hidden one. A year step and Agenda's steps are the calendar card's
+  /// ([CalendarCardController.step]): a year step moves the month picker
+  /// alone, and a month step in Agenda the calendar card alone.
   void _step(int direction) {
+    final unit = _stepUnit;
+    if (unit == CalendarStepUnit.year || _view == CalendarViewKind.agenda) {
+      _card.step(direction);
+      return;
+    }
     final weekdays = widget.weekdays;
-    switch (_stepUnit) {
-      case CalendarStepUnit.year:
-        setState(() {
-          _pickerYear += direction;
-        });
+    switch (unit) {
       case CalendarStepUnit.day:
         _select(CalendarDates.nextShownDay(_day, direction, weekdays));
       case CalendarStepUnit.week:
         _select(CalendarDates.addDays(_day, DateTime.daysPerWeek * direction));
       case CalendarStepUnit.month:
-        if (_view == CalendarViewKind.agenda) {
-          _browse(CalendarDates.addMonths(_cardMonth, direction));
-        } else {
-          _select(
-            CalendarDates.shownDayNear(
-              CalendarDates.addMonths(_day, direction),
-              weekdays,
-            ),
-          );
-        }
+        _select(
+          CalendarDates.shownDayNear(
+            CalendarDates.addMonths(_day, direction),
+            weekdays,
+          ),
+        );
+      case CalendarStepUnit.year:
+        break;
     }
   }
 
@@ -1394,65 +1274,59 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   }
 
   void _openMonthPicker() {
-    _event(() {
-      _picksMonth = true;
-      _pickerYear = _day.year;
-    });
-    _pickerShown.animateTo(1.0, curve: _theme.motionCurve);
+    _card.openPicker();
   }
 
   void _closeMonthPicker() {
-    _event(() {
-      _picksMonth = false;
-    });
-    _pickerShown.animateTo(0.0, curve: _theme.motionCurve);
+    _card.closePicker();
   }
 
   /// Selects the day of [month] a month step from the selected day would.
   /// The month picker stays open, filling [month].
   void _pickMonth(DateTime month) {
-    final months = (month.year - _day.year) * 12 + month.month - _day.month;
-    _select(
-      CalendarDates.shownDayNear(
-        CalendarDates.addMonths(_day, months),
-        widget.weekdays,
-      ),
-    );
+    _card.pickMonth(month);
   }
 
   bool get _showsCalendarCard {
     return _view == CalendarViewKind.agenda || _view == CalendarViewKind.day;
   }
 
+  @override
+  DateTime get cardSelectedDay {
+    return _day;
+  }
+
+  @override
+  DateTime get cardToday {
+    return _now.value.today;
+  }
+
+  @override
+  CalendarWeekdaySet get cardWeekdays {
+    return widget.weekdays;
+  }
+
+  @override
+  DateTime cardDayIn(DateTime day) {
+    return _dayIn(day);
+  }
+
+  @override
+  bool selectCardDay(DateTime day) {
+    _select(day);
+    return true;
+  }
+
+  @override
+  void runCardEvent(VoidCallback change) {
+    _event(change);
+  }
+
   void _setCollapsed(bool collapsed) {
-    if (collapsed == _collapsed || !_showsCalendarCard) {
+    if (collapsed == _card.folded || !_showsCalendarCard) {
       return;
     }
-    _settleCollapse(collapsed);
-  }
-
-  /// Folds or unfolds the calendar card from however far it has folded, a
-  /// drag on the pull tab having moved it. Unfolding closes the month
-  /// picker, and leaves a browse the month the card shows, which a later
-  /// fold opens the strip on a week of.
-  void _settleCollapse(bool collapsed) {
-    if (collapsed != _collapsed || (!collapsed && _picksMonth)) {
-      _event(() {
-        _collapsed = collapsed;
-        if (!collapsed) {
-          _picksMonth = false;
-          _browsedByStrip = false;
-        }
-      });
-    }
-    _collapseController.animateTo(
-      _collapsed ? 1.0 : 0.0,
-      curve: _theme.motionCurve,
-    );
-  }
-
-  void _unfold() {
-    _setCollapsed(false);
+    _card.settle(collapsed);
   }
 
   /// In Day, a drag that scrolls the grid's content up folds the month
@@ -1617,8 +1491,8 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     return CalendarHeaderDetails(
       view: _view,
       views: _views,
-      day: _shownBrowse ?? _day,
-      pickerYear: _picksMonth ? _pickerYear : null,
+      day: (_showsCalendarCard ? _card.browsedDay : null) ?? _day,
+      pickerYear: _card.picksMonth ? _card.pickerYear : null,
       stepUnit: _stepUnit,
       onPrevious: _stepBack,
       onNext: _stepOn,
@@ -1667,44 +1541,31 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     );
   }
 
-  /// The month picker, on [_pickerYear], filling the selected day's month
-  /// and ringing today's.
+  /// The month picker, on the card's [CalendarCardController.pickerYear],
+  /// filling the selected day's month and ringing today's.
   Widget _buildMonthPicker() {
     final today = _now.value.today;
     return MonthPicker(
       key: const ValueKey<String>("month-picker"),
-      year: _pickerYear,
+      year: _card.pickerYear,
       selectedMonth: DateTime(_day.year, _day.month),
       currentMonth: DateTime(today.year, today.month),
       onSelectMonth: _pickMonth,
-      onBrowse: (year) {
-        setState(() {
-          _pickerYear = year;
-        });
-      },
+      onBrowse: _card.browseYear,
     );
   }
 
   Widget _buildCard(Widget? header) {
     return CalendarCard<T>(
+      controller: _card,
       store: widget.store,
-      month: _cardMonth,
+      month: _card.month,
       selectedDay: _day,
       today: _now.value.today,
       weekdays: widget.weekdays,
-      stripRecalls: _stripRecalls,
-      collapse: _collapseController,
-      collapsed: _collapsed,
-      pickerShown: _pickerShown,
-      picksMonth: _picksMonth,
       header: header,
       buildPicker: _buildMonthPicker,
       onSelectDay: _select,
-      onBrowseMonth: _browse,
-      onBrowseStrip: _browseStrip,
-      onSettle: _settleCollapse,
-      onUnfold: _unfold,
-      stripMiddleDay: _browsedByStrip ? _browsedDay : null,
       dayBadges: widget.dayBadges,
     );
   }
@@ -1715,8 +1576,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     }
     return CalendarHeaderCard(
       header: header,
-      pickerShown: _pickerShown,
-      picksMonth: _picksMonth,
+      controller: _card,
       buildPicker: _buildMonthPicker,
     );
   }

@@ -15,6 +15,7 @@ import '../presentation/calendar_theme.dart';
 import '../views/day_cell.dart';
 import '../views/month_strip.dart';
 import '../views/week_strip.dart';
+import 'calendar_card_controller.dart';
 
 /// The key of the calendar card's pull tab.
 const ValueKey<String> calendarPullTabKey = ValueKey<String>(
@@ -30,20 +31,21 @@ const ValueKey<String> calendarDaysAreaKey = ValueKey<String>(
 
 /// [header] on a card of its own, above the grids of Week and Month, with
 /// the month picker, which [buildPicker] builds, coming in under it as
-/// [pickerShown] runs from 0 to 1, taking pointers while [picksMonth]
-/// holds.
+/// [controller]'s [CalendarCardController.pickerShown] runs from 0 to 1,
+/// taking pointers while its [CalendarCardController.picksMonth] holds.
 class CalendarHeaderCard extends StatelessWidget {
   const CalendarHeaderCard({
     super.key,
     required this.header,
-    required this.pickerShown,
-    required this.picksMonth,
+    required this.controller,
     required this.buildPicker,
   });
 
   final Widget header;
-  final Animation<double> pickerShown;
-  final bool picksMonth;
+
+  /// The card state the month picker's motion and pointers follow.
+  final CalendarCardController controller;
+
   final Widget Function() buildPicker;
 
   @override
@@ -63,11 +65,11 @@ class CalendarHeaderCard extends StatelessWidget {
             children: <Widget>[
               header,
               AnimatedBuilder(
-                animation: pickerShown,
+                animation: controller.pickerShown,
                 builder: (context, child) {
                   return _PickerArea(
-                    shown: pickerShown.value,
-                    picksMonth: picksMonth,
+                    shown: controller.pickerShown.value,
+                    picksMonth: controller.picksMonth,
                     days: const SizedBox.shrink(),
                     pickerPadding: const EdgeInsets.only(top: 4.0),
                     buildPicker: buildPicker,
@@ -84,45 +86,43 @@ class CalendarHeaderCard extends StatelessWidget {
 
 /// Agenda's and Day's calendar card: [header] over [month]'s days as a
 /// [MonthStrip] under the weekdays' abbreviations, which fold into
-/// the week of [monthFoldDay] as [collapse] runs from 0 to 1, and at 1
-/// give way to a [WeekStrip] opening on that week, over a pull tab; the
-/// month picker, which [buildPicker] builds, comes in over the days as
-/// [pickerShown] runs from 0 to 1.
+/// the week of [monthFoldDay] as [controller]'s
+/// [CalendarCardController.collapse] runs from 0 to 1, and at 1 give way
+/// to a [WeekStrip] opening on that week, over a pull tab; the month
+/// picker, which [buildPicker] builds, comes in over the days as its
+/// [CalendarCardController.pickerShown] runs from 0 to 1.
 ///
-/// A drag on the pull tab moves [collapse] with the finger, the card
-/// losing a row for each week the month folds and the weekday names'
-/// height; a release reports through [onSettle] the fold to settle on,
-/// the way a fast one moves and otherwise the nearer one, and so does a
-/// tap, which switches. A drag down the folded strip of 16 logical pixels
-/// reports [onUnfold]. The strips report a day selected through
-/// [onSelectDay], and a month or a day browsed to through [onBrowseMonth]
-/// and [onBrowseStrip].
+/// A drag on the pull tab moves the fold with the finger, the card losing
+/// a row for each week the month folds and the weekday names' height; a
+/// release settles the controller ([CalendarCardController.settle]) on
+/// the fold the way a fast one moves and otherwise the nearer one, and so
+/// does a tap, which switches. A drag down the folded strip of 16 logical
+/// pixels unfolds it ([CalendarCardController.unfold]). The strips report
+/// a day selected through [onSelectDay], and a month or a day browsed to
+/// through the controller's [CalendarCardController.browseMonth] and
+/// [CalendarCardController.browseStrip]. The card reads the controller as
+/// it builds and listens to its motions alone, so its host builds it again
+/// at each of the controller's events.
 ///
 /// Its rows are as tall as a week strip's cell under the [CalendarTheme]
 /// above it ([stripCellHeight]).
 class CalendarCard<T> extends StatefulWidget {
   const CalendarCard({
     super.key,
+    required this.controller,
     required this.store,
     required this.month,
     required this.selectedDay,
     required this.today,
     required this.weekdays,
-    required this.stripRecalls,
-    required this.collapse,
-    required this.collapsed,
-    required this.pickerShown,
-    required this.picksMonth,
     required this.header,
     required this.buildPicker,
     required this.onSelectDay,
-    required this.onBrowseMonth,
-    required this.onBrowseStrip,
-    required this.onSettle,
-    required this.onUnfold,
-    this.stripMiddleDay,
     this.dayBadges,
   });
+
+  /// The card's fold, browse and month picker, and their motions.
+  final CalendarCardController controller;
 
   final CalendarStore<T> store;
 
@@ -133,43 +133,12 @@ class CalendarCard<T> extends StatefulWidget {
   final DateTime today;
   final CalendarWeekdaySet weekdays;
 
-  /// [WeekStrip.recalls].
-  final int stripRecalls;
-
-  /// How far the month has folded into its week, 0 for the month and 1
-  /// for the week.
-  final AnimationController collapse;
-
-  /// Whether the card settles folded, which names what a tap on the pull
-  /// tab shows.
-  final bool collapsed;
-
-  /// How far the month picker has come in, 0 for out and 1 for in.
-  final Animation<double> pickerShown;
-
-  /// Whether the month picker shows, and so takes pointers.
-  final bool picksMonth;
-
   /// The header row over the days; null for no header row and no gap
   /// under it.
   final Widget? header;
 
   final Widget Function() buildPicker;
   final ValueChanged<DateTime> onSelectDay;
-  final ValueChanged<DateTime> onBrowseMonth;
-  final ValueChanged<DateTime> onBrowseStrip;
-
-  /// The fold to settle on, true for the week, after a release or a tap
-  /// of the pull tab.
-  final ValueChanged<bool> onSettle;
-
-  /// A drag down the folded strip asks to unfold the month.
-  final VoidCallback onUnfold;
-
-  /// The day a drag left at the middle of a week strip, which a strip the
-  /// card builds opens with at its middle ([WeekStrip.initialMiddleDay]);
-  /// null opens it on the week of [monthFoldDay].
-  final DateTime? stripMiddleDay;
 
   /// The kinds of entry the days' badges mark, in the month and in the
   /// week strip; null for one primary dot on a day with entries.
@@ -218,39 +187,40 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
   }
 
   void _dragFold(DragUpdateDetails details) {
-    widget.collapse.value -= details.primaryDelta! / _foldDistance;
+    widget.controller.collapse.value -= details.primaryDelta! / _foldDistance;
   }
 
   void _endFoldDrag(DragEndDetails details) {
     final velocity = details.primaryVelocity ?? 0.0;
-    widget.onSettle(
+    widget.controller.settle(
       velocity.abs() >= _foldFlingVelocity
           ? velocity < 0.0
-          : widget.collapse.value >= 0.5,
+          : widget.controller.collapse.value >= 0.5,
     );
   }
 
   /// The strip of days the folded month becomes, opening on the week the
-  /// month folded into, or with [CalendarCard.stripMiddleDay] at its
-  /// middle. Its weekdays are fixed for its life, so new ones build a new
-  /// strip.
+  /// month folded into, or with the controller's
+  /// [CalendarCardController.stripMiddleDay] at its middle. Its weekdays
+  /// are fixed for its life, so new ones build a new strip.
   Widget _buildStrip() {
+    final controller = widget.controller;
     return WeekStrip<T>(
       key: ValueKey<CalendarWeekdaySet>(widget.weekdays),
       store: widget.store,
       selectedDay: widget.selectedDay,
       today: widget.today,
       weekdays: widget.weekdays,
-      recalls: widget.stripRecalls,
+      recalls: controller.stripRecalls,
       initialDay: monthFoldDay(
         widget.month,
         selectedDay: widget.selectedDay,
         today: widget.today,
         weekdays: widget.weekdays,
       ),
-      initialMiddleDay: widget.stripMiddleDay,
+      initialMiddleDay: controller.stripMiddleDay,
       onSelectDay: widget.onSelectDay,
-      onBrowse: widget.onBrowseStrip,
+      onBrowse: controller.browseStrip,
       dayBadges: widget.dayBadges,
     );
   }
@@ -288,7 +258,7 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
                   onVerticalDragUpdate: (details) {
                     _unfoldDrag += details.delta.dy;
                     if (_unfoldDrag >= _unfoldDistance) {
-                      widget.onUnfold();
+                      widget.controller.unfold();
                     }
                   },
                   child: _buildStrip(),
@@ -301,6 +271,7 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
 
   @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
     // Built once per build of this card and handed to the collapse builder
     // as its child, so the fold does not rebuild the strip, which follows
     // the fold itself. Its weekdays are fixed for its life, so new ones
@@ -313,9 +284,9 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
       today: widget.today,
       weekdays: widget.weekdays,
       rowHeight: _rowHeight,
-      collapse: widget.collapse,
+      collapse: controller.collapse,
       onSelectDay: widget.onSelectDay,
-      onBrowse: widget.onBrowseMonth,
+      onBrowse: controller.browseMonth,
       dayBadges: widget.dayBadges,
     );
     final header = widget.header;
@@ -335,27 +306,27 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
               const SizedBox(height: 4.0),
             ],
             AnimatedBuilder(
-              animation: widget.pickerShown,
+              animation: controller.pickerShown,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
                   AnimatedBuilder(
-                    animation: widget.collapse,
+                    animation: controller.collapse,
                     child: months,
                     builder: (context, child) {
-                      return _buildGrid(widget.collapse.value, child!);
+                      return _buildGrid(controller.collapse.value, child!);
                     },
                   ),
                   _PullTab(
-                    folded: widget.collapsed,
+                    folded: controller.folded,
                     onDragStart: (details) {
-                      widget.collapse.stop();
+                      controller.collapse.stop();
                     },
                     onDragUpdate: _dragFold,
                     onDragEnd: _endFoldDrag,
                     onTap: () {
-                      widget.onSettle(!widget.collapsed);
+                      controller.settle(!controller.folded);
                     },
                   ),
                 ],
@@ -364,8 +335,8 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
                 // The picker does not fold, so it has no pull tab; under it
                 // the card pads its bottom as the header card does.
                 return _PickerArea(
-                  shown: widget.pickerShown.value,
-                  picksMonth: widget.picksMonth,
+                  shown: controller.pickerShown.value,
+                  picksMonth: controller.picksMonth,
                   days: days!,
                   pickerPadding: const EdgeInsets.only(bottom: 8.0),
                   buildPicker: widget.buildPicker,
