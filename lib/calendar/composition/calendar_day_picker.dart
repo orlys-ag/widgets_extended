@@ -43,14 +43,17 @@ import 'calendar_theme_extension.dart';
 /// selected. With [store], a day with entries carries a badge for each kind
 /// [dayBadges] gives them, or the primary dot without [dayBadges], once the
 /// store has read the day; the picker asks the store to read the grid of
-/// the month it opens on after its first frame. Without [store] no day
-/// carries a badge. With a null [onChanged] the picker reports nothing and
-/// its days take no tap. A null [today] rings the date the device's clock
-/// reads on [store]'s zone when the picker builds, so a picker open across
-/// midnight rings the new date at its next build; a host with a clock of
-/// its own gives [today]. Opening moves no focus into the picker; the
-/// unfolded month takes the arrow keys once a tap has given it focus, and
-/// the week row takes none.
+/// the month it shows after its first frame, and after a build that gives it
+/// another store. Without [store] no day carries a badge. With a null
+/// [onChanged] the picker reports nothing and its days take no tap. A null
+/// [today] rings the date the device's clock reads on [store]'s zone when the
+/// picker builds, so a picker open across midnight rings the new date at its
+/// next build; a host with a clock of its own gives [today]. Opening moves no
+/// focus into the picker; the unfolded month takes the arrow keys once a tap
+/// has given it focus, and the week row takes none. The picker pads its sides
+/// by 8 logical pixels and centres each day's circle in its column; with
+/// [daysToEdges] the circles of the first and last columns reach its sides
+/// instead, so its days line up with what lies above and below it.
 class CalendarDayPicker<T> extends StatefulWidget {
   /// Creates a day picker of [value].
   ///
@@ -68,6 +71,7 @@ class CalendarDayPicker<T> extends StatefulWidget {
     this.firstColumn = 0,
     this.headerSelects = false,
     this.dayBadges,
+    this.daysToEdges = false,
   }) {
     if (firstColumn < 0 || firstColumn >= DateTime.daysPerWeek) {
       throw ArgumentError.value(
@@ -126,6 +130,15 @@ class CalendarDayPicker<T> extends StatefulWidget {
   /// The kinds of entry the days' badges mark; null for one primary dot on
   /// a day with entries.
   final CalendarDayBadges<T>? dayBadges;
+
+  /// Whether the circles of the first and last columns reach the picker's
+  /// sides: the picker pads no side, and its weekday names and days lie in
+  /// columns spread wider than equal shares of its width, by up to half a
+  /// column less half a circle on each side. An edge column's badges then
+  /// draw up to 5 logical pixels past the picker's side, which a host that
+  /// clips the picker leaves room for. False, the default, pads each side
+  /// by 8 logical pixels and centres each circle in its column.
+  final bool daysToEdges;
 
   @override
   State<CalendarDayPicker<T>> createState() {
@@ -419,6 +432,7 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
         onSelectDay: widget.onChanged == null ? null : _selectDay,
         dayBadges: widget.dayBadges,
         isDayEnabled: asks ? _isDayEnabled : null,
+        daysToEdges: widget.daysToEdges,
       ),
     );
     final inserted = _themes.inserted;

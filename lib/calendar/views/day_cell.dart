@@ -184,6 +184,15 @@ const double _smallBadgeSize = 7.0;
 const double _badgeRim = 1.5;
 const double _smallBadgeRim = 1.0;
 
+/// The most a badge on a [DayCell]'s circle reaches past the circle's box
+/// on any side: [_badgeCentre] turns each badge's centre about the
+/// circle's centre at the distance of a lone badge's, and the badge's box,
+/// its rim inside it, is at most [_badgeSize] across.
+const double dayBadgeReach =
+    math.sqrt2 * (dayCircleSize / 2.0 - _badgeSize / 2.0) +
+    _badgeSize / 2.0 -
+    dayCircleSize / 2.0;
+
 /// The most badges a [DayCell]'s circle draws.
 const int _maxDrawnBadges = 4;
 

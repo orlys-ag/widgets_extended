@@ -1,8 +1,8 @@
 /// The inline day picker through the package barrel: what it opens on and
 /// the weeks its first column starts, what its chevrons and month picks
 /// report under each setting, the days its first and last day and its
-/// predicate refuse, when it asks the predicate, and what a store given in
-/// a later build reads.
+/// predicate refuse, when it asks the predicate, what a store given in a
+/// later build reads, and where its days lie with daysToEdges.
 library;
 
 import 'dart:async';
@@ -48,6 +48,40 @@ Widget app(Widget picker) {
       ),
     ),
   );
+}
+
+/// The circle of the day cell [cell] finds.
+Finder circleIn(Finder cell) {
+  return find.descendant(
+    of: cell,
+    matching: find.byWidgetPredicate((widget) {
+      return widget is Container &&
+          widget.constraints ==
+              const BoxConstraints.tightFor(width: 32.0, height: 32.0);
+    }),
+  );
+}
+
+/// The part of [box] that the clips above it leave painted, in global
+/// coordinates.
+Rect paintedRectOf(RenderBox box) {
+  var painted = MatrixUtils.transformRect(
+    box.getTransformTo(null),
+    Offset.zero & box.size,
+  );
+  RenderObject child = box;
+  var parent = box.parent;
+  while (parent != null) {
+    final clip = parent.describeApproximatePaintClip(child);
+    if (clip != null) {
+      painted = painted.intersect(
+        MatrixUtils.transformRect(parent.getTransformTo(null), clip),
+      );
+    }
+    child = parent;
+    parent = parent.parent;
+  }
+  return painted;
 }
 
 /// Counts and records the days it is asked.
@@ -449,6 +483,110 @@ void main() {
         ),
       ),
       findsOneWidget,
+    );
+    semantics.dispose();
+  });
+
+  testWidgets("DP6 with daysToEdges the circles of the first and last "
+      "columns reach the picker's sides, folded and unfolded, an edge "
+      "column's badges draw whole past its side, and a tap at the edge picks "
+      "the day; by default the circles lie inside the picker's padding", (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    const write = CalendarBadgeKind(color: Color(0xFF3366CC), label: "Write");
+    const meet = CalendarBadgeKind(color: Color(0xFFCC6633), label: "Meet");
+    final badges = CalendarDayBadges<String>(
+      kinds: const <CalendarBadgeKind>[write, meet],
+      kindOf: (entry) {
+        return entry.payload == "write" ? write : meet;
+      },
+    );
+    final sunday = DateTime(2026, 4, 26);
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        for (final (id, hour) in <(String, int)>[("write", 9), ("meet", 11)])
+          CalendarEntry<String>(
+            id: id,
+            start: DateTime(2026, 4, 26, hour),
+            end: DateTime(2026, 4, 26, hour + 1),
+            title: id,
+            color: const Color(0xFF3366CC),
+            payload: id,
+          ),
+      ],
+    );
+    addTearDown(store.dispose);
+    final reported = <DateTime>[];
+    Widget picker({required bool daysToEdges}) {
+      return app(
+        CalendarDayPicker<String>(
+          key: ValueKey<bool>(daysToEdges),
+          value: tuesday,
+          onChanged: reported.add,
+          store: store,
+          dayBadges: badges,
+          daysToEdges: daysToEdges,
+        ),
+      );
+    }
+
+    await tester.pumpWidget(picker(daysToEdges: true));
+    await tester.pumpAndSettle();
+    final side = tester.getRect(find.byType(CalendarDayPicker<String>));
+    // Found by its date alone, whatever badges its label names.
+    final sundayCell = find.bySemanticsLabel(RegExp(r"^Sunday, April 26(,|$)"));
+    expect(
+      tester.getRect(circleIn(dayCell(DateTime(2026, 4, 20)))).left,
+      moreOrLessEquals(side.left),
+    );
+    final sundayCircle = tester.getRect(circleIn(sundayCell));
+    expect(sundayCircle.right, moreOrLessEquals(side.right));
+    final drawn = find
+        .descendant(of: sundayCell, matching: find.byType(DecoratedBox))
+        .evaluate()
+        .map((element) {
+          return element.renderObject! as RenderBox;
+        })
+        .where((box) {
+          return box.size.width < 10.0;
+        })
+        .toList();
+    // Setup sanity: Sunday carries two badges, one of them past the side.
+    expect(drawn, hasLength(2));
+    expect(
+      drawn.any((box) {
+        return box.localToGlobal(Offset(box.size.width, 0.0)).dx > side.right;
+      }),
+      isTrue,
+    );
+    for (final box in drawn) {
+      final rect = MatrixUtils.transformRect(
+        box.getTransformTo(null),
+        Offset.zero & box.size,
+      );
+      expect(paintedRectOf(box), rect);
+    }
+    await tester.tapAt(sundayCircle.centerRight - const Offset(2.0, 0.0));
+    await tester.pumpAndSettle();
+    expect(reported, <DateTime>[sunday]);
+
+    await tester.tap(find.bySemanticsLabel("Show the month"));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getRect(circleIn(dayCell(DateTime(2026, 4, 6)))).left,
+      moreOrLessEquals(side.left),
+    );
+    expect(
+      tester.getRect(circleIn(dayCell(DateTime(2026, 4, 12)))).right,
+      moreOrLessEquals(side.right),
+    );
+
+    await tester.pumpWidget(picker(daysToEdges: false));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getRect(circleIn(dayCell(DateTime(2026, 4, 20)))).left,
+      greaterThan(side.left + 8.0),
     );
     semantics.dispose();
   });

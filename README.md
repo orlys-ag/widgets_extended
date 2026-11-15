@@ -574,6 +574,11 @@ with no store no day carries a badge. It shows all seven weekdays, its
 weeks starting on the column `firstColumn`, 0 for Monday to 6 for Sunday,
 opens no route, and draws in the theme a `CalendarView` would resolve
 there, with its words from `CalendarLocalizations`.
+By default it pads its sides by 8 logical pixels and centres each day's
+circle in its column; set `daysToEdges` to have the circles of the first
+and last columns reach its sides instead, so its days line up with the
+fields above and below it. An edge column's badges then draw up to 5
+logical pixels past its sides.
 
 **Editing.** With `editable: true`, Week's and Day's blocks move and
 resize, and a create gesture reports a `CalendarCreateDetails` through
