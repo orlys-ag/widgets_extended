@@ -3133,8 +3133,9 @@ void main() {
 
   testWidgets("IP4 a tap on Start date while Start time's picker is open "
       "swaps the panel's pickers in place over the theme's motion, rebuilding "
-      "nothing under the panel; a tap on End date then closes it, and its "
-      "day picker takes no tap as it shrinks", (tester) async {
+      "under the panel only the time picker's focus scopes, once, in the "
+      "frame after the tap's; a tap on End date then closes it, and its day "
+      "picker takes no tap as it shrinks", (tester) async {
     final reports = <CalendarSchedule>[];
     await pumpSection(
       tester,
@@ -3150,23 +3151,31 @@ void main() {
 
     await tester.tap(formDateFinder("Start date"));
     await tester.pump();
-    final rebuilt = <Element>[];
-    bool underPanel(Element element) {
-      var under = element.widget.key == scheduleStartPanelKey;
-      element.visitAncestorElements((ancestor) {
-        under = under || ancestor.widget.key == scheduleStartPanelKey;
-        return !under;
-      });
-      return under;
-    }
-
+    // Each element rebuilt at or under the Start panel, with the frame after
+    // the tap's own it rebuilt in, counted from 1, and whether it lies under
+    // the CalendarTimePicker.
+    final rebuilt = <({int frame, Element element, bool underTimePicker})>[];
+    var frame = 0;
     debugOnRebuildDirtyWidget = (element, builtOnce) {
-      if (underPanel(element)) {
-        rebuilt.add(element);
+      var underPanel = element.widget.key == scheduleStartPanelKey;
+      var underTimePicker = false;
+      element.visitAncestorElements((ancestor) {
+        underTimePicker =
+            underTimePicker || ancestor.widget is CalendarTimePicker;
+        underPanel = underPanel || ancestor.widget.key == scheduleStartPanelKey;
+        return !underPanel;
+      });
+      if (underPanel) {
+        rebuilt.add((
+          frame: frame,
+          element: element,
+          underTimePicker: underTimePicker,
+        ));
       }
     };
     try {
       for (var elapsed = 20; elapsed < 480; elapsed += 20) {
+        frame++;
         await tester.pump(const Duration(milliseconds: 20));
         expect(
           panelHeight(tester, "Start date"),
@@ -3186,7 +3195,17 @@ void main() {
     } finally {
       debugOnRebuildDirtyWidget = null;
     }
-    expect(rebuilt, isEmpty);
+    // The tap's frame gives the time picker a null onChanged, which flips the
+    // skipTraversal of its Focus nodes; FocusManager notifies those nodes in
+    // a microtask after that frame, so their scopes rebuild in the next one.
+    expect([
+      for (final r in rebuilt)
+        if (r.frame == 1 && !r.underTimePicker) r.element,
+    ], isEmpty);
+    expect([
+      for (final r in rebuilt)
+        if (r.frame > 1) r.element,
+    ], isEmpty);
     await tester.pumpAndSettle();
     expect(panelHeight(tester, "Start date"), greaterThan(0.0));
     expect(dayPickerFinder("Start date"), findsOneWidget);
