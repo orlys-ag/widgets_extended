@@ -13,12 +13,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
+import 'package:widgets_extended/calendar/composition/calendar_card.dart'
+    show CalendarCard;
+import 'package:widgets_extended/calendar/views/day_cell.dart' show DayCell;
+import 'package:widgets_extended/calendar/views/month_strip.dart'
+    show MonthStrip;
 import 'package:widgets_extended/calendar/views/time_picker.dart'
     show
         timePickerHourColumnKey,
         timePickerHourRowKey,
         timePickerMinuteRowKey,
         timePickerNowKey;
+import 'package:widgets_extended/calendar/views/week_strip.dart'
+    show WeekStrip, weekStripDayKey;
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
@@ -2976,6 +2983,103 @@ void main() {
     // first's.
     expect(heights[1], greaterThanOrEqualTo(2 * heights[0]));
   });
+
+  testWidgets("IP1 a tap on Start date or End date opens no dialog but the "
+      "calendar card under its row, folded on the field's week, its day "
+      "selected and the form's today ringed", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    for (final (label, panel) in <(String, Key)>[
+      ("Start date", scheduleStartPanelKey),
+      ("End date", scheduleEndPanelKey),
+    ]) {
+      Finder under(Finder finder) {
+        return find.descendant(of: find.byKey(panel), matching: finder);
+      }
+
+      await tester.tap(formDateFinder(label));
+      await tester.pumpAndSettle();
+      expect(find.byType(DatePickerDialog), findsNothing, reason: label);
+      expect(
+        under(find.byType(CalendarCard<ItemPayload>)),
+        findsOneWidget,
+        reason: label,
+      );
+      expect(
+        under(find.byType(WeekStrip<ItemPayload>)),
+        findsOneWidget,
+        reason: label,
+      );
+      expect(
+        under(find.byType(MonthStrip<ItemPayload>)),
+        findsNothing,
+        reason: label,
+      );
+      final cell = under(find.byKey(weekStripDayKey(wednesday)));
+      expect(cell.hitTestable(), findsOneWidget, reason: label);
+      final day = tester.widget<DayCell>(
+        find.descendant(of: cell, matching: find.byType(DayCell)),
+      );
+      expect(day.isSelected, isTrue, reason: label);
+      // The form's clock reads Wednesday, not the device's today.
+      expect(day.isToday, isTrue, reason: label);
+      expect(
+        tester.widgetList<DayCell>(under(find.byType(DayCell))).where((cell) {
+          return cell.isToday;
+        }),
+        hasLength(1),
+        reason: label,
+      );
+    }
+  }, skip: true);
+
+  testWidgets("IP2 a day picked in Start date's picker moves the item there "
+      "and leaves the picker open, and one picked in End date's moves the "
+      "end alone", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    Finder cellUnder(Key panel, DateTime day) {
+      return find.descendant(
+        of: find.byKey(panel),
+        matching: find.byKey(weekStripDayKey(day)),
+      );
+    }
+
+    final friday = DateTime(2026, 4, 24);
+    await tester.tap(formDateFinder("Start date"));
+    await tester.pumpAndSettle();
+    await tester.tap(cellUnder(scheduleStartPanelKey, friday));
+    await tester.pumpAndSettle();
+    expect(summary(tester), "Fri, Apr 24\n09:00 - 10:00\n1h");
+    expect(formDateShows("Start date", "2026-04-24"), findsOneWidget);
+    expect(formDateShows("End date", "2026-04-24"), findsOneWidget);
+    expect(
+      tester
+          .widget<DayCell>(
+            find.descendant(
+              of: cellUnder(scheduleStartPanelKey, friday),
+              matching: find.byType(DayCell),
+            ),
+          )
+          .isSelected,
+      isTrue,
+    );
+
+    final saturday = DateTime(2026, 4, 25);
+    await tester.tap(formDateFinder("End date"));
+    await tester.pumpAndSettle();
+    await tester.tap(cellUnder(scheduleEndPanelKey, saturday));
+    await tester.pumpAndSettle();
+    expect(formDateShows("Start date", "2026-04-24"), findsOneWidget);
+    expect(formDateShows("End date", "2026-04-25"), findsOneWidget);
+    expect(summary(tester), "Fri, Apr 24, 09:00\nSat, Apr 25, 10:00\n25h");
+  }, skip: true);
 }
 
 /// An offset from UTC as the zone panel writes it: "UTC-04:00".
