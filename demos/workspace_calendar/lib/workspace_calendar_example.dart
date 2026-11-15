@@ -398,6 +398,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
         now: _currentNow,
         hourLabelFormat: _settings.hourLabelFormat,
         slotMinutes: _settings.slotMinutes,
+        dayBadges: harborDayBadges,
+        firstColumn: _settings.weekdays.firstColumn,
       );
     } else {
       showItemDetails(
@@ -418,6 +420,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
       now: _currentNow,
       hourLabelFormat: _settings.hourLabelFormat,
       slotMinutes: _settings.slotMinutes,
+      dayBadges: harborDayBadges,
+      firstColumn: _settings.weekdays.firstColumn,
     );
   }
 
@@ -430,6 +434,8 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
       now: _currentNow,
       hourLabelFormat: _settings.hourLabelFormat,
       slotMinutes: _settings.slotMinutes,
+      dayBadges: harborDayBadges,
+      firstColumn: _settings.weekdays.firstColumn,
     );
   }
 

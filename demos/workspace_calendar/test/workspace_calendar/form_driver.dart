@@ -14,9 +14,13 @@ import 'package:widgets_extended/calendar/views/time_picker.dart'
         timePickerMinuteColumnKey,
         timePickerMinuteRowKey,
         timePickerPmKey;
+import 'package:widgets_extended/calendar/views/day_cell.dart' show DayCell;
+import 'package:widgets_extended/calendar/views/week_strip.dart'
+    show weekStripDayKey;
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart'
     show parseIsoDate;
 import 'package:widgets_extended/widgets_extended.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/item_form.dart';
 import 'package:workspace_calendar/workspace_calendar/schedule_section.dart';
 
@@ -316,6 +320,105 @@ Finder formDateFinder(String label) {
 /// [CalendarDates.isoDate] writes it.
 Finder formDateShows(String label, String date) {
   return find.descendant(of: formDateFinder(label), matching: find.text(date));
+}
+
+/// The key of the panel under the row of the form's date field labelled
+/// [label].
+ValueKey<String> _datePanelKey(String label) {
+  switch (label) {
+    case "Start date":
+      return scheduleStartPanelKey;
+    case "End date":
+      return scheduleEndPanelKey;
+  }
+  throw ArgumentError.value(label, "label", "names no date field");
+}
+
+/// The day picker of the form's date field labelled [label], "Start date"
+/// or "End date": the [CalendarDayPicker] in the panel under its row.
+Finder dayPickerFinder(String label) {
+  return find.descendant(
+    of: find.byKey(_datePanelKey(label)),
+    matching: find.byType(CalendarDayPicker<ItemPayload>),
+  );
+}
+
+/// Scrolls the date field labelled [label] into view where part of it lies
+/// outside, as a user does before a tap, and lets it settle; a field in
+/// view stays where it is.
+Future<void> _revealDateField(WidgetTester tester, String label) async {
+  final field = tester.element(formDateFinder(label));
+  for (final policy in <ScrollPositionAlignmentPolicy>[
+    ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+    ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+  ]) {
+    await Scrollable.ensureVisible(field, alignmentPolicy: policy);
+  }
+  await tester.pumpAndSettle();
+}
+
+/// Opens the day picker of the form's date field labelled [label] with a
+/// tap on the field where it is closed, brought into view first, and lets
+/// it settle.
+Future<void> openDayPicker(WidgetTester tester, String label) async {
+  if (dayPickerFinder(label).evaluate().isNotEmpty) {
+    return;
+  }
+  await _revealDateField(tester, label);
+  await tester.tap(formDateFinder(label));
+  await tester.pumpAndSettle();
+}
+
+/// Closes the day picker of the form's date field labelled [label] with a
+/// tap on the field where it is open, brought into view first, and lets it
+/// settle.
+Future<void> closeDayPicker(WidgetTester tester, String label) async {
+  if (dayPickerFinder(label).evaluate().isEmpty) {
+    return;
+  }
+  await _revealDateField(tester, label);
+  await tester.tap(formDateFinder(label));
+  await tester.pumpAndSettle();
+}
+
+/// The cell of [day] in the week row of the day picker of the form's date
+/// field labelled [label].
+Finder _weekCell(String label, DateTime day) {
+  return find.descendant(
+    of: dayPickerFinder(label),
+    matching: find.byKey(weekStripDayKey(day)),
+  );
+}
+
+/// Picks [day] in the form's date field labelled [label] as a user does:
+/// opens its day picker, expects the picker's week row to hold [day], taps
+/// it, brings the field back into view and closes the picker.
+Future<void> pickFormDay(
+  WidgetTester tester,
+  String label,
+  DateTime day,
+) async {
+  await openDayPicker(tester, label);
+  final cell = _weekCell(label, day);
+  expect(cell, findsOneWidget, reason: "$label's week row holds $day");
+  await tester.tap(cell);
+  await tester.pumpAndSettle();
+  await closeDayPicker(tester, label);
+}
+
+/// Whether the open day picker of the form's date field labelled [label]
+/// takes [day], a day its week row holds: whether the [DayCell] of [day]
+/// there is drawn other than disabled.
+bool dayEnabled(WidgetTester tester, String label, DateTime day) {
+  return tester
+          .widget<DayCell>(
+            find.descendant(
+              of: _weekCell(label, day),
+              matching: find.byType(DayCell),
+            ),
+          )
+          .enabled !=
+      false;
 }
 
 /// Expects the form's Start date to name [day], and its End date the day

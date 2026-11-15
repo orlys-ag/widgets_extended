@@ -197,4 +197,122 @@ void main() {
       expect(browsed, isEmpty);
     },
   );
+
+  testWidgets(
+    "SM2 a new recalls with recallDay slides the strip to that day's week, "
+    "reporting no browse",
+    (tester) async {
+      final store = MemoryCalendarStore<String>();
+      addTearDown(store.dispose);
+      final browsed = <DateTime>[];
+
+      Widget strip({required int recalls, DateTime? recallDay}) {
+        return MaterialApp(
+          home: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 350.0,
+              child: WeekStrip<String>(
+                store: store,
+                selectedDay: DateTime(2026, 4, 21),
+                today: DateTime(2026, 4, 21),
+                weekdays: CalendarWeekdaySet.all,
+                onSelectDay: (day) {},
+                onBrowse: browsed.add,
+                recalls: recalls,
+                recallDay: recallDay,
+              ),
+            ),
+          ),
+        );
+      }
+
+      double startOf(DateTime day) {
+        return tester.getRect(find.byKey(weekStripDayKey(day))).left -
+            tester.getRect(find.byType(WeekStrip<String>)).left;
+      }
+
+      await tester.pumpWidget(strip(recalls: 0));
+      await tester.pumpAndSettle();
+      // Setup sanity: the strip opens on the selected day's week.
+      expect(startOf(DateTime(2026, 4, 20)), moreOrLessEquals(0.0));
+
+      await tester.pumpWidget(
+        strip(recalls: 1, recallDay: DateTime(2026, 5, 6)),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        startOf(DateTime(2026, 5, 4)),
+        moreOrLessEquals(0.0, epsilon: 0.5),
+      );
+      expect(browsed, isEmpty);
+    },
+  );
+
+  testWidgets(
+    "SM3 a day isDayEnabled refuses draws disabled and takes no tap, and a "
+    "strip with no predicate gives its days no enabled state",
+    (tester) async {
+      final store = MemoryCalendarStore<String>();
+      addTearDown(store.dispose);
+      final selected = <DateTime>[];
+      final refused = DateTime(2026, 4, 23);
+
+      Widget strip({bool Function(DateTime day)? isDayEnabled}) {
+        return MaterialApp(
+          home: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 350.0,
+              child: WeekStrip<String>(
+                store: store,
+                selectedDay: DateTime(2026, 4, 21),
+                today: DateTime(2026, 4, 21),
+                weekdays: CalendarWeekdaySet.all,
+                onSelectDay: selected.add,
+                onBrowse: (day) {},
+                isDayEnabled: isDayEnabled,
+              ),
+            ),
+          ),
+        );
+      }
+
+      DayCell cellOf(DateTime day) {
+        return tester.widget<DayCell>(
+          find.descendant(
+            of: find.byKey(weekStripDayKey(day)),
+            matching: find.byType(DayCell),
+          ),
+        );
+      }
+
+      await tester.pumpWidget(
+        strip(
+          isDayEnabled: (day) {
+            return day != refused;
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(cellOf(refused).enabled, isFalse);
+      expect(cellOf(DateTime(2026, 4, 24)).enabled, isTrue);
+      await tester.tap(find.byKey(weekStripDayKey(refused)));
+      await tester.pump();
+      expect(selected, isEmpty);
+      await tester.tap(find.byKey(weekStripDayKey(DateTime(2026, 4, 24))));
+      await tester.pump();
+      // Setup sanity: an enabled day takes the tap.
+      expect(selected, <DateTime>[DateTime(2026, 4, 24)]);
+
+      await tester.pumpWidget(strip());
+      await tester.pumpAndSettle();
+      expect(
+        tester.widgetList<DayCell>(find.byType(DayCell)).map((cell) {
+          return cell.enabled;
+        }).toSet(),
+        <bool?>{null},
+      );
+    },
+  );
 }

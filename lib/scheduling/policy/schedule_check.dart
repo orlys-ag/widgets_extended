@@ -287,8 +287,8 @@ final class CalendarScheduleRefused extends CalendarScheduleProblem {
 /// ([CalendarSchedule.timesOn]).
 ///
 /// [problems] is answered when the check is made; [overlaps],
-/// [firstStartMinute], [nextFree] and [startFixed] on their first read, each
-/// once.
+/// [firstStartMinute], [nextFree], [startFixed], [firstStartDay] and
+/// [endDays] on their first read, each once.
 final class CalendarScheduleCheck<T> {
   /// The check of [schedule] under [rules] at [now], for the stored
   /// [entry], or for a new entry where it is null, with [others] the
@@ -431,6 +431,94 @@ final class CalendarScheduleCheck<T> {
       return null;
     }
     return CalendarSchedule.of(slot.start, slot.end, isAllDay: false);
+  }
+
+  /// The first day a new start may lie on, as a plain local date, as the
+  /// earliest starts of the day before [now]'s today and of today say
+  /// ([CalendarEditRules.earliestStartOn]): null where the day before
+  /// today is open to a start ([CalendarEarliestStart.closesDay] is false);
+  /// otherwise today where today is open to one, and the day after it where
+  /// it is not. Asks at most those two earliest starts.
+  ///
+  /// Under a policy that closes to a new start every day before the first
+  /// it opens, as `HistoryLockPolicy` does, a new entry, or a stored one the
+  /// policy lets move, started on a day before this one is admitted at no
+  /// time.
+  late final DateTime? firstStartDay = _findFirstStartDay();
+
+  DateTime? _findFirstStartDay() {
+    final today = CalendarDates.dayNumber(now.today);
+    final yesterday = rules.earliestStartOn(
+      CalendarDates.dateOfDayNumber(today - 1),
+      now,
+    );
+    if (!yesterday.closesDay) {
+      return null;
+    }
+    final opensToday = !rules
+        .earliestStartOn(CalendarDates.dateOfDayNumber(today), now)
+        .closesDay;
+    return CalendarDates.dateOfDayNumber(opensToday ? today : today + 1);
+  }
+
+  /// The days the schedule's end may lie on, as plain local dates: from
+  /// `first` to `last`, where a null `last` sets no last day.
+  ///
+  /// `first` is the schedule's start day ([CalendarSchedule.startDay]);
+  /// where [startFixed], the first day from it whose 24:00, the start of the
+  /// next day on [now]'s clock, the policy admits as the stored entry's end
+  /// with its start and kind ([CalendarEditPolicy.admitsChange]), each day
+  /// asked in turn up to the entry's last day; where none is, the day after
+  /// the entry's last day, or the start day where that lies later. `last`
+  /// is the start day where [options] take no spanning days
+  /// ([CalendarScheduleOptions.spansDays]); otherwise the last of the
+  /// [CalendarEditRules.dayLimit] days from the start day, where the rules
+  /// have a limit; otherwise null. `first` lies after `last` where no day
+  /// is.
+  ///
+  /// Under a policy that admits an in-progress entry's end wherever it
+  /// admits an earlier one, as `HistoryLockPolicy` does, an end on a day
+  /// before `first` or after `last` is admitted at no minute.
+  late final ({DateTime first, DateTime? last}) endDays = _findEndDays();
+
+  ({DateTime first, DateTime? last}) _findEndDays() {
+    final startDay = CalendarDates.dayNumber(schedule.startDay);
+    var first = startDay;
+    final entry = this.entry;
+    if (entry != null && startFixed) {
+      final zone = zoneOf(now.time);
+      final entryLastDay = CalendarDates.lastDayNumberOf(
+        entry.start,
+        entry.end,
+      );
+      first = entryLastDay + 1 > startDay ? entryLastDay + 1 : startDay;
+      for (var day = startDay; day <= entryLastDay; day++) {
+        final end = CalendarDates.dateOfDayNumber(day + 1, zone: zone);
+        if (rules.policy.admitsChange(
+          entry,
+          entry.start,
+          end,
+          now,
+          isAllDay: entry.isAllDay,
+        )) {
+          first = day;
+          break;
+        }
+      }
+    }
+    int? last;
+    if (!options.spansDays) {
+      last = startDay;
+    } else {
+      final limit = rules.dayLimit;
+      if (limit != null) {
+        last = startDay + limit - 1;
+      }
+    }
+    return (
+      first: CalendarDates.dateOfDayNumber(first),
+      last: last == null ? null : CalendarDates.dateOfDayNumber(last),
+    );
   }
 
   List<CalendarScheduleProblem> _findProblems() {

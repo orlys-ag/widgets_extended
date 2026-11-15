@@ -4,6 +4,8 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/views/week_strip.dart'
+    show WeekStrip, weekStripDayKey;
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
@@ -28,8 +30,9 @@ CalendarItem task(DateTime start, DateTime end) {
 }
 
 /// Pumps a host over [store] whose one button opens the form of the item
-/// "item-1", its times stepping by [slotMinutes] and its Save checked by
-/// [policy], and opens it.
+/// "item-1", its times stepping by [slotMinutes], its Save checked by
+/// [policy] and its day pickers' weeks starting on [firstColumn], and opens
+/// it.
 Future<void> openForm(
   WidgetTester tester,
   CalendarStore<ItemPayload> store, {
@@ -37,6 +40,7 @@ Future<void> openForm(
   CalendarEditPolicy<ItemPayload> policy =
       const UnrestrictedEditPolicy<ItemPayload>(),
   DateTime? now,
+  int firstColumn = 0,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -59,6 +63,7 @@ Future<void> openForm(
                   },
                   hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
                   slotMinutes: slotMinutes,
+                  firstColumn: firstColumn,
                 );
               },
               child: const Text("Open"),
@@ -325,6 +330,42 @@ void main() {
     await tester.pumpAndSettle();
     expect(writes, hasLength(1));
     expect(allDaySwitch(), findsOneWidget);
+  });
+
+  testWidgets("IF6 the form's day pickers start their weeks on the first "
+      "column it is given: Start date's week row opens on Sunday", (
+    tester,
+  ) async {
+    final store = MemoryCalendarStore<ItemPayload>(
+      entries: <CalendarItem>[
+        task(DateTime(2026, 4, 22, 9), DateTime(2026, 4, 22, 10)),
+      ],
+    );
+    addTearDown(store.dispose);
+    await openForm(tester, store, firstColumn: 6);
+    await openDayPicker(tester, "Start date");
+    final weekRow = find.descendant(
+      of: dayPickerFinder("Start date"),
+      matching: find.byType(WeekStrip<ItemPayload>),
+    );
+    final row = tester.getRect(weekRow);
+    Rect cellOf(DateTime day) {
+      return tester.getRect(
+        find.descendant(
+          of: weekRow,
+          matching: find.byKey(weekStripDayKey(day)),
+        ),
+      );
+    }
+
+    expect(
+      cellOf(DateTime(2026, 4, 19)).left,
+      moreOrLessEquals(row.left, epsilon: 0.5),
+    );
+    expect(
+      cellOf(DateTime(2026, 4, 25)).right,
+      moreOrLessEquals(row.right, epsilon: 0.5),
+    );
   });
 
   testWidgets("FC1 the form's page is three outlined cards, the scheduling, "

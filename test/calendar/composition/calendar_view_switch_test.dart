@@ -57,6 +57,7 @@ Finder inHeader(String text) {
 bool folded(WidgetTester tester) {
   final fold = tester
       .widget<CalendarCard<String>>(find.byType(CalendarCard<String>))
+      .controller
       .collapse
       .value;
   final strip = find.byType(WeekStrip<String>).evaluate().isNotEmpty;

@@ -891,6 +891,24 @@ later time the picker offers.
 `lengthChoices` parameter: the options hold `allowsAllDay` and `spansDays`
 alone, the constructor is `const`, and `CalendarScheduleOptions.standard`
 is a `static const`.
+- Added `CalendarDayPicker`, an inline picker of a day on the calendar
+card of Agenda and Day: folded into its week row on the value's week,
+unfolding into the month, under the month's title, which opens the month
+picker, and chevrons that step a week, a month or a year; a tap on a day
+reports it through `onChanged`. Its chevrons, swipes and month picks only
+move the card unless `headerSelects`, which makes a folded chevron step
+and a month pick select a day as Agenda's do; its strips scroll as
+Agenda's. A day before `firstDay` or after `lastDay`, or one `isEnabled`
+refuses, draws disabled and takes no tap; `isEnabled` is asked of a day as
+its cell first builds, at most once per predicate and value. `store` and
+`dayBadges` badge the days with entries; its weeks start on `firstColumn`
+and show all seven weekdays.
+- Added `CalendarScheduleCheck.firstStartDay`, the first day a new start
+may lie on as the policy's earliest starts of yesterday and today say, and
+`CalendarScheduleCheck.endDays`, the days the schedule's end may lie on:
+from its start day, or for a fixed start the first day whose 24:00 the
+policy admits as its end, to the start day where the options take no
+spanning days, or the last day the day limit covers.
 
 ## 0.0.35
 

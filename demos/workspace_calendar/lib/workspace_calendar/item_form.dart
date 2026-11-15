@@ -9,8 +9,9 @@
 /// away, the summary stays at the page's top while the item's fields scroll
 /// under it, where it takes at most half of the page
 /// ([FittingPinnedHeaderSliver]). The check is made again
-/// at each edit, at each change of the store and at the start of each
-/// minute. Save sends nothing while the check names a problem
+/// at each edit, at each change of the store that moves the entries over
+/// the schedule's days, the store's zone or its hours, and at the start of
+/// each minute. Save sends nothing while the check names a problem
 /// ([scheduleErrorsOf]) or the validator the API runs refuses the item;
 /// after a failed Save the title's and the times' messages follow the
 /// edits.
@@ -18,6 +19,7 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
@@ -48,8 +50,12 @@ const ValueKey<String> formItemCardKey = ValueKey<String>("form-item-card");
 /// Opens the form for a new item over the range [range] picked, with All
 /// day on for an all-day range, its type chosen in the form, Task first;
 /// its Save [policy] checks at the time [now] reads then, its times step
-/// by [slotMinutes], and it writes them on [hourLabelFormat]'s clock.
-/// Completes when the form closes, whether or not an item was created.
+/// by [slotMinutes], and it writes them on [hourLabelFormat]'s clock. Its
+/// date fields' day pickers badge the days with entries of [store] as
+/// [dayBadges] marks them, or with one primary dot where it is null, and
+/// start their weeks on the weekday column [firstColumn], 0 for Monday to
+/// 6 for Sunday. Completes when the form closes, whether or not an item
+/// was created.
 Future<void> showCreateFlow(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
@@ -58,6 +64,8 @@ Future<void> showCreateFlow(
   required ValueGetter<CalendarNow> now,
   required CalendarHourLabelFormat hourLabelFormat,
   int slotMinutes = CalendarDates.defaultSlotMinutes,
+  CalendarDayBadges<ItemPayload>? dayBadges,
+  int firstColumn = 0,
 }) {
   const type = CalendarItemType.task;
   final draft = calendarItem(
@@ -76,6 +84,8 @@ Future<void> showCreateFlow(
     now: now,
     hourLabelFormat: hourLabelFormat,
     slotMinutes: slotMinutes,
+    dayBadges: dayBadges,
+    firstColumn: firstColumn,
   );
 }
 
@@ -84,8 +94,10 @@ Future<void> showCreateFlow(
 /// writes them on [hourLabelFormat]'s clock. Of an item [policy], when the
 /// form opens, lets neither move nor resize its start, the start date, the
 /// start time and All day take no input; and the form offers Delete only
-/// where [policy] then lets the item be deleted. Does nothing when the
-/// store does not hold it.
+/// where [policy] then lets the item be deleted. Its date fields' day
+/// pickers badge the days as [dayBadges] marks them and start their weeks
+/// on [firstColumn], as [showCreateFlow]'s do. Does nothing when the store
+/// does not hold it.
 Future<void> showEditForm(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
@@ -94,6 +106,8 @@ Future<void> showEditForm(
   required ValueGetter<CalendarNow> now,
   required CalendarHourLabelFormat hourLabelFormat,
   int slotMinutes = CalendarDates.defaultSlotMinutes,
+  CalendarDayBadges<ItemPayload>? dayBadges,
+  int firstColumn = 0,
 }) async {
   final item = store.storedEntry(id);
   if (item == null) {
@@ -107,6 +121,8 @@ Future<void> showEditForm(
     now: now,
     hourLabelFormat: hourLabelFormat,
     slotMinutes: slotMinutes,
+    dayBadges: dayBadges,
+    firstColumn: firstColumn,
   );
 }
 
@@ -221,6 +237,8 @@ Future<void> _showForm(
   CalendarEditPolicy<ItemPayload>? policy,
   ValueGetter<CalendarNow>? now,
   int slotMinutes = CalendarDates.defaultSlotMinutes,
+  CalendarDayBadges<ItemPayload>? dayBadges,
+  int firstColumn = 0,
 }) {
   // Neither a drag nor the barrier closes the sheet: a drag would close it
   // through the sheet's onClosing, which no PopScope stops, so a save in
@@ -241,6 +259,8 @@ Future<void> _showForm(
         now: now ?? _clockNow,
         hourLabelFormat: hourLabelFormat,
         slotMinutes: slotMinutes,
+        dayBadges: dayBadges,
+        firstColumn: firstColumn,
       );
     },
   );
@@ -267,10 +287,19 @@ class _ItemForm extends StatefulWidget {
     required this.now,
     required this.hourLabelFormat,
     required this.slotMinutes,
+    required this.dayBadges,
+    required this.firstColumn,
   });
 
   final CalendarStore<ItemPayload> store;
   final CalendarItem item;
+
+  /// The kinds of entry the day pickers' badges mark; null for one primary
+  /// dot on a day with entries.
+  final CalendarDayBadges<ItemPayload>? dayBadges;
+
+  /// The weekday column the day pickers' weeks start on.
+  final int firstColumn;
 
   /// The step of the time fields' slot boundaries.
   final int slotMinutes;
@@ -368,6 +397,14 @@ class _ItemFormState extends State<_ItemForm> {
   /// The schedule's check, which the summary and the section read: made in
   /// [initState] and again by [_recheck] only.
   late CalendarScheduleCheck<ItemPayload> _scheduleCheck;
+
+  /// What [_checkNow] read of the store for [_scheduleCheck], the last check
+  /// it made: the entries it gave the check as its others, and the store's
+  /// zone and hours, which the form's build reads.
+  List<CalendarEntry<ItemPayload>> _checkedOthers =
+      const <CalendarEntry<ItemPayload>>[];
+  Location? _checkedZone;
+  CalendarDayHours? _checkedHours;
 
   /// The errors [_errorsOf] finds of [_scheduleCheck] and the form's item,
   /// made at the first read after each [_recheck].
@@ -474,12 +511,22 @@ class _ItemFormState extends State<_ItemForm> {
     super.dispose();
   }
 
-  /// Checks the schedule again, so an item another write puts over its time
-  /// shows while the form is open; but not while a send is in flight, whose
+  /// Checks the schedule again where the change moves what the check or
+  /// the build reads of the store: the entries from the schedule's first
+  /// day to the day after its last, compared by `==`, or the store's zone
+  /// or hours. So an item another write puts over or off the item's days
+  /// shows while the form is open, and a read of other days, as a day
+  /// picker browses, checks nothing. Not while a send is in flight, whose
   /// own write notifies before it completes, and which a draft's check
   /// would count as an overlap of its own.
   void _storeChanged() {
     if (_saving) {
+      return;
+    }
+    final store = widget.store;
+    if (store.zone == _checkedZone &&
+        store.hours == _checkedHours &&
+        listEquals(_othersNow(), _checkedOthers)) {
       return;
     }
     setState(_recheck);
@@ -564,24 +611,36 @@ class _ItemFormState extends State<_ItemForm> {
     });
   }
 
-  /// The check of the schedule now, against the entries the store shows
-  /// from its first day to the day after its last, so that the checks the
-  /// schedule section makes of its pickers' times, an end moved onto the
-  /// next day among them, see that day's entries too.
+  /// The entries the store shows from the schedule's first day to the day
+  /// after its last, so that the checks the schedule section makes of its
+  /// pickers' times, an end moved onto the next day among them, see that
+  /// day's entries too.
+  List<CalendarEntry<ItemPayload>> _othersNow() {
+    return widget.store
+        .entriesBetween(
+          _schedule.startDay,
+          CalendarDates.addDays(_schedule.endDay, 1),
+        )
+        .map((shown) {
+          return shown.entry;
+        })
+        .toList();
+  }
+
+  /// The check of the schedule now, against [_othersNow]; keeps what it
+  /// read of the store as [_checkedOthers], [_checkedZone] and
+  /// [_checkedHours]. Each check it makes becomes [_scheduleCheck].
   CalendarScheduleCheck<ItemPayload> _checkNow() {
+    final store = widget.store;
+    final others = _othersNow();
+    _checkedOthers = others;
+    _checkedZone = store.zone;
+    _checkedHours = store.hours;
     return CalendarScheduleCheck<ItemPayload>(
       schedule: _schedule,
       rules: _rules,
       now: widget.now(),
-      others: widget.store
-          .entriesBetween(
-            _schedule.startDay,
-            CalendarDates.addDays(_schedule.endDay, 1),
-          )
-          .map((shown) {
-            return shown.entry;
-          })
-          .toList(),
+      others: others,
       entry: _isDraft ? null : widget.item,
       options: scheduleOptionsOf(_type),
     );
@@ -941,6 +1000,9 @@ class _ItemFormState extends State<_ItemForm> {
         hourLabelFormat: widget.hourLabelFormat,
         now: widget.now,
         zone: widget.store.zone,
+        store: widget.store,
+        dayBadges: widget.dayBadges,
+        firstColumn: widget.firstColumn,
         locked: _locked,
         errors: _scheduleErrors(),
         onChanged: _scheduleChanged,

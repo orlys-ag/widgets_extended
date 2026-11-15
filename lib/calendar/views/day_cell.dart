@@ -224,9 +224,21 @@ class _DayCellStyles {
         color: theme.onPrimary,
       ),
       todayNumber = theme.dayNumberMarkedStyle.copyWith(color: theme.primary),
+      todayNumberDisabled = theme.dayNumberMarkedStyle.copyWith(
+        color: _disabled(theme, theme.primary),
+      ),
       numberFrom = theme.dayNumberStyle.copyWith(color: theme.text),
       numberFromMuted = theme.dayNumberStyle.copyWith(color: theme.textMuted),
       numberTo = theme.dayNumberMarkedStyle.copyWith(color: theme.text),
+      numberFromDisabled = theme.dayNumberStyle.copyWith(
+        color: _disabled(theme, theme.text),
+      ),
+      numberFromMutedDisabled = theme.dayNumberStyle.copyWith(
+        color: _disabled(theme, theme.textMuted),
+      ),
+      numberToDisabled = theme.dayNumberMarkedStyle.copyWith(
+        color: _disabled(theme, theme.text),
+      ),
       stripWeekday = theme.stripWeekdayStyle.copyWith(color: theme.textMuted),
       weekdayName = theme.weekdayHeaderStyle.copyWith(color: theme.textMuted),
       weekdayLetter = theme.weekdayLetterStyle.copyWith(color: theme.text),
@@ -245,6 +257,11 @@ class _DayCellStyles {
             fontWeight: theme.dayNumberMarkedStyle.fontWeight,
           ) ==
           theme.dayNumberMarkedStyle.copyWith(color: theme.text);
+
+  /// [colour] at [theme]'s [CalendarThemeData.disabledOpacity].
+  static Color _disabled(CalendarThemeData theme, Color colour) {
+    return colour.withValues(alpha: colour.a * theme.disabledOpacity);
+  }
 
   /// The styles of [theme]: those made for it before, or for a theme `==`
   /// to it last, so an equal theme makes none.
@@ -282,6 +299,9 @@ class _DayCellStyles {
   final TextStyle selectedNumber;
   final TextStyle todayNumber;
 
+  /// [todayNumber] of a disabled day.
+  final TextStyle todayNumberDisabled;
+
   /// An unmarked number where the month is unfolded: in the shown month,
   /// and in another.
   final TextStyle numberFrom;
@@ -289,6 +309,12 @@ class _DayCellStyles {
 
   /// Every number where the month is folded into its week.
   final TextStyle numberTo;
+
+  /// [numberFrom], [numberFromMuted] and [numberTo] of a disabled day,
+  /// each colour at the theme's [CalendarThemeData.disabledOpacity].
+  final TextStyle numberFromDisabled;
+  final TextStyle numberFromMutedDisabled;
+  final TextStyle numberToDisabled;
 
   /// Whether [numberFrom] and [numberTo] differ in their weight alone.
   final bool weightOnly;
@@ -311,28 +337,38 @@ class _DayCellStyles {
   }
 
   /// The style of an unmarked number [t] of the way through the fold, for a
-  /// day of the shown month when [inMonth]: the prepared style itself at
-  /// either end; between them [TextStyle.lerp] of the two ends, or where
-  /// they differ in weight alone, the unfolded style at the lerped weight,
-  /// which keeps the colour and shadows the two ends share.
-  TextStyle numberAt(double t, {required bool inMonth}) {
-    final from = inMonth ? numberFrom : numberFromMuted;
+  /// day of the shown month when [inMonth], and a disabled day's where not
+  /// [enabled]: the prepared style itself at either end; between them
+  /// [TextStyle.lerp] of the two ends, or where they differ in weight
+  /// alone, the unfolded style at the lerped weight, which keeps the colour
+  /// and shadows the two ends share, and for a day outside the shown month
+  /// lerps the colour between the two ends' colours.
+  TextStyle numberAt(double t, {required bool inMonth, required bool enabled}) {
+    final TextStyle from;
+    final TextStyle to;
+    if (enabled) {
+      from = inMonth ? numberFrom : numberFromMuted;
+      to = numberTo;
+    } else {
+      from = inMonth ? numberFromDisabled : numberFromMutedDisabled;
+      to = numberToDisabled;
+    }
     if (t <= 0.0) {
       return from;
     }
     if (t >= 1.0) {
-      return numberTo;
+      return to;
     }
     if (!weightOnly) {
-      return TextStyle.lerp(from, numberTo, t)!;
+      return TextStyle.lerp(from, to, t)!;
     }
-    final weight = FontWeight.lerp(from.fontWeight, numberTo.fontWeight, t);
+    final weight = FontWeight.lerp(from.fontWeight, to.fontWeight, t);
     if (inMonth) {
       return from.copyWith(fontWeight: weight);
     }
     return from.copyWith(
       fontWeight: weight,
-      color: Color.lerp(theme.textMuted, theme.text, t),
+      color: Color.lerp(from.color, to.color, t),
     );
   }
 }
@@ -354,7 +390,9 @@ class _DayCellElement extends StatelessElement {
 /// items, in the [CalendarTheme] above it: up to four dots along the
 /// circle's rim, 30 degrees apart, about a lone dot's place at its top
 /// right corner, smaller where there are three or more. A screen reader
-/// hears every badge's kind.
+/// hears every badge's kind. Where [enabled] is false the number draws at
+/// the theme's [CalendarThemeData.disabledOpacity] unless the day is
+/// selected, and a screen reader hears the day disabled.
 ///
 /// [collapse] runs from 0, the month grid, to 1, the week strip. At 0 a
 /// day outside the shown month is muted on no circle and the weekday name
@@ -372,12 +410,17 @@ class DayCell extends StatelessWidget {
     required this.isToday,
     required this.badges,
     required this.collapse,
+    this.enabled,
   });
 
   final DateTime day;
   final bool inMonth;
   final bool isSelected;
   final bool isToday;
+
+  /// Whether the day may be picked: false draws it disabled; null, as
+  /// true, draws it enabled and gives its [Semantics] no enabled state.
+  final bool? enabled;
 
   /// The badges the circle carries ([dayBadgesOf]), a null for the
   /// primary dot.
@@ -402,6 +445,7 @@ class DayCell extends StatelessWidget {
     return Semantics(
       button: true,
       selected: isSelected,
+      enabled: enabled,
       label: strings.dayWithBadges(day, <String?>[
         for (final kind in badges) kind?.label,
       ]),
@@ -438,13 +482,14 @@ class DayCell extends StatelessWidget {
     _DayCellStyles styles,
     CalendarLocalizations strings,
   ) {
+    final disabled = enabled == false;
     final TextStyle numberStyle;
     if (isSelected) {
       numberStyle = styles.selectedNumber;
     } else if (isToday) {
-      numberStyle = styles.todayNumber;
+      numberStyle = disabled ? styles.todayNumberDisabled : styles.todayNumber;
     } else {
-      numberStyle = styles.numberAt(t, inMonth: inMonth);
+      numberStyle = styles.numberAt(t, inMonth: inMonth, enabled: !disabled);
     }
     final BoxDecoration fill;
     if (isSelected) {
