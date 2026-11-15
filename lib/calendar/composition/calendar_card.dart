@@ -100,9 +100,13 @@ class CalendarHeaderCard extends StatelessWidget {
 /// pixels unfolds it ([CalendarCardController.unfold]). The strips report
 /// a day selected through [onSelectDay], and a month or a day browsed to
 /// through the controller's [CalendarCardController.browseMonth] and
-/// [CalendarCardController.browseStrip]. The card reads the controller as
-/// it builds and listens to its motions alone, so its host builds it again
-/// at each of the controller's events.
+/// [CalendarCardController.browseStrip]; the week strip slides to the
+/// controller's [CalendarCardController.recallDay] at a recall, and the
+/// month folds into the week of its [CalendarCardController.foldDay]. A
+/// day [isDayEnabled] refuses draws disabled in both strips and takes no
+/// tap, and with no [onSelectDay] no day takes one. The card reads the
+/// controller as it builds and listens to its motions alone, so its host
+/// builds it again at each of the controller's events.
 ///
 /// Its rows are as tall as a week strip's cell under the [CalendarTheme]
 /// above it ([stripCellHeight]).
@@ -119,6 +123,7 @@ class CalendarCard<T> extends StatefulWidget {
     required this.buildPicker,
     required this.onSelectDay,
     this.dayBadges,
+    this.isDayEnabled,
   });
 
   /// The card's fold, browse and month picker, and their motions.
@@ -138,11 +143,19 @@ class CalendarCard<T> extends StatefulWidget {
   final Widget? header;
 
   final Widget Function() buildPicker;
-  final ValueChanged<DateTime> onSelectDay;
+
+  /// Reports a day tapped, or in the month reached by an arrow key; null
+  /// for a card whose days take no tap.
+  final ValueChanged<DateTime>? onSelectDay;
 
   /// The kinds of entry the days' badges mark, in the month and in the
   /// week strip; null for one primary dot on a day with entries.
   final CalendarDayBadges<T>? dayBadges;
+
+  /// Whether a day may be picked, which both strips ask of each day's
+  /// cell, a plain day, as it builds ([WeekStrip.isDayEnabled],
+  /// [MonthStrip.isDayEnabled]); null takes every day.
+  final bool Function(DateTime day)? isDayEnabled;
 
   @override
   State<CalendarCard<T>> createState() {
@@ -212,6 +225,7 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
       today: widget.today,
       weekdays: widget.weekdays,
       recalls: controller.stripRecalls,
+      recallDay: controller.recallDay,
       initialDay: monthFoldDay(
         widget.month,
         selectedDay: widget.selectedDay,
@@ -222,6 +236,7 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
       onSelectDay: widget.onSelectDay,
       onBrowse: controller.browseStrip,
       dayBadges: widget.dayBadges,
+      isDayEnabled: widget.isDayEnabled,
     );
   }
 
@@ -288,6 +303,8 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
       onSelectDay: widget.onSelectDay,
       onBrowse: controller.browseMonth,
       dayBadges: widget.dayBadges,
+      isDayEnabled: widget.isDayEnabled,
+      foldDay: controller.foldDay,
     );
     final header = widget.header;
     return DecoratedBox(

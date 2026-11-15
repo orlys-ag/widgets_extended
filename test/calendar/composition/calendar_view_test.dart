@@ -18,6 +18,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/composition/calendar_card.dart';
+import 'package:widgets_extended/calendar/composition/calendar_day_picker.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_theme_extension.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
@@ -3243,6 +3244,228 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.selectedDay, DateTime(2026, 6, 28));
     expect(notifies, 1);
+  });
+
+  testWidgets("CV62 the frames of an unfold rebuild the same elements under "
+      "the calendar card of a CalendarDayPicker with a first day, a last day "
+      "and a predicate as under Agenda's", (tester) async {
+    /// The elements rebuilt under the calendar card, by widget type, in the
+    /// frames of the unfold a tap on the pull tab runs, after the tap's
+    /// own.
+    Future<Map<Type, int>> unfoldRebuilds() async {
+      final counts = <Type, int>{};
+      await tester.tap(find.byKey(calendarPullTabKey));
+      await tester.pump();
+      debugOnRebuildDirtyWidget = (element, builtOnce) {
+        var under = false;
+        element.visitAncestorElements((ancestor) {
+          under = ancestor.widget is CalendarCard;
+          return !under;
+        });
+        if (under) {
+          counts.update(element.widget.runtimeType, (count) {
+            return count + 1;
+          }, ifAbsent: () => 1);
+        }
+      };
+      try {
+        await tester.pumpAndSettle(const Duration(milliseconds: 16));
+      } finally {
+        debugOnRebuildDirtyWidget = null;
+      }
+      return counts;
+    }
+
+    // The card lies 16 logical pixels in from each side of Agenda.
+    await tester.pumpWidget(
+      app(
+        Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            width: 400.0,
+            height: 600.0,
+            child: CalendarView<String>(store: store, clock: fixedClock),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(calendarPullTabKey));
+    await tester.pumpAndSettle();
+    // Setup sanity: Agenda's card folded on April's week of the 21st.
+    expect(find.byType(WeekStrip<String>), findsOneWidget);
+    final agenda = await unfoldRebuilds();
+    // Setup sanity: the unfold rebuilt the month's cells.
+    expect(agenda[DayCell], greaterThan(0));
+
+    await tester.pumpWidget(
+      app(
+        Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            width: 368.0,
+            child: CalendarDayPicker<String>(
+              value: tuesday,
+              today: tuesday,
+              onChanged: (day) {},
+              firstDay: DateTime(2026, 4, 15),
+              lastDay: DateTime(2026, 5, 10),
+              isEnabled: (day) {
+                return day.day != 23;
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(WeekStrip<String>), findsOneWidget);
+    expect(await unfoldRebuilds(), agenda);
+  });
+
+  testWidgets("CV64 a CalendarDayPicker's Next week tapped while the month "
+      "folds browses a week that the folding month, the strip it folds "
+      "into, a drag of the pull tab and the next unfold all show", (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            width: 400.0,
+            child: CalendarDayPicker<String>(
+              value: tuesday,
+              today: tuesday,
+              onChanged: (day) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final tab = find.byKey(calendarPullTabKey);
+    final twentySeventh = DateTime(2026, 4, 27);
+    final months = find.byType(MonthStrip<String>);
+
+    /// Expects the 27th's cell, in April's last row, to lie no lower than
+    /// the month, where the month shows; answers whether it shows.
+    bool expectFoldsOnTheWeek(String reason) {
+      if (months.evaluate().isEmpty) {
+        return false;
+      }
+      expect(
+        tester.getRect(find.byKey(dayCellKey(twentySeventh))).bottom,
+        lessThanOrEqualTo(tester.getRect(months).bottom + 0.5),
+        reason: reason,
+      );
+      return true;
+    }
+
+    /// Expects the week row to start on the 27th.
+    void expectWeekFromThe27th(String reason) {
+      final strip = find.byType(WeekStrip<String>);
+      expect(strip, findsOneWidget, reason: reason);
+      expect(
+        tester.getRect(find.byKey(weekStripDayKey(twentySeventh))).left,
+        moreOrLessEquals(tester.getRect(strip).left, epsilon: 0.5),
+        reason: reason,
+      );
+    }
+
+    await tester.tap(tab);
+    await tester.pumpAndSettle();
+    // Setup sanity: unfolded, the 27th in April's fifth and last row.
+    expect(months, findsOneWidget);
+    final grid = CalendarMonthGrid(2026, 4, weekdays: CalendarWeekdaySet.all);
+    expect(grid.weekCount, 5);
+    expect(grid.cellOf(twentySeventh).row, 4);
+
+    await tester.tap(tab);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    // Setup sanity: the month still folds.
+    expect(months, findsOneWidget);
+    await tester.tap(find.byTooltip("Next week"));
+    var frames = 0;
+    do {
+      await tester.pump(const Duration(milliseconds: 16));
+      frames++;
+    } while (expectFoldsOnTheWeek("fold, frame $frames") && frames < 100);
+    await tester.pumpAndSettle();
+    expectWeekFromThe27th("after the fold");
+
+    final gesture = await tester.startGesture(tester.getCenter(tab));
+    // The drag starts past the touch slop, and folds from the next move.
+    await gesture.moveBy(const Offset(0.0, 20.0));
+    await tester.pump(const Duration(milliseconds: 16));
+    for (var step = 0; step < 5; step++) {
+      await gesture.moveBy(const Offset(0.0, 8.0));
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(expectFoldsOnTheWeek("drag, step $step"), isTrue);
+    }
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(expectFoldsOnTheWeek("held"), isTrue);
+    await gesture.up();
+    frames = 0;
+    do {
+      await tester.pump(const Duration(milliseconds: 16));
+      frames++;
+    } while (expectFoldsOnTheWeek("release, frame $frames") && frames < 100);
+    await tester.pumpAndSettle();
+    expectWeekFromThe27th("after the drag");
+
+    await tester.tap(tab);
+    await tester.pump();
+    for (frames = 0; tester.binding.hasScheduledFrame && frames < 100;) {
+      await tester.pump(const Duration(milliseconds: 16));
+      frames++;
+      expect(expectFoldsOnTheWeek("unfold, frame $frames"), isTrue);
+    }
+    // Setup sanity: the unfold ran over frames.
+    expect(frames, greaterThan(2));
+  });
+
+  testWidgets("CV65 a fling of Agenda's week strip still running as a drag "
+      "of the pull tab starts gives the folding month no fold day of its "
+      "own", (tester) async {
+    await tester.pumpWidget(
+      app(CalendarView<String>(store: store, clock: fixedClock)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(calendarPullTabKey));
+    await tester.pumpAndSettle();
+    final strip = find.byType(WeekStrip<String>);
+    // Setup sanity: folded.
+    expect(strip, findsOneWidget);
+    await tester.fling(strip, const Offset(-300.0, 0.0), 6000.0);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    // Setup sanity: the strip still moves.
+    expect(tester.binding.hasScheduledFrame, isTrue);
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(calendarPullTabKey)),
+    );
+    // The drag starts past the touch slop, and folds from the next move.
+    await gesture.moveBy(const Offset(0.0, 30.0));
+    await gesture.moveBy(const Offset(0.0, 10.0));
+    final months = find.byType(MonthStrip<String>);
+    var shown = 0;
+    for (var frame = 0; frame < 10; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      if (months.evaluate().isNotEmpty) {
+        shown++;
+        expect(
+          tester.widget<MonthStrip<String>>(months).foldDay,
+          isNull,
+          reason: "frame $frame",
+        );
+      }
+    }
+    // Setup sanity: the month showed.
+    expect(shown, greaterThan(0));
+    await gesture.up();
+    await tester.pumpAndSettle();
   });
 
   group("CV59 Agenda marks the gap whose add button reported a create until "

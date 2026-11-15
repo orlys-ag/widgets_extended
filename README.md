@@ -554,6 +554,27 @@ and reads no Material theme, so in a Material app put a `CalendarTheme`
 above it, of your `CalendarThemeExtension`'s `data` or of
 `CalendarThemeExtension.fromColorScheme(scheme).data`.
 
+`CalendarDayPicker` is an inline panel from which a user picks a day: the
+calendar card of Agenda and Day, folded into its week row on the week of
+`value`, under the month's title, which opens a month picker, and chevrons
+that step a week while the card is folded, a month while it is unfolded
+and a year in the month picker. The pull tab and a drag down the week row
+unfold it into the month, and the pull tab folds it back. A tap on a day
+reports it through `onChanged`, and the picker shows it selected once you
+give it as `value`. The chevrons, a swipe of either strip and a month pick
+only move the card, unless you set `headerSelects`, under which a chevron
+step while folded and a month pick select a day, as Agenda's do. A day
+before `firstDay` or after `lastDay`, compared by date, or one your
+`isEnabled` refuses, draws disabled and takes no tap; the picker asks
+`isEnabled` of a day at most once for each predicate and date of `value`,
+so give a function not `==` to the last where its answers change. With a
+`store`, a day with entries carries a badge for each kind your `dayBadges`
+gives them, as in `CalendarView`, or the primary dot without `dayBadges`;
+with no store no day carries a badge. It shows all seven weekdays, its
+weeks starting on the column `firstColumn`, 0 for Monday to 6 for Sunday,
+opens no route, and draws in the theme a `CalendarView` would resolve
+there, with its words from `CalendarLocalizations`.
+
 **Editing.** With `editable: true`, Week's and Day's blocks move and
 resize, and a create gesture reports a `CalendarCreateDetails` through
 `onCreateRange`: the range it picked, where its mark is on screen when it

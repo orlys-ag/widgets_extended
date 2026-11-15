@@ -26,7 +26,8 @@ import 'package:flutter/widgets.dart';
 /// failed read. [disabledOpacity], [timePickerRowStyle] and
 /// [timePickerHeaderStyle] are read by the time picker,
 /// `CalendarTimePicker`, which draws its Now and Clear in
-/// [actionLabelStyle].
+/// [actionLabelStyle]; [disabledOpacity] also by the day picker,
+/// `CalendarDayPicker`, for the number of a day it refuses.
 ///
 /// [CalendarTheme] hands a theme down the tree, and [CalendarTheme.of]
 /// reads it.
@@ -509,9 +510,12 @@ final class CalendarThemeData with Diagnosticable {
   /// 1.
   final double pendingEntryOpacity;
 
-  /// The opacity of what the time picker draws disabled, from 0 to 1: the
-  /// [text] of a row, in any of its columns, no time of which may be
-  /// picked, and Now or Clear while they take no tap.
+  /// The opacity of what the time picker and the day picker draw
+  /// disabled, from 0 to 1: the [text] of a time picker's row, in any of
+  /// its columns, no time of which may be picked, and Now or Clear while
+  /// they take no tap; and the number of a day `CalendarDayPicker` refuses:
+  /// one before its `firstDay` or after its `lastDay`, or one its
+  /// `isEnabled` refuses.
   final double disabledOpacity;
 
   /// The shadows under each grip of the selected block on the timed grid,

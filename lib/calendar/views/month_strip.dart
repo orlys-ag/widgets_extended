@@ -78,6 +78,7 @@ DateTime monthFoldDay(
 ///
 /// [collapse] runs from 0, the month, to 1, its week. As it runs the strip
 /// shrinks to one row and moves up by the rows above the week of
+/// [foldDay] where the month it rests on holds it, and otherwise of
 /// [monthFoldDay], while the days of the months beside it fade into that
 /// week's blank cells, so at 1 the strip shows that week as [WeekStrip]
 /// shows it. Once [collapse] leaves 0 the strip comes to rest on the
@@ -105,6 +106,7 @@ class MonthStrip<T> extends StatefulWidget {
     this.snap = MonthStripSnap.nearest,
     this.dayBadges,
     this.isDayEnabled,
+    this.foldDay,
   });
 
   final CalendarStore<T> store;
@@ -144,6 +146,11 @@ class MonthStrip<T> extends StatefulWidget {
   /// (the local midnight of its date), as the cell builds; null takes
   /// every day.
   final bool Function(DateTime day)? isDayEnabled;
+
+  /// The day, on a shown weekday, whose week the month folds into while the
+  /// month the strip rests on holds it; null, or a day of another month,
+  /// for [monthFoldDay]'s.
+  final DateTime? foldDay;
 
   /// The most weeks a month's grid takes.
   static const int maxWeeks = 6;
@@ -204,9 +211,16 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
   late DateTime _selectedDay;
   late DateTime _today;
 
+  /// [MonthStrip.foldDay] as a plain day, made only where it changes.
+  DateTime? _foldDay;
+
   /// The local midnight of [day]'s date.
   static DateTime _plainTwinOf(DateTime day) {
     return CalendarDates.dateOfDayNumber(CalendarDates.dayNumber(day));
+  }
+
+  static DateTime? _foldTwinOf(DateTime? day) {
+    return day == null ? null : _plainTwinOf(day);
   }
 
   @override
@@ -214,6 +228,7 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
     super.initState();
     _selectedDay = _plainTwinOf(widget.selectedDay);
     _today = _plainTwinOf(widget.today);
+    _foldDay = _foldTwinOf(widget.foldDay);
     widget.collapse.addListener(_handleCollapse);
     // After the frame, because a read may notify the day cells' listeners,
     // which must not rebuild mid-build.
@@ -243,6 +258,9 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
     }
     if (widget.today != oldWidget.today) {
       _today = _plainTwinOf(widget.today);
+    }
+    if (widget.foldDay != oldWidget.foldDay) {
+      _foldDay = _foldTwinOf(widget.foldDay);
     }
     if (widget.collapse != oldWidget.collapse) {
       oldWidget.collapse.removeListener(_handleCollapse);
@@ -494,15 +512,20 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
                 fraction,
               )!;
               final resting = _monthAt(position.round());
+              final foldDay = _foldDay;
               final foldRow = t > 0.0
                   ? _gridOf(resting)
                         .cellOf(
-                          monthFoldDay(
-                            resting,
-                            selectedDay: _selectedDay,
-                            today: _today,
-                            weekdays: widget.weekdays,
-                          ),
+                          foldDay != null &&
+                                  foldDay.year == resting.year &&
+                                  foldDay.month == resting.month
+                              ? foldDay
+                              : monthFoldDay(
+                                  resting,
+                                  selectedDay: _selectedDay,
+                                  today: _today,
+                                  weekdays: widget.weekdays,
+                                ),
                         )
                         .row
                   : 0;

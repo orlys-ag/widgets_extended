@@ -36,11 +36,15 @@ abstract interface class CalendarCardHost {
 /// Who set [CalendarCardController.browsedDay] to the day at the middle of
 /// the week strip.
 enum _StripBrowse {
-  /// Not the strip: a slide of the month strip or a chevron, or no browse.
+  /// Not the strip: a slide of the month strip, an unfolded chevron, a
+  /// month pick, or no browse.
   none,
 
-  /// A drag of the week strip.
+  /// A drag of the week strip, which the fold leaving the week ends.
   dragged,
+
+  /// A chevron while folded, which lasts across a fold.
+  stepped,
 }
 
 /// The calendar card's state, owned by a host State that makes it in its
@@ -53,10 +57,17 @@ enum _StripBrowse {
 /// [forgetBrowse], [recall], [hidePicker], [retakeBrowse] and
 /// [endStripBrowse], change state alone, start no motion and notify
 /// nothing, for a host to call inside its own event.
+///
+/// Where [headerSelects], a chevron step while folded and a month pick
+/// select a day, and browse as below only where the host refuses it;
+/// otherwise a chevron step while folded browses a week, sliding the week
+/// strip there, and a month pick moves the card to the month and closes
+/// the month picker.
 final class CalendarCardController extends ChangeNotifier {
   CalendarCardController({
     required TickerProvider vsync,
     required CalendarCardHost host,
+    required this.headerSelects,
     bool folded = false,
   }) : _host = host,
        _folded = folded,
@@ -66,6 +77,10 @@ final class CalendarCardController extends ChangeNotifier {
   }
 
   final CalendarCardHost _host;
+
+  /// Whether a chevron step while folded and a month pick select a day
+  /// rather than browse.
+  bool headerSelects;
 
   /// How far the card has folded, 0 for the month and 1 for its week:
   /// linear, so a drag on the pull tab moves it with the finger.
@@ -126,18 +141,34 @@ final class CalendarCardController extends ChangeNotifier {
 
   int _stripRecalls = 0;
 
-  /// Who set [_browsedDay] to the day at the week strip's middle. A strip
-  /// browse ends once a fold short of the week ([_handleFold]) or new
-  /// weekdays end that strip, as the next one opens on the week of
-  /// [monthFoldDay].
+  /// Who set [_browsedDay] to the day at the week strip's middle. A
+  /// dragged browse ends once a fold short of the week ([_handleFold]) or
+  /// an unfold ends that strip, and either ends once new weekdays do, as
+  /// the next strip opens on the week of [monthFoldDay].
   _StripBrowse _stripBrowse = _StripBrowse.none;
 
-  /// The day at the middle of the week strip a drag left, which a strip the
-  /// card builds opens with at its middle; null for the week of
-  /// [monthFoldDay].
+  /// The day at the middle of the week strip a drag or a folded chevron
+  /// left, which a strip the card builds opens with at its middle; null
+  /// for the week of [monthFoldDay].
   DateTime? get stripMiddleDay {
     return _stripBrowse == _StripBrowse.none ? null : _browsedDay;
   }
+
+  /// The day whose week the folding month folds into where the month it
+  /// rests on holds it: the day a folded chevron browsed to, so the month
+  /// and the strip it folds into show that week; null for the week of
+  /// [monthFoldDay], as for a drag's browse, which the fold ends.
+  DateTime? get foldDay {
+    return _stripBrowse == _StripBrowse.stepped ? _browsedDay : null;
+  }
+
+  /// The day whose week a new [stripRecalls] brings the week strip to;
+  /// null for the selected day's.
+  DateTime? get recallDay {
+    return _recallDay;
+  }
+
+  DateTime? _recallDay;
 
   /// The first day of the month the card shows.
   DateTime get month {
@@ -164,10 +195,11 @@ final class CalendarCardController extends ChangeNotifier {
   }
 
   /// The shown days the folded card's week strip holds: a week's count of
-  /// them around [_browsedDay], the day a drag brought to the strip's
-  /// middle, the first half of the count before it, as `WeekStrip` finds
-  /// its middle; or, where a slide or a chevron browsed the card, or none
-  /// did, the shown days of the week the strip opens on ([monthFoldDay]).
+  /// them around [_browsedDay], the day a drag or a folded chevron brought
+  /// to the strip's middle, the first half of the count before it, as
+  /// `WeekStrip` finds its middle; or, where a slide, an unfolded chevron
+  /// or a month pick browsed the card, or none did, the shown days of the
+  /// week the strip opens on ([monthFoldDay]).
   List<DateTime> _stripDays() {
     final weekdays = _host.cardWeekdays;
     final browsed = _browsedDay;
@@ -234,10 +266,11 @@ final class CalendarCardController extends ChangeNotifier {
     });
   }
 
-  /// Ends a strip browse once the fold leaves the week: the card builds
+  /// Ends a dragged browse once the fold leaves the week: the card builds
   /// its `WeekStrip` only at a full fold, so the strip a drag moved is
   /// gone, and the one the card folds into next opens on the week of
-  /// [monthFoldDay].
+  /// [monthFoldDay]. A stepped browse stays, the month folding into its
+  /// week ([foldDay]) and the next strip opening on it.
   void _handleFold() {
     if (_stripBrowse == _StripBrowse.dragged && _collapse.value < 1.0) {
       _event(() {
@@ -246,9 +279,10 @@ final class CalendarCardController extends ChangeNotifier {
     }
   }
 
-  /// Steps by [stepUnit]: a year moves the month picker alone; a week
-  /// selects the day a week from the selected one; and a month moves the
-  /// card alone.
+  /// Steps by [stepUnit]: a year moves the month picker alone; a month
+  /// moves the card alone; and a week, where [headerSelects] and the host
+  /// takes it, selects the day a week from the selected one, and otherwise
+  /// browses the week strip a week ([_browseWeek]).
   void step(int direction) {
     switch (stepUnit) {
       case CalendarStepUnit.year:
@@ -256,16 +290,41 @@ final class CalendarCardController extends ChangeNotifier {
           _pickerYear += direction;
         });
       case CalendarStepUnit.week:
-        _host.selectCardDay(
-          CalendarDates.addDays(
-            _host.cardSelectedDay,
-            DateTime.daysPerWeek * direction,
-          ),
-        );
+        if (headerSelects &&
+            _host.selectCardDay(
+              CalendarDates.addDays(
+                _host.cardSelectedDay,
+                DateTime.daysPerWeek * direction,
+              ),
+            )) {
+          return;
+        }
+        _browseWeek(direction);
       case CalendarStepUnit.month:
       case CalendarStepUnit.day:
         browseMonth(CalendarDates.addMonths(month, direction));
     }
+  }
+
+  /// Browses the folded card a week: the middle of the shown days of the
+  /// week a week from the strip's middle day becomes the browsed day and
+  /// the strip's middle, which the week strip slides to as a recall slides
+  /// ([recallDay]), reporting no day on the way.
+  void _browseWeek(int direction) {
+    final weekdays = _host.cardWeekdays;
+    final days = _stripDays();
+    final target = CalendarDates.addDays(
+      days[days.length ~/ 2],
+      DateTime.daysPerWeek * direction,
+    );
+    final week = CalendarDates.shownDaysOfWeek(target, weekdays);
+    final next = week[week.length ~/ 2];
+    _event(() {
+      _browsedDay = _host.cardDayIn(next);
+      _stripBrowse = _StripBrowse.stepped;
+      _recallDay = next;
+      _stripRecalls++;
+    });
   }
 
   /// Opens the month picker on the selected day's year.
@@ -285,17 +344,41 @@ final class CalendarCardController extends ChangeNotifier {
     _pickerShown.animateTo(0.0, curve: _curve);
   }
 
-  /// Selects the day of [month] a month step from the selected day would.
-  /// The month picker stays open, filling [month].
+  /// Where [headerSelects], selects the day of [month] a month step from
+  /// the selected day would, the month picker staying open, filling
+  /// [month]. Otherwise, or where the host refuses that day, moves the card
+  /// to [month], a folded card's week strip to the week [monthFoldDay]
+  /// gives it, and closes the month picker.
   void pickMonth(DateTime month) {
     final day = _host.cardSelectedDay;
-    final months = (month.year - day.year) * 12 + month.month - day.month;
-    _host.selectCardDay(
-      CalendarDates.shownDayNear(
-        CalendarDates.addMonths(day, months),
-        _host.cardWeekdays,
-      ),
-    );
+    final weekdays = _host.cardWeekdays;
+    if (headerSelects) {
+      final months = (month.year - day.year) * 12 + month.month - day.month;
+      if (_host.selectCardDay(
+        CalendarDates.shownDayNear(
+          CalendarDates.addMonths(day, months),
+          weekdays,
+        ),
+      )) {
+        return;
+      }
+    }
+    final first = DateTime(month.year, month.month);
+    _event(() {
+      _picksMonth = false;
+      _browsedDay = _host.cardDayIn(first);
+      _stripBrowse = _StripBrowse.none;
+      if (_folded) {
+        _recallDay = monthFoldDay(
+          first,
+          selectedDay: day,
+          today: _host.cardToday,
+          weekdays: weekdays,
+        );
+        _stripRecalls++;
+      }
+    });
+    _pickerShown.animateTo(0.0, curve: _curve);
   }
 
   /// Shows [year] in the month picker.
@@ -307,15 +390,18 @@ final class CalendarCardController extends ChangeNotifier {
 
   /// Folds the card where [folded], or unfolds it, from however far it
   /// has folded, a drag on the pull tab having moved it. Unfolding closes
-  /// the month picker and ends a strip browse, and leaves a browse the
-  /// month the card shows, which a later fold opens the strip on a week of.
+  /// the month picker and ends a dragged browse, and leaves a browse the
+  /// month the card shows, which a later fold opens the strip on a week of;
+  /// a stepped browse stays, the month unfolding from its week.
   void settle(bool folded) {
     if (folded != _folded || (!folded && _picksMonth)) {
       _event(() {
         _folded = folded;
         if (!folded) {
           _picksMonth = false;
-          _stripBrowse = _StripBrowse.none;
+          if (_stripBrowse == _StripBrowse.dragged) {
+            _stripBrowse = _StripBrowse.none;
+          }
         }
       });
     }
@@ -338,6 +424,7 @@ final class CalendarCardController extends ChangeNotifier {
   /// day.
   void recall() {
     _browsedDay = null;
+    _recallDay = null;
     _stripRecalls++;
   }
 

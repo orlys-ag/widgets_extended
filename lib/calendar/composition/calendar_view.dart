@@ -686,7 +686,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     _ownsController = host == null;
     // Before the bind, which can read what the card holds
     // ([_showsSelectedDay]).
-    _card = CalendarCardController(vsync: this, host: this);
+    _card = CalendarCardController(
+      vsync: this,
+      host: this,
+      headerSelects: true,
+    );
     _bind(host ?? CalendarController(), shown: null);
     _scheduleMinute(_now.value.time);
     _storeHours = widget.store.hours;

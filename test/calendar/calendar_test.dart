@@ -214,6 +214,7 @@ void main() {
       CalendarHourLabelFormat,
       CalendarMonthLayout,
       CalendarTimePicker,
+      CalendarDayPicker,
       CalendarController.minDayWidthLow,
       CalendarController.minDayWidthHigh,
       CalendarController.minSlotHeightLow,
@@ -329,6 +330,7 @@ void main() {
       "CalendarTheme",
       "CalendarZonePanel",
       "CalendarTimePicker",
+      "CalendarDayPicker",
     };
     const bases = <String>{
       "CalendarController",
@@ -554,6 +556,10 @@ void main() {
         path: "lib/calendar/views/time_picker.dart",
         name: "CalendarTimePicker",
       ),
+      (
+        path: "lib/calendar/composition/calendar_day_picker.dart",
+        name: "CalendarDayPicker",
+      ),
     ];
     final asserts = RegExp(r"\bassert\(");
     for (final (:path, :name) in classes) {
@@ -585,6 +591,7 @@ void main() {
       ],
       "views/move_request.dart": <String>["CalendarMoveRequest({"],
       "views/time_picker.dart": <String>["CalendarTimePicker({"],
+      "composition/calendar_day_picker.dart": <String>["CalendarDayPicker({"],
       "composition/calendar_controller.dart": <String>[
         "CalendarController({",
         "double get minDayWidth",
