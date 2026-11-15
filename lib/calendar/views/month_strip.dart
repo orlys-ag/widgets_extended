@@ -59,7 +59,9 @@ DateTime monthFoldDay(
 /// selected day's in the primary colour, today's ringed, and badges on a day
 /// with items once the store has read it, one for each kind [dayBadges] gives
 /// its entries. The cells before a month's first day
-/// and after its last are blank. A tap on a day reports [onSelectDay].
+/// and after its last are blank. A tap on a day reports [onSelectDay]. A
+/// day [isDayEnabled] refuses draws disabled and takes no tap, and with no
+/// [onSelectDay] no day takes one.
 ///
 /// A horizontal drag slides the strip with the finger, the next month
 /// coming in from the right and the previous from the left, and selects
@@ -83,7 +85,8 @@ DateTime monthFoldDay(
 ///
 /// Once a tap has given it focus, the arrow keys select the shown day
 /// before or after the selected one, and the day a week before or after
-/// it, through [onSelectDay].
+/// it, through [onSelectDay]; an arrow onto a day [isDayEnabled] refuses
+/// selects nothing, and with no [onSelectDay] the strip takes no key.
 ///
 /// [weekdays] are fixed for the strip's life: give a strip that changes
 /// them its own key.
@@ -101,6 +104,7 @@ class MonthStrip<T> extends StatefulWidget {
     required this.onBrowse,
     this.snap = MonthStripSnap.nearest,
     this.dayBadges,
+    this.isDayEnabled,
   });
 
   final CalendarStore<T> store;
@@ -122,7 +126,9 @@ class MonthStrip<T> extends StatefulWidget {
   /// How far the strip has folded into a week, from 0 to 1.
   final Animation<double> collapse;
 
-  final ValueChanged<DateTime> onSelectDay;
+  /// Reports a day tapped or reached by an arrow key; null for a strip
+  /// whose days take no tap and which takes no key.
+  final ValueChanged<DateTime>? onSelectDay;
 
   /// Reports the first day of the month that a scroll has brought to the
   /// middle of the strip.
@@ -133,6 +139,11 @@ class MonthStrip<T> extends StatefulWidget {
   /// The kinds of entry the days' badges mark; null for one primary dot
   /// on a day with entries.
   final CalendarDayBadges<T>? dayBadges;
+
+  /// Whether a day may be picked, asked of each day's cell, a plain day
+  /// (the local midnight of its date), as the cell builds; null takes
+  /// every day.
+  final bool Function(DateTime day)? isDayEnabled;
 
   /// The most weeks a month's grid takes.
   static const int maxWeeks = 6;
@@ -390,7 +401,9 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
   }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+    final onSelectDay = widget.onSelectDay;
+    if (onSelectDay == null ||
+        (event is! KeyDownEvent && event is! KeyRepeatEvent)) {
       return KeyEventResult.ignored;
     }
     final selected = _selectedDay;
@@ -408,7 +421,9 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
     } else {
       return KeyEventResult.ignored;
     }
-    widget.onSelectDay(day);
+    if (widget.isDayEnabled?.call(day) ?? true) {
+      onSelectDay(day);
+    }
     return KeyEventResult.handled;
   }
 
@@ -535,22 +550,26 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
   }
 
   Widget _buildDay(CalendarMonthGrid grid, DateTime day) {
+    final enabled = widget.isDayEnabled?.call(day);
     if (!grid.contains(day)) {
       return _NeighbourDay<T>(
         store: widget.store,
         day: day,
         isSelected: day == _selectedDay,
         isToday: day == _today,
+        enabled: enabled,
         collapse: widget.collapse,
         dayBadges: widget.dayBadges,
       );
     }
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () {
-        _focus.requestFocus();
-        widget.onSelectDay(day);
-      },
+      onTap: widget.onSelectDay == null || enabled == false
+          ? null
+          : () {
+              _focus.requestFocus();
+              widget.onSelectDay?.call(day);
+            },
       child: DayMarkerListener<T>(
         store: widget.store,
         day: day,
@@ -564,6 +583,7 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
             isToday: day == _today,
             badges: badges,
             collapse: widget.collapse,
+            enabled: enabled,
           );
         },
       ),
@@ -573,13 +593,15 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
 
 /// A day of the month beside a [MonthStrip]'s in one of its blank cells:
 /// nothing while [collapse] is 0, and otherwise its [DayCell], unkeyed,
-/// faded in by [collapse], taking no pointers.
+/// faded in by [collapse], taking no pointers, drawn disabled where
+/// [enabled] is false, as the week strip draws it.
 class _NeighbourDay<T> extends StatelessWidget {
   const _NeighbourDay({
     required this.store,
     required this.day,
     required this.isSelected,
     required this.isToday,
+    required this.enabled,
     required this.collapse,
     required this.dayBadges,
   });
@@ -588,6 +610,10 @@ class _NeighbourDay<T> extends StatelessWidget {
   final DateTime day;
   final bool isSelected;
   final bool isToday;
+
+  /// [DayCell.enabled].
+  final bool? enabled;
+
   final Animation<double> collapse;
   final CalendarDayBadges<T>? dayBadges;
 
@@ -608,6 +634,7 @@ class _NeighbourDay<T> extends StatelessWidget {
               isToday: isToday,
               badges: badges,
               collapse: collapse,
+              enabled: enabled,
             );
           },
         ),

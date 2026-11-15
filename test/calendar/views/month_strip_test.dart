@@ -3,6 +3,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show KeyDownEvent, LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/calendar.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
@@ -141,6 +142,131 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(browsed, <DateTime>[DateTime(2026, 5)]);
+  });
+
+  testWidgets("MS3 a day isDayEnabled refuses draws disabled and takes no "
+      "tap and no arrow key, and with no onSelectDay no day takes either", (
+    tester,
+  ) async {
+    final store = MemoryCalendarStore<String>();
+    addTearDown(store.dispose);
+    final selected = <DateTime>[];
+    // The key downs the strip leaves to the widgets above it.
+    final passed = <LogicalKeyboardKey>[];
+    final refused = DateTime(2026, 4, 23);
+    Widget strip({
+      bool Function(DateTime day)? isDayEnabled,
+      bool selects = true,
+    }) {
+      return MaterialApp(
+        home: Focus(
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent) {
+              passed.add(event.logicalKey);
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 350.0,
+              child: MonthStrip<String>(
+                store: store,
+                month: DateTime(2026, 4),
+                selectedDay: DateTime(2026, 4, 22),
+                today: DateTime(2026, 4, 21),
+                weekdays: CalendarWeekdaySet.all,
+                rowHeight: 48.0,
+                collapse: kAlwaysDismissedAnimation,
+                onSelectDay: selects ? selected.add : null,
+                onBrowse: (month) {},
+                isDayEnabled: isDayEnabled,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Finder cellOf(DateTime day) {
+      return find.byKey(dayCellKey(day));
+    }
+
+    FocusNode stripNode() {
+      return tester
+          .widget<Focus>(
+            find
+                .descendant(
+                  of: find.byType(MonthStrip<String>),
+                  matching: find.byType(Focus),
+                )
+                .first,
+          )
+          .focusNode!;
+    }
+
+    await tester.pumpWidget(
+      strip(
+        isDayEnabled: (day) {
+          return day != refused;
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.widget<DayCell>(cellOf(refused)).enabled, isFalse);
+    expect(
+      tester.widget<DayCell>(cellOf(DateTime(2026, 4, 24))).enabled,
+      isTrue,
+    );
+    final theme = CalendarTheme.of(
+      tester.element(find.byType(MonthStrip<String>)),
+    );
+    final number = tester.widget<Text>(
+      find.descendant(of: cellOf(refused), matching: find.text("23")),
+    );
+    expect(
+      number.style!.color!.a,
+      moreOrLessEquals(theme.text.a * theme.disabledOpacity),
+    );
+    await tester.tap(cellOf(refused));
+    await tester.pump();
+    expect(selected, isEmpty);
+    expect(stripNode().hasFocus, isFalse);
+
+    await tester.tap(cellOf(DateTime(2026, 4, 22)));
+    await tester.pump();
+    // Setup sanity: the tap on an enabled day reports it and focuses the
+    // strip.
+    expect(selected, <DateTime>[DateTime(2026, 4, 22)]);
+    expect(stripNode().hasFocus, isTrue);
+    selected.clear();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(selected, isEmpty);
+    expect(passed, isEmpty);
+
+    await tester.pumpWidget(strip());
+    await tester.pumpAndSettle();
+    expect(
+      tester.widgetList<DayCell>(find.byType(DayCell)).map((cell) {
+        return cell.enabled;
+      }).toSet(),
+      <bool?>{null},
+    );
+
+    await tester.pumpWidget(strip(selects: false));
+    await tester.pumpAndSettle();
+    stripNode().unfocus();
+    await tester.pump();
+    await tester.tap(cellOf(DateTime(2026, 4, 24)));
+    await tester.pump();
+    expect(stripNode().hasFocus, isFalse);
+    stripNode().requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(selected, isEmpty);
+    expect(passed, <LogicalKeyboardKey>[LogicalKeyboardKey.arrowRight]);
   });
 
   testWidgets(

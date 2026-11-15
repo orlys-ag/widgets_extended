@@ -23,7 +23,9 @@ ValueKey<String> weekStripDayKey(DateTime day) {
 /// over its number on a circle, the selected day's in the primary colour,
 /// today's ringed, and badges on a day with items once the store has read
 /// it, one for each kind [dayBadges] gives its entries. The strip is as tall as a day ([stripCellHeight]), at any text
-/// size. A tap on a day reports [onSelectDay].
+/// size. A tap on a day reports [onSelectDay]. A day [isDayEnabled]
+/// refuses draws disabled and takes no tap, and with no [onSelectDay] no
+/// day takes one.
 ///
 /// A horizontal drag slides the strip through the shown days, one after
 /// another across weeks and months, and selects nothing; a release comes
@@ -37,7 +39,8 @@ ValueKey<String> weekStripDayKey(DateTime day) {
 /// after the frame, to the shown days of that day's week, sliding there
 /// over the [CalendarTheme]'s motion, or at once where its duration is
 /// zero, from a week short of them when they are further away; a new
-/// [recalls] does too, wherever [selectedDay] is.
+/// [recalls] does too, wherever [selectedDay] is, to the shown days of
+/// [recallDay]'s week where it is given.
 ///
 /// [weekdays] are fixed for the strip's life: give a strip that changes
 /// them its own key.
@@ -51,9 +54,11 @@ class WeekStrip<T> extends StatefulWidget {
     required this.onSelectDay,
     required this.onBrowse,
     this.recalls = 0,
+    this.recallDay,
     this.initialDay,
     this.initialMiddleDay,
     this.dayBadges,
+    this.isDayEnabled,
   });
 
   final CalendarStore<T> store;
@@ -65,7 +70,9 @@ class WeekStrip<T> extends StatefulWidget {
   final DateTime today;
 
   final CalendarWeekdaySet weekdays;
-  final ValueChanged<DateTime> onSelectDay;
+
+  /// Reports a day tapped; null for a strip whose days take no tap.
+  final ValueChanged<DateTime>? onSelectDay;
 
   /// Reports the day that has come to the middle of the strip, which for an
   /// odd count of days is in the month most of the days it shows are in.
@@ -74,6 +81,10 @@ class WeekStrip<T> extends StatefulWidget {
   /// Counts the calls to bring the strip back to [selectedDay]'s week,
   /// from wherever a drag left it, even where it shows [selectedDay].
   final int recalls;
+
+  /// The day whose week a new [recalls] brings the strip to; null for
+  /// [selectedDay]'s.
+  final DateTime? recallDay;
 
   /// A day of the week the strip opens on; null opens it on
   /// [selectedDay]'s.
@@ -88,6 +99,11 @@ class WeekStrip<T> extends StatefulWidget {
   /// The kinds of entry the days' badges mark; null for one primary dot
   /// on a day with entries.
   final CalendarDayBadges<T>? dayBadges;
+
+  /// Whether a day may be picked, asked of each day's cell, a plain day
+  /// (the local midnight of its date), as the cell builds; null takes
+  /// every day.
+  final bool Function(DateTime day)? isDayEnabled;
 
   @override
   State<WeekStrip<T>> createState() {
@@ -201,10 +217,14 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
     }
     final recalled = widget.recalls != oldWidget.recalls;
     if (recalled || moved) {
+      final recallDay = widget.recallDay;
+      final target = recalled && recallDay != null
+          ? _plainTwinOf(recallDay)
+          : _selectedDay;
       // After the frame, because a scroll dispatches scroll notifications,
       // which must not reach their listeners mid-build.
       SchedulerBinding.instance.addPostFrameCallback((_) {
-        _showSelected(always: recalled);
+        _showSelected(target, always: recalled);
       });
     }
   }
@@ -244,23 +264,23 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
     return week * _count + position;
   }
 
-  /// Slides the strip to the shown days of the selected day's week where
-  /// the middle of that day's cell lies outside it, or [always]. Days more
-  /// than a week away are jumped to a week short of first, so the slide is
-  /// a week's at most, as fast whatever the distance.
-  void _showSelected({required bool always}) {
+  /// Slides the strip to the shown days of [day]'s week, a plain day,
+  /// where the middle of that day's cell lies outside it, or [always]. Days
+  /// more than a week away are jumped to a week short of first, so the
+  /// slide is a week's at most, as fast whatever the distance.
+  void _showSelected(DateTime day, {required bool always}) {
     final extent = _extent;
     if (!mounted || !_scroll.hasClients || extent == null) {
       return;
     }
     final position = _scroll.position;
-    final middle = (_indexOf(_selectedDay) + 0.5) * extent;
+    final middle = (_indexOf(day) + 0.5) * extent;
     if (!always &&
         middle >= position.pixels &&
         middle <= position.pixels + position.viewportDimension) {
       return;
     }
-    final target = _indexOf(widget.weekdays.weekStartOf(_selectedDay)) * extent;
+    final target = _indexOf(widget.weekdays.weekStartOf(day)) * extent;
     final week = _count * extent;
     final distance = target - position.pixels;
     final follow = ++_follows;
@@ -404,12 +424,15 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
   }
 
   Widget _buildDay(DateTime day) {
+    final enabled = widget.isDayEnabled?.call(day);
     return GestureDetector(
       key: weekStripDayKey(day),
       behavior: HitTestBehavior.opaque,
-      onTap: () {
-        widget.onSelectDay(day);
-      },
+      onTap: widget.onSelectDay == null || enabled == false
+          ? null
+          : () {
+              widget.onSelectDay?.call(day);
+            },
       child: DayMarkerListener<T>(
         store: widget.store,
         day: day,
@@ -422,6 +445,7 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
             isToday: day == _today,
             badges: badges,
             collapse: kAlwaysCompleteAnimation,
+            enabled: enabled,
           );
         },
       ),
