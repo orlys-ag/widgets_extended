@@ -3822,6 +3822,59 @@ void main() {
       lessThanOrEqualTo(page.bottom + 0.5),
     );
   });
+
+  testWidgets("IP14 End date's picker unfolded at the bottom of the form's "
+      "view scrolls into it while an unrelated animation runs", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    await openDayPicker(tester, "End date");
+    final scrollable = find
+        .descendant(
+          of: find.byType(BottomSheet),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    final page = tester.getRect(scrollable);
+    final opened = tester.getRect(pickerPanel("End date"));
+    final unrelated = AnimationController(
+      vsync: tester,
+      duration: const Duration(seconds: 1),
+    )..repeat();
+    try {
+      await tester.tap(
+        find.descendant(
+          of: dayPickerFinder("End date"),
+          matching: find.byKey(calendarPullTabKey),
+        ),
+      );
+      for (var frame = 0; frame < 50; frame++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      // Setup sanity: the unrelated animation still runs, the picker
+      // unfolded into its month, and the panel grew.
+      expect(tester.binding.transientCallbackCount, greaterThan(0));
+      expect(
+        find.descendant(
+          of: dayPickerFinder("End date"),
+          matching: find.byType(MonthStrip<ItemPayload>),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.getRect(pickerPanel("End date")).height,
+        greaterThan(opened.height),
+      );
+      expect(
+        tester.getRect(pickerPanel("End date")).bottom,
+        lessThanOrEqualTo(page.bottom + 0.5),
+      );
+    } finally {
+      unrelated.dispose();
+    }
+  });
 }
 
 /// An offset from UTC as the zone panel writes it: "UTC-04:00".

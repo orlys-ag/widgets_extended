@@ -589,11 +589,7 @@ void main() {
       expect(made.schedule, schedule);
       expect(made.problems, fresh.problems, reason: "$schedule");
       expect(made.overlaps, fresh.overlaps, reason: "$schedule");
-      expect(
-        made.firstStartMinute,
-        fresh.firstStartMinute,
-        reason: "$schedule",
-      );
+      expect(made.firstStartMinute, fresh.firstStartMinute, reason: "$schedule");
       expect(made.nextFree, fresh.nextFree, reason: "$schedule");
       expect(made.startFixed, fresh.startFixed, reason: "$schedule");
     }

@@ -3263,9 +3263,15 @@ void main() {
           return !under;
         });
         if (under) {
-          counts.update(element.widget.runtimeType, (count) {
-            return count + 1;
-          }, ifAbsent: () => 1);
+          counts.update(
+            element.widget.runtimeType,
+            (count) {
+              return count + 1;
+            },
+            ifAbsent: () {
+              return 1;
+            },
+          );
         }
       };
       try {

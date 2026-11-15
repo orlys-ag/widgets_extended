@@ -1,9 +1,11 @@
 /// The inline day picker through the package barrel: what it opens on and
 /// the weeks its first column starts, what its chevrons and month picks
 /// report under each setting, the days its first and last day and its
-/// predicate refuse, and when it asks the predicate.
+/// predicate refuse, when it asks the predicate, and what a store given in
+/// a later build reads.
 library;
 
+import 'dart:async';
 import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
@@ -247,12 +249,18 @@ void main() {
 
     await tester.tap(find.bySemanticsLabel("Show the week"));
     await tester.pumpAndSettle();
+    final around = daysFrom(DateTime(2026, 4, 1), 91);
+    final shownBefore = around.where(shows).toSet();
+    // Setup sanity: the week row shows one week.
+    expect(shownBefore, hasLength(7));
     await tester.fling(
       find.byType(CalendarDayPicker<String>),
       const Offset(-300.0, 0.0),
       3000.0,
     );
     await tester.pumpAndSettle();
+    // Setup sanity: the fling moved the week row.
+    expect(around.where(shows).toSet().difference(shownBefore), isNotEmpty);
     await tester.pumpWidget(picker());
     await tester.pumpAndSettle();
 
@@ -376,4 +384,118 @@ void main() {
     expect(shows(tuesday), isTrue);
     semantics.dispose();
   });
+
+  testWidgets("DP5 a store given in a later build reads the shown month, and "
+      "its entries badge their days", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final wednesday = DateTime(2026, 4, 22);
+    final source = HeldReads(<CalendarEntry<String>>[
+      CalendarEntry<String>(
+        id: "write",
+        start: DateTime(2026, 4, 22, 9),
+        end: DateTime(2026, 4, 22, 10),
+        title: "Write",
+        color: const Color(0xFF3366CC),
+        payload: "write",
+      ),
+    ]);
+    final caching = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(caching.dispose);
+    // A calendar shows June from the store, which a store shows entries of
+    // only once its shown range is ready.
+    caching.show(DateTime(2026, 6, 1), DateTime(2026, 6, 30));
+    source.reads.single.answer();
+    source.reads.clear();
+    await tester.pump();
+    // Setup sanity: the shown range is ready.
+    expect(caching.status, CalendarLoadStatus.ready);
+    final memory = MemoryCalendarStore<String>();
+    addTearDown(memory.dispose);
+    Widget picker(CalendarStore<String> store) {
+      return app(
+        CalendarDayPicker<String>(
+          value: tuesday,
+          onChanged: (day) {},
+          store: store,
+        ),
+      );
+    }
+
+    await tester.pumpWidget(picker(memory));
+    await tester.pumpAndSettle();
+    // Setup sanity: with the empty store, Wednesday shows no badge.
+    expect(dayCell(wednesday), findsOneWidget);
+
+    await tester.pumpWidget(picker(caching));
+    await tester.pumpAndSettle();
+    expect(
+      source.reads.where((read) {
+        return CalendarDates.dayNumber(read.first) <=
+                CalendarDates.dayNumber(wednesday) &&
+            CalendarDates.dayNumber(read.last) >=
+                CalendarDates.dayNumber(wednesday);
+      }),
+      isNotEmpty,
+    );
+    for (final read in List.of(source.reads)) {
+      read.answer();
+    }
+    await tester.pumpAndSettle();
+    expect(
+      find.bySemanticsLabel(
+        const DefaultCalendarLocalizations().dayWithBadges(
+          wednesday,
+          const <String?>[null],
+        ),
+      ),
+      findsOneWidget,
+    );
+    semantics.dispose();
+  });
+}
+
+/// A data source each of whose reads waits until the test answers it, with
+/// the entries that start on its days.
+class HeldReads implements CalendarDataSource<String> {
+  HeldReads(this.entries);
+
+  final List<CalendarEntry<String>> entries;
+
+  final List<({DateTime first, DateTime last, VoidCallback answer})> reads =
+      <({DateTime first, DateTime last, VoidCallback answer})>[];
+
+  @override
+  Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    final from = CalendarDates.dayNumber(first);
+    final to = CalendarDates.dayNumber(last);
+    final completer = Completer<List<CalendarEntry<String>>>();
+    reads.add((
+      first: first,
+      last: last,
+      answer: () {
+        completer.complete(<CalendarEntry<String>>[
+          for (final entry in entries)
+            if (CalendarDates.dayNumber(entry.start) >= from &&
+                CalendarDates.dayNumber(entry.start) <= to)
+              entry,
+        ]);
+      },
+    ));
+    return completer.future;
+  }
+
+  @override
+  Future<CalendarEntry<String>> create(CalendarEntry<String> draft) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<CalendarEntry<String>> replace(CalendarEntry<String> entry) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<void> delete(String id) {
+    throw UnimplementedError();
+  }
 }

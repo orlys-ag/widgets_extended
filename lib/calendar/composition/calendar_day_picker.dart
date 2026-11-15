@@ -197,8 +197,14 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
     )..addListener(_handleCard);
     _first = _plainOf(widget.firstDay);
     _last = _plainOf(widget.lastDay);
-    // After the frame, as a read can notify the cells' listeners, which
-    // must not rebuild mid-build.
+    _readShownMonthAfterFrame();
+  }
+
+  /// Asks the store to read the days of the shown month's grid, after the
+  /// frame, as a read can notify the cells' listeners, which must not
+  /// rebuild mid-build. Neither strip reads when its store changes, so a
+  /// store given in a later build reads here.
+  void _readShownMonthAfterFrame() {
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -245,6 +251,9 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
     }
     if (widget.store == null && _ownStore == null) {
       _ownStore = MemoryCalendarStore<T>();
+    }
+    if (!identical(widget.store, oldWidget.store)) {
+      _readShownMonthAfterFrame();
     }
     if (!_sameDate(widget.firstDay, oldWidget.firstDay)) {
       _first = _plainOf(widget.firstDay);

@@ -1374,6 +1374,9 @@ class _PickerPanelState extends State<_PickerPanel>
   /// its own under way, and has not been revealed since.
   bool _grown = false;
 
+  /// Whether the picker grew since [_revealGrowth] last looked.
+  bool _growing = false;
+
   /// Whether [_revealGrowth] waits among the post-frame callbacks.
   bool _growthQueued = false;
 
@@ -1547,6 +1550,7 @@ class _PickerPanelState extends State<_PickerPanel>
       return;
     }
     _grown = true;
+    _growing = true;
     _queueGrowthReveal();
   }
 
@@ -1558,17 +1562,21 @@ class _PickerPanelState extends State<_PickerPanel>
     WidgetsBinding.instance.addPostFrameCallback(_revealGrowthCallback);
   }
 
-  /// Reveals a grown picker once nothing moves it: a motion still running,
-  /// such as a day picker's unfold, has a transient callback for the next
-  /// frame, after which this asks again; a pointer down on the pickers asks
-  /// again as it lifts. So a growth over many frames is revealed once.
+  /// Reveals a grown picker once its height holds: after a frame in which
+  /// it grew, as each frame of a day picker's unfold does, this asks again
+  /// after the next frame, which it schedules, since no motion may be left
+  /// to; a pointer down on the pickers asks again as it lifts. So a growth
+  /// over many frames is revealed once, a frame after it ends, whatever
+  /// other motion runs.
   void _revealGrowth(Duration timeStamp) {
     _growthQueued = false;
     if (!mounted || !_grown || _pointers > 0) {
       return;
     }
-    if (WidgetsBinding.instance.transientCallbackCount > 0) {
+    if (_growing) {
+      _growing = false;
       _queueGrowthReveal();
+      WidgetsBinding.instance.ensureVisualUpdate();
       return;
     }
     _grown = false;
