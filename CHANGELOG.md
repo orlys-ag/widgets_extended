@@ -189,7 +189,10 @@ listed the header shows no view button, where it named the view. A custom
 header receives the new controls as `CalendarHeaderDetails.onToday`,
 `canGoToToday`, `editable` and `onEditableChanged`, and their words come
 from two new `CalendarLocalizations` members with English defaults,
-`todayTooltip` and `editModeTooltip`.
+`todayTooltip` and `editModeTooltip`. The chevrons are 32-pixel circles
+around 24-pixel icons, like the Today button, the toggle and the view
+button, and the previous chevron's circle lies at the row's start: with
+`CalendarDayPicker.daysToEdges` it spans the first column's day circles.
 - A change of view no longer resets the calendar card or the month picker.
 The card opens on its month in every view, Day included, which opened it
 folded into the week strip. A pick of another view or of the view shown, a

@@ -2,7 +2,10 @@
 /// step by, what its header shows and calls, and the header built in.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
@@ -156,9 +159,11 @@ typedef CalendarHeaderBuilder =
 /// mode; then, 4 px on, where [CalendarHeaderDetails.views] lists more
 /// than one view, the view button, the icon of the view shown, which a
 /// screen reader hears named, and which opens a menu of the views, each
-/// with its icon and name. The Today button, the toggle and the view
-/// button are 32 px circles around 22 px icons. The title gives up width, scaling down, only
-/// where the row is too narrow for the rest.
+/// with its icon and name. The chevrons are 32 px circles around 24 px
+/// icons, the previous chevron's circle lying at the row's start; the Today
+/// button, the toggle and the view button are 32 px circles around 22 px
+/// icons. The title gives up width, scaling down, only where the row is too
+/// narrow for the rest.
 ///
 /// The Today button shows while [CalendarHeaderDetails.canGoToToday] is
 /// true, fading in and out over the theme's motion, and keeps its width
@@ -180,12 +185,24 @@ class CalendarHeader extends StatelessWidget {
 
   final CalendarHeaderDetails details;
 
+  /// The diameter of the header's round buttons, the chevrons included.
+  static const double _circle = 32.0;
+
+  /// The style of the chevrons: a [_circle] circle around a 24 px icon.
+  static const ButtonStyle _chevronButton = ButtonStyle(
+    visualDensity: VisualDensity.compact,
+    fixedSize: WidgetStatePropertyAll<Size>(Size.square(_circle)),
+    padding: WidgetStatePropertyAll<EdgeInsetsGeometry>(EdgeInsets.zero),
+    iconSize: WidgetStatePropertyAll<double>(24.0),
+    shape: WidgetStatePropertyAll<OutlinedBorder>(CircleBorder()),
+  );
+
   /// The style of the Today button, the edit mode toggle and the view
-  /// button: a 32 px circle around a 22 px icon, in a tap target as tall
-  /// as the chevrons'.
+  /// button: a [_circle] circle around a 22 px icon, in a tap target as
+  /// tall as the chevrons'.
   static const ButtonStyle _roundButton = ButtonStyle(
     visualDensity: VisualDensity.compact,
-    fixedSize: WidgetStatePropertyAll<Size>(Size.square(32.0)),
+    fixedSize: WidgetStatePropertyAll<Size>(Size.square(_circle)),
     padding: WidgetStatePropertyAll<EdgeInsetsGeometry>(EdgeInsets.zero),
     iconSize: WidgetStatePropertyAll<double>(22.0),
     shape: WidgetStatePropertyAll<OutlinedBorder>(CircleBorder()),
@@ -302,12 +319,15 @@ class CalendarHeader extends StatelessWidget {
         Expanded(
           child: Row(
             children: <Widget>[
-              IconButton(
-                icon: const Icon(Icons.chevron_left),
-                tooltip: _previousTooltip(strings, details.stepUnit),
-                color: theme.text,
-                visualDensity: VisualDensity.compact,
-                onPressed: details.onPrevious,
+              _CircleAtStart(
+                extent: _circle,
+                child: IconButton(
+                  icon: const Icon(Icons.chevron_left),
+                  tooltip: _previousTooltip(strings, details.stepUnit),
+                  color: theme.text,
+                  style: _chevronButton,
+                  onPressed: details.onPrevious,
+                ),
               ),
               // Shrinks, and the title in it, only where the row is too
               // narrow for it.
@@ -338,7 +358,7 @@ class CalendarHeader extends StatelessWidget {
                 icon: const Icon(Icons.chevron_right),
                 tooltip: _nextTooltip(strings, details.stepUnit),
                 color: theme.text,
-                visualDensity: VisualDensity.compact,
+                style: _chevronButton,
                 onPressed: details.onNext,
               ),
               if (onToday != null)
@@ -466,6 +486,124 @@ class _TodayButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// [child], a button whose [extent]-wide circle is centred in its tap
+/// target, placed so that the circle lies at the box's start. The box is as
+/// wide as the child less the target's margin beside the circle on that
+/// side, which the child overhangs past the start; there it takes no
+/// pointer, as a [RenderBox] hit-tests only inside its own size. A target
+/// no wider than the circle leaves no margin.
+class _CircleAtStart extends SingleChildRenderObjectWidget {
+  const _CircleAtStart({required this.extent, required Widget super.child});
+
+  final double extent;
+
+  @override
+  _RenderCircleAtStart createRenderObject(BuildContext context) {
+    return _RenderCircleAtStart(
+      extent: extent,
+      textDirection: Directionality.of(context),
+    );
+  }
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderCircleAtStart renderObject,
+  ) {
+    renderObject
+      ..extent = extent
+      ..textDirection = Directionality.of(context);
+  }
+}
+
+class _RenderCircleAtStart extends RenderShiftedBox {
+  _RenderCircleAtStart({
+    required double extent,
+    required TextDirection textDirection,
+  }) : _extent = extent,
+       _textDirection = textDirection,
+       super(null);
+
+  double get extent {
+    return _extent;
+  }
+
+  double _extent;
+
+  set extent(double value) {
+    if (value == _extent) {
+      return;
+    }
+    _extent = value;
+    markNeedsLayout();
+  }
+
+  TextDirection get textDirection {
+    return _textDirection;
+  }
+
+  TextDirection _textDirection;
+
+  set textDirection(TextDirection value) {
+    if (value == _textDirection) {
+      return;
+    }
+    _textDirection = value;
+    markNeedsLayout();
+  }
+
+  /// The margin beside the circle on each side of a child [width] wide.
+  double _marginOf(double width) {
+    return math.max(0.0, (width - _extent) / 2.0);
+  }
+
+  @override
+  double computeMinIntrinsicWidth(double height) {
+    final width = child?.getMinIntrinsicWidth(height) ?? 0.0;
+    return width - _marginOf(width);
+  }
+
+  @override
+  double computeMaxIntrinsicWidth(double height) {
+    final width = child?.getMaxIntrinsicWidth(height) ?? 0.0;
+    return width - _marginOf(width);
+  }
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) {
+    final child = this.child;
+    if (child == null) {
+      return constraints.smallest;
+    }
+    final size = child.getDryLayout(constraints.loosen());
+    return constraints.constrain(
+      Size(size.width - _marginOf(size.width), size.height),
+    );
+  }
+
+  @override
+  void performLayout() {
+    final child = this.child;
+    if (child == null) {
+      size = constraints.smallest;
+      return;
+    }
+    child.layout(constraints.loosen(), parentUsesSize: true);
+    final childSize = child.size;
+    final margin = _marginOf(childSize.width);
+    size = constraints.constrain(
+      Size(childSize.width - margin, childSize.height),
+    );
+    final dx = _textDirection == TextDirection.ltr
+        ? -margin
+        : size.width - childSize.width + margin;
+    (child.parentData! as BoxParentData).offset = Offset(
+      dx,
+      (size.height - childSize.height) / 2.0,
     );
   }
 }

@@ -1,6 +1,7 @@
 /// The calendar's built-in header: its one row, the chevrons and the title
 /// then the Today button at its start, and the edit mode toggle and the
-/// view button at its end; when the Today button shows, on the clock of the
+/// view button at its end; the chevrons' circles, the previous one's at the
+/// row's start; when the Today button shows, on the clock of the
 /// store's zone and past midnight, how it fades and keeps its size, and
 /// what a tap on it does; the toggle's look, what a screen reader hears of
 /// it and what it reports; the view button's icon, what a screen reader
@@ -693,5 +694,79 @@ void main() {
       tester.getSize(find.byIcon(Icons.chevron_right)),
       const Size.square(24.0),
     );
+  });
+
+  testWidgets("HD13 the chevrons are 32 px circles around 24 px icons, and "
+      "the previous chevron's circle lies at the row's start, where a tap "
+      "steps back, in either direction and whether the tap targets are "
+      "padded or shrink-wrapped", (tester) async {
+    usePhoneView(tester);
+    for (final direction in TextDirection.values) {
+      for (final size in MaterialTapTargetSize.values) {
+        final reason = "$direction $size";
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeData(
+              splashFactory: NoSplash.splashFactory,
+              materialTapTargetSize: size,
+            ),
+            home: Directionality(
+              textDirection: direction,
+              child: CalendarView<String>(
+                key: ValueKey<String>(reason),
+                store: store,
+                clock: fixedClock,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final header = tester.getRect(find.byType(CalendarHeader));
+        Rect circleOf(IconData icon) {
+          final ink = find
+              .descendant(
+                of: find.ancestor(
+                  of: find.byIcon(icon),
+                  matching: find.byType(IconButton),
+                ),
+                matching: find.byType(Material),
+              )
+              .first;
+          expect(
+            tester.widget<Material>(ink).shape,
+            isA<CircleBorder>(),
+            reason: "$reason $icon",
+          );
+          expect(
+            tester.getSize(find.byIcon(icon)),
+            const Size.square(24.0),
+            reason: "$reason $icon",
+          );
+          return tester.getRect(ink);
+        }
+
+        final previous = circleOf(Icons.chevron_left);
+        final next = circleOf(Icons.chevron_right);
+        expect(previous.size, const Size.square(32.0), reason: reason);
+        expect(next.size, const Size.square(32.0), reason: reason);
+        if (direction == TextDirection.ltr) {
+          expect(previous.left, header.left, reason: reason);
+        } else {
+          expect(previous.right, header.right, reason: reason);
+        }
+        // Setup sanity: the calendar shows April, which a step back leaves.
+        expect(find.text("Apr 2026"), findsOneWidget, reason: reason);
+        await tester.tapAt(
+          Offset(
+            direction == TextDirection.ltr
+                ? header.left + 1.0
+                : header.right - 1.0,
+            previous.center.dy,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text("Mar 2026"), findsOneWidget, reason: reason);
+      }
+    }
   });
 }
