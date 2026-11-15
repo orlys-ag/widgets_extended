@@ -48,8 +48,12 @@ const ValueKey<String> formItemCardKey = ValueKey<String>("form-item-card");
 /// Opens the form for a new item over the range [range] picked, with All
 /// day on for an all-day range, its type chosen in the form, Task first;
 /// its Save [policy] checks at the time [now] reads then, its times step
-/// by [slotMinutes], and it writes them on [hourLabelFormat]'s clock.
-/// Completes when the form closes, whether or not an item was created.
+/// by [slotMinutes], and it writes them on [hourLabelFormat]'s clock. Its
+/// date fields' day pickers badge the days with entries of [store] as
+/// [dayBadges] marks them, or with one primary dot where it is null, and
+/// start their weeks on the weekday column [firstColumn], 0 for Monday to
+/// 6 for Sunday. Completes when the form closes, whether or not an item
+/// was created.
 Future<void> showCreateFlow(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
@@ -58,6 +62,8 @@ Future<void> showCreateFlow(
   required ValueGetter<CalendarNow> now,
   required CalendarHourLabelFormat hourLabelFormat,
   int slotMinutes = CalendarDates.defaultSlotMinutes,
+  CalendarDayBadges<ItemPayload>? dayBadges,
+  int firstColumn = 0,
 }) {
   const type = CalendarItemType.task;
   final draft = calendarItem(
@@ -76,6 +82,8 @@ Future<void> showCreateFlow(
     now: now,
     hourLabelFormat: hourLabelFormat,
     slotMinutes: slotMinutes,
+    dayBadges: dayBadges,
+    firstColumn: firstColumn,
   );
 }
 
@@ -84,8 +92,10 @@ Future<void> showCreateFlow(
 /// writes them on [hourLabelFormat]'s clock. Of an item [policy], when the
 /// form opens, lets neither move nor resize its start, the start date, the
 /// start time and All day take no input; and the form offers Delete only
-/// where [policy] then lets the item be deleted. Does nothing when the
-/// store does not hold it.
+/// where [policy] then lets the item be deleted. Its date fields' day
+/// pickers badge the days as [dayBadges] marks them and start their weeks
+/// on [firstColumn], as [showCreateFlow]'s do. Does nothing when the store
+/// does not hold it.
 Future<void> showEditForm(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
@@ -94,6 +104,8 @@ Future<void> showEditForm(
   required ValueGetter<CalendarNow> now,
   required CalendarHourLabelFormat hourLabelFormat,
   int slotMinutes = CalendarDates.defaultSlotMinutes,
+  CalendarDayBadges<ItemPayload>? dayBadges,
+  int firstColumn = 0,
 }) async {
   final item = store.storedEntry(id);
   if (item == null) {
@@ -107,6 +119,8 @@ Future<void> showEditForm(
     now: now,
     hourLabelFormat: hourLabelFormat,
     slotMinutes: slotMinutes,
+    dayBadges: dayBadges,
+    firstColumn: firstColumn,
   );
 }
 
@@ -221,6 +235,8 @@ Future<void> _showForm(
   CalendarEditPolicy<ItemPayload>? policy,
   ValueGetter<CalendarNow>? now,
   int slotMinutes = CalendarDates.defaultSlotMinutes,
+  CalendarDayBadges<ItemPayload>? dayBadges,
+  int firstColumn = 0,
 }) {
   // Neither a drag nor the barrier closes the sheet: a drag would close it
   // through the sheet's onClosing, which no PopScope stops, so a save in
@@ -241,6 +257,8 @@ Future<void> _showForm(
         now: now ?? _clockNow,
         hourLabelFormat: hourLabelFormat,
         slotMinutes: slotMinutes,
+        dayBadges: dayBadges,
+        firstColumn: firstColumn,
       );
     },
   );
@@ -267,10 +285,19 @@ class _ItemForm extends StatefulWidget {
     required this.now,
     required this.hourLabelFormat,
     required this.slotMinutes,
+    required this.dayBadges,
+    required this.firstColumn,
   });
 
   final CalendarStore<ItemPayload> store;
   final CalendarItem item;
+
+  /// The kinds of entry the day pickers' badges mark; null for one primary
+  /// dot on a day with entries.
+  final CalendarDayBadges<ItemPayload>? dayBadges;
+
+  /// The weekday column the day pickers' weeks start on.
+  final int firstColumn;
 
   /// The step of the time fields' slot boundaries.
   final int slotMinutes;
@@ -941,6 +968,9 @@ class _ItemFormState extends State<_ItemForm> {
         hourLabelFormat: widget.hourLabelFormat,
         now: widget.now,
         zone: widget.store.zone,
+        store: widget.store,
+        dayBadges: widget.dayBadges,
+        firstColumn: widget.firstColumn,
         locked: _locked,
         errors: _scheduleErrors(),
         onChanged: _scheduleChanged,
