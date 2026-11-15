@@ -20,6 +20,8 @@ library;
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/gestures.dart'
+    show GestureRecognizer, VerticalDragGestureRecognizer;
 import 'package:flutter/material.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
@@ -240,16 +242,15 @@ Future<void> _showForm(
   CalendarDayBadges<ItemPayload>? dayBadges,
   int firstColumn = 0,
 }) {
-  // Neither a drag nor the barrier closes the sheet: a drag would close it
-  // through the sheet's onClosing, which no PopScope stops, so a save in
-  // flight would lose its outcome. Cancel, Save, Delete and the back
-  // gesture close it, the last through the form's PopScope.
+  // The barrier does not close the sheet. Cancel, Save, Delete, a drag down
+  // and the back gesture do, the last through the form's PopScope; a drag
+  // closes it through the sheet's onClosing, which no PopScope stops, so
+  // the form claims vertical drags while a save is in flight.
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
     isDismissible: false,
-    enableDrag: false,
     builder: (context) {
       return _ItemForm(
         store: store,
@@ -1037,125 +1038,147 @@ class _ItemFormState extends State<_ItemForm> {
         Theme.of(context).colorScheme.surfaceContainerLow;
     return PopScope(
       canPop: !_saving,
-      child: _KeyboardInset(
-        child: Padding(
-          padding: const EdgeInsets.only(top: 20.0, bottom: 12.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                child: Text(
-                  heading,
-                  style: const TextStyle(
-                    fontSize: 20.0,
-                    fontWeight: FontWeight.w600,
-                    color: HarborColors.text,
-                  ),
+      // While a save is in flight the form claims each vertical drag on it,
+      // so the sheet's own drag, which would close the sheet and drop the
+      // save's outcome, never starts. Its recognizer is of the sheet's kind,
+      // with the same default slop, and lies deeper, so it hears each move
+      // first and wins the gesture arena.
+      child: RawGestureDetector(
+        behavior: HitTestBehavior.opaque,
+        gestures: <Type, GestureRecognizerFactory<GestureRecognizer>>{
+          if (_saving)
+            VerticalDragGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<
+                  VerticalDragGestureRecognizer
+                >(
+                  () {
+                    return VerticalDragGestureRecognizer(debugOwner: this);
+                  },
+                  (VerticalDragGestureRecognizer recognizer) {
+                    recognizer.onStart = (details) {};
+                  },
                 ),
-              ),
-              // The page's padding lies inside its scroll view, so a drag
-              // anywhere across the sheet's width scrolls it. The view
-              // shrink-wraps, so the sheet is no taller than its page. The
-              // summary's strip holds the 12-pixel gaps above and below its
-              // card, and pins at the page's top while it takes at most
-              // half of the page.
-              Flexible(
-                child: CustomScrollView(
-                  shrinkWrap: true,
-                  slivers: <Widget>[
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          24.0,
-                          12.0,
-                          24.0,
-                          0.0,
-                        ),
-                        child: schedulingCard,
-                      ),
-                    ),
-                    FittingPinnedHeaderSliver(
-                      child: ColoredBox(
-                        color: sheetColor,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24.0,
-                            vertical: 12.0,
-                          ),
-                          child: summaryCard,
-                        ),
-                      ),
-                    ),
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          24.0,
-                          0.0,
-                          24.0,
-                          12.0,
-                        ),
-                        child: itemCard,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (message != null)
+        },
+        child: _KeyboardInset(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 20.0, bottom: 12.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(24.0, 0.0, 24.0, 8.0),
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
                   child: Text(
-                    message,
-                    style: const TextStyle(color: HarborColors.error),
+                    heading,
+                    style: const TextStyle(
+                      fontSize: 20.0,
+                      fontWeight: FontWeight.w600,
+                      color: HarborColors.text,
+                    ),
                   ),
                 ),
-              // Stacks the actions where a narrow screen cannot fit them in
-              // a row.
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                child: OverflowBar(
-                  alignment: MainAxisAlignment.end,
-                  spacing: 8.0,
-                  overflowAlignment: OverflowBarAlignment.end,
-                  children: <Widget>[
-                    if (widget.readOnly)
-                      TextButton(
-                        onPressed: () {
-                          Navigator.of(context).pop();
-                        },
-                        child: const Text("Close"),
+                // The page's padding lies inside its scroll view, so a drag
+                // anywhere across the sheet's width scrolls it. The view
+                // shrink-wraps, so the sheet is no taller than its page. The
+                // summary's strip holds the 12-pixel gaps above and below its
+                // card, and pins at the page's top while it takes at most
+                // half of the page.
+                Flexible(
+                  child: CustomScrollView(
+                    shrinkWrap: true,
+                    slivers: <Widget>[
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            24.0,
+                            12.0,
+                            24.0,
+                            0.0,
+                          ),
+                          child: schedulingCard,
+                        ),
                       ),
-                    if (_deletable)
-                      TextButton(
-                        onPressed: _saving ? null : _delete,
-                        child: const Text("Delete"),
+                      FittingPinnedHeaderSliver(
+                        child: ColoredBox(
+                          color: sheetColor,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24.0,
+                              vertical: 12.0,
+                            ),
+                            child: summaryCard,
+                          ),
+                        ),
                       ),
-                    if (!widget.readOnly) ...<Widget>[
-                      TextButton(
-                        onPressed: _saving
-                            ? null
-                            : () {
-                                Navigator.of(context).pop();
-                              },
-                        child: const Text("Cancel"),
-                      ),
-                      FilledButton(
-                        onPressed: _saving ? null : _save,
-                        child: _saving
-                            ? const SizedBox.square(
-                                dimension: 16.0,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.0,
-                                ),
-                              )
-                            : const Text("Save"),
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            24.0,
+                            0.0,
+                            24.0,
+                            12.0,
+                          ),
+                          child: itemCard,
+                        ),
                       ),
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
+                if (message != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24.0, 0.0, 24.0, 8.0),
+                    child: Text(
+                      message,
+                      style: const TextStyle(color: HarborColors.error),
+                    ),
+                  ),
+                // Stacks the actions where a narrow screen cannot fit them in
+                // a row.
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                  child: OverflowBar(
+                    alignment: MainAxisAlignment.end,
+                    spacing: 8.0,
+                    overflowAlignment: OverflowBarAlignment.end,
+                    children: <Widget>[
+                      if (widget.readOnly)
+                        TextButton(
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                          },
+                          child: const Text("Close"),
+                        ),
+                      if (_deletable)
+                        TextButton(
+                          onPressed: _saving ? null : _delete,
+                          child: const Text("Delete"),
+                        ),
+                      if (!widget.readOnly) ...<Widget>[
+                        TextButton(
+                          onPressed: _saving
+                              ? null
+                              : () {
+                                  Navigator.of(context).pop();
+                                },
+                          child: const Text("Cancel"),
+                        ),
+                        FilledButton(
+                          onPressed: _saving ? null : _save,
+                          child: _saving
+                              ? const SizedBox.square(
+                                  dimension: 16.0,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.0,
+                                  ),
+                                )
+                              : const Text("Save"),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

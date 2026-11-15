@@ -2,7 +2,8 @@
 /// the weeks its first column starts, what its chevrons and month picks
 /// report under each setting, the days its first and last day and its
 /// predicate refuse, when it asks the predicate, what a store given in a
-/// later build reads, and where its days lie with daysToEdges.
+/// later build reads, and where its days and its previous chevron lie with
+/// daysToEdges.
 library;
 
 import 'dart:async';
@@ -588,6 +589,36 @@ void main() {
       tester.getRect(circleIn(dayCell(DateTime(2026, 4, 20)))).left,
       greaterThan(side.left + 8.0),
     );
+    semantics.dispose();
+  });
+
+  testWidgets("DP7 with daysToEdges the previous chevron's circle spans the "
+      "first column's circles", (tester) async {
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(
+      app(
+        CalendarDayPicker<String>(
+          value: tuesday,
+          onChanged: (day) {},
+          daysToEdges: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final previous = tester.getRect(
+      find
+          .descendant(
+            of: find.ancestor(
+              of: find.byIcon(Icons.chevron_left),
+              matching: find.byType(IconButton),
+            ),
+            matching: find.byType(Material),
+          )
+          .first,
+    );
+    final monday = tester.getRect(circleIn(dayCell(DateTime(2026, 4, 20))));
+    expect(previous.left, moreOrLessEquals(monday.left));
+    expect(previous.right, moreOrLessEquals(monday.right));
     semantics.dispose();
   });
 }

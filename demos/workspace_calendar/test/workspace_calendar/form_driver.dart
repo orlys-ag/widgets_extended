@@ -316,10 +316,17 @@ Finder formDateFinder(String label) {
   );
 }
 
-/// The form's date field labelled [label] showing [date], as
-/// [CalendarDates.isoDate] writes it.
+/// The form's date field labelled [label] showing the day [date] names,
+/// an ISO date, as the field writes it, with its weekday: "Wed, Apr 22".
 Finder formDateShows(String label, String date) {
-  return find.descendant(of: formDateFinder(label), matching: find.text(date));
+  return find.descendant(
+    of: formDateFinder(label),
+    matching: find.text(
+      const DefaultMaterialLocalizations().formatMediumDate(
+        parseIsoDate(date)!,
+      ),
+    ),
+  );
 }
 
 /// The key of the panel under the row of the form's date field labelled
@@ -421,8 +428,8 @@ bool dayEnabled(WidgetTester tester, String label, DateTime day) {
       false;
 }
 
-/// Expects the form's Start date to name [day], and its End date the day
-/// [days] - 1 days after it, both as [CalendarDates.isoDate] writes them.
+/// Expects the form's Start date to name [day], an ISO date, and its End
+/// date the day [days] - 1 days after it ([formDateShows]).
 void expectFormDays(String day, int days) {
   expect(formDateShows("Start date", day), findsOneWidget);
   expect(

@@ -1,12 +1,14 @@
 /// The item form's sheet, its summary card and its schedule section: the
-/// sheet's container and type selector, the message of each schedule
-/// problem, the messages after a failed Save, the summary's lines, overlap
+/// sheet's container, what closes it and its type selector, the message of
+/// each schedule problem, the messages after a failed Save, the summary's
+/// lines, overlap
 /// notice, next free time and zone, and the section's All day switch, its
 /// Start and End rows, End date, options and kept kind, and its time
 /// fields, the pickers they open under their rows, what each picker
 /// refuses, and where the focus goes.
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -402,8 +404,8 @@ bool focusUnder(Finder finder) {
 void main() {
   setUpAll(tz_data.initializeTimeZones);
 
-  testWidgets("SF1 the form is a bottom sheet that neither a drag nor the "
-      "barrier closes, and the back gesture does", (tester) async {
+  testWidgets("SF1 the form is a bottom sheet that a drag down and the back "
+      "gesture close, and the barrier does not", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
     ]);
@@ -412,14 +414,55 @@ void main() {
     expect(find.byType(BottomSheet), findsOneWidget);
     expect(find.byType(Dialog), findsNothing);
 
-    await tester.drag(find.text("Edit Task"), const Offset(0.0, 600.0));
-    await tester.pumpAndSettle();
-    expect(find.text("Edit Task"), findsOneWidget);
     await tester.tapAt(const Offset(10.0, 10.0));
     await tester.pumpAndSettle();
     expect(find.text("Edit Task"), findsOneWidget);
+    await tester.drag(find.text("Edit Task"), const Offset(0.0, 600.0));
+    await tester.pumpAndSettle();
+    expect(find.text("Edit Task"), findsNothing);
 
+    await tester.tap(find.text("Open"));
+    await tester.pumpAndSettle();
+    // Setup sanity: the form is open again.
+    expect(find.text("Edit Task"), findsOneWidget);
     await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text("Edit Task"), findsNothing);
+  });
+
+  testWidgets("SF5 while a save is in flight a drag leaves the sheet where "
+      "it is, and the save then closes it", (tester) async {
+    final store = _HeldUpdates(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    final sheet = tester.getRect(find.byType(BottomSheet));
+    await tester.tap(saveFinder());
+    await tester.pump();
+    // Setup sanity: the save is in flight.
+    expect(
+      find.descendant(
+        of: saveFinder(),
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsOneWidget,
+    );
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.text("Edit Task")),
+    );
+    // The first move takes the pointer past the slop; a sheet that took the
+    // drag would follow the next.
+    await gesture.moveBy(const Offset(0.0, 20.0));
+    await gesture.moveBy(const Offset(0.0, 300.0));
+    await tester.pump();
+    expect(tester.getRect(find.byType(BottomSheet)), sheet);
+    await gesture.moveBy(const Offset(0.0, 300.0));
+    await gesture.up();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text("Edit Task"), findsOneWidget);
+
+    store.release.complete();
     await tester.pumpAndSettle();
     expect(find.text("Edit Task"), findsNothing);
   });
@@ -4030,6 +4073,45 @@ void main() {
       await tester.pumpAndSettle();
     }
   });
+
+  testWidgets("IP17 Start date and End date write their days with the "
+      "weekday, as the summary's lines begin, on a timed item that spans "
+      "days and on an all-day one", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), DateTime(2026, 4, 23, 10)),
+      task(
+        "item-2",
+        "Off",
+        DateTime(2026, 4, 24),
+        DateTime(2026, 4, 25),
+        isAllDay: true,
+      ),
+    ]);
+    addTearDown(store.dispose);
+    for (final (id, start, end) in <(String, String, String)>[
+      ("item-1", "Wed, Apr 22", "Thu, Apr 23"),
+      ("item-2", "Fri, Apr 24", "Fri, Apr 24"),
+    ]) {
+      await openEdit(tester, store, id: id);
+      for (final (label, day, line) in <(String, String, Key)>[
+        ("Start date", start, scheduleSummaryFirstLineKey),
+        ("End date", end, scheduleSummarySecondLineKey),
+      ]) {
+        expect(
+          find.descendant(of: formDateFinder(label), matching: find.text(day)),
+          findsOneWidget,
+          reason: "$id $label",
+        );
+        expect(
+          tester.widget<Text>(find.byKey(line)).data,
+          startsWith(day),
+          reason: "$id $label",
+        );
+      }
+      await tester.tap(formButton("Cancel"));
+      await tester.pumpAndSettle();
+    }
+  });
 }
 
 /// The circle of the day cell [cell] finds.
@@ -4155,5 +4237,18 @@ final class _Unnamed extends CalendarScheduleProblem {
   @override
   bool get atEnd {
     return false;
+  }
+}
+
+/// A store each of whose updates waits until the test completes [release].
+final class _HeldUpdates extends MemoryCalendarStore<ItemPayload> {
+  _HeldUpdates(List<CalendarItem> items) : super(entries: items);
+
+  final Completer<void> release = Completer<void>();
+
+  @override
+  Future<CalendarItem> update(CalendarItem entry) async {
+    await release.future;
+    return super.update(entry);
   }
 }

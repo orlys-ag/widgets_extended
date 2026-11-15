@@ -201,8 +201,8 @@ void main() {
     ]) {
       expect(find.text(label), findsOneWidget, reason: label);
     }
-    expect(find.text("2026-04-22"), findsOneWidget);
-    expect(find.text("2026-04-23"), findsOneWidget);
+    expect(formDateShows("Start date", "2026-04-22"), findsOneWidget);
+    expect(formDateShows("End date", "2026-04-23"), findsOneWidget);
 
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
