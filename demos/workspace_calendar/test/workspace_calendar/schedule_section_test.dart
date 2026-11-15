@@ -31,6 +31,8 @@ import 'package:widgets_extended/calendar/views/week_strip.dart'
 import 'package:widgets_extended/widgets_extended.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
+import 'package:workspace_calendar/workspace_calendar/item_builders.dart'
+    show harborDayBadges;
 import 'package:workspace_calendar/workspace_calendar/item_form.dart';
 import 'package:workspace_calendar/workspace_calendar/schedule_section.dart';
 
@@ -483,7 +485,7 @@ void main() {
       );
     });
     expect(find.byType(SegmentedButton<CalendarItemType>), findsNothing);
-    expect(summary(tester), "Wed, Apr 22\n09:00 - 10:00\n1h");
+    expect(summary(tester), "Wed, Apr 22, 09:00\nWed, Apr 22, 10:00\n1h");
     expect(formButton("Close"), findsOneWidget);
     expect(formButton("Cancel"), findsNothing);
     expect(saveFinder(), findsNothing);
@@ -539,13 +541,13 @@ void main() {
     ]);
     addTearDown(store.dispose);
     await openEdit(tester, store);
-    expect(summary(tester), "Wed, Apr 22\n09:00 - 10:30\n1h 30m");
+    expect(summary(tester), "Wed, Apr 22, 09:00\nWed, Apr 22, 10:30\n1h 30m");
     expect(find.byType(ChoiceChip), findsNothing);
 
     await pickTime(tester, "End time", "09:30");
-    expect(summary(tester), "Wed, Apr 22\n09:00 - 09:30\n30m");
+    expect(summary(tester), "Wed, Apr 22, 09:00\nWed, Apr 22, 09:30\n30m");
     await pickTime(tester, "End time", "10:00");
-    expect(summary(tester), "Wed, Apr 22\n09:00 - 10:00\n1h");
+    expect(summary(tester), "Wed, Apr 22, 09:00\nWed, Apr 22, 10:00\n1h");
   });
 
   testWidgets("SS3 End date names the item's last day, and a later day "
@@ -574,7 +576,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(formDateShows("End date", "2026-04-22"), findsOneWidget);
     expect(timeFieldFinder("Start time"), findsNothing);
-    expect(summary(tester), "Wed, Apr 22\nAll day");
+    expect(summary(tester), "Wed, Apr 22\nWed, Apr 22\nAll day");
   });
 
   testWidgets("SS4 an overlap shows before Save, and Next free time moves "
@@ -686,13 +688,13 @@ void main() {
 
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22\nAll day");
+    expect(summary(tester), "Wed, Apr 22\nWed, Apr 22\nAll day");
     expect(timeFieldFinder("Start time"), findsNothing);
     expect(formAllDayOn(), isTrue);
 
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22\n09:00 - 10:30\n1h 30m");
+    expect(summary(tester), "Wed, Apr 22, 09:00\nWed, Apr 22, 10:30\n1h 30m");
     expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
     expect(formAllDayOn(), isFalse);
   });
@@ -747,10 +749,10 @@ void main() {
     );
     addTearDown(store.dispose);
     await openEdit(tester, store);
-    expect(summary(tester), "Wed, Apr 22\nAll day");
+    expect(summary(tester), "Wed, Apr 22\nWed, Apr 22\nAll day");
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22\n09:30 - 10:30\n1h");
+    expect(summary(tester), "Wed, Apr 22, 09:30\nWed, Apr 22, 10:30\n1h");
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
@@ -763,10 +765,10 @@ void main() {
         isAllDay: true,
       ),
     );
-    expect(summary(tester), "Wed, Apr 22\nAll day");
+    expect(summary(tester), "Wed, Apr 22\nWed, Apr 22\nAll day");
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22\n09:30 - 10:30\n1h");
+    expect(summary(tester), "Wed, Apr 22, 09:30\nWed, Apr 22, 10:30\n1h");
   });
 
   testWidgets("TF1 a tap on Start time opens its picker in the panel under "
@@ -798,7 +800,7 @@ void main() {
       inPicker("Start time", find.byKey(timePickerMinuteRowKey(30))),
     );
     await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22\n09:30 - 10:30\n1h");
+    expect(summary(tester), "Wed, Apr 22, 09:30\nWed, Apr 22, 10:30\n1h");
 
     await tester.ensureVisible(timeFieldFinder("End time"));
     await tester.pumpAndSettle();
@@ -997,12 +999,12 @@ void main() {
         hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
       );
     });
-    expect(summary(tester), "Wed, Apr 22\n11:00 - 12:00\n1h");
+    expect(summary(tester), "Wed, Apr 22, 11:00\nWed, Apr 22, 12:00\n1h");
     await openTimePicker(tester, "Start time");
     await tester.tap(inPicker("Start time", find.byKey(timePickerNowKey)));
     await tester.pumpAndSettle();
     // The nearest slot would be 09:15.
-    expect(summary(tester), "Wed, Apr 22\n09:00 - 10:00\n1h");
+    expect(summary(tester), "Wed, Apr 22, 09:00\nWed, Apr 22, 10:00\n1h");
   });
 
   testWidgets("TF5 the start's picker stays open across Next free time, a "
@@ -1020,11 +1022,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text("Next free time"));
     await tester.pumpAndSettle();
-    expect(summary(tester), "Wed, Apr 22\n10:30 - 11:30\n1h");
+    expect(summary(tester), "Wed, Apr 22, 10:30\nWed, Apr 22, 11:30\n1h");
     expect(timePickerFinder("Start time"), findsOneWidget);
 
     await pickFormDay(tester, "Start date", DateTime(2026, 4, 23));
-    expect(summary(tester), "Thu, Apr 23\n10:30 - 11:30\n1h");
+    expect(summary(tester), "Thu, Apr 23, 10:30\nThu, Apr 23, 11:30\n1h");
     expect(timePickerFinder("Start time"), findsNothing);
     await openTimePicker(tester, "Start time");
     expect(timePickerFinder("Start time"), findsOneWidget);
@@ -1033,7 +1035,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
-    expect(summary(tester), "Thu, Apr 23\nAll day");
+    expect(summary(tester), "Thu, Apr 23\nThu, Apr 23\nAll day");
     expect(timePickerFinder("Start time"), findsNothing);
     expect(focusUnder(allDaySwitch()), isTrue);
   });
@@ -1896,9 +1898,9 @@ void main() {
   });
 
   testWidgets("FW3 what the scheduling card's controls show lies 16 pixels "
-      "from its edges: All day's label and switch track at the top and "
-      "side, and at the bottom the End row's fields, or an all-day item's "
-      "End date", (tester) async {
+      "from its edges: All day's label at the top and side, its switch 8 "
+      "pixels after the label, and at the bottom the End row's fields, or "
+      "an all-day item's End date", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task(
@@ -1912,10 +1914,10 @@ void main() {
     addTearDown(store.dispose);
     await openEdit(tester, store);
     var card = tester.getRect(find.byKey(formSchedulingCardKey));
-    expect(tester.getRect(find.text("All day")).top, card.top + 16.0);
-    // A padded Switch pads its track 4 pixels at each side
-    // (SwitchThemeData.padding), 3 at three quarters of its size.
-    expect(tester.getRect(allDaySwitch()).right - 3.0, card.right - 16.0);
+    final label = tester.getRect(find.text("All day"));
+    expect(label.top, card.top + 16.0);
+    expect(label.left, card.left + 16.0);
+    expect(tester.getRect(allDaySwitch()).left, label.right + 8.0);
     expect(
       math.max(
         tester.getRect(formDateFinder("End date")).bottom,
@@ -2310,14 +2312,13 @@ void main() {
     expect(panelHeight(tester), 0.0);
   });
 
-  testWidgets("FP3 a panel made while its field is open shows the field's "
-      "picker at once, and one tap on the field closes it", (tester) async {
+  testWidgets("FP3 the Start row keeps its open panel and picker as the All "
+      "day switch above it goes, the panel at full height, and as the switch "
+      "comes back; and one tap on the field closes it", (tester) async {
     final schedule = CalendarSchedule.of(at(9), at(10), isAllDay: false);
     await pumpSection(tester, checkOf(schedule), theme: motionTheme);
     await openTimePicker(tester, "Start time");
     final before = tester.state(timePickerFinder("Start time"));
-    // Without the switch above the Start row, the row and its panel are
-    // made anew.
     await pumpSection(
       tester,
       checkOf(
@@ -2326,9 +2327,16 @@ void main() {
       ),
       theme: motionTheme,
     );
-    // Setup sanity: the panel's picker is a new one.
-    expect(tester.state(timePickerFinder("Start time")), isNot(same(before)));
+    // Setup sanity: the switch goes.
+    expect(allDaySwitch(), findsNothing);
+    expect(tester.state(timePickerFinder("Start time")), same(before));
     expect(panelHeight(tester), settledPanelHeight(tester));
+    final gone = tester.state(timePickerFinder("Start time"));
+
+    await pumpSection(tester, checkOf(schedule), theme: motionTheme);
+    // Setup sanity: the switch comes back.
+    expect(allDaySwitch(), findsOneWidget);
+    expect(tester.state(timePickerFinder("Start time")), same(gone));
 
     await tester.tap(timeFieldFinder("Start time"));
     await tester.pump();
@@ -2441,10 +2449,9 @@ void main() {
     expect(now.bottom, lessThanOrEqualTo(300.0));
   });
 
-  testWidgets("FS1 the summary card shows a one-day schedule's date above "
-      "its times, and holds its length, its zone and the overlap notice", (
-    tester,
-  ) async {
+  testWidgets("FS1 the summary card shows a one-day schedule's start above "
+      "its end, each its date and time, and holds its length, its zone and "
+      "the overlap notice", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10, 30)),
     ]);
@@ -2453,8 +2460,8 @@ void main() {
     final first = find.byKey(scheduleSummaryFirstLineKey);
     final second = find.byKey(scheduleSummarySecondLineKey);
     final length = find.byKey(scheduleSummaryLengthKey);
-    expect(tester.widget<Text>(first).data, "Wed, Apr 22");
-    expect(tester.widget<Text>(second).data, "09:00 - 10:30");
+    expect(tester.widget<Text>(first).data, "Wed, Apr 22, 09:00");
+    expect(tester.widget<Text>(second).data, "Wed, Apr 22, 10:30");
     expect(tester.widget<Text>(length).data, "1h 30m");
     expect(
       tester.getRect(first).bottom,
@@ -2511,26 +2518,25 @@ void main() {
     }
   });
 
-  testWidgets("FS2 the summary names an all-day schedule's days, its pill "
-      "All day for one day or its count of days for more, across a change "
-      "of the clock included, and a timed one that spans days its start "
-      "above its end, each with its date, and its length", (tester) async {
+  testWidgets("FS2 the summary names an all-day schedule's first and last "
+      "days, the same day for one day, its pill All day for one day or its "
+      "count of days for more, across a change of the clock included, and a "
+      "timed one that spans days its start above its end, each with its "
+      "date, and its length", (tester) async {
     Future<void> expectSummary(
       CalendarSchedule schedule,
       String first,
-      String? second,
+      String second,
     ) async {
       await pumpSection(tester, checkOf(schedule));
       expect(
         tester.widget<Text>(find.byKey(scheduleSummaryFirstLineKey)).data,
         first,
       );
-      final secondLine = find.byKey(scheduleSummarySecondLineKey);
-      if (second == null) {
-        expect(secondLine, findsNothing);
-      } else {
-        expect(tester.widget<Text>(secondLine).data, second);
-      }
+      expect(
+        tester.widget<Text>(find.byKey(scheduleSummarySecondLineKey)).data,
+        second,
+      );
     }
 
     for (final (from, to, first, second, pill)
@@ -2579,7 +2585,7 @@ void main() {
     await expectSummary(
       CalendarSchedule.of(wednesday, DateTime(2026, 4, 23), isAllDay: true),
       "Wed, Apr 22",
-      null,
+      "Wed, Apr 22",
     );
     expect(
       tester.widget<Text>(find.byKey(scheduleSummaryLengthKey)).data,
@@ -2686,12 +2692,13 @@ void main() {
     }
   });
 
-  testWidgets("FS4 the summary card's top right corner shows the length in "
-      "a pill, a timer icon before it, or for an all-day schedule All day, "
-      "and under it the zone in a light grey rounded box, padded around its "
-      "name and offset; an all-day schedule's date on one day is as large "
-      "as a timed schedule's times; and the lines of a timed schedule that "
-      "spans days are written at 14 pixels", (tester) async {
+  testWidgets("FS4 the summary card's top right corner shows the zone in a "
+      "light grey rounded box, padded around its name and offset, and under "
+      "it the length in a pill, a timer icon before it, or for an all-day "
+      "schedule All day; and the lines of a timed schedule on one day or "
+      "across days, and of an all-day one, are written at 14 pixels", (
+    tester,
+  ) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10, 30)),
       task("item-2", "Trip", at(22), DateTime(2026, 4, 23, 2)),
@@ -2741,10 +2748,20 @@ void main() {
     expect(inner.expandToInclude(texts), inner);
     final length = find.byKey(scheduleSummaryLengthKey);
     expect(tester.widget<Text>(length).data, "1h 30m");
-    final timesSize = tester
-        .widget<Text>(find.byKey(scheduleSummarySecondLineKey))
-        .style
-        ?.fontSize;
+    void expectLineSizes(String reason) {
+      for (final key in <Key>[
+        scheduleSummaryFirstLineKey,
+        scheduleSummarySecondLineKey,
+      ]) {
+        expect(
+          tester.widget<Text>(find.byKey(key)).style?.fontSize,
+          14.0,
+          reason: "$reason $key",
+        );
+      }
+    }
+
+    expectLineSizes("item-1");
     final pill = find
         .ancestor(of: length, matching: find.byType(DecoratedBox))
         .first;
@@ -2759,9 +2776,9 @@ void main() {
       ),
     );
     final pillRect = tester.getRect(pill);
-    expect(pillRect.topRight, card.topRight + const Offset(-16.0, 16.0));
-    expect(zone.top, greaterThanOrEqualTo(pillRect.bottom));
-    expect(zone.right, pillRect.right);
+    expect(zone.topRight, card.topRight + const Offset(-16.0, 16.0));
+    expect(pillRect.top, greaterThanOrEqualTo(zone.bottom));
+    expect(pillRect.right, zone.right);
     final icon = find.descendant(
       of: pill,
       matching: find.byIcon(Icons.timer_outlined),
@@ -2775,12 +2792,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await openEdit(tester, store, id: "item-2");
-    for (final key in <Key>[
-      scheduleSummaryFirstLineKey,
-      scheduleSummarySecondLineKey,
-    ]) {
-      expect(tester.widget<Text>(find.byKey(key)).style?.fontSize, 14.0);
-    }
+    expectLineSizes("item-2");
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
@@ -2788,25 +2800,15 @@ void main() {
     // Setup sanity: the schedule is all-day.
     expect(formAllDayOn(), isTrue);
     expect(tester.widget<Text>(length).data, "All day");
-    expect(find.byKey(scheduleSummarySecondLineKey), findsNothing);
-    expect(
-      tester.widget<Text>(find.byKey(scheduleSummaryFirstLineKey)).style,
-      isA<TextStyle>().having(
-        (style) {
-          return style.fontSize;
-        },
-        "fontSize",
-        timesSize,
-      ),
-    );
+    expectLineSizes("item-3");
     card = tester.getRect(find.byKey(formSummaryCardKey));
     final zoneRect = tester.getRect(find.byKey(scheduleSummaryZoneKey));
     final allDayPill = tester.getRect(
       find.ancestor(of: length, matching: find.byType(DecoratedBox)).first,
     );
-    expect(allDayPill.topRight, card.topRight + const Offset(-16.0, 16.0));
-    expect(zoneRect.top, greaterThanOrEqualTo(allDayPill.bottom));
-    expect(zoneRect.right, allDayPill.right);
+    expect(zoneRect.topRight, card.topRight + const Offset(-16.0, 16.0));
+    expect(allDayPill.top, greaterThanOrEqualTo(zoneRect.bottom));
+    expect(allDayPill.right, zoneRect.right);
   });
 
   testWidgets("FS5 a line of a timed schedule that spans days, too wide for "
@@ -2840,12 +2842,11 @@ void main() {
     }
   });
 
-  testWidgets("FS6 a schedule that spans days shows its start and its end "
-      "each under its label, Start and End, and no dash: a timed one's "
-      "dates and times, an all-day one's first and last day, its pill "
-      "counting its days; a schedule on one day shows no labels", (
-    tester,
-  ) async {
+  testWidgets("FS6 every schedule shows its start and its end each under "
+      "its label, Start and End, and no dash: a timed one's dates and "
+      "times, on one day or across days, and an all-day one's first and "
+      "last day, the same day for one day, its pill counting its days "
+      "where it spans them", (tester) async {
     Finder inSummary(Finder finder) {
       return find.descendant(
         of: find.byType(ScheduleSummary),
@@ -2855,6 +2856,22 @@ void main() {
 
     for (final (schedule, from, to, pill)
         in <(CalendarSchedule, String, String, String)>[
+          (
+            CalendarSchedule.of(at(9), at(10), isAllDay: false),
+            "Wed, Apr 22, 09:00",
+            "Wed, Apr 22, 10:00",
+            "1h",
+          ),
+          (
+            CalendarSchedule.of(
+              wednesday,
+              DateTime(2026, 4, 23),
+              isAllDay: true,
+            ),
+            "Wed, Apr 22",
+            "Wed, Apr 22",
+            "All day",
+          ),
           (
             CalendarSchedule.of(
               at(22),
@@ -2888,7 +2905,10 @@ void main() {
       final length = find.byKey(scheduleSummaryLengthKey);
       expect(tester.widget<Text>(length).data, pill);
       // The pill of an all-day schedule that spans days counts its days.
-      expect(inSummary(find.text("All day")), findsNothing);
+      expect(
+        inSummary(find.text("All day")),
+        findsNWidgets(pill == "All day" ? 1 : 0),
+      );
       final parts = <Finder>[start, first, end, second];
       final top = <Rect>[for (final part in parts) tester.getRect(part)];
       for (var index = 1; index < top.length; index++) {
@@ -2900,15 +2920,6 @@ void main() {
       }
       expect(top[0].left, top[1].left, reason: "$schedule");
       expect(top[2].left, top[3].left, reason: "$schedule");
-    }
-
-    for (final schedule in <CalendarSchedule>[
-      CalendarSchedule.of(at(9), at(10), isAllDay: false),
-      CalendarSchedule.of(wednesday, DateTime(2026, 4, 23), isAllDay: true),
-    ]) {
-      await pumpSection(tester, checkOf(schedule));
-      expect(inSummary(find.text("Start")), findsNothing, reason: "$schedule");
-      expect(inSummary(find.text("End")), findsNothing, reason: "$schedule");
     }
   });
 
@@ -3074,7 +3085,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(cellUnder(scheduleStartPanelKey, friday));
     await tester.pumpAndSettle();
-    expect(summary(tester), "Fri, Apr 24\n09:00 - 10:00\n1h");
+    expect(summary(tester), "Fri, Apr 24, 09:00\nFri, Apr 24, 10:00\n1h");
     expect(formDateShows("Start date", "2026-04-24"), findsOneWidget);
     expect(formDateShows("End date", "2026-04-24"), findsOneWidget);
     expect(dayPickerFinder("Start date"), findsOneWidget);
@@ -3875,6 +3886,184 @@ void main() {
       unrelated.dispose();
     }
   });
+
+  testWidgets("IP15 the day picker under Start date or End date lies on its "
+      "row's sides, folded and unfolded: the circles of its first and last "
+      "columns reach the date field's left edge and the time field's right "
+      "edge; and the badges of a day in its last column draw whole", (
+    tester,
+  ) async {
+    final sunday = DateTime(2026, 4, 26);
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+      task(
+        "item-2",
+        "Plan",
+        DateTime(2026, 4, 26, 9),
+        DateTime(2026, 4, 26, 10),
+      ),
+      calendarItem(
+        id: "item-3",
+        type: CalendarItemType.risk,
+        title: "Slip",
+        start: DateTime(2026, 4, 26, 11),
+        end: DateTime(2026, 4, 26, 12),
+      ),
+    ]);
+    addTearDown(store.dispose);
+    await openWith(tester, (context) {
+      showEditForm(
+        context,
+        store: store,
+        id: "item-1",
+        policy: const UnrestrictedEditPolicy<ItemPayload>(),
+        now: wednesdayStart,
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+        dayBadges: harborDayBadges,
+      );
+    });
+    for (final (date, time) in <(String, String)>[
+      ("Start date", "Start time"),
+      ("End date", "End time"),
+    ]) {
+      final picker = dayPickerFinder(date);
+      Rect circleOf(Key cell) {
+        return tester.getRect(
+          circleIn(find.descendant(of: picker, matching: find.byKey(cell))),
+        );
+      }
+
+      await openDayPicker(tester, date);
+      final left = tester.getRect(formDateFinder(date)).left;
+      final right = tester.getRect(timeFieldFinder(time)).right;
+      expect(
+        circleOf(weekStripDayKey(DateTime(2026, 4, 20))).left,
+        moreOrLessEquals(left),
+        reason: date,
+      );
+      expect(
+        circleOf(weekStripDayKey(sunday)).right,
+        moreOrLessEquals(right),
+        reason: date,
+      );
+      final badges = find
+          .descendant(
+            of: find.descendant(
+              of: picker,
+              matching: find.byKey(weekStripDayKey(sunday)),
+            ),
+            matching: find.byType(DecoratedBox),
+          )
+          .evaluate()
+          .map((element) {
+            return element.renderObject! as RenderBox;
+          })
+          .where((box) {
+            return box.size.width < 10.0;
+          })
+          .toList();
+      // Setup sanity: Sunday carries two badges, one of them past the
+      // field's right edge.
+      expect(badges, hasLength(2), reason: date);
+      expect(
+        badges.any((box) {
+          return box.localToGlobal(Offset(box.size.width, 0.0)).dx > right;
+        }),
+        isTrue,
+        reason: date,
+      );
+      for (final box in badges) {
+        expect(
+          paintedRectOf(box),
+          MatrixUtils.transformRect(
+            box.getTransformTo(null),
+            Offset.zero & box.size,
+          ),
+          reason: date,
+        );
+      }
+
+      await tester.tap(
+        find.descendant(of: picker, matching: find.byKey(calendarPullTabKey)),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        circleOf(dayCellKey(DateTime(2026, 4, 6))).left,
+        moreOrLessEquals(left),
+        reason: date,
+      );
+      expect(
+        circleOf(dayCellKey(DateTime(2026, 4, 12))).right,
+        moreOrLessEquals(right),
+        reason: date,
+      );
+      await closeDayPicker(tester, date);
+    }
+  });
+
+  testWidgets("IP16 Start date and End date show their date and no icon, "
+      "on a timed item and on an all-day one", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+      task(
+        "item-2",
+        "Off",
+        DateTime(2026, 4, 24),
+        DateTime(2026, 4, 25),
+        isAllDay: true,
+      ),
+    ]);
+    addTearDown(store.dispose);
+    for (final id in <String>["item-1", "item-2"]) {
+      await openEdit(tester, store, id: id);
+      for (final label in <String>["Start date", "End date"]) {
+        expect(
+          find.descendant(
+            of: formDateFinder(label),
+            matching: find.byType(Icon),
+          ),
+          findsNothing,
+          reason: "$id $label",
+        );
+      }
+      await tester.tap(formButton("Cancel"));
+      await tester.pumpAndSettle();
+    }
+  });
+}
+
+/// The circle of the day cell [cell] finds.
+Finder circleIn(Finder cell) {
+  return find.descendant(
+    of: cell,
+    matching: find.byWidgetPredicate((widget) {
+      return widget is Container &&
+          widget.constraints ==
+              const BoxConstraints.tightFor(width: 32.0, height: 32.0);
+    }),
+  );
+}
+
+/// The part of [box] that the clips above it leave painted, in global
+/// coordinates.
+Rect paintedRectOf(RenderBox box) {
+  var painted = MatrixUtils.transformRect(
+    box.getTransformTo(null),
+    Offset.zero & box.size,
+  );
+  RenderObject child = box;
+  var parent = box.parent;
+  while (parent != null) {
+    final clip = parent.describeApproximatePaintClip(child);
+    if (clip != null) {
+      painted = painted.intersect(
+        MatrixUtils.transformRect(parent.getTransformTo(null), clip),
+      );
+    }
+    child = parent;
+    parent = parent.parent;
+  }
+  return painted;
 }
 
 /// An offset from UTC as the zone panel writes it: "UTC-04:00".

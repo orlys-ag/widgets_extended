@@ -511,7 +511,7 @@ void main() {
       "strip would take more than half of the page, as when a keyboard "
       "shrinks the page", (tester) async {
     tester.view.devicePixelRatio = 1.0;
-    tester.view.physicalSize = const Size(400.0, 700.0);
+    tester.view.physicalSize = const Size(400.0, 600.0);
     addTearDown(tester.view.reset);
     final store = MemoryCalendarStore<ItemPayload>(
       entries: <CalendarItem>[
@@ -546,7 +546,7 @@ void main() {
   testWidgets("FP3 a field that the pinned summary card hides scrolls out "
       "below its strip when it takes focus", (tester) async {
     tester.view.devicePixelRatio = 1.0;
-    tester.view.physicalSize = const Size(400.0, 640.0);
+    tester.view.physicalSize = const Size(400.0, 560.0);
     addTearDown(tester.view.reset);
     final store = MemoryCalendarStore<ItemPayload>(
       entries: <CalendarItem>[

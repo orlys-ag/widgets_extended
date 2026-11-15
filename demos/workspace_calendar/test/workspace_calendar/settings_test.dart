@@ -596,8 +596,12 @@ void main() {
         findsOneWidget,
       );
       expect(
+        tester.widget<Text>(find.byKey(scheduleSummaryFirstLineKey)).data,
+        "Tue, Apr 21, 9 AM",
+      );
+      expect(
         tester.widget<Text>(find.byKey(scheduleSummarySecondLineKey)).data,
-        "9 AM - 10 AM",
+        "Tue, Apr 21, 10 AM",
       );
     },
   );
