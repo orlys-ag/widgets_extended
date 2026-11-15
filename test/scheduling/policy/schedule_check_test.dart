@@ -128,6 +128,60 @@ final class _EndsByNoon extends CalendarEditPolicy<String> {
   }
 }
 
+/// Answers as [inner] does, recording the day of each earliest start and
+/// the end of each change it is asked.
+final class _Counting extends CalendarEditPolicy<String> {
+  _Counting(this.inner);
+
+  final CalendarEditPolicy<String> inner;
+  final List<DateTime> earliestAsked = <DateTime>[];
+  final List<DateTime> changeAsked = <DateTime>[];
+
+  @override
+  bool mayMove(CalendarEntry<String> entry, CalendarNow now) {
+    return inner.mayMove(entry, now);
+  }
+
+  @override
+  CalendarResizeEdges resizableEdges(
+    CalendarEntry<String> entry,
+    CalendarNow now,
+  ) {
+    return inner.resizableEdges(entry, now);
+  }
+
+  @override
+  bool mayEdit(CalendarEntry<String> entry, CalendarNow now) {
+    return inner.mayEdit(entry, now);
+  }
+
+  @override
+  bool admitsChange(
+    CalendarEntry<String> entry,
+    DateTime start,
+    DateTime end,
+    CalendarNow now, {
+    required bool isAllDay,
+  }) {
+    changeAsked.add(end);
+    return inner.admitsChange(entry, start, end, now, isAllDay: isAllDay);
+  }
+
+  @override
+  DateTime? earliestStartOn(DateTime day, CalendarNow now) {
+    earliestAsked.add(day);
+    return inner.earliestStartOn(day, now);
+  }
+}
+
+/// Matches the plain local date of [date], a local midnight: that instant,
+/// not a UTC time and not a zone's `TZDateTime`.
+Matcher plainDate(DateTime date) {
+  return predicate<DateTime?>((day) {
+    return day is DateTime && day is! tz.TZDateTime && day == date;
+  }, "the plain local date $date");
+}
+
 void main() {
   const lock = HistoryLockPolicy<String>(lockEarlierToday: true);
   const unrestricted = UnrestrictedEditPolicy<String>();
@@ -535,9 +589,165 @@ void main() {
       expect(made.schedule, schedule);
       expect(made.problems, fresh.problems, reason: "$schedule");
       expect(made.overlaps, fresh.overlaps, reason: "$schedule");
-      expect(made.firstStartMinute, fresh.firstStartMinute, reason: "$schedule");
+      expect(
+        made.firstStartMinute,
+        fresh.firstStartMinute,
+        reason: "$schedule",
+      );
       expect(made.nextFree, fresh.nextFree, reason: "$schedule");
       expect(made.startFixed, fresh.startFixed, reason: "$schedule");
     }
+  });
+
+  test("SC10 the first start day is none where yesterday takes a start, "
+      "today where only today does, and tomorrow where neither does", () {
+    CalendarScheduleCheck<String> checkOf(
+      CalendarEditPolicy<String> policy, {
+      CalendarNow? now,
+    }) {
+      return CalendarScheduleCheck<String>(
+        schedule: timed(wednesday, 540, 600),
+        rules: rulesOf(policy),
+        now: now ?? elevenOhSeven,
+      );
+    }
+
+    expect(checkOf(unrestricted).firstStartDay, isNull);
+    expect(
+      checkOf(const HistoryLockPolicy<String>()).firstStartDay,
+      plainDate(tuesday),
+    );
+    // Past 23:59 the lock at the current minute closes today too.
+    final lastMinute = CalendarNow(
+      time: DateTime(2026, 4, 21, 23, 59, 30),
+      today: tuesday,
+    );
+    expect(checkOf(lock, now: lastMinute).firstStartDay, plainDate(wednesday));
+
+    // Today on the clock of a zone 12 hours behind the device's, which at
+    // 13:00 reads Tuesday while the device reads Wednesday.
+    ensureZones();
+    final behind = zoneApartFromDevice(DateTime(2026, 4, 21, 13), -12);
+    expect(
+      checkOf(
+        const HistoryLockPolicy<String>(),
+        now: CalendarNow(
+          time: tz.TZDateTime(behind, 2026, 4, 21, 13),
+          today: tz.TZDateTime(behind, 2026, 4, 21),
+        ),
+      ).firstStartDay,
+      plainDate(tuesday),
+    );
+
+    final counting = _Counting(lock);
+    final check = checkOf(counting, now: lastMinute);
+    final before = counting.earliestAsked.length;
+    final first = check.firstStartDay;
+    check.firstStartDay;
+    // Setup sanity: the counting policy answers as the lock.
+    expect(first, plainDate(wednesday));
+    expect(counting.earliestAsked.length - before, lessThanOrEqualTo(2));
+  });
+
+  test("SC11 the end days run from the start day, or a fixed start's first "
+      "day whose 24:00 the policy admits, to the start day without spanning "
+      "days or the day limit's last day", () {
+    CalendarScheduleCheck<String> checkOf(
+      CalendarEditPolicy<String> policy,
+      CalendarSchedule schedule, {
+      CalendarEntry<String>? entry,
+      CalendarScheduleOptions? options,
+      CalendarNow? now,
+    }) {
+      return CalendarScheduleCheck<String>(
+        schedule: schedule,
+        rules: rulesOf(policy),
+        now: now ?? elevenOhSeven,
+        entry: entry,
+        options: options,
+      );
+    }
+
+    /// Expects [check]'s end days to be the plain local dates [first] and
+    /// [last], or no last day where [last] is null.
+    void expectEndDays(
+      CalendarScheduleCheck<String> check,
+      DateTime first,
+      DateTime? last,
+    ) {
+      final days = check.endDays;
+      expect(days.first, plainDate(first), reason: "$days");
+      expect(
+        days.last,
+        last == null ? isNull : plainDate(last),
+        reason: "$days",
+      );
+    }
+
+    final noSpanning = CalendarScheduleOptions(spansDays: false);
+    final friday = DateTime(2026, 4, 24);
+    final wednesdayMorning = timed(wednesday, 540, 600);
+    expectEndDays(checkOf(unrestricted, wednesdayMorning), wednesday, null);
+    expectEndDays(
+      checkOf(DayLimitPolicy<String>(3), wednesdayMorning),
+      wednesday,
+      friday,
+    );
+    expectEndDays(
+      checkOf(unrestricted, wednesdayMorning, options: noSpanning),
+      wednesday,
+      wednesday,
+    );
+    // On a zone's clock the answers are still the plain local dates.
+    ensureZones();
+    final zone = zoneFarFromDevice(DateTime(2026, 4, 21, 11, 7));
+    expectEndDays(
+      checkOf(
+        DayLimitPolicy<String>(3),
+        wednesdayMorning,
+        now: CalendarNow(
+          time: tz.TZDateTime(zone, 2026, 4, 21, 11, 7),
+          today: tz.TZDateTime(zone, 2026, 4, 21),
+        ),
+      ),
+      wednesday,
+      friday,
+    );
+
+    const atToday = HistoryLockPolicy<String>();
+    final running = CalendarEntry<String>(
+      id: "running",
+      start: DateTime(2026, 4, 20, 9),
+      end: DateTime(2026, 4, 22, 10),
+      title: "running",
+      color: const Color(0xFF336699),
+      payload: "running",
+    );
+    final runningSchedule = CalendarSchedule.of(
+      running.start,
+      running.end,
+      isAllDay: false,
+    );
+    final fixed = checkOf(atToday, runningSchedule, entry: running);
+    // Setup sanity: the lock holds the running entry's start.
+    expect(fixed.startFixed, isTrue);
+    // Monday's 24:00 is the lock's boundary, the start of today, which an
+    // end must lie after.
+    expectEndDays(fixed, tuesday, null);
+    // With no spanning days no day is: the first lies after the last.
+    expectEndDays(
+      checkOf(atToday, runningSchedule, entry: running, options: noSpanning),
+      tuesday,
+      monday,
+    );
+
+    final counting = _Counting(atToday);
+    final counted = checkOf(counting, runningSchedule, entry: running);
+    final before = counting.changeAsked.length;
+    final days = counted.endDays;
+    counted.endDays;
+    // Setup sanity: the counting policy answers as the lock.
+    expect(days.first, plainDate(tuesday));
+    expect(counting.changeAsked.length - before, lessThanOrEqualTo(3));
   });
 }

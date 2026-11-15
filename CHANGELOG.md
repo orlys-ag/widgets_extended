@@ -903,6 +903,12 @@ refuses, draws disabled and takes no tap; `isEnabled` is asked of a day as
 its cell first builds, at most once per predicate and value. `store` and
 `dayBadges` badge the days with entries; its weeks start on `firstColumn`
 and show all seven weekdays.
+- Added `CalendarScheduleCheck.firstStartDay`, the first day a new start
+may lie on as the policy's earliest starts of yesterday and today say, and
+`CalendarScheduleCheck.endDays`, the days the schedule's end may lie on:
+from its start day, or for a fixed start the first day whose 24:00 the
+policy admits as its end, to the start day where the options take no
+spanning days, or the last day the day limit covers.
 
 ## 0.0.35
 
