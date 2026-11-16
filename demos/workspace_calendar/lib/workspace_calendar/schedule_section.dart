@@ -973,7 +973,7 @@ class ScheduleHeading extends StatelessWidget {
 
   /// The text of the pill.
   static const TextStyle _lengthStyle = TextStyle(
-    fontSize: 12.0,
+    fontSize: 14.0,
     fontWeight: FontWeight.w600,
     color: HarborColors.primary,
   );
