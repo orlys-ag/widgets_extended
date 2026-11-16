@@ -368,9 +368,10 @@ void main() {
     );
   });
 
-  testWidgets("FC1 the form's page is three outlined cards, the scheduling, "
-      "the summary's and the item's, in that order between the heading and "
-      "the actions", (tester) async {
+  testWidgets("FC1 the form's page is the scheduling part, the summary's "
+      "outlined card and the item's part, in that order between the heading "
+      "and the actions, with no card around the scheduling and the item's "
+      "parts", (tester) async {
     final store = MemoryCalendarStore<ItemPayload>(
       entries: <CalendarItem>[
         task(DateTime(2026, 4, 22, 9), DateTime(2026, 4, 22, 10)),
@@ -385,8 +386,44 @@ void main() {
     ];
     for (final key in keys) {
       expect(find.byKey(key), findsOneWidget, reason: "$key");
-      expect(tester.widget(find.byKey(key)), isA<Card>(), reason: "$key");
     }
+    // The summary keeps its card, outlined.
+    expect(tester.widget(find.byKey(formSummaryCardKey)), isA<Card>());
+    final summaryShape = tester
+        .widget<Material>(
+          find
+              .descendant(
+                of: find.byKey(formSummaryCardKey),
+                matching: find.byType(Material),
+              )
+              .first,
+        )
+        .shape;
+    expect(
+      summaryShape,
+      isA<OutlinedBorder>().having(
+        (shape) {
+          return shape.side.style;
+        },
+        "side's style",
+        BorderStyle.solid,
+      ),
+    );
+    for (final part in <Finder>[
+      find.byType(ScheduleSection),
+      fieldFinder("Title"),
+    ]) {
+      expect(
+        find.ancestor(of: part, matching: find.byType(Card)),
+        findsNothing,
+        reason: "$part",
+      );
+    }
+    // The item's fields span its part, which pads them by nothing.
+    final itemPart = tester.getRect(find.byKey(formItemCardKey));
+    final title = tester.getRect(fieldFinder("Title"));
+    expect(title.left, itemPart.left);
+    expect(title.right, itemPart.right);
     final cards = <Rect>[
       for (final key in keys) tester.getRect(find.byKey(key)),
     ];
