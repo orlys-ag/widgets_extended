@@ -96,6 +96,17 @@ void main() {
       contrast(rgbOf(HarborColors.error), rgbOf(HarborColors.surface)),
       greaterThanOrEqualTo(4.5),
     );
+    expect(
+      contrast(rgbOf(HarborColors.onNotice), rgbOf(HarborColors.notice)),
+      greaterThanOrEqualTo(4.5),
+    );
+    expect(
+      contrast(
+        rgbOf(HarborColors.onErrorNotice),
+        rgbOf(HarborColors.errorNotice),
+      ),
+      greaterThanOrEqualTo(4.5),
+    );
   });
 
   test("H2 tints", () {

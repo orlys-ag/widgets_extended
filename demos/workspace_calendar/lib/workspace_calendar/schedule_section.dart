@@ -1,8 +1,8 @@
 /// The item form's schedule heading, schedule section and overlap notice,
 /// the parts of the form any item type shares: the section edits a
 /// [CalendarSchedule], the heading shows its length and zone beside the
-/// form's title, and the notice names the entries it overlaps, as its
-/// [CalendarScheduleCheck] answers while the user edits.
+/// form's title, and the notice shows a card of each entry it overlaps, as
+/// its [CalendarScheduleCheck] answers while the user edits.
 library;
 
 import 'dart:math' as math;
@@ -13,6 +13,7 @@ import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_item.dart';
 import 'harbor_theme.dart';
+import 'item_builders.dart' show ItemCard;
 
 /// The key of the text of the heading's length pill, after its title: the
 /// length of a timed schedule of a positive length, or of an all-day
@@ -28,6 +29,23 @@ const ValueKey<String> scheduleZoneKey = ValueKey<String>("schedule-zone");
 const ValueKey<String> scheduleOverlapKey = ValueKey<String>(
   "schedule-overlap",
 );
+
+/// The key of the overlap notice's card of the overlapped item [id].
+ValueKey<String> scheduleOverlapCardKey(String id) {
+  return ValueKey<String>("schedule-overlap-card-$id");
+}
+
+/// The key of the bar of the overlap notice's card of the item [id], which
+/// stands for the schedule's time.
+ValueKey<String> scheduleOverlapBarKey(String id) {
+  return ValueKey<String>("schedule-overlap-bar-$id");
+}
+
+/// The key of the filled part of the bar of the overlap notice's card of
+/// the item [id]: the part of the schedule's time the item shares.
+ValueKey<String> scheduleOverlapShareKey(String id) {
+  return ValueKey<String>("schedule-overlap-share-$id");
+}
 
 /// The key of the [Focus] around the Start date field.
 const ValueKey<String> scheduleStartDateKey = ValueKey<String>(
@@ -1071,20 +1089,51 @@ class ScheduleHeading extends StatelessWidget {
 
 /// The notice of the entries [check]'s schedule overlaps
 /// ([CalendarScheduleCheck.overlaps]), which the form shows while there are
-/// any: "Overlaps" and their titles, each title in bold, its warning icon
-/// beside the top of its text; and a "Next free time" button that sends
-/// [CalendarScheduleCheck.nextFree] to [onChanged], shown where that is
-/// another schedule, unless the form is [locked] or the check's start is
-/// fixed.
-class ScheduleOverlapNotice extends StatelessWidget {
+/// any.
+///
+/// Its heading, after a warning icon level with its top, counts them,
+/// "Overlaps 2 items", and those whose overlap the rules refuse
+/// ([CalendarScheduleOverlapRefused]): "Overlaps 2 items, 1 not allowed",
+/// or "Can't overlap 2 items" where they refuse each. Beside it a "Next
+/// free time" button sends [CalendarScheduleCheck.nextFree] to [onChanged],
+/// and "Next free:" under the heading writes that schedule's times; both
+/// show where it is another schedule, unless the form is [locked] or the
+/// check's start is fixed.
+///
+/// Under them lies a card per overlapped item, in the order of their starts
+/// and then their ends. A white card, its type's edge colour down its
+/// leading side, holds its type's icon, its title and its times, the
+/// summaries its schema gives it ([ItemCard.summariesOf]), the time it
+/// shares with the schedule, or "Covers all of this item" where that is
+/// all of it, and "Not allowed" where the rules refuse its overlap; and a
+/// bar that stands for the schedule's time, the part the item shares filled
+/// in the item's colour. Times are written on [hourLabelFormat]'s clock, an
+/// end at a day's start as the 24:00 of the day before, and a range that
+/// runs past the schedule's start day with the weekday of each end. The
+/// notice shows its first [shownCards] cards and a button that shows the
+/// rest, which then shows fewer again.
+///
+/// The notice is soft yellow ([HarborColors.notice]), or soft red
+/// ([HarborColors.errorNotice]) where the rules refuse an overlap.
+class ScheduleOverlapNotice extends StatefulWidget {
   const ScheduleOverlapNotice({
     super.key,
     required this.check,
+    required this.hourLabelFormat,
     required this.onChanged,
+    this.zone,
     this.locked = false,
   });
 
   final CalendarScheduleCheck<ItemPayload> check;
+
+  final CalendarHourLabelFormat hourLabelFormat;
+
+  /// The zone on whose clock the schedule's times are read
+  /// ([CalendarSchedule.timesOn]), the device's where it is null: the clock
+  /// [check] reads them on. A card whose schedule's times the clock skips
+  /// shows no shared time and no bar.
+  final Location? zone;
 
   /// Takes the schedule "Next free time" moves to.
   final ValueChanged<CalendarSchedule> onChanged;
@@ -1093,69 +1142,454 @@ class ScheduleOverlapNotice extends StatelessWidget {
   /// not show.
   final bool locked;
 
+  /// How many cards show before the button that shows the rest.
+  static const int shownCards = 3;
+
+  @override
+  State<ScheduleOverlapNotice> createState() {
+    return _ScheduleOverlapNoticeState();
+  }
+}
+
+class _ScheduleOverlapNoticeState extends State<ScheduleOverlapNotice> {
+  /// Whether every card shows, past [ScheduleOverlapNotice.shownCards].
+  bool _expanded = false;
+
   @override
   Widget build(BuildContext context) {
+    final check = widget.check;
+    final strings = CalendarLocalizations.of(context);
+    final format = widget.hourLabelFormat;
+    final refused = <CalendarEntry<ItemPayload>>{
+      for (final problem in check.problems)
+        if (problem is CalendarScheduleOverlapRefused<ItemPayload>)
+          problem.other,
+    };
+    final overlaps = check.overlaps.toList()..sort(_byTimes);
+    final refusedCount = overlaps.where(refused.contains).length;
+    final alert = refusedCount > 0;
+    final ink = alert ? HarborColors.onErrorNotice : HarborColors.onNotice;
     final next = check.nextFree;
-    final overlaps = check.overlaps;
+    final offered =
+        next != null &&
+            next != check.schedule &&
+            !(widget.locked || check.startFixed)
+        ? next
+        : null;
+    const shownCards = ScheduleOverlapNotice.shownCards;
+    final folds = overlaps.length > shownCards;
+    final shown = folds && !_expanded
+        ? overlaps.sublist(0, shownCards)
+        : overlaps;
+    final times = check.schedule.timesOn(widget.zone);
+    final day = CalendarDates.dayNumber(check.schedule.startDay);
     return DecoratedBox(
       key: scheduleOverlapKey,
       decoration: BoxDecoration(
-        color: HarborColors.notice,
-        border: Border.all(color: HarborColors.noticeEdge),
-        borderRadius: BorderRadius.circular(8.0),
+        color: alert ? HarborColors.errorNotice : HarborColors.notice,
+        border: Border.all(
+          color: alert ? HarborColors.errorNoticeEdge : HarborColors.noticeEdge,
+        ),
+        borderRadius: BorderRadius.circular(12.0),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12.0, 8.0, 8.0, 8.0),
-        child: Row(
+        padding: const EdgeInsets.fromLTRB(12.0, 8.0, 12.0, 12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            // The icon lies at the text's top, beside its first line; the
-            // two together centre on the button.
-            Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  const Icon(
-                    Icons.warning_amber,
-                    size: 18.0,
-                    color: HarborColors.onNotice,
-                  ),
-                  const SizedBox(width: 8.0),
-                  Expanded(
-                    child: Text.rich(
-                      TextSpan(
-                        text: "Overlaps ",
-                        children: <InlineSpan>[
-                          for (
-                            var index = 0;
-                            index < overlaps.length;
-                            index++
-                          ) ...<InlineSpan>[
-                            if (index > 0) const TextSpan(text: ", "),
-                            TextSpan(
-                              text: overlaps[index].title,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
+            Row(
+              children: <Widget>[
+                // The icon lies at the heading's top, beside its first
+                // line; the two together centre on the button.
+                Expanded(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Icon(Icons.warning_amber, size: 18.0, color: ink),
+                      const SizedBox(width: 8.0),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              _overlapHeading(overlaps.length, refusedCount),
+                              style: TextStyle(
+                                color: ink,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
+                            if (offered != null)
+                              Text(
+                                "Next free: ${strings.formatTimeRange(offered.startMinute, offered.endMinute, format)}",
+                                style: TextStyle(color: ink, fontSize: 13.0),
+                              ),
                           ],
-                        ],
+                        ),
                       ),
-                      style: const TextStyle(color: HarborColors.onNotice),
-                    ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                if (offered != null)
+                  TextButton(
+                    onPressed: () {
+                      widget.onChanged(offered);
+                    },
+                    child: const Text("Next free time"),
+                  ),
+              ],
             ),
-            if (next != null &&
-                next != check.schedule &&
-                !(locked || check.startFixed))
-              TextButton(
-                onPressed: () {
-                  onChanged(next);
-                },
-                child: const Text("Next free time"),
+            for (final item in shown) ...<Widget>[
+              const SizedBox(height: 8.0),
+              _OverlapCard(
+                item: item,
+                times: times,
+                day: day,
+                refused: refused.contains(item),
+                hourLabelFormat: format,
+              ),
+            ],
+            if (folds)
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _expanded = !_expanded;
+                    });
+                  },
+                  child: Text(
+                    _expanded
+                        ? "Show fewer"
+                        : "Show ${overlaps.length - shownCards} more",
+                  ),
+                ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Orders items by their starts, then their ends, then their titles and
+/// ids, so that the cards' order does not rest on the sort's stability.
+int _byTimes(CalendarItem a, CalendarItem b) {
+  final start = a.start.compareTo(b.start);
+  if (start != 0) {
+    return start;
+  }
+  final end = a.end.compareTo(b.end);
+  if (end != 0) {
+    return end;
+  }
+  final title = a.title.compareTo(b.title);
+  if (title != 0) {
+    return title;
+  }
+  return (a.id ?? "").compareTo(b.id ?? "");
+}
+
+/// The overlap notice's heading for [count] overlapped items, [refused] of
+/// them refused.
+String _overlapHeading(int count, int refused) {
+  final items = count == 1 ? "1 item" : "$count items";
+  if (refused == 0) {
+    return "Overlaps $items";
+  }
+  if (refused == count) {
+    return "Can't overlap $items";
+  }
+  return "Overlaps $items, $refused not allowed";
+}
+
+/// The times from [start] to [end] in [format]: as
+/// [CalendarLocalizations.entryTimes] writes them where the range starts
+/// and ends on the day numbered [day], its last day
+/// ([CalendarDates.lastDayNumberOf]) counted as the day it ends on, and
+/// otherwise each time after its day's weekday, as "Tue 22:00-Wed 09:30".
+String _overlapTimes(
+  DateTime start,
+  DateTime end,
+  int day,
+  CalendarLocalizations strings,
+  CalendarHourLabelFormat format,
+) {
+  final lastDay = CalendarDates.lastDayNumberOf(start, end);
+  if (CalendarDates.dayNumber(start) == day && lastDay == day) {
+    return strings.entryTimes(start, end, format, isAllDay: false);
+  }
+  final from = strings.formatTime(CalendarDates.minuteOfDay(start), format);
+  final to = strings.formatTime(CalendarDates.endMinuteOfDay(end), format);
+  final lastWeekday = CalendarDates.dateOfDayNumber(lastDay).weekday;
+  return "${strings.weekdayAbbreviation(start.weekday)} $from-"
+      "${strings.weekdayAbbreviation(lastWeekday)} $to";
+}
+
+/// An overlapped [item]'s card in the [ScheduleOverlapNotice].
+class _OverlapCard extends StatelessWidget {
+  const _OverlapCard({
+    required this.item,
+    required this.times,
+    required this.day,
+    required this.refused,
+    required this.hourLabelFormat,
+  });
+
+  final CalendarItem item;
+
+  /// The schedule's times, or null where the clock skips one, under which
+  /// the card shows no shared time and no bar.
+  final ({DateTime start, DateTime end})? times;
+
+  /// The day number of the schedule's start day.
+  final int day;
+
+  /// Whether the rules refuse the item's overlap.
+  final bool refused;
+
+  final CalendarHourLabelFormat hourLabelFormat;
+
+  /// The width of the type's edge colour down the card's leading side.
+  static const double _edgeWidth = 4.0;
+
+  static const double _radius = 8.0;
+
+  /// The width of the icon's column and the gap after it, which the lines
+  /// under the title are indented by.
+  static const double _indent = 22.0;
+
+  static const double _iconSize = 16.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = CalendarLocalizations.of(context);
+    final style = harborTypeStyleOf(item.type);
+    final summaries = ItemCard.summariesOf(item);
+    final id = item.id;
+    String? shares;
+    ({double from, double to})? share;
+    final times = this.times;
+    if (times != null) {
+      final total = times.end.difference(times.start).inMicroseconds;
+      final start = item.start.isAfter(times.start) ? item.start : times.start;
+      final end = item.end.isBefore(times.end) ? item.end : times.end;
+      if (total > 0 && end.isAfter(start)) {
+        if (!item.start.isAfter(times.start) && !item.end.isBefore(times.end)) {
+          shares = "Covers all of this item";
+        } else {
+          final range = _overlapTimes(
+            start,
+            end,
+            day,
+            strings,
+            hourLabelFormat,
+          );
+          final minutes = end.difference(start).inMinutes;
+          shares = "Shares $range, ${strings.duration(minutes)}";
+        }
+        share = (
+          from: start.difference(times.start).inMicroseconds / total,
+          to: end.difference(times.start).inMicroseconds / total,
+        );
+      }
+    }
+    final tags = <Widget>[
+      if (shares != null)
+        DecoratedBox(
+          decoration: ShapeDecoration(
+            color: refused ? HarborColors.errorNotice : HarborColors.notice,
+            shape: const StadiumBorder(),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
+            child: Text(
+              shares,
+              style: TextStyle(
+                color: refused
+                    ? HarborColors.onErrorNotice
+                    : HarborColors.onNotice,
+                fontSize: 12.0,
+              ),
+            ),
+          ),
+        ),
+      if (refused)
+        const Text(
+          "Not allowed",
+          style: TextStyle(
+            color: HarborColors.error,
+            fontSize: 12.0,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+    ];
+    final content = Padding(
+      padding: const EdgeInsets.fromLTRB(_edgeWidth + 10.0, 8.0, 10.0, 10.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(style.icon, size: _iconSize, color: style.edge),
+              const SizedBox(width: _indent - _iconSize),
+              Expanded(
+                child: Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: HarborColors.text,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8.0),
+              Text(
+                _overlapTimes(
+                  item.start,
+                  item.end,
+                  day,
+                  strings,
+                  hourLabelFormat,
+                ),
+                style: const TextStyle(
+                  color: HarborColors.textSecondary,
+                  fontSize: 13.0,
+                ),
+              ),
+            ],
+          ),
+          if (summaries.isNotEmpty)
+            Padding(
+              padding: const EdgeInsetsDirectional.only(
+                start: _indent,
+                top: 2.0,
+              ),
+              child: Text(
+                summaries.join(", "),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: HarborColors.textMuted,
+                  fontSize: 12.0,
+                ),
+              ),
+            ),
+          if (tags.isNotEmpty)
+            Padding(
+              padding: const EdgeInsetsDirectional.only(
+                start: _indent,
+                top: 8.0,
+              ),
+              child: Wrap(
+                spacing: 8.0,
+                runSpacing: 4.0,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: tags,
+              ),
+            ),
+          if (share != null)
+            Padding(
+              padding: const EdgeInsetsDirectional.only(
+                start: _indent,
+                top: 8.0,
+              ),
+              child: _ShareBar(
+                id: id,
+                from: share.from,
+                to: share.to,
+                color: item.color,
+              ),
+            ),
+        ],
+      ),
+    );
+    return DecoratedBox(
+      key: id == null ? null : scheduleOverlapCardKey(id),
+      decoration: BoxDecoration(
+        color: HarborColors.surface,
+        border: Border.all(
+          color: refused
+              ? HarborColors.errorNoticeEdge
+              : HarborColors.noticeEdge,
+        ),
+        borderRadius: BorderRadius.circular(_radius),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(_radius),
+        child: Stack(
+          children: <Widget>[
+            content,
+            PositionedDirectional(
+              start: 0.0,
+              top: 0.0,
+              bottom: 0.0,
+              width: _edgeWidth,
+              child: ColoredBox(color: style.edge),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A card's bar: a track that stands for the schedule's time, filled in
+/// [color] from the fraction [from] of its width to the fraction [to], the
+/// part the item [id] shares. A screen reader skips it, as the card's
+/// shared time states the same.
+class _ShareBar extends StatelessWidget {
+  const _ShareBar({
+    required this.id,
+    required this.from,
+    required this.to,
+    required this.color,
+  });
+
+  final String? id;
+  final double from;
+  final double to;
+  final Color color;
+
+  static const double _height = 4.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final id = this.id;
+    const radius = BorderRadius.all(Radius.circular(_height / 2.0));
+    return ExcludeSemantics(
+      child: SizedBox(
+        key: id == null ? null : scheduleOverlapBarKey(id),
+        height: _height,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            return Stack(
+              children: <Widget>[
+                const Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: HarborColors.outline,
+                      borderRadius: radius,
+                    ),
+                  ),
+                ),
+                PositionedDirectional(
+                  start: width * from,
+                  width: width * (to - from),
+                  top: 0.0,
+                  bottom: 0.0,
+                  child: DecoratedBox(
+                    key: id == null ? null : scheduleOverlapShareKey(id),
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: radius,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
