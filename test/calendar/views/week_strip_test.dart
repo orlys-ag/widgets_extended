@@ -1,6 +1,6 @@
 /// The week strip on its own: the days it marks selected and today when
-/// it is given the day starts of a zone, and the days it opens on around
-/// a middle day given.
+/// it is given the day starts of a zone, the days it opens on around a
+/// middle day given, and the week it browses back no further than.
 library;
 
 import 'package:flutter/gestures.dart' show kTouchSlop;
@@ -313,6 +313,106 @@ void main() {
         }).toSet(),
         <bool?>{null},
       );
+    },
+  );
+
+  testWidgets(
+    "SB1 a week strip given browseFrom opens on its week where the day it "
+    "would open on lies in an earlier week, and slides back, by a fling or "
+    "a recall, no further than that week",
+    (tester) async {
+      final store = MemoryCalendarStore<String>();
+      addTearDown(store.dispose);
+
+      Widget strip({
+        Key? key,
+        DateTime? initialMiddleDay,
+        int recalls = 0,
+        DateTime? recallDay,
+      }) {
+        return MaterialApp(
+          home: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 350.0,
+              child: WeekStrip<String>(
+                key: key,
+                store: store,
+                selectedDay: DateTime(2026, 4, 14),
+                today: DateTime(2026, 4, 14),
+                weekdays: CalendarWeekdaySet.all,
+                onSelectDay: (day) {},
+                onBrowse: (day) {},
+                initialMiddleDay: initialMiddleDay,
+                recalls: recalls,
+                recallDay: recallDay,
+                browseFrom: DateTime(2026, 4, 22),
+              ),
+            ),
+          ),
+        );
+      }
+
+      double startOf(DateTime day) {
+        return tester.getRect(find.byKey(weekStripDayKey(day))).left -
+            tester.getRect(find.byType(WeekStrip<String>)).left;
+      }
+
+      void expectInRange(String step) {
+        final position = tester
+            .state<ScrollableState>(
+              find.descendant(
+                of: find.byType(WeekStrip<String>),
+                matching: find.byType(Scrollable),
+              ),
+            )
+            .position;
+        expect(
+          position.pixels,
+          greaterThanOrEqualTo(position.minScrollExtent - 0.01),
+          reason: step,
+        );
+      }
+
+      // The selected day lies in the week before April 22's, which runs
+      // from Monday April 20.
+      final monday = DateTime(2026, 4, 20);
+      await tester.pumpWidget(strip());
+      await tester.pumpAndSettle();
+      expect(startOf(monday), moreOrLessEquals(0.0));
+
+      await tester.fling(
+        find.byType(WeekStrip<String>),
+        const Offset(300.0, 0.0),
+        3000.0,
+      );
+      await tester.pumpAndSettle();
+      expect(startOf(monday), moreOrLessEquals(0.0));
+
+      await tester.pumpWidget(
+        strip(
+          key: const ValueKey<String>("middle"),
+          initialMiddleDay: DateTime(2026, 4, 9),
+        ),
+      );
+      // In the frame the strip opens in.
+      expect(startOf(monday), moreOrLessEquals(0.0));
+      await tester.pumpAndSettle();
+
+      await tester.pumpWidget(
+        strip(
+          key: const ValueKey<String>("middle"),
+          initialMiddleDay: DateTime(2026, 4, 9),
+          recalls: 1,
+          recallDay: DateTime(2026, 3, 31),
+        ),
+      );
+      for (var frame = 0; frame < 30; frame++) {
+        expectInRange("frame $frame");
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await tester.pumpAndSettle();
+      expect(startOf(monday), moreOrLessEquals(0.0));
     },
   );
 }

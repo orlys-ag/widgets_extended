@@ -1,7 +1,8 @@
 /// The calendar's built-in header: its one row, the chevrons and the title
 /// then the Today button at its start, and the edit mode toggle and the
 /// view button at its end; the chevrons' circles, the previous one's at the
-/// row's start; when the Today button shows, on the clock of the
+/// row's start, and the previous one disabled where the details step
+/// back no further; when the Today button shows, on the clock of the
 /// store's zone and past midnight, how it fades and keeps its size, and
 /// what a tap on it does; the toggle's look, what a screen reader hears of
 /// it and what it reports; the view button's icon, what a screen reader
@@ -694,6 +695,78 @@ void main() {
       tester.getSize(find.byIcon(Icons.chevron_right)),
       const Size.square(24.0),
     );
+  });
+
+  testWidgets("HD14 while canStepBack is false the previous chevron draws "
+      "at the theme's disabledOpacity and takes no press; by default it "
+      "draws in the theme's text colour and steps back", (tester) async {
+    var steps = 0;
+    void stepBack() {
+      steps++;
+    }
+
+    void none() {}
+    void select(CalendarViewKind view) {}
+    final stepsBack = CalendarHeaderDetails(
+      view: CalendarViewKind.agenda,
+      views: const <CalendarViewKind>[CalendarViewKind.agenda],
+      day: tuesday,
+      pickerYear: null,
+      stepUnit: CalendarStepUnit.week,
+      onPrevious: stepBack,
+      onNext: none,
+      onSelectView: select,
+      onOpenPicker: none,
+      onClosePicker: none,
+    );
+    final stops = CalendarHeaderDetails(
+      view: CalendarViewKind.agenda,
+      views: const <CalendarViewKind>[CalendarViewKind.agenda],
+      day: tuesday,
+      pickerYear: null,
+      stepUnit: CalendarStepUnit.week,
+      onPrevious: stepBack,
+      onNext: none,
+      onSelectView: select,
+      onOpenPicker: none,
+      onClosePicker: none,
+      canStepBack: false,
+    );
+
+    Color? previousColour() {
+      return tester
+          .widget<RichText>(
+            find.descendant(
+              of: find.byIcon(Icons.chevron_left),
+              matching: find.byType(RichText),
+            ),
+          )
+          .text
+          .style
+          ?.color;
+    }
+
+    await tester.pumpWidget(
+      app(Scaffold(body: CalendarHeader(details: stops))),
+    );
+    await tester.pumpAndSettle();
+    final theme = CalendarTheme.of(tester.element(find.byType(CalendarHeader)));
+    expect(
+      previousColour(),
+      theme.text.withValues(alpha: theme.text.a * theme.disabledOpacity),
+    );
+    await tester.tap(find.byTooltip("Previous week"));
+    await tester.pump();
+    expect(steps, 0);
+
+    await tester.pumpWidget(
+      app(Scaffold(body: CalendarHeader(details: stepsBack))),
+    );
+    await tester.pumpAndSettle();
+    expect(previousColour(), theme.text);
+    await tester.tap(find.byTooltip("Previous week"));
+    await tester.pump();
+    expect(steps, 1);
   });
 
   testWidgets("HD13 the chevrons are 32 px circles around 24 px icons, and "

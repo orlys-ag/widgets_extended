@@ -29,28 +29,38 @@ enum MonthStripSnap {
 /// The day of [month]'s week that the calendar card folds into while it
 /// shows [month]: [selectedDay] where [month] holds it; otherwise [today],
 /// or the shown day nearest it, where [month] holds today; otherwise
-/// [month]'s first shown day.
+/// [month]'s first shown day. With [firstDay], a shown day in [month] or
+/// before it, below which the card browses no week, [firstDay] in place of
+/// a day whose week starts before [firstDay]'s.
 DateTime monthFoldDay(
   DateTime month, {
   required DateTime selectedDay,
   required DateTime today,
   required CalendarWeekdaySet weekdays,
+  DateTime? firstDay,
 }) {
   bool holds(DateTime day) {
     return day.year == month.year && day.month == month.month;
   }
 
+  final DateTime day;
   if (holds(selectedDay)) {
-    return selectedDay;
-  }
-  if (holds(today)) {
+    day = selectedDay;
+  } else if (holds(today)) {
     // `shownDayNear` stays inside the month of the day it is given.
-    return CalendarDates.shownDayNear(today, weekdays);
+    day = CalendarDates.shownDayNear(today, weekdays);
+  } else {
+    day = CalendarDates.shownDayNear(
+      DateTime(month.year, month.month),
+      weekdays,
+    );
   }
-  return CalendarDates.shownDayNear(
-    DateTime(month.year, month.month),
-    weekdays,
-  );
+  if (firstDay != null &&
+      weekdays.weekStartOfDay(CalendarDates.dayNumber(day)) <
+          weekdays.weekStartOfDay(CalendarDates.dayNumber(firstDay))) {
+    return firstDay;
+  }
+  return day;
 }
 
 /// The months side by side, opening on [month], one at a time across the
@@ -84,6 +94,10 @@ DateTime monthFoldDay(
 /// shows it. Once [collapse] leaves 0 the strip comes to rest on the
 /// nearest whole month at once and takes no pointers.
 ///
+/// With [browseFrom], the strip slides back no further than that day's
+/// month, and folds into that day's week where the week it would fold into
+/// starts before it.
+///
 /// Once a tap has given it focus, the arrow keys select the shown day
 /// before or after the selected one, and the day a week before or after
 /// it, through [onSelectDay]; an arrow onto a day [isDayEnabled] refuses
@@ -107,6 +121,7 @@ class MonthStrip<T> extends StatefulWidget {
     this.dayBadges,
     this.isDayEnabled,
     this.foldDay,
+    this.browseFrom,
   });
 
   final CalendarStore<T> store;
@@ -152,6 +167,13 @@ class MonthStrip<T> extends StatefulWidget {
   /// for [monthFoldDay]'s.
   final DateTime? foldDay;
 
+  /// A shown day the strip slides back no further than the month of, and
+  /// whose week the month folds into in place of an earlier one
+  /// ([monthFoldDay]'s `firstDay`); null for no limit. Fixed for the
+  /// strip's life by its month: give a strip a limit in another month its
+  /// own key.
+  final DateTime? browseFrom;
+
   /// The most weeks a month's grid takes.
   static const int maxWeeks = 6;
 
@@ -172,8 +194,27 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
   static const Key _forwardKey = ValueKey<String>("month-strip-forward");
 
   /// The month at index 0: [MonthStrip.month] when the strip was first
-  /// built. Each index after or before it is the next or previous month.
-  late final DateTime _origin = DateTime(widget.month.year, widget.month.month);
+  /// built, or [MonthStrip.browseFrom]'s month where that is later. Each
+  /// index after or before it is the next or previous month.
+  late final DateTime _origin = _openingMonth();
+
+  DateTime _openingMonth() {
+    final month = DateTime(widget.month.year, widget.month.month);
+    final from = _browseFrom;
+    if (from != null && from.isAfter(month)) {
+      return DateTime(from.year, from.month);
+    }
+    return month;
+  }
+
+  /// [MonthStrip.browseFrom] as a plain day; null for no limit.
+  late final DateTime? _browseFrom = _foldTwinOf(widget.browseFrom);
+
+  /// The index of [MonthStrip.browseFrom]'s month, 0 or before it, which
+  /// the strip slides back no further than; null for no limit.
+  late final int? _limit = _browseFrom == null
+      ? null
+      : _indexOf(DateTime(_browseFrom.year, _browseFrom.month));
 
   final ScrollController _scroll = ScrollController();
 
@@ -253,6 +294,11 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
       "A MonthStrip keeps its weekdays; give a strip that changes them its "
       "own key.",
     );
+    assert(
+      _sameMonth(widget.browseFrom, oldWidget.browseFrom),
+      "A MonthStrip keeps the month of its browseFrom; give a strip a limit "
+      "in another month its own key.",
+    );
     if (widget.selectedDay != oldWidget.selectedDay) {
       _selectedDay = _plainTwinOf(widget.selectedDay);
     }
@@ -284,6 +330,13 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
     super.dispose();
   }
 
+  static bool _sameMonth(DateTime? a, DateTime? b) {
+    if (a == null || b == null) {
+      return a == b;
+    }
+    return a.year == b.year && a.month == b.month;
+  }
+
   DateTime _monthAt(int index) {
     return DateTime(_origin.year, _origin.month + index);
   }
@@ -309,7 +362,8 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
     widget.store.prefetch(grid.firstDay, grid.lastDay);
   }
 
-  /// Slides the strip to [month], unless it rests there. A month more than
+  /// Slides the strip to [month], or to [MonthStrip.browseFrom]'s month
+  /// where [month] lies before it, unless it rests there. A month more than
   /// one away is jumped to a month short of first, so the slide is a
   /// month's at most, as fast whatever the distance.
   void _slideTo(DateTime month) {
@@ -318,7 +372,12 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
       return;
     }
     final position = _scroll.position;
-    final target = _indexOf(month) * extent;
+    var index = _indexOf(month);
+    final limit = _limit;
+    if (limit != null && index < limit) {
+      index = limit;
+    }
+    final target = index * extent;
     final distance = target - position.pixels;
     if (distance.abs() < _epsilon * extent) {
       return;
@@ -483,7 +542,7 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
                   itemExtent: extent,
                   delegate: SliverChildBuilderDelegate((context, index) {
                     return _buildMonth(_monthAt(-1 - index));
-                  }),
+                  }, childCount: _limit == null ? null : -_limit),
                 ),
                 SliverFixedExtentList(
                   key: _forwardKey,
@@ -525,6 +584,7 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
                                   selectedDay: _selectedDay,
                                   today: _today,
                                   weekdays: widget.weekdays,
+                                  firstDay: _browseFrom,
                                 ),
                         )
                         .row

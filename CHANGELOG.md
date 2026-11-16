@@ -193,6 +193,10 @@ from two new `CalendarLocalizations` members with English defaults,
 around 24-pixel icons, like the Today button, the toggle and the view
 button, and the previous chevron's circle lies at the row's start: with
 `CalendarDayPicker.daysToEdges` it spans the first column's day circles.
+- Added `CalendarHeaderDetails.canStepBack`, true by default: while it is
+false the built-in header draws its previous chevron disabled, at the
+theme's `disabledOpacity`, and takes no press on it. A `CalendarDayPicker`
+that browses no further back sets it false.
 - A change of view no longer resets the calendar card or the month picker.
 The card opens on its month in every view, Day included, which opened it
 folded into the week strip. A pick of another view or of the view shown, a
@@ -908,6 +912,11 @@ its cell first builds, at most once per predicate and value. `store` and
 and show all seven weekdays. With `daysToEdges` it pads no side and
 spreads its columns so that the circles of the first and last columns
 reach its sides, lining its days up with the fields above and below it.
+With `browsesBeforeFirstDay` false it browses to no week, month or year
+before those of `firstDay`, or of the value where that is earlier: its week
+row and month stop there whether a chevron, a swipe or a fold moves them,
+its previous chevron draws disabled there, and its month picker draws the
+months before that month disabled and takes no tap on them.
 - Added `CalendarScheduleCheck.firstStartDay`, the first day a new start
 may lie on as the policy's earliest starts of yesterday and today say, and
 `CalendarScheduleCheck.endDays`, the days the schedule's end may lie on:

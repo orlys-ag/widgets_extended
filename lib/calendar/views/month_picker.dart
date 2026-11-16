@@ -28,6 +28,12 @@ class _PickerStyles {
         color: theme.onPrimary,
       ),
       currentName = theme.monthNameMarkedStyle.copyWith(color: theme.primary),
+      disabledName = theme.monthNameStyle.copyWith(
+        color: _disabled(theme, theme.text),
+      ),
+      disabledCurrentName = theme.monthNameMarkedStyle.copyWith(
+        color: _disabled(theme, theme.primary),
+      ),
       pill = BoxDecoration(
         color: theme.background,
         borderRadius: BorderRadius.circular(dayCircleSize / 2.0),
@@ -40,6 +46,11 @@ class _PickerStyles {
         border: Border.all(color: theme.todayRing, width: theme.todayRingWidth),
         borderRadius: BorderRadius.circular(dayCircleSize / 2.0),
       );
+
+  /// [colour] at [theme]'s [CalendarThemeData.disabledOpacity].
+  static Color _disabled(CalendarThemeData theme, Color colour) {
+    return colour.withValues(alpha: colour.a * theme.disabledOpacity);
+  }
 
   /// The styles of [theme]: those made for it before, or for a theme `==`
   /// to it last, so an equal theme makes none.
@@ -80,6 +91,12 @@ class _PickerStyles {
   final TextStyle selectedName;
 
   final TextStyle currentName;
+
+  /// [name] and [currentName] at the theme's
+  /// [CalendarThemeData.disabledOpacity].
+  final TextStyle disabledName;
+  final TextStyle disabledCurrentName;
+
   final BoxDecoration pill;
   final BoxDecoration selectedPill;
   final BoxDecoration ring;
@@ -91,7 +108,8 @@ class _PickerStyles {
 /// ringed as today's number is. Every name reads at the text size, or
 /// where the widest would not fit its pill at it, at the one smaller size
 /// that fits it. The picker is as tall as its rows of cells. A tap on a
-/// month reports [onSelectMonth].
+/// month reports [onSelectMonth]. A month before [firstMonth] draws
+/// disabled and takes no tap.
 ///
 /// A horizontal drag slides the picker with the finger, the next year's
 /// months coming in from the right and the previous year's from the left,
@@ -99,7 +117,8 @@ class _PickerStyles {
 /// one the way a fling moves, and otherwise the nearest. The picker reports
 /// through [onBrowse] each new year it is to rest on: the nearest while the
 /// finger moves it, then the one a release slides to. A new [year] the
-/// picker is not on slides it there.
+/// picker is not on slides it there. The picker shows, slides to and
+/// reports no year before [firstMonth]'s, a drag stopping at it.
 class MonthPicker extends StatefulWidget {
   const MonthPicker({
     super.key,
@@ -108,6 +127,7 @@ class MonthPicker extends StatefulWidget {
     required this.currentMonth,
     required this.onSelectMonth,
     required this.onBrowse,
+    this.firstMonth,
   });
 
   /// The year whose months the picker shows.
@@ -124,6 +144,10 @@ class MonthPicker extends StatefulWidget {
 
   /// Reports the year a drag has brought the picker to.
   final ValueChanged<int> onBrowse;
+
+  /// The first day of the first month the picker takes; null for no first
+  /// month.
+  final DateTime? firstMonth;
 
   @override
   State<MonthPicker> createState() {
@@ -142,7 +166,7 @@ class _MonthPickerState extends State<MonthPicker>
   /// the first quarter of 2027's at its right.
   late final AnimationController _position = AnimationController.unbounded(
     vsync: this,
-    value: widget.year.toDouble(),
+    value: _yearFrom(widget.year).toDouble(),
   );
 
   /// The year the picker rests on or slides to: the last [MonthPicker.year]
@@ -190,12 +214,20 @@ class _MonthPickerState extends State<MonthPicker>
     super.dispose();
   }
 
-  /// Slides to [year] over the theme's motion, or at a zero duration, in
-  /// this call.
+  /// [year], or [MonthPicker.firstMonth]'s year where [year] lies before
+  /// it.
+  int _yearFrom(int year) {
+    final first = widget.firstMonth?.year;
+    return first != null && year < first ? first : year;
+  }
+
+  /// Slides to [year], or [MonthPicker.firstMonth]'s year where [year] lies
+  /// before it, over the theme's motion, or at a zero duration, in this
+  /// call.
   void _slideTo(int year) {
     final theme = _styles.theme;
     _position.animateTo(
-      year.toDouble(),
+      _yearFrom(year).toDouble(),
       duration: theme.motionDuration,
       curve: theme.motionCurve,
     );
@@ -212,25 +244,34 @@ class _MonthPickerState extends State<MonthPicker>
     _position.stop();
   }
 
+  /// Moves the picker with the finger, back no further than
+  /// [MonthPicker.firstMonth]'s year.
   void _drag(DragUpdateDetails details) {
-    _position.value -= details.primaryDelta! / context.size!.width;
-    _report(_position.value.round());
+    var position =
+        _position.value - details.primaryDelta! / context.size!.width;
+    final first = widget.firstMonth?.year;
+    if (first != null && position < first) {
+      position = first.toDouble();
+    }
+    _position.value = position;
+    _report(position.round());
   }
 
   /// A fling slides to the next whole year the way it moves, and any other
   /// release, whose [DragEndDetails.primaryVelocity] is zero, to the
-  /// nearest year.
+  /// nearest year; none to a year before [MonthPicker.firstMonth]'s.
   void _endDrag(DragEndDetails details) {
     final velocity = details.primaryVelocity ?? 0.0;
     final position = _position.value;
-    final int target;
+    final int fling;
     if (velocity < 0.0) {
-      target = (position + _epsilon).floor() + 1;
+      fling = (position + _epsilon).floor() + 1;
     } else if (velocity > 0.0) {
-      target = (position - _epsilon).ceil() - 1;
+      fling = (position - _epsilon).ceil() - 1;
     } else {
-      target = position.round();
+      fling = position.round();
     }
+    final target = _yearFrom(fling);
     _report(target);
     _slideTo(target);
   }
@@ -337,17 +378,22 @@ class _MonthPickerState extends State<MonthPicker>
   }
 
   Widget _buildMonth(DateTime month, TextScaler scaler) {
+    final first = widget.firstMonth;
+    final enabled = first == null ? null : !month.isBefore(first);
     return GestureDetector(
       key: monthPickerMonthKey(month),
       behavior: HitTestBehavior.opaque,
-      onTap: () {
-        widget.onSelectMonth(month);
-      },
+      onTap: enabled == false
+          ? null
+          : () {
+              widget.onSelectMonth(month);
+            },
       child: MonthCell(
         month: month,
         isSelected: month == widget.selectedMonth,
         isCurrent: month == widget.currentMonth,
         nameScaler: scaler,
+        enabled: enabled,
       ),
     );
   }
@@ -358,7 +404,9 @@ class _MonthPickerState extends State<MonthPicker>
 /// otherwise as tall as the name, filled with the primary colour when
 /// [isSelected] and ringed as today's number is when [isCurrent], in the
 /// [CalendarTheme] above it. A screen reader hears the cell as a button
-/// named by the month and the year.
+/// named by the month and the year. Where [enabled] is false the name
+/// draws at the theme's [CalendarThemeData.disabledOpacity] unless the
+/// month is selected, and a screen reader hears the month disabled.
 class MonthCell extends StatelessWidget {
   const MonthCell({
     super.key,
@@ -366,6 +414,7 @@ class MonthCell extends StatelessWidget {
     required this.isSelected,
     required this.isCurrent,
     required this.nameScaler,
+    this.enabled,
   });
 
   /// The first day of the month the cell shows.
@@ -376,6 +425,10 @@ class MonthCell extends StatelessWidget {
 
   /// The text scaler of the name.
   final TextScaler nameScaler;
+
+  /// Whether the month may be picked: false draws it disabled; null, as
+  /// true, draws it enabled and gives its [Semantics] no enabled state.
+  final bool? enabled;
 
   /// The space around the pill, which makes a row of pills at the default
   /// text size as tall as a row of the month's days.
@@ -391,17 +444,19 @@ class MonthCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final styles = _PickerStyles.of(context);
     final strings = CalendarLocalizations.of(context);
+    final disabled = enabled == false;
     final TextStyle nameStyle;
     if (isSelected) {
       nameStyle = styles.selectedName;
     } else if (isCurrent) {
-      nameStyle = styles.currentName;
+      nameStyle = disabled ? styles.disabledCurrentName : styles.currentName;
     } else {
-      nameStyle = styles.name;
+      nameStyle = disabled ? styles.disabledName : styles.name;
     }
     return Semantics(
       button: true,
       selected: isSelected,
+      enabled: enabled,
       label: strings.monthYear(month),
       excludeSemantics: true,
       child: Container(
