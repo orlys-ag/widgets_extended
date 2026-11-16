@@ -131,9 +131,10 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// and where the time at or before now is refused picks the first later
 /// time the picker offers.
 ///
-/// The section pads what its controls show 16 pixels from its edges: the
-/// All day switch's touch target reaches into that padding, so its track
-/// lines up with the fields.
+/// The section pads its controls by nothing. Its rows reach its sides; at
+/// its top lies the All day row, the switch's touch target whole, or with
+/// no switch the Start row; and at its bottom the End row's fields, or its
+/// panel while open.
 ///
 /// Every edit goes to [onChanged] as a new schedule. A [locked] section
 /// takes no input; a [CalendarScheduleCheck.startFixed] one takes none at
@@ -244,30 +245,13 @@ enum _ScheduleField {
   }
 }
 
-/// The space between the section's edges and what its controls show.
-const double _edge = 16.0;
-
 /// The All day switch's size, as a share of a [Switch]'s.
 const double _allDaySwitchScale = 0.75;
-
-/// The space above the All day switch's track, at its scale: a [Switch]
-/// given [MaterialTapTargetSize.padded] is [kMinInteractiveDimension] tall
-/// around Material 3's 32-pixel track.
-const double _allDaySwitchTop =
-    (kMinInteractiveDimension - 32.0) / 2.0 * _allDaySwitchScale;
 
 /// The shares of a Start or End row that its date and its time take: the
 /// date three fifths, the time two.
 const int _dateFlex = 3;
 const int _timeFlex = 2;
-
-/// [child] padded [_edge] pixels from the section's sides.
-Widget _sides(Widget child) {
-  return Padding(
-    padding: const EdgeInsets.symmetric(horizontal: _edge),
-    child: child,
-  );
-}
 
 /// The lookups the open picker has made of its [_TimeTable], in debug
 /// builds; the release build counts none.
@@ -843,8 +827,8 @@ class ScheduleSectionState extends State<ScheduleSection> {
   /// way All day turns, and with them the panel's state and the field's
   /// focus: a [Focus] that leaves the tree drops its focus. So does each
   /// row as the All day switch above it comes or goes: a row's outermost
-  /// widget is a [Column], and the switch's row a [Padding], which the
-  /// section's [Column] does not match to it.
+  /// widget is a [Column], and the switch's row a [MergeSemantics], which
+  /// the section's [Column] does not match to it.
   Widget _dateRow(_TimeField row, String? error) {
     final schedule = _schedule;
     final timed = !schedule.isAllDay;
@@ -854,28 +838,26 @@ class ScheduleSectionState extends State<ScheduleSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        _sides(
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(
+              flex: timed ? _dateFlex : 1,
+              child: _dateField(row, error: timed ? null : error),
+            ),
+            if (timed) ...<Widget>[
+              const SizedBox(width: 12.0),
               Expanded(
-                flex: timed ? _dateFlex : 1,
-                child: _dateField(row, error: timed ? null : error),
-              ),
-              if (timed) ...<Widget>[
-                const SizedBox(width: 12.0),
-                Expanded(
-                  flex: _timeFlex,
-                  child: _timeField(
-                    row,
-                    label: start ? "Start time" : "End time",
-                    minute: start ? schedule.startMinute : schedule.endMinute,
-                    error: error,
-                  ),
+                flex: _timeFlex,
+                child: _timeField(
+                  row,
+                  label: start ? "Start time" : "End time",
+                  minute: start ? schedule.startMinute : schedule.endMinute,
+                  error: error,
                 ),
-              ],
+              ),
             ],
-          ),
+          ],
         ),
         _PickerPanel(
           key: start ? scheduleStartPanelKey : scheduleEndPanelKey,
@@ -904,25 +886,18 @@ class ScheduleSectionState extends State<ScheduleSection> {
     final startLocked = _startLocked;
     final allDayShows = _options.allowsAllDay || schedule.isAllDay;
     final children = <Widget>[
-      if (allDayShows) _sides(_allDayRow(schedule, startLocked)),
+      if (allDayShows) _allDayRow(schedule, startLocked),
       _dateRow(_TimeField.start, errors["start"]),
       _dateRow(_TimeField.end, errors["end"]),
     ];
-    // The top padding is measured to what the first control shows.
-    return Padding(
-      padding: EdgeInsets.only(
-        top: allDayShows ? _edge - _allDaySwitchTop : _edge,
-        bottom: _edge,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          for (var index = 0; index < children.length; index++) ...<Widget>[
-            if (index > 0) const SizedBox(height: 12.0),
-            children[index],
-          ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        for (var index = 0; index < children.length; index++) ...<Widget>[
+          if (index > 0) const SizedBox(height: 12.0),
+          children[index],
         ],
-      ),
+      ],
     );
   }
 }
@@ -1232,12 +1207,46 @@ class ScheduleSummary extends StatelessWidget {
   }
 }
 
+/// How far past its sides the picker panel shows what its pickers paint,
+/// as the badges of a day picker's edge columns, which reach past the
+/// picker's sides under [CalendarDayPicker.daysToEdges]; the sheet's page
+/// keeps a wider margin around the section.
+const double _panelOverhang = 16.0;
+
+/// Clips to its box's height, and [_panelOverhang] past each of its sides.
+class _OverhangClipper extends CustomClipper<Rect> {
+  const _OverhangClipper();
+
+  @override
+  Rect getClip(Size size) {
+    return Rect.fromLTRB(
+      -_panelOverhang,
+      0.0,
+      size.width + _panelOverhang,
+      size.height,
+    );
+  }
+
+  /// The clip itself, which reaches past the box, rather than the box
+  /// [CustomClipper.getApproximateClipRect] takes by default.
+  @override
+  Rect getApproximateClipRect(Size size) {
+    return getClip(size);
+  }
+
+  @override
+  bool shouldReclip(_OverhangClipper oldClipper) {
+    return false;
+  }
+}
+
 /// The panel under a Start or End row that holds the picker of the row's
 /// open field: its date field's day picker, which [dateBuilder] builds, or
 /// where [showsTime] its time field's picker, which [timeBuilder] builds,
 /// null for an all-day row, which has no time field. Each is built only
-/// while the panel shows it. The panel spans the section and clips at its
-/// sides, its pickers lying [_edge] inside them, as the row's fields do.
+/// while the panel shows it. The panel and its pickers span the section,
+/// as the row's fields do, and the panel clips [_panelOverhang] past its
+/// sides, so what a picker paints a little past them shows.
 /// As [open] turns true the panel grows from no height to the picker's
 /// over the [CalendarTheme]'s motion, the picker fading in over the
 /// motion's first half, and as it turns false it plays
@@ -1566,40 +1575,47 @@ class _PickerPanelState extends State<_PickerPanel>
         : const SizedBox.shrink();
     return FadeTransition(
       opacity: _fade,
-      child: SizeTransition(
-        sizeFactor: _curved,
-        alignment: Alignment.topCenter,
+      // A SizeTransition of the panel's height, but for its clip, which
+      // reaches past the panel's sides as the one inside it does.
+      child: AnimatedBuilder(
+        animation: _curved,
+        builder: (context, child) {
+          return ClipRect(
+            clipper: const _OverhangClipper(),
+            child: Align(
+              alignment: Alignment.topCenter,
+              heightFactor: math.max(_curved.value, 0.0),
+              child: child,
+            ),
+          );
+        },
         child: Padding(
           padding: const EdgeInsets.only(top: 12.0),
           child: ClipRect(
-            // Inside the clips, so what a picker paints past its sides
-            // shows, as the badges of a day picker's edge column do under
-            // CalendarDayPicker.daysToEdges.
-            child: _sides(
-              Listener(
-                onPointerDown: _pointerDown,
-                onPointerUp: _pointerUp,
-                onPointerCancel: _pointerUp,
-                child: _PanelSwap(
-                  t: _swapCurved,
-                  onGrow: _grew,
-                  children: <Widget>[
-                    IgnorePointer(
-                      ignoring: _showsTime,
-                      child: FadeTransition(
-                        opacity: _dateOpacity,
-                        child: datePicker,
-                      ),
+            clipper: const _OverhangClipper(),
+            child: Listener(
+              onPointerDown: _pointerDown,
+              onPointerUp: _pointerUp,
+              onPointerCancel: _pointerUp,
+              child: _PanelSwap(
+                t: _swapCurved,
+                onGrow: _grew,
+                children: <Widget>[
+                  IgnorePointer(
+                    ignoring: _showsTime,
+                    child: FadeTransition(
+                      opacity: _dateOpacity,
+                      child: datePicker,
                     ),
-                    IgnorePointer(
-                      ignoring: !_showsTime,
-                      child: FadeTransition(
-                        opacity: _timeOpacity,
-                        child: timePicker,
-                      ),
+                  ),
+                  IgnorePointer(
+                    ignoring: !_showsTime,
+                    child: FadeTransition(
+                      opacity: _timeOpacity,
+                      child: timePicker,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),

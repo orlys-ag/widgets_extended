@@ -2301,10 +2301,10 @@ void main() {
     expect(formAllDayOn(), isTrue);
   });
 
-  testWidgets("FW3 what the scheduling card's controls show lies 16 pixels "
-      "from its edges: All day's label at the top and side, its switch 8 "
-      "pixels after the label, and at the bottom the End row's fields, or "
-      "an all-day item's End date", (tester) async {
+  testWidgets("FW3 the scheduling part's controls reach its edges: All "
+      "day's switch, its touch target whole, at the top, its label at the "
+      "side, the switch 8 pixels after the label, and at the bottom the End "
+      "row's fields, or an all-day item's End date", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task(
@@ -2319,15 +2319,15 @@ void main() {
     await openEdit(tester, store);
     var card = tester.getRect(find.byKey(formSchedulingCardKey));
     final label = tester.getRect(find.text("All day"));
-    expect(label.top, card.top + 16.0);
-    expect(label.left, card.left + 16.0);
+    expect(tester.getRect(allDaySwitch()).top, card.top);
+    expect(label.left, card.left);
     expect(tester.getRect(allDaySwitch()).left, label.right + 8.0);
     expect(
       math.max(
         tester.getRect(formDateFinder("End date")).bottom,
         tester.getRect(timeFieldFinder("End time")).bottom,
       ),
-      card.bottom - 16.0,
+      card.bottom,
     );
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
@@ -2336,10 +2336,7 @@ void main() {
     // Setup sanity: the item is all-day.
     expect(formAllDayOn(), isTrue);
     card = tester.getRect(find.byKey(formSchedulingCardKey));
-    expect(
-      tester.getRect(formDateFinder("End date")).bottom,
-      card.bottom - 16.0,
-    );
+    expect(tester.getRect(formDateFinder("End date")).bottom, card.bottom);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
@@ -2355,7 +2352,7 @@ void main() {
     expect(allDaySwitch(), findsNothing);
     expect(
       tester.getRect(formDateFinder("Start date")).top,
-      tester.getRect(find.byType(ScheduleSection)).top + 16.0,
+      tester.getRect(find.byType(ScheduleSection)).top,
     );
   });
 
@@ -2385,8 +2382,8 @@ void main() {
       final date = dates[row];
       final time = times[row];
       expect(date.top, time.top, reason: "row $row");
-      expect(date.left, card.left + 16.0, reason: "row $row");
-      expect(time.right, card.right - 16.0, reason: "row $row");
+      expect(date.left, card.left, reason: "row $row");
+      expect(time.right, card.right, reason: "row $row");
       expect(time.left - date.right, 12.0, reason: "row $row");
       expect(
         date.width / (date.width + time.width),
@@ -2398,7 +2395,7 @@ void main() {
   });
 
   testWidgets("FR2 an all-day item's Start date and End date each take a "
-      "row of their own across the card", (tester) async {
+      "row of their own across the section", (tester) async {
     await pumpSection(
       tester,
       checkOf(
@@ -2409,8 +2406,8 @@ void main() {
     final start = tester.getRect(formDateFinder("Start date"));
     final end = tester.getRect(formDateFinder("End date"));
     for (final date in <Rect>[start, end]) {
-      expect(date.left, section.left + 16.0);
-      expect(date.right, section.right - 16.0);
+      expect(date.left, section.left);
+      expect(date.right, section.right);
     }
     expect(start.bottom, lessThanOrEqualTo(end.top));
   });

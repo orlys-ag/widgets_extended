@@ -2,10 +2,12 @@
 /// read-only, and the delete confirmation.
 ///
 /// The form opens in a modal bottom sheet, a scrolling page of three
-/// cards: the schedule section, which every item type shares and which
-/// edits a [CalendarSchedule]; the schedule's summary, which shows what its
-/// [CalendarScheduleCheck] answers; and the item's own fields, generated
-/// from the item type's schema. Once the schedule section has scrolled
+/// parts: the schedule section, which every item type shares and which
+/// edits a [CalendarSchedule]; the schedule's summary, in an outlined card,
+/// which shows what its [CalendarScheduleCheck] answers; and the item's own
+/// fields, generated from the item type's schema. The section and the
+/// fields lie on the sheet with no card around them, at the page's
+/// margins. Once the schedule section has scrolled
 /// away, the summary stays at the page's top while the item's fields scroll
 /// under it, where it takes at most half of the page
 /// ([FittingPinnedHeaderSliver]). The check is made again
@@ -37,19 +39,20 @@ import 'fitting_pinned_header.dart';
 import 'harbor_theme.dart';
 import 'schedule_section.dart';
 
-/// The key of the form's summary card, which holds the [ScheduleSummary].
+/// The key of the form's summary card, an outlined card holding the
+/// [ScheduleSummary].
 const ValueKey<String> formSummaryCardKey = ValueKey<String>(
   "form-summary-card",
 );
 
-/// The key of the form's scheduling card, which holds the
-/// [ScheduleSection].
+/// The key of the form's scheduling part, which holds the
+/// [ScheduleSection], with no card around it.
 const ValueKey<String> formSchedulingCardKey = ValueKey<String>(
   "form-scheduling-card",
 );
 
-/// The key of the form's item card, which holds the item's type, title and
-/// type fields.
+/// The key of the form's item part, which holds the item's type, title and
+/// type fields, with no card around them.
 const ValueKey<String> formItemCardKey = ValueKey<String>("form-item-card");
 
 /// Opens the form for a new item over the range [range] picked, with All
@@ -1054,17 +1057,13 @@ class _ItemFormState extends State<_ItemForm> {
     }
   }
 
-  /// An outlined card keyed [key], with no heading, holding [child] inside
-  /// [padding].
-  Widget _card(
-    Key key,
-    Widget child, {
-    EdgeInsetsGeometry padding = const EdgeInsets.all(16.0),
-  }) {
+  /// An outlined card keyed [key], with no heading, holding [child] 16
+  /// pixels inside its edges.
+  Widget _card(Key key, Widget child) {
     return Card.outlined(
       key: key,
       margin: EdgeInsets.zero,
-      child: Padding(padding: padding, child: child),
+      child: Padding(padding: const EdgeInsets.all(16.0), child: child),
     );
   }
 
@@ -1134,12 +1133,9 @@ class _ItemFormState extends State<_ItemForm> {
       ),
       for (final field in _schema.fields) _fieldFor(field),
     ];
-    // The section pads itself to the card's edges, so that its controls'
-    // touch targets can reach into the padding.
-    final schedulingCard = _card(
-      formSchedulingCardKey,
-      padding: EdgeInsets.zero,
-      ScheduleSection(
+    final schedulingCard = KeyedSubtree(
+      key: formSchedulingCardKey,
+      child: ScheduleSection(
         key: _sectionKey,
         check: _scheduleCheck,
         hours: widget.store.hours,
@@ -1165,9 +1161,9 @@ class _ItemFormState extends State<_ItemForm> {
         onChanged: _scheduleChanged,
       ),
     );
-    final itemCard = _card(
-      formItemCardKey,
-      Column(
+    final itemCard = KeyedSubtree(
+      key: formItemCardKey,
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           for (var index = 0; index < itemFields.length; index++) ...<Widget>[
@@ -1178,7 +1174,7 @@ class _ItemFormState extends State<_ItemForm> {
       ),
     );
     // The sheet's own colour, which the summary's strip paints so that the
-    // item card scrolls out of sight under it.
+    // item's fields scroll out of sight under it.
     final sheetColor =
         Material.of(context).color ??
         Theme.of(context).colorScheme.surfaceContainerLow;
