@@ -3478,9 +3478,10 @@ void main() {
   testWidgets("FS9 a card's bar zooms on the shared time: its axis runs "
       "from that time's length before it to that length after it, within "
       "the two items' times, under a lane for the item and one for the "
-      "overlapped item in that item's colour, each lane square where its "
-      "item runs on past the axis, over a tinted column of the shared time, "
-      "the axis's first and last times under its ends", (tester) async {
+      "overlapped item in that item's colour, each lane rounded at both "
+      "ends, as the track is, also where its item runs on past the axis, "
+      "over a tinted column of the shared time, the axis's first and last "
+      "times under its ends", (tester) async {
     final standup = task("item-3", "Standup", at(9, 30), at(10, 30));
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
@@ -3529,20 +3530,21 @@ void main() {
       "11:00",
     ]);
 
-    const round = Radius.circular(3.0);
+    // Write's lane runs on past the axis's end, and Early's past its start.
+    const pill = BorderRadius.all(Radius.circular(3.0));
     expect(
       decorationRadius(
         tester,
         find.byKey(scheduleOverlapThisLaneKey("item-2")),
       ),
-      const BorderRadiusDirectional.horizontal(start: round, end: Radius.zero),
+      pill,
     );
     expect(
       decorationRadius(
         tester,
         find.byKey(scheduleOverlapOtherLaneKey("item-2")),
       ),
-      const BorderRadiusDirectional.horizontal(start: Radius.zero, end: round),
+      pill,
     );
     expect(
       decorationColor(
@@ -3595,7 +3597,7 @@ void main() {
         tester,
         find.byKey(scheduleOverlapThisLaneKey("item-6")),
       ),
-      BorderRadiusDirectional.zero,
+      pill,
     );
     expect(overlapBarTexts(tester, "item-6").sublist(2), <String>[
       "12:45",
@@ -3611,7 +3613,7 @@ void main() {
         tester,
         find.byKey(scheduleOverlapThisLaneKey("item-7")),
       ),
-      const BorderRadiusDirectional.horizontal(start: Radius.zero, end: round),
+      pill,
     );
     expect(overlapBarTexts(tester, "item-7").sublist(2), <String>[
       "16:30",
