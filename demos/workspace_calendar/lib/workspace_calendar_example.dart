@@ -22,11 +22,11 @@
 /// opens its form read-only.
 ///
 /// The add button floats over the calendar's bottom right corner in every
-/// view, in edit mode and out of it, and opens the create flow on one slot:
-/// on today in Agenda, whose list selects each day it scrolls to, and on
-/// the selected day in Day, Week and Month, at the first slot from the
-/// start the settings' edit policy gives the day, after the current time
-/// on today, that no item holds. Week's, Day's and Month's grids keep their
+/// view, in edit mode and out of it, and opens the create flow on one slot
+/// of the selected day, in Agenda the day a tap on the calendar card or a
+/// drag of the list selects: at the first slot from the start the
+/// settings' edit policy gives the day, after the current time on today,
+/// that no item holds. Week's, Day's and Month's grids keep their
 /// last slot and their last week clear of it, above the screen's bottom
 /// inset too, while Agenda's rows pass under it.
 ///
@@ -290,18 +290,15 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
 
   final GlobalKey _addButtonKey = GlobalKey();
 
-  /// The add button's create, on today in Agenda and on the selected day
-  /// in the other views, reported where the button lies on screen. A day
-  /// with no slot left says so ([CalendarView.onCreateRefused]).
+  /// The add button's create, on the selected day in every view, reported
+  /// where the button lies on screen. A day with no slot left, as a past
+  /// one under the history lock, says so ([CalendarView.onCreateRefused]).
   void _createFromButton() {
     final box = _addButtonKey.currentContext?.findRenderObject();
     final rect = box is RenderBox && box.hasSize
         ? box.localToGlobal(Offset.zero) & box.size
         : Rect.zero;
-    final day = _controller.view == CalendarViewKind.agenda
-        ? _today()
-        : _controller.selectedDay;
-    _controller.createOn(day, globalRect: rect);
+    _controller.createOn(_controller.selectedDay, globalRect: rect);
   }
 
   /// The style of the header's settings button, as the built-in header's
