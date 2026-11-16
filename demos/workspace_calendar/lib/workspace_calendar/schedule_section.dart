@@ -1,7 +1,8 @@
-/// The item form's schedule summary and schedule section, the parts of the
-/// form any item type shares: the section edits a [CalendarSchedule], and
-/// the summary shows it and what its [CalendarScheduleCheck] answers as the
-/// user edits.
+/// The item form's schedule heading, schedule section and overlap notice,
+/// the parts of the form any item type shares: the section edits a
+/// [CalendarSchedule], the heading shows its length and zone beside the
+/// form's title, and the notice names the entries it overlaps, as its
+/// [CalendarScheduleCheck] answers while the user edits.
 library;
 
 import 'dart:math' as math;
@@ -13,34 +14,17 @@ import 'package:widgets_extended/widgets_extended.dart';
 import 'calendar_item.dart';
 import 'harbor_theme.dart';
 
-/// The key of the summary's first line, under its Start label: a timed
-/// schedule's start date and time, or an all-day schedule's first day.
-const ValueKey<String> scheduleSummaryFirstLineKey = ValueKey<String>(
-  "schedule-summary-first-line",
-);
+/// The key of the text of the heading's length pill, after its title: the
+/// length of a timed schedule of a positive length, or of an all-day
+/// schedule, "All day" for one day and its count of days, such as "3 days",
+/// for more.
+const ValueKey<String> scheduleLengthKey = ValueKey<String>("schedule-length");
 
-/// The key of the summary's second line, under its End label: a timed
-/// schedule's end date and time, or an all-day schedule's last day.
-const ValueKey<String> scheduleSummarySecondLineKey = ValueKey<String>(
-  "schedule-summary-second-line",
-);
+/// The key of the heading's zone box, at its right end: the zone's city or
+/// the device's zone's name, above the zone's offset from UTC.
+const ValueKey<String> scheduleZoneKey = ValueKey<String>("schedule-zone");
 
-/// The key of the text of the summary's pill, in its top right corner
-/// under the zone: the length of a timed schedule of a positive length, or
-/// of an all-day schedule, "All day" for one day and its count of days,
-/// such as "3 days", for more.
-const ValueKey<String> scheduleSummaryLengthKey = ValueKey<String>(
-  "schedule-summary-length",
-);
-
-/// The key of the summary's zone, the box at the top of its top right
-/// corner: the zone's city or the device's zone's name, above the zone's
-/// offset from UTC.
-const ValueKey<String> scheduleSummaryZoneKey = ValueKey<String>(
-  "schedule-summary-zone",
-);
-
-/// The key of the summary's overlap notice.
+/// The key of the overlap notice.
 const ValueKey<String> scheduleOverlapKey = ValueKey<String>(
   "schedule-overlap",
 );
@@ -104,9 +88,8 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// date's those before [CalendarScheduleCheck.firstStartDay], End date's
 /// those outside [CalendarScheduleCheck.endDays]; the section reads them
 /// of each check once, as a day picker first builds under it. Times are
-/// written on [hourLabelFormat]'s clock. [ScheduleSummary] shows the
-/// schedule, its overlaps and its zone. A date field writes its day as the
-/// summary does, with its weekday.
+/// written on [hourLabelFormat]'s clock. [ScheduleHeading] shows the
+/// schedule's length and zone, and [ScheduleOverlapNotice] its overlaps.
 ///
 /// A panel grows and fades in as its field's tap opens it, and shrinks and
 /// fades out as that field's tap closes it, over the [CalendarTheme]'s
@@ -915,66 +898,41 @@ String _lengthLabel(int minutes) {
   return "${hours}h ${rest}m";
 }
 
-/// The summary of [check]'s schedule, top to bottom: its start and its
-/// end, each under its label, Start or End, in smaller type, and shrunk
-/// onto one line where its room is too narrow: a timed schedule's each a
-/// date and a time, an all-day one's its first and last day, the same day
-/// for one day; and, while
-/// [CalendarScheduleCheck.overlaps] is not empty, an overlap notice naming
-/// them, each title in bold, its warning icon beside the top of its text,
-/// whose "Next free time" sends
-/// [CalendarScheduleCheck.nextFree] to [onChanged] unless the form is
-/// [locked] or the check's start is fixed. Times are written on
-/// [hourLabelFormat]'s clock.
-///
-/// Its top right corner shows, in a light grey rounded box, [zone]'s name,
-/// its city ([CalendarZonePanel.cityOf]) or, for the device's zone,
+/// The form's heading: its [title], and 8 pixels after it, where the
+/// schedule has a length to show, a pill with a timer icon before
+/// [check]'s schedule's length: an all-day schedule's "All day" for one
+/// day, or its count of civil days, such as "3 days", for more; or a timed
+/// schedule's hours and minutes, where it is positive. At the heading's
+/// right end lies, in a light grey rounded box, [zone]'s name, its city
+/// ([CalendarZonePanel.cityOf]) or, for the device's zone,
 /// [CalendarLocalizations.deviceZoneName], above the zone's offset from UTC
 /// at the start ([CalendarLocalizations.utcOffset]), or at its day's start
-/// where the zone's clock skips the start; and under the box, a pill with a
-/// timer icon before the schedule's length: an all-day schedule's "All
-/// day" for one day, or its count of civil days, such as "3 days", for
-/// more; or a timed schedule's hours and minutes, where it is positive. The
-/// corner lies at the same place whatever lines the schedule shows beside
-/// it.
-class ScheduleSummary extends StatelessWidget {
-  const ScheduleSummary({
+/// where the zone's clock skips the start. The title and the pill centre on
+/// the heading's height. Where the room before the box cannot hold them on
+/// one line, the title wraps; where it cannot hold the pill beside its
+/// gap, the pill shrinks to fit.
+class ScheduleHeading extends StatelessWidget {
+  const ScheduleHeading({
     super.key,
+    required this.title,
     required this.check,
-    required this.hourLabelFormat,
-    required this.onChanged,
     this.zone,
-    this.locked = false,
   });
+
+  /// The form's title, such as "New item".
+  final String title;
 
   final CalendarScheduleCheck<ItemPayload> check;
 
-  /// The clock the summary writes times on.
-  final CalendarHourLabelFormat hourLabelFormat;
-
-  /// Takes the schedule "Next free time" moves to.
-  final ValueChanged<CalendarSchedule> onChanged;
-
-  /// The zone the times are on, which the summary names; none for the
+  /// The zone the times are on, which the heading names; none for the
   /// device's.
   final Location? zone;
 
-  /// Whether the form takes no input, under which "Next free time" does
-  /// not show.
-  final bool locked;
-
-  /// The start and end lines, each a date or a date and a time.
-  static const TextStyle _lineStyle = TextStyle(
-    fontSize: 14.0,
+  /// The title.
+  static const TextStyle _titleStyle = TextStyle(
+    fontSize: 20.0,
     fontWeight: FontWeight.w600,
     color: HarborColors.text,
-  );
-
-  /// The Start and End labels above the lines.
-  static const TextStyle _labelStyle = TextStyle(
-    fontSize: 12.0,
-    fontWeight: FontWeight.w500,
-    color: HarborColors.textMuted,
   );
 
   /// The text of the pill.
@@ -997,6 +955,20 @@ class ScheduleSummary extends StatelessWidget {
     color: HarborColors.textMuted,
   );
 
+  /// The text of the pill for [schedule], null where it shows none: for a
+  /// timed schedule of no length.
+  static String? _lengthOf(CalendarSchedule schedule) {
+    if (schedule.isAllDay) {
+      final days =
+          CalendarDates.daysBetween(schedule.startDay, schedule.endDay) + 1;
+      return days > 1 ? "$days days" : "All day";
+    }
+    if (schedule.lengthMinutes > 0) {
+      return _lengthLabel(schedule.lengthMinutes);
+    }
+    return null;
+  }
+
   /// [label] in a pill, a timer icon before it.
   Widget _pill(String label) {
     return DecoratedBox(
@@ -1015,7 +987,7 @@ class ScheduleSummary extends StatelessWidget {
               color: HarborColors.primary,
             ),
             const SizedBox(width: 4.0),
-            Text(label, key: scheduleSummaryLengthKey, style: _lengthStyle),
+            Text(label, key: scheduleLengthKey, style: _lengthStyle),
           ],
         ),
       ),
@@ -1035,7 +1007,7 @@ class ScheduleSummary extends StatelessWidget {
         ) ??
         CalendarDates.dateOfDayNumber(day, zone: zone);
     return Container(
-      key: scheduleSummaryZoneKey,
+      key: scheduleZoneKey,
       padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
       decoration: BoxDecoration(
         color: Colors.grey.shade100,
@@ -1060,7 +1032,69 @@ class ScheduleSummary extends StatelessWidget {
     );
   }
 
-  Widget _overlapNotice() {
+  @override
+  Widget build(BuildContext context) {
+    final length = _lengthOf(check.schedule);
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return Row(
+                children: <Widget>[
+                  Flexible(child: Text(title, style: _titleStyle)),
+                  if (length != null) ...<Widget>[
+                    const SizedBox(width: 8.0),
+                    // The pill takes its own width before the title takes
+                    // the rest, and no more than the room beside the gap.
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: math.max(0.0, constraints.maxWidth - 8.0),
+                      ),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: _pill(length),
+                      ),
+                    ),
+                  ],
+                ],
+              );
+            },
+          ),
+        ),
+        const SizedBox(width: 12.0),
+        _zone(CalendarLocalizations.of(context)),
+      ],
+    );
+  }
+}
+
+/// The notice of the entries [check]'s schedule overlaps
+/// ([CalendarScheduleCheck.overlaps]), which the form shows while there are
+/// any: "Overlaps" and their titles, each title in bold, its warning icon
+/// beside the top of its text; and a "Next free time" button that sends
+/// [CalendarScheduleCheck.nextFree] to [onChanged], shown where that is
+/// another schedule, unless the form is [locked] or the check's start is
+/// fixed.
+class ScheduleOverlapNotice extends StatelessWidget {
+  const ScheduleOverlapNotice({
+    super.key,
+    required this.check,
+    required this.onChanged,
+    this.locked = false,
+  });
+
+  final CalendarScheduleCheck<ItemPayload> check;
+
+  /// Takes the schedule "Next free time" moves to.
+  final ValueChanged<CalendarSchedule> onChanged;
+
+  /// Whether the form takes no input, under which "Next free time" does
+  /// not show.
+  final bool locked;
+
+  @override
+  Widget build(BuildContext context) {
     final next = check.nextFree;
     final overlaps = check.overlaps;
     return DecoratedBox(
@@ -1124,85 +1158,6 @@ class ScheduleSummary extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final dates = MaterialLocalizations.of(context);
-    final strings = CalendarLocalizations.of(context);
-    final schedule = check.schedule;
-    final startDay = dates.formatMediumDate(schedule.startDay);
-    final endDay = dates.formatMediumDate(schedule.endDay);
-    final start = strings.formatTime(schedule.startMinute, hourLabelFormat);
-    final end = strings.formatTime(schedule.endMinute, hourLabelFormat);
-    final timed = !schedule.isAllDay;
-    final String? pill;
-    if (!timed) {
-      final days =
-          CalendarDates.daysBetween(schedule.startDay, schedule.endDay) + 1;
-      pill = days > 1 ? "$days days" : "All day";
-    } else if (schedule.lengthMinutes > 0) {
-      pill = _lengthLabel(schedule.lengthMinutes);
-    } else {
-      pill = null;
-    }
-    // A line sits under its label and, too wide for the room beside the
-    // corner, shrinks onto one line.
-    Widget line(String label, Key key, String day, String time) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Text(label, style: _labelStyle),
-          const SizedBox(height: 2.0),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: AlignmentDirectional.centerStart,
-            child: Text(
-              timed ? "$day, $time" : day,
-              key: key,
-              style: _lineStyle,
-            ),
-          ),
-        ],
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  line("Start", scheduleSummaryFirstLineKey, startDay, start),
-                  const SizedBox(height: 8.0),
-                  line("End", scheduleSummarySecondLineKey, endDay, end),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12.0),
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: <Widget>[
-                _zone(strings),
-                if (pill != null) ...<Widget>[
-                  const SizedBox(height: 6.0),
-                  _pill(pill),
-                ],
-              ],
-            ),
-          ],
-        ),
-        if (check.overlaps.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 12.0),
-          _overlapNotice(),
-        ],
-      ],
     );
   }
 }

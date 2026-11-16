@@ -1,16 +1,16 @@
 /// The calendar's create flow, its item form, which also shows an item
 /// read-only, and the delete confirmation.
 ///
-/// The form opens in a modal bottom sheet, a scrolling page of three
-/// parts: the schedule section, which every item type shares and which
-/// edits a [CalendarSchedule]; the schedule's summary, in an outlined card,
-/// which shows what its [CalendarScheduleCheck] answers; and the item's own
-/// fields, generated from the item type's schema. The section and the
-/// fields lie on the sheet with no card around them, at the page's
-/// margins. Once the schedule section has scrolled
-/// away, the summary stays at the page's top while the item's fields scroll
-/// under it, where it takes at most half of the page
-/// ([FittingPinnedHeaderSliver]). The check is made again
+/// The form opens in a modal bottom sheet: a heading ([ScheduleHeading]),
+/// which writes the schedule's length after the form's title and its zone
+/// at the sheet's top right, over a scrolling page of the schedule section,
+/// which every item type shares and which edits a [CalendarSchedule], the
+/// overlap notice ([ScheduleOverlapNotice]) while the schedule overlaps
+/// other entries, and the item's own fields, generated from the item type's
+/// schema. The page's parts lie on the sheet with no card around them, at
+/// the page's margins, and nothing on it stays in place as it scrolls. The
+/// heading and the notice show what the schedule's [CalendarScheduleCheck]
+/// answers. The check is made again
 /// at each edit, at each change of the store that moves the entries over
 /// the schedule's days, the store's zone or its hours, and at the start of
 /// each minute. The start's and the end's messages follow the check from
@@ -35,15 +35,8 @@ import 'calendar_api_source.dart';
 import 'calendar_item.dart';
 import 'calendar_settings.dart';
 import 'calendar_schema.dart';
-import 'fitting_pinned_header.dart';
 import 'harbor_theme.dart';
 import 'schedule_section.dart';
-
-/// The key of the form's summary card, an outlined card holding the
-/// [ScheduleSummary].
-const ValueKey<String> formSummaryCardKey = ValueKey<String>(
-  "form-summary-card",
-);
 
 /// The key of the form's scheduling part, which holds the
 /// [ScheduleSection], with no card around it.
@@ -1014,9 +1007,7 @@ class _ItemFormState extends State<_ItemForm> {
   /// with [_revealPadding] around it, or its leading edge where the view
   /// cannot hold it, over the [CalendarTheme]'s motion, or at once where the
   /// platform asks for no animations; and then gives the field the focus
-  /// where it takes text. A leading edge lands below a pinned summary: the
-  /// viewport counts the height [FittingPinnedHeaderSliver] pins as an
-  /// obstruction of what follows it.
+  /// where it takes text.
   Future<void> _revealFirstError() async {
     final first = _firstError();
     final box = first?.field.findRenderObject();
@@ -1055,16 +1046,6 @@ class _ItemFormState extends State<_ItemForm> {
     if (first.field.mounted) {
       first.focus?.requestFocus();
     }
-  }
-
-  /// An outlined card keyed [key], with no heading, holding [child] 16
-  /// pixels inside its edges.
-  Widget _card(Key key, Widget child) {
-    return Card.outlined(
-      key: key,
-      margin: EdgeInsets.zero,
-      child: Padding(padding: const EdgeInsets.all(16.0), child: child),
-    );
   }
 
   Widget _typeSelector() {
@@ -1151,16 +1132,6 @@ class _ItemFormState extends State<_ItemForm> {
         onChanged: _scheduleChanged,
       ),
     );
-    final summaryCard = _card(
-      formSummaryCardKey,
-      ScheduleSummary(
-        check: _scheduleCheck,
-        hourLabelFormat: widget.hourLabelFormat,
-        zone: widget.store.zone,
-        locked: _locked,
-        onChanged: _scheduleChanged,
-      ),
-    );
     final itemCard = KeyedSubtree(
       key: formItemCardKey,
       child: Column(
@@ -1173,11 +1144,6 @@ class _ItemFormState extends State<_ItemForm> {
         ],
       ),
     );
-    // The sheet's own colour, which the summary's strip paints so that the
-    // item's fields scroll out of sight under it.
-    final sheetColor =
-        Material.of(context).color ??
-        Theme.of(context).colorScheme.surfaceContainerLow;
     return PopScope(
       canPop: !_saving,
       // While a save is in flight the form claims each vertical drag on it,
@@ -1210,60 +1176,35 @@ class _ItemFormState extends State<_ItemForm> {
               children: <Widget>[
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                  child: Text(
-                    heading,
-                    style: const TextStyle(
-                      fontSize: 20.0,
-                      fontWeight: FontWeight.w600,
-                      color: HarborColors.text,
-                    ),
+                  child: ScheduleHeading(
+                    title: heading,
+                    check: _scheduleCheck,
+                    zone: widget.store.zone,
                   ),
                 ),
                 // The page's padding lies inside its scroll view, so a drag
-                // anywhere across the sheet's width scrolls it. The view
-                // shrink-wraps, so the sheet is no taller than its page. The
-                // summary's strip holds the 12-pixel gaps above and below its
-                // card, and pins at the page's top while it takes at most
-                // half of the page.
+                // anywhere across the sheet's width scrolls it. The view is
+                // no taller than its page, so the sheet is no taller than
+                // its contents.
                 Flexible(
-                  child: CustomScrollView(
-                    shrinkWrap: true,
-                    slivers: <Widget>[
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(
-                            24.0,
-                            12.0,
-                            24.0,
-                            0.0,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(24.0, 12.0, 24.0, 12.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        schedulingCard,
+                        if (_scheduleCheck.overlaps.isNotEmpty) ...<Widget>[
+                          const SizedBox(height: 12.0),
+                          ScheduleOverlapNotice(
+                            check: _scheduleCheck,
+                            locked: _locked,
+                            onChanged: _scheduleChanged,
                           ),
-                          child: schedulingCard,
-                        ),
-                      ),
-                      FittingPinnedHeaderSliver(
-                        child: ColoredBox(
-                          color: sheetColor,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24.0,
-                              vertical: 12.0,
-                            ),
-                            child: summaryCard,
-                          ),
-                        ),
-                      ),
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(
-                            24.0,
-                            0.0,
-                            24.0,
-                            12.0,
-                          ),
-                          child: itemCard,
-                        ),
-                      ),
-                    ],
+                        ],
+                        const SizedBox(height: 12.0),
+                        itemCard,
+                      ],
+                    ),
                   ),
                 ),
                 if (message != null)

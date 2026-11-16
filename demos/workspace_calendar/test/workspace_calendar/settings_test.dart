@@ -8,7 +8,6 @@ import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_settings.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
-import 'package:workspace_calendar/workspace_calendar/schedule_section.dart';
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -556,8 +555,8 @@ void main() {
   });
 
   testWidgets(
-    "TF6 with the settings' 12-hour clock, the form's time fields and "
-    "summary write 12-hour times",
+    "TF6 with the settings' 12-hour clock, the form's time fields write "
+    "12-hour times",
     (tester) async {
       final api = MockCalendarApi.seeded(today, latency: harnessLatency);
       final nine = await store(
@@ -594,14 +593,6 @@ void main() {
       expect(
         find.descendant(of: field("End time"), matching: find.text("10 AM")),
         findsOneWidget,
-      );
-      expect(
-        tester.widget<Text>(find.byKey(scheduleSummaryFirstLineKey)).data,
-        "Tue, Apr 21, 9 AM",
-      );
-      expect(
-        tester.widget<Text>(find.byKey(scheduleSummarySecondLineKey)).data,
-        "Tue, Apr 21, 10 AM",
       );
     },
   );
@@ -699,19 +690,7 @@ void main() {
     await tester.tap(blockFinder(nine));
     await tester.pumpAndSettle();
     await openTimePicker(tester, "Start time");
-    // The summary's lines: the day, the times and the length.
-    List<String?> summaryLines() {
-      return <String?>[
-        for (final key in <Key>[
-          scheduleSummaryFirstLineKey,
-          scheduleSummarySecondLineKey,
-          scheduleSummaryLengthKey,
-        ])
-          tester.widget<Text>(find.byKey(key)).data,
-      ];
-    }
-
-    final summary = summaryLines();
+    final schedule = formSchedule(tester);
     Finder inPicker(Key key) {
       return find.descendant(
         of: timePickerFinder("Start time"),
@@ -750,7 +729,7 @@ void main() {
     await tester.pump(api.latency ~/ 2);
     await tester.pump(api.latency ~/ 4);
     expect(offPill(), lessThanOrEqualTo(0.5));
-    expect(summaryLines(), summary);
+    expect(formSchedule(tester), schedule);
 
     await tester.pump(api.latency);
     await tester.pumpAndSettle();

@@ -9,10 +9,7 @@ import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/schedule_section.dart'
-    show
-        debugScheduleDayRangeAsks,
-        scheduleSummaryFirstLineKey,
-        scheduleSummarySecondLineKey;
+    show debugScheduleDayRangeAsks;
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -2999,18 +2996,7 @@ void main() {
     // Setup sanity: the block's form opened, editable.
     expect(find.text("Edit Task"), findsOneWidget);
     await openDayPicker(tester, "Start date");
-    String summary() {
-      return <String>[
-        for (final key in <Key>[
-          scheduleSummaryFirstLineKey,
-          scheduleSummarySecondLineKey,
-        ])
-          if (find.byKey(key).evaluate().isNotEmpty)
-            tester.widget<Text>(find.byKey(key)).data!,
-      ].join("\n");
-    }
-
-    final before = summary();
+    final before = formSchedule(tester);
     final requests = api.requests.length;
     debugScheduleDayRangeAsks = 0;
     final picker = dayPickerFinder("Start date");
@@ -3048,7 +3034,7 @@ void main() {
       isNotEmpty,
     );
     expect(debugScheduleDayRangeAsks, 0);
-    expect(summary(), before);
+    expect(formSchedule(tester), before);
     expect(formDateShows("Start date", "2026-04-21"), findsOneWidget);
     expect(formDateShows("End date", "2026-04-21"), findsOneWidget);
   });
