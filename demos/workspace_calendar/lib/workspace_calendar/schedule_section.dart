@@ -1608,12 +1608,13 @@ typedef _Range = ({DateTime start, DateTime end});
 /// A card's bar for the overlapped item [id]: an axis of time from
 /// [axis]'s start to its end, under a lane of the schedule's times
 /// ([mine]), labelled "This", above one of the overlapped item's
-/// ([theirs]), labelled "Other", in [color]; each lane is rounded at an end
-/// that lies on the axis and square at one that runs on past it. Behind
-/// the lanes a column marks the [shared] time, soft red where [refused]
-/// and soft yellow otherwise, and under the axis's ends [startLabel] and
-/// [endLabel] write its times. A screen reader skips it, as the card's
-/// shared time states the same.
+/// ([theirs]), labelled "Other", in [color], each over a track the width of
+/// the axis. Behind the lanes a column marks the [shared] time, soft red
+/// where [refused] and soft yellow otherwise, and under the axis's ends
+/// [startLabel] and [endLabel] write its times. The column, the tracks and
+/// the lanes are rounded at both ends, a lane whose item runs on past the
+/// axis too. A screen reader skips the bar, as the card's shared time
+/// states the same.
 class _OverlapBar extends StatelessWidget {
   const _OverlapBar({
     required this.id,
@@ -1647,7 +1648,10 @@ class _OverlapBar extends StatelessWidget {
 
   static const double _labelGap = 8.0;
 
-  static const Radius _round = Radius.circular(_laneHeight / 2.0);
+  /// The corners of the column, the tracks and the lanes.
+  static const BorderRadius _pill = BorderRadius.all(
+    Radius.circular(_laneHeight / 2.0),
+  );
 
   static const TextStyle _labelStyle = TextStyle(
     color: HarborColors.textMuted,
@@ -1672,7 +1676,6 @@ class _OverlapBar extends StatelessWidget {
       required double top,
       required double height,
       required Color color,
-      required BorderRadiusGeometry radius,
     }) {
       final from = fractionOf(range.start);
       return PositionedDirectional(
@@ -1682,17 +1685,8 @@ class _OverlapBar extends StatelessWidget {
         height: height,
         child: DecoratedBox(
           key: key,
-          decoration: BoxDecoration(color: color, borderRadius: radius),
+          decoration: BoxDecoration(color: color, borderRadius: _pill),
         ),
-      );
-    }
-
-    // A lane's corners: round at an end that lies on the axis, square at
-    // one that runs on past it.
-    BorderRadiusGeometry cornersOf(_Range range) {
-      return BorderRadiusDirectional.horizontal(
-        start: range.start.isBefore(axis.start) ? Radius.zero : _round,
-        end: range.end.isAfter(axis.end) ? Radius.zero : _round,
       );
     }
 
@@ -1741,7 +1735,6 @@ class _OverlapBar extends StatelessWidget {
                             color: refused
                                 ? HarborColors.errorNotice
                                 : HarborColors.notice,
-                            radius: const BorderRadius.all(_round),
                           ),
                           for (final row in <int>[0, 1])
                             span(
@@ -1751,7 +1744,6 @@ class _OverlapBar extends StatelessWidget {
                               top: row * _rowHeight + laneTop,
                               height: _laneHeight,
                               color: HarborColors.outline,
-                              radius: const BorderRadius.all(_round),
                             ),
                           span(
                             width,
@@ -1762,7 +1754,6 @@ class _OverlapBar extends StatelessWidget {
                             top: laneTop,
                             height: _laneHeight,
                             color: HarborColors.textSecondary,
-                            radius: cornersOf(mine),
                           ),
                           span(
                             width,
@@ -1773,7 +1764,6 @@ class _OverlapBar extends StatelessWidget {
                             top: _rowHeight + laneTop,
                             height: _laneHeight,
                             color: color,
-                            radius: cornersOf(theirs),
                           ),
                         ],
                       );
