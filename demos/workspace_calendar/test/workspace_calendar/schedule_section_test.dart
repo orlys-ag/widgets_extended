@@ -393,20 +393,48 @@ List<String?> scheduleFieldErrors(WidgetTester tester) {
       .toList();
 }
 
+/// The texts of [elements], [Text] widgets, in their order.
+List<String> _textsOf(Iterable<Element> elements) {
+  return elements.map((element) {
+    final text = element.widget as Text;
+    return text.data ?? text.textSpan!.toPlainText();
+  }).toList();
+}
+
 /// The texts of the overlap notice's card of the item [id], in the order
-/// they are laid out.
+/// they are laid out, its bar's left out.
 List<String> overlapCardTexts(WidgetTester tester, String id) {
-  return tester
-      .widgetList<Text>(
-        find.descendant(
+  final bar = find
+      .descendant(
+        of: find.byKey(scheduleOverlapBarKey(id)),
+        matching: find.byType(Text),
+      )
+      .evaluate()
+      .toSet();
+  return _textsOf(
+    find
+        .descendant(
           of: find.byKey(scheduleOverlapCardKey(id)),
           matching: find.byType(Text),
-        ),
-      )
-      .map((text) {
-        return text.data ?? text.textSpan!.toPlainText();
-      })
-      .toList();
+        )
+        .evaluate()
+        .where((element) {
+          return !bar.contains(element);
+        }),
+  );
+}
+
+/// The texts of the bar of the overlap notice's card of the item [id], in
+/// the order they are laid out.
+List<String> overlapBarTexts(WidgetTester tester, String id) {
+  return _textsOf(
+    find
+        .descendant(
+          of: find.byKey(scheduleOverlapBarKey(id)),
+          matching: find.byType(Text),
+        )
+        .evaluate(),
+  );
 }
 
 /// The fill of the box decoration of the widget [finder] finds.
@@ -415,16 +443,46 @@ Color? decorationColor(WidgetTester tester, Finder finder) {
   return (decoration as BoxDecoration).color;
 }
 
-/// The left and right of the overlap notice's card of [id]'s shared part
-/// as fractions of its bar, each to three decimals.
-(double, double) overlapShare(WidgetTester tester, String id) {
-  final bar = tester.getRect(find.byKey(scheduleOverlapBarKey(id)));
-  final share = tester.getRect(find.byKey(scheduleOverlapShareKey(id)));
+/// The fill of the chip of the time the overlap notice's card of [id]
+/// shares, the nearest [DecoratedBox] around its text, and the colour of
+/// the card's border.
+(Color?, Color?) overlapCardColors(WidgetTester tester, String id) {
+  final card = find.byKey(scheduleOverlapCardKey(id));
+  final chip = find
+      .ancestor(
+        of: find.descendant(
+          of: card,
+          matching: find.textContaining(RegExp(r"^(Shares|Covers)")),
+        ),
+        matching: find.byType(DecoratedBox),
+      )
+      .first;
+  final shape = tester.widget<DecoratedBox>(chip).decoration;
+  final box = tester.widget<DecoratedBox>(card).decoration as BoxDecoration;
+  return ((shape as ShapeDecoration).color, (box.border! as Border).top.color);
+}
+
+/// The corners of the box decoration of the widget [finder] finds.
+BorderRadiusGeometry? decorationRadius(WidgetTester tester, Finder finder) {
+  final decoration = tester.widget<DecoratedBox>(finder).decoration;
+  return (decoration as BoxDecoration).borderRadius;
+}
+
+/// The left and right of the part of the bar of the overlap notice's card
+/// of [id] that [key] names, as fractions of the bar's axis, each to three
+/// decimals.
+(double, double) overlapSpan(
+  WidgetTester tester,
+  String id,
+  ValueKey<String> Function(String id) key,
+) {
+  final axis = tester.getRect(find.byKey(scheduleOverlapAxisKey(id)));
+  final span = tester.getRect(find.byKey(key(id)));
   double fraction(double x) {
-    return ((x - bar.left) / bar.width * 1000).round() / 1000;
+    return ((x - axis.left) / axis.width * 1000).round() / 1000;
   }
 
-  return (fraction(share.left), fraction(share.right));
+  return (fraction(span.left), fraction(span.right));
 }
 
 /// Makes the platform ask for no animations until the test ends.
@@ -3324,8 +3382,8 @@ void main() {
 
   testWidgets("FS7 the overlap notice counts the overlaps and names the "
       "next free time, over a card per overlapped item in the order of their "
-      "starts: its type's icon, its title and times, its summaries, and the "
-      "time it shares with the item", (tester) async {
+      "starts: its type's icon and its title across the card, its times "
+      "under the title, and the time it shares with the item", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task("item-2", "Standup", at(9, 30), at(10, 30)),
@@ -3359,13 +3417,11 @@ void main() {
     expect(overlapCardTexts(tester, "item-3"), <String>[
       "Review",
       "08:30-11:00",
-      "High, Mitigated: No",
       "Covers all of this item",
     ]);
     expect(overlapCardTexts(tester, "item-2"), <String>[
       "Standup",
       "09:30-10:30",
-      "To do",
       "Shares 09:30-10:00, 30m",
     ]);
     final review = find.byKey(scheduleOverlapCardKey("item-3"));
@@ -3374,6 +3430,19 @@ void main() {
       tester.getRect(review).bottom,
       lessThanOrEqualTo(tester.getRect(standup).top),
     );
+    // The times lie under the title, and the title takes the row after the
+    // icon to the card's padding, where the line of the times ends too.
+    Rect inStandup(String text) {
+      return tester.getRect(
+        find.descendant(of: standup, matching: find.text(text)),
+      );
+    }
+
+    final title = inStandup("Standup");
+    final times = inStandup("09:30-10:30");
+    expect(times.top, greaterThanOrEqualTo(title.bottom));
+    expect(times.left, title.left);
+    expect(title.right, times.right);
     expect(
       find.descendant(of: review, matching: find.byIcon(Icons.warning_amber)),
       findsOneWidget,
@@ -3406,28 +3475,148 @@ void main() {
     expect(icon.left, lessThan(card.left + 1.0));
   });
 
-  testWidgets("FS9 a card's bar is the item's time, and its filled part the "
-      "part the overlapped item shares, in that item's colour", (tester) async {
+  testWidgets("FS9 a card's bar zooms on the shared time: its axis runs "
+      "from that time's length before it to that length after it, within "
+      "the two items' times, under a lane for the item and one for the "
+      "overlapped item in that item's colour, each lane square where its "
+      "item runs on past the axis, over a tinted column of the shared time, "
+      "the axis's first and last times under its ends", (tester) async {
     final standup = task("item-3", "Standup", at(9, 30), at(10, 30));
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task("item-2", "Early", at(8), at(9, 15)),
       standup,
       task("item-4", "Review", at(8, 30), at(11)),
+      task("item-5", "Workshop", at(12), at(17)),
+      task("item-6", "Call", at(13), at(13, 15)),
+      task("item-7", "Close", at(16, 45), at(17)),
     ]);
     addTearDown(store.dispose);
+    (double, double) spanOf(
+      String id,
+      ValueKey<String> Function(String id) key,
+    ) {
+      return overlapSpan(tester, id, key);
+    }
+
     await openEdit(tester, store);
-    expect(overlapShare(tester, "item-2"), (0.0, 0.25));
-    expect(overlapShare(tester, "item-3"), (0.5, 1.0));
-    expect(overlapShare(tester, "item-4"), (0.0, 1.0));
-    final card = tester.getRect(find.byKey(scheduleOverlapCardKey("item-3")));
-    final bar = tester.getRect(find.byKey(scheduleOverlapBarKey("item-3")));
-    expect(card.expandToInclude(bar), card);
-    expect(bar.width, greaterThan(card.width / 2.0));
+    // Write from 09:00 to 10:00 shares 09:00 to 09:15 with Early, from
+    // 08:00: the axis runs from 08:45 to 09:30.
+    expect(spanOf("item-2", scheduleOverlapShareKey), (0.333, 0.667));
+    expect(spanOf("item-2", scheduleOverlapThisLaneKey), (0.333, 1.0));
+    expect(spanOf("item-2", scheduleOverlapOtherLaneKey), (0.0, 0.667));
+    expect(overlapBarTexts(tester, "item-2"), <String>[
+      "This",
+      "Other",
+      "08:45",
+      "09:30",
+    ]);
+    // It shares 09:30 to 10:00 with Standup, to 10:30.
+    expect(spanOf("item-3", scheduleOverlapShareKey), (0.333, 0.667));
+    expect(spanOf("item-3", scheduleOverlapThisLaneKey), (0.0, 0.667));
+    expect(spanOf("item-3", scheduleOverlapOtherLaneKey), (0.333, 1.0));
+    expect(overlapBarTexts(tester, "item-3").sublist(2), <String>[
+      "09:00",
+      "10:30",
+    ]);
+    // Review, from 08:30 to 11:00, covers it: the axis runs from 08:30,
+    // the two items' first time, to 11:00.
+    expect(spanOf("item-4", scheduleOverlapShareKey), (0.2, 0.6));
+    expect(spanOf("item-4", scheduleOverlapThisLaneKey), (0.2, 0.6));
+    expect(spanOf("item-4", scheduleOverlapOtherLaneKey), (0.0, 1.0));
+    expect(overlapBarTexts(tester, "item-4").sublist(2), <String>[
+      "08:30",
+      "11:00",
+    ]);
+
+    const round = Radius.circular(3.0);
     expect(
-      decorationColor(tester, find.byKey(scheduleOverlapShareKey("item-3"))),
+      decorationRadius(
+        tester,
+        find.byKey(scheduleOverlapThisLaneKey("item-2")),
+      ),
+      const BorderRadiusDirectional.horizontal(start: round, end: Radius.zero),
+    );
+    expect(
+      decorationRadius(
+        tester,
+        find.byKey(scheduleOverlapOtherLaneKey("item-2")),
+      ),
+      const BorderRadiusDirectional.horizontal(start: Radius.zero, end: round),
+    );
+    expect(
+      decorationColor(
+        tester,
+        find.byKey(scheduleOverlapOtherLaneKey("item-3")),
+      ),
       standup.color,
     );
+    expect(
+      decorationColor(tester, find.byKey(scheduleOverlapShareKey("item-3"))),
+      HarborColors.notice,
+    );
+    final card = tester.getRect(find.byKey(scheduleOverlapCardKey("item-3")));
+    final axis = tester.getRect(find.byKey(scheduleOverlapAxisKey("item-3")));
+    expect(card.expandToInclude(axis), card);
+    expect(axis.width, greaterThan(card.width / 2.0));
+    // The item's lane lies beside "This", above the other's, beside
+    // "Other".
+    Rect labelOf(String text) {
+      return tester.getRect(
+        find.descendant(
+          of: find.byKey(scheduleOverlapBarKey("item-3")),
+          matching: find.text(text),
+        ),
+      );
+    }
+
+    final mine = tester.getRect(
+      find.byKey(scheduleOverlapThisLaneKey("item-3")),
+    );
+    final theirs = tester.getRect(
+      find.byKey(scheduleOverlapOtherLaneKey("item-3")),
+    );
+    expect(mine.bottom, lessThan(theirs.top));
+    expect(mine.center.dy, moreOrLessEquals(labelOf("This").center.dy));
+    expect(theirs.center.dy, moreOrLessEquals(labelOf("Other").center.dy));
+    expect(labelOf("This").right, lessThanOrEqualTo(axis.left));
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    // Workshop, from 12:00 to 17:00, shares 13:00 to 13:15 with Call: the
+    // axis runs from 12:45 to 13:30, and Workshop's lane runs on past both
+    // its ends.
+    await openEdit(tester, store, id: "item-5");
+    expect(spanOf("item-6", scheduleOverlapShareKey), (0.333, 0.667));
+    expect(spanOf("item-6", scheduleOverlapThisLaneKey), (0.0, 1.0));
+    expect(spanOf("item-6", scheduleOverlapOtherLaneKey), (0.333, 0.667));
+    expect(
+      decorationRadius(
+        tester,
+        find.byKey(scheduleOverlapThisLaneKey("item-6")),
+      ),
+      BorderRadiusDirectional.zero,
+    );
+    expect(overlapBarTexts(tester, "item-6").sublist(2), <String>[
+      "12:45",
+      "13:30",
+    ]);
+    // It shares 16:45 to 17:00 with Close: the axis runs from 16:30 to
+    // 17:00, where both items end.
+    expect(spanOf("item-7", scheduleOverlapShareKey), (0.5, 1.0));
+    expect(spanOf("item-7", scheduleOverlapThisLaneKey), (0.0, 1.0));
+    expect(spanOf("item-7", scheduleOverlapOtherLaneKey), (0.5, 1.0));
+    expect(
+      decorationRadius(
+        tester,
+        find.byKey(scheduleOverlapThisLaneKey("item-7")),
+      ),
+      const BorderRadiusDirectional.horizontal(start: Radius.zero, end: round),
+    );
+    expect(overlapBarTexts(tester, "item-7").sublist(2), <String>[
+      "16:30",
+      "17:00",
+    ]);
   });
 
   testWidgets("FS10 the overlap notice shows three cards and a button that "
@@ -3475,8 +3664,10 @@ void main() {
   });
 
   testWidgets("FS11 the overlap notice turns red where the policy refuses an "
-      "overlap, saying how many it refuses, and marks each refused card "
-      "Not allowed", (tester) async {
+      "overlap, saying how many it refuses, and draws each refused card's "
+      "chip, border and bar's shared column red, with no label of its own", (
+    tester,
+  ) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task("item-2", "Standup", at(9, 30), at(10, 30)),
@@ -3488,25 +3679,38 @@ void main() {
       return find.descendant(of: notice, matching: find.text(text));
     }
 
-    List<bool> marked() {
-      return <bool>[
+    const allowed = (HarborColors.notice, HarborColors.noticeEdge);
+    const refused = (HarborColors.errorNotice, HarborColors.errorNoticeEdge);
+    List<(Color?, Color?)> marked() {
+      return <(Color?, Color?)>[
         for (final id in <String>["item-2", "item-3"])
-          overlapCardTexts(tester, id).contains("Not allowed"),
+          overlapCardColors(tester, id),
       ];
     }
 
     await openEdit(tester, store);
     expect(inNotice("Overlaps 2 items"), findsOneWidget);
     expect(decorationColor(tester, notice), HarborColors.notice);
-    expect(marked(), <bool>[false, false]);
+    expect(marked(), <(Color?, Color?)>[allowed, allowed]);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
     await openEdit(tester, store, policy: const _RefusesOverlapWith("item-3"));
     expect(inNotice("Overlaps 2 items, 1 not allowed"), findsOneWidget);
     expect(decorationColor(tester, notice), HarborColors.errorNotice);
-    expect(marked(), <bool>[false, true]);
-    expect(overlapCardTexts(tester, "item-3").last, "Not allowed");
+    expect(marked(), <(Color?, Color?)>[allowed, refused]);
+    expect(overlapCardTexts(tester, "item-3"), <String>[
+      "Review",
+      "08:30-11:00",
+      "Covers all of this item",
+    ]);
+    expect(
+      <Color?>[
+        for (final id in <String>["item-2", "item-3"])
+          decorationColor(tester, find.byKey(scheduleOverlapShareKey(id))),
+      ],
+      <Color?>[HarborColors.notice, HarborColors.errorNotice],
+    );
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
@@ -3517,37 +3721,63 @@ void main() {
     );
     expect(inNotice("Can't overlap 2 items"), findsOneWidget);
     expect(decorationColor(tester, notice), HarborColors.errorNotice);
-    expect(marked(), <bool>[true, true]);
+    expect(marked(), <(Color?, Color?)>[refused, refused]);
   });
 
   testWidgets("FS12 a card writes the weekday at each end of an item that "
       "runs past the item's day, and an end at the next midnight as 24:00 "
-      "of the day", (tester) async {
+      "of the day; its bar writes the weekday of an end of its axis on "
+      "another day, and an axis's end at the next midnight as 24:00", (
+    tester,
+  ) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task("item-2", "Overnight", DateTime(2026, 4, 21, 22), at(9, 30)),
       task("item-3", "Late", at(9, 45), DateTime(2026, 4, 23)),
       task("item-4", "Shift", at(9, 50), DateTime(2026, 4, 23, 1)),
+      task("item-5", "Deploy", at(23), DateTime(2026, 4, 23)),
     ]);
     addTearDown(store.dispose);
     await openEdit(tester, store);
     expect(overlapCardTexts(tester, "item-2"), <String>[
       "Overnight",
       "Tue 22:00-Wed 09:30",
-      "To do",
       "Shares 09:00-09:30, 30m",
     ]);
     expect(overlapCardTexts(tester, "item-3"), <String>[
       "Late",
       "09:45-24:00",
-      "To do",
       "Shares 09:45-10:00, 15m",
     ]);
     expect(overlapCardTexts(tester, "item-4"), <String>[
       "Shift",
       "Wed 09:50-Thu 01:00",
-      "To do",
       "Shares 09:50-10:00, 10m",
+    ]);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    // Deploy, from 23:00 to 24:00, shares all of it with Late, to 24:00:
+    // the axis runs from 22:00 to 24:00, where both items end.
+    await openEdit(tester, store, id: "item-5");
+    expect(overlapCardTexts(tester, "item-3"), <String>[
+      "Late",
+      "09:45-24:00",
+      "Covers all of this item",
+    ]);
+    expect(overlapBarTexts(tester, "item-3").sublist(2), <String>[
+      "22:00",
+      "24:00",
+    ]);
+    // Shift covers Deploy and ends at Thursday's 01:00, the axis's end.
+    expect(overlapCardTexts(tester, "item-4"), <String>[
+      "Shift",
+      "Wed 09:50-Thu 01:00",
+      "Covers all of this item",
+    ]);
+    expect(overlapBarTexts(tester, "item-4").sublist(2), <String>[
+      "22:00",
+      "Thu 01:00",
     ]);
   });
 

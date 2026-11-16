@@ -7,13 +7,13 @@ library;
 
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show clampDouble;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_item.dart';
 import 'harbor_theme.dart';
-import 'item_builders.dart' show ItemCard;
 
 /// The key of the text of the heading's length pill, after its title: the
 /// length of a timed schedule of a positive length, or of an all-day
@@ -35,16 +35,34 @@ ValueKey<String> scheduleOverlapCardKey(String id) {
   return ValueKey<String>("schedule-overlap-card-$id");
 }
 
-/// The key of the bar of the overlap notice's card of the item [id], which
-/// stands for the schedule's time.
+/// The key of the bar of the overlap notice's card of the item [id]: its
+/// lanes' labels, its axis and the axis's times.
 ValueKey<String> scheduleOverlapBarKey(String id) {
   return ValueKey<String>("schedule-overlap-bar-$id");
 }
 
-/// The key of the filled part of the bar of the overlap notice's card of
-/// the item [id]: the part of the schedule's time the item shares.
+/// The key of the axis of the bar of the overlap notice's card of the item
+/// [id], whose width stands for the time from the axis's start to its end.
+ValueKey<String> scheduleOverlapAxisKey(String id) {
+  return ValueKey<String>("schedule-overlap-axis-$id");
+}
+
+/// The key of the column of the shared time on the axis of the overlap
+/// notice's card of the item [id].
 ValueKey<String> scheduleOverlapShareKey(String id) {
   return ValueKey<String>("schedule-overlap-share-$id");
+}
+
+/// The key of the lane of the schedule's times on the axis of the overlap
+/// notice's card of the item [id].
+ValueKey<String> scheduleOverlapThisLaneKey(String id) {
+  return ValueKey<String>("schedule-overlap-this-lane-$id");
+}
+
+/// The key of the lane of the item [id]'s times on the axis of its card in
+/// the overlap notice.
+ValueKey<String> scheduleOverlapOtherLaneKey(String id) {
+  return ValueKey<String>("schedule-overlap-other-lane-$id");
 }
 
 /// The key of the [Focus] around the Start date field.
@@ -1102,16 +1120,21 @@ class ScheduleHeading extends StatelessWidget {
 ///
 /// Under them lies a card per overlapped item, in the order of their starts
 /// and then their ends. A white card, its type's edge colour down its
-/// leading side, holds its type's icon, its title and its times, the
-/// summaries its schema gives it ([ItemCard.summariesOf]), the time it
-/// shares with the schedule, or "Covers all of this item" where that is
-/// all of it, and "Not allowed" where the rules refuse its overlap; and a
-/// bar that stands for the schedule's time, the part the item shares filled
-/// in the item's colour. Times are written on [hourLabelFormat]'s clock, an
-/// end at a day's start as the 24:00 of the day before, and a range that
-/// runs past the schedule's start day with the weekday of each end. The
-/// notice shows its first [shownCards] cards and a button that shows the
-/// rest, which then shows fewer again.
+/// leading side, holds its type's icon and its title across the card, its
+/// times under the title, the time it shares with the schedule, or "Covers
+/// all of this item" where that is all of it, in a chip, and a bar zoomed
+/// on the shared time; where the rules refuse its overlap, its chip, its
+/// border and its bar's shared column are soft red. The bar's axis reaches
+/// the shared time's length past each of its ends, within the two items'
+/// times, so the shared time fills a third of it or more; on it a lane of
+/// the schedule's times, "This", lies above one of the item's, "Other", in
+/// the item's colour, over a tinted column of the shared time, and the
+/// axis's first and last times lie under its ends.
+/// Times are written on [hourLabelFormat]'s clock, an end at a day's start
+/// as the 24:00 of the day before, and a range that runs past the
+/// schedule's start day with the weekday of each end. The notice shows its
+/// first [shownCards] cards and a button that shows the rest, which then
+/// shows fewer again.
 ///
 /// The notice is soft yellow ([HarborColors.notice]), or soft red
 /// ([HarborColors.errorNotice]) where the rules refuse an overlap.
@@ -1314,15 +1337,59 @@ String _overlapTimes(
   CalendarLocalizations strings,
   CalendarHourLabelFormat format,
 ) {
+  final firstDay = CalendarDates.dayNumber(start);
   final lastDay = CalendarDates.lastDayNumberOf(start, end);
-  if (CalendarDates.dayNumber(start) == day && lastDay == day) {
+  if (firstDay == day && lastDay == day) {
     return strings.entryTimes(start, end, format, isAllDay: false);
   }
-  final from = strings.formatTime(CalendarDates.minuteOfDay(start), format);
-  final to = strings.formatTime(CalendarDates.endMinuteOfDay(end), format);
-  final lastWeekday = CalendarDates.dateOfDayNumber(lastDay).weekday;
-  return "${strings.weekdayAbbreviation(start.weekday)} $from-"
-      "${strings.weekdayAbbreviation(lastWeekday)} $to";
+  final from = CalendarDates.minuteOfDay(start);
+  final to = CalendarDates.endMinuteOfDay(end);
+  return "${_weekdayTime(firstDay, from, strings, format)}-"
+      "${_weekdayTime(lastDay, to, strings, format)}";
+}
+
+/// [time] in [format], after its day's weekday where that is not the day
+/// numbered [day]; where [end], a day's start reads as the 24:00 of the
+/// day before ([CalendarDates.endMinuteOfDay]).
+String _overlapTime(
+  DateTime time,
+  int day,
+  CalendarLocalizations strings,
+  CalendarHourLabelFormat format, {
+  required bool end,
+}) {
+  final endsDay = end && CalendarDates.isDayStart(time);
+  final number = CalendarDates.dayNumber(time) - (endsDay ? 1 : 0);
+  final minute = endsDay
+      ? CalendarDates.minutesPerDay
+      : CalendarDates.minuteOfDay(time);
+  if (number == day) {
+    return strings.formatTime(minute, format);
+  }
+  return _weekdayTime(number, minute, strings, format);
+}
+
+/// The [minute] of the day numbered [number] in [format], after the day's
+/// weekday, as "Tue 22:00".
+String _weekdayTime(
+  int number,
+  int minute,
+  CalendarLocalizations strings,
+  CalendarHourLabelFormat format,
+) {
+  final weekday = CalendarDates.dateOfDayNumber(number).weekday;
+  return "${strings.weekdayAbbreviation(weekday)} "
+      "${strings.formatTime(minute, format)}";
+}
+
+/// The earlier of [a] and [b], [a] where they are the same instant.
+DateTime _earlier(DateTime a, DateTime b) {
+  return b.isBefore(a) ? b : a;
+}
+
+/// The later of [a] and [b], [a] where they are the same instant.
+DateTime _later(DateTime a, DateTime b) {
+  return b.isAfter(a) ? b : a;
 }
 
 /// An overlapped [item]'s card in the [ScheduleOverlapNotice].
@@ -1339,7 +1406,7 @@ class _OverlapCard extends StatelessWidget {
 
   /// The schedule's times, or null where the clock skips one, under which
   /// the card shows no shared time and no bar.
-  final ({DateTime start, DateTime end})? times;
+  final _Range? times;
 
   /// The day number of the schedule's start day.
   final int day;
@@ -1364,65 +1431,65 @@ class _OverlapCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final strings = CalendarLocalizations.of(context);
     final style = harborTypeStyleOf(item.type);
-    final summaries = ItemCard.summariesOf(item);
     final id = item.id;
     String? shares;
-    ({double from, double to})? share;
+    Widget? bar;
     final times = this.times;
     if (times != null) {
-      final total = times.end.difference(times.start).inMicroseconds;
-      final start = item.start.isAfter(times.start) ? item.start : times.start;
-      final end = item.end.isBefore(times.end) ? item.end : times.end;
-      if (total > 0 && end.isAfter(start)) {
+      final shared = (
+        start: _later(item.start, times.start),
+        end: _earlier(item.end, times.end),
+      );
+      if (shared.end.isAfter(shared.start)) {
         if (!item.start.isAfter(times.start) && !item.end.isBefore(times.end)) {
           shares = "Covers all of this item";
         } else {
           final range = _overlapTimes(
-            start,
-            end,
+            shared.start,
+            shared.end,
             day,
             strings,
             hourLabelFormat,
           );
-          final minutes = end.difference(start).inMinutes;
+          final minutes = shared.end.difference(shared.start).inMinutes;
           shares = "Shares $range, ${strings.duration(minutes)}";
         }
-        share = (
-          from: start.difference(times.start).inMicroseconds / total,
-          to: end.difference(times.start).inMicroseconds / total,
+        // The axis reaches the shared time's length past each of its ends,
+        // and no further than the two items' times, so the shared time
+        // fills a third of it or more.
+        final length = shared.end.difference(shared.start);
+        final axis = (
+          start: _later(
+            shared.start.subtract(length),
+            _earlier(item.start, times.start),
+          ),
+          end: _earlier(shared.end.add(length), _later(item.end, times.end)),
+        );
+        bar = _OverlapBar(
+          id: id,
+          axis: axis,
+          mine: times,
+          theirs: (start: item.start, end: item.end),
+          shared: shared,
+          color: item.color,
+          refused: refused,
+          startLabel: _overlapTime(
+            axis.start,
+            day,
+            strings,
+            hourLabelFormat,
+            end: false,
+          ),
+          endLabel: _overlapTime(
+            axis.end,
+            day,
+            strings,
+            hourLabelFormat,
+            end: true,
+          ),
         );
       }
     }
-    final tags = <Widget>[
-      if (shares != null)
-        DecoratedBox(
-          decoration: ShapeDecoration(
-            color: refused ? HarborColors.errorNotice : HarborColors.notice,
-            shape: const StadiumBorder(),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
-            child: Text(
-              shares,
-              style: TextStyle(
-                color: refused
-                    ? HarborColors.onErrorNotice
-                    : HarborColors.onNotice,
-                fontSize: 12.0,
-              ),
-            ),
-          ),
-        ),
-      if (refused)
-        const Text(
-          "Not allowed",
-          style: TextStyle(
-            color: HarborColors.error,
-            fontSize: 12.0,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-    ];
     final content = Padding(
       padding: const EdgeInsets.fromLTRB(_edgeWidth + 10.0, 8.0, 10.0, 10.0),
       child: Column(
@@ -1443,63 +1510,64 @@ class _OverlapCard extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8.0),
-              Text(
-                _overlapTimes(
-                  item.start,
-                  item.end,
-                  day,
-                  strings,
-                  hourLabelFormat,
-                ),
-                style: const TextStyle(
-                  color: HarborColors.textSecondary,
-                  fontSize: 13.0,
-                ),
-              ),
             ],
           ),
-          if (summaries.isNotEmpty)
+          Padding(
+            padding: const EdgeInsetsDirectional.only(start: _indent, top: 2.0),
+            child: Text(
+              _overlapTimes(
+                item.start,
+                item.end,
+                day,
+                strings,
+                hourLabelFormat,
+              ),
+              style: const TextStyle(
+                color: HarborColors.textSecondary,
+                fontSize: 13.0,
+              ),
+            ),
+          ),
+          if (shares != null)
             Padding(
               padding: const EdgeInsetsDirectional.only(
                 start: _indent,
-                top: 2.0,
+                top: 8.0,
               ),
-              child: Text(
-                summaries.join(", "),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: HarborColors.textMuted,
-                  fontSize: 12.0,
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: DecoratedBox(
+                  decoration: ShapeDecoration(
+                    color: refused
+                        ? HarborColors.errorNotice
+                        : HarborColors.notice,
+                    shape: const StadiumBorder(),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8.0,
+                      vertical: 2.0,
+                    ),
+                    child: Text(
+                      shares,
+                      style: TextStyle(
+                        color: refused
+                            ? HarborColors.onErrorNotice
+                            : HarborColors.onNotice,
+                        fontSize: 12.0,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
-          if (tags.isNotEmpty)
+          if (bar != null)
             Padding(
               padding: const EdgeInsetsDirectional.only(
                 start: _indent,
-                top: 8.0,
+                top: 10.0,
               ),
-              child: Wrap(
-                spacing: 8.0,
-                runSpacing: 4.0,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: tags,
-              ),
-            ),
-          if (share != null)
-            Padding(
-              padding: const EdgeInsetsDirectional.only(
-                start: _indent,
-                top: 8.0,
-              ),
-              child: _ShareBar(
-                id: id,
-                from: share.from,
-                to: share.to,
-                color: item.color,
-              ),
+              child: bar,
             ),
         ],
       ),
@@ -1534,63 +1602,201 @@ class _OverlapCard extends StatelessWidget {
   }
 }
 
-/// A card's bar: a track that stands for the schedule's time, filled in
-/// [color] from the fraction [from] of its width to the fraction [to], the
-/// part the item [id] shares. A screen reader skips it, as the card's
+/// A range of time, its end exclusive.
+typedef _Range = ({DateTime start, DateTime end});
+
+/// A card's bar for the overlapped item [id]: an axis of time from
+/// [axis]'s start to its end, under a lane of the schedule's times
+/// ([mine]), labelled "This", above one of the overlapped item's
+/// ([theirs]), labelled "Other", in [color]; each lane is rounded at an end
+/// that lies on the axis and square at one that runs on past it. Behind
+/// the lanes a column marks the [shared] time, soft red where [refused]
+/// and soft yellow otherwise, and under the axis's ends [startLabel] and
+/// [endLabel] write its times. A screen reader skips it, as the card's
 /// shared time states the same.
-class _ShareBar extends StatelessWidget {
-  const _ShareBar({
+class _OverlapBar extends StatelessWidget {
+  const _OverlapBar({
     required this.id,
-    required this.from,
-    required this.to,
+    required this.axis,
+    required this.mine,
+    required this.theirs,
+    required this.shared,
     required this.color,
+    required this.refused,
+    required this.startLabel,
+    required this.endLabel,
   });
 
   final String? id;
-  final double from;
-  final double to;
+  final _Range axis;
+  final _Range mine;
+  final _Range theirs;
+  final _Range shared;
   final Color color;
+  final bool refused;
+  final String startLabel;
+  final String endLabel;
 
-  static const double _height = 4.0;
+  static const double _laneHeight = 6.0;
+
+  /// The height of a lane's row: the lane lies in its middle, beside its
+  /// label.
+  static const double _rowHeight = 14.0;
+
+  static const double _labelWidth = 36.0;
+
+  static const double _labelGap = 8.0;
+
+  static const Radius _round = Radius.circular(_laneHeight / 2.0);
+
+  static const TextStyle _labelStyle = TextStyle(
+    color: HarborColors.textMuted,
+    fontSize: 11.0,
+  );
 
   @override
   Widget build(BuildContext context) {
     final id = this.id;
-    const radius = BorderRadius.all(Radius.circular(_height / 2.0));
-    return ExcludeSemantics(
-      child: SizedBox(
-        key: id == null ? null : scheduleOverlapBarKey(id),
-        height: _height,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final width = constraints.maxWidth;
-            return Stack(
-              children: <Widget>[
-                const Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: HarborColors.outline,
-                      borderRadius: radius,
-                    ),
-                  ),
-                ),
-                PositionedDirectional(
-                  start: width * from,
-                  width: width * (to - from),
-                  top: 0.0,
-                  bottom: 0.0,
-                  child: DecoratedBox(
-                    key: id == null ? null : scheduleOverlapShareKey(id),
-                    decoration: BoxDecoration(
-                      color: color,
-                      borderRadius: radius,
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
+    final total = axis.end.difference(axis.start).inMicroseconds;
+    double fractionOf(DateTime time) {
+      final fraction = time.difference(axis.start).inMicroseconds / total;
+      return clampDouble(fraction, 0.0, 1.0);
+    }
+
+    // A span from [range]'s start to its end, clipped to the axis, at
+    // [top] in the axis's box.
+    Widget span(
+      double width,
+      _Range range, {
+      required Key? key,
+      required double top,
+      required double height,
+      required Color color,
+      required BorderRadiusGeometry radius,
+    }) {
+      final from = fractionOf(range.start);
+      return PositionedDirectional(
+        start: width * from,
+        width: width * (fractionOf(range.end) - from),
+        top: top,
+        height: height,
+        child: DecoratedBox(
+          key: key,
+          decoration: BoxDecoration(color: color, borderRadius: radius),
         ),
+      );
+    }
+
+    // A lane's corners: round at an end that lies on the axis, square at
+    // one that runs on past it.
+    BorderRadiusGeometry cornersOf(_Range range) {
+      return BorderRadiusDirectional.horizontal(
+        start: range.start.isBefore(axis.start) ? Radius.zero : _round,
+        end: range.end.isAfter(axis.end) ? Radius.zero : _round,
+      );
+    }
+
+    const laneTop = (_rowHeight - _laneHeight) / 2.0;
+    Widget label(String text) {
+      return SizedBox(
+        height: _rowHeight,
+        child: Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: Text(text, maxLines: 1, style: _labelStyle),
+        ),
+      );
+    }
+
+    return ExcludeSemantics(
+      child: Column(
+        key: id == null ? null : scheduleOverlapBarKey(id),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              SizedBox(
+                width: _labelWidth,
+                child: Column(
+                  children: <Widget>[label("This"), label("Other")],
+                ),
+              ),
+              const SizedBox(width: _labelGap),
+              Expanded(
+                child: SizedBox(
+                  key: id == null ? null : scheduleOverlapAxisKey(id),
+                  height: 2.0 * _rowHeight,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final width = constraints.maxWidth;
+                      return Stack(
+                        children: <Widget>[
+                          span(
+                            width,
+                            shared,
+                            key: id == null
+                                ? null
+                                : scheduleOverlapShareKey(id),
+                            top: 0.0,
+                            height: 2.0 * _rowHeight,
+                            color: refused
+                                ? HarborColors.errorNotice
+                                : HarborColors.notice,
+                            radius: const BorderRadius.all(_round),
+                          ),
+                          for (final row in <int>[0, 1])
+                            span(
+                              width,
+                              axis,
+                              key: null,
+                              top: row * _rowHeight + laneTop,
+                              height: _laneHeight,
+                              color: HarborColors.outline,
+                              radius: const BorderRadius.all(_round),
+                            ),
+                          span(
+                            width,
+                            mine,
+                            key: id == null
+                                ? null
+                                : scheduleOverlapThisLaneKey(id),
+                            top: laneTop,
+                            height: _laneHeight,
+                            color: HarborColors.textSecondary,
+                            radius: cornersOf(mine),
+                          ),
+                          span(
+                            width,
+                            theirs,
+                            key: id == null
+                                ? null
+                                : scheduleOverlapOtherLaneKey(id),
+                            top: _rowHeight + laneTop,
+                            height: _laneHeight,
+                            color: color,
+                            radius: cornersOf(theirs),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsetsDirectional.only(
+              start: _labelWidth + _labelGap,
+              top: 2.0,
+            ),
+            child: Row(
+              children: <Widget>[
+                Text(startLabel, style: _labelStyle),
+                const Spacer(),
+                Text(endLabel, style: _labelStyle),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
