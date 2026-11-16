@@ -152,10 +152,18 @@ English defaults: `timePickerHourLabel`, `timePickerMinuteLabel`,
 through `CalendarView.onCreateRange`, as Month's long press does, in any
 view and out of edit mode too: one slot, at the first free slot from the
 edit policy's earliest start, and on today from the current time, with the
-rect the host gives (such as its add button's) and no length chosen. It
-returns the host's future, or null where it reports `onCreateRefused`
-instead or the controller is bound to no calendar, and it changes neither
-the selected day nor the view.
+rect the host gives (such as its add button's) and no length chosen. On a
+day the store has not read, it asks the store to read the day (`retry` of
+the day where its last read failed, and otherwise `prefetch`) and reports
+nothing until the read answers, then picks the slot from the entries read;
+where the read fails, it reports the new `CalendarView.onCreateReadFailed`
+instead. A later `createOn`, another store or controller, a new zone of
+the store or the calendar leaving the tree ends that wait, reporting
+nothing. It returns the host's future, or null where it reports
+`onCreateRefused` instead, the day's read fails within the call or the
+controller is bound to no calendar, and for a create that waits a future
+that completes once the wait ends, or once the host's future does; it
+changes neither the selected day nor the view.
 - Week's, Day's and Month's grids keep clear the bottom inset of the
 calendar's `MediaQuery`, such as a phone's home indicator, and the new
 `CalendarView.bottomPadding` past it, room for a host's floating action

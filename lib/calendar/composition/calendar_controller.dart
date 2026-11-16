@@ -346,13 +346,31 @@ base class CalendarController extends ChangeNotifier {
   /// [CalendarCreateDetails.globalRect], such as the rect of the button
   /// that asked, and [CalendarCreateDetails.userChoseLength] false.
   ///
+  /// Where the store has not read [day] ([CalendarStore.isRead]), it asks
+  /// the store to read it: through [CalendarStore.retry] of [day] where
+  /// its last read failed ([CalendarStore.readFailed]), which reads the
+  /// shown range's failed days again too, and otherwise through
+  /// [CalendarStore.prefetch], which sends nothing where a read in flight
+  /// covers the day. The create then waits, reporting nothing, until a
+  /// notify of the store finds the day read, when it reports as above,
+  /// its slot chosen at that time from the entries read; or finds the
+  /// day's read failed, when it reports [CalendarView.onCreateReadFailed]
+  /// instead. A later call, another store or controller given to the
+  /// calendar, a new zone of its store, or the calendar leaving the tree
+  /// ends the wait, reporting nothing. As it may ask the store to read, a
+  /// host calls it outside a build, such as from a gesture.
+  ///
   /// Returns the future of the calendar's call of
   /// [CalendarView.onCreateRange], one that completes at once where it is
   /// null. Where those starts leave no slot of the store's hours on [day]
   /// whose start and end its clock both read, it reports
-  /// [CalendarView.onCreateRefused] instead and returns null; an unbound
-  /// controller reports nothing and returns null. It changes neither the
-  /// selected day nor the view, and no view marks the create.
+  /// [CalendarView.onCreateRefused] instead and returns null; where the
+  /// day's read fails within the call, it reports
+  /// [CalendarView.onCreateReadFailed] and returns null; and an unbound
+  /// controller reports nothing and returns null. A create that waits
+  /// returns a future that completes once its wait ends, or where it
+  /// reports a create, once that call's future does. It changes neither
+  /// the selected day nor the view, and no view marks the create.
   Future<void>? createOn(DateTime day, {required Rect globalRect}) {
     return _binding?._createOnRequest(day, globalRect);
   }

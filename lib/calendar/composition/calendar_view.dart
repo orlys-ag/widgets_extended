@@ -281,6 +281,7 @@ class CalendarView<T> extends StatefulWidget {
     this.onEditRequest,
     this.onDeleteRequest,
     this.onCreateRefused,
+    this.onCreateReadFailed,
     this.showsHeader = true,
     this.headerBuilder,
     this.bottomPadding = 0.0,
@@ -490,6 +491,11 @@ class CalendarView<T> extends StatefulWidget {
   /// reports nothing.
   final ValueChanged<DateTime>? onCreateRefused;
 
+  /// A create [CalendarController.createOn] asked for on a day the store
+  /// had not read, whose read then failed ([CalendarStore.readFailed]), in
+  /// place of the create, with the day; null reports nothing.
+  final ValueChanged<DateTime>? onCreateReadFailed;
+
   /// Whether the calendar builds a header; false builds none, whatever
   /// [headerBuilder], and in Week and Month no header card.
   final bool showsHeader;
@@ -664,6 +670,12 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// frame.
   bool _askPending = false;
 
+  /// The create [CalendarController.createOn] asked for on a day the store
+  /// had not read, which waits for the day's read
+  /// ([_answerWaitingCreate]), and the future it returned; null while none
+  /// waits.
+  ({DateTime day, Rect globalRect, Completer<void> done})? _waitingCreate;
+
   CalendarViewKind get _view {
     return _controller._view!;
   }
@@ -754,6 +766,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       _card.endStripBrowse();
     }
     if (widget.store != oldWidget.store) {
+      _endWaitingCreate();
       // Before the views' own updates, which run in the build after this.
       oldWidget.store.removeListener(_handleStoreChange);
       widget.store.addListener(_handleStoreChange);
@@ -771,6 +784,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   @override
   void dispose() {
     widget.store.removeListener(_handleStoreChange);
+    _endWaitingCreate();
     _minuteTimer?.cancel();
     _noteLifecycle();
     _controller._detach(this);
@@ -843,8 +857,9 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// Takes [CalendarView.controller] in place of the one bound: a new
   /// host's, or, where the host's went, one of this state's own holding
   /// what the host's held. Disposes a controller of this state's own that
-  /// it replaces.
+  /// it replaces, and ends the wait of a create the old one asked for.
   void _swapController() {
+    _endWaitingCreate();
     final old = _controller;
     final shown = (view: _view, day: _day);
     _noteLifecycle();
@@ -859,10 +874,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   }
 
   /// Switches to an own copy of [shared], which another state's bind took,
-  /// holding what it holds; after the frame, where this state is still
-  /// mounted, reports the shared controller in a debug build and builds
-  /// again on the copy.
+  /// holding what it holds, ending the wait of a create [shared] asked for;
+  /// after the frame, where this state is still mounted, reports the
+  /// shared controller in a debug build and builds again on the copy.
   void _takeCopyOf(CalendarController shared) {
+    _endWaitingCreate();
     final copy = CalendarController._copyOf(shared);
     copy._binding = this;
     _controller = copy;
@@ -941,30 +957,72 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// the views take from this state's build, or another zone, which it
   /// takes first ([_takeZone]). The views follow the store's entries, load
   /// state and zone themselves, so any other notify builds nothing here.
+  /// Then answers a create waiting for its day's read
+  /// ([_answerWaitingCreate]).
   void _handleStoreChange() {
     final hours = widget.store.hours;
     final zone = widget.store.zone;
-    if (hours == _storeHours && zone == _storeZone) {
-      return;
+    if (hours != _storeHours || zone != _storeZone) {
+      if (zone != _storeZone) {
+        _takeZone(zone);
+      }
+      setState(() {
+        _storeHours = hours;
+      });
     }
-    if (zone != _storeZone) {
-      _takeZone(zone);
-    }
-    setState(() {
-      _storeHours = hours;
-    });
+    _answerWaitingCreate();
   }
 
-  /// Takes [zone], the store's new zone: keeps the selected date and the
-  /// card's browsed one, each now the start of that date on the new clock
-  /// ([_dayIn]); reads the held time on the new clock, which moves today
-  /// to the new clock's date; and asks the store for the range after the
-  /// frame. Its controller notifies once after the frame, as its selected
-  /// day and range read otherwise ([_noteLifecycle]). The clock notifies
-  /// whether or not the new reading is `==` to the old
+  /// Answers [_waitingCreate] where the store has read its day: reports
+  /// the create [_openCreateFlow] reports there now, and completes the
+  /// wait's future with that create's, or with the error that call throws.
+  /// Where the day's read has failed, reports
+  /// [CalendarView.onCreateReadFailed] instead, completing the future.
+  /// While the day is neither, the create waits on.
+  void _answerWaitingCreate() {
+    final waiting = _waitingCreate;
+    if (waiting == null) {
+      return;
+    }
+    final store = widget.store;
+    final day = waiting.day;
+    if (store.isRead(day)) {
+      _waitingCreate = null;
+      waiting.done.complete(
+        Future<void>.sync(() {
+          return _openCreateFlow(day, waiting.globalRect, afterNow: true)?.done;
+        }),
+      );
+    } else if (store.readFailed(day)) {
+      _waitingCreate = null;
+      waiting.done.complete();
+      widget.onCreateReadFailed?.call(day);
+    }
+  }
+
+  /// Ends the wait of [_waitingCreate], reporting nothing, and completes
+  /// its future.
+  void _endWaitingCreate() {
+    final waiting = _waitingCreate;
+    if (waiting == null) {
+      return;
+    }
+    _waitingCreate = null;
+    waiting.done.complete();
+  }
+
+  /// Takes [zone], the store's new zone: ends the wait of a create on a
+  /// day of the old clock ([_endWaitingCreate]); keeps the selected date
+  /// and the card's browsed one, each now the start of that date on the
+  /// new clock ([_dayIn]); reads the held time on the new clock, which
+  /// moves today to the new clock's date; and asks the store for the range
+  /// after the frame. Its controller notifies once after the frame, as its
+  /// selected day and range read otherwise ([_noteLifecycle]). The clock
+  /// notifies whether or not the new reading is `==` to the old
   /// ([_CalendarNowNotifier.retake]), as [CalendarNow] compares instants,
   /// and two zones can read the same instants on different dates.
   void _takeZone(Location? zone) {
+    _endWaitingCreate();
     _noteLifecycle();
     _storeZone = zone;
     _controller._selectedDay = _dayIn(_day);
@@ -1421,12 +1479,39 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     }
   }
 
-  /// [CalendarController.createOn]: a create on [day] as
-  /// [_openCreateFlow] reports one, after the current time where [day] is
-  /// today, with [_createRange]'s future, or null where it reports a
-  /// refusal. It selects nothing and marks nothing.
+  /// [CalendarController.createOn]: ends the wait of an earlier create,
+  /// then reports a create on [day] as [_openCreateFlow] reports one,
+  /// after the current time where [day] is today, with [_createRange]'s
+  /// future, or null where it reports a refusal. Where the store has not
+  /// read [day], it asks the store to read it, and leaves the create
+  /// waiting for the read ([_waitingCreate]), returning the wait's future;
+  /// or where the read fails within the call, reports
+  /// [CalendarView.onCreateReadFailed] and returns null. It selects
+  /// nothing and marks nothing.
   Future<void>? _createOnRequest(DateTime day, Rect globalRect) {
-    return _openCreateFlow(_dayIn(day), globalRect, afterNow: true)?.done;
+    _endWaitingCreate();
+    final shown = _dayIn(day);
+    final store = widget.store;
+    if (!store.isRead(shown)) {
+      // A retry ends the day's failed mark, so a failure of its new read
+      // marks the day again, where a prefetch would leave the mark on it
+      // through the read ([CalendarStore.readFailed]).
+      if (store.readFailed(shown)) {
+        store.retry(shown, shown);
+      } else {
+        store.prefetch(shown, shown);
+      }
+      if (!store.isRead(shown)) {
+        if (store.readFailed(shown)) {
+          widget.onCreateReadFailed?.call(shown);
+          return null;
+        }
+        final done = Completer<void>();
+        _waitingCreate = (day: shown, globalRect: globalRect, done: done);
+        return done.future;
+      }
+    }
+    return _openCreateFlow(shown, globalRect, afterNow: true)?.done;
   }
 
   /// Month's long press on [day], whose cell lies at [globalRect],

@@ -1,27 +1,107 @@
 /// The controller's create on a day, [CalendarController.createOn]: the
 /// slot it reports, the start after the current time on today, a refusal,
-/// and what it leaves alone: edit mode, the selection and an unbound
-/// controller.
+/// what it leaves alone: edit mode, the selection and an unbound
+/// controller, and a create on a day the store has not read, which waits
+/// for the day's read, and what ends the wait.
 library;
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
 import 'package:widgets_extended/calendar/views/create_details.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
+import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
+
+import '../../scheduling/zones.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
 final DateTime thursday = DateTime(2026, 4, 23);
 final DateTime friday = DateTime(2026, 4, 24);
+
+/// Days outside April's Monday-first month grid, March 30 to May 3, which
+/// a calendar on [thursday] asks its store to show.
+final DateTime may14 = DateTime(2026, 5, 14);
+final DateTime may15 = DateTime(2026, 5, 15);
+
+/// A data source whose reads wait in [held] for the test to answer them.
+class HeldReads implements CalendarDataSource<String> {
+  final List<
+    ({
+      DateTime first,
+      DateTime last,
+      Completer<List<CalendarEntry<String>>> answer,
+    })
+  >
+  held =
+      <
+        ({
+          DateTime first,
+          DateTime last,
+          Completer<List<CalendarEntry<String>>> answer,
+        })
+      >[];
+
+  /// Whether a held read covers [day].
+  bool reads(DateTime day) {
+    return held.any((read) {
+      return !read.first.isAfter(day) && !read.last.isBefore(day);
+    });
+  }
+
+  /// Fails with [error] every held read covering [day] not yet answered.
+  void failReadsOf(DateTime day, Object error) {
+    for (final read in held) {
+      if (!read.answer.isCompleted &&
+          !read.first.isAfter(day) &&
+          !read.last.isBefore(day)) {
+        read.answer.completeError(error);
+      }
+    }
+  }
+
+  /// Answers every held read not yet answered with [entries].
+  void answerAll([List<CalendarEntry<String>> entries = const []]) {
+    for (final read in held) {
+      if (!read.answer.isCompleted) {
+        read.answer.complete(entries);
+      }
+    }
+  }
+
+  @override
+  Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    final answer = Completer<List<CalendarEntry<String>>>();
+    held.add((first: first, last: last, answer: answer));
+    return answer.future;
+  }
+
+  @override
+  Future<CalendarEntry<String>> create(CalendarEntry<String> draft) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<CalendarEntry<String>> replace(CalendarEntry<String> entry) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<void> delete(String id) {
+    throw UnimplementedError();
+  }
+}
 
 /// 11:07 on Tuesday April 21 2026.
 DateTime fixedClock() {
@@ -60,29 +140,38 @@ final class AfternoonPolicy extends CalendarEditPolicy<String> {
 void main() {
   late List<CalendarCreateDetails> creates;
   late List<DateTime> refused;
+  late List<DateTime> readFailed;
 
   setUp(() {
     creates = <CalendarCreateDetails>[];
     refused = <DateTime>[];
+    readFailed = <DateTime>[];
   });
 
+  /// Pumps a calendar on [store] under [controller], or a new one on
+  /// [view] and [thursday], whose loading state is still, so a held read
+  /// lets it settle.
   Future<CalendarController> pumpCalendar(
     WidgetTester tester, {
-    required MemoryCalendarStore<String> store,
+    required CalendarStore<String> store,
+    CalendarController? controller,
     CalendarViewKind view = CalendarViewKind.week,
     bool editable = true,
     CalendarEditPolicy<String>? policy,
     bool reportsCreates = true,
     Future<void> Function(CalendarCreateDetails details)? onCreateRange,
   }) async {
-    final controller = CalendarController(view: view, selectedDay: thursday);
-    addTearDown(controller.dispose);
+    final shown =
+        controller ?? CalendarController(view: view, selectedDay: thursday);
+    if (controller == null) {
+      addTearDown(shown.dispose);
+    }
     await tester.pumpWidget(
       MaterialApp(
         theme: ThemeData(splashFactory: NoSplash.splashFactory),
         home: CalendarView<String>(
           store: store,
-          controller: controller,
+          controller: shown,
           clock: fixedClock,
           editable: editable,
           editPolicy: policy,
@@ -93,11 +182,57 @@ void main() {
                       creates.add(details);
                     },
           onCreateRefused: refused.add,
+          onCreateReadFailed: readFailed.add,
+          loadingBuilder: (context, state) {
+            return const SizedBox.shrink();
+          },
         ),
       ),
     );
     await tester.pumpAndSettle();
-    return controller;
+    return shown;
+  }
+
+  /// A caching store over [source], disposed at the test's end.
+  CachingCalendarStore<String> cachingOf(HeldReads source) {
+    final store = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(store.dispose);
+    return store;
+  }
+
+  /// A Month calendar on [thursday] over [source], whose read of April's
+  /// grid has answered with no entries.
+  Future<(CachingCalendarStore<String>, CalendarController)> pumpRead(
+    WidgetTester tester,
+    HeldReads source, {
+    Future<void> Function(CalendarCreateDetails details)? onCreateRange,
+  }) async {
+    final store = cachingOf(source);
+    final controller = await pumpCalendar(
+      tester,
+      store: store,
+      view: CalendarViewKind.month,
+      onCreateRange: onCreateRange,
+    );
+    source.answerAll();
+    await tester.pumpAndSettle();
+    // Setup sanity: the grid is read, and May 14 is not.
+    expect(store.isRead(thursday), isTrue);
+    expect(store.isRead(may14), isFalse);
+    return (store, controller);
+  }
+
+  /// The one slot at [start] to [end] minutes after [day]'s midnight, at
+  /// [fabRect], with no length chosen.
+  CalendarCreateDetails slotOn(DateTime day, int start, int end) {
+    return CalendarCreateDetails(
+      range: CalendarCreateRange(
+        start: DateTime(day.year, day.month, day.day, 0, start),
+        end: DateTime(day.year, day.month, day.day, 0, end),
+      ),
+      globalRect: fabRect,
+      userChoseLength: false,
+    );
   }
 
   MemoryCalendarStore<String> storeOf(
@@ -255,5 +390,189 @@ void main() {
     final controller = CalendarController();
     addTearDown(controller.dispose);
     expect(controller.createOn(thursday, globalRect: fabRect), isNull);
+  });
+
+  testWidgets("CR9 a create on a day the store has not read reads it and "
+      "reports nothing until the read answers, then the first slot no entry "
+      "it read shares", (tester) async {
+    final source = HeldReads();
+    final (_, controller) = await pumpRead(tester, source);
+    controller.createOn(may14, globalRect: fabRect);
+    await tester.pump();
+    expect(creates, isEmpty);
+    expect(source.reads(may14), isTrue);
+    source.answerAll(<CalendarEntry<String>>[entryOf("early", may14, 0, 30)]);
+    await tester.pump();
+    expect(creates, <CalendarCreateDetails>[slotOn(may14, 30, 45)]);
+  });
+
+  testWidgets("CR10 a create on a shown day under the read in flight waits "
+      "for that read", (tester) async {
+    final source = HeldReads();
+    final controller = await pumpCalendar(
+      tester,
+      store: cachingOf(source),
+      view: CalendarViewKind.month,
+    );
+    controller.createOn(thursday, globalRect: fabRect);
+    await tester.pump();
+    expect(creates, isEmpty);
+    source.answerAll(<CalendarEntry<String>>[
+      entryOf("early", thursday, 0, 30),
+    ]);
+    await tester.pump();
+    expect(creates, <CalendarCreateDetails>[slotOn(thursday, 30, 45)]);
+  });
+
+  testWidgets("CR11 a create on a day whose read fails reports the failure "
+      "with the day and no create", (tester) async {
+    final source = HeldReads();
+    final (_, controller) = await pumpRead(tester, source);
+    controller.createOn(may14, globalRect: fabRect);
+    await tester.pump();
+    expect(source.reads(may14), isTrue);
+    source.failReadsOf(may14, StateError("offline"));
+    await tester.pump();
+    expect(readFailed, <DateTime>[may14]);
+    expect(creates, isEmpty);
+  });
+
+  testWidgets("CR12 a create on a day whose last read failed reads it again "
+      "and reports once that read answers", (tester) async {
+    final source = HeldReads();
+    final (store, controller) = await pumpRead(tester, source);
+    store.prefetch(may14, may14);
+    source.failReadsOf(may14, StateError("offline"));
+    await tester.pump();
+    // Setup sanity: the day's read failed.
+    expect(store.readFailed(may14), isTrue);
+    final reads = source.held.length;
+    controller.createOn(may14, globalRect: fabRect);
+    await tester.pump();
+    expect(readFailed, isEmpty);
+    expect(source.held.length, reads + 1);
+    source.answerAll(<CalendarEntry<String>>[entryOf("early", may14, 0, 30)]);
+    await tester.pump();
+    expect(creates, <CalendarCreateDetails>[slotOn(may14, 30, 45)]);
+  });
+
+  testWidgets("CR13 the future of a create that waited completes when the "
+      "host's does", (tester) async {
+    final source = HeldReads();
+    final host = Completer<void>();
+    final (_, controller) = await pumpRead(
+      tester,
+      source,
+      onCreateRange: (details) {
+        creates.add(details);
+        return host.future;
+      },
+    );
+    var completed = false;
+    controller.createOn(may14, globalRect: fabRect)!.then((_) {
+      completed = true;
+    });
+    await tester.pump();
+    expect(completed, isFalse);
+    source.answerAll();
+    await tester.pump();
+    // Setup sanity: the create was reported.
+    expect(creates, hasLength(1));
+    expect(completed, isFalse);
+    host.complete();
+    await tester.pump();
+    expect(completed, isTrue);
+  });
+
+  testWidgets("CR14 a later create ends the wait of an earlier one, which "
+      "reports nothing and completes", (tester) async {
+    final source = HeldReads();
+    final (_, controller) = await pumpRead(tester, source);
+    var completed = false;
+    controller.createOn(may14, globalRect: fabRect)!.then((_) {
+      completed = true;
+    });
+    controller.createOn(may15, globalRect: fabRect);
+    await tester.pump();
+    expect(completed, isTrue);
+    source.answerAll();
+    await tester.pump();
+    expect(creates, <CalendarCreateDetails>[slotOn(may15, 0, 15)]);
+  });
+
+  testWidgets("CR15 a new zone of the store ends the wait, which reports "
+      "nothing and completes", (tester) async {
+    ensureZones();
+    final source = HeldReads();
+    final store = cachingOf(source);
+    final controller = await pumpCalendar(
+      tester,
+      store: store,
+      view: CalendarViewKind.month,
+    );
+    var completed = false;
+    controller.createOn(thursday, globalRect: fabRect)!.then((_) {
+      completed = true;
+    });
+    await tester.pump();
+    store.zone = tz.getLocation("Etc/GMT-3");
+    await tester.pump();
+    expect(completed, isTrue);
+    source.answerAll();
+    await tester.pumpAndSettle();
+    // Setup sanity: the day is read on the new clock.
+    expect(store.isRead(thursday), isTrue);
+    expect(creates, isEmpty);
+  });
+
+  testWidgets("CR16 another store ends the wait, which reports nothing and "
+      "completes", (tester) async {
+    final source = HeldReads();
+    final (_, controller) = await pumpRead(tester, source);
+    var completed = false;
+    controller.createOn(may14, globalRect: fabRect)!.then((_) {
+      completed = true;
+    });
+    await tester.pump();
+    final other = storeOf(<CalendarEntry<String>>[]);
+    await pumpCalendar(tester, store: other, controller: controller);
+    expect(completed, isTrue);
+    source.answerAll();
+    // A notify of the new store, which has read every day.
+    other.hours = CalendarDayHours(8 * 60, 18 * 60);
+    await tester.pumpAndSettle();
+    expect(creates, isEmpty);
+  });
+
+  testWidgets("CR17 another controller ends the wait, which reports nothing "
+      "and completes", (tester) async {
+    final source = HeldReads();
+    final (store, controller) = await pumpRead(tester, source);
+    var completed = false;
+    controller.createOn(may14, globalRect: fabRect)!.then((_) {
+      completed = true;
+    });
+    await tester.pump();
+    await pumpCalendar(tester, store: store, view: CalendarViewKind.month);
+    expect(completed, isTrue);
+    source.answerAll();
+    await tester.pumpAndSettle();
+    expect(creates, isEmpty);
+  });
+
+  testWidgets("CR18 a calendar leaving the tree ends the wait, which "
+      "reports nothing and completes", (tester) async {
+    final source = HeldReads();
+    final (_, controller) = await pumpRead(tester, source);
+    var completed = false;
+    controller.createOn(may14, globalRect: fabRect)!.then((_) {
+      completed = true;
+    });
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(completed, isTrue);
+    source.answerAll();
+    await tester.pump();
+    expect(creates, isEmpty);
   });
 }
