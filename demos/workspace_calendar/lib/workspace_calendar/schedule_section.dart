@@ -201,8 +201,8 @@ class ScheduleSection extends StatefulWidget {
   final Map<String, String> errors;
 
   @override
-  State<ScheduleSection> createState() {
-    return _ScheduleSectionState();
+  ScheduleSectionState createState() {
+    return ScheduleSectionState();
   }
 }
 
@@ -371,7 +371,9 @@ class _TimeTable {
   }
 }
 
-class _ScheduleSectionState extends State<ScheduleSection> {
+/// The state of a [ScheduleSection], which finds the field a message of
+/// [ScheduleSection.errors] shows on.
+class ScheduleSectionState extends State<ScheduleSection> {
   /// The field whose picker is open; none where null.
   _ScheduleField? _open;
 
@@ -508,6 +510,17 @@ class _ScheduleSectionState extends State<ScheduleSection> {
       case _ScheduleField.endTime:
         return _endRestNode;
     }
+  }
+
+  /// The context of the field that shows the message of
+  /// [ScheduleSection.errors] keyed [key], `start` or `end`: its row's time
+  /// field, or for an all-day schedule its date field, each built in every
+  /// build that shows its schedule; null before the section first builds.
+  BuildContext? errorFieldOf(String key) {
+    final row = key == "start" ? _TimeField.start : _TimeField.end;
+    return _restNodeOf(
+      _schedule.isAllDay ? row.dateField : row.timeField,
+    ).context;
   }
 
   /// Whether a time field, or anything under its [Focus], has the focus.

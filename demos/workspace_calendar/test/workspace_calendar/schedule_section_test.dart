@@ -1,6 +1,7 @@
 /// The item form's sheet, its summary card and its schedule section: the
-/// sheet's container, what closes it and its type selector, the message of
-/// each schedule problem, the messages after a failed Save, the summary's
+/// sheet's container, what closes it, where its actions lie and its type
+/// selector, the message of each schedule problem, the messages before and
+/// after a failed Save and the field a failed Save reveals, the summary's
 /// lines, overlap
 /// notice, next free time and zone, and the section's All day switch, its
 /// Start and End rows, End date, options and kept kind, and its time
@@ -31,6 +32,8 @@ import 'package:widgets_extended/calendar/views/time_picker.dart'
 import 'package:widgets_extended/calendar/views/week_strip.dart'
     show WeekStrip, weekStripDayKey;
 import 'package:widgets_extended/widgets_extended.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_api.dart'
+    show CalendarValidationException;
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/item_builders.dart'
@@ -336,6 +339,34 @@ Future<List<Element>> pickerRebuildsDuring(Future<void> Function() body) async {
   return rebuilt;
 }
 
+/// The form's page, the scroll view of its cards.
+Finder formPage() {
+  return find
+      .ancestor(
+        of: find.byKey(formItemCardKey),
+        matching: find.byType(Scrollable),
+      )
+      .first;
+}
+
+/// The scroll position of the form's page.
+ScrollPosition pagePosition(WidgetTester tester) {
+  return tester.state<ScrollableState>(formPage()).position;
+}
+
+/// Whether the form's text field labelled [label] has the focus.
+bool fieldHasFocus(WidgetTester tester, String label) {
+  return tester
+      .widget<EditableText>(
+        find.descendant(
+          of: fieldFinder(label),
+          matching: find.byType(EditableText),
+        ),
+      )
+      .focusNode
+      .hasFocus;
+}
+
 /// Makes the platform ask for no animations until the test ends.
 void disableAnimations(WidgetTester tester) {
   tester.platformDispatcher.accessibilityFeaturesTestValue =
@@ -465,6 +496,57 @@ void main() {
     store.release.complete();
     await tester.pumpAndSettle();
     expect(find.text("Edit Task"), findsNothing);
+  });
+
+  testWidgets("SF6 Delete lies at the actions' start and Cancel and Save "
+      "at their end, as do Cancel and Save with no Delete; where the sheet "
+      "cannot fit them in a row, Delete stacks above Cancel and Save", (
+    tester,
+  ) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    // Expects Save at the item card's end and Cancel beside it.
+    void expectEndActions(String step) {
+      final save = tester.getRect(saveFinder());
+      final cancel = tester.getRect(formButton("Cancel"));
+      expect(
+        save.right,
+        tester.getRect(find.byKey(formItemCardKey)).right,
+        reason: step,
+      );
+      expect(cancel.right, save.left - 8.0, reason: step);
+      expect(cancel.top, save.top, reason: step);
+    }
+
+    await openEdit(tester, store);
+    expectEndActions("row");
+    final delete = tester.getRect(formButton("Delete"));
+    expect(delete.left, tester.getRect(find.byKey(formItemCardKey)).left);
+    expect(delete.top, tester.getRect(saveFinder()).top);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    await openCreate(
+      tester,
+      store,
+      CalendarCreateRange(start: at(11), end: at(12)),
+    );
+    // Setup sanity: a new item has no Delete.
+    expect(formButton("Delete"), findsNothing);
+    expectEndActions("no Delete");
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    tester.view.physicalSize = const Size(360.0, 800.0);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await openEdit(tester, store);
+    expectEndActions("stacked");
+    final stacked = tester.getRect(formButton("Delete"));
+    expect(stacked.right, tester.getRect(find.byKey(formItemCardKey)).right);
+    expect(stacked.bottom, lessThanOrEqualTo(tester.getRect(saveFinder()).top));
   });
 
   testWidgets("SF2 a create picks its type in the sheet, Task first, and a "
@@ -1380,11 +1462,10 @@ void main() {
     }
   });
 
-  testWidgets("FA1 after a failed Save the title's and the times' messages "
-      "follow the edits: none before Save, a start picked in the hours "
-      "clears the end's hours message, and a title clears its own", (
-    tester,
-  ) async {
+  testWidgets("FA1 the times' messages follow the check from the form's "
+      "opening, and the title's shows after a failed Save: the end's hours "
+      "message before Save, the title's after it, a start picked in the "
+      "hours clears the end's, and a title clears its own", (tester) async {
     final store = MemoryCalendarStore<ItemPayload>(
       hours: CalendarDayHours(8 * 60, 18 * 60),
     );
@@ -1396,19 +1477,17 @@ void main() {
     );
     const endMessage =
         "The end is from after 08:00 to 18:00, inside the calendar's hours.";
+    final onEnd = find.descendant(
+      of: timeFieldFinder("End time"),
+      matching: find.text(endMessage),
+    );
+    expect(onEnd, findsOneWidget);
     expect(find.text("Enter a title."), findsNothing);
-    expect(find.text(endMessage), findsNothing);
 
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
     expect(find.text("Enter a title."), findsOneWidget);
-    expect(
-      find.descendant(
-        of: timeFieldFinder("End time"),
-        matching: find.text(endMessage),
-      ),
-      findsOneWidget,
-    );
+    expect(onEnd, findsOneWidget);
 
     await pickTime(tester, "Start time", "09:00");
     expect(find.text(endMessage), findsNothing);
@@ -1465,8 +1544,10 @@ void main() {
     expect(find.text(startMessage), findsNothing);
   });
 
-  testWidgets("FA2 a type field's message shows from one Save to the next, "
-      "whatever is typed meanwhile", (tester) async {
+  testWidgets("FA2 after a failed Save a type field's message follows its "
+      "value: Project's as it is typed and cleared; and a type change shows "
+      "the new type's at once, Link's following its text and Kind's its "
+      "choice", (tester) async {
     final store = storeOf(<CalendarItem>[]);
     addTearDown(store.dispose);
     await openCreate(
@@ -1481,13 +1562,293 @@ void main() {
     expect(find.text("Project is required."), findsOneWidget);
     await tester.enterText(fieldFinder("Project"), "Apollo");
     await tester.pump();
+    expect(find.text("Project is required."), findsNothing);
+    await tester.enterText(fieldFinder("Project"), "");
+    await tester.pump();
     expect(find.text("Project is required."), findsOneWidget);
+
+    await tester.ensureVisible(find.text("Request").last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text("Request").last);
+    await tester.pumpAndSettle();
+    expect(find.text("Kind is required."), findsOneWidget);
+    expect(find.text("Enter an http or https link."), findsNothing);
+    await tester.enterText(fieldFinder("Link"), "ftp://example.org");
+    await tester.pump();
+    expect(find.text("Enter an http or https link."), findsOneWidget);
+    await tester.enterText(fieldFinder("Link"), "https://example.org");
+    await tester.pump();
+    expect(find.text("Enter an http or https link."), findsNothing);
+    await tester.ensureVisible(dropdownFinder("Kind"));
+    await tester.pumpAndSettle();
+    await chooseOption(tester, "Kind", "Travel");
+    expect(find.text("Kind is required."), findsNothing);
+  });
+
+  testWidgets("FA5 a refused send's message of a type field stays through "
+      "other edits and a move of its field's selection until its own value "
+      "changes, and a type change drops it", (tester) async {
+    final store = _RefusedCreates(const <String, String>{
+      "fields.severity": "Severity is under review.",
+      "fields.project": "Apollo is closed.",
+    });
+    addTearDown(store.dispose);
+    await openCreate(
+      tester,
+      store,
+      CalendarCreateRange(start: at(9), end: at(10)),
+    );
+    await tester.tap(find.text("Risk").last);
+    await tester.pumpAndSettle();
+    await tester.enterText(fieldFinder("Title"), "Plan");
+    await tester.enterText(fieldFinder("Project"), "Apollo");
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    expect(find.text("Severity is under review."), findsOneWidget);
+    expect(find.text("Apollo is closed."), findsOneWidget);
+
+    await tester.enterText(fieldFinder("Owner"), "Kim");
+    tester.widget<TextField>(fieldFinder("Project")).controller!.selection =
+        const TextSelection.collapsed(offset: 0);
+    await tester.pump();
+    expect(find.text("Severity is under review."), findsOneWidget);
+    expect(find.text("Apollo is closed."), findsOneWidget);
+    await tester.ensureVisible(dropdownFinder("Severity"));
+    await tester.pumpAndSettle();
+    await chooseOption(tester, "Severity", "High");
+    expect(find.text("Severity is under review."), findsNothing);
+    expect(find.text("Apollo is closed."), findsOneWidget);
+    await tester.enterText(fieldFinder("Project"), "Gemini");
+    await tester.pump();
+    expect(find.text("Apollo is closed."), findsNothing);
+
+    await tester.enterText(fieldFinder("Project"), "Apollo");
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    // Setup sanity: the send is refused again.
+    expect(find.text("Apollo is closed."), findsOneWidget);
+    for (final type in <String>["Task", "Risk"]) {
+      await tester.ensureVisible(find.text(type).last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(type).last);
+      await tester.pumpAndSettle();
+    }
+    expect(find.text("Apollo is closed."), findsNothing);
+  });
+
+  testWidgets("FL1 the times' messages show with no Save as the clock and "
+      "the store make the schedule fail: the minute that passes a new "
+      "item's start under the lock of earlier today, and an item another "
+      "write puts over the item's times under a policy that refuses "
+      "overlaps", (tester) async {
+    var clock = at(9, 50);
+    final store = storeOf(<CalendarItem>[]);
+    addTearDown(store.dispose);
+    await openWith(tester, (context) {
+      showCreateFlow(
+        context,
+        store: store,
+        range: CalendarCreateRange(start: at(10), end: at(11)),
+        policy: const HistoryLockPolicy<ItemPayload>(lockEarlierToday: true),
+        now: () {
+          return CalendarNow(time: clock, today: wednesday);
+        },
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+      );
+    });
+    final past = find.descendant(
+      of: timeFieldFinder("Start time"),
+      matching: find.text("The start can't be in the past."),
+    );
+    expect(past, findsNothing);
+    clock = at(10, 1);
+    await tester.pump(const Duration(minutes: 1));
+    expect(past, findsOneWidget);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    final shared = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(shared.dispose);
+    await openEdit(
+      tester,
+      shared,
+      policy: const NoOverlapsPolicy<ItemPayload>(),
+    );
+    final overlap = find.descendant(
+      of: find.byKey(formSchedulingCardKey),
+      matching: find.text("Overlaps Review."),
+    );
+    expect(overlap, findsNothing);
+    unawaited(shared.create(task("item-2", "Review", at(9, 30), at(10, 30))));
+    await tester.pump();
+    expect(overlap, findsOneWidget);
+  });
+
+  testWidgets("FV1 a failed Save brings its first message, the title's, out "
+      "from under the pinned summary into view below it, and gives the "
+      "title the focus", (tester) async {
+    final store = storeOf(<CalendarItem>[]);
+    addTearDown(store.dispose);
+    await openCreate(
+      tester,
+      store,
+      CalendarCreateRange(start: at(9), end: at(10)),
+    );
+    await tester.tap(find.text("Risk").last);
+    await tester.pumpAndSettle();
+    final page = pagePosition(tester);
+    page.jumpTo(page.maxScrollExtent);
+    await tester.pump();
+    final summaryCard = find.byKey(formSummaryCardKey);
+    // Setup sanity: the title lies under the summary, and has no focus.
+    expect(
+      tester.getRect(fieldFinder("Title")).top,
+      lessThan(tester.getRect(summaryCard).bottom),
+    );
+    expect(fieldHasFocus(tester, "Title"), isFalse);
 
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
-    // Setup sanity: the Save is refused for the title alone.
+    expect(
+      find.descendant(
+        of: fieldFinder("Title"),
+        matching: find.text("Enter a title."),
+      ),
+      findsOneWidget,
+    );
+    final title = tester.getRect(fieldFinder("Title"));
+    expect(title.top, greaterThanOrEqualTo(tester.getRect(summaryCard).bottom));
+    expect(title.bottom, lessThanOrEqualTo(tester.getRect(formPage()).bottom));
+    expect(fieldHasFocus(tester, "Title"), isTrue);
+  });
+
+  testWidgets("FV2 a failed Save brings its first message, Project's, up "
+      "from below the page's view, and gives Project the focus", (
+    tester,
+  ) async {
+    final store = storeOf(<CalendarItem>[]);
+    addTearDown(store.dispose);
+    await openCreate(
+      tester,
+      store,
+      CalendarCreateRange(start: at(9), end: at(10)),
+    );
+    await tester.tap(find.text("Risk").last);
+    await tester.pumpAndSettle();
+    await tester.enterText(fieldFinder("Title"), "Plan");
+    final page = pagePosition(tester);
+    page.jumpTo(0.0);
+    await tester.pump();
+    final view = tester.getRect(formPage());
+    // Setup sanity: Project lies below the view, and the title has the
+    // focus.
+    expect(
+      tester.getRect(fieldFinder("Project")).top,
+      greaterThanOrEqualTo(view.bottom),
+    );
+    expect(fieldHasFocus(tester, "Title"), isTrue);
+
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    final message = find.descendant(
+      of: fieldFinder("Project"),
+      matching: find.text("Project is required."),
+    );
+    expect(message, findsOneWidget);
+    expect(tester.getRect(message).bottom, lessThanOrEqualTo(view.bottom));
+    expect(fieldHasFocus(tester, "Project"), isTrue);
+  });
+
+  testWidgets("FV3 a failed Save brings the first message in the page's "
+      "order into view, the start's before the title's", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(
+      tester,
+      store,
+      policy: const NoOverlapsPolicy<ItemPayload>(),
+    );
+    await tester.enterText(fieldFinder("Title"), "");
+    unawaited(store.create(task("item-2", "Review", at(9, 30), at(10, 30))));
+    await tester.pump();
+    final page = pagePosition(tester);
+    page.jumpTo(page.maxScrollExtent);
+    await tester.pump();
+    final view = tester.getRect(formPage());
+    // Setup sanity: Start time lies above the view.
+    expect(
+      tester.getRect(timeFieldFinder("Start time")).bottom,
+      lessThanOrEqualTo(view.top),
+    );
+
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    // Setup sanity: the start's message shows, and the title's too.
+    expect(
+      find.descendant(
+        of: timeFieldFinder("Start time"),
+        matching: find.text("Overlaps Review."),
+      ),
+      findsOneWidget,
+    );
     expect(find.text("Enter a title."), findsOneWidget);
-    expect(find.text("Project is required."), findsNothing);
+    expect(
+      tester.getRect(timeFieldFinder("Start time")).top,
+      greaterThanOrEqualTo(view.top),
+    );
+  });
+
+  testWidgets("FV4 a failed Save's reveal moves over the theme's motion, and "
+      "at once where the platform asks for no animations", (tester) async {
+    final store = storeOf(<CalendarItem>[]);
+    addTearDown(store.dispose);
+    // Opens a new Risk under the motion theme, titled, its page at its top.
+    Future<ScrollPosition> open() async {
+      await openWith(tester, (context) {
+        showCreateFlow(
+          context,
+          store: store,
+          range: CalendarCreateRange(start: at(9), end: at(10)),
+          policy: const UnrestrictedEditPolicy<ItemPayload>(),
+          now: wednesdayStart,
+          hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+        );
+      }, theme: motionTheme);
+      await tester.tap(find.text("Risk").last);
+      await tester.pumpAndSettle();
+      await tester.enterText(fieldFinder("Title"), "Plan");
+      final page = pagePosition(tester);
+      page.jumpTo(0.0);
+      await tester.pump();
+      return page;
+    }
+
+    var page = await open();
+    await tester.tap(saveFinder());
+    // The frame that shows the messages, after which the reveal starts,
+    // and the frame its motion starts on.
+    await tester.pump();
+    await tester.pump();
+    final start = page.pixels;
+    await tester.pump(motionTheme.motionDuration ~/ 2);
+    final half = page.pixels;
+    await tester.pumpAndSettle();
+    final end = page.pixels;
+    // Setup sanity: the reveal scrolls.
+    expect(end, greaterThan(start));
+    expect(half, closeTo((start + end) / 2, 1.0));
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    disableAnimations(tester);
+    page = await open();
+    await tester.tap(saveFinder());
+    await tester.pump();
+    expect(page.pixels, end);
   });
 
   testWidgets("FA4 a Save after a failed one shows no message of the item it "
@@ -4250,5 +4611,18 @@ final class _HeldUpdates extends MemoryCalendarStore<ItemPayload> {
   Future<CalendarItem> update(CalendarItem entry) async {
     await release.future;
     return super.update(entry);
+  }
+}
+
+/// A store that refuses each create with [fieldErrors], as the API's
+/// validation refuses an item.
+final class _RefusedCreates extends MemoryCalendarStore<ItemPayload> {
+  _RefusedCreates(this.fieldErrors);
+
+  final Map<String, String> fieldErrors;
+
+  @override
+  Future<CalendarItem> create(CalendarItem draft) async {
+    throw CalendarValidationException(fieldErrors);
   }
 }
