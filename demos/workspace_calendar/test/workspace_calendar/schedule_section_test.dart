@@ -35,6 +35,8 @@ import 'package:workspace_calendar/workspace_calendar/calendar_api.dart'
     show CalendarValidationException;
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
+import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart'
+    show HarborColors;
 import 'package:workspace_calendar/workspace_calendar/item_builders.dart'
     show harborDayBadges;
 import 'package:workspace_calendar/workspace_calendar/item_form.dart';
@@ -214,6 +216,8 @@ Future<void> pumpSection(
         if (check.overlaps.isNotEmpty)
           ScheduleOverlapNotice(
             check: check,
+            hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+            zone: zone,
             locked: locked,
             onChanged: onChanged,
           ),
@@ -370,6 +374,57 @@ bool fieldHasFocus(WidgetTester tester, String label) {
       )
       .focusNode
       .hasFocus;
+}
+
+/// The messages of the form's scheduling part's fields, in the page's
+/// order: Start date, Start time, End date and End time for a timed
+/// schedule.
+List<String?> scheduleFieldErrors(WidgetTester tester) {
+  return tester
+      .widgetList<InputDecorator>(
+        find.descendant(
+          of: find.byKey(formSchedulingCardKey),
+          matching: find.byType(InputDecorator),
+        ),
+      )
+      .map((decorator) {
+        return decorator.decoration.errorText;
+      })
+      .toList();
+}
+
+/// The texts of the overlap notice's card of the item [id], in the order
+/// they are laid out.
+List<String> overlapCardTexts(WidgetTester tester, String id) {
+  return tester
+      .widgetList<Text>(
+        find.descendant(
+          of: find.byKey(scheduleOverlapCardKey(id)),
+          matching: find.byType(Text),
+        ),
+      )
+      .map((text) {
+        return text.data ?? text.textSpan!.toPlainText();
+      })
+      .toList();
+}
+
+/// The fill of the box decoration of the widget [finder] finds.
+Color? decorationColor(WidgetTester tester, Finder finder) {
+  final decoration = tester.widget<DecoratedBox>(finder).decoration;
+  return (decoration as BoxDecoration).color;
+}
+
+/// The left and right of the overlap notice's card of [id]'s shared part
+/// as fractions of its bar, each to three decimals.
+(double, double) overlapShare(WidgetTester tester, String id) {
+  final bar = tester.getRect(find.byKey(scheduleOverlapBarKey(id)));
+  final share = tester.getRect(find.byKey(scheduleOverlapShareKey(id)));
+  double fraction(double x) {
+    return ((x - bar.left) / bar.width * 1000).round() / 1000;
+  }
+
+  return (fraction(share.left), fraction(share.right));
 }
 
 /// Makes the platform ask for no animations until the test ends.
@@ -662,6 +717,21 @@ void main() {
         "end": "The end can't be in the past.",
       },
     );
+    // A refused overlap names no field: the overlap notice states it, and
+    // the start's message is the first other problem's.
+    expect(
+      scheduleErrorsOf(<CalendarScheduleProblem>[
+        CalendarScheduleOverlapRefused<ItemPayload>(other),
+      ]),
+      isEmpty,
+    );
+    expect(
+      scheduleErrorsOf(<CalendarScheduleProblem>[
+        CalendarScheduleOverlapRefused<ItemPayload>(other),
+        const CalendarScheduleBeforeEarliest(),
+      ]),
+      <String, String>{"start": "The start can't be in the past."},
+    );
   });
 
   testWidgets("SS1 SS2 the form shows the schedule and its length, "
@@ -725,10 +795,11 @@ void main() {
     expect(
       find.descendant(
         of: find.byKey(scheduleOverlapKey),
-        matching: find.text("Overlaps Standup"),
+        matching: find.text("Overlaps 1 item"),
       ),
       findsOneWidget,
     );
+    expect(find.byKey(scheduleOverlapCardKey("item-2")), findsOneWidget);
     await tester.ensureVisible(find.text("Next free time"));
     await tester.pumpAndSettle();
     await tester.tap(find.text("Next free time"));
@@ -1649,11 +1720,12 @@ void main() {
     expect(find.text("Apollo is closed."), findsNothing);
   });
 
-  testWidgets("FL1 the times' messages show with no Save as the clock and "
-      "the store make the schedule fail: the minute that passes a new "
-      "item's start under the lock of earlier today, and an item another "
-      "write puts over the item's times under a policy that refuses "
-      "overlaps", (tester) async {
+  testWidgets("FL1 the schedule's refusals show with no Save as the clock "
+      "and the store make the schedule fail: the start's message as the "
+      "minute passes a new item's start under the lock of earlier today, "
+      "and the refusing overlap notice, with no message on the times, as "
+      "another write puts an item over the item's times under a policy that "
+      "refuses overlaps", (tester) async {
     var clock = at(9, 50);
     final store = storeOf(<CalendarItem>[]);
     addTearDown(store.dispose);
@@ -1689,14 +1761,16 @@ void main() {
       shared,
       policy: const NoOverlapsPolicy<ItemPayload>(),
     );
-    final overlap = find.descendant(
-      of: find.byKey(formSchedulingCardKey),
-      matching: find.text("Overlaps Review."),
+    final refusing = find.descendant(
+      of: find.byKey(scheduleOverlapKey),
+      matching: find.text("Can't overlap 1 item"),
     );
-    expect(overlap, findsNothing);
+    expect(refusing, findsNothing);
     unawaited(shared.create(task("item-2", "Review", at(9, 30), at(10, 30))));
     await tester.pump();
-    expect(overlap, findsOneWidget);
+    expect(refusing, findsOneWidget);
+    // The notice states the refusal, so no message shows on the times.
+    expect(scheduleFieldErrors(tester), <String?>[null, null, null, null]);
   });
 
   testWidgets("FV1 a failed Save brings its first message, the title's, "
@@ -1785,7 +1859,12 @@ void main() {
   });
 
   testWidgets("FV3 a failed Save brings the first message in the page's "
-      "order into view, the start's before the title's", (tester) async {
+      "order into view, the overlap notice of a refused overlap before the "
+      "title's", (tester) async {
+    // A view short enough that the page scrolls the notice out of it.
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(800.0, 450.0);
+    addTearDown(tester.view.reset);
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
     ]);
@@ -1802,26 +1881,55 @@ void main() {
     page.jumpTo(page.maxScrollExtent);
     await tester.pump();
     final view = tester.getRect(formPage());
-    // Setup sanity: Start time lies above the view.
+    final notice = find.byKey(scheduleOverlapKey);
+    // Setup sanity: the notice refuses the overlap, and lies above the
+    // view.
     expect(
-      tester.getRect(timeFieldFinder("Start time")).bottom,
-      lessThanOrEqualTo(view.top),
+      find.descendant(of: notice, matching: find.text("Can't overlap 1 item")),
+      findsOneWidget,
     );
+    expect(tester.getRect(notice).bottom, lessThanOrEqualTo(view.top));
 
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
-    // Setup sanity: the start's message shows, and the title's too.
+    // Setup sanity: the title's message shows.
+    expect(find.text("Enter a title."), findsOneWidget);
+    expect(scheduleFieldErrors(tester), <String?>[null, null, null, null]);
+    expect(tester.getRect(notice).top, greaterThanOrEqualTo(view.top));
+  });
+
+  testWidgets("FV5 a Save whose one problem is an overlap the policy refuses "
+      "sends nothing and keeps the form open", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+      task("item-2", "Review", at(9, 30), at(10, 30)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(
+      tester,
+      store,
+      policy: const NoOverlapsPolicy<ItemPayload>(),
+    );
+    await tester.enterText(fieldFinder("Title"), "Rewrite");
+    // Setup sanity: the notice refuses the overlap, and no field has a
+    // message.
     expect(
       find.descendant(
-        of: timeFieldFinder("Start time"),
-        matching: find.text("Overlaps Review."),
+        of: find.byKey(scheduleOverlapKey),
+        matching: find.text("Can't overlap 1 item"),
       ),
       findsOneWidget,
     );
-    expect(find.text("Enter a title."), findsOneWidget);
+    expect(scheduleFieldErrors(tester), <String?>[null, null, null, null]);
+
+    await tester.tap(saveFinder());
+    await tester.pumpAndSettle();
+    expect(find.text("Edit Task"), findsOneWidget);
     expect(
-      tester.getRect(timeFieldFinder("Start time")).top,
-      greaterThanOrEqualTo(view.top),
+      store.entriesOn(wednesday).map((shown) {
+        return shown.entry.title;
+      }),
+      <String>["Write", "Review"],
     );
   });
 
@@ -1899,11 +2007,6 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
       frame++;
       expect(find.byKey(scheduleOverlapKey), findsNothing, reason: "$frame");
-      expect(
-        find.textContaining("Overlaps Plan"),
-        findsNothing,
-        reason: "$frame",
-      );
       expect(frame, lessThan(200));
     } while (find.text("New item").evaluate().isNotEmpty);
     // Setup sanity: the second Save wrote the item.
@@ -3219,89 +3322,233 @@ void main() {
     );
   });
 
-  testWidgets("FS7 the overlap notice writes each overlapped item's title "
-      "in bold, and its other words not in bold", (tester) async {
+  testWidgets("FS7 the overlap notice counts the overlaps and names the "
+      "next free time, over a card per overlapped item in the order of their "
+      "starts: its type's icon, its title and times, its summaries, and the "
+      "time it shares with the item", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task("item-2", "Standup", at(9, 30), at(10, 30)),
-      task("item-3", "Review", at(9, 45), at(10, 15)),
-    ]);
-    addTearDown(store.dispose);
-    await openEdit(tester, store);
-    final notice = tester
-        .widgetList<RichText>(
-          find.descendant(
-            of: find.byKey(scheduleOverlapKey),
-            matching: find.byType(RichText),
-          ),
-        )
-        .singleWhere((text) {
-          return text.text.toPlainText().startsWith("Overlaps");
-        });
-    // Each run of the notice's text, and whether its style, merged down
-    // the spans from the root's, is bold.
-    final runs = <(String, bool)>[];
-    void collect(InlineSpan span, TextStyle inherited) {
-      final style = inherited.merge(span.style);
-      if (span is! TextSpan) {
-        return;
-      }
-      final text = span.text;
-      if (text != null && text.isNotEmpty) {
-        runs.add((text, style.fontWeight == FontWeight.bold));
-      }
-      for (final child in span.children ?? const <InlineSpan>[]) {
-        collect(child, style);
-      }
-    }
-
-    collect(notice.text, const TextStyle());
-    expect(runs, <(String, bool)>[
-      ("Overlaps ", false),
-      ("Standup", true),
-      (", ", false),
-      ("Review", true),
-    ]);
-  });
-
-  testWidgets("FS8 the overlap notice's warning icon lies at its top left: "
-      "before its text and level with the text's top, whether the text "
-      "takes one line or more", (tester) async {
-    final store = storeOf(<CalendarItem>[
-      task("item-1", "Write", at(9), at(10)),
-      task("item-2", "Standup", at(9, 30), at(10, 30)),
-      task("item-3", "Draft", at(14), at(15)),
-      task(
-        "item-4",
-        "Quarterly planning review with the whole team",
-        at(14, 30),
-        at(15, 30),
+      calendarItem(
+        id: "item-3",
+        type: CalendarItemType.risk,
+        title: "Review",
+        start: at(8, 30),
+        end: at(11),
+        fields: const <String, Object?>{
+          "severity": "high",
+          "project": "Apollo",
+          "mitigated": false,
+        },
       ),
     ]);
     addTearDown(store.dispose);
+    await openEdit(tester, store);
     final notice = find.byKey(scheduleOverlapKey);
-    final icon = find.descendant(
-      of: notice,
-      matching: find.byIcon(Icons.warning_amber),
+    expect(
+      find.descendant(of: notice, matching: find.text("Overlaps 2 items")),
+      findsOneWidget,
     );
-    final text = find.descendant(
-      of: notice,
-      matching: find.textContaining("Overlaps"),
+    expect(
+      find.descendant(
+        of: notice,
+        matching: find.text("Next free: 11:00-12:00"),
+      ),
+      findsOneWidget,
     );
-    final heights = <double>[];
-    for (final id in <String>["item-1", "item-3"]) {
-      await openEdit(tester, store, id: id);
-      final iconRect = tester.getRect(icon);
-      final textRect = tester.getRect(text);
-      expect(iconRect.top, textRect.top, reason: id);
-      expect(iconRect.right, lessThanOrEqualTo(textRect.left), reason: id);
-      heights.add(textRect.height);
-      await tester.tap(formButton("Cancel"));
+    expect(overlapCardTexts(tester, "item-3"), <String>[
+      "Review",
+      "08:30-11:00",
+      "High, Mitigated: No",
+      "Covers all of this item",
+    ]);
+    expect(overlapCardTexts(tester, "item-2"), <String>[
+      "Standup",
+      "09:30-10:30",
+      "To do",
+      "Shares 09:30-10:00, 30m",
+    ]);
+    final review = find.byKey(scheduleOverlapCardKey("item-3"));
+    final standup = find.byKey(scheduleOverlapCardKey("item-2"));
+    expect(
+      tester.getRect(review).bottom,
+      lessThanOrEqualTo(tester.getRect(standup).top),
+    );
+    expect(
+      find.descendant(of: review, matching: find.byIcon(Icons.warning_amber)),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: standup, matching: find.byIcon(Icons.task_alt)),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets("FS8 the overlap notice's warning icon lies at its top left, "
+      "before its heading and level with the heading's top", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+      task("item-2", "Standup", at(9, 30), at(10, 30)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    final notice = find.byKey(scheduleOverlapKey);
+    final icon = tester.getRect(
+      find.descendant(of: notice, matching: find.byIcon(Icons.warning_amber)),
+    );
+    final heading = tester.getRect(
+      find.descendant(of: notice, matching: find.text("Overlaps 1 item")),
+    );
+    final card = tester.getRect(find.byKey(scheduleOverlapCardKey("item-2")));
+    expect(icon.top, heading.top);
+    expect(icon.right, lessThanOrEqualTo(heading.left));
+    expect(icon.bottom, lessThanOrEqualTo(card.top));
+    expect(icon.left, lessThan(card.left + 1.0));
+  });
+
+  testWidgets("FS9 a card's bar is the item's time, and its filled part the "
+      "part the overlapped item shares, in that item's colour", (tester) async {
+    final standup = task("item-3", "Standup", at(9, 30), at(10, 30));
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+      task("item-2", "Early", at(8), at(9, 15)),
+      standup,
+      task("item-4", "Review", at(8, 30), at(11)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    expect(overlapShare(tester, "item-2"), (0.0, 0.25));
+    expect(overlapShare(tester, "item-3"), (0.5, 1.0));
+    expect(overlapShare(tester, "item-4"), (0.0, 1.0));
+    final card = tester.getRect(find.byKey(scheduleOverlapCardKey("item-3")));
+    final bar = tester.getRect(find.byKey(scheduleOverlapBarKey("item-3")));
+    expect(card.expandToInclude(bar), card);
+    expect(bar.width, greaterThan(card.width / 2.0));
+    expect(
+      decorationColor(tester, find.byKey(scheduleOverlapShareKey("item-3"))),
+      standup.color,
+    );
+  });
+
+  testWidgets("FS10 the overlap notice shows three cards and a button that "
+      "shows the rest, which then shows fewer again", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+      for (var index = 0; index < 5; index++)
+        task(
+          "item-${index + 2}",
+          "Meeting $index",
+          at(9, 10 * index),
+          at(10, 10 * index),
+        ),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    final notice = find.byKey(scheduleOverlapKey);
+    List<bool> shown() {
+      return <bool>[
+        for (var index = 2; index <= 6; index++)
+          find
+              .byKey(scheduleOverlapCardKey("item-$index"))
+              .evaluate()
+              .isNotEmpty,
+      ];
+    }
+
+    Future<void> tapInNotice(String label) async {
+      final button = find.descendant(of: notice, matching: find.text(label));
+      await tester.ensureVisible(button);
+      await tester.pumpAndSettle();
+      await tester.tap(button);
       await tester.pumpAndSettle();
     }
-    // Setup sanity: the second notice's text takes more lines than the
-    // first's.
-    expect(heights[1], greaterThanOrEqualTo(2 * heights[0]));
+
+    expect(
+      find.descendant(of: notice, matching: find.text("Overlaps 5 items")),
+      findsOneWidget,
+    );
+    expect(shown(), <bool>[true, true, true, false, false]);
+    await tapInNotice("Show 2 more");
+    expect(shown(), <bool>[true, true, true, true, true]);
+    await tapInNotice("Show fewer");
+    expect(shown(), <bool>[true, true, true, false, false]);
+  });
+
+  testWidgets("FS11 the overlap notice turns red where the policy refuses an "
+      "overlap, saying how many it refuses, and marks each refused card "
+      "Not allowed", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+      task("item-2", "Standup", at(9, 30), at(10, 30)),
+      task("item-3", "Review", at(8, 30), at(11)),
+    ]);
+    addTearDown(store.dispose);
+    final notice = find.byKey(scheduleOverlapKey);
+    Finder inNotice(String text) {
+      return find.descendant(of: notice, matching: find.text(text));
+    }
+
+    List<bool> marked() {
+      return <bool>[
+        for (final id in <String>["item-2", "item-3"])
+          overlapCardTexts(tester, id).contains("Not allowed"),
+      ];
+    }
+
+    await openEdit(tester, store);
+    expect(inNotice("Overlaps 2 items"), findsOneWidget);
+    expect(decorationColor(tester, notice), HarborColors.notice);
+    expect(marked(), <bool>[false, false]);
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    await openEdit(tester, store, policy: const _RefusesOverlapWith("item-3"));
+    expect(inNotice("Overlaps 2 items, 1 not allowed"), findsOneWidget);
+    expect(decorationColor(tester, notice), HarborColors.errorNotice);
+    expect(marked(), <bool>[false, true]);
+    expect(overlapCardTexts(tester, "item-3").last, "Not allowed");
+    await tester.tap(formButton("Cancel"));
+    await tester.pumpAndSettle();
+
+    await openEdit(
+      tester,
+      store,
+      policy: const NoOverlapsPolicy<ItemPayload>(),
+    );
+    expect(inNotice("Can't overlap 2 items"), findsOneWidget);
+    expect(decorationColor(tester, notice), HarborColors.errorNotice);
+    expect(marked(), <bool>[true, true]);
+  });
+
+  testWidgets("FS12 a card writes the weekday at each end of an item that "
+      "runs past the item's day, and an end at the next midnight as 24:00 "
+      "of the day", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+      task("item-2", "Overnight", DateTime(2026, 4, 21, 22), at(9, 30)),
+      task("item-3", "Late", at(9, 45), DateTime(2026, 4, 23)),
+      task("item-4", "Shift", at(9, 50), DateTime(2026, 4, 23, 1)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
+    expect(overlapCardTexts(tester, "item-2"), <String>[
+      "Overnight",
+      "Tue 22:00-Wed 09:30",
+      "To do",
+      "Shares 09:00-09:30, 30m",
+    ]);
+    expect(overlapCardTexts(tester, "item-3"), <String>[
+      "Late",
+      "09:45-24:00",
+      "To do",
+      "Shares 09:45-10:00, 15m",
+    ]);
+    expect(overlapCardTexts(tester, "item-4"), <String>[
+      "Shift",
+      "Wed 09:50-Thu 01:00",
+      "To do",
+      "Shares 09:50-10:00, 10m",
+    ]);
   });
 
   testWidgets("IP1 a tap on Start date or End date opens no dialog but the "
@@ -4536,6 +4783,26 @@ final class _StartsFromTen extends CalendarEditPolicy<ItemPayload> {
   @override
   DateTime? earliestStartOn(DateTime day, CalendarNow now) {
     return DateTime(day.year, day.month, day.day, 10);
+  }
+}
+
+/// A policy that refuses an overlap with the item [id] alone.
+final class _RefusesOverlapWith extends CalendarEditPolicy<ItemPayload> {
+  const _RefusesOverlapWith(this.id);
+
+  final String id;
+
+  @override
+  bool get allowsOverlaps {
+    return false;
+  }
+
+  @override
+  bool mayOverlap(
+    CalendarOverlapCandidate<ItemPayload> candidate,
+    CalendarEntry<ItemPayload> other,
+  ) {
+    return other.id != id;
   }
 }
 

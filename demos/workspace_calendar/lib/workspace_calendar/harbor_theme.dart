@@ -30,6 +30,12 @@ abstract final class HarborColors {
   static const Color notice = Color(0xFFFFF4C2);
   static const Color noticeEdge = Color(0xFFF0D77A);
   static const Color onNotice = Color(0xFF5C4300);
+
+  /// A soft red for a notice of something refused, with [errorNoticeEdge]
+  /// for its rule and [onErrorNotice] for its text and icon.
+  static const Color errorNotice = Color(0xFFFCE8E6);
+  static const Color errorNoticeEdge = Color(0xFFF2B8B5);
+  static const Color onErrorNotice = Color(0xFF8C1D18);
 }
 
 /// How an item of one type is drawn: [tint] fills it, a 4 px [edge] runs

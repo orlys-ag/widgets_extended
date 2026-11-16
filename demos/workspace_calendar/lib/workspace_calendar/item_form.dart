@@ -13,12 +13,14 @@
 /// answers. The check is made again
 /// at each edit, at each change of the store that moves the entries over
 /// the schedule's days, the store's zone or its hours, and at the start of
-/// each minute. The start's and the end's messages follow the check from
-/// the form's opening. Save sends nothing while the check names a problem
-/// ([scheduleErrorsOf]) or the validator the API runs refuses the item;
+/// each minute. The start's and the end's messages ([scheduleErrorsOf])
+/// follow the check from the form's opening; an overlap the rules refuse
+/// shows in the notice, not as a message. Save sends nothing while the
+/// check names a problem or the validator the API runs refuses the item;
 /// after a failed Save the title's and the type fields' messages show too,
 /// following the edits, and the page scrolls the first field with a
-/// message into view, which takes the focus where it takes text.
+/// message, or the notice of a refused overlap, into view, which takes the
+/// focus where it takes text.
 library;
 
 import 'dart:async';
@@ -216,12 +218,17 @@ String scheduleProblemMessage(CalendarScheduleProblem problem) {
 
 /// The form's errors for [problems], keyed `start` or `end` as the form's
 /// fields and the envelope key them ([CalendarScheduleProblem.atEnd]), the
-/// first problem of each key giving its message.
+/// first problem of each key giving its message. A refused overlap
+/// ([CalendarScheduleOverlapRefused]) gives none: the overlap notice
+/// ([ScheduleOverlapNotice]) states it.
 Map<String, String> scheduleErrorsOf(
   Iterable<CalendarScheduleProblem> problems,
 ) {
   final errors = <String, String>{};
   for (final problem in problems) {
+    if (problem is CalendarScheduleOverlapRefused) {
+      continue;
+    }
     errors.putIfAbsent(problem.atEnd ? "end" : "start", () {
       return scheduleProblemMessage(problem);
     });
@@ -408,6 +415,7 @@ class _ItemFormState extends State<_ItemForm> {
 
   final GlobalKey<ScheduleSectionState> _sectionKey =
       GlobalKey<ScheduleSectionState>();
+  final GlobalKey _noticeKey = GlobalKey(debugLabel: "Overlap notice");
   final GlobalKey _titleKey = GlobalKey(debugLabel: "Title");
   final FocusNode _titleFocus = FocusNode(debugLabel: "Title");
 
@@ -755,7 +763,9 @@ class _ItemFormState extends State<_ItemForm> {
     final json = _envelope();
     final check = _checkNow();
     final errors = _errorsOf(check, json);
-    if (errors.isNotEmpty) {
+    // A refused overlap has no field's message, so the check's own answer
+    // stops the send too.
+    if (errors.isNotEmpty || !check.admitted) {
       setState(() {
         _scheduleCheck = check;
         _liveErrors = null;
@@ -967,9 +977,10 @@ class _ItemFormState extends State<_ItemForm> {
   }
 
   /// The field the first message shows on, in the page's order, the start's
-  /// or the end's field, the title, then the type's fields, and the node
-  /// that takes the focus there, where it takes text; null where none shows
-  /// or its field is not built.
+  /// or the end's field, the overlap notice where it names an overlap the
+  /// rules refuse, the title, then the type's fields, and the node that
+  /// takes the focus there, where it takes text; null where none shows or
+  /// its field is not built.
   ({BuildContext field, FocusNode? focus})? _firstError() {
     final scheduleErrors = _scheduleErrors();
     for (final key in const <String>["start", "end"]) {
@@ -977,6 +988,12 @@ class _ItemFormState extends State<_ItemForm> {
         final field = _sectionKey.currentState?.errorFieldOf(key);
         return field == null ? null : (field: field, focus: null);
       }
+    }
+    if (_scheduleCheck.problems.any((problem) {
+      return problem is CalendarScheduleOverlapRefused;
+    })) {
+      final notice = _noticeKey.currentContext;
+      return notice == null ? null : (field: notice, focus: null);
     }
     if (_titleError() != null) {
       final field = _titleKey.currentContext;
@@ -1196,7 +1213,10 @@ class _ItemFormState extends State<_ItemForm> {
                         if (_scheduleCheck.overlaps.isNotEmpty) ...<Widget>[
                           const SizedBox(height: 12.0),
                           ScheduleOverlapNotice(
+                            key: _noticeKey,
                             check: _scheduleCheck,
+                            hourLabelFormat: widget.hourLabelFormat,
+                            zone: widget.store.zone,
                             locked: _locked,
                             onChanged: _scheduleChanged,
                           ),

@@ -9,7 +9,7 @@ import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
 import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/schedule_section.dart'
-    show debugScheduleDayRangeAsks;
+    show debugScheduleDayRangeAsks, scheduleOverlapKey;
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -1293,7 +1293,13 @@ void main() {
     final sent = api.requests.length;
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
-    expect(find.text("Overlaps Day off."), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(scheduleOverlapKey),
+        matching: find.text("Can't overlap 1 item"),
+      ),
+      findsOneWidget,
+    );
     expect(api.requests, hasLength(sent));
     expect(find.text("New item"), findsOneWidget);
     expect(fieldText(tester, "Title"), "Dentist");
