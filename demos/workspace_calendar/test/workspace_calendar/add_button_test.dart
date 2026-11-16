@@ -1,7 +1,9 @@
 /// The add button floating over the calendar: in every view, in edit mode
-/// and out of it, it opens the create flow on today in Agenda and on the
-/// selected day in Day, Week and Month, after the current time on today,
-/// and the calendar keeps its last week clear of it.
+/// and out of it, it opens the create flow on the selected day, in Agenda
+/// the day a tap on the calendar card or a drag of the list selects, after
+/// the current time on today; on a day the history lock holds it says no
+/// new item can start there; and the calendar keeps its last week clear of
+/// it.
 library;
 
 import 'package:flutter/material.dart';
@@ -9,9 +11,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart'
     show calendarEditToggleKey;
 import 'package:widgets_extended/calendar/views/day_cell.dart';
+import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
 
 import 'calendar_harness.dart';
 
@@ -60,15 +64,53 @@ void main() {
     expect(addButton(), findsOneWidget);
   });
 
-  testWidgets("A2 in Agenda, out of edit mode, the button creates on today "
-      "at the first free slot after the current time, whatever day is "
-      "selected", (tester) async {
+  testWidgets("A2 in Agenda, out of edit mode, the button creates on the day "
+      "a tap on the calendar card selects, from the start of its hours on a "
+      "later day", (tester) async {
     await pumpCalendar(tester, clock: elevenOhSeven);
     await tester.tap(find.byKey(dayCellKey(DateTime(2026, 4, 23))));
     await tester.pumpAndSettle();
     expect(calendarControllerOf(tester).selectedDay, DateTime(2026, 4, 23));
+    await expectCreateOn(tester, "2026-04-23", "00:00", "00:15");
+  });
+
+  testWidgets("A7 in Agenda the button creates on the day a drag of the "
+      "list brings to its top", (tester) async {
+    await pumpCalendar(tester, clock: elevenOhSeven);
+    // Today's block is taller than the first drag, so the second brings
+    // the next day's header to the top.
+    for (final dy in <double>[-100.0, -400.0]) {
+      await tester.drag(find.byType(DayList<ItemPayload>), Offset(0.0, dy));
+      await tester.pumpAndSettle();
+    }
+    expect(calendarControllerOf(tester).selectedDay, DateTime(2026, 4, 22));
+    await expectCreateOn(tester, "2026-04-22", "00:00", "00:15");
+  });
+
+  testWidgets("A8 Agenda opens on today, where the button creates at the "
+      "first free slot after the current time", (tester) async {
+    await pumpCalendar(tester, clock: elevenOhSeven);
+    expect(calendarControllerOf(tester).selectedDay, today);
     // "Design new UX flow for Michael" holds today from 10:00 to 13:00.
     await expectCreateOn(tester, "2026-04-21", "13:00", "13:15");
+  });
+
+  testWidgets("A9 under the history lock, in Agenda the button on a past "
+      "day says no new item can start on it and opens no form", (
+    tester,
+  ) async {
+    await pumpCalendar(
+      tester,
+      clock: elevenOhSeven,
+      settings: harnessSettings.copyWith(lockPast: true),
+    );
+    await tester.tap(find.byKey(dayCellKey(DateTime(2026, 4, 20))));
+    await tester.pumpAndSettle();
+    expect(calendarControllerOf(tester).selectedDay, DateTime(2026, 4, 20));
+    await tester.tap(addButton());
+    await tester.pumpAndSettle();
+    expect(find.text("No new item can start on this day."), findsOneWidget);
+    expect(find.text("New item"), findsNothing);
   });
 
   testWidgets("A3 in Week the button creates on the selected day, from the "
