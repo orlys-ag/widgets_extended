@@ -1,5 +1,5 @@
-/// The item form's page of cards and its times: its start and end dates
-/// and times, the slot length they step by, and its All day switch.
+/// The item form's page and its times: its start and end dates and times,
+/// the slot length they step by, and its All day switch.
 library;
 
 import 'package:flutter/material.dart';
@@ -84,17 +84,6 @@ Finder pageFinder() {
       .descendant(
         of: find.byType(BottomSheet),
         matching: find.byType(Scrollable),
-      )
-      .first;
-}
-
-/// The strip that holds the summary card: the nearest [ColoredBox] around
-/// the card.
-Finder summaryStripFinder() {
-  return find
-      .ancestor(
-        of: find.byKey(formSummaryCardKey),
-        matching: find.byType(ColoredBox),
       )
       .first;
 }
@@ -368,10 +357,9 @@ void main() {
     );
   });
 
-  testWidgets("FC1 the form's page is the scheduling part, the summary's "
-      "outlined card and the item's part, in that order between the heading "
-      "and the actions, with no card around the scheduling and the item's "
-      "parts", (tester) async {
+  testWidgets("FC1 the form's page is the scheduling part and the item's "
+      "part, 12 pixels apart, between the heading and the actions, and the "
+      "sheet holds no card", (tester) async {
     final store = MemoryCalendarStore<ItemPayload>(
       entries: <CalendarItem>[
         task(DateTime(2026, 4, 22, 9), DateTime(2026, 4, 22, 10)),
@@ -379,63 +367,11 @@ void main() {
     );
     addTearDown(store.dispose);
     await openForm(tester, store);
-    final keys = <Key>[
-      formSchedulingCardKey,
-      formSummaryCardKey,
-      formItemCardKey,
-    ];
-    for (final key in keys) {
-      expect(find.byKey(key), findsOneWidget, reason: "$key");
-    }
-    // The summary keeps its card, outlined.
-    expect(tester.widget(find.byKey(formSummaryCardKey)), isA<Card>());
-    final summaryShape = tester
-        .widget<Material>(
-          find
-              .descendant(
-                of: find.byKey(formSummaryCardKey),
-                matching: find.byType(Material),
-              )
-              .first,
-        )
-        .shape;
-    expect(
-      summaryShape,
-      isA<OutlinedBorder>().having(
-        (shape) {
-          return shape.side.style;
-        },
-        "side's style",
-        BorderStyle.solid,
-      ),
-    );
-    for (final part in <Finder>[
-      find.byType(ScheduleSection),
-      fieldFinder("Title"),
-    ]) {
-      expect(
-        find.ancestor(of: part, matching: find.byType(Card)),
-        findsNothing,
-        reason: "$part",
-      );
-    }
-    // The item's fields span its part, which pads them by nothing.
-    final itemPart = tester.getRect(find.byKey(formItemCardKey));
-    final title = tester.getRect(fieldFinder("Title"));
-    expect(title.left, itemPart.left);
-    expect(title.right, itemPart.right);
-    final cards = <Rect>[
-      for (final key in keys) tester.getRect(find.byKey(key)),
-    ];
-    for (var index = 1; index < cards.length; index++) {
-      expect(cards[index - 1].top, lessThan(cards[index].top));
-      expect(cards[index - 1].bottom, lessThanOrEqualTo(cards[index].top));
-    }
     for (final (key, part) in <(Key, Finder)>[
       (formSchedulingCardKey, find.byType(ScheduleSection)),
-      (formSummaryCardKey, find.byType(ScheduleSummary)),
       (formItemCardKey, fieldFinder("Title")),
     ]) {
+      expect(find.byKey(key), findsOneWidget, reason: "$key");
       expect(
         find.descendant(of: find.byKey(key), matching: part),
         findsOneWidget,
@@ -443,8 +379,22 @@ void main() {
       );
     }
     expect(
-      tester.getRect(find.text("Edit Task")).bottom,
-      lessThanOrEqualTo(cards.first.top),
+      find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.byType(Card),
+      ),
+      findsNothing,
+    );
+    // The item's fields span its part, which pads them by nothing.
+    final itemPart = tester.getRect(find.byKey(formItemCardKey));
+    final title = tester.getRect(fieldFinder("Title"));
+    expect(title.left, itemPart.left);
+    expect(title.right, itemPart.right);
+    final scheduling = tester.getRect(find.byKey(formSchedulingCardKey));
+    expect(itemPart.top, scheduling.bottom + 12.0);
+    expect(
+      tester.getRect(find.byType(ScheduleHeading)).bottom,
+      lessThanOrEqualTo(scheduling.top),
     );
     final page = pageFinder();
     expect(
@@ -454,7 +404,7 @@ void main() {
   });
 
   testWidgets("FC2 the page's padding lies inside its scroll view: the page "
-      "spans the sheet's width, its cards keep 24 pixels from the sheet's "
+      "spans the sheet's width, its parts keep 24 pixels from the sheet's "
       "sides, and a drag that starts beside them scrolls it", (tester) async {
     final store = MemoryCalendarStore<ItemPayload>(
       entries: <CalendarItem>[
@@ -491,131 +441,6 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.getRect(card).top, lessThan(before.top));
-  });
-
-  testWidgets("FP1 the summary card scrolls with the page until the "
-      "scheduling card has gone, then stays at the page's top on a strip of "
-      "the sheet's colour while the item card moves under it", (tester) async {
-    final store = MemoryCalendarStore<ItemPayload>(
-      entries: <CalendarItem>[
-        task(DateTime(2026, 4, 22, 9), DateTime(2026, 4, 22, 10)),
-      ],
-    );
-    addTearDown(store.dispose);
-    await openForm(tester, store);
-    final page = tester.getRect(pageFinder());
-    final position = tester.state<ScrollableState>(pageFinder()).position;
-    final summary = find.byKey(formSummaryCardKey);
-    final scheduling = find.byKey(formSchedulingCardKey);
-    // The page's offset at which the strip's top, 12 pixels above the card,
-    // reaches the page's top.
-    final pinsAt = tester.getRect(summary).top - 12.0 - page.top;
-    // Setup sanity: the page scrolls well past that offset.
-    expect(position.maxScrollExtent, greaterThan(pinsAt + 24.0));
-
-    position.jumpTo(pinsAt / 2.0);
-    await tester.pump();
-    expect(
-      tester.getRect(summary).top,
-      tester.getRect(scheduling).bottom + 12.0,
-    );
-
-    position.jumpTo(position.maxScrollExtent);
-    await tester.pump();
-    final pinned = tester.getRect(summary);
-    expect(pinned.top, page.top + 12.0);
-    expect(
-      tester.getRect(find.byKey(formItemCardKey)).top,
-      lessThan(pinned.bottom),
-    );
-    expect(
-      tester.getRect(summaryStripFinder()),
-      Rect.fromLTRB(page.left, page.top, page.right, pinned.bottom + 12.0),
-    );
-    final sheet = find
-        .descendant(
-          of: find.byType(BottomSheet),
-          matching: find.byType(Material),
-        )
-        .first;
-    expect(
-      tester.widget<ColoredBox>(summaryStripFinder()).color,
-      tester.widget<Material>(sheet).color,
-    );
-  });
-
-  testWidgets("FP2 the summary card scrolls away with the page where its "
-      "strip would take more than half of the page, as when a keyboard "
-      "shrinks the page", (tester) async {
-    tester.view.devicePixelRatio = 1.0;
-    tester.view.physicalSize = const Size(400.0, 600.0);
-    addTearDown(tester.view.reset);
-    final store = MemoryCalendarStore<ItemPayload>(
-      entries: <CalendarItem>[
-        task(DateTime(2026, 4, 22, 9), DateTime(2026, 4, 22, 10)),
-      ],
-    );
-    addTearDown(store.dispose);
-    await openForm(tester, store);
-    final position = tester.state<ScrollableState>(pageFinder()).position;
-    final summary = find.byKey(formSummaryCardKey);
-    position.jumpTo(position.maxScrollExtent);
-    await tester.pump();
-    // Setup sanity: on the whole screen the strip fits, and the card pins.
-    expect(
-      tester.getRect(summary).top,
-      tester.getRect(pageFinder()).top + 12.0,
-    );
-
-    tester.view.viewInsets = const FakeViewPadding(bottom: 400.0);
-    await tester.pumpAndSettle();
-    final page = tester.getRect(pageFinder());
-    // Setup sanity: the keyboard leaves the page less than twice the strip.
-    expect(
-      page.height,
-      lessThan(2.0 * (tester.getRect(summary).height + 24.0)),
-    );
-    position.jumpTo(position.maxScrollExtent);
-    await tester.pump();
-    expect(tester.getRect(summary).bottom, lessThanOrEqualTo(page.top));
-  });
-
-  testWidgets("FP3 a field that the pinned summary card hides scrolls out "
-      "below its strip when it takes focus", (tester) async {
-    tester.view.devicePixelRatio = 1.0;
-    tester.view.physicalSize = const Size(400.0, 560.0);
-    addTearDown(tester.view.reset);
-    final store = MemoryCalendarStore<ItemPayload>(
-      entries: <CalendarItem>[
-        task(DateTime(2026, 4, 22, 9), DateTime(2026, 4, 22, 10)),
-      ],
-    );
-    addTearDown(store.dispose);
-    await openForm(tester, store);
-    final page = tester.getRect(pageFinder());
-    final position = tester.state<ScrollableState>(pageFinder()).position;
-    final summary = find.byKey(formSummaryCardKey);
-    final input = find.descendant(
-      of: fieldFinder("Title"),
-      matching: find.byType(EditableText),
-    );
-    // Brings the title's input as near to 24 pixels below the page's top as
-    // the page scrolls.
-    position.jumpTo(
-      (position.pixels + tester.getRect(input).top - page.top - 24.0).clamp(
-        0.0,
-        position.maxScrollExtent,
-      ),
-    );
-    await tester.pump();
-    final stripBottom = page.top + 12.0 + tester.getRect(summary).height + 12.0;
-    // Setup sanity: the card is pinned, and its strip covers the input.
-    expect(tester.getRect(summary).top, page.top + 12.0);
-    expect(tester.getRect(input).top, lessThan(stripBottom));
-
-    tester.state<EditableTextState>(input).requestKeyboard();
-    await tester.pumpAndSettle();
-    expect(tester.getRect(input).top, greaterThanOrEqualTo(stripBottom));
   });
 
   group(

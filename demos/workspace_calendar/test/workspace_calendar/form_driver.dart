@@ -443,6 +443,37 @@ void expectFormDays(String day, int days) {
   );
 }
 
+/// The schedule the open form shows, its lines joined by "\n": its start,
+/// then its end, each its date field's day and, for a timed schedule, a
+/// comma and its time field's time; then the length its heading's pill
+/// writes, where it shows one: "Wed, Apr 22, 09:00\nWed, Apr 22, 10:00\n1h".
+String formSchedule(WidgetTester tester) {
+  String shown(Finder decorator) {
+    final child = tester.widget<InputDecorator>(decorator).child;
+    return (child! as Text).data!;
+  }
+
+  Finder timeDecorator(String label) {
+    return find.descendant(
+      of: timeFieldFinder(label),
+      matching: find.byType(InputDecorator),
+    );
+  }
+
+  final timed = timeFieldFinder("Start time").evaluate().isNotEmpty;
+  final length = find.byKey(scheduleLengthKey);
+  return <String>[
+    for (final (date, time) in <(String, String)>[
+      ("Start date", "Start time"),
+      ("End date", "End time"),
+    ])
+      timed
+          ? "${shown(formDateFinder(date))}, ${shown(timeDecorator(time))}"
+          : shown(formDateFinder(date)),
+    if (length.evaluate().isNotEmpty) tester.widget<Text>(length).data!,
+  ].join("\n");
+}
+
 /// The form's All day switch.
 Finder allDaySwitch() {
   return find.byKey(scheduleAllDayKey);
