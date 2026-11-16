@@ -26,7 +26,9 @@
 /// of the selected day, in Agenda the day a tap on the calendar card or a
 /// drag of the list selects: at the first slot from the start the
 /// settings' edit policy gives the day, after the current time on today,
-/// that no item holds. Week's, Day's and Month's grids keep their
+/// that no item holds. On a day whose items are still being read, the
+/// flow opens once they are, and where their read fails a message says
+/// they could not be read. Week's, Day's and Month's grids keep their
 /// last slot and their last week clear of it, above the screen's bottom
 /// inset too, while Agenda's rows pass under it.
 ///
@@ -291,8 +293,10 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
   final GlobalKey _addButtonKey = GlobalKey();
 
   /// The add button's create, on the selected day in every view, reported
-  /// where the button lies on screen. A day with no slot left, as a past
-  /// one under the history lock, says so ([CalendarView.onCreateRefused]).
+  /// where the button lies on screen, once the day's items are read. A day
+  /// with no slot left, as a past one under the history lock, says so
+  /// ([CalendarView.onCreateRefused]), as does one whose items could not
+  /// be read ([CalendarView.onCreateReadFailed]).
   void _createFromButton() {
     final box = _addButtonKey.currentContext?.findRenderObject();
     final rect = box is RenderBox && box.hasSize
@@ -510,6 +514,9 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
               onDeleteRequest: _deleteFromCard,
               onCreateRefused: (day) {
                 _showMessage("No new item can start on this day.");
+              },
+              onCreateReadFailed: (day) {
+                _showMessage("This day's items could not be read.");
               },
               bottomPadding: WorkspaceCalendarExample.addButtonRoom,
             ),

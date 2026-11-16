@@ -1,9 +1,10 @@
 /// The add button floating over the calendar: in every view, in edit mode
 /// and out of it, it opens the create flow on the selected day, in Agenda
 /// the day a tap on the calendar card or a drag of the list selects, after
-/// the current time on today; on a day the history lock holds it says no
-/// new item can start there; and the calendar keeps its last week clear of
-/// it.
+/// the current time on today, and on a day still being read once its items
+/// are; on a day the history lock holds it says no new item can start
+/// there, and on one whose items fail to be read that they could not be
+/// read; and the calendar keeps its last week clear of it.
 library;
 
 import 'package:flutter/material.dart';
@@ -15,7 +16,9 @@ import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:workspace_calendar/workspace_calendar/calendar_api.dart';
 import 'package:workspace_calendar/workspace_calendar/calendar_item.dart';
+import 'package:workspace_calendar/workspace_calendar/mock_calendar_api.dart';
 
 import 'calendar_harness.dart';
 
@@ -96,9 +99,7 @@ void main() {
   });
 
   testWidgets("A9 under the history lock, in Agenda the button on a past "
-      "day says no new item can start on it and opens no form", (
-    tester,
-  ) async {
+      "day says no new item can start on it and opens no form", (tester) async {
     await pumpCalendar(
       tester,
       clock: elevenOhSeven,
@@ -138,6 +139,43 @@ void main() {
     await pumpCalendar(tester, clock: elevenOhSeven);
     await pickMode(tester, "Day");
     await expectCreateOn(tester, "2026-04-21", "13:00", "13:15");
+  });
+
+  testWidgets("A10 in Month the button on a day whose items are still being "
+      "read opens the create flow once they are, at the first slot free of "
+      "them", (tester) async {
+    final may21 = DateTime(2026, 5, 21);
+    final api = MockCalendarApi.seeded(today, latency: harnessLatency);
+    await createBeforePump(tester, api, taskJson("Early", may21, 0, 30));
+    await pumpCalendar(tester, api: api, clock: elevenOhSeven);
+    await pickMode(tester, "Month");
+    await tester.tap(find.byTooltip("Next month"));
+    await tester.pump();
+    expect(calendarControllerOf(tester).selectedDay, may21);
+    await tester.tap(addButton());
+    await tester.pump();
+    expect(find.text("New item"), findsNothing);
+    await tester.pump(harnessLatency);
+    await tester.pumpAndSettle();
+    await pickTask(tester);
+    expect(timeFieldShows("Start time", "00:30"), findsOneWidget);
+    expect(timeFieldShows("End time", "00:45"), findsOneWidget);
+  });
+
+  testWidgets("A11 the button on a day whose items fail to be read says "
+      "they could not be read and opens no form", (tester) async {
+    final api = await pumpCalendar(tester, clock: elevenOhSeven);
+    await pickMode(tester, "Month");
+    api.failurePolicy = (request) {
+      return request.method == CalendarMethod.list ? "Reading failed." : null;
+    };
+    await tester.tap(find.byTooltip("Next month"));
+    await tester.pump();
+    await tester.tap(addButton());
+    await tester.pump(harnessLatency);
+    await tester.pumpAndSettle();
+    expect(find.text("This day's items could not be read."), findsOneWidget);
+    expect(find.text("New item"), findsNothing);
   });
 
   testWidgets("A6 Month's last week ends above the button, under a screen "
