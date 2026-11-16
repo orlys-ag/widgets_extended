@@ -3219,8 +3219,8 @@ void main() {
   });
 
   testWidgets("FS4 the heading shows the zone in a light grey rounded box, "
-      "padded around its name and offset, and the length in a pill, a "
-      "timer icon before it, or for an all-day schedule All day", (
+      "padded around its name and offset, and the length in a pill, in "
+      "14 px text after a timer icon, or for an all-day schedule All day", (
     tester,
   ) async {
     final store = storeOf(<CalendarItem>[
@@ -3270,6 +3270,7 @@ void main() {
     expect(inner.expandToInclude(texts), inner);
     final length = find.byKey(scheduleLengthKey);
     expect(tester.widget<Text>(length).data, "1h 30m");
+    expect(tester.widget<Text>(length).style?.fontSize, 14.0);
     expect(
       tester.widget<DecoratedBox>(lengthPill()).decoration,
       isA<ShapeDecoration>().having(
