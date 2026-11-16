@@ -11,18 +11,21 @@
 /// ([FittingPinnedHeaderSliver]). The check is made again
 /// at each edit, at each change of the store that moves the entries over
 /// the schedule's days, the store's zone or its hours, and at the start of
-/// each minute. Save sends nothing while the check names a problem
+/// each minute. The start's and the end's messages follow the check from
+/// the form's opening. Save sends nothing while the check names a problem
 /// ([scheduleErrorsOf]) or the validator the API runs refuses the item;
-/// after a failed Save the title's and the times' messages follow the
-/// edits.
+/// after a failed Save the title's and the type fields' messages show too,
+/// following the edits, and the page scrolls the first field with a
+/// message into view, which takes the focus where it takes text.
 library;
 
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart' show clampDouble, listEquals;
 import 'package:flutter/gestures.dart'
     show GestureRecognizer, VerticalDragGestureRecognizer;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderAbstractViewport;
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_api.dart';
@@ -271,6 +274,14 @@ Future<void> _showForm(
 /// off: an hour.
 const int _timedLengthMinutes = 60;
 
+/// The room the form's text fields keep around their caret as they scroll
+/// it into view on taking the focus ([TextField.scrollPadding]), which
+/// [_ItemFormState._revealFirstError] keeps around the field it reveals, so
+/// that reveal of the caret, made as the field then takes the focus, has
+/// nothing to scroll; where selection handles show, it may scroll on to
+/// make room under them.
+const EdgeInsets _revealPadding = EdgeInsets.all(20.0);
+
 CalendarNow _clockNow() {
   final time = DateTime.now();
   return CalendarNow(time: time, today: time);
@@ -392,6 +403,18 @@ class _ItemFormState extends State<_ItemForm> {
   final Map<String, TextEditingController> _texts =
       <String, TextEditingController>{};
 
+  /// The focus nodes of the fields of [_texts], by key.
+  final Map<String, FocusNode> _textFocus = <String, FocusNode>{};
+
+  /// The keys of the schema's fields, by key, which [_revealFirstError]
+  /// scrolls into view; new for each type.
+  final Map<String, GlobalKey> _fieldKeys = <String, GlobalKey>{};
+
+  final GlobalKey<ScheduleSectionState> _sectionKey =
+      GlobalKey<ScheduleSectionState>();
+  final GlobalKey _titleKey = GlobalKey(debugLabel: "Title");
+  final FocusNode _titleFocus = FocusNode(debugLabel: "Title");
+
   /// The values of the schema's choice and bool fields, by key.
   final Map<String, Object?> _values = <String, Object?>{};
 
@@ -412,22 +435,14 @@ class _ItemFormState extends State<_ItemForm> {
   Map<String, String>? _liveErrors;
 
   /// Whether a Save failed, by a failed validation or a refused send, so
-  /// that the title's and the times' messages show, following the edits.
+  /// that the title's and the type fields' messages show, following the
+  /// edits.
   bool _saveFailed = false;
 
-  /// The errors the last failed validation found, or a refused send's field
-  /// errors, keyed as the validator keys them; the type fields show theirs
-  /// until the next Save or a type change. Replaced, never changed in
-  /// place.
-  Map<String, String> _saveErrors = const <String, String>{};
-
-  /// A refused send's messages of the title, the start and the end, each
-  /// shown until an edit changes what it reads. Replaced, never changed in
-  /// place.
+  /// A refused send's messages of the title, the start, the end and the
+  /// type's fields, keyed as the validator keys them, each shown until an
+  /// edit changes what it reads. Replaced, never changed in place.
   Map<String, String> _refusal = const <String, String>{};
-
-  /// The title's text as [_titleChanged] last saw it.
-  late String _titleText;
 
   /// A failure that names no field: an overlap, the network, a lock.
   String? _message;
@@ -457,8 +472,7 @@ class _ItemFormState extends State<_ItemForm> {
     _initFields(widget.item.fields);
     _scheduleCheck = _checkNow();
     _scheduleMinute();
-    _titleText = _title.text;
-    _title.addListener(_titleChanged);
+    _dropRefusalOnEdit(_title, "title");
     widget.store.addListener(_storeChanged);
   }
 
@@ -477,10 +491,16 @@ class _ItemFormState extends State<_ItemForm> {
     for (final controller in _texts.values) {
       controller.dispose();
     }
+    for (final node in _textFocus.values) {
+      node.dispose();
+    }
     _texts.clear();
+    _textFocus.clear();
     _values.clear();
+    _fieldKeys.clear();
     final values = withFieldDefaults(_type, fields);
     for (final field in _schema.fields) {
+      _fieldKeys[field.key] = GlobalKey(debugLabel: field.label);
       final value = values[field.key];
       switch (field.kind) {
         case FieldKind.choice:
@@ -489,25 +509,32 @@ class _ItemFormState extends State<_ItemForm> {
         case FieldKind.text:
         case FieldKind.longText:
         case FieldKind.url:
-          _texts[field.key] = TextEditingController(
-            text: value is String ? value : "",
-          );
+          _addText(field, value is String ? value : "");
         case FieldKind.textList:
-          _texts[field.key] = TextEditingController(
-            text: value is List ? value.join(", ") : "",
-          );
+          _addText(field, value is List ? value.join(", ") : "");
       }
     }
+  }
+
+  /// [field]'s text controller, holding [text], and its focus node.
+  void _addText(FieldSpec field, String text) {
+    final controller = TextEditingController(text: text);
+    _dropRefusalOnEdit(controller, fieldErrorKey(field.key));
+    _texts[field.key] = controller;
+    _textFocus[field.key] = FocusNode(debugLabel: field.label);
   }
 
   @override
   void dispose() {
     _minuteTimer?.cancel();
     widget.store.removeListener(_storeChanged);
-    _title.removeListener(_titleChanged);
     _title.dispose();
+    _titleFocus.dispose();
     for (final controller in _texts.values) {
       controller.dispose();
+    }
+    for (final node in _textFocus.values) {
+      node.dispose();
     }
     super.dispose();
   }
@@ -549,7 +576,7 @@ class _ItemFormState extends State<_ItemForm> {
   /// Checks the schedule again as a minute starts, since the check's
   /// answers move with the minute now
   /// ([CalendarEarliestStart.firstWallMinute]), so the summary, the pickers,
-  /// their Now and the messages after a failed Save answer as Save's own
+  /// their Now and the start's and the end's messages answer as Save's own
   /// check does; but not while a send is in flight, which [_storeChanged]
   /// skips too.
   void _minuteTurned() {
@@ -559,17 +586,20 @@ class _ItemFormState extends State<_ItemForm> {
     _scheduleMinute();
   }
 
-  /// Drops the refusal's title message at a change of the title's text;
-  /// the title's [ListenableBuilder] shows it, rebuilding nothing else.
-  void _titleChanged() {
-    final text = _title.text;
-    if (text == _titleText) {
-      return;
-    }
-    _titleText = text;
-    if (_refusal.containsKey("title")) {
-      _refusal = _without(_refusal, const <String>["title"]);
-    }
+  /// Has [controller] drop the refusal's message keyed [errorKey] at each
+  /// change of its text, and not at a change of its selection alone; the
+  /// field's [ListenableBuilder] shows it, rebuilding nothing else.
+  void _dropRefusalOnEdit(TextEditingController controller, String errorKey) {
+    var text = controller.text;
+    controller.addListener(() {
+      if (controller.text == text) {
+        return;
+      }
+      text = controller.text;
+      if (_refusal.containsKey(errorKey)) {
+        _refusal = _without(_refusal, <String>[errorKey]);
+      }
+    });
   }
 
   /// [map] without [keys], as a new map.
@@ -651,32 +681,9 @@ class _ItemFormState extends State<_ItemForm> {
   /// store's clock, as [itemTimeText] writes them; a time the clock skips
   /// as its own local text, which the validator then reports.
   Map<String, Object?> _envelope() {
-    final fields = <String, Object?>{};
-    for (final field in _schema.fields) {
-      switch (field.kind) {
-        case FieldKind.choice:
-        case FieldKind.boolean:
-          final value = _values[field.key];
-          if (value != null) {
-            fields[field.key] = value;
-          }
-        case FieldKind.text:
-        case FieldKind.longText:
-        case FieldKind.url:
-          final text = _texts[field.key]!.text;
-          if (text.isNotEmpty) {
-            fields[field.key] = text;
-          }
-        case FieldKind.textList:
-          final entries = <String>[
-            for (final part in _texts[field.key]!.text.split(","))
-              if (part.trim().isNotEmpty) part.trim(),
-          ];
-          if (entries.isNotEmpty) {
-            fields[field.key] = entries;
-          }
-      }
-    }
+    final fields = <String, Object?>{
+      for (final field in _schema.fields) field.key: ?_fieldValue(field),
+    };
     final schedule = _schedule;
     final times = schedule.timesOn(widget.store.zone);
     final allDay = schedule.isAllDay;
@@ -697,11 +704,32 @@ class _ItemFormState extends State<_ItemForm> {
     };
   }
 
+  /// The value of [field] in the form, as the envelope holds it: null where
+  /// the envelope leaves it out, as it does an empty text or list.
+  Object? _fieldValue(FieldSpec field) {
+    switch (field.kind) {
+      case FieldKind.choice:
+      case FieldKind.boolean:
+        return _values[field.key];
+      case FieldKind.text:
+      case FieldKind.longText:
+      case FieldKind.url:
+        final text = _texts[field.key]!.text;
+        return text.isEmpty ? null : text;
+      case FieldKind.textList:
+        final entries = <String>[
+          for (final part in _texts[field.key]!.text.split(","))
+            if (part.trim().isNotEmpty) part.trim(),
+        ];
+        return entries.isEmpty ? null : entries;
+    }
+  }
+
   /// The errors of [json], the form's item as an envelope, under [check],
   /// keyed as the validator keys them: the validator's, the check's
   /// ([scheduleErrorsOf]), and where the hours refuse the times, their own
   /// words, as the store's refusal of them reads. Save's errors, and the
-  /// live start and end messages after a failed Save.
+  /// live start and end messages.
   Map<String, String> _errorsOf(
     CalendarScheduleCheck<ItemPayload> check,
     Map<String, Object?> json,
@@ -722,7 +750,8 @@ class _ItemFormState extends State<_ItemForm> {
   /// Checks at the time now, validates and sends. Nothing is sent while the
   /// schedule's check names a problem or a field breaks a rule; the form
   /// stays open, with every control disabled, until the API answers, and
-  /// closes on success.
+  /// closes on success. A failed validation or a send refused with field
+  /// errors reveals the first field with a message.
   Future<void> _save() async {
     if (_saving) {
       return;
@@ -735,17 +764,16 @@ class _ItemFormState extends State<_ItemForm> {
         _scheduleCheck = check;
         _liveErrors = null;
         _saveFailed = true;
-        _saveErrors = errors;
         _refusal = const <String, String>{};
         _message = null;
       });
+      _revealFirstErrorAfterFrame();
       return;
     }
     setState(() {
       _scheduleCheck = check;
       _liveErrors = null;
       _saving = true;
-      _saveErrors = const <String, String>{};
       _refusal = const <String, String>{};
       _message = null;
     });
@@ -768,9 +796,13 @@ class _ItemFormState extends State<_ItemForm> {
           _saving = false;
           _saveFailed = true;
           if (fieldErrors != null) {
-            _saveErrors = fieldErrors;
             _refusal = <String, String>{
-              for (final key in const <String>["title", "start", "end"])
+              for (final key in <String>[
+                "title",
+                "start",
+                "end",
+                for (final field in _schema.fields) fieldErrorKey(field.key),
+              ])
                 key: ?fieldErrors[key],
             };
           } else {
@@ -779,6 +811,9 @@ class _ItemFormState extends State<_ItemForm> {
           // The store may have changed while the send was in flight.
           _recheck();
         });
+        if (fieldErrors != null) {
+          _revealFirstErrorAfterFrame();
+        }
       }
       return;
     }
@@ -805,16 +840,18 @@ class _ItemFormState extends State<_ItemForm> {
     }
   }
 
-  /// A new item's type: the details reset to [type]'s defaults, the title
-  /// and the schedule kept.
+  /// A new item's type: the details reset to [type]'s defaults, with no
+  /// message of the refusal, the title and the schedule kept.
   void _selectType(CalendarItemType type) {
     if (type == _type) {
       return;
     }
     setState(() {
+      _refusal = _without(_refusal, <String>[
+        for (final field in _schema.fields) fieldErrorKey(field.key),
+      ]);
       _type = type;
       _initFields(const <String, Object?>{});
-      _saveErrors = const <String, String>{};
       _recheck();
     });
   }
@@ -826,16 +863,14 @@ class _ItemFormState extends State<_ItemForm> {
         (_saveFailed ? titleErrorOf(_title.text) : null);
   }
 
-  /// The start's and the end's messages, each the refusal's, or after a
-  /// failed Save that of [_errorsOf] of the check and the item now.
+  /// The start's and the end's messages, each the refusal's, or that of
+  /// [_errorsOf] of the check and the item now.
   Map<String, String> _scheduleErrors() {
     final errors = <String, String>{};
     for (final key in const <String>["start", "end"]) {
       final message =
           _refusal[key] ??
-          (_saveFailed
-              ? (_liveErrors ??= _errorsOf(_scheduleCheck, _envelope()))[key]
-              : null);
+          (_liveErrors ??= _errorsOf(_scheduleCheck, _envelope()))[key];
       if (message != null) {
         errors[key] = message;
       }
@@ -843,16 +878,36 @@ class _ItemFormState extends State<_ItemForm> {
     return errors;
   }
 
-  /// The control for one schema field, by its kind.
+  /// [field]'s message: the refusal's, or after a failed Save that of its
+  /// value now ([fieldErrorOf]).
+  String? _fieldError(FieldSpec field) {
+    return _refusal[fieldErrorKey(field.key)] ??
+        (_saveFailed ? fieldErrorOf(field, _fieldValue(field)) : null);
+  }
+
+  /// Sets [field]'s value to [value], dropping the refusal's message of it.
+  void _setValue(FieldSpec field, Object? value) {
+    setState(() {
+      _values[field.key] = value;
+      _refusal = _without(_refusal, <String>[fieldErrorKey(field.key)]);
+    });
+  }
+
+  /// The control for one schema field, by its kind, under its key in
+  /// [_fieldKeys]. A text field's message follows each keystroke, which
+  /// rebuilds that field alone.
   Widget _fieldFor(FieldSpec field) {
-    final error = _saveErrors[fieldErrorKey(field.key)];
+    final Widget control;
     switch (field.kind) {
       case FieldKind.choice:
         final value = _values[field.key];
-        return DropdownButtonFormField<String>(
+        control = DropdownButtonFormField<String>(
           key: ValueKey<String>("${_type.id}.${field.key}"),
           initialValue: value is String ? value : null,
-          decoration: InputDecoration(labelText: field.label, errorText: error),
+          decoration: InputDecoration(
+            labelText: field.label,
+            errorText: _fieldError(field),
+          ),
           items: <DropdownMenuItem<String>>[
             for (final choice in field.choices)
               DropdownMenuItem<String>(
@@ -863,38 +918,42 @@ class _ItemFormState extends State<_ItemForm> {
           onChanged: _locked
               ? null
               : (choice) {
-                  setState(() {
-                    _values[field.key] = choice;
-                  });
+                  _setValue(field, choice);
                 },
         );
       case FieldKind.text:
       case FieldKind.url:
       case FieldKind.textList:
-        return TextField(
-          controller: _texts[field.key],
-          enabled: !_locked,
-          maxLines: 1,
-          keyboardType: field.kind == FieldKind.url ? TextInputType.url : null,
-          decoration: InputDecoration(
-            labelText: field.label,
-            helperText: field.kind == FieldKind.textList
-                ? "Separate names with commas"
-                : null,
-            errorText: error,
-          ),
-        );
       case FieldKind.longText:
-        return TextField(
-          controller: _texts[field.key],
-          enabled: !_locked,
-          minLines: 2,
-          maxLines: 4,
-          decoration: InputDecoration(labelText: field.label, errorText: error),
+        final controller = _texts[field.key]!;
+        final long = field.kind == FieldKind.longText;
+        control = ListenableBuilder(
+          listenable: controller,
+          builder: (context, child) {
+            return TextField(
+              controller: controller,
+              focusNode: _textFocus[field.key],
+              scrollPadding: _revealPadding,
+              enabled: !_locked,
+              minLines: long ? 2 : null,
+              maxLines: long ? 4 : 1,
+              keyboardType: field.kind == FieldKind.url
+                  ? TextInputType.url
+                  : null,
+              decoration: InputDecoration(
+                labelText: field.label,
+                helperText: field.kind == FieldKind.textList
+                    ? "Separate names with commas"
+                    : null,
+                errorText: _fieldError(field),
+              ),
+            );
+          },
         );
       case FieldKind.boolean:
         final value = _values[field.key];
-        return SwitchListTile(
+        final error = _fieldError(field);
+        control = SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: Text(field.label),
           subtitle: error == null
@@ -904,11 +963,94 @@ class _ItemFormState extends State<_ItemForm> {
           onChanged: _locked
               ? null
               : (on) {
-                  setState(() {
-                    _values[field.key] = on;
-                  });
+                  _setValue(field, on);
                 },
         );
+    }
+    return KeyedSubtree(key: _fieldKeys[field.key], child: control);
+  }
+
+  /// The field the first message shows on, in the page's order, the start's
+  /// or the end's field, the title, then the type's fields, and the node
+  /// that takes the focus there, where it takes text; null where none shows
+  /// or its field is not built.
+  ({BuildContext field, FocusNode? focus})? _firstError() {
+    final scheduleErrors = _scheduleErrors();
+    for (final key in const <String>["start", "end"]) {
+      if (scheduleErrors.containsKey(key)) {
+        final field = _sectionKey.currentState?.errorFieldOf(key);
+        return field == null ? null : (field: field, focus: null);
+      }
+    }
+    if (_titleError() != null) {
+      final field = _titleKey.currentContext;
+      return field == null ? null : (field: field, focus: _titleFocus);
+    }
+    for (final spec in _schema.fields) {
+      if (_fieldError(spec) != null) {
+        final field = _fieldKeys[spec.key]!.currentContext;
+        return field == null
+            ? null
+            : (field: field, focus: _textFocus[spec.key]);
+      }
+    }
+    return null;
+  }
+
+  /// Runs [_revealFirstError] after the frame, once the messages that the
+  /// frame shows have their room.
+  void _revealFirstErrorAfterFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _revealFirstError();
+      }
+    });
+  }
+
+  /// Scrolls the page the least that shows the field of [_firstError],
+  /// with [_revealPadding] around it, or its leading edge where the view
+  /// cannot hold it, over the [CalendarTheme]'s motion, or at once where the
+  /// platform asks for no animations; and then gives the field the focus
+  /// where it takes text. A leading edge lands below a pinned summary: the
+  /// viewport counts the height [FittingPinnedHeaderSliver] pins as an
+  /// obstruction of what follows it.
+  Future<void> _revealFirstError() async {
+    final first = _firstError();
+    final box = first?.field.findRenderObject();
+    if (first == null || box == null) {
+      return;
+    }
+    final position = Scrollable.of(first.field).position;
+    final viewport = RenderAbstractViewport.of(box);
+    final rect = _revealPadding.inflateRect(box.paintBounds);
+    final leading = viewport.getOffsetToReveal(box, 0.0, rect: rect).offset;
+    final trailing = viewport.getOffsetToReveal(box, 1.0, rect: rect).offset;
+    final pixels = position.pixels;
+    var target = pixels;
+    if (pixels > leading || trailing > leading) {
+      target = leading;
+    } else if (pixels < trailing) {
+      target = trailing;
+    }
+    target = clampDouble(
+      target,
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if (target != pixels) {
+      if (MediaQuery.disableAnimationsOf(context)) {
+        position.jumpTo(target);
+      } else {
+        final theme = CalendarTheme.of(context);
+        await position.animateTo(
+          target,
+          duration: theme.motionDuration,
+          curve: theme.motionCurve,
+        );
+      }
+    }
+    if (first.field.mounted) {
+      first.focus?.requestFocus();
     }
   }
 
@@ -978,7 +1120,10 @@ class _ItemFormState extends State<_ItemForm> {
         listenable: _title,
         builder: (context, child) {
           return TextField(
+            key: _titleKey,
             controller: _title,
+            focusNode: _titleFocus,
+            scrollPadding: _revealPadding,
             enabled: !_locked,
             decoration: InputDecoration(
               labelText: "Title",
@@ -995,6 +1140,7 @@ class _ItemFormState extends State<_ItemForm> {
       formSchedulingCardKey,
       padding: EdgeInsets.zero,
       ScheduleSection(
+        key: _sectionKey,
         check: _scheduleCheck,
         hours: widget.store.hours,
         slotMinutes: widget.slotMinutes,
@@ -1132,48 +1278,57 @@ class _ItemFormState extends State<_ItemForm> {
                       style: const TextStyle(color: HarborColors.error),
                     ),
                   ),
-                // Stacks the actions where a narrow screen cannot fit them in
-                // a row.
+                // Delete lies at the row's start, the other actions at its
+                // end. Where a narrow screen cannot fit them in a row, Delete
+                // stacks above Cancel and Save, which stack in turn where
+                // they alone do not fit.
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 24.0),
                   child: OverflowBar(
-                    alignment: MainAxisAlignment.end,
+                    alignment: _deletable
+                        ? MainAxisAlignment.spaceBetween
+                        : MainAxisAlignment.end,
                     spacing: 8.0,
                     overflowAlignment: OverflowBarAlignment.end,
                     children: <Widget>[
+                      if (_deletable)
+                        TextButton(
+                          onPressed: _saving ? null : _delete,
+                          child: const Text("Delete"),
+                        ),
                       if (widget.readOnly)
                         TextButton(
                           onPressed: () {
                             Navigator.of(context).pop();
                           },
                           child: const Text("Close"),
+                        )
+                      else
+                        OverflowBar(
+                          spacing: 8.0,
+                          overflowAlignment: OverflowBarAlignment.end,
+                          children: <Widget>[
+                            TextButton(
+                              onPressed: _saving
+                                  ? null
+                                  : () {
+                                      Navigator.of(context).pop();
+                                    },
+                              child: const Text("Cancel"),
+                            ),
+                            FilledButton(
+                              onPressed: _saving ? null : _save,
+                              child: _saving
+                                  ? const SizedBox.square(
+                                      dimension: 16.0,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.0,
+                                      ),
+                                    )
+                                  : const Text("Save"),
+                            ),
+                          ],
                         ),
-                      if (_deletable)
-                        TextButton(
-                          onPressed: _saving ? null : _delete,
-                          child: const Text("Delete"),
-                        ),
-                      if (!widget.readOnly) ...<Widget>[
-                        TextButton(
-                          onPressed: _saving
-                              ? null
-                              : () {
-                                  Navigator.of(context).pop();
-                                },
-                          child: const Text("Cancel"),
-                        ),
-                        FilledButton(
-                          onPressed: _saving ? null : _save,
-                          child: _saving
-                              ? const SizedBox.square(
-                                  dimension: 16.0,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.0,
-                                  ),
-                                )
-                              : const Text("Save"),
-                        ),
-                      ],
                     ],
                   ),
                 ),

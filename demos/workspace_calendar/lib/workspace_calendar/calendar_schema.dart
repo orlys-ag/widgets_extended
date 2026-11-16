@@ -509,20 +509,26 @@ void _validateFields(
     }
   }
   for (final field in schema.fields) {
-    final value = fields[field.key];
-    final errorKey = fieldErrorKey(field.key);
-    if (_isBlank(value)) {
-      if (field.required) {
-        errors[errorKey] = "${field.label} is required.";
-      } else if (value != null && !_hasKind(field, value)) {
-        errors[errorKey] = _kindError(field);
-      }
-      continue;
-    }
-    if (!_hasKind(field, value)) {
-      errors[errorKey] = _kindError(field);
+    final error = fieldErrorOf(field, fields[field.key]);
+    if (error != null) {
+      errors[fieldErrorKey(field.key)] = error;
     }
   }
+}
+
+/// The error of [value], a payload's value of [field], null where the
+/// payload lacks it: "<label> is required." where [field] is required and
+/// [value] is blank, the message of [field]'s kind where [value] is present
+/// and not of that kind, and null otherwise. [validateItemJson] reports it
+/// keyed [fieldErrorKey] of [field]'s key.
+String? fieldErrorOf(FieldSpec field, Object? value) {
+  if (field.required && _isBlank(value)) {
+    return "${field.label} is required.";
+  }
+  if (value != null && !_hasKind(field, value)) {
+    return _kindError(field);
+  }
+  return null;
 }
 
 /// Whether [value], present and not blank, is of [field]'s kind.
