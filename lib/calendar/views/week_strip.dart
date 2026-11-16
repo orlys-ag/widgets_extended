@@ -42,6 +42,10 @@ ValueKey<String> weekStripDayKey(DateTime day) {
 /// [recalls] does too, wherever [selectedDay] is, to the shown days of
 /// [recallDay]'s week where it is given.
 ///
+/// With [browseFrom], the strip opens, slides, follows and recalls no
+/// further back than that day's week, whose first shown day is the first
+/// it shows.
+///
 /// [weekdays] are fixed for the strip's life: give a strip that changes
 /// them its own key.
 class WeekStrip<T> extends StatefulWidget {
@@ -59,6 +63,7 @@ class WeekStrip<T> extends StatefulWidget {
     this.initialMiddleDay,
     this.dayBadges,
     this.isDayEnabled,
+    this.browseFrom,
   });
 
   final CalendarStore<T> store;
@@ -105,6 +110,12 @@ class WeekStrip<T> extends StatefulWidget {
   /// every day.
   final bool Function(DateTime day)? isDayEnabled;
 
+  /// A shown day whose week the strip slides back no further than: that
+  /// week's first shown day is the first the strip shows; null for no
+  /// limit. Fixed for the strip's life by its week: give a strip a limit in
+  /// another week its own key.
+  final DateTime? browseFrom;
+
   @override
   State<WeekStrip<T>> createState() {
     return _WeekStripState<T>();
@@ -120,25 +131,44 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
   /// view centres on, so the days before index 0 lie at negative offsets.
   static const Key _forwardKey = ValueKey<String>("strip-forward");
 
-  /// The first day of the week the strip opened on. Index 0 is that week's
+  /// The first day of the week the strip opened on, or of
+  /// [WeekStrip.browseFrom]'s where that is later. Index 0 is that week's
   /// first shown day, and each index after or before it the next or the
   /// previous shown day. A plain day, as the cells are.
-  late final DateTime _origin = widget.weekdays.weekStartOf(
-    _plainTwinOf(
+  late final DateTime _origin = widget.weekdays.weekStartOf(_openingDay());
+
+  DateTime _openingDay() {
+    final day = _plainTwinOf(
       widget.initialMiddleDay ?? widget.initialDay ?? widget.selectedDay,
-    ),
-  );
+    );
+    final from = _browseFrom;
+    return from != null && from.isAfter(day) ? from : day;
+  }
+
+  /// [WeekStrip.browseFrom] as a plain day; null for no limit.
+  late final DateTime? _browseFrom = widget.browseFrom == null
+      ? null
+      : _plainTwinOf(widget.browseFrom!);
+
+  /// The index of the first shown day of [WeekStrip.browseFrom]'s week, 0
+  /// or before it, which the strip slides back no further than; null for
+  /// no limit.
+  late final int? _limit = _browseFrom == null
+      ? null
+      : _indexOf(widget.weekdays.weekStartOf(_browseFrom));
 
   /// The index of the day at the strip's start as it opens: half a week's
   /// count of shown days before [WeekStrip.initialMiddleDay]'s, or where
-  /// that is null 0, the first shown day of [_origin]'s week.
+  /// that is null 0, the first shown day of [_origin]'s week; and no index
+  /// before [_limit].
   late final int _openingIndex = _openingIndexOf(widget.initialMiddleDay);
 
   int _openingIndexOf(DateTime? middle) {
-    if (middle == null) {
-      return 0;
-    }
-    return _indexOf(_plainTwinOf(middle)) - _count ~/ 2;
+    final index = middle == null
+        ? 0
+        : _indexOf(_plainTwinOf(middle)) - _count ~/ 2;
+    final limit = _limit;
+    return limit != null && index < limit ? limit : index;
   }
 
   /// [WeekStrip.selectedDay] and [WeekStrip.today] as plain days, the
@@ -203,6 +233,11 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
       "A WeekStrip keeps its weekdays; give a strip that changes them its "
       "own key.",
     );
+    assert(
+      _weekOf(widget.browseFrom) == _weekOf(oldWidget.browseFrom),
+      "A WeekStrip keeps the week of its browseFrom; give a strip a limit in "
+      "another week its own key.",
+    );
     if (widget.today != oldWidget.today) {
       _today = _plainTwinOf(widget.today);
     }
@@ -239,6 +274,14 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
     return _columns.length;
   }
 
+  /// The day number of the first day of [day]'s week; null for null.
+  int? _weekOf(DateTime? day) {
+    if (day == null) {
+      return null;
+    }
+    return widget.weekdays.weekStartOfDay(CalendarDates.dayNumber(day));
+  }
+
   /// [a] divided by the positive [b], rounded down.
   static int _floorDiv(int a, int b) {
     return (a - a % b) ~/ b;
@@ -264,10 +307,11 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
     return week * _count + position;
   }
 
-  /// Slides the strip to the shown days of [day]'s week, a plain day,
-  /// where the middle of that day's cell lies outside it, or [always]. Days
-  /// more than a week away are jumped to a week short of first, so the
-  /// slide is a week's at most, as fast whatever the distance.
+  /// Slides the strip to the shown days of [day]'s week, a plain day, or
+  /// of [WeekStrip.browseFrom]'s where that is later, where the middle of
+  /// that day's cell lies outside it, or [always]. Days more than a week
+  /// away are jumped to a week short of first, so the slide is a week's at
+  /// most, as fast whatever the distance.
   void _showSelected(DateTime day, {required bool always}) {
     final extent = _extent;
     if (!mounted || !_scroll.hasClients || extent == null) {
@@ -280,7 +324,12 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
         middle <= position.pixels + position.viewportDimension) {
       return;
     }
-    final target = _indexOf(widget.weekdays.weekStartOf(day)) * extent;
+    var index = _indexOf(widget.weekdays.weekStartOf(day));
+    final limit = _limit;
+    if (limit != null && index < limit) {
+      index = limit;
+    }
+    final target = index * extent;
     final week = _count * extent;
     final distance = target - position.pixels;
     final follow = ++_follows;
@@ -406,7 +455,7 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
                   itemExtent: extent,
                   delegate: SliverChildBuilderDelegate((context, index) {
                     return _buildDay(_dayAt(-1 - index));
-                  }),
+                  }, childCount: _limit == null ? null : -_limit),
                 ),
                 SliverFixedExtentList(
                   key: _forwardKey,

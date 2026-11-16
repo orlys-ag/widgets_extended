@@ -39,8 +39,9 @@ import 'calendar_theme_extension.dart';
 /// by date, or a day [isEnabled] refuses, draws disabled, at the theme's
 /// [CalendarThemeData.disabledOpacity], and takes no tap; an arrow key onto
 /// it selects nothing. The chevrons, the strips and the month picker browse
-/// past [firstDay] and [lastDay]. A [value] the picker refuses still draws
-/// selected. With [store], a day with entries carries a badge for each kind
+/// past [firstDay] and [lastDay], unless [browsesBeforeFirstDay] is false.
+/// A [value] the picker refuses still draws selected. With [store], a day
+/// with entries carries a badge for each kind
 /// [dayBadges] gives them, or the primary dot without [dayBadges], once the
 /// store has read the day; the picker asks the store to read the grid of
 /// the month it shows after its first frame, and after a build that gives it
@@ -72,6 +73,7 @@ class CalendarDayPicker<T> extends StatefulWidget {
     this.headerSelects = false,
     this.dayBadges,
     this.daysToEdges = false,
+    this.browsesBeforeFirstDay = true,
   }) {
     if (firstColumn < 0 || firstColumn >= DateTime.daysPerWeek) {
       throw ArgumentError.value(
@@ -140,6 +142,20 @@ class CalendarDayPicker<T> extends StatefulWidget {
   /// by 8 logical pixels and centres each circle in its column.
   final bool daysToEdges;
 
+  /// Whether the picker browses to weeks and months before [firstDay]'s.
+  /// True, the default, lets the strips, the chevrons and the month picker
+  /// browse past it. False stops them at the week, the month and the year
+  /// of [firstDay], or of [value] where that is earlier, compared by date:
+  /// the week row slides back no further than that week and the month no
+  /// further than that month; the previous chevron draws disabled there
+  /// ([CalendarHeaderDetails.canStepBack]), as it does in the month picker
+  /// at that year; the month picker draws the months before that month
+  /// disabled, at the theme's [CalendarThemeData.disabledOpacity], and
+  /// takes no tap on them; and the month folds into no week before that
+  /// week. A build that moves that day brings the card back to [value].
+  /// With no [firstDay] it has no effect.
+  final bool browsesBeforeFirstDay;
+
   @override
   State<CalendarDayPicker<T>> createState() {
     return _CalendarDayPickerState<T>();
@@ -178,6 +194,25 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
 
   CalendarStore<T> get _store {
     return widget.store ?? _ownStore!;
+  }
+
+  /// The day before whose week and month the picker browses nothing, as a
+  /// plain day ([_browseFromOf]).
+  DateTime? get _browseFrom {
+    return _browseFromOf(widget);
+  }
+
+  /// The day before whose week and month [picker] browses nothing, as a
+  /// plain day: the date of its [CalendarDayPicker.firstDay], or of its
+  /// [CalendarDayPicker.value] where that is earlier; null where it
+  /// browses before its first day or has none.
+  static DateTime? _browseFromOf(CalendarDayPicker<Object?> picker) {
+    final first = _plainOf(picker.firstDay);
+    if (picker.browsesBeforeFirstDay || first == null) {
+      return null;
+    }
+    final value = _plainOf(picker.value)!;
+    return value.isBefore(first) ? value : first;
   }
 
   /// The local midnight of [day]'s date; null for null.
@@ -274,6 +309,11 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
     if (!_sameDate(widget.lastDay, oldWidget.lastDay)) {
       _last = _plainOf(widget.lastDay);
     }
+    // A browse can lie before a new limit, where neither strip goes.
+    final from = _browseFrom;
+    if (from != null && !_sameDate(from, _browseFromOf(oldWidget))) {
+      _card.recall();
+    }
     if (valueMoved || widget.isEnabled != oldWidget.isEnabled) {
       _answers = <DateTime, bool>{};
     }
@@ -313,6 +353,11 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
   @override
   CalendarWeekdaySet get cardWeekdays {
     return _weekdays;
+  }
+
+  @override
+  DateTime? get cardBrowseFrom {
+    return _browseFrom;
   }
 
   @override
@@ -391,6 +436,7 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
       stepUnit: _card.stepUnit,
       onPrevious: _stepBack,
       onNext: _stepOn,
+      canStepBack: _card.canStepBack,
       onSelectView: _selectView,
       onOpenPicker: _card.openPicker,
       onClosePicker: _card.closePicker,
@@ -398,10 +444,12 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
   }
 
   /// The month picker, on the card's year, filling the month of
-  /// [CalendarDayPicker.value] and ringing today's.
+  /// [CalendarDayPicker.value] and ringing today's, and taking no month
+  /// before [_browseFrom]'s.
   Widget _buildMonthPicker() {
     final today = cardToday;
     final value = widget.value;
+    final from = _browseFrom;
     return MonthPicker(
       key: const ValueKey<String>("month-picker"),
       year: _card.pickerYear,
@@ -409,6 +457,7 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
       currentMonth: DateTime(today.year, today.month),
       onSelectMonth: _card.pickMonth,
       onBrowse: _card.browseYear,
+      firstMonth: from == null ? null : DateTime(from.year, from.month),
     );
   }
 
@@ -433,6 +482,7 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
         dayBadges: widget.dayBadges,
         isDayEnabled: asks ? _isDayEnabled : null,
         daysToEdges: widget.daysToEdges,
+        browseFrom: _browseFrom,
       ),
     );
     final inserted = _themes.inserted;

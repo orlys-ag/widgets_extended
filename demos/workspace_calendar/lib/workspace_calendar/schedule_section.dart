@@ -96,7 +96,9 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// last columns on the row's sides
 /// ([CalendarDayPicker.daysToEdges]); the field keeps the focus. A
 /// tap on a day there moves the field's day to it and leaves the picker
-/// open, and its chevrons, swipes and month picks only browse. Each opening
+/// open, and its chevrons, swipes and month picks only browse, End date's
+/// to no week, month or year before the start day's
+/// ([CalendarDayPicker.browsesBeforeFirstDay]). Each opening
 /// of a date field shows its picker folded. A day picker draws disabled,
 /// and takes no tap on, the days its check's day answers rule out: Start
 /// date's those before [CalendarScheduleCheck.firstStartDay], End date's
@@ -801,7 +803,8 @@ class ScheduleSectionState extends State<ScheduleSection> {
 
   /// [row]'s day picker, folded on the week of the row's day, that day
   /// selected and [ScheduleSection.now]'s today ringed, taking the days of
-  /// [_dayRangeOf]. Keyed by the row's openings, so each opening of its
+  /// [_dayRangeOf], End date's browsing back no further than the first
+  /// of them. Keyed by the row's openings, so each opening of its
   /// date field builds a new one, folded, whatever the last one showed. A
   /// tap on a day moves the row's day to it; the picker takes no pick while
   /// its panel closes or swaps it out, or where the field takes no input.
@@ -828,6 +831,7 @@ class ScheduleSectionState extends State<ScheduleSection> {
       firstColumn: widget.firstColumn,
       dayBadges: widget.dayBadges,
       daysToEdges: true,
+      browsesBeforeFirstDay: start,
     );
   }
 

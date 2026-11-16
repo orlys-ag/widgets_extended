@@ -65,6 +65,7 @@ final class CalendarHeaderDetails {
     this.canGoToToday = false,
     this.editable = false,
     this.onEditableChanged,
+    this.canStepBack = true,
   });
 
   /// The view shown.
@@ -89,6 +90,12 @@ final class CalendarHeaderDetails {
 
   /// Steps back by [stepUnit].
   final VoidCallback onPrevious;
+
+  /// Whether [onPrevious] steps back: false where the calendar browses no
+  /// further back, as a `CalendarDayPicker` that browses no week or month
+  /// before its first day does at that day's week, month or year. The
+  /// built-in header then draws its previous chevron disabled.
+  final bool canStepBack;
 
   /// Steps on by [stepUnit].
   final VoidCallback onNext;
@@ -163,7 +170,9 @@ typedef CalendarHeaderBuilder =
 /// icons, the previous chevron's circle lying at the row's start; the Today
 /// button, the toggle and the view button are 32 px circles around 22 px
 /// icons. The title gives up width, scaling down, only where the row is too
-/// narrow for the rest.
+/// narrow for the rest. While [CalendarHeaderDetails.canStepBack] is false
+/// the previous chevron draws at the theme's
+/// [CalendarThemeData.disabledOpacity] and takes no press.
 ///
 /// The Today button shows while [CalendarHeaderDetails.canGoToToday] is
 /// true, fading in and out over the theme's motion, and keeps its width
@@ -325,8 +334,11 @@ class CalendarHeader extends StatelessWidget {
                   icon: const Icon(Icons.chevron_left),
                   tooltip: _previousTooltip(strings, details.stepUnit),
                   color: theme.text,
+                  disabledColor: theme.text.withValues(
+                    alpha: theme.text.a * theme.disabledOpacity,
+                  ),
                   style: _chevronButton,
-                  onPressed: details.onPrevious,
+                  onPressed: details.canStepBack ? details.onPrevious : null,
                 ),
               ),
               // Shrinks, and the title in it, only where the row is too

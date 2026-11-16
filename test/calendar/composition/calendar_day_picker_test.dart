@@ -2,8 +2,9 @@
 /// the weeks its first column starts, what its chevrons and month picks
 /// report under each setting, the days its first and last day and its
 /// predicate refuse, when it asks the predicate, what a store given in a
-/// later build reads, and where its days and its previous chevron lie with
-/// daysToEdges.
+/// later build reads, where its days and its previous chevron lie with
+/// daysToEdges, and the weeks, months and years it browses back to with
+/// browsesBeforeFirstDay false.
 library;
 
 import 'dart:async';
@@ -28,6 +29,33 @@ Tristate enabledOf(WidgetTester tester, DateTime day) {
 /// Whether the cell of [day] lies where a pointer reaches it.
 bool shows(DateTime day) {
   return dayCell(day).hitTestable().evaluate().isNotEmpty;
+}
+
+/// Whether the header's previous chevron takes a press.
+bool previousEnabled(WidgetTester tester) {
+  return tester
+          .widget<IconButton>(
+            find.widgetWithIcon(IconButton, Icons.chevron_left),
+          )
+          .onPressed !=
+      null;
+}
+
+/// Expects the week row, seven days wide, to show the seven days from
+/// [monday], at [step].
+void expectWeekFrom(DateTime monday, String step) {
+  for (final day in daysFrom(monday, 7)) {
+    expect(shows(day), isTrue, reason: "$step: $day");
+  }
+}
+
+/// The enabled state a screen reader hears of the month picker's month
+/// named [label].
+Tristate monthEnabledOf(WidgetTester tester, String label) {
+  return tester
+      .getSemantics(find.bySemanticsLabel(label))
+      .flagsCollection
+      .isEnabled;
 }
 
 /// The days from [first] on, [count] of them.
@@ -310,6 +338,312 @@ void main() {
       }),
       isEmpty,
     );
+    semantics.dispose();
+  });
+
+  testWidgets("DP8 with browsesBeforeFirstDay false the week row browses "
+      "back, by the previous chevron or a fling, no further than the first "
+      "day's week, where the chevron draws disabled, and a step or a fling "
+      "on enables it", (tester) async {
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(
+      app(
+        CalendarDayPicker<String>(
+          value: DateTime(2026, 4, 23),
+          onChanged: (day) {},
+          firstDay: DateTime(2026, 4, 22),
+          today: DateTime(2026, 6, 10),
+          browsesBeforeFirstDay: false,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final monday = DateTime(2026, 4, 20);
+    // Setup sanity: the row opens on the value's week, the first day's.
+    expectWeekFrom(monday, "opening");
+    expect(previousEnabled(tester), isFalse);
+    await tester.tap(find.byTooltip("Previous week"));
+    await tester.pumpAndSettle();
+    expectWeekFrom(monday, "Previous week");
+    await tester.fling(
+      find.byType(CalendarDayPicker<String>),
+      const Offset(300.0, 0.0),
+      3000.0,
+    );
+    await tester.pumpAndSettle();
+    expectWeekFrom(monday, "a fling back");
+
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pumpAndSettle();
+    // Setup sanity: Next week moves the row.
+    expectWeekFrom(DateTime(2026, 4, 27), "Next week");
+    expect(previousEnabled(tester), isTrue);
+    await tester.tap(find.byTooltip("Previous week"));
+    await tester.pumpAndSettle();
+    expectWeekFrom(monday, "Previous week from the next week");
+    expect(previousEnabled(tester), isFalse);
+
+    await tester.fling(
+      find.byType(CalendarDayPicker<String>),
+      const Offset(-300.0, 0.0),
+      1000.0,
+    );
+    await tester.pumpAndSettle();
+    // Setup sanity: the fling moved the row on.
+    expect(shows(monday), isFalse);
+    expect(previousEnabled(tester), isTrue);
+    await tester.fling(
+      find.byType(CalendarDayPicker<String>),
+      const Offset(300.0, 0.0),
+      3000.0,
+    );
+    await tester.pumpAndSettle();
+    expect(previousEnabled(tester), isFalse);
+    semantics.dispose();
+  });
+
+  testWidgets("DP9 with browsesBeforeFirstDay false the month browses back, "
+      "by the previous chevron or a fling, no further than the first day's "
+      "month, where the chevron draws disabled; by default the chevron "
+      "browses past the first day's week", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final thursday = DateTime(2026, 4, 23);
+    final wednesday = DateTime(2026, 4, 22);
+    await tester.pumpWidget(
+      app(
+        CalendarDayPicker<String>(
+          value: thursday,
+          onChanged: (day) {},
+          firstDay: wednesday,
+          today: DateTime(2026, 6, 10),
+          browsesBeforeFirstDay: false,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.bySemanticsLabel("Show the month"));
+    await tester.pumpAndSettle();
+    // Setup sanity: the card shows the value's month.
+    expect(find.text("Apr 2026"), findsOneWidget);
+    expect(previousEnabled(tester), isFalse);
+    await tester.tap(find.byTooltip("Previous month"));
+    await tester.pumpAndSettle();
+    expect(find.text("Apr 2026"), findsOneWidget);
+    await tester.fling(
+      find.byType(CalendarDayPicker<String>),
+      const Offset(300.0, 0.0),
+      3000.0,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text("Apr 2026"), findsOneWidget);
+    await tester.tap(find.byTooltip("Next month"));
+    await tester.pumpAndSettle();
+    // Setup sanity: Next month moves the card.
+    expect(find.text("May 2026"), findsOneWidget);
+    expect(previousEnabled(tester), isTrue);
+    await tester.tap(find.byTooltip("Previous month"));
+    await tester.pumpAndSettle();
+    expect(find.text("Apr 2026"), findsOneWidget);
+
+    await tester.pumpWidget(
+      app(
+        CalendarDayPicker<String>(
+          key: const ValueKey<String>("browses"),
+          value: thursday,
+          onChanged: (day) {},
+          firstDay: wednesday,
+          today: DateTime(2026, 6, 10),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(previousEnabled(tester), isTrue);
+    await tester.tap(find.byTooltip("Previous week"));
+    await tester.pumpAndSettle();
+    expectWeekFrom(DateTime(2026, 4, 13), "by default");
+    semantics.dispose();
+  });
+
+  testWidgets("DP10 with browsesBeforeFirstDay false the month picker draws "
+      "the months before the first day's disabled and takes no tap on them, "
+      "and its chevron, a drag and a fling go back to no year before the "
+      "first day's; by default its months have no enabled state and a drag "
+      "goes back a year", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final thursday = DateTime(2026, 4, 23);
+    final wednesday = DateTime(2026, 4, 22);
+    // Today in March, so March is the current month.
+    final today = DateTime(2026, 3, 10);
+    await tester.pumpWidget(
+      app(
+        CalendarDayPicker<String>(
+          value: thursday,
+          onChanged: (day) {},
+          firstDay: wednesday,
+          today: today,
+          browsesBeforeFirstDay: false,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("Pick a month"));
+    await tester.pumpAndSettle();
+    expect(monthEnabledOf(tester, "February 2026"), Tristate.isFalse);
+    expect(monthEnabledOf(tester, "April 2026"), Tristate.isTrue);
+    final theme = CalendarTheme.of(tester.element(find.text("March")));
+    Color? colourOf(String name) {
+      return tester.widget<Text>(find.text(name)).style?.color;
+    }
+
+    Color disabled(Color colour) {
+      return colour.withValues(alpha: colour.a * theme.disabledOpacity);
+    }
+
+    expect(colourOf("February"), disabled(theme.text));
+    expect(colourOf("March"), disabled(theme.primary));
+    await tester.tap(find.text("February"));
+    await tester.pumpAndSettle();
+    expect(find.text("February"), findsOneWidget);
+
+    expect(previousEnabled(tester), isFalse);
+    await tester.tap(find.byTooltip("Previous year"));
+    await tester.pumpAndSettle();
+    expect(find.text("2026"), findsOneWidget);
+    final drag = await tester.startGesture(tester.getCenter(find.text("June")));
+    await drag.moveBy(const Offset(20.0, 0.0));
+    await tester.pump();
+    await drag.moveBy(const Offset(280.0, 0.0));
+    await tester.pump();
+    // While the finger holds the picker.
+    expect(find.text("2026"), findsOneWidget);
+    expect(find.bySemanticsLabel("June 2025"), findsNothing);
+    await drag.up();
+    await tester.pumpAndSettle();
+    await tester.fling(find.text("June"), const Offset(300.0, 0.0), 3000.0);
+    await tester.pumpAndSettle();
+    expect(find.text("2026"), findsOneWidget);
+    expect(find.bySemanticsLabel("June 2026"), findsOneWidget);
+
+    await tester.tap(find.byTooltip("Next year"));
+    await tester.pumpAndSettle();
+    // Setup sanity: Next year moves the picker.
+    expect(find.text("2027"), findsOneWidget);
+    expect(previousEnabled(tester), isTrue);
+    expect(monthEnabledOf(tester, "March 2027"), Tristate.isTrue);
+    await tester.tap(find.byTooltip("Previous year"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text("May"));
+    await tester.pumpAndSettle();
+    // Setup sanity: a month the picker takes moves the card there.
+    expect(find.text("May 2026"), findsOneWidget);
+
+    await tester.pumpWidget(
+      app(
+        CalendarDayPicker<String>(
+          key: const ValueKey<String>("browses"),
+          value: thursday,
+          onChanged: (day) {},
+          firstDay: wednesday,
+          today: today,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("Pick a month"));
+    await tester.pumpAndSettle();
+    expect(monthEnabledOf(tester, "February 2026"), Tristate.none);
+    await tester.drag(find.text("June"), const Offset(300.0, 0.0));
+    await tester.pumpAndSettle();
+    expect(find.text("2025"), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets("DP11 with browsesBeforeFirstDay false a month before the "
+      "value's folds, and a month pick brings the week row, into no week "
+      "before the first day's, from which the chevrons step", (tester) async {
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(
+      app(
+        CalendarDayPicker<String>(
+          value: DateTime(2026, 5, 5),
+          onChanged: (day) {},
+          firstDay: DateTime(2026, 4, 22),
+          today: DateTime(2026, 6, 10),
+          browsesBeforeFirstDay: false,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final limitWeek = DateTime(2026, 4, 20);
+    // Setup sanity: the picker opens on the value's week.
+    expectWeekFrom(DateTime(2026, 5, 4), "opening");
+    await tester.tap(find.bySemanticsLabel("Show the month"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("Previous month"));
+    await tester.pumpAndSettle();
+    // Setup sanity: the card shows April, whose first day's week starts
+    // before the first day's.
+    expect(find.text("Apr 2026"), findsOneWidget);
+    await tester.tap(find.bySemanticsLabel("Show the week"));
+    await tester.pumpAndSettle();
+    expectWeekFrom(limitWeek, "the fold");
+    expect(previousEnabled(tester), isFalse);
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pumpAndSettle();
+    expectWeekFrom(DateTime(2026, 4, 27), "Next week");
+
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("Pick a month"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text("April"));
+    await tester.pumpAndSettle();
+    expectWeekFrom(limitWeek, "a month pick");
+    semantics.dispose();
+  });
+
+  testWidgets("DP12 with browsesBeforeFirstDay false a value before the first "
+      "day lets the week row browse back to the value's week, and a new "
+      "first day brings the card back to the value", (tester) async {
+    final semantics = tester.ensureSemantics();
+    Widget picker(DateTime value, DateTime firstDay, {Key? key}) {
+      return app(
+        CalendarDayPicker<String>(
+          key: key,
+          value: value,
+          onChanged: (day) {},
+          firstDay: firstDay,
+          today: DateTime(2026, 6, 10),
+          browsesBeforeFirstDay: false,
+        ),
+      );
+    }
+
+    final wednesday = DateTime(2026, 4, 22);
+    await tester.pumpWidget(picker(DateTime(2026, 4, 14), wednesday));
+    await tester.pumpAndSettle();
+    expectWeekFrom(DateTime(2026, 4, 13), "a value before the first day");
+    expect(previousEnabled(tester), isFalse);
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pumpAndSettle();
+    expect(previousEnabled(tester), isTrue);
+    await tester.tap(find.byTooltip("Previous week"));
+    await tester.pumpAndSettle();
+    expectWeekFrom(DateTime(2026, 4, 13), "back to the value's week");
+
+    const moves = ValueKey<String>("moves");
+    final tuesday = DateTime(2026, 5, 5);
+    await tester.pumpWidget(picker(tuesday, wednesday, key: moves));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("Previous week"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("Previous week"));
+    await tester.pumpAndSettle();
+    // Setup sanity: the row shows a week before May 1's.
+    expectWeekFrom(DateTime(2026, 4, 20), "two weeks back");
+    await tester.pumpWidget(picker(tuesday, DateTime(2026, 5, 1), key: moves));
+    await tester.pumpAndSettle();
+    expectWeekFrom(DateTime(2026, 5, 4), "a new first day");
     semantics.dispose();
   });
 

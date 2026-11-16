@@ -4473,6 +4473,66 @@ void main() {
       await tester.pumpAndSettle();
     }
   });
+
+  testWidgets("IP18 End date's picker browses back, by its previous chevron "
+      "or a fling of its week row, to no week before the start day's, the "
+      "chevron drawn disabled there, while Start date's browses past its "
+      "first day", (tester) async {
+    await pumpSection(
+      tester,
+      checkOf(
+        CalendarSchedule.of(at(9), at(10), isAllDay: false),
+        policy: const HistoryLockPolicy<ItemPayload>(),
+      ),
+    );
+    Finder inPicker(String label, Finder finder) {
+      return find.descendant(of: dayPickerFinder(label), matching: finder);
+    }
+
+    bool shows(String label, DateTime day) {
+      return inPicker(
+        label,
+        find.byKey(weekStripDayKey(day)),
+      ).hitTestable().evaluate().isNotEmpty;
+    }
+
+    bool previousEnabled(String label) {
+      return tester
+              .widget<IconButton>(
+                inPicker(
+                  label,
+                  find.widgetWithIcon(IconButton, Icons.chevron_left),
+                ),
+              )
+              .onPressed !=
+          null;
+    }
+
+    // The start day, Wednesday April 22, lies in the week from Monday
+    // April 20.
+    final monday = DateTime(2026, 4, 20);
+    await openDayPicker(tester, "End date");
+    expect(previousEnabled("End date"), isFalse);
+    await tester.tap(inPicker("End date", find.byTooltip("Previous week")));
+    await tester.pumpAndSettle();
+    expect(shows("End date", monday), isTrue);
+    await tester.fling(
+      inPicker("End date", find.byType(WeekStrip<ItemPayload>)),
+      const Offset(300.0, 0.0),
+      3000.0,
+    );
+    await tester.pumpAndSettle();
+    expect(shows("End date", monday), isTrue);
+    expect(shows("End date", DateTime(2026, 4, 19)), isFalse);
+
+    await openDayPicker(tester, "Start date");
+    // Setup sanity: the lock refuses starts before today, Wednesday.
+    expect(dayEnabled(tester, "Start date", DateTime(2026, 4, 21)), isFalse);
+    expect(previousEnabled("Start date"), isTrue);
+    await tester.tap(inPicker("Start date", find.byTooltip("Previous week")));
+    await tester.pumpAndSettle();
+    expect(shows("Start date", DateTime(2026, 4, 13)), isTrue);
+  });
 }
 
 /// The circle of the day cell [cell] finds.

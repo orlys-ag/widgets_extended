@@ -29,7 +29,6 @@ class WorkspaceCalendarApp extends StatelessWidget {
   // remove edit toggle; make behavior = always on
   // card colors: based on lookups that have associated colors
   //  will have picker to select lookup field (which determines color)
-  //  FAB should default to today; user can change date
   //
   // Custom color coding per user, saved to device?\
   // Have a list of users to assign tasks, risks, and requests to, etc.?

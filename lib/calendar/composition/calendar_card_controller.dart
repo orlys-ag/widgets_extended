@@ -21,6 +21,12 @@ abstract interface class CalendarCardHost {
   /// The weekdays the card shows.
   CalendarWeekdaySet get cardWeekdays;
 
+  /// A day, on a weekday [cardWeekdays] holds, before whose week and month
+  /// the card browses nothing: the week strip and a folded chevron stop at
+  /// its week, the month strip and an unfolded chevron at its month, and
+  /// the month picker at its month and year; null for no limit.
+  DateTime? get cardBrowseFrom;
+
   /// The start of [day]'s date on the host's clock.
   DateTime cardDayIn(DateTime day);
 
@@ -62,7 +68,9 @@ enum _StripBrowse {
 /// select a day, and browse as below only where the host refuses it;
 /// otherwise a chevron step while folded browses a week, sliding the week
 /// strip there, and a month pick moves the card to the month and closes
-/// the month picker.
+/// the month picker. Where the host gives
+/// [CalendarCardHost.cardBrowseFrom], a chevron steps back only while
+/// [canStepBack], and a pick of a month before that day's does nothing.
 final class CalendarCardController extends ChangeNotifier {
   CalendarCardController({
     required TickerProvider vsync,
@@ -210,6 +218,7 @@ final class CalendarCardController extends ChangeNotifier {
           selectedDay: _host.cardSelectedDay,
           today: _host.cardToday,
           weekdays: weekdays,
+          firstDay: _host.cardBrowseFrom,
         ),
         weekdays,
       );
@@ -234,6 +243,32 @@ final class CalendarCardController extends ChangeNotifier {
       return CalendarStepUnit.year;
     }
     return _folded ? CalendarStepUnit.week : CalendarStepUnit.month;
+  }
+
+  /// Whether a chevron steps back by [stepUnit]: always without the host's
+  /// [CalendarCardHost.cardBrowseFrom]; with it, while the month picker's
+  /// year lies after that day's year, the card's month after its month, or,
+  /// folded, the week of the week strip's middle day after its week.
+  bool get canStepBack {
+    final from = _host.cardBrowseFrom;
+    if (from == null) {
+      return true;
+    }
+    switch (stepUnit) {
+      case CalendarStepUnit.year:
+        return _pickerYear > from.year;
+      case CalendarStepUnit.week:
+        final weekdays = _host.cardWeekdays;
+        final days = _stripDays();
+        final middle = CalendarDates.dayNumber(days[days.length ~/ 2]);
+        return weekdays.weekStartOfDay(middle) >
+            weekdays.weekStartOfDay(CalendarDates.dayNumber(from));
+      case CalendarStepUnit.month:
+      case CalendarStepUnit.day:
+        final shown = month;
+        return shown.year * DateTime.monthsPerYear + shown.month >
+            from.year * DateTime.monthsPerYear + from.month;
+    }
   }
 
   /// Sets the duration of the fold's and the picker's motions, and the
@@ -282,8 +317,12 @@ final class CalendarCardController extends ChangeNotifier {
   /// Steps by [stepUnit]: a year moves the month picker alone; a month
   /// moves the card alone; and a week, where [headerSelects] and the host
   /// takes it, selects the day a week from the selected one, and otherwise
-  /// browses the week strip a week ([_browseWeek]).
+  /// browses the week strip a week ([_browseWeek]). A step back does
+  /// nothing where [canStepBack] is false.
   void step(int direction) {
+    if (direction < 0 && !canStepBack) {
+      return;
+    }
     switch (stepUnit) {
       case CalendarStepUnit.year:
         _event(() {
@@ -348,8 +387,15 @@ final class CalendarCardController extends ChangeNotifier {
   /// the selected day would, the month picker staying open, filling
   /// [month]. Otherwise, or where the host refuses that day, moves the card
   /// to [month], a folded card's week strip to the week [monthFoldDay]
-  /// gives it, and closes the month picker.
+  /// gives it, and closes the month picker. Does nothing for a [month]
+  /// before the month of the host's [CalendarCardHost.cardBrowseFrom].
   void pickMonth(DateTime month) {
+    final from = _host.cardBrowseFrom;
+    if (from != null &&
+        month.year * DateTime.monthsPerYear + month.month <
+            from.year * DateTime.monthsPerYear + from.month) {
+      return;
+    }
     final day = _host.cardSelectedDay;
     final weekdays = _host.cardWeekdays;
     if (headerSelects) {
@@ -374,6 +420,7 @@ final class CalendarCardController extends ChangeNotifier {
           selectedDay: day,
           today: _host.cardToday,
           weekdays: weekdays,
+          firstDay: from,
         );
         _stripRecalls++;
       }

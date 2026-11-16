@@ -105,7 +105,10 @@ class CalendarHeaderCard extends StatelessWidget {
 /// controller's [CalendarCardController.recallDay] at a recall, and the
 /// month folds into the week of its [CalendarCardController.foldDay]. A
 /// day [isDayEnabled] refuses draws disabled in both strips and takes no
-/// tap, and with no [onSelectDay] no day takes one. The card reads the
+/// tap, and with no [onSelectDay] no day takes one. With [browseFrom] the
+/// week strip browses no week before that day's, the month strip no month
+/// before its month, and the month folds into no week before its week.
+/// The card reads the
 /// controller as it builds and listens to its motions alone, so its host
 /// builds it again at each of the controller's events.
 ///
@@ -130,6 +133,7 @@ class CalendarCard<T> extends StatefulWidget {
     this.dayBadges,
     this.isDayEnabled,
     this.daysToEdges = false,
+    this.browseFrom,
   });
 
   /// The card's fold, browse and month picker, and their motions.
@@ -166,6 +170,11 @@ class CalendarCard<T> extends StatefulWidget {
   /// Whether the circles of the first and last columns reach the card's
   /// sides, the card padding no side.
   final bool daysToEdges;
+
+  /// A day, on a weekday [weekdays] holds, before whose week and month the
+  /// strips browse nothing ([WeekStrip.browseFrom],
+  /// [MonthStrip.browseFrom]); null for no limit.
+  final DateTime? browseFrom;
 
   @override
   State<CalendarCard<T>> createState() {
@@ -225,11 +234,18 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
   /// The strip of days the folded month becomes, opening on the week the
   /// month folded into, or with the controller's
   /// [CalendarCardController.stripMiddleDay] at its middle. Its weekdays
-  /// are fixed for its life, so new ones build a new strip.
+  /// and the week of its limit are fixed for its life, so new ones build a
+  /// new strip.
   Widget _buildStrip() {
     final controller = widget.controller;
+    final from = widget.browseFrom;
     return WeekStrip<T>(
-      key: ValueKey<CalendarWeekdaySet>(widget.weekdays),
+      key: ValueKey<(CalendarWeekdaySet, int?)>((
+        widget.weekdays,
+        from == null
+            ? null
+            : widget.weekdays.weekStartOfDay(CalendarDates.dayNumber(from)),
+      )),
       store: widget.store,
       selectedDay: widget.selectedDay,
       today: widget.today,
@@ -241,12 +257,14 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
         selectedDay: widget.selectedDay,
         today: widget.today,
         weekdays: widget.weekdays,
+        firstDay: from,
       ),
       initialMiddleDay: controller.stripMiddleDay,
       onSelectDay: widget.onSelectDay,
       onBrowse: controller.browseStrip,
       dayBadges: widget.dayBadges,
       isDayEnabled: widget.isDayEnabled,
+      browseFrom: from,
     );
   }
 
@@ -299,10 +317,14 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
     final controller = widget.controller;
     // Built once per build of this card and handed to the collapse builder
     // as its child, so the fold does not rebuild the strip, which follows
-    // the fold itself. Its weekdays are fixed for its life, so new ones
-    // build a new strip.
+    // the fold itself. Its weekdays and the month of its limit are fixed
+    // for its life, so new ones build a new strip.
+    final from = widget.browseFrom;
     final months = MonthStrip<T>(
-      key: ValueKey<CalendarWeekdaySet>(widget.weekdays),
+      key: ValueKey<(CalendarWeekdaySet, int?)>((
+        widget.weekdays,
+        from == null ? null : from.year * DateTime.monthsPerYear + from.month,
+      )),
       store: widget.store,
       month: widget.month,
       selectedDay: widget.selectedDay,
@@ -315,6 +337,7 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
       dayBadges: widget.dayBadges,
       isDayEnabled: widget.isDayEnabled,
       foldDay: controller.foldDay,
+      browseFrom: from,
     );
     final header = widget.header;
     Widget grid = AnimatedBuilder(

@@ -1311,6 +1311,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   }
 
   @override
+  DateTime? get cardBrowseFrom {
+    return null;
+  }
+
+  @override
   DateTime cardDayIn(DateTime day) {
     return _dayIn(day);
   }
