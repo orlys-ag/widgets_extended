@@ -41,7 +41,7 @@ ValueKey<String> scheduleOverlapCardKey(String id) {
 }
 
 /// The key of the bar of the overlap notice's card of the item [id]: its
-/// lanes' labels, its axis and the axis's times.
+/// axis and the axis's times.
 ValueKey<String> scheduleOverlapBarKey(String id) {
   return ValueKey<String>("schedule-overlap-bar-$id");
 }
@@ -52,22 +52,22 @@ ValueKey<String> scheduleOverlapAxisKey(String id) {
   return ValueKey<String>("schedule-overlap-axis-$id");
 }
 
-/// The key of the column of the shared time on the axis of the overlap
-/// notice's card of the item [id].
+/// The key of the striped part of the shared time on the axis of the
+/// overlap notice's card of the item [id].
 ValueKey<String> scheduleOverlapShareKey(String id) {
   return ValueKey<String>("schedule-overlap-share-$id");
 }
 
-/// The key of the lane of the schedule's times on the axis of the overlap
-/// notice's card of the item [id].
-ValueKey<String> scheduleOverlapThisLaneKey(String id) {
-  return ValueKey<String>("schedule-overlap-this-lane-$id");
+/// The key of the part of the axis of the overlap notice's card of the item
+/// [id] that lies before the shared time, where the axis starts before it.
+ValueKey<String> scheduleOverlapBeforeKey(String id) {
+  return ValueKey<String>("schedule-overlap-before-$id");
 }
 
-/// The key of the lane of the item [id]'s times on the axis of its card in
-/// the overlap notice.
-ValueKey<String> scheduleOverlapOtherLaneKey(String id) {
-  return ValueKey<String>("schedule-overlap-other-lane-$id");
+/// The key of the part of the axis of the overlap notice's card of the item
+/// [id] that lies after the shared time, where the axis ends after it.
+ValueKey<String> scheduleOverlapAfterKey(String id) {
+  return ValueKey<String>("schedule-overlap-after-$id");
 }
 
 /// The key of the [Focus] around the Start date field.
@@ -1594,12 +1594,13 @@ class _RenderSummaryInset extends RenderBox
 /// title across the card, its times under the title, the time it shares
 /// with the schedule, or "Covers all of this item" where that is all of it,
 /// in a chip, and a bar zoomed on the shared time; where the rules refuse
-/// its overlap, its chip and its bar's shared column are soft red. The
-/// bar's axis reaches the shared time's length past each of its ends,
+/// its overlap, its chip and the tint under its bar's stripes are soft red.
+/// The bar's axis reaches the shared time's length past each of its ends,
 /// within the two items' times, so the shared time fills a third of it or
-/// more; on it a lane of the schedule's times, "This", lies above one of
-/// the item's, "Other", in the item's colour, over a tinted column of the
-/// shared time, and the axis's first and last times lie under its ends.
+/// more. One track fills the axis: the shared time striped in the item's
+/// colour, and the time before and after it in the item's colour where it
+/// is the item's and in grey where it is the schedule's; the axis's first
+/// and last times lie under its ends.
 /// Times are written on [hourLabelFormat]'s clock, an end at a day's start
 /// as the 24:00 of the day before, and a range that runs past the
 /// schedule's start day with the weekday of each end. The notice shows its
@@ -2266,15 +2267,15 @@ class _OverlapCard extends StatelessWidget {
 typedef _Range = ({DateTime start, DateTime end});
 
 /// A card's bar for the overlapped item [id]: an axis of time from
-/// [axis]'s start to its end, under a lane of the schedule's times
-/// ([mine]), labelled "This", above one of the overlapped item's
-/// ([theirs]), labelled "Other", in [color], each over a track the width of
-/// the axis. Behind the lanes a column marks the [shared] time, soft red
-/// where [refused] and soft yellow otherwise, and under the axis's ends
-/// [startLabel] and [endLabel] write its times. The column, the tracks and
-/// the lanes are rounded at both ends, a lane whose item runs on past the
-/// axis too. A screen reader skips the bar, as the card's shared time
-/// states the same.
+/// [axis]'s start to its end, which one track rounded at both ends fills.
+/// On it the [shared] time is striped in [color], the item's, over a tint,
+/// soft red where [refused] and soft yellow otherwise ([_StripesPainter]),
+/// rounded at both ends and parted from the rest of the track by a gap of
+/// the card's colour. The time before and after it is in [color] where it
+/// is the item's ([theirs]) and in grey where it is the schedule's
+/// ([mine]). Under the axis's ends [startLabel] and [endLabel] write its
+/// times. A screen reader skips the bar, as the card's shared time states
+/// the same.
 class _OverlapBar extends StatelessWidget {
   const _OverlapBar({
     required this.id,
@@ -2298,19 +2299,13 @@ class _OverlapBar extends StatelessWidget {
   final String startLabel;
   final String endLabel;
 
-  static const double _laneHeight = 6.0;
+  static const double _height = 10.0;
 
-  /// The height of a lane's row: the lane lies in its middle, beside its
-  /// label.
-  static const double _rowHeight = 14.0;
+  /// The width of the gap of the card's colour around the striped part.
+  static const double _gap = 1.5;
 
-  static const double _labelWidth = 36.0;
-
-  static const double _labelGap = 8.0;
-
-  /// The corners of the column, the tracks and the lanes.
-  static const BorderRadius _pill = BorderRadius.all(
-    Radius.circular(_laneHeight / 2.0),
+  static const BorderRadius _track = BorderRadius.all(
+    Radius.circular(_height / 2.0),
   );
 
   static const TextStyle _labelStyle = TextStyle(
@@ -2327,117 +2322,96 @@ class _OverlapBar extends StatelessWidget {
       return clampDouble(fraction, 0.0, 1.0);
     }
 
-    // A span from [range]'s start to its end, clipped to the axis, at
-    // [top] in the axis's box.
-    Widget span(
-      double width,
-      _Range range, {
-      required Key? key,
-      required double top,
-      required double height,
-      required Color color,
-    }) {
-      final from = fractionOf(range.start);
-      return PositionedDirectional(
-        start: width * from,
-        width: width * (fractionOf(range.end) - from),
-        top: top,
-        height: height,
-        child: DecoratedBox(
-          key: key,
-          decoration: BoxDecoration(color: color, borderRadius: _pill),
-        ),
-      );
-    }
-
-    const laneTop = (_rowHeight - _laneHeight) / 2.0;
-    Widget label(String text) {
-      return SizedBox(
-        height: _rowHeight,
-        child: Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: Text(text, maxLines: 1, style: _labelStyle),
-        ),
-      );
-    }
-
+    final before = theirs.start.isBefore(mine.start)
+        ? color
+        : HarborColors.textSecondary;
+    final after = theirs.end.isAfter(mine.end)
+        ? color
+        : HarborColors.textSecondary;
+    final stripes = _StripesPainter(
+      tint: refused ? HarborColors.errorNotice : HarborColors.notice,
+      stripe: color,
+      textDirection: Directionality.of(context),
+    );
     return ExcludeSemantics(
       child: Column(
         key: id == null ? null : scheduleOverlapBarKey(id),
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              SizedBox(
-                width: _labelWidth,
-                child: Column(
-                  children: <Widget>[label("This"), label("Other")],
-                ),
-              ),
-              const SizedBox(width: _labelGap),
-              Expanded(
-                child: SizedBox(
-                  key: id == null ? null : scheduleOverlapAxisKey(id),
-                  height: 2.0 * _rowHeight,
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final width = constraints.maxWidth;
-                      return Stack(
-                        children: <Widget>[
-                          span(
-                            width,
-                            shared,
+          SizedBox(
+            key: id == null ? null : scheduleOverlapAxisKey(id),
+            height: _height,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                final from = width * fractionOf(shared.start);
+                final to = width * fractionOf(shared.end);
+                // The parts before and after the shared time meet under its
+                // middle, so each fills the corners its rounded ends leave.
+                final middle = (from + to) / 2.0;
+                final radius = math.min(to - from, _height) / 2.0;
+                return ClipRRect(
+                  borderRadius: _track,
+                  child: Stack(
+                    children: <Widget>[
+                      if (from > 0.0)
+                        PositionedDirectional(
+                          start: 0.0,
+                          top: 0.0,
+                          bottom: 0.0,
+                          width: middle,
+                          child: ColoredBox(
                             key: id == null
                                 ? null
-                                : scheduleOverlapShareKey(id),
-                            top: 0.0,
-                            height: 2.0 * _rowHeight,
-                            color: refused
-                                ? HarborColors.errorNotice
-                                : HarborColors.notice,
+                                : scheduleOverlapBeforeKey(id),
+                            color: before,
                           ),
-                          for (final row in <int>[0, 1])
-                            span(
-                              width,
-                              axis,
-                              key: null,
-                              top: row * _rowHeight + laneTop,
-                              height: _laneHeight,
-                              color: HarborColors.outline,
+                        ),
+                      if (to < width)
+                        PositionedDirectional(
+                          start: middle,
+                          end: 0.0,
+                          top: 0.0,
+                          bottom: 0.0,
+                          child: ColoredBox(
+                            key: id == null
+                                ? null
+                                : scheduleOverlapAfterKey(id),
+                            color: after,
+                          ),
+                        ),
+                      PositionedDirectional(
+                        start: from - _gap,
+                        top: -_gap,
+                        bottom: -_gap,
+                        width: to - from + 2.0 * _gap,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: HarborColors.surface,
+                            borderRadius: BorderRadius.all(
+                              Radius.circular(radius + _gap),
                             ),
-                          span(
-                            width,
-                            mine,
-                            key: id == null
-                                ? null
-                                : scheduleOverlapThisLaneKey(id),
-                            top: laneTop,
-                            height: _laneHeight,
-                            color: HarborColors.textSecondary,
                           ),
-                          span(
-                            width,
-                            theirs,
-                            key: id == null
-                                ? null
-                                : scheduleOverlapOtherLaneKey(id),
-                            top: _rowHeight + laneTop,
-                            height: _laneHeight,
-                            color: color,
-                          ),
-                        ],
-                      );
-                    },
+                        ),
+                      ),
+                      PositionedDirectional(
+                        start: from,
+                        top: 0.0,
+                        bottom: 0.0,
+                        width: to - from,
+                        child: CustomPaint(
+                          key: id == null ? null : scheduleOverlapShareKey(id),
+                          painter: stripes,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ),
-            ],
+                );
+              },
+            ),
           ),
           Padding(
-            padding: const EdgeInsetsDirectional.only(
-              start: _labelWidth + _labelGap,
-              top: 2.0,
-            ),
+            padding: const EdgeInsets.only(top: 2.0),
             child: Row(
               children: <Widget>[
                 Text(startLabel, style: _labelStyle),
@@ -2449,6 +2423,65 @@ class _OverlapBar extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Paints the striped part of an [_OverlapBar]: its box, its ends rounded
+/// by half its height, or by half its width where it is narrower, filled
+/// with [tint] and striped with [stripe], each stripe rising at 45 degrees
+/// from the box's bottom edge toward the end of a line of [textDirection].
+class _StripesPainter extends CustomPainter {
+  const _StripesPainter({
+    required this.tint,
+    required this.stripe,
+    required this.textDirection,
+  });
+
+  final Color tint;
+  final Color stripe;
+  final TextDirection textDirection;
+
+  /// The width of a stripe along the box's width, and of the tint between
+  /// two stripes.
+  static const double _stripeWidth = 3.0;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final box = Offset.zero & size;
+    final radius = math.min(size.width, size.height) / 2.0;
+    canvas
+      ..save()
+      ..clipRRect(RRect.fromRectAndRadius(box, Radius.circular(radius)))
+      ..drawRect(box, Paint()..color = tint);
+    Offset at(double x, double y) {
+      return Offset(textDirection == TextDirection.ltr ? x : size.width - x, y);
+    }
+
+    final stripes = Path();
+    // The first stripe's foot lies a height before the box, so its top
+    // fills the box's first corner.
+    for (
+      var foot = -size.height;
+      foot < size.width;
+      foot += 2.0 * _stripeWidth
+    ) {
+      stripes.addPolygon(<Offset>[
+        at(foot, size.height),
+        at(foot + _stripeWidth, size.height),
+        at(foot + _stripeWidth + size.height, 0.0),
+        at(foot + size.height, 0.0),
+      ], true);
+    }
+    canvas
+      ..drawPath(stripes, Paint()..color = stripe)
+      ..restore();
+  }
+
+  @override
+  bool shouldRepaint(_StripesPainter oldDelegate) {
+    return tint != oldDelegate.tint ||
+        stripe != oldDelegate.stripe ||
+        textDirection != oldDelegate.textDirection;
   }
 }
 
