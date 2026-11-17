@@ -400,8 +400,8 @@ void main() {
     expect(formButton("Delete"), findsNothing);
     expect(timeFieldTakesInput(tester, "Start time"), isFalse);
     final day = tester.widget<InkWell>(
-      find.ancestor(
-        of: find.text("Start date"),
+      find.descendant(
+        of: formDateFinder("Start date"),
         matching: find.byType(InkWell),
       ),
     );

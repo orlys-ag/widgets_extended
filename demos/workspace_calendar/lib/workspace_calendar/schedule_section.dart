@@ -90,6 +90,18 @@ const ValueKey<String> scheduleEndTimeKey = ValueKey<String>(
   "schedule-end-time",
 );
 
+/// The key of the message under the Start row, the form's message keyed
+/// `start` ([ScheduleSection.errors]).
+const ValueKey<String> scheduleStartErrorKey = ValueKey<String>(
+  "schedule-start-error",
+);
+
+/// The key of the message under the End row, the form's message keyed
+/// `end` ([ScheduleSection.errors]).
+const ValueKey<String> scheduleEndErrorKey = ValueKey<String>(
+  "schedule-end-error",
+);
+
 /// The key of the All day switch.
 const ValueKey<String> scheduleAllDayKey = ValueKey<String>("schedule-all-day");
 
@@ -107,11 +119,13 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 
 /// The section of [check]'s schedule: an All day switch, where the kind
 /// takes all-day or the schedule is all-day, which turned off restores the
-/// times the schedule keeps; then a Start row, Start date beside Start time,
-/// above an End row, End date beside End time, each date taking three fifths
-/// of its row; an all-day schedule's rows hold their dates alone. A field's
-/// tap opens its own picker in a panel under the field's row, one of the
-/// four open at a time, the field drawn focused while it is open. A time
+/// times the schedule keeps; then a Start row, Start date beside Start time
+/// under the label "Start", above an End row, End date beside End time
+/// under "End", each date taking three fifths of its row; an all-day
+/// schedule's rows hold their dates alone. Each field is a button that
+/// shows its day or time ([_FieldButton]). A field's tap opens its own
+/// picker in a panel under the field's row, one of the four open at a
+/// time, the field drawn open while it is. A time
 /// field's picker is a [CalendarTimePicker], with its haptic feedback on,
 /// whose Hour column takes the focus. A date field's is a
 /// [CalendarDayPicker] on the week or month of the field's day, that day
@@ -171,9 +185,9 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// day switch. The switch turned on closes an open time picker and takes
 /// the focus from a time field; an open date field keeps its panel, its
 /// picker and the focus whichever way the switch turns.
-/// [errors] holds the form's messages keyed `start` and `end`, which show on
-/// Start time and End time, or for an all-day schedule on Start date and
-/// End date.
+/// [errors] holds the form's messages keyed `start` and `end`, which show
+/// under the Start and End rows and tint Start time and End time with the
+/// soft error colour, or for an all-day schedule Start date and End date.
 class ScheduleSection extends StatefulWidget {
   const ScheduleSection({
     super.key,
@@ -278,6 +292,132 @@ const double _allDaySwitchScale = 0.75;
 /// date three fifths, the time two.
 const int _dateFlex = 3;
 const int _timeFlex = 2;
+
+/// The label above a Start or End row's fields.
+const TextStyle _rowLabelStyle = TextStyle(
+  color: HarborColors.textMuted,
+  fontSize: 12.0,
+  fontWeight: FontWeight.w500,
+);
+
+/// A Start or End row's date or time field: a button, named [name] to a
+/// screen reader, that shows [icon] and [value], and whose tap, [onTap],
+/// opens or closes its picker. A box with rounded corners and no outline
+/// holds them, filled with the page's grey, or where [error] with the soft
+/// error tint, its icon then in the error colour; while [open] it is filled
+/// with the primary tint, and its icon and value drawn in the primary
+/// colour, and it moves from the one look to the other over the
+/// [CalendarTheme]'s motion, or at once where the platform asks for no
+/// animations. A field with no [onTap], which takes no input, shows its
+/// value in the muted colour with no box around it, as text rather than a
+/// button, unless [error] tints it. The value keeps to one line, and
+/// shrinks to fit a box too narrow for it, as a 12-hour time in a narrow
+/// form or under a large text scale, rather than lose its end. A tap
+/// anywhere on the box, [_height] high, reaches [onTap], and [focusNode] is
+/// its [InkWell]'s.
+class _FieldButton extends StatelessWidget {
+  const _FieldButton({
+    required this.name,
+    required this.icon,
+    required this.value,
+    required this.open,
+    required this.error,
+    required this.focusNode,
+    required this.onTap,
+  });
+
+  final String name;
+  final IconData icon;
+  final String value;
+  final bool open;
+  final bool error;
+  final FocusNode focusNode;
+  final VoidCallback? onTap;
+
+  static const BorderRadius _corners = BorderRadius.all(Radius.circular(12.0));
+
+  static const double _height = 44.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = CalendarTheme.of(context);
+    final takesInput = onTap != null;
+    return Semantics(
+      container: true,
+      button: true,
+      enabled: takesInput,
+      label: name,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(end: open ? 1.0 : 0.0),
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : theme.motionDuration,
+        curve: theme.motionCurve,
+        builder: (context, opening, child) {
+          Color between(Color shut, Color opened) {
+            return Color.lerp(shut, opened, opening)!;
+          }
+
+          final shut = error
+              ? HarborColors.errorNotice
+              : takesInput
+              ? HarborColors.background
+              : Colors.transparent;
+          final fill = takesInput
+              ? between(shut, HarborColors.primaryTint)
+              : shut;
+          final ink = takesInput
+              ? between(HarborColors.text, HarborColors.primary)
+              : HarborColors.textMuted;
+          final shutMark = error ? HarborColors.error : HarborColors.textMuted;
+          final mark = takesInput
+              ? between(shutMark, HarborColors.primary)
+              : shutMark;
+          return DecoratedBox(
+            decoration: BoxDecoration(color: fill, borderRadius: _corners),
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                focusNode: focusNode,
+                onTap: onTap,
+                customBorder: const RoundedRectangleBorder(
+                  borderRadius: _corners,
+                ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: _height),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                    child: Row(
+                      children: <Widget>[
+                        Icon(icon, size: 18.0, color: mark),
+                        const SizedBox(width: 8.0),
+                        Expanded(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: AlignmentDirectional.centerStart,
+                            child: Text(
+                              value,
+                              maxLines: 1,
+                              style: TextStyle(
+                                color: ink,
+                                fontSize: 15.0,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
 
 /// The lookups the open picker has made of its [_TimeTable], in debug
 /// builds; the release build counts none.
@@ -591,64 +731,61 @@ class ScheduleSectionState extends State<ScheduleSection> {
   }
 
   /// The Start date or End date field of [row], showing the row's day with
-  /// its weekday ([MaterialLocalizations.formatMediumDate]); its tap opens
-  /// or closes its day picker.
-  Widget _dateField(_TimeField row, {required String? error}) {
+  /// its weekday ([MaterialLocalizations.formatMediumDate]), tinted with the
+  /// soft error colour where [error]; its tap opens or closes its day
+  /// picker.
+  Widget _dateField(_TimeField row, {required bool error}) {
     final field = row.dateField;
     final start = row == _TimeField.start;
     final open = _open == field;
     return Focus(
       key: start ? scheduleStartDateKey : scheduleEndDateKey,
       focusNode: _restNodeOf(field),
-      child: InkWell(
+      child: _FieldButton(
+        name: start ? "Start date" : "End date",
+        icon: Icons.calendar_today_outlined,
+        value: MaterialLocalizations.of(
+          context,
+        ).formatMediumDate(start ? _schedule.startDay : _schedule.endDay),
+        open: open,
+        error: error,
         focusNode: _fieldNodeOf(field),
         onTap: open || _takesInput(field)
             ? () {
                 _tapField(field);
               }
             : null,
-        child: InputDecorator(
-          isFocused: open,
-          decoration: InputDecoration(
-            labelText: start ? "Start date" : "End date",
-            errorText: error,
-          ),
-          child: Text(
-            MaterialLocalizations.of(
-              context,
-            ).formatMediumDate(start ? _schedule.startDay : _schedule.endDay),
-          ),
-        ),
       ),
     );
   }
 
-  /// The Start time or End time field of [row], showing [minute]; its tap
-  /// opens or closes its picker.
+  /// The Start time or End time field of [row], showing [minute], tinted
+  /// with the soft error colour where [error]; its tap opens or closes its
+  /// picker.
   Widget _timeField(
     _TimeField row, {
-    required String label,
     required int minute,
-    required String? error,
+    required bool error,
   }) {
     final strings = CalendarLocalizations.of(context);
     final field = row.timeField;
+    final start = row == _TimeField.start;
     final open = _open == field;
     return Focus(
-      key: row == _TimeField.start ? scheduleStartTimeKey : scheduleEndTimeKey,
+      key: start ? scheduleStartTimeKey : scheduleEndTimeKey,
       focusNode: _restNodeOf(field),
-      child: InkWell(
+      child: _FieldButton(
+        name: start ? "Start time" : "End time",
+        icon: Icons.schedule,
+        value: strings.formatTime(minute, widget.hourLabelFormat),
+        open: open,
+        error: error,
         focusNode: _fieldNodeOf(field),
         onTap: open || _takesInput(field)
             ? () {
                 _tapField(field);
               }
             : null,
-        child: InputDecorator(
-          isFocused: open,
-          decoration: InputDecoration(labelText: label, errorText: error),
-          child: Text(strings.formatTime(minute, widget.hourLabelFormat)),
-        ),
       ),
     );
   }
@@ -862,9 +999,12 @@ class ScheduleSectionState extends State<ScheduleSection> {
   }
 
   /// The Start or End row of [row], above the panel that holds the picker
-  /// of the row's open field: its date field, and for a timed schedule its
-  /// time field beside it, the date taking three fifths of the row; [error]
-  /// shows on the time field, or for an all-day schedule on the date field.
+  /// of the row's open field: under the label "Start" or "End", its date
+  /// field, and for a timed schedule its time field beside it, the date
+  /// taking three fifths of the row; [error] shows under the fields and
+  /// tints the time field, or for an all-day schedule the date field, with
+  /// the soft error colour. A screen reader skips the label, as each field
+  /// names itself ([_FieldButton]).
   /// The date field and the panel keep their places in the tree whichever
   /// way All day turns, and with them the panel's state and the field's
   /// focus: a [Focus] that leaves the tree drops its focus. So does each
@@ -880,12 +1020,18 @@ class ScheduleSectionState extends State<ScheduleSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        ExcludeSemantics(
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 6.0),
+            child: Text(start ? "Start" : "End", style: _rowLabelStyle),
+          ),
+        ),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Expanded(
               flex: timed ? _dateFlex : 1,
-              child: _dateField(row, error: timed ? null : error),
+              child: _dateField(row, error: !timed && error != null),
             ),
             if (timed) ...<Widget>[
               const SizedBox(width: 12.0),
@@ -893,14 +1039,22 @@ class ScheduleSectionState extends State<ScheduleSection> {
                 flex: _timeFlex,
                 child: _timeField(
                   row,
-                  label: start ? "Start time" : "End time",
                   minute: start ? schedule.startMinute : schedule.endMinute,
-                  error: error,
+                  error: error != null,
                 ),
               ),
             ],
           ],
         ),
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6.0),
+            child: Text(
+              error,
+              key: start ? scheduleStartErrorKey : scheduleEndErrorKey,
+              style: const TextStyle(color: HarborColors.error, fontSize: 12.0),
+            ),
+          ),
         _PickerPanel(
           key: start ? scheduleStartPanelKey : scheduleEndPanelKey,
           open: open != null && open.row == row,

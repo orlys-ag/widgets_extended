@@ -181,15 +181,11 @@ void main() {
       },
     );
     await openForm(tester, store);
-    for (final label in <String>[
-      "Start date",
-      "Start time",
-      "End date",
-      "End time",
-      "All day",
-    ]) {
+    for (final label in <String>["Start", "End", "All day"]) {
       expect(find.text(label), findsOneWidget, reason: label);
     }
+    expect(timeFieldFinder("Start time"), findsOneWidget);
+    expect(timeFieldFinder("End time"), findsOneWidget);
     expect(formDateShows("Start date", "2026-04-22"), findsOneWidget);
     expect(formDateShows("End date", "2026-04-23"), findsOneWidget);
 
@@ -197,8 +193,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(timeFieldFinder("Start time"), findsNothing);
     expect(timeFieldFinder("End time"), findsNothing);
-    expect(find.text("Start date"), findsOneWidget);
-    expect(find.text("End date"), findsOneWidget);
+    expect(formDateFinder("Start date"), findsOneWidget);
+    expect(formDateFinder("End date"), findsOneWidget);
 
     await tester.tap(find.widgetWithText(FilledButton, "Save"));
     await tester.pumpAndSettle();
