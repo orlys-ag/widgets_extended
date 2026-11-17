@@ -4845,35 +4845,34 @@ void main() {
     expect(focusUnder(find.byKey(scheduleEndDateKey)), isTrue);
   });
 
-  testWidgets("IP9 each opening of Start date's picker shows it folded, a "
-      "reopening while the panel closes or swaps out the day picker "
-      "included", (tester) async {
+  testWidgets("IP9 each opening of Start date's picker builds a new one, on "
+      "the field's own month in the view the last one left, a reopening "
+      "while the panel closes or swaps out the day picker included", (
+    tester,
+  ) async {
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
       theme: motionTheme,
     );
     final picker = dayPickerFinder("Start date");
-    Future<void> unfold() async {
-      await tester.tap(
-        find.descendant(of: picker, matching: find.byKey(calendarPullTabKey)),
-      );
-      await tester.pumpAndSettle();
-      // Setup sanity: the picker shows its month.
-      expect(
-        find.descendant(
-          of: picker,
-          matching: find.byType(MonthStrip<ItemPayload>),
-        ),
-        findsOneWidget,
-      );
+    Finder inPicker(Finder finder) {
+      return find.descendant(of: picker, matching: finder);
     }
 
-    void expectFolded(String step) {
+    /// Browses the open picker's month on to May.
+    Future<void> browseOn() async {
+      await tester.tap(inPicker(find.byTooltip("Next month")));
+      await tester.pumpAndSettle();
+      // Setup sanity: the picker browsed to May.
+      expect(inPicker(find.text("May 2026")), findsOneWidget);
+    }
+
+    void expectNew(String step) {
       expect(
         find.descendant(
           of: pickerPanel("Start date"),
-          matching: find.byType(WeekStrip<ItemPayload>),
+          matching: find.byType(MonthStrip<ItemPayload>),
         ),
         findsOneWidget,
         reason: step,
@@ -4881,16 +4880,18 @@ void main() {
       expect(
         find.descendant(
           of: pickerPanel("Start date"),
-          matching: find.byType(MonthStrip<ItemPayload>),
+          matching: find.text("Apr 2026"),
         ),
-        findsNothing,
+        findsOneWidget,
         reason: step,
       );
     }
 
     await tester.tap(formDateFinder("Start date"));
     await tester.pumpAndSettle();
-    await unfold();
+    await tester.tap(inPicker(find.byKey(calendarPullTabKey)));
+    await tester.pumpAndSettle();
+    await browseOn();
     await tester.tap(formDateFinder("Start date"));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 120));
@@ -4898,9 +4899,9 @@ void main() {
     expect(panelHeight(tester, "Start date"), greaterThan(0.0));
     await tester.tap(formDateFinder("Start date"));
     await tester.pumpAndSettle();
-    expectFolded("reopened while it closed");
+    expectNew("reopened while it closed");
 
-    await unfold();
+    await browseOn();
     await tester.tap(timeFieldFinder("Start time"));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 120));
@@ -4908,7 +4909,7 @@ void main() {
     expect(picker, findsOneWidget);
     await tester.tap(formDateFinder("Start date"));
     await tester.pumpAndSettle();
-    expectFolded("reopened while it swapped out");
+    expectNew("reopened while it swapped out");
   });
 
   testWidgets("IP10 the section reads its check's day ranges once per "
@@ -5298,6 +5299,11 @@ void main() {
         moreOrLessEquals(right),
         reason: date,
       );
+      // Folded back, so the next picker opens on its week row.
+      await tester.tap(
+        find.descendant(of: picker, matching: find.byKey(calendarPullTabKey)),
+      );
+      await tester.pumpAndSettle();
       await closeDayPicker(tester, date);
     }
   });
@@ -5425,6 +5431,62 @@ void main() {
     await tester.tap(inPicker("Start date", find.byTooltip("Previous week")));
     await tester.pumpAndSettle();
     expect(shows("Start date", DateTime(2026, 4, 13)), isTrue);
+  });
+
+  testWidgets("IP19 a day picker opens on the view the last one turned to, "
+      "on its own day: End date's on its month where Start date's unfolded, "
+      "Start date's on the month picker of its own year where End date's "
+      "opened it, closing on the month; a fold brings the week row back in "
+      "the next one, and the same field reopened opens on its last view", (
+    tester,
+  ) async {
+    await pumpSection(
+      tester,
+      checkOf(
+        CalendarSchedule.of(
+          DateTime(2026, 12, 30, 9),
+          DateTime(2027, 1, 2, 10),
+          isAllDay: false,
+        ),
+      ),
+    );
+    Finder inPicker(String label, Finder finder) {
+      return find.descendant(of: dayPickerFinder(label), matching: finder);
+    }
+
+    Future<void> tapIn(String label, Finder finder) async {
+      await tester.tap(inPicker(label, finder));
+      await tester.pumpAndSettle();
+    }
+
+    await openDayPicker(tester, "Start date");
+    await tapIn("Start date", find.byKey(calendarPullTabKey));
+    // Setup sanity: the pull tab unfolded Start date's picker.
+    expect(inPicker("Start date", find.byTooltip("Next month")), findsOne);
+    await openDayPicker(tester, "End date");
+    expect(inPicker("End date", find.byTooltip("Next month")), findsOne);
+    expect(inPicker("End date", find.text("Jan 2027")), findsOne);
+
+    await tapIn("End date", find.byTooltip("Pick a month"));
+    await openDayPicker(tester, "Start date");
+    expect(
+      inPicker("Start date", find.byTooltip("Close the months")),
+      findsOne,
+    );
+    expect(inPicker("Start date", find.text("2026")), findsOne);
+    await tapIn("Start date", find.byTooltip("Close the months"));
+    expect(inPicker("Start date", find.byTooltip("Next month")), findsOne);
+
+    await tapIn("Start date", find.byKey(calendarPullTabKey));
+    await openDayPicker(tester, "End date");
+    expect(inPicker("End date", find.byTooltip("Next week")), findsOne);
+
+    await tapIn("End date", find.byKey(calendarPullTabKey));
+    await closeDayPicker(tester, "End date");
+    // Setup sanity: the picker closed.
+    expect(dayPickerFinder("End date"), findsNothing);
+    await openDayPicker(tester, "End date");
+    expect(inPicker("End date", find.byTooltip("Next month")), findsOne);
   });
 }
 

@@ -924,7 +924,12 @@ With `browsesBeforeFirstDay` false it browses to no week, month or year
 before those of `firstDay`, or of the value where that is earlier: its week
 row and month stop there whether a chevron, a swipe or a fold moves them,
 its previous chevron draws disabled there, and its month picker draws the
-months before that month disabled and takes no tap on them.
+months before that month disabled and takes no tap on them. It opens on
+`initialView`, a `CalendarDayPickerView` of whether it is folded and
+whether its month picker shows, by default folded with the month picker
+closed, and reports the view each fold, unfold, and opening or closing of
+the month picker turns it to through `onViewChanged`, so a host can open
+its next picker on the view its last one showed.
 - Added `CalendarScheduleCheck.firstStartDay`, the first day a new start
 may lie on as the policy's earliest starts of yesterday and today say, and
 `CalendarScheduleCheck.endDays`, the days the schedule's end may lie on:

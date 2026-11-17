@@ -578,7 +578,11 @@ By default it pads its sides by 8 logical pixels and centres each day's
 circle in its column; set `daysToEdges` to have the circles of the first
 and last columns reach its sides instead, so its days line up with the
 fields above and below it. An edge column's badges then draw up to 5
-logical pixels past its sides.
+logical pixels past its sides. It opens on `initialView`, by default folded
+with the month picker closed, and reports the view each fold, unfold, and
+opening or closing of the month picker turns it to through
+`onViewChanged`, as a `CalendarDayPickerView`; keep the last one to open
+your next picker on the view the user left.
 
 **Editing.** With `editable: true`, Week's and Day's blocks move and
 resize, and a create gesture reports a `CalendarCreateDetails` through

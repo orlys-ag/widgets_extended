@@ -102,30 +102,32 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 
 /// The section of [check]'s schedule: an All day switch, where the kind
 /// takes all-day or the schedule is all-day, which turned off restores the
-/// times the schedule keeps; then a Start row, Start date beside Start
-/// time, above an End row, End date beside End time, each date taking
-/// three fifths of its row; an all-day schedule's rows hold their dates
-/// alone. A field's tap opens its own picker in a panel under the field's
-/// row, one of the four open at a time, the field drawn focused while it
-/// is open. A time field's picker is a [CalendarTimePicker], with its
-/// haptic feedback on, whose Hour column takes the focus. A date field's is
-/// a [CalendarDayPicker], folded on the week of the field's day, that day
+/// times the schedule keeps; then a Start row, Start date beside Start time,
+/// above an End row, End date beside End time, each date taking three fifths
+/// of its row; an all-day schedule's rows hold their dates alone. A field's
+/// tap opens its own picker in a panel under the field's row, one of the
+/// four open at a time, the field drawn focused while it is open. A time
+/// field's picker is a [CalendarTimePicker], with its haptic feedback on,
+/// whose Hour column takes the focus. A date field's is a
+/// [CalendarDayPicker] on the week or month of the field's day, that day
 /// selected and the [CalendarNow.today] of [now] ringed, its weeks starting
-/// on the weekday column [firstColumn], and its days with entries of
-/// [store] badged as [dayBadges] marks them, the circles of its first and
-/// last columns on the row's sides
-/// ([CalendarDayPicker.daysToEdges]); the field keeps the focus. A
-/// tap on a day there moves the field's day to it and leaves the picker
-/// open, and its chevrons, swipes and month picks only browse, End date's
-/// to no week, month or year before the start day's
-/// ([CalendarDayPicker.browsesBeforeFirstDay]). Each opening
-/// of a date field shows its picker folded. A day picker draws disabled,
-/// and takes no tap on, the days its check's day answers rule out: Start
-/// date's those before [CalendarScheduleCheck.firstStartDay], End date's
-/// those outside [CalendarScheduleCheck.endDays]; the section reads them
-/// of each check once, as a day picker first builds under it. Times are
-/// written on [hourLabelFormat]'s clock. [ScheduleHeading] shows the
-/// schedule's length and zone, and [ScheduleOverlapNotice] its overlaps.
+/// on the weekday column [firstColumn], and its days with entries of [store]
+/// badged as [dayBadges] marks them, the circles of its first and last
+/// columns on the row's sides ([CalendarDayPicker.daysToEdges]); the field
+/// keeps the focus. A tap on a day there moves the field's day to it and
+/// leaves the picker open, and its chevrons, swipes and month picks only
+/// browse, End date's to no week, month or year before the start day's
+/// ([CalendarDayPicker.browsesBeforeFirstDay]). Each opening of a date field
+/// shows its picker on the view either picker last turned to
+/// ([CalendarDayPicker.onViewChanged]): folded into its week row or unfolded
+/// into its month, and the month picker open or not, folded at first. A day
+/// picker draws disabled, and takes no tap on, the days its check's day
+/// answers rule out: Start date's those before
+/// [CalendarScheduleCheck.firstStartDay], End date's those outside
+/// [CalendarScheduleCheck.endDays]; the section reads them of each check
+/// once, as a day picker first builds under it. Times are written on
+/// [hourLabelFormat]'s clock. [ScheduleHeading] shows the schedule's length
+/// and zone, and [ScheduleOverlapNotice] its overlaps.
 ///
 /// A panel grows and fades in as its field's tap opens it, and shrinks and
 /// fades out as that field's tap closes it, over the [CalendarTheme]'s
@@ -383,9 +385,14 @@ class ScheduleSectionState extends State<ScheduleSection> {
   _ScheduleField? _open;
 
   /// How many times each date field has opened its picker, which keys the
-  /// row's day picker, so that each opening builds a new one, folded.
+  /// row's day picker, so that each opening builds a new one, on
+  /// [_dayPickerView].
   int _startDateOpenings = 0;
   int _endDateOpenings = 0;
+
+  /// The view either day picker last turned to, which the next one opens
+  /// on; read only as a day picker is made, so a change needs no build.
+  CalendarDayPickerView _dayPickerView = const CalendarDayPickerView();
 
   /// Each field's picker's table, kept across builds while it holds.
   final Map<_TimeField, _TimeTable> _tables = <_TimeField, _TimeTable>{};
@@ -804,13 +811,14 @@ class ScheduleSectionState extends State<ScheduleSection> {
     return row == _TimeField.start ? _startRange : _endRange;
   }
 
-  /// [row]'s day picker, folded on the week of the row's day, that day
+  /// [row]'s day picker, on the week or month of the row's day, that day
   /// selected and [ScheduleSection.now]'s today ringed, taking the days of
-  /// [_dayRangeOf], End date's browsing back no further than the first
-  /// of them. Keyed by the row's openings, so each opening of its
-  /// date field builds a new one, folded, whatever the last one showed. A
-  /// tap on a day moves the row's day to it; the picker takes no pick while
-  /// its panel closes or swaps it out, or where the field takes no input.
+  /// [_dayRangeOf], End date's browsing back no further than the first of
+  /// them. Keyed by the row's openings, so each opening of its date field
+  /// builds a new one, on the view either picker last turned to,
+  /// [_dayPickerView]. A tap on a day moves the row's day to it; the picker
+  /// takes no pick while its panel closes or swaps it out, or where the
+  /// field takes no input.
   Widget _dayPicker(_TimeField row) {
     final schedule = _schedule;
     final start = row == _TimeField.start;
@@ -835,6 +843,10 @@ class ScheduleSectionState extends State<ScheduleSection> {
       dayBadges: widget.dayBadges,
       daysToEdges: true,
       browsesBeforeFirstDay: start,
+      initialView: _dayPickerView,
+      onViewChanged: (view) {
+        _dayPickerView = view;
+      },
     );
   }
 

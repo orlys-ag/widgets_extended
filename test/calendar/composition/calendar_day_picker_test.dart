@@ -3,8 +3,8 @@
 /// report under each setting, the days its first and last day and its
 /// predicate refuse, when it asks the predicate, what a store given in a
 /// later build reads, where its days and its previous chevron lie with
-/// daysToEdges, and the weeks, months and years it browses back to with
-/// browsesBeforeFirstDay false.
+/// daysToEdges, the weeks, months and years it browses back to with
+/// browsesBeforeFirstDay false, and the view it opens on and reports.
 library;
 
 import 'dart:async';
@@ -64,6 +64,17 @@ List<DateTime> daysFrom(DateTime first, int count) {
     for (var offset = 0; offset < count; offset++)
       CalendarDates.addDays(first, offset),
   ];
+}
+
+/// Whether every [Opacity] above what [finder] finds paints it whole.
+bool opaque(WidgetTester tester, Finder finder) {
+  return tester
+      .widgetList<Opacity>(
+        find.ancestor(of: finder, matching: find.byType(Opacity)),
+      )
+      .every((opacity) {
+        return opacity.opacity == 1.0;
+      });
 }
 
 /// [picker] under a MaterialApp, at the top of a 400-pixel-wide column.
@@ -954,6 +965,155 @@ void main() {
     expect(previous.left, moreOrLessEquals(monday.left));
     expect(previous.right, moreOrLessEquals(monday.right));
     semantics.dispose();
+  });
+
+  testWidgets("DP13 an unfold, a fold, and the month picker opening and "
+      "closing, by a tap or a month pick, report the view they turn to "
+      "through onViewChanged as they start; opening and a chevron report "
+      "nothing", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final reported = <CalendarDayPickerView>[];
+    await tester.pumpWidget(
+      app(
+        CalendarDayPicker<String>(
+          value: tuesday,
+          onChanged: (day) {},
+          onViewChanged: reported.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(reported, isEmpty);
+    await tester.tap(find.byTooltip("Next week"));
+    await tester.pumpAndSettle();
+    // Setup sanity: the chevron moved the card.
+    expect(shows(DateTime(2026, 4, 28)), isTrue);
+    expect(reported, isEmpty);
+
+    await tester.tap(find.bySemanticsLabel("Show the month"));
+    await tester.pump();
+    expect(reported, <CalendarDayPickerView>[
+      const CalendarDayPickerView(folded: false),
+    ]);
+    await tester.pumpAndSettle();
+    reported.clear();
+    await tester.tap(find.byTooltip("Pick a month"));
+    await tester.pump();
+    expect(reported, <CalendarDayPickerView>[
+      const CalendarDayPickerView(folded: false, picksMonth: true),
+    ]);
+    await tester.pumpAndSettle();
+    reported.clear();
+    await tester.tap(find.text("June"));
+    await tester.pump();
+    expect(reported, <CalendarDayPickerView>[
+      const CalendarDayPickerView(folded: false),
+    ]);
+    await tester.pumpAndSettle();
+
+    reported.clear();
+    await tester.tap(find.byTooltip("Pick a month"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("Close the months"));
+    await tester.pumpAndSettle();
+    expect(reported, <CalendarDayPickerView>[
+      const CalendarDayPickerView(folded: false, picksMonth: true),
+      const CalendarDayPickerView(folded: false),
+    ]);
+    reported.clear();
+    await tester.tap(find.bySemanticsLabel("Show the week"));
+    await tester.pump();
+    expect(reported, <CalendarDayPickerView>[const CalendarDayPickerView()]);
+    semantics.dispose();
+  });
+
+  testWidgets("DP14 the picker opens on initialView at once: unfolded on the "
+      "value's month, or on the month picker of the value's year over the "
+      "week row or the month, which closing it shows; a later build's "
+      "initialView leaves the view", (tester) async {
+    final semantics = tester.ensureSemantics();
+    // A Tuesday in a year after today's.
+    final value = DateTime(2027, 6, 15);
+    Widget picker(CalendarDayPickerView view, {Key? key}) {
+      return app(
+        CalendarDayPicker<String>(
+          key: key,
+          value: value,
+          today: tuesday,
+          onChanged: (day) {},
+          initialView: view,
+        ),
+      );
+    }
+
+    Size pickerSize() {
+      return tester.getSize(find.byType(CalendarDayPicker<String>));
+    }
+
+    await tester.pumpWidget(picker(const CalendarDayPickerView(folded: false)));
+    final unfolded = pickerSize();
+    expect(find.byTooltip("Next month"), findsOneWidget);
+    expect(shows(DateTime(2027, 6, 1)), isTrue);
+    await tester.pumpAndSettle();
+    expect(pickerSize(), unfolded);
+
+    await tester.pumpWidget(
+      picker(
+        const CalendarDayPickerView(picksMonth: true),
+        key: const ValueKey<String>("over-week"),
+      ),
+    );
+    final picking = pickerSize();
+    expect(find.text("2027"), findsOneWidget);
+    expect(find.text("June").hitTestable(), findsOneWidget);
+    expect(opaque(tester, find.text("June")), isTrue);
+    await tester.pumpAndSettle();
+    expect(pickerSize(), picking);
+    await tester.tap(find.byTooltip("Close the months"));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip("Next week"), findsOneWidget);
+
+    const overMonth = ValueKey<String>("over-month");
+    await tester.pumpWidget(
+      picker(
+        const CalendarDayPickerView(folded: false, picksMonth: true),
+        key: overMonth,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("Close the months"));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip("Next month"), findsOneWidget);
+    await tester.pumpWidget(
+      picker(const CalendarDayPickerView(), key: overMonth),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byTooltip("Next month"), findsOneWidget);
+    semantics.dispose();
+  });
+
+  test("DP15 a CalendarDayPickerView equals one of the same fields, with "
+      "the same hash code, and names its fields", () {
+    expect(const CalendarDayPickerView().folded, isTrue);
+    expect(const CalendarDayPickerView().picksMonth, isFalse);
+    // Views made at run time, as two equal constants are one object.
+    final fields = <bool>[false, true];
+    final view = CalendarDayPickerView(
+      folded: fields[0],
+      picksMonth: fields[1],
+    );
+    final same = CalendarDayPickerView(
+      folded: fields[0],
+      picksMonth: fields[1],
+    );
+    expect(view, same);
+    expect(view, isNot(const CalendarDayPickerView(picksMonth: true)));
+    expect(view, isNot(const CalendarDayPickerView(folded: false)));
+    expect(view.hashCode, same.hashCode);
+    expect(
+      view.toString(),
+      "CalendarDayPickerView(folded: false, picksMonth: true)",
+    );
   });
 }
 
