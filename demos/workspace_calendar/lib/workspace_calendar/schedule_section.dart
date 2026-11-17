@@ -1122,22 +1122,28 @@ class ScheduleHeading extends StatelessWidget {
 /// check's start is fixed.
 ///
 /// Under them lies a card per overlapped item, in the order of their starts
-/// and then their ends. A white card, its type's edge colour down its
-/// leading side, holds its type's icon and its title across the card, its
-/// times under the title, the time it shares with the schedule, or "Covers
-/// all of this item" where that is all of it, in a chip, and a bar zoomed
-/// on the shared time; where the rules refuse its overlap, its chip, its
-/// border and its bar's shared column are soft red. The bar's axis reaches
-/// the shared time's length past each of its ends, within the two items'
-/// times, so the shared time fills a third of it or more; on it a lane of
-/// the schedule's times, "This", lies above one of the item's, "Other", in
-/// the item's colour, over a tinted column of the shared time, and the
-/// axis's first and last times lie under its ends.
+/// and then their ends. A white card, outlined in the item's colour, its
+/// type's edge colour down its leading side, holds its type's icon and its
+/// title across the card, its times under the title, the time it shares
+/// with the schedule, or "Covers all of this item" where that is all of it,
+/// in a chip, and a bar zoomed on the shared time; where the rules refuse
+/// its overlap, its chip and its bar's shared column are soft red. The
+/// bar's axis reaches the shared time's length past each of its ends,
+/// within the two items' times, so the shared time fills a third of it or
+/// more; on it a lane of the schedule's times, "This", lies above one of
+/// the item's, "Other", in the item's colour, over a tinted column of the
+/// shared time, and the axis's first and last times lie under its ends.
 /// Times are written on [hourLabelFormat]'s clock, an end at a day's start
 /// as the 24:00 of the day before, and a range that runs past the
 /// schedule's start day with the weekday of each end. The notice shows its
 /// first [shownCards] cards and a button that shows the rest, which then
 /// shows fewer again.
+///
+/// The cards are the rows of a [SyncedSliverTree]: a card that comes, as
+/// the button shows it or the schedule comes to overlap its item, grows in;
+/// one that goes shrinks out still showing what it showed; and one whose
+/// place changes slides to it; each over the [CalendarTheme]'s motion, or
+/// at once where the platform asks for no animations.
 ///
 /// The notice is soft yellow ([HarborColors.notice]), or soft red
 /// ([HarborColors.errorNotice]) where the rules refuse an overlap.
@@ -1209,6 +1215,17 @@ class _ScheduleOverlapNoticeState extends State<ScheduleOverlapNotice> {
         : overlaps;
     final times = check.schedule.timesOn(widget.zone);
     final day = CalendarDates.dayNumber(check.schedule.startDay);
+    final rows = <_OverlapRow>[
+      for (final item in shown)
+        (item: item, times: times, day: day, refused: refused.contains(item)),
+    ];
+    final theme = CalendarTheme.of(context);
+    final motion = MediaQuery.disableAnimationsOf(context)
+        ? TreeAnimationStyle.disabled
+        : TreeAnimationStyle.uniform(
+            duration: theme.motionDuration,
+            curve: theme.motionCurve,
+          );
     return DecoratedBox(
       key: scheduleOverlapKey,
       decoration: BoxDecoration(
@@ -1264,16 +1281,40 @@ class _ScheduleOverlapNoticeState extends State<ScheduleOverlapNotice> {
                   ),
               ],
             ),
-            for (final item in shown) ...<Widget>[
-              const SizedBox(height: 8.0),
-              _OverlapCard(
-                item: item,
-                times: times,
-                day: day,
-                refused: refused.contains(item),
-                hourLabelFormat: format,
-              ),
-            ],
+            CustomScrollView(
+              shrinkWrap: true,
+              // The form's scroll view, not this one, takes the route's
+              // PrimaryScrollController.
+              primary: false,
+              physics: const NeverScrollableScrollPhysics(),
+              slivers: <Widget>[
+                SyncedSliverTree<Object, _OverlapRow>.flat(
+                  items: rows,
+                  keyOf: (row) {
+                    return row.item.id ?? row.item;
+                  },
+                  parentOf: (row) {
+                    return null;
+                  },
+                  animationStyle: motion,
+                  itemBuilder: (context, node) {
+                    final row = node.item;
+                    // The gap lies inside the row, so it grows and shrinks
+                    // with its card.
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: _OverlapCard(
+                        item: row.item,
+                        times: row.times,
+                        day: row.day,
+                        refused: row.refused,
+                        hourLabelFormat: format,
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
             if (folds)
               Align(
                 alignment: AlignmentDirectional.centerStart,
@@ -1394,6 +1435,18 @@ DateTime _earlier(DateTime a, DateTime b) {
 DateTime _later(DateTime a, DateTime b) {
   return b.isAfter(a) ? b : a;
 }
+
+/// A row of the [ScheduleOverlapNotice]'s cards: the overlapped [item], the
+/// schedule's [times] and the number of its start [day], which its card
+/// reads [item] against, and whether the rules have [refused] the overlap.
+/// A row holds all its card shows, so a card that leaves shows, while it
+/// shrinks, what it showed before the schedule changed.
+typedef _OverlapRow = ({
+  CalendarItem item,
+  _Range? times,
+  int day,
+  bool refused,
+});
 
 /// An overlapped [item]'s card in the [ScheduleOverlapNotice].
 class _OverlapCard extends StatelessWidget {
@@ -1579,11 +1632,7 @@ class _OverlapCard extends StatelessWidget {
       key: id == null ? null : scheduleOverlapCardKey(id),
       decoration: BoxDecoration(
         color: HarborColors.surface,
-        border: Border.all(
-          color: refused
-              ? HarborColors.errorNoticeEdge
-              : HarborColors.noticeEdge,
-        ),
+        border: Border.all(color: item.color),
         borderRadius: BorderRadius.circular(_radius),
       ),
       child: ClipRRect(
