@@ -841,7 +841,10 @@ void main() {
     expect(formDateShows("End date", "2026-04-22"), findsOneWidget);
     await pickFormDay(tester, "End date", DateTime(2026, 4, 23));
     expect(formDateShows("End date", "2026-04-23"), findsOneWidget);
-    expect(formSchedule(tester), "Wed, Apr 22, 09:00\nThu, Apr 23, 10:00\n25h");
+    expect(
+      formSchedule(tester),
+      "Wed, Apr 22, 09:00\nThu, Apr 23, 10:00\n1d 1h",
+    );
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
@@ -3214,11 +3217,13 @@ void main() {
     }
   });
 
-  testWidgets("FS2 the pill writes a timed schedule's hours and minutes, on "
-      "one day or across days, and an all-day one's All day for one day or "
-      "its count of days for more, across a change of the clock "
+  testWidgets("FS2 the pill writes a timed schedule's days, hours and "
+      "minutes, each that is not none, a day being 24 hours of the wall "
+      "clock, and an all-day one's All day for one day or All day and its "
+      "count of days in parentheses for more, across a change of the clock "
       "included", (tester) async {
     for (final (schedule, pill) in <(CalendarSchedule, String)>[
+      (CalendarSchedule.of(at(9), at(9, 45), isAllDay: false), "45m"),
       (CalendarSchedule.of(at(9), at(10), isAllDay: false), "1h"),
       (CalendarSchedule.of(at(9), at(10, 30), isAllDay: false), "1h 30m"),
       (
@@ -3226,16 +3231,56 @@ void main() {
         "4h",
       ),
       (
+        CalendarSchedule.of(at(9), DateTime(2026, 4, 23, 9), isAllDay: false),
+        "1d",
+      ),
+      (
+        CalendarSchedule.of(
+          at(9),
+          DateTime(2026, 4, 23, 9, 30),
+          isAllDay: false,
+        ),
+        "1d 30m",
+      ),
+      (
+        CalendarSchedule.of(at(9), DateTime(2026, 4, 23, 11), isAllDay: false),
+        "1d 2h",
+      ),
+      (
+        CalendarSchedule.of(
+          at(9),
+          DateTime(2026, 4, 24, 11, 30),
+          isAllDay: false,
+        ),
+        "2d 2h 30m",
+      ),
+      (
+        CalendarSchedule.of(at(9), DateTime(2026, 4, 24, 9), isAllDay: false),
+        "2d",
+      ),
+      // Havana's clock skips its midnight on March 8, and Santiago's repeats
+      // an hour on April 4; across each, the same time the next day is one
+      // day on.
+      for (final day in <DateTime>[DateTime(2026, 3, 7), DateTime(2026, 4, 4)])
+        (
+          CalendarSchedule.of(
+            DateTime(day.year, day.month, day.day, 9),
+            DateTime(day.year, day.month, day.day + 1, 9),
+            isAllDay: false,
+          ),
+          "1d",
+        ),
+      (
         CalendarSchedule.of(wednesday, DateTime(2026, 4, 23), isAllDay: true),
         "All day",
       ),
       (
         CalendarSchedule.of(wednesday, DateTime(2026, 4, 24), isAllDay: true),
-        "2 days",
+        "All day (2 days)",
       ),
       (
         CalendarSchedule.of(wednesday, DateTime(2026, 4, 25), isAllDay: true),
-        "3 days",
+        "All day (3 days)",
       ),
       // Havana's clock skips its midnight on March 8 and repeats an hour on
       // November 1; each is one day of the count.
@@ -3245,7 +3290,7 @@ void main() {
           DateTime(2026, 3, 10),
           isAllDay: true,
         ),
-        "3 days",
+        "All day (3 days)",
       ),
       (
         CalendarSchedule.of(
@@ -3253,7 +3298,7 @@ void main() {
           DateTime(2026, 11, 3),
           isAllDay: true,
         ),
-        "3 days",
+        "All day (3 days)",
       ),
     ]) {
       await pumpSection(tester, checkOf(schedule));
@@ -4009,7 +4054,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(formDateShows("Start date", "2026-04-24"), findsOneWidget);
     expect(formDateShows("End date", "2026-04-25"), findsOneWidget);
-    expect(formSchedule(tester), "Fri, Apr 24, 09:00\nSat, Apr 25, 10:00\n25h");
+    expect(
+      formSchedule(tester),
+      "Fri, Apr 24, 09:00\nSat, Apr 25, 10:00\n1d 1h",
+    );
   });
 
   testWidgets("IP3 Start date's panel grows and fades in over the theme's "

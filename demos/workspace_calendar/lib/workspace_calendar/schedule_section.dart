@@ -16,9 +16,9 @@ import 'calendar_item.dart';
 import 'harbor_theme.dart';
 
 /// The key of the text of the heading's length pill, after its title: the
-/// length of a timed schedule of a positive length, or of an all-day
-/// schedule, "All day" for one day and its count of days, such as "3 days",
-/// for more.
+/// length of a timed schedule of a positive length, such as "1d 2h 30m",
+/// or of an all-day schedule, "All day" for one day and "All day" with its
+/// count of days in parentheses, such as "All day (3 days)", for more.
 const ValueKey<String> scheduleLengthKey = ValueKey<String>("schedule-length");
 
 /// The key of the heading's zone box, at its right end: the zone's city or
@@ -921,32 +921,35 @@ class ScheduleSectionState extends State<ScheduleSection> {
   }
 }
 
-/// [minutes] written in hours and minutes, as "1h 30m", "2h" or "45m".
+/// [minutes], a positive count of wall minutes, written in days of 24
+/// hours, hours and minutes, each that is not none, as "2d 4h 30m", "1d",
+/// "1h 30m" or "45m".
 String _lengthLabel(int minutes) {
-  final hours = minutes ~/ 60;
+  assert(minutes > 0);
+  final days = minutes ~/ CalendarDates.minutesPerDay;
+  final hours = minutes % CalendarDates.minutesPerDay ~/ 60;
   final rest = minutes % 60;
-  if (hours == 0) {
-    return "${rest}m";
-  }
-  if (rest == 0) {
-    return "${hours}h";
-  }
-  return "${hours}h ${rest}m";
+  return <String>[
+    if (days > 0) "${days}d",
+    if (hours > 0) "${hours}h",
+    if (rest > 0) "${rest}m",
+  ].join(" ");
 }
 
 /// The form's heading: its [title], and 8 pixels after it, where the
-/// schedule has a length to show, a pill with a timer icon before
-/// [check]'s schedule's length: an all-day schedule's "All day" for one
-/// day, or its count of civil days, such as "3 days", for more; or a timed
-/// schedule's hours and minutes, where it is positive. At the heading's
+/// schedule has a length to show, a pill with a timer icon before [check]'s
+/// schedule's length: an all-day schedule's "All day" for one day, or
+/// "All day" with its count of civil days in parentheses, such as
+/// "All day (3 days)", for more; or a timed schedule's days, hours and
+/// minutes, such as "1d 2h 30m", where it is positive. At the heading's
 /// right end lies, in a light grey rounded box, [zone]'s name, its city
 /// ([CalendarZonePanel.cityOf]) or, for the device's zone,
 /// [CalendarLocalizations.deviceZoneName], above the zone's offset from UTC
 /// at the start ([CalendarLocalizations.utcOffset]), or at its day's start
 /// where the zone's clock skips the start. The title and the pill centre on
 /// the heading's height. Where the room before the box cannot hold them on
-/// one line, the title wraps; where it cannot hold the pill beside its
-/// gap, the pill shrinks to fit.
+/// one line, the title wraps; where it cannot hold the pill beside its gap,
+/// the pill shrinks to fit.
 class ScheduleHeading extends StatelessWidget {
   const ScheduleHeading({
     super.key,
@@ -997,7 +1000,7 @@ class ScheduleHeading extends StatelessWidget {
     if (schedule.isAllDay) {
       final days =
           CalendarDates.daysBetween(schedule.startDay, schedule.endDay) + 1;
-      return days > 1 ? "$days days" : "All day";
+      return days > 1 ? "All day ($days days)" : "All day";
     }
     if (schedule.lengthMinutes > 0) {
       return _lengthLabel(schedule.lengthMinutes);
