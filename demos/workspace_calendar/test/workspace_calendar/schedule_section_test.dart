@@ -12,6 +12,8 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
+import 'package:flutter/semantics.dart' show SemanticsNode;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
@@ -187,7 +189,8 @@ CalendarScheduleCheck<ItemPayload> checkOf(
 /// the next frame builds the parts of the edit, as the form's does;
 /// otherwise they keep [check]. Under [theme], where given,
 /// they draw and move as that [CalendarTheme] says. They lay out in
-/// [textDirection].
+/// [textDirection], and the section shows the form's messages [errors]
+/// ([ScheduleSection.errors]).
 Future<void> pumpSection(
   WidgetTester tester,
   CalendarScheduleCheck<ItemPayload> check, {
@@ -198,6 +201,7 @@ Future<void> pumpSection(
   bool follows = false,
   CalendarThemeData? theme,
   TextDirection textDirection = TextDirection.ltr,
+  Map<String, String> errors = const <String, String>{},
 }) {
   Widget sectionOf(
     CalendarScheduleCheck<ItemPayload> check,
@@ -215,6 +219,7 @@ Future<void> pumpSection(
           now: now ?? wednesdayStart,
           zone: zone,
           locked: locked,
+          errors: errors,
           onChanged: onChanged,
         ),
         ScheduleOverlapNotice(
@@ -400,21 +405,19 @@ bool fieldHasFocus(WidgetTester tester, String label) {
       .hasFocus;
 }
 
-/// The messages of the form's scheduling part's fields, in the page's
-/// order: Start date, Start time, End date and End time for a timed
-/// schedule.
-List<String?> scheduleFieldErrors(WidgetTester tester) {
-  return tester
-      .widgetList<InputDecorator>(
-        find.descendant(
-          of: find.byKey(formSchedulingCardKey),
-          matching: find.byType(InputDecorator),
-        ),
-      )
-      .map((decorator) {
-        return decorator.decoration.errorText;
-      })
-      .toList();
+/// The messages under the Start and End rows of the form's scheduling
+/// part, in that order, null for a row with none.
+List<String?> scheduleRowErrors(WidgetTester tester) {
+  return <String?>[
+    for (final key in <ValueKey<String>>[
+      scheduleStartErrorKey,
+      scheduleEndErrorKey,
+    ])
+      if (find.byKey(key).evaluate().isEmpty)
+        null
+      else
+        tester.widget<Text>(find.byKey(key)).data,
+  ];
 }
 
 /// The texts of [elements], [Text] widgets, in their order.
@@ -490,6 +493,42 @@ Color? decorationColor(WidgetTester tester, Finder finder) {
 BorderRadiusGeometry? decorationRadius(WidgetTester tester, Finder finder) {
   final decoration = tester.widget<DecoratedBox>(finder).decoration;
   return (decoration as BoxDecoration).borderRadius;
+}
+
+/// The box of the schedule's field [field] finds: the decoration of the
+/// first [DecoratedBox] under it.
+BoxDecoration fieldBox(WidgetTester tester, Finder field) {
+  return tester
+          .widget<DecoratedBox>(
+            find
+                .descendant(of: field, matching: find.byType(DecoratedBox))
+                .first,
+          )
+          .decoration
+      as BoxDecoration;
+}
+
+/// The colour of the day or time the schedule's field [field] finds shows.
+Color fieldInk(WidgetTester tester, Finder field) {
+  return tester
+      .widget<Text>(find.descendant(of: field, matching: find.byType(Text)))
+      .style!
+      .color!;
+}
+
+/// The semantics node of the button of the schedule's field [field]
+/// finds, the node its [InkWell] lies in, inside the field's [Focus].
+SemanticsNode fieldSemantics(WidgetTester tester, Finder field) {
+  return tester.getSemantics(
+    find.descendant(of: field, matching: find.byType(InkWell)),
+  );
+}
+
+/// The colour of the icon of the schedule's field [field] finds.
+Color fieldMark(WidgetTester tester, Finder field) {
+  return tester
+      .widget<Icon>(find.descendant(of: field, matching: find.byType(Icon)))
+      .color!;
 }
 
 /// The left and right of the part of the bar of the overlap notice's card
@@ -928,12 +967,10 @@ void main() {
     bool endDateTakesTap() {
       return tester
               .widget<InkWell>(
-                find
-                    .ancestor(
-                      of: formDateFinder("End date"),
-                      matching: find.byType(InkWell),
-                    )
-                    .first,
+                find.descendant(
+                  of: formDateFinder("End date"),
+                  matching: find.byType(InkWell),
+                ),
               )
               .onTap !=
           null;
@@ -1644,10 +1681,7 @@ void main() {
     );
     const endMessage =
         "The end is from after 08:00 to 18:00, inside the calendar's hours.";
-    final onEnd = find.descendant(
-      of: timeFieldFinder("End time"),
-      matching: find.text(endMessage),
-    );
+    final onEnd = rowMessage("End", endMessage);
     expect(onEnd, findsOneWidget);
     expect(find.text("Enter a title."), findsNothing);
 
@@ -1697,10 +1731,7 @@ void main() {
     const startMessage =
         "The start is from 10:00 to before 18:00, inside the calendar's "
         "hours.";
-    final onStart = find.descendant(
-      of: timeFieldFinder("Start time"),
-      matching: find.text(startMessage),
-    );
+    final onStart = rowMessage("Start", startMessage);
     expect(onStart, findsOneWidget);
     await tester.enterText(fieldFinder("Title"), "Write more");
     await tester.pumpAndSettle();
@@ -1822,10 +1853,7 @@ void main() {
         hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
       );
     });
-    final past = find.descendant(
-      of: timeFieldFinder("Start time"),
-      matching: find.text("The start can't be in the past."),
-    );
+    final past = rowMessage("Start", "The start can't be in the past.");
     expect(past, findsNothing);
     clock = at(10, 1);
     await tester.pump(const Duration(minutes: 1));
@@ -1851,7 +1879,7 @@ void main() {
     await tester.pump();
     expect(refusing, findsOneWidget);
     // The notice states the refusal, so no message shows on the times.
-    expect(scheduleFieldErrors(tester), <String?>[null, null, null, null]);
+    expect(scheduleRowErrors(tester), <String?>[null, null]);
   });
 
   testWidgets("FV1 a failed Save brings its first message, the title's, "
@@ -1976,7 +2004,7 @@ void main() {
     await tester.pumpAndSettle();
     // Setup sanity: the title's message shows.
     expect(find.text("Enter a title."), findsOneWidget);
-    expect(scheduleFieldErrors(tester), <String?>[null, null, null, null]);
+    expect(scheduleRowErrors(tester), <String?>[null, null]);
     expect(tester.getRect(notice).top, greaterThanOrEqualTo(view.top));
   });
 
@@ -2002,7 +2030,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(scheduleFieldErrors(tester), <String?>[null, null, null, null]);
+    expect(scheduleRowErrors(tester), <String?>[null, null]);
 
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
@@ -2547,7 +2575,7 @@ void main() {
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
-    // Without All day, Start date's field lies at the top.
+    // Without All day, the Start row's label lies at the top.
     await pumpSection(
       tester,
       checkOf(
@@ -2558,7 +2586,7 @@ void main() {
     // Setup sanity: All day does not show.
     expect(allDaySwitch(), findsNothing);
     expect(
-      tester.getRect(formDateFinder("Start date")).top,
+      tester.getRect(find.text("Start")).top,
       tester.getRect(find.byType(ScheduleSection)).top,
     );
   });
@@ -2755,7 +2783,8 @@ void main() {
   });
 
   testWidgets("FR6 after a failed Save, the end's message of a timed item "
-      "that spans days shows on End time, not on End date", (tester) async {
+      "that spans days shows under the End row and tints End time, not End "
+      "date, with the soft error colour", (tester) async {
     final store = MemoryCalendarStore<ItemPayload>(
       hours: CalendarDayHours(8 * 60, 18 * 60),
     );
@@ -2771,19 +2800,14 @@ void main() {
     expect(formDateShows("End date", "2026-04-23"), findsOneWidget);
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
+    expect(rowMessage("End", endMessage), findsOneWidget);
     expect(
-      find.descendant(
-        of: timeFieldFinder("End time"),
-        matching: find.text(endMessage),
-      ),
-      findsOneWidget,
+      fieldBox(tester, timeFieldFinder("End time")).color,
+      HarborColors.errorNotice,
     );
     expect(
-      find.descendant(
-        of: formDateFinder("End date"),
-        matching: find.text(endMessage),
-      ),
-      findsNothing,
+      fieldBox(tester, formDateFinder("End date")).color,
+      HarborColors.background,
     );
   });
 
@@ -5324,8 +5348,9 @@ void main() {
     }
   });
 
-  testWidgets("IP16 Start date and End date show their date and no icon, "
-      "on a timed item and on an all-day one", (tester) async {
+  testWidgets("IP16 Start date and End date show a calendar icon before "
+      "their day, and Start time and End time a clock before their time, on "
+      "a timed item and on an all-day one", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task(
@@ -5337,16 +5362,38 @@ void main() {
       ),
     ]);
     addTearDown(store.dispose);
-    for (final id in <String>["item-1", "item-2"]) {
+    for (final (id, fields) in <(String, List<(Finder, IconData)>)>[
+      (
+        "item-1",
+        <(Finder, IconData)>[
+          (formDateFinder("Start date"), Icons.calendar_today_outlined),
+          (timeFieldFinder("Start time"), Icons.schedule),
+          (formDateFinder("End date"), Icons.calendar_today_outlined),
+          (timeFieldFinder("End time"), Icons.schedule),
+        ],
+      ),
+      (
+        "item-2",
+        <(Finder, IconData)>[
+          (formDateFinder("Start date"), Icons.calendar_today_outlined),
+          (formDateFinder("End date"), Icons.calendar_today_outlined),
+        ],
+      ),
+    ]) {
       await openEdit(tester, store, id: id);
-      for (final label in <String>["Start date", "End date"]) {
+      for (final (field, icon) in fields) {
+        final shown = find.descendant(of: field, matching: find.byType(Icon));
+        expect(tester.widget<Icon>(shown).icon, icon, reason: "$id $field");
         expect(
-          find.descendant(
-            of: formDateFinder(label),
-            matching: find.byType(Icon),
+          tester.getRect(shown).right,
+          lessThan(
+            tester
+                .getRect(
+                  find.descendant(of: field, matching: find.byType(Text)),
+                )
+                .left,
           ),
-          findsNothing,
-          reason: "$id $label",
+          reason: "$id $field",
         );
       }
       await tester.tap(formButton("Cancel"));
@@ -5807,6 +5854,294 @@ void main() {
     expect(
       shown.getMinIntrinsicWidth(100.0),
       text.getMinIntrinsicWidth(double.infinity) + 48.0,
+    );
+  });
+
+  testWidgets("SB1 the Start row and the End row each show one label above "
+      "their fields, Start or End, at the fields' left and 6 pixels above "
+      "them, which a screen reader skips; each field is a button that names "
+      "itself before its day or time; an all-day schedule's rows keep their "
+      "labels", (tester) async {
+    final handle = tester.ensureSemantics();
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
+    );
+    for (final (label, date) in <(String, String)>[
+      ("Start", "Start date"),
+      ("End", "End date"),
+    ]) {
+      final text = tester.getRect(find.text(label));
+      final field = tester.getRect(formDateFinder(date));
+      expect(text.left, field.left, reason: label);
+      expect(text.bottom + 6.0, field.top, reason: label);
+    }
+    for (final name in <String>[
+      "Start date",
+      "Start time",
+      "End date",
+      "End time",
+    ]) {
+      expect(find.text(name), findsNothing, reason: name);
+    }
+    expect(find.bySemanticsLabel("Start"), findsNothing);
+    expect(find.bySemanticsLabel("End"), findsNothing);
+    for (final (field, label) in <(Finder, String)>[
+      (formDateFinder("Start date"), "Start date\nWed, Apr 22"),
+      (timeFieldFinder("Start time"), "Start time\n09:00"),
+      (formDateFinder("End date"), "End date\nWed, Apr 22"),
+      (timeFieldFinder("End time"), "End time\n10:00"),
+    ]) {
+      expect(
+        fieldSemantics(tester, field),
+        isSemantics(
+          label: label,
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: true,
+          hasTapAction: true,
+        ),
+        reason: label,
+      );
+    }
+
+    await pumpSection(
+      tester,
+      checkOf(
+        CalendarSchedule.of(wednesday, DateTime(2026, 4, 23), isAllDay: true),
+      ),
+    );
+    // Setup sanity: the rows hold their dates alone.
+    expect(timeFieldFinder("Start time"), findsNothing);
+    expect(
+      tester.getRect(find.text("End")).bottom + 6.0,
+      tester.getRect(formDateFinder("End date")).top,
+    );
+    handle.dispose();
+  });
+
+  testWidgets("SB2 a field is a box 44 high with corners rounded by 12 and "
+      "no outline, filled with the page's grey, its icon in the muted colour "
+      "and its day or time in the text colour, and a tap anywhere on it "
+      "opens its picker", (tester) async {
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
+    );
+    for (final field in <Finder>[
+      formDateFinder("Start date"),
+      timeFieldFinder("Start time"),
+      formDateFinder("End date"),
+      timeFieldFinder("End time"),
+    ]) {
+      final box = fieldBox(tester, field);
+      expect(tester.getSize(field).height, 44.0, reason: "$field");
+      expect(box.color, HarborColors.background, reason: "$field");
+      expect(
+        box.borderRadius,
+        const BorderRadius.all(Radius.circular(12.0)),
+        reason: "$field",
+      );
+      expect(box.border, isNull, reason: "$field");
+      expect(fieldMark(tester, field), HarborColors.textMuted);
+      expect(fieldInk(tester, field), HarborColors.text);
+    }
+    final time = tester.getRect(timeFieldFinder("End time"));
+    await tester.tapAt(time.bottomRight - const Offset(3.0, 3.0));
+    await tester.pumpAndSettle();
+    expect(timePickerFinder("End time"), findsOneWidget);
+  });
+
+  testWidgets("SB3 a field whose picker is open is filled with the primary "
+      "tint, and its icon and its time drawn in the primary colour, the "
+      "other fields keeping their look; it turns so over the "
+      "theme's motion as its picker opens, and back as it closes, and at "
+      "once where the platform asks for no animations", (tester) async {
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
+      theme: motionTheme,
+    );
+    final time = timeFieldFinder("Start time");
+    await tester.tap(time);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 240));
+    final half = Color.lerp(
+      HarborColors.background,
+      HarborColors.primaryTint,
+      0.5,
+    );
+    expect(fieldBox(tester, time).color, half);
+    await tester.pump(const Duration(milliseconds: 240));
+    expect(fieldBox(tester, time).color, HarborColors.primaryTint);
+    expect(fieldMark(tester, time), HarborColors.primary);
+    expect(fieldInk(tester, time), HarborColors.primary);
+    for (final other in <Finder>[
+      formDateFinder("Start date"),
+      formDateFinder("End date"),
+      timeFieldFinder("End time"),
+    ]) {
+      expect(fieldBox(tester, other).color, HarborColors.background);
+    }
+
+    await tester.tap(time);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 240));
+    expect(fieldBox(tester, time).color, half);
+    await tester.pumpAndSettle();
+    expect(fieldBox(tester, time).color, HarborColors.background);
+
+    disableAnimations(tester);
+    await tester.pump();
+    await tester.tap(time);
+    await tester.pump();
+    expect(fieldBox(tester, time).color, HarborColors.primaryTint);
+  });
+
+  testWidgets("SB4 a field that takes no input shows its day or time in the "
+      "muted colour with no box around it: End date where the options refuse "
+      "spanning days and the item ends on its start's day, and each field of "
+      "a locked section, unless a message tints it", (tester) async {
+    final handle = tester.ensureSemantics();
+    final schedule = CalendarSchedule.of(at(9), at(10), isAllDay: false);
+    await pumpSection(
+      tester,
+      checkOf(
+        schedule,
+        options: const CalendarScheduleOptions(
+          allowsAllDay: false,
+          spansDays: false,
+        ),
+      ),
+    );
+    final end = formDateFinder("End date");
+    expect(fieldBox(tester, end).color, Colors.transparent);
+    expect(fieldInk(tester, end), HarborColors.textMuted);
+    expect(
+      fieldSemantics(tester, end),
+      isSemantics(isButton: true, hasEnabledState: true, isEnabled: false),
+    );
+    // Setup sanity: End time takes input.
+    expect(
+      fieldBox(tester, timeFieldFinder("End time")).color,
+      HarborColors.background,
+    );
+
+    await pumpSection(tester, checkOf(schedule), locked: true);
+    for (final field in <Finder>[
+      formDateFinder("Start date"),
+      timeFieldFinder("Start time"),
+      formDateFinder("End date"),
+      timeFieldFinder("End time"),
+    ]) {
+      expect(fieldBox(tester, field).color, Colors.transparent);
+    }
+    await pumpSection(
+      tester,
+      checkOf(schedule),
+      locked: true,
+      errors: const <String, String>{"end": "Too late."},
+    );
+    expect(
+      fieldBox(tester, timeFieldFinder("End time")).color,
+      HarborColors.errorNotice,
+    );
+    handle.dispose();
+  });
+
+  testWidgets("SB5 a row's message shows under its fields, at their left and "
+      "6 pixels under them, in the error colour, and tints the row's time "
+      "field, or an all-day schedule's date field, with the soft error "
+      "colour, its icon in the error colour, while its picker is closed; the "
+      "other fields keep the page's grey", (tester) async {
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
+      errors: const <String, String>{"end": "Too late."},
+    );
+    final message = find.byKey(scheduleEndErrorKey);
+    expect(tester.widget<Text>(message).data, "Too late.");
+    expect(tester.widget<Text>(message).style!.color, HarborColors.error);
+    expect(
+      tester.getRect(message).left,
+      tester.getRect(formDateFinder("End date")).left,
+    );
+    expect(
+      tester.getRect(message).top,
+      tester.getRect(timeFieldFinder("End time")).bottom + 6.0,
+    );
+    expect(find.byKey(scheduleStartErrorKey), findsNothing);
+    final endTime = timeFieldFinder("End time");
+    expect(fieldBox(tester, endTime).color, HarborColors.errorNotice);
+    expect(fieldMark(tester, endTime), HarborColors.error);
+    expect(
+      fieldBox(tester, formDateFinder("End date")).color,
+      HarborColors.background,
+    );
+    expect(
+      fieldBox(tester, timeFieldFinder("Start time")).color,
+      HarborColors.background,
+    );
+    await tester.tap(endTime);
+    await tester.pumpAndSettle();
+    expect(fieldBox(tester, endTime).color, HarborColors.primaryTint);
+    expect(fieldMark(tester, endTime), HarborColors.primary);
+    await tester.tap(endTime);
+    await tester.pumpAndSettle();
+    expect(fieldBox(tester, endTime).color, HarborColors.errorNotice);
+
+    await pumpSection(
+      tester,
+      checkOf(
+        CalendarSchedule.of(wednesday, DateTime(2026, 4, 23), isAllDay: true),
+      ),
+      errors: const <String, String>{"start": "Too early."},
+    );
+    await tester.pumpAndSettle();
+    expect(
+      fieldBox(tester, formDateFinder("Start date")).color,
+      HarborColors.errorNotice,
+    );
+    expect(
+      tester.getRect(find.byKey(scheduleStartErrorKey)).top,
+      tester.getRect(formDateFinder("Start date")).bottom + 6.0,
+    );
+    expect(
+      fieldBox(tester, formDateFinder("End date")).color,
+      HarborColors.background,
+    );
+  });
+
+  testWidgets("SB6 a field's day or time too wide for its box, as a 12-hour "
+      "time in a narrow section, shrinks to fit inside the box's padding, "
+      "whole", (tester) async {
+    tester.view.physicalSize = const Size(320.0, 900.0);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ScheduleSection(
+            check: checkOf(
+              CalendarSchedule.of(at(12, 30), at(23, 45), isAllDay: false),
+            ),
+            hours: CalendarDayHours.allDay,
+            slotMinutes: 15,
+            hourLabelFormat: CalendarHourLabelFormat.twelveHour,
+            now: wednesdayStart,
+            onChanged: (schedule) {},
+          ),
+        ),
+      ),
+    );
+    final field = timeFieldFinder("Start time");
+    final text = find.descendant(of: field, matching: find.text("12:30 PM"));
+    final paragraph = tester.renderObject<RenderParagraph>(text);
+    // The time shows narrower than it lays out, on its one line.
+    expect(tester.getRect(text).width, lessThan(paragraph.size.width));
+    expect(
+      tester.getRect(text).right,
+      lessThanOrEqualTo(tester.getRect(field).right - 12.0),
     );
   });
 }

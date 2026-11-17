@@ -308,12 +308,41 @@ Future<void> chooseOption(
   await tester.pumpAndSettle();
 }
 
-/// The form's date field labelled [label], "Start date" or "End date".
+/// The form's date field named [label], "Start date" or "End date".
 Finder formDateFinder(String label) {
-  return find.ancestor(
-    of: find.text(label),
-    matching: find.byType(InputDecorator),
+  switch (label) {
+    case "Start date":
+      return find.byKey(scheduleStartDateKey);
+    case "End date":
+      return find.byKey(scheduleEndDateKey);
+  }
+  throw ArgumentError.value(label, "label", "names no date field");
+}
+
+/// The message under the form's Start or End row, [row], that reads
+/// [message].
+Finder rowMessage(String row, String message) {
+  final ValueKey<String> key;
+  switch (row) {
+    case "Start":
+      key = scheduleStartErrorKey;
+    case "End":
+      key = scheduleEndErrorKey;
+    default:
+      throw ArgumentError.value(row, "row", "names no row");
+  }
+  return find.descendant(
+    of: find.byKey(key),
+    matching: find.text(message),
+    matchRoot: true,
   );
+}
+
+/// The day or time the schedule's field [field] finds shows.
+String scheduleFieldValue(WidgetTester tester, Finder field) {
+  return tester
+      .widget<Text>(find.descendant(of: field, matching: find.byType(Text)))
+      .data!;
 }
 
 /// The form's date field labelled [label] showing the day [date] names,
@@ -455,16 +484,8 @@ void expectFormDays(String day, int days) {
 /// comma and its time field's time; then the length its heading's pill
 /// writes, where it shows one: "Wed, Apr 22, 09:00\nWed, Apr 22, 10:00\n1h".
 String formSchedule(WidgetTester tester) {
-  String shown(Finder decorator) {
-    final child = tester.widget<InputDecorator>(decorator).child;
-    return (child! as Text).data!;
-  }
-
-  Finder timeDecorator(String label) {
-    return find.descendant(
-      of: timeFieldFinder(label),
-      matching: find.byType(InputDecorator),
-    );
+  String shown(Finder field) {
+    return scheduleFieldValue(tester, field);
   }
 
   final timed = timeFieldFinder("Start time").evaluate().isNotEmpty;
@@ -475,7 +496,7 @@ String formSchedule(WidgetTester tester) {
       ("End date", "End time"),
     ])
       timed
-          ? "${shown(formDateFinder(date))}, ${shown(timeDecorator(time))}"
+          ? "${shown(formDateFinder(date))}, ${shown(timeFieldFinder(time))}"
           : shown(formDateFinder(date)),
     if (length.evaluate().isNotEmpty) tester.widget<Text>(length).data!,
   ].join("\n");

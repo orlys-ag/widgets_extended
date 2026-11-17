@@ -2441,7 +2441,7 @@ void main() {
     expect(timeFieldTakesInput(tester, "Start time"), isFalse);
     expect(timeFieldTakesInput(tester, "End time"), isFalse);
     for (final label in <String>["Start date", "End date"]) {
-      final field = inDialog(find.widgetWithText(InputDecorator, label));
+      final field = inDialog(formDateFinder(label));
       await tester.ensureVisible(field);
       await tester.pumpAndSettle();
       await tester.tap(field);

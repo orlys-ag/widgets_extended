@@ -580,10 +580,7 @@ void main() {
       expect(find.text("Edit Task"), findsOneWidget);
 
       Finder field(String label) {
-        return find.ancestor(
-          of: find.text(label),
-          matching: find.byType(InputDecorator),
-        );
+        return timeFieldFinder(label);
       }
 
       expect(
