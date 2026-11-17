@@ -434,15 +434,17 @@ void main() {
     expect(find.byType(CalendarSettingsSheet), findsOneWidget);
   });
 
-  testWidgets("E12 the month folds and unfolds over 300 ms on "
-      "fastOutSlowIn", (tester) async {
+  testWidgets("E12 the month folds and unfolds over Harbor's standard "
+      "motion, 300 ms on its standard curve", (tester) async {
     await pumpCalendar(tester);
     final row = rowHeight(tester);
     final month = gridHeight(tester);
 
     /// The grid's height [elapsed] into a fold.
     double foldedAt(Duration elapsed) {
-      final t = Curves.fastOutSlowIn.transform(elapsed.inMicroseconds / 300000);
+      final t = HarborMotion.standardCurve.transform(
+        elapsed.inMicroseconds / 300000,
+      );
       return month + (row - month) * t;
     }
 
@@ -473,7 +475,7 @@ void main() {
     );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    final t = Curves.fastOutSlowIn.transform(1.0 / 3.0);
+    final t = HarborMotion.standardCurve.transform(1.0 / 3.0);
     expect(gridHeight(tester), moreOrLessEquals(row + (month - row) * t));
     await tester.pump(const Duration(milliseconds: 200));
     expect(gridHeight(tester), month);

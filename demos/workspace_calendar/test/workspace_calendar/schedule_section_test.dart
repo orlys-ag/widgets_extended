@@ -250,6 +250,23 @@ final CalendarThemeData motionTheme = CalendarThemeData.builtIn.copyWith(
   motionCurve: Curves.linear,
 );
 
+/// An ease-out curve, Cubic(0.2, 0.0, 0.0, 1.0): played backwards, a
+/// motion on it would start slowly.
+const Curve easeOut = Cubic(0.2, 0.0, 0.0, 1.0);
+
+/// [motionTheme] on [easeOut].
+final CalendarThemeData easedTheme = motionTheme.copyWith(motionCurve: easeOut);
+
+/// The opacity of the nearest [FadeTransition] above what [finder] finds.
+double fadeAbove(WidgetTester tester, Finder finder) {
+  return tester
+      .widget<FadeTransition>(
+        find.ancestor(of: finder, matching: find.byType(FadeTransition)).first,
+      )
+      .opacity
+      .value;
+}
+
 /// The panel under the row of the field labelled [label], "Start date",
 /// "Start time", "End date" or "End time", that holds the picker of the
 /// row's open field.
@@ -593,7 +610,7 @@ void main() {
     expect(
       find.descendant(
         of: saveFinder(),
-        matching: find.byType(CircularProgressIndicator),
+        matching: find.byType(CalendarActivityIndicator),
       ),
       findsOneWidget,
     );
@@ -3001,6 +3018,114 @@ void main() {
     // Setup sanity: the section built again.
     expect(timeFieldShows("End time", "11:00"), findsOneWidget);
     expect(reads, 0);
+  });
+
+  testWidgets("FP6 on an ease-out curve the panel closes easing out, as it "
+      "opens: a quarter of the way through the motion it has shrunk by the "
+      "curve at a quarter, and three quarters through, its picker has "
+      "faded by the curve at a half", (tester) async {
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
+      theme: easedTheme,
+    );
+    await openTimePicker(tester, "Start time");
+    final full = settledPanelHeight(tester);
+    await tester.tap(timeFieldFinder("Start time"));
+    await tester.pump();
+    // 120 ms after the tap's own frame, a quarter of the theme's 480 ms.
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(
+      panelHeight(tester),
+      moreOrLessEquals(full * (1.0 - easeOut.transform(0.25)), epsilon: 1.0),
+    );
+    expect(panelOpacity(tester), 1.0);
+    // Three quarters of the motion: half of the picker's fade.
+    await tester.pump(const Duration(milliseconds: 240));
+    expect(
+      panelOpacity(tester),
+      moreOrLessEquals(1.0 - easeOut.transform(0.5), epsilon: 0.01),
+    );
+  });
+
+  testWidgets("FP7 on an ease-out curve the panel swaps back from its time "
+      "picker to its day picker easing out: a quarter of the way through, "
+      "its height has moved by the curve at a quarter and the time picker "
+      "has faded by the curve at a half; three quarters through, the day "
+      "picker has come in by the curve at a half", (tester) async {
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
+      theme: easedTheme,
+    );
+    await openTimePicker(tester, "Start time");
+    final timeFull = settledPanelHeight(tester, "Start time");
+    await tester.tap(formDateFinder("Start date"));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 120));
+    final dayFull = settledDayPanelHeight(tester, "Start date");
+    // Setup sanity: the two pickers differ in height.
+    expect((dayFull - timeFull).abs(), greaterThan(40.0));
+    expect(
+      panelHeight(tester, "Start date"),
+      moreOrLessEquals(
+        timeFull + (dayFull - timeFull) * easeOut.transform(0.25),
+        epsilon: 1.0,
+      ),
+    );
+    expect(
+      fadeAbove(tester, timePickerFinder("Start time")),
+      moreOrLessEquals(1.0 - easeOut.transform(0.5), epsilon: 0.01),
+    );
+    await tester.pump(const Duration(milliseconds: 240));
+    expect(
+      fadeAbove(tester, dayPickerFinder("Start date")),
+      moreOrLessEquals(easeOut.transform(0.5), epsilon: 0.01),
+    );
+  });
+
+  testWidgets("FP8 a panel opened past the view's bottom scrolls into view "
+      "over the theme's motion once it has opened, not at once", (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(390.0, 300.0);
+    addTearDown(tester.view.reset);
+    final thursday = DateTime(2026, 4, 23);
+    await pumpSection(
+      tester,
+      checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
+      // Today is Thursday, so the picker shows no Now: the panel's opening
+      // alone scrolls it into view.
+      now: () {
+        return CalendarNow(time: thursday, today: thursday);
+      },
+      theme: motionTheme,
+    );
+    final position = tester
+        .state<ScrollableState>(find.byType(Scrollable).first)
+        .position;
+    final start = position.pixels;
+    await tester.tap(timeFieldFinder("Start time"));
+    await tester.pump();
+    // Each frame's scroll offset, through the panel's own 480 ms motion and
+    // the reveal's after it.
+    final seen = <double>[];
+    for (var elapsed = 0; elapsed < 1440; elapsed += 16) {
+      await tester.pump(const Duration(milliseconds: 16));
+      seen.add(position.pixels);
+    }
+    // Setup sanity: the panel is open.
+    expect(panelHeight(tester), settledPanelHeight(tester));
+    final end = seen.last;
+    expect(end, greaterThan(start));
+    final between = seen.where((pixels) {
+      return pixels > start + 1.0 && pixels < end - 1.0;
+    });
+    // Most of the theme's 480 ms, frame by frame, lies between the two.
+    expect(between.length, greaterThanOrEqualTo(20));
+    final picker = tester.getRect(timePickerFinder("Start time"));
+    expect(picker.bottom, lessThanOrEqualTo(300.0));
   });
 
   testWidgets("FX3 the footer an open picker gains as its field's day "

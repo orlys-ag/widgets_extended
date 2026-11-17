@@ -874,7 +874,7 @@ void main() {
       await tester.tap(find.byTooltip("Next month"));
       await tester.pump();
       expect(
-        underBoard(find.byType(CircularProgressIndicator)),
+        underBoard(find.byType(CalendarActivityIndicator)),
         findsOneWidget,
       );
 
@@ -889,7 +889,7 @@ void main() {
       expect(listCount(api), reads + 1);
       await tester.pump(harnessLatency);
       await tester.pump();
-      expect(underBoard(find.byType(CircularProgressIndicator)), findsNothing);
+      expect(underBoard(find.byType(CalendarActivityIndicator)), findsNothing);
       expect(underBoard(find.text("Retry")), findsNothing);
     },
   );

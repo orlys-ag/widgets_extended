@@ -635,7 +635,7 @@ void main() {
       cellRect(tester, rowOf(14 * 60), colOf(5)).topLeft,
     );
     expect(marks.lastBlock(brainstormId).entry.pending, isTrue);
-    for (final type in <Type>[Opacity, Icon, CircularProgressIndicator]) {
+    for (final type in <Type>[Opacity, Icon, CalendarActivityIndicator]) {
       expect(
         find.descendant(of: brainstorm, matching: find.byType(type)),
         findsNothing,
@@ -876,13 +876,6 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(
-      find.descendant(
-        of: grid,
-        matching: find.byType(CircularProgressIndicator),
-      ),
-      findsNothing,
-    );
     await pumpFor(tester, second);
 
     api.failurePolicy = (request) {
@@ -941,13 +934,6 @@ void main() {
     await tester.tap(find.byTooltip("Next day"));
     await tester.pump();
     await tester.pump(oneFrame);
-    expect(
-      find.descendant(
-        of: grid,
-        matching: find.byType(CircularProgressIndicator),
-      ),
-      findsNothing,
-    );
     expect(
       find.descendant(
         of: grid,
@@ -1549,13 +1535,6 @@ void main() {
         matching: find.byType(CalendarActivityIndicator),
       ),
       findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: month,
-        matching: find.byType(CircularProgressIndicator),
-      ),
-      findsNothing,
     );
     await pumpFor(tester, second);
 

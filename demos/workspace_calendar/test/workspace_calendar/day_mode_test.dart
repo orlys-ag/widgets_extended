@@ -382,7 +382,7 @@ void main() {
     expect(read.last, CalendarDates.addDays(monday, 6));
     final overlay = find.descendant(
       of: find.byType(TimedGrid<ItemPayload>),
-      matching: find.byType(CircularProgressIndicator),
+      matching: find.byType(CalendarActivityIndicator),
     );
     expect(overlay, findsOneWidget);
     await tester.pump(api.latency);

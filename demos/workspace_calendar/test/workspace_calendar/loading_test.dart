@@ -12,6 +12,8 @@ import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
+import 'package:widgets_extended/widgets_extended.dart'
+    show CalendarActivityIndicator;
 
 import 'calendar_harness.dart';
 
@@ -193,7 +195,7 @@ void main() {
     await tester.pump();
     await tester.pump(oneFrame);
     expect(
-      overlayShowing(find.byType(CircularProgressIndicator)),
+      overlayShowing(find.byType(CalendarActivityIndicator)),
       findsOneWidget,
     );
     await tester.tapAt(cellRect(tester, rowOf(14 * 60), colOf(2)).center);
@@ -206,7 +208,7 @@ void main() {
     await tester.pump(latency);
     await tester.pump(oneFrame);
     expect(
-      overlayShowing(find.byType(CircularProgressIndicator)),
+      overlayShowing(find.byType(CalendarActivityIndicator)),
       findsNothing,
     );
     expect(blockFinder(teamOffsiteId), findsOneWidget);
@@ -332,5 +334,32 @@ void main() {
     expect(find.text("Reading failed."), findsNothing);
     await tester.pump(latency);
     await tester.pumpAndSettle();
+  });
+
+  testWidgets("F5 a loading day row shows the calendar's progress "
+      "indicator, 16 square with a 2 px stroke", (tester) async {
+    await pumpCalendar(
+      tester,
+      api: MockCalendarApi.seeded(today, latency: latency),
+      readAhead: 0,
+    );
+    await selectNextMonth(tester);
+    await revealFrames(tester);
+    // Setup sanity: May 21's row is loading.
+    expect(loading, findsOneWidget);
+    final spinner = find.descendant(
+      of: loading,
+      matching: find.byType(CalendarActivityIndicator),
+    );
+    expect(spinner, findsOneWidget);
+    final indicator = tester.widget<CalendarActivityIndicator>(spinner);
+    expect(indicator.size, 16.0);
+    expect(indicator.strokeWidth, 2.0);
+    // May's read, and then the read of June 1 to 7, the rest of May's
+    // grid, which starts once May's lands.
+    for (var read = 0; read < 2; read++) {
+      await tester.pump(latency);
+      await tester.pumpAndSettle();
+    }
   });
 }

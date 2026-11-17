@@ -126,6 +126,9 @@ class WorkspaceCalendarExample extends StatelessWidget {
 
   /// The theme the calendar's views draw with; null gives
   /// [harborCalendarTheme]. It shadows any [CalendarTheme] of the host's.
+  /// Where the platform asks for no animations
+  /// ([MediaQuery.disableAnimationsOf]), the calendar draws with it at no
+  /// motion ([CalendarThemeData.motionDuration] zero).
   final CalendarThemeData? calendarTheme;
 
   /// What the views draw their items and states with, [harborItemBuilders]
@@ -152,10 +155,13 @@ class WorkspaceCalendarExample extends StatelessWidget {
   Widget build(BuildContext context) {
     // Above the calendar's state, so every dialog and menu it opens from
     // its own context captures both themes.
+    final theme = calendarTheme ?? harborCalendarTheme;
     return Theme(
       data: _theme,
       child: CalendarTheme(
-        data: calendarTheme ?? harborCalendarTheme,
+        data: HarborMotion.animates(context)
+            ? theme
+            : theme.copyWith(motionDuration: Duration.zero),
         child: _WorkspaceCalendar(
           today: today,
           api: api,
@@ -363,10 +369,15 @@ class _WorkspaceCalendarState extends State<_WorkspaceCalendar> {
     _applySettings(_settings.copyWith(editing: editing));
   }
 
+  /// Shows [message] in a snack bar, which comes in and leaves as a
+  /// surface ([HarborMotion.surface]).
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+      ..showSnackBar(
+        SnackBar(content: Text(message)),
+        snackBarAnimationStyle: HarborMotion.of(context, HarborMotion.surface),
+      );
   }
 
   /// Writes a grid move or resize, and says why where it fails.
