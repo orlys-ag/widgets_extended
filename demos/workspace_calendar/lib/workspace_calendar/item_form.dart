@@ -1221,17 +1221,15 @@ class _ItemFormState extends State<_ItemForm> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
                         schedulingCard,
-                        if (_scheduleCheck.overlaps.isNotEmpty) ...<Widget>[
-                          const SizedBox(height: 12.0),
-                          ScheduleOverlapNotice(
-                            key: _noticeKey,
-                            check: _scheduleCheck,
-                            hourLabelFormat: widget.hourLabelFormat,
-                            zone: widget.store.zone,
-                            locked: _locked,
-                            onChanged: _scheduleChanged,
-                          ),
-                        ],
+                        ScheduleOverlapNotice(
+                          key: _noticeKey,
+                          check: _scheduleCheck,
+                          hourLabelFormat: widget.hourLabelFormat,
+                          zone: widget.store.zone,
+                          locked: _locked,
+                          padding: const EdgeInsets.only(top: 12.0),
+                          onChanged: _scheduleChanged,
+                        ),
                         const SizedBox(height: 12.0),
                         itemCard,
                       ],

@@ -1109,8 +1109,7 @@ class ScheduleHeading extends StatelessWidget {
 }
 
 /// The notice of the entries [check]'s schedule overlaps
-/// ([CalendarScheduleCheck.overlaps]), which the form shows while there are
-/// any.
+/// ([CalendarScheduleCheck.overlaps]), which shows while there are any.
 ///
 /// Its heading, after a warning icon level with its top, counts them,
 /// "Overlaps 2 items", and those whose overlap the rules refuse
@@ -1145,6 +1144,17 @@ class ScheduleHeading extends StatelessWidget {
 /// place changes slides to it; each over the [CalendarTheme]'s motion, or
 /// at once where the platform asks for no animations.
 ///
+/// As [check] comes to name overlaps, the notice, with [padding] around it,
+/// grows from no height over the theme's motion: its box, the fill and the
+/// outline, fades in over the motion's first half, and what the box holds
+/// from a fifth of the motion to seven tenths, so the box comes first. As
+/// it stops, the notice shrinks out over the motion, what the box holds
+/// fading out from three tenths of the motion to four fifths and the box
+/// over its last half, still showing the overlaps it last named, and takes
+/// no pointer. Overlaps that come back while it shrinks turn it back from
+/// where it is, its cards as they were. A notice built over overlaps shows
+/// at once, as all of it does where the platform asks for no animations.
+///
 /// The notice is soft yellow ([HarborColors.notice]), or soft red
 /// ([HarborColors.errorNotice]) where the rules refuse an overlap.
 class ScheduleOverlapNotice extends StatefulWidget {
@@ -1155,6 +1165,7 @@ class ScheduleOverlapNotice extends StatefulWidget {
     required this.onChanged,
     this.zone,
     this.locked = false,
+    this.padding = EdgeInsets.zero,
   });
 
   final CalendarScheduleCheck<ItemPayload> check;
@@ -1174,6 +1185,9 @@ class ScheduleOverlapNotice extends StatefulWidget {
   /// not show.
   final bool locked;
 
+  /// The room around the notice, which grows in and shrinks out with it.
+  final EdgeInsetsGeometry padding;
+
   /// How many cards show before the button that shows the rest.
   static const int shownCards = 3;
 
@@ -1183,13 +1197,121 @@ class ScheduleOverlapNotice extends StatefulWidget {
   }
 }
 
-class _ScheduleOverlapNoticeState extends State<ScheduleOverlapNotice> {
+class _ScheduleOverlapNoticeState extends State<ScheduleOverlapNotice>
+    with SingleTickerProviderStateMixin {
   /// Whether every card shows, past [ScheduleOverlapNotice.shownCards].
   bool _expanded = false;
 
+  /// The check whose overlaps show: the widget's while it names any, the
+  /// last that did while the notice shrinks out, and null once it has.
+  CalendarScheduleCheck<ItemPayload>? _shown;
+
+  /// How far in the notice is, from 0, gone, to 1, shown.
+  late final AnimationController _controller = AnimationController(vsync: this);
+
+  /// [_controller] on the theme's curve, which the notice's height reads.
+  late final CurvedAnimation _size = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.linear,
+  );
+
+  /// The share of [_controller] by which the box has faded in.
+  static const double _boxFadeEnd = 0.5;
+
+  /// The share of [_controller] at which what the box holds starts to fade
+  /// in, after its box.
+  static const double _contentFadeStart = 0.2;
+
+  /// The share of [_controller] by which what the box holds has faded in.
+  static const double _contentFadeEnd = 0.7;
+
+  /// [_controller] up to [_boxFadeEnd] on the theme's curve, which the
+  /// alphas of the box's fill and outline read.
+  late final CurvedAnimation _boxFade = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.linear,
+  );
+
+  /// [_controller] from [_contentFadeStart] to [_contentFadeEnd] on the
+  /// theme's curve, which the opacity of what the box holds reads.
+  late final CurvedAnimation _contentFade = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.linear,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.check.overlaps.isNotEmpty) {
+      _shown = widget.check;
+      _controller.value = 1.0;
+    }
+    _controller.addStatusListener(_statusChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final theme = CalendarTheme.of(context);
+    final curve = theme.motionCurve;
+    // A reverse reads its curve from 1 down to 0, so the flip of the curve
+    // eases a closing as the curve eases an opening.
+    final flipped = FlippedCurve(curve);
+    _size
+      ..curve = curve
+      ..reverseCurve = flipped;
+    _boxFade
+      ..curve = Interval(0.0, _boxFadeEnd, curve: curve)
+      ..reverseCurve = Interval(0.0, _boxFadeEnd, curve: flipped);
+    _contentFade
+      ..curve = Interval(_contentFadeStart, _contentFadeEnd, curve: curve)
+      ..reverseCurve = Interval(
+        _contentFadeStart,
+        _contentFadeEnd,
+        curve: flipped,
+      );
+    _controller.duration = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : theme.motionDuration;
+  }
+
+  @override
+  void didUpdateWidget(ScheduleOverlapNotice oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.check.overlaps.isNotEmpty) {
+      _shown = widget.check;
+      _controller.forward();
+    } else if (_shown != null) {
+      _controller.reverse();
+    }
+  }
+
+  /// Drops the shown check once the notice has shrunk out, so a notice
+  /// that comes again starts with its cards folded.
+  void _statusChanged(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed) {
+      setState(() {
+        _shown = null;
+        _expanded = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _size.dispose();
+    _boxFade.dispose();
+    _contentFade.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final check = widget.check;
+    final check = _shown;
+    if (check == null) {
+      return const SizedBox.shrink();
+    }
     final strings = CalendarLocalizations.of(context);
     final format = widget.hourLabelFormat;
     final refused = <CalendarEntry<ItemPayload>>{
@@ -1226,113 +1348,131 @@ class _ScheduleOverlapNoticeState extends State<ScheduleOverlapNotice> {
             duration: theme.motionDuration,
             curve: theme.motionCurve,
           );
-    return DecoratedBox(
-      key: scheduleOverlapKey,
-      decoration: BoxDecoration(
-        color: alert ? HarborColors.errorNotice : HarborColors.notice,
-        border: Border.all(
-          color: alert ? HarborColors.errorNoticeEdge : HarborColors.noticeEdge,
-        ),
-        borderRadius: BorderRadius.circular(12.0),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12.0, 8.0, 12.0, 12.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                // The icon lies at the heading's top, beside its first
-                // line; the two together centre on the button.
-                Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Icon(Icons.warning_amber, size: 18.0, color: ink),
-                      const SizedBox(width: 8.0),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Text(
-                              _overlapHeading(overlaps.length, refusedCount),
-                              style: TextStyle(
-                                color: ink,
-                                fontWeight: FontWeight.w600,
-                              ),
+    final fill = alert ? HarborColors.errorNotice : HarborColors.notice;
+    final edge = alert ? HarborColors.errorNoticeEdge : HarborColors.noticeEdge;
+    final content = Padding(
+      padding: const EdgeInsets.fromLTRB(12.0, 8.0, 12.0, 12.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              // The icon lies at the heading's top, beside its first
+              // line; the two together centre on the button.
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Icon(Icons.warning_amber, size: 18.0, color: ink),
+                    const SizedBox(width: 8.0),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            _overlapHeading(overlaps.length, refusedCount),
+                            style: TextStyle(
+                              color: ink,
+                              fontWeight: FontWeight.w600,
                             ),
-                            if (offered != null)
-                              Text(
-                                "Next free: ${strings.formatTimeRange(offered.startMinute, offered.endMinute, format)}",
-                                style: TextStyle(color: ink, fontSize: 13.0),
-                              ),
-                          ],
-                        ),
+                          ),
+                          if (offered != null)
+                            Text(
+                              "Next free: ${strings.formatTimeRange(offered.startMinute, offered.endMinute, format)}",
+                              style: TextStyle(color: ink, fontSize: 13.0),
+                            ),
+                        ],
                       ),
-                    ],
-                  ),
-                ),
-                if (offered != null)
-                  TextButton(
-                    onPressed: () {
-                      widget.onChanged(offered);
-                    },
-                    child: const Text("Next free time"),
-                  ),
-              ],
-            ),
-            CustomScrollView(
-              shrinkWrap: true,
-              // The form's scroll view, not this one, takes the route's
-              // PrimaryScrollController.
-              primary: false,
-              physics: const NeverScrollableScrollPhysics(),
-              slivers: <Widget>[
-                SyncedSliverTree<Object, _OverlapRow>.flat(
-                  items: rows,
-                  keyOf: (row) {
-                    return row.item.id ?? row.item;
-                  },
-                  parentOf: (row) {
-                    return null;
-                  },
-                  animationStyle: motion,
-                  itemBuilder: (context, node) {
-                    final row = node.item;
-                    // The gap lies inside the row, so it grows and shrinks
-                    // with its card.
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: _OverlapCard(
-                        item: row.item,
-                        times: row.times,
-                        day: row.day,
-                        refused: row.refused,
-                        hourLabelFormat: format,
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
-            if (folds)
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: TextButton(
-                  onPressed: () {
-                    setState(() {
-                      _expanded = !_expanded;
-                    });
-                  },
-                  child: Text(
-                    _expanded
-                        ? "Show fewer"
-                        : "Show ${overlaps.length - shownCards} more",
-                  ),
+                    ),
+                  ],
                 ),
               ),
-          ],
-        ),
+              if (offered != null)
+                TextButton(
+                  onPressed: () {
+                    widget.onChanged(offered);
+                  },
+                  child: const Text("Next free time"),
+                ),
+            ],
+          ),
+          CustomScrollView(
+            shrinkWrap: true,
+            // The form's scroll view, not this one, takes the route's
+            // PrimaryScrollController.
+            primary: false,
+            physics: const NeverScrollableScrollPhysics(),
+            slivers: <Widget>[
+              SyncedSliverTree<Object, _OverlapRow>.flat(
+                items: rows,
+                keyOf: (row) {
+                  return row.item.id ?? row.item;
+                },
+                parentOf: (row) {
+                  return null;
+                },
+                animationStyle: motion,
+                itemBuilder: (context, node) {
+                  final row = node.item;
+                  // The gap lies inside the row, so it grows and shrinks
+                  // with its card.
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: _OverlapCard(
+                      item: row.item,
+                      times: row.times,
+                      day: row.day,
+                      refused: row.refused,
+                      hourLabelFormat: format,
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+          if (folds)
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton(
+                onPressed: () {
+                  setState(() {
+                    _expanded = !_expanded;
+                  });
+                },
+                child: Text(
+                  _expanded
+                      ? "Show fewer"
+                      : "Show ${overlaps.length - shownCards} more",
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+    // The box fades through the alphas of its colours rather than under an
+    // opacity of its own, which would fade what it holds with it.
+    final notice = AnimatedBuilder(
+      animation: _boxFade,
+      builder: (context, child) {
+        final alpha = _boxFade.value;
+        return DecoratedBox(
+          key: scheduleOverlapKey,
+          decoration: BoxDecoration(
+            color: fill.withValues(alpha: fill.a * alpha),
+            border: Border.all(color: edge.withValues(alpha: edge.a * alpha)),
+            borderRadius: BorderRadius.circular(12.0),
+          ),
+          child: child,
+        );
+      },
+      child: FadeTransition(opacity: _contentFade, child: content),
+    );
+    return IgnorePointer(
+      ignoring: widget.check.overlaps.isEmpty,
+      child: SizeTransition(
+        sizeFactor: _size,
+        alignment: AlignmentDirectional.topStart,
+        child: Padding(padding: widget.padding, child: notice),
       ),
     );
   }
