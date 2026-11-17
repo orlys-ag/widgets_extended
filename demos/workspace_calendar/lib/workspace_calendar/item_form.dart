@@ -152,10 +152,12 @@ Future<void> showItemDetails(
   );
 }
 
-/// Asks whether to delete an item. True when Delete was pressed.
+/// Asks whether to delete an item, in a dialog that comes in and leaves
+/// as [HarborMotion.dialog]. True when Delete was pressed.
 Future<bool> confirmDelete(BuildContext context) async {
   final confirmed = await showDialog<bool>(
     context: context,
+    animationStyle: HarborMotion.of(context, HarborMotion.dialog),
     builder: (context) {
       return AlertDialog(
         title: const Text("Delete item?"),
@@ -236,6 +238,8 @@ Map<String, String> scheduleErrorsOf(
   return errors;
 }
 
+/// Opens the form for [item] in a sheet that comes in and leaves as a
+/// surface ([HarborMotion.surface]).
 Future<void> _showForm(
   BuildContext context, {
   required CalendarStore<ItemPayload> store,
@@ -257,6 +261,7 @@ Future<void> _showForm(
     isScrollControlled: true,
     useSafeArea: true,
     isDismissible: false,
+    sheetAnimationStyle: HarborMotion.of(context, HarborMotion.surface),
     builder: (context) {
       return _ItemForm(
         store: store,
@@ -829,20 +834,26 @@ class _ItemFormState extends State<_ItemForm> {
   }
 
   /// Asks first; a confirmed delete closes the form and then deletes,
-  /// and the messenger the form showed under says why where it fails.
+  /// and the messenger the form showed under says why where it fails, in
+  /// a snack bar that comes in and leaves as a surface
+  /// ([HarborMotion.surface]).
   Future<void> _delete() async {
     final confirmed = await confirmDelete(context);
     if (!confirmed || !mounted) {
       return;
     }
     final messenger = ScaffoldMessenger.of(context);
+    final snackBarMotion = HarborMotion.of(context, HarborMotion.surface);
     Navigator.of(context).pop();
     try {
       await widget.store.requestDelete(widget.item.id!);
     } on Object catch (error) {
       messenger
         ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(writeFailureMessage(error))));
+        ..showSnackBar(
+          SnackBar(content: Text(writeFailureMessage(error))),
+          snackBarAnimationStyle: snackBarMotion,
+        );
     }
   }
 
@@ -1276,11 +1287,9 @@ class _ItemFormState extends State<_ItemForm> {
                             FilledButton(
                               onPressed: _saving ? null : _save,
                               child: _saving
-                                  ? const SizedBox.square(
-                                      dimension: 16.0,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2.0,
-                                      ),
+                                  ? const CalendarActivityIndicator(
+                                      size: 16.0,
+                                      strokeWidth: 2.0,
                                     )
                                   : const Text("Save"),
                             ),

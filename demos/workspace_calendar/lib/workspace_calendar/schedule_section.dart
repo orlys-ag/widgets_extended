@@ -1834,14 +1834,15 @@ class _OverhangClipper extends CustomClipper<Rect> {
 /// sides, so what a picker paints a little past them shows.
 /// As [open] turns true the panel grows from no height to the picker's
 /// over the [CalendarTheme]'s motion, the picker fading in over the
-/// motion's first half, and as it turns false it plays
-/// that backwards: it shrinks over the motion, the picker fading out over
-/// its last half, the closing panel keeping the picker it showed. As
-/// [showsTime] changes while [open], the panel swaps its pickers in place
-/// over that motion: its height moves from the one picker's to the
-/// other's, the leaving picker fading out over the motion's first half and
-/// the coming one fading in over its last, and the leaving one takes no
-/// pointer. All of it happens at once where the platform asks for no
+/// motion's first half, and as it turns false it shrinks over the motion,
+/// the picker fading out over its last half, the closing panel keeping the
+/// picker it showed. As [showsTime] changes while [open], the panel swaps
+/// its pickers in place over that motion: its height moves from the one
+/// picker's to the other's, the leaving picker fading out over the
+/// motion's first half and the coming one fading in over its last, and the
+/// leaving one takes no pointer. Each of these eases on the theme's curve
+/// whichever way it runs, so a closing, or a swap back, eases as an
+/// opening does. All of it happens at once where the platform asks for no
 /// animations ([MediaQuery.disableAnimationsOf]), a motion under way
 /// included; the panel shows nothing once closed. A panel made while
 /// [open], or opened once closed, shows its picker at once. A row that
@@ -1853,7 +1854,9 @@ class _OverhangClipper extends CustomClipper<Rect> {
 /// comes or goes, and where its picker grows once it rests, it scrolls into
 /// view: the open field, whose [Focus] has [field] for its node, where the
 /// field lies before the visible part of the form, then the panel where it
-/// lies past it, the panel winning where both do not fit. A picker that
+/// lies past it, the panel winning where both do not fit, in one scroll
+/// over the [CalendarTheme]'s motion, or at once where the platform asks
+/// for no animations. A picker that
 /// grows over a motion or under a pointer, as a day picker unfolds, is
 /// revealed once that motion has ended and the pointer has lifted.
 class _PickerPanel extends StatefulWidget {
@@ -1892,9 +1895,9 @@ class _PickerPanelState extends State<_PickerPanel>
   late final CurvedAnimation _curved;
 
   /// The first [_fadeShare] of [_controller] on the theme's curve, which
-  /// the picker's opacity reads. [CurvedAnimation] applies a curve with no
-  /// reverse curve both ways, so the opacity is one function of how far
-  /// open the panel is, and a reversal mid-motion keeps it continuous.
+  /// the picker's opacity reads. [CurvedAnimation] keeps the curve of the
+  /// direction a motion started in until the motion ends, so a reversal
+  /// mid-motion keeps the opacity continuous.
   late final CurvedAnimation _fade;
 
   /// The swap of the panel's pickers, from 0 for the day picker to 1 for
@@ -1909,9 +1912,9 @@ class _PickerPanelState extends State<_PickerPanel>
   late final CurvedAnimation _timeOpacity;
 
   /// The first half of [_swap] on the theme's curve, of which the day
-  /// picker's opacity, [_dateOpacity], is the complement. Each opacity is
-  /// one function of [_swap]'s value, so a reversal mid-swap keeps both
-  /// continuous, and at most one picker is partly faded at a time.
+  /// picker's opacity, [_dateOpacity], is the complement. The two halves
+  /// do not meet, so at most one picker is partly faded at a time, and as
+  /// with [_fade], a reversal mid-swap keeps both opacities continuous.
   late final CurvedAnimation _dateFade;
   late final Animation<double> _dateOpacity;
 
@@ -1959,11 +1962,24 @@ class _PickerPanelState extends State<_PickerPanel>
     super.didChangeDependencies();
     final theme = CalendarTheme.of(context);
     final curve = theme.motionCurve;
-    _curved.curve = curve;
-    _fade.curve = Interval(0.0, _fadeShare, curve: curve);
-    _swapCurved.curve = curve;
-    _timeOpacity.curve = Interval(0.5, 1.0, curve: curve);
-    _dateFade.curve = Interval(0.0, 0.5, curve: curve);
+    // A reverse reads its curve from 1 down to 0, so the flip of the curve
+    // eases a closing, or a swap back, as the curve eases an opening.
+    final flipped = FlippedCurve(curve);
+    _curved
+      ..curve = curve
+      ..reverseCurve = flipped;
+    _fade
+      ..curve = Interval(0.0, _fadeShare, curve: curve)
+      ..reverseCurve = Interval(0.0, _fadeShare, curve: flipped);
+    _swapCurved
+      ..curve = curve
+      ..reverseCurve = flipped;
+    _timeOpacity
+      ..curve = Interval(0.5, 1.0, curve: curve)
+      ..reverseCurve = Interval(0.5, 1.0, curve: flipped);
+    _dateFade
+      ..curve = Interval(0.0, 0.5, curve: curve)
+      ..reverseCurve = Interval(0.0, 0.5, curve: flipped);
     final duration = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero
         : theme.motionDuration;
@@ -2076,18 +2092,42 @@ class _PickerPanelState extends State<_PickerPanel>
     });
   }
 
+  /// Scrolls the form the least that shows the open field's leading edge,
+  /// and then the panel's trailing edge, which wins where both do not fit:
+  /// over the [CalendarTheme]'s motion, or at once where the platform asks
+  /// for no animations.
   void _reveal() {
-    final field = widget.field.context;
+    final position = Scrollable.maybeOf(context)?.position;
+    final panel = context.findRenderObject();
+    if (position == null || panel == null) {
+      return;
+    }
+    var target = position.pixels;
+    final field = widget.field.context?.findRenderObject();
     if (field != null) {
-      Scrollable.ensureVisible(
-        field,
-        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+      final viewport = RenderAbstractViewport.of(field);
+      target = math.min(target, viewport.getOffsetToReveal(field, 0.0).offset);
+    }
+    final viewport = RenderAbstractViewport.of(panel);
+    target = math.max(target, viewport.getOffsetToReveal(panel, 1.0).offset);
+    target = clampDouble(
+      target,
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if (target == position.pixels) {
+      return;
+    }
+    if (MediaQuery.disableAnimationsOf(context)) {
+      position.jumpTo(target);
+    } else {
+      final theme = CalendarTheme.of(context);
+      position.animateTo(
+        target,
+        duration: theme.motionDuration,
+        curve: theme.motionCurve,
       );
     }
-    Scrollable.ensureVisible(
-      context,
-      alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
-    );
   }
 
   /// [_PanelSwap] laid its pickers out taller than before, with no swap

@@ -128,19 +128,16 @@ final CalendarDayBadges<ItemPayload> harborDayBadges =
       },
     );
 
-/// A progress indicator: centred on the cover, and 16 square at the start
-/// of a day row.
+/// The calendar's progress indicator, [CalendarActivityIndicator]: centred
+/// on the cover, and 16 square at the start of a day row.
 Widget harborLoadingBuilder(BuildContext context, CalendarLoadingState state) {
   switch (state.site) {
     case CalendarStateSite.cover:
-      return const CircularProgressIndicator();
+      return const CalendarActivityIndicator();
     case CalendarStateSite.dayRow:
       return const Align(
         alignment: Alignment.centerLeft,
-        child: SizedBox.square(
-          dimension: 16.0,
-          child: CircularProgressIndicator(strokeWidth: 2.0),
-        ),
+        child: CalendarActivityIndicator(size: 16.0, strokeWidth: 2.0),
       );
   }
 }
@@ -383,10 +380,7 @@ class HarborBlock extends StatelessWidget {
           const Positioned(
             top: 2.0,
             right: 2.0,
-            child: SizedBox.square(
-              dimension: 12.0,
-              child: CircularProgressIndicator(strokeWidth: 2.0),
-            ),
+            child: CalendarActivityIndicator(size: 12.0, strokeWidth: 2.0),
           ),
         ],
       );
@@ -775,6 +769,10 @@ class ItemCard extends StatelessWidget {
                         // No tooltip: its icon's label names the button.
                         tooltip: "",
                         enabled: !pending,
+                        popUpAnimationStyle: HarborMotion.of(
+                          context,
+                          HarborMotion.quick,
+                        ),
                         style: const ButtonStyle(
                           visualDensity: VisualDensity.compact,
                         ),
@@ -838,9 +836,9 @@ class ItemCard extends StatelessWidget {
           Positioned(
             top: startsAt == null ? 8.0 : 8.0 + stripHeight,
             right: 48.0,
-            child: const SizedBox.square(
-              dimension: 12.0,
-              child: CircularProgressIndicator(strokeWidth: 2.0),
+            child: const CalendarActivityIndicator(
+              size: 12.0,
+              strokeWidth: 2.0,
             ),
           ),
         ],

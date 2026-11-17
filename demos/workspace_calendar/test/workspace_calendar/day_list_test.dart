@@ -276,8 +276,8 @@ void main() {
     expect(find.text("Deleting failed."), findsOneWidget);
   });
 
-  testWidgets("L5 the list animates every family over 300 ms on "
-      "fastOutSlowIn", (tester) async {
+  testWidgets("L5 the list animates every family over Harbor's standard "
+      "motion, 300 ms on its standard curve", (tester) async {
     await pumpCalendar(tester);
 
     final list = tester.widget<SyncedSliverTree<String, DayListRow>>(
@@ -290,7 +290,7 @@ void main() {
         const Duration(milliseconds: 300),
         reason: "$family",
       );
-      expect(spec.curve, Curves.fastOutSlowIn, reason: "$family");
+      expect(spec.curve, HarborMotion.standardCurve, reason: "$family");
     }
   });
 
@@ -1076,7 +1076,7 @@ void main() {
       ),
     );
     expect(
-      tester.getRect(find.byType(CircularProgressIndicator)).top,
+      tester.getRect(find.byType(CalendarActivityIndicator)).top,
       tester.getRect(find.byKey(itemCardStartsAtKey("early"))).bottom + 8.0,
     );
   });

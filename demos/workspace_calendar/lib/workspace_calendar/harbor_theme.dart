@@ -83,12 +83,107 @@ HarborTypeStyle harborTypeStyleOf(CalendarItemType type) {
 /// it marks the time the carried block came from.
 const double harborDraggedItemOpacity = 0.66;
 
-/// How long each animation the calendar runs takes: the month's fold into
-/// its week, and every animation of the timed grid and the day list.
-const Duration harborMotionDuration = Duration(milliseconds: 300);
+/// The groups the demo's motions run in, each a duration and a curve of the
+/// framework's animation library, so none of them depends on a design
+/// library: [quick] for a small control, a menu or a chip's remove button;
+/// [standard], the calendar's own, for what moves, resizes or fades inside
+/// a surface; and [surface] for a sheet or a snack bar coming in and
+/// leaving, with [dialog] for a dialog's route, which has one duration.
+///
+/// A motion that reverses, as a closing does, eases out as its opening
+/// does: a reverse reads its curve from 1 down to 0, so each group's
+/// reverse curve is the flip ([FlippedCurve]) of the curve its reverse
+/// runs on.
+abstract final class HarborMotion {
+  /// How long [quick] takes, each way.
+  static const Duration quickDuration = Duration(milliseconds: 150);
 
-/// The curve each animation the calendar runs eases on.
-const Curve harborMotionCurve = Curves.fastOutSlowIn;
+  /// How long [standard] takes, each way.
+  static const Duration standardDuration = Duration(milliseconds: 300);
+
+  /// How long a surface takes to come in.
+  static const Duration surfaceInDuration = Duration(milliseconds: 400);
+
+  /// How long a surface takes to leave.
+  static const Duration surfaceOutDuration = Duration(milliseconds: 200);
+
+  /// The curve [quick] and [standard] ease on: it starts from rest, covers
+  /// half its distance in the first fifth of its time, and settles over the
+  /// rest.
+  static const Curve standardCurve = Cubic(0.2, 0.0, 0.0, 1.0);
+
+  /// The curve a surface comes in on: it arrives fast and settles.
+  static const Curve surfaceInCurve = Cubic(0.05, 0.7, 0.1, 1.0);
+
+  /// The curve a surface leaves on: it starts slowly and speeds away.
+  static const Curve surfaceOutCurve = Cubic(0.3, 0.0, 0.8, 0.15);
+
+  /// A small control's motion: [quickDuration] each way, on
+  /// [standardCurve].
+  static const AnimationStyle quick = AnimationStyle(
+    duration: quickDuration,
+    reverseDuration: quickDuration,
+    curve: standardCurve,
+    reverseCurve: FlippedCurve(standardCurve),
+  );
+
+  /// A motion inside a surface: [standardDuration] each way, on
+  /// [standardCurve].
+  static const AnimationStyle standard = AnimationStyle(
+    duration: standardDuration,
+    reverseDuration: standardDuration,
+    curve: standardCurve,
+    reverseCurve: FlippedCurve(standardCurve),
+  );
+
+  /// A surface's motion: in over [surfaceInDuration] on [surfaceInCurve],
+  /// and out over [surfaceOutDuration] on [surfaceOutCurve].
+  static const AnimationStyle surface = AnimationStyle(
+    duration: surfaceInDuration,
+    reverseDuration: surfaceOutDuration,
+    curve: surfaceInCurve,
+    reverseCurve: FlippedCurve(surfaceOutCurve),
+  );
+
+  /// A dialog's motion: a surface's curves, over [surfaceOutDuration] both
+  /// ways, since a dialog's route takes its one duration from
+  /// [AnimationStyle.duration] and reverses over it too
+  /// ([TransitionRoute.reverseTransitionDuration]).
+  static const AnimationStyle dialog = AnimationStyle(
+    duration: surfaceOutDuration,
+    reverseDuration: surfaceOutDuration,
+    curve: surfaceInCurve,
+    reverseCurve: FlippedCurve(surfaceOutCurve),
+  );
+
+  /// Whether [context] may animate: false where the platform asks for no
+  /// animations ([MediaQuery.disableAnimationsOf]), and true where it does
+  /// not or [context] has no [MediaQuery].
+  static bool animates(BuildContext context) {
+    return !(MediaQuery.maybeDisableAnimationsOf(context) ?? false);
+  }
+
+  /// [style] where [context] [animates], and [AnimationStyle.noAnimation]
+  /// where it does not.
+  static AnimationStyle of(BuildContext context, AnimationStyle style) {
+    return animates(context) ? style : AnimationStyle.noAnimation;
+  }
+
+  /// [duration] where [context] [animates], and [Duration.zero] where it
+  /// does not.
+  static Duration durationOf(BuildContext context, Duration duration) {
+    return animates(context) ? duration : Duration.zero;
+  }
+}
+
+/// How long each animation the calendar runs takes: the month's fold into
+/// its week, and every animation of the timed grid and the day list;
+/// [HarborMotion.standardDuration].
+const Duration harborMotionDuration = HarborMotion.standardDuration;
+
+/// The curve each animation the calendar runs eases on;
+/// [HarborMotion.standardCurve].
+const Curve harborMotionCurve = HarborMotion.standardCurve;
 
 /// The calendar views' theme in the Harbor palette: each colour the
 /// [HarborColors] value of its name, the notice outline [HarborColors.noticeEdge],

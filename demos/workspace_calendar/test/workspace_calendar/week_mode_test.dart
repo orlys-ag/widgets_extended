@@ -100,7 +100,7 @@ Size indicatorSizeIn(WidgetTester tester, Finder finder) {
   return tester.getSize(
     find.descendant(
       of: finder,
-      matching: find.byType(CircularProgressIndicator),
+      matching: find.byType(CalendarActivityIndicator),
     ),
   );
 }
@@ -377,7 +377,7 @@ void main() {
     expect(
       find.descendant(
         of: saveFinder(),
-        matching: find.byType(CircularProgressIndicator),
+        matching: find.byType(CalendarActivityIndicator),
       ),
       findsOneWidget,
     );
@@ -1205,7 +1205,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byType(TimedGrid<ItemPayload>),
-        matching: find.byType(CircularProgressIndicator),
+        matching: find.byType(CalendarActivityIndicator),
       ),
       findsOneWidget,
     );
@@ -2134,8 +2134,8 @@ void main() {
     );
   });
 
-  testWidgets("W25 the grid animates every family over 300 ms on "
-      "fastOutSlowIn", (tester) async {
+  testWidgets("W25 the grid animates every family over Harbor's standard "
+      "motion, 300 ms on its standard curve", (tester) async {
     await pumpCalendar(tester, size: tall);
     await pickMode(tester, "Week");
 
@@ -2149,7 +2149,7 @@ void main() {
         const Duration(milliseconds: 300),
         reason: "$family",
       );
-      expect(spec.curve, Curves.fastOutSlowIn, reason: "$family");
+      expect(spec.curve, HarborMotion.standardCurve, reason: "$family");
     }
   });
 
@@ -2197,15 +2197,15 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets("W27 a lifted block casts a shadow that eases in over 300 ms "
-      "on fastOutSlowIn", (tester) async {
+  testWidgets("W27 a lifted block casts a shadow that eases in over Harbor's "
+      "standard motion, 300 ms on its standard curve", (tester) async {
     await pumpCalendar(tester, editing: true, size: tall);
     await pickMode(tester, "Week");
 
     /// The built-in [CalendarThemeData.liftedBlockShadows] at the share of
     /// the lift [elapsed] reaches.
     List<BoxShadow> liftedAt(Duration elapsed) {
-      final lift = Curves.fastOutSlowIn.transform(
+      final lift = HarborMotion.standardCurve.transform(
         elapsed.inMicroseconds / 300000,
       );
       return <BoxShadow>[

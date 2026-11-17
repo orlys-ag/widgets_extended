@@ -549,13 +549,13 @@ class _ProbeContext extends TestRecordingPaintingContext {
 }
 
 /// Paints each of [roots]' render objects into a recording context, past
-/// every [CircularProgressIndicator] and [TextButton], whose colours the
-/// ambient [ThemeData] resolves, and reads what it drew.
+/// every [TextButton], whose colours the ambient [ThemeData] resolves, and
+/// reads what it drew.
 Drawn drawnUnder(WidgetTester tester, List<Finder> roots) {
   final drawn = Drawn();
   final skip = <RenderObject>{};
   for (final root in roots) {
-    for (final type in <Type>[CircularProgressIndicator, TextButton]) {
+    for (final type in <Type>[TextButton]) {
       for (final element
           in find
               .descendant(of: root, matching: find.byType(type))

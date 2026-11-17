@@ -83,7 +83,8 @@ String hoursLabel(
 /// leave, scrolling past it. Each change applies at once, a
 /// setting through [onChanged] and a zone through [onZoneChanged], so the
 /// calendar behind the sheet shows it while the sheet is open. The zones
-/// show their offsets at [clock]'s reading. Completes when the sheet
+/// show their offsets at [clock]'s reading. The sheet comes in and leaves
+/// as a surface ([HarborMotion.surface]). Completes when the sheet
 /// closes.
 Future<void> showCalendarSettings(
   BuildContext context, {
@@ -98,6 +99,7 @@ Future<void> showCalendarSettings(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
+    sheetAnimationStyle: HarborMotion.of(context, HarborMotion.surface),
     // Light, so the calendar the changes apply to shows through.
     barrierColor: Colors.black12,
     builder: (context) {
@@ -135,8 +137,8 @@ Future<void> showCalendarSettings(
 /// The manage mode, titled "Time zone selection", keeps the time zone
 /// part, the Manage chip reading "Done", a tap on it ending the mode, and each
 /// chip of [zones] holding a button that removes its zone, which grows in
-/// and out over Harbor's motion; a removal of the chosen zone chooses the
-/// device's. In place of the settings under the
+/// and out over [HarborMotion.quick]; a removal of the chosen zone chooses
+/// the device's. In place of the settings under the
 /// time zone part it shows a search field over a list of the loaded zones
 /// ([CalendarDates.loadedZones]) that [zones] does not hold, sorted by
 /// name, whose id or city holds the search text, ignoring case and the
@@ -144,9 +146,11 @@ Future<void> showCalendarSettings(
 /// takes the row out of the list and gives the zone a chip, and leaves
 /// the mode on. The list is two fifths of the height the keyboard and the
 /// screen's top intrusions leave, from two rows to 320 px tall, and
-/// scrolls; its rows enter and leave over Harbor's motion, and each shows
-/// its zone's city, id and offset at [clock]'s reading. The modes
-/// cross-fade over Harbor's motion as the sheet's height follows.
+/// scrolls; its rows enter and leave over [HarborMotion.standard], and
+/// each shows its zone's city, id and offset at [clock]'s reading. The
+/// modes swap over [HarborMotion.standard] as the sheet's height follows,
+/// the leaving one fading out before the coming one fades in. Where the
+/// platform asks for no animations, none of these motions runs.
 class CalendarSettingsSheet extends StatefulWidget {
   const CalendarSettingsSheet({
     super.key,
@@ -216,19 +220,11 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
   /// matches.
   List<Location> _shown = const <Location>[];
 
-  /// The motion the chips' remove buttons grow and shrink with: Harbor's
-  /// duration, on the chip's own curve, which is Harbor's.
-  static final ChipAnimationStyle _chipMotion = ChipAnimationStyle(
-    deleteDrawerAnimation: const AnimationStyle(
-      duration: harborMotionDuration,
-      reverseDuration: harborMotionDuration,
-    ),
-  );
-
-  /// The motion the manage mode's rows enter and leave with.
+  /// The motion the manage mode's rows enter and leave with, where the
+  /// sheet animates.
   static final TreeAnimationStyle _rowMotion = TreeAnimationStyle.uniform(
-    duration: harborMotionDuration,
-    curve: harborMotionCurve,
+    duration: HarborMotion.standardDuration,
+    curve: HarborMotion.standardCurve,
   );
 
   @override
@@ -364,13 +360,19 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
   );
 
   /// Scrolls the search field to the top of the sheet's view, or as near
-  /// it as the sheet scrolls, so the list under it fills the rest.
+  /// it as the sheet scrolls, so the list under it fills the rest, over
+  /// [HarborMotion.standard], or at once where the platform asks for no
+  /// animations.
   void _revealSearch() {
     final field = _searchField.currentContext;
     if (!mounted || field == null) {
       return;
     }
-    Scrollable.ensureVisible(field);
+    Scrollable.ensureVisible(
+      field,
+      duration: HarborMotion.durationOf(context, HarborMotion.standardDuration),
+      curve: HarborMotion.standardCurve,
+    );
   }
 
   @override
@@ -494,24 +496,28 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
     final name = chosen == null
         ? _deviceChip
         : CalendarZonePanel.cityOf(chosen);
+    final Widget chips = Wrap(
+      key: zoneChoicesKey,
+      spacing: 8.0,
+      runSpacing: 4.0,
+      children: <Widget>[
+        for (final zone in <Location?>[null, ...widget.zones.zones])
+          _buildZoneChip(zone, chosen),
+        _buildManageChip(),
+      ],
+    );
     return _Part(
       title: "Time zone",
       value: "$name, ${strings.utcOffset(offset)}",
-      child: AnimatedSize(
-        duration: harborMotionDuration,
-        curve: harborMotionCurve,
-        alignment: Alignment.topCenter,
-        child: Wrap(
-          key: zoneChoicesKey,
-          spacing: 8.0,
-          runSpacing: 4.0,
-          children: <Widget>[
-            for (final zone in <Location?>[null, ...widget.zones.zones])
-              _buildZoneChip(zone, chosen),
-            _buildManageChip(),
-          ],
-        ),
-      ),
+      // An AnimatedSize takes no zero duration, as [_Switched] says.
+      child: !HarborMotion.animates(context)
+          ? chips
+          : AnimatedSize(
+              duration: HarborMotion.standardDuration,
+              curve: HarborMotion.standardCurve,
+              alignment: Alignment.topCenter,
+              child: chips,
+            ),
     );
   }
 
@@ -560,7 +566,11 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
       },
       deleteIcon: const Icon(Icons.close, size: 18.0),
       deleteButtonTooltipMessage: "Remove $name",
-      chipAnimationStyle: _chipMotion,
+      // The chip reads the durations alone, and grows and shrinks the
+      // button on a curve of its own.
+      chipAnimationStyle: ChipAnimationStyle(
+        deleteDrawerAnimation: HarborMotion.of(context, HarborMotion.quick),
+      ),
       onDeleted: zone == null || !_managing
           ? null
           : () {
@@ -633,7 +643,9 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
                       parentOf: (zone) {
                         return null;
                       },
-                      animationStyle: _rowMotion,
+                      animationStyle: HarborMotion.animates(context)
+                          ? _rowMotion
+                          : TreeAnimationStyle.disabled,
                       itemBuilder: (context, node) {
                         return _buildZoneRow(strings, node.item, reading);
                       },
@@ -882,9 +894,12 @@ class _CalendarSettingsSheetState extends State<CalendarSettingsSheet> {
   }
 }
 
-/// [child] in place of the child before it, cross-fading over Harbor's
-/// motion while its height follows. The child that leaves keeps to the
-/// height of the one that comes, clipped.
+/// [child] in place of the child before it, over [HarborMotion.standard]
+/// while its height follows: the child that leaves fades out over the
+/// motion's first half and the one that comes fades in over its second,
+/// each easing out. The child that leaves keeps to the height of the one
+/// that comes, clipped. Where the platform asks for no animations, it
+/// shows [child] alone, in place of the child before it at once.
 class _Switched extends StatelessWidget {
   const _Switched({required this.child});
 
@@ -893,14 +908,31 @@ class _Switched extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // An AnimatedSize takes no zero duration: its render object would end
+    // its controller inside its own layout, which may not mark it to lay
+    // out again. So with no motion the child shows alone.
+    if (!HarborMotion.animates(context)) {
+      return child;
+    }
     return AnimatedSize(
-      duration: harborMotionDuration,
-      curve: harborMotionCurve,
+      duration: HarborMotion.standardDuration,
+      curve: HarborMotion.standardCurve,
       alignment: Alignment.topCenter,
       child: AnimatedSwitcher(
-        duration: harborMotionDuration,
-        switchInCurve: harborMotionCurve,
-        switchOutCurve: harborMotionCurve,
+        duration: HarborMotion.standardDuration,
+        // The leaving child runs its animation backwards, from 1 down to
+        // 0, so the second half of its time is the first of the motion's,
+        // and the flip of the curve eases it out.
+        switchInCurve: const Interval(
+          0.5,
+          1.0,
+          curve: HarborMotion.standardCurve,
+        ),
+        switchOutCurve: const Interval(
+          0.5,
+          1.0,
+          curve: FlippedCurve(HarborMotion.standardCurve),
+        ),
         layoutBuilder: (current, previous) {
           return Stack(
             alignment: Alignment.topCenter,
@@ -1115,6 +1147,7 @@ class _WeekStartMenu extends StatelessWidget {
     return PopupMenuButton<int>(
       key: weekStartKey,
       tooltip: "Week starts on",
+      popUpAnimationStyle: HarborMotion.of(context, HarborMotion.quick),
       initialValue: firstColumn,
       color: HarborColors.surface,
       onSelected: onSelected,

@@ -426,7 +426,7 @@ void main() {
 
   testWidgets(
     "MZ4 in the manage mode each added zone's chip, never the device's, "
-    "grows a remove button over Harbor's motion; a removal puts the zone "
+    "grows a remove button over Harbor's quick motion; a removal puts the zone "
     "back in the list, and that of the chosen zone chooses the device's",
     (tester) async {
       await pumpCalendar(tester, clock: noonClock);
@@ -449,7 +449,7 @@ void main() {
 
       await tester.tap(find.byKey(manageZonesKey));
       await tester.pump();
-      await tester.pump(harborMotionDuration ~/ 2);
+      await tester.pump(HarborMotion.quickDuration ~/ 2);
       final growing = tester.getSize(zoneChip("America/Havana")).width;
       await tester.pumpAndSettle();
       final wide = tester.getSize(zoneChip("America/Havana")).width;
