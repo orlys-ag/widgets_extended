@@ -55,7 +55,9 @@ enum _StripBrowse {
 
 /// The calendar card's state, owned by a host State that makes it in its
 /// `initState` with its own [TickerProvider] and disposes it in its
-/// `dispose`.
+/// `dispose`. It starts [folded] or on the month, and where [picksMonth]
+/// with the month picker in on the year of the host's
+/// [CalendarCardHost.cardSelectedDay], each with no motion.
 ///
 /// Each event runs its change through [CalendarCardHost.runCardEvent],
 /// then notifies, then starts its motion; a select calls
@@ -77,10 +79,16 @@ final class CalendarCardController extends ChangeNotifier {
     required CalendarCardHost host,
     required this.headerSelects,
     bool folded = false,
+    bool picksMonth = false,
   }) : _host = host,
        _folded = folded,
+       _picksMonth = picksMonth,
+       _pickerYear = picksMonth ? host.cardSelectedDay.year : 0,
        _collapse = AnimationController(vsync: vsync, value: folded ? 1.0 : 0.0),
-       _pickerShown = AnimationController(vsync: vsync) {
+       _pickerShown = AnimationController(
+         vsync: vsync,
+         value: picksMonth ? 1.0 : 0.0,
+       ) {
     _collapse.addListener(_handleFold);
   }
 
@@ -121,14 +129,14 @@ final class CalendarCardController extends ChangeNotifier {
     return _picksMonth;
   }
 
-  bool _picksMonth = false;
+  bool _picksMonth;
 
   /// The year the month picker shows.
   int get pickerYear {
     return _pickerYear;
   }
 
-  int _pickerYear = 0;
+  int _pickerYear;
 
   /// A day of the month the card shows and the header names since a slide
   /// of the month strip, a chevron or a drag of the week strip moved the

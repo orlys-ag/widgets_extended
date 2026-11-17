@@ -25,6 +25,11 @@ const ValueKey<String> scheduleLengthKey = ValueKey<String>("schedule-length");
 /// the device's zone's name, above the zone's offset from UTC.
 const ValueKey<String> scheduleZoneKey = ValueKey<String>("schedule-zone");
 
+/// The key of the text of the schedule's summary ([ScheduleSummary]).
+const ValueKey<String> scheduleSummaryKey = ValueKey<String>(
+  "schedule-summary",
+);
+
 /// The key of the overlap notice.
 const ValueKey<String> scheduleOverlapKey = ValueKey<String>(
   "schedule-overlap",
@@ -102,30 +107,32 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 
 /// The section of [check]'s schedule: an All day switch, where the kind
 /// takes all-day or the schedule is all-day, which turned off restores the
-/// times the schedule keeps; then a Start row, Start date beside Start
-/// time, above an End row, End date beside End time, each date taking
-/// three fifths of its row; an all-day schedule's rows hold their dates
-/// alone. A field's tap opens its own picker in a panel under the field's
-/// row, one of the four open at a time, the field drawn focused while it
-/// is open. A time field's picker is a [CalendarTimePicker], with its
-/// haptic feedback on, whose Hour column takes the focus. A date field's is
-/// a [CalendarDayPicker], folded on the week of the field's day, that day
+/// times the schedule keeps; then a Start row, Start date beside Start time,
+/// above an End row, End date beside End time, each date taking three fifths
+/// of its row; an all-day schedule's rows hold their dates alone. A field's
+/// tap opens its own picker in a panel under the field's row, one of the
+/// four open at a time, the field drawn focused while it is open. A time
+/// field's picker is a [CalendarTimePicker], with its haptic feedback on,
+/// whose Hour column takes the focus. A date field's is a
+/// [CalendarDayPicker] on the week or month of the field's day, that day
 /// selected and the [CalendarNow.today] of [now] ringed, its weeks starting
-/// on the weekday column [firstColumn], and its days with entries of
-/// [store] badged as [dayBadges] marks them, the circles of its first and
-/// last columns on the row's sides
-/// ([CalendarDayPicker.daysToEdges]); the field keeps the focus. A
-/// tap on a day there moves the field's day to it and leaves the picker
-/// open, and its chevrons, swipes and month picks only browse, End date's
-/// to no week, month or year before the start day's
-/// ([CalendarDayPicker.browsesBeforeFirstDay]). Each opening
-/// of a date field shows its picker folded. A day picker draws disabled,
-/// and takes no tap on, the days its check's day answers rule out: Start
-/// date's those before [CalendarScheduleCheck.firstStartDay], End date's
-/// those outside [CalendarScheduleCheck.endDays]; the section reads them
-/// of each check once, as a day picker first builds under it. Times are
-/// written on [hourLabelFormat]'s clock. [ScheduleHeading] shows the
-/// schedule's length and zone, and [ScheduleOverlapNotice] its overlaps.
+/// on the weekday column [firstColumn], and its days with entries of [store]
+/// badged as [dayBadges] marks them, the circles of its first and last
+/// columns on the row's sides ([CalendarDayPicker.daysToEdges]); the field
+/// keeps the focus. A tap on a day there moves the field's day to it and
+/// leaves the picker open, and its chevrons, swipes and month picks only
+/// browse, End date's to no week, month or year before the start day's
+/// ([CalendarDayPicker.browsesBeforeFirstDay]). Each opening of a date field
+/// shows its picker on the view either picker last turned to
+/// ([CalendarDayPicker.onViewChanged]): folded into its week row or unfolded
+/// into its month, and the month picker open or not, folded at first. A day
+/// picker draws disabled, and takes no tap on, the days its check's day
+/// answers rule out: Start date's those before
+/// [CalendarScheduleCheck.firstStartDay], End date's those outside
+/// [CalendarScheduleCheck.endDays]; the section reads them of each check
+/// once, as a day picker first builds under it. Times are written on
+/// [hourLabelFormat]'s clock. [ScheduleHeading] shows the schedule's length
+/// and zone, and [ScheduleOverlapNotice] its overlaps.
 ///
 /// A panel grows and fades in as its field's tap opens it, and shrinks and
 /// fades out as that field's tap closes it, over the [CalendarTheme]'s
@@ -383,9 +390,14 @@ class ScheduleSectionState extends State<ScheduleSection> {
   _ScheduleField? _open;
 
   /// How many times each date field has opened its picker, which keys the
-  /// row's day picker, so that each opening builds a new one, folded.
+  /// row's day picker, so that each opening builds a new one, on
+  /// [_dayPickerView].
   int _startDateOpenings = 0;
   int _endDateOpenings = 0;
+
+  /// The view either day picker last turned to, which the next one opens
+  /// on; read only as a day picker is made, so a change needs no build.
+  CalendarDayPickerView _dayPickerView = const CalendarDayPickerView();
 
   /// Each field's picker's table, kept across builds while it holds.
   final Map<_TimeField, _TimeTable> _tables = <_TimeField, _TimeTable>{};
@@ -526,6 +538,12 @@ class ScheduleSectionState extends State<ScheduleSection> {
     return _restNodeOf(
       _schedule.isAllDay ? row.dateField : row.timeField,
     ).context;
+  }
+
+  /// The context of the Start date field, whose box tells where the Start
+  /// row lies; null before the section builds.
+  BuildContext? get startDateContext {
+    return _startDateRestNode.context;
   }
 
   /// Whether a time field, or anything under its [Focus], has the focus.
@@ -804,13 +822,14 @@ class ScheduleSectionState extends State<ScheduleSection> {
     return row == _TimeField.start ? _startRange : _endRange;
   }
 
-  /// [row]'s day picker, folded on the week of the row's day, that day
+  /// [row]'s day picker, on the week or month of the row's day, that day
   /// selected and [ScheduleSection.now]'s today ringed, taking the days of
-  /// [_dayRangeOf], End date's browsing back no further than the first
-  /// of them. Keyed by the row's openings, so each opening of its
-  /// date field builds a new one, folded, whatever the last one showed. A
-  /// tap on a day moves the row's day to it; the picker takes no pick while
-  /// its panel closes or swaps it out, or where the field takes no input.
+  /// [_dayRangeOf], End date's browsing back no further than the first of
+  /// them. Keyed by the row's openings, so each opening of its date field
+  /// builds a new one, on the view either picker last turned to,
+  /// [_dayPickerView]. A tap on a day moves the row's day to it; the picker
+  /// takes no pick while its panel closes or swaps it out, or where the
+  /// field takes no input.
   Widget _dayPicker(_TimeField row) {
     final schedule = _schedule;
     final start = row == _TimeField.start;
@@ -835,6 +854,10 @@ class ScheduleSectionState extends State<ScheduleSection> {
       dayBadges: widget.dayBadges,
       daysToEdges: true,
       browsesBeforeFirstDay: start,
+      initialView: _dayPickerView,
+      onViewChanged: (view) {
+        _dayPickerView = view;
+      },
     );
   }
 
@@ -1104,6 +1127,451 @@ class ScheduleHeading extends StatelessWidget {
         const SizedBox(width: 12.0),
         _zone(CalendarLocalizations.of(context)),
       ],
+    );
+  }
+}
+
+/// The form's page, [child], under a band that writes [check]'s schedule
+/// where [shown]: its first day as the date fields write it
+/// ([MaterialLocalizations.formatMediumDate]) and, for a timed schedule,
+/// its times on [hourLabelFormat]'s clock, as "Wed, Apr 22, 09:00-10:00",
+/// or each day's across days, as "Wed, Apr 22, 22:00 - Thu, Apr 23, 02:00",
+/// an end at a day's 24:00 written as the End time field writes it
+/// ([CalendarSchedule.endMinute]); for an all-day schedule its first day,
+/// and its last after " - " where it has more, as
+/// "Wed, Apr 22 - Fri, Apr 24". The spaces within a day and a time do not
+/// break, so a summary too long for its line breaks after " - " alone.
+///
+/// The band paints the sheet's colour, [HarborColors.surface], with a
+/// hairline of [HarborColors.outline] along its bottom, and starts its text
+/// where the heading's title starts. As [shown] turns true the band grows
+/// from no height to its own over the [CalendarTheme]'s motion, sliding
+/// down from its top edge as it fades in, and the page's view starts under
+/// it; as [shown] turns false it shrinks back over that motion, fading out
+/// and taking no pointer; each at once where the platform asks for no
+/// animations. A band built [shown] shows at once.
+///
+/// As the band's height changes, the offset of [controller]'s position
+/// changes by as much, so what the page shows stays where it lies, the band
+/// covering or uncovering the top of it; where that would take the offset
+/// below its least, the offset stops there and the page moves with its
+/// view. An animated scroll of the page sets its offset whole on each
+/// frame ([ScrollPosition.animateTo]), so the page moves with the band
+/// while one runs.
+class ScheduleSummary extends StatefulWidget {
+  const ScheduleSummary({
+    super.key,
+    required this.check,
+    required this.hourLabelFormat,
+    required this.shown,
+    required this.controller,
+    required this.child,
+  });
+
+  final CalendarScheduleCheck<ItemPayload> check;
+
+  final CalendarHourLabelFormat hourLabelFormat;
+
+  /// Whether the band shows, or comes in.
+  final bool shown;
+
+  /// The controller of the page's scroll view, whose offset follows the
+  /// band's height.
+  final ScrollController controller;
+
+  /// The page, under the band.
+  final Widget child;
+
+  @override
+  State<ScheduleSummary> createState() {
+    return _ScheduleSummaryState();
+  }
+}
+
+class _ScheduleSummaryState extends State<ScheduleSummary>
+    with SingleTickerProviderStateMixin {
+  /// The summary's text.
+  static const TextStyle _style = TextStyle(
+    fontSize: 14.0,
+    fontWeight: FontWeight.w500,
+    color: HarborColors.textMuted,
+  );
+
+  /// How far in the band is, from 0, gone, to 1, shown.
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    value: widget.shown ? 1.0 : 0.0,
+  );
+
+  /// [_controller] on the theme's curve, which the band's height and
+  /// opacity read.
+  late final CurvedAnimation _curved = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.linear,
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final theme = CalendarTheme.of(context);
+    // A reverse reads its curve from 1 down to 0, so the flip of the curve
+    // eases a going as the curve eases a coming.
+    _curved
+      ..curve = theme.motionCurve
+      ..reverseCurve = FlippedCurve(theme.motionCurve);
+    _controller.duration = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : theme.motionDuration;
+  }
+
+  @override
+  void didUpdateWidget(ScheduleSummary oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.shown != oldWidget.shown) {
+      if (widget.shown) {
+        _controller.forward();
+      } else {
+        _controller.reverse();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _curved.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// [schedule] as the band writes it.
+  static String _summaryOf(
+    CalendarSchedule schedule,
+    MaterialLocalizations dates,
+    CalendarLocalizations strings,
+    CalendarHourLabelFormat format,
+  ) {
+    String unbroken(String text) {
+      return text.replaceAll(" ", "\u00A0");
+    }
+
+    final start = dates.formatMediumDate(schedule.startDay);
+    final end = dates.formatMediumDate(schedule.endDay);
+    final oneDay =
+        CalendarDates.dayNumber(schedule.startDay) ==
+        CalendarDates.dayNumber(schedule.endDay);
+    if (schedule.isAllDay) {
+      return oneDay ? unbroken(start) : "${unbroken(start)} - ${unbroken(end)}";
+    }
+    if (oneDay) {
+      final times = strings.formatTimeRange(
+        schedule.startMinute,
+        schedule.endMinute,
+        format,
+      );
+      return unbroken("$start, $times");
+    }
+    final from = strings.formatTime(schedule.startMinute, format);
+    final to = strings.formatTime(schedule.endMinute, format);
+    return "${unbroken("$start, $from")} - ${unbroken("$end, $to")}";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = _summaryOf(
+      widget.check.schedule,
+      MaterialLocalizations.of(context),
+      CalendarLocalizations.of(context),
+      widget.hourLabelFormat,
+    );
+    return _SummaryInset(
+      reveal: _curved,
+      controller: widget.controller,
+      band: IgnorePointer(
+        ignoring: !widget.shown,
+        child: FadeTransition(
+          opacity: _curved,
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              color: HarborColors.surface,
+              border: Border(bottom: BorderSide(color: HarborColors.outline)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24.0, 0.0, 24.0, 8.0),
+              child: Text(summary, key: scheduleSummaryKey, style: _style),
+            ),
+          ),
+        ),
+      ),
+      page: widget.child,
+    );
+  }
+}
+
+/// [band] over [page]: the band's own height times [reveal] of it shows,
+/// its bottom edge there, and the page lies under it, the change of that
+/// share moving [controller]'s offset by as much
+/// ([ScheduleSummary.controller]).
+class _SummaryInset extends MultiChildRenderObjectWidget {
+  _SummaryInset({
+    required this.reveal,
+    required this.controller,
+    required Widget band,
+    required Widget page,
+  }) : super(children: <Widget>[band, page]);
+
+  final Animation<double> reveal;
+
+  final ScrollController controller;
+
+  @override
+  _RenderSummaryInset createRenderObject(BuildContext context) {
+    return _RenderSummaryInset(reveal: reveal, controller: controller);
+  }
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderSummaryInset renderObject,
+  ) {
+    renderObject
+      ..reveal = reveal
+      ..controller = controller;
+  }
+}
+
+class _SummaryInsetParentData extends ContainerBoxParentData<RenderBox> {}
+
+/// Lays out [_SummaryInset]'s band, then its page under the share of the
+/// band that shows, and moves the page's offset by the change of that
+/// share before the page lays out, as a viewport corrects its own offset
+/// ([ScrollPosition.correctBy]): a drag and a fling go on from the moved
+/// offset, and an idle page keeps it.
+class _RenderSummaryInset extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _SummaryInsetParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _SummaryInsetParentData> {
+  _RenderSummaryInset({
+    required Animation<double> reveal,
+    required this.controller,
+  }) : _reveal = reveal;
+
+  /// The share of the band that shows, from 0 to 1.
+  Animation<double> get reveal {
+    return _reveal;
+  }
+
+  Animation<double> _reveal;
+
+  set reveal(Animation<double> value) {
+    if (identical(value, _reveal)) {
+      return;
+    }
+    if (attached) {
+      _reveal.removeListener(markNeedsLayout);
+      value.addListener(markNeedsLayout);
+    }
+    _reveal = value;
+    markNeedsLayout();
+  }
+
+  /// The controller of the page's scroll view, read as the band's share
+  /// changes.
+  ScrollController controller;
+
+  /// The height of the band that showed at the last layout, by which the
+  /// page's offset has moved; null before the first.
+  double? _inset;
+
+  final LayerHandle<ClipRectLayer> _clip = LayerHandle<ClipRectLayer>();
+
+  RenderBox get _band {
+    return firstChild!;
+  }
+
+  RenderBox get _page {
+    return lastChild!;
+  }
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _SummaryInsetParentData) {
+      child.parentData = _SummaryInsetParentData();
+    }
+  }
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    _reveal.addListener(markNeedsLayout);
+  }
+
+  @override
+  void detach() {
+    _reveal.removeListener(markNeedsLayout);
+    super.detach();
+  }
+
+  @override
+  void dispose() {
+    _clip.layer = null;
+    super.dispose();
+  }
+
+  /// The band's constraints: the width of [constraints], where it has one,
+  /// and any height.
+  static BoxConstraints _bandConstraints(BoxConstraints constraints) {
+    return BoxConstraints(
+      minWidth: constraints.hasBoundedWidth ? constraints.maxWidth : 0.0,
+      maxWidth: constraints.maxWidth,
+    );
+  }
+
+  /// The page's constraints under [inset] of the band.
+  static BoxConstraints _pageConstraints(
+    BoxConstraints constraints,
+    double inset,
+  ) {
+    return BoxConstraints(
+      minWidth: constraints.minWidth,
+      maxWidth: constraints.maxWidth,
+      minHeight: math.max(0.0, constraints.minHeight - inset),
+      maxHeight: math.max(0.0, constraints.maxHeight - inset),
+    );
+  }
+
+  /// The share of a band [height] tall that shows, no taller than
+  /// [maxHeight].
+  double _insetOf(double height, double maxHeight) {
+    return math.min(height * _reveal.value, maxHeight);
+  }
+
+  @override
+  void performLayout() {
+    final band = _band;
+    final page = _page;
+    band.layout(_bandConstraints(constraints), parentUsesSize: true);
+    final inset = _insetOf(band.size.height, constraints.maxHeight);
+    final last = _inset;
+    _inset = inset;
+    if (last != null && inset != last) {
+      _movePage(inset - last);
+    }
+    page.layout(_pageConstraints(constraints, inset), parentUsesSize: true);
+    (band.parentData! as _SummaryInsetParentData).offset = Offset(
+      0.0,
+      inset - band.size.height,
+    );
+    (page.parentData! as _SummaryInsetParentData).offset = Offset(0.0, inset);
+    size = constraints.constrain(
+      Size(page.size.width, inset + page.size.height),
+    );
+  }
+
+  /// Moves the page's offset by [change], the change of the band's share,
+  /// so what the page shows stays where it lies; no further down than the
+  /// offset's least.
+  void _movePage(double change) {
+    if (!controller.hasClients) {
+      return;
+    }
+    final position = controller.position;
+    if (!position.hasPixels || !position.hasContentDimensions) {
+      return;
+    }
+    var correction = change;
+    if (correction < 0.0) {
+      correction = math.min(
+        0.0,
+        math.max(correction, position.minScrollExtent - position.pixels),
+      );
+    }
+    if (correction != 0.0) {
+      position.correctBy(correction);
+    }
+  }
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) {
+    final band = _band.getDryLayout(_bandConstraints(constraints));
+    final inset = _insetOf(band.height, constraints.maxHeight);
+    final page = _page.getDryLayout(_pageConstraints(constraints, inset));
+    return constraints.constrain(Size(page.width, inset + page.height));
+  }
+
+  @override
+  double computeMinIntrinsicWidth(double height) {
+    return math.max(
+      _band.getMinIntrinsicWidth(double.infinity),
+      _page.getMinIntrinsicWidth(height),
+    );
+  }
+
+  @override
+  double computeMaxIntrinsicWidth(double height) {
+    return math.max(
+      _band.getMaxIntrinsicWidth(double.infinity),
+      _page.getMaxIntrinsicWidth(height),
+    );
+  }
+
+  @override
+  double computeMinIntrinsicHeight(double width) {
+    return _band.getMinIntrinsicHeight(width) * _reveal.value +
+        _page.getMinIntrinsicHeight(width);
+  }
+
+  @override
+  double computeMaxIntrinsicHeight(double width) {
+    return _band.getMaxIntrinsicHeight(width) * _reveal.value +
+        _page.getMaxIntrinsicHeight(width);
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final page = _page;
+    context.paintChild(
+      page,
+      offset + (page.parentData! as _SummaryInsetParentData).offset,
+    );
+    final inset = _inset ?? 0.0;
+    if (inset <= 0.0) {
+      _clip.layer = null;
+      return;
+    }
+    _clip.layer = context.pushClipRect(
+      needsCompositing,
+      offset,
+      Offset.zero & Size(size.width, inset),
+      _paintBand,
+      oldLayer: _clip.layer,
+    );
+  }
+
+  void _paintBand(PaintingContext context, Offset offset) {
+    final band = _band;
+    context.paintChild(
+      band,
+      offset + (band.parentData! as _SummaryInsetParentData).offset,
+    );
+  }
+
+  @override
+  Rect? describeApproximatePaintClip(RenderObject child) {
+    if (identical(child, _band)) {
+      return Offset.zero & Size(size.width, _inset ?? 0.0);
+    }
+    return null;
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
+    final child = position.dy < (_inset ?? 0.0) ? _band : _page;
+    return result.addWithPaintOffset(
+      offset: (child.parentData! as _SummaryInsetParentData).offset,
+      position: position,
+      hitTest: (result, transformed) {
+        return child.hitTest(result, position: transformed);
+      },
     );
   }
 }
