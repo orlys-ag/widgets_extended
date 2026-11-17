@@ -2,13 +2,19 @@
 /// read-only, and the delete confirmation.
 ///
 /// The form opens in a modal bottom sheet: a heading ([ScheduleHeading]),
-/// which writes the schedule's length after the form's title and its zone
-/// at the sheet's top right, over a scrolling page of the schedule section,
+/// which writes the schedule's length after the form's title and its zone at
+/// the sheet's top right, over a scrolling page of the schedule section,
 /// which every item type shares and which edits a [CalendarSchedule], the
 /// overlap notice ([ScheduleOverlapNotice]) while the schedule overlaps
 /// other entries, and the item's own fields, generated from the item type's
 /// schema. The page's parts lie on the sheet with no card around them, at
-/// the page's margins, and nothing on it stays in place as it scrolls. The
+/// the page's margins, and nothing on it stays in place as it scrolls. Once
+/// the page has scrolled the Start date field wholly out of its view, a
+/// summary of the schedule's days and times ([ScheduleSummary]) grows in
+/// under the heading, the page's view then starting under it and what the
+/// page shows staying where it lies, and it shrinks out as soon as any of
+/// the field comes back; while the page scrolls itself, as to a message, the
+/// summary waits for that scroll's end. The
 /// heading and the notice show what the schedule's [CalendarScheduleCheck]
 /// answers. The check is made again
 /// at each edit, at each change of the store that moves the entries over
@@ -29,7 +35,9 @@ import 'package:flutter/foundation.dart' show clampDouble, listEquals;
 import 'package:flutter/gestures.dart'
     show GestureRecognizer, VerticalDragGestureRecognizer;
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show RenderAbstractViewport;
+import 'package:flutter/rendering.dart'
+    show RenderAbstractViewport, ScrollDirection;
+import 'package:flutter/scheduler.dart' show SchedulerBinding;
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_api.dart';
@@ -420,6 +428,17 @@ class _ItemFormState extends State<_ItemForm> {
 
   final GlobalKey<ScheduleSectionState> _sectionKey =
       GlobalKey<ScheduleSectionState>();
+
+  /// Whether the schedule's summary shows under the heading: once the
+  /// Start date field has scrolled wholly out of the page's view.
+  bool _summaryShown = false;
+
+  /// Whether a [_placeSummary] waits for the end of a frame.
+  bool _summaryQueued = false;
+
+  /// The controller of the page's scroll view, whose offset the summary
+  /// moves as it comes and goes.
+  final ScrollController _page = ScrollController();
   final GlobalKey _noticeKey = GlobalKey(debugLabel: "Overlap notice");
   final GlobalKey _titleKey = GlobalKey(debugLabel: "Title");
   final FocusNode _titleFocus = FocusNode(debugLabel: "Title");
@@ -545,6 +564,7 @@ class _ItemFormState extends State<_ItemForm> {
     for (final node in _textFocus.values) {
       node.dispose();
     }
+    _page.dispose();
     super.dispose();
   }
 
@@ -987,6 +1007,62 @@ class _ItemFormState extends State<_ItemForm> {
     return KeyedSubtree(key: _fieldKeys[field.key], child: control);
   }
 
+  /// Places the schedule's summary after a frame in which the page
+  /// scrolled or its extent or view changed; a scroll inside the page, as
+  /// of a picker's strip, moves nothing the summary reads.
+  bool _pageNotified(Notification notification) {
+    if (notification is ViewportNotificationMixin &&
+        notification.depth == 0 &&
+        (notification is ScrollNotification ||
+            notification is ScrollMetricsNotification) &&
+        !_summaryQueued) {
+      _summaryQueued = true;
+      SchedulerBinding.instance
+        ..addPostFrameCallback((timeStamp) {
+          _summaryQueued = false;
+          _placeSummary();
+        })
+        ..ensureVisualUpdate();
+    }
+    return false;
+  }
+
+  /// Shows the schedule's summary where the Start date field lies wholly
+  /// above the page's view, and hides it where any of the field shows;
+  /// while the page scrolls by no drag, as a reveal animates it, places
+  /// nothing until that scroll ends, as an animated scroll would undo the
+  /// summary's move of the offset ([ScheduleSummary]).
+  void _placeSummary() {
+    if (!mounted) {
+      return;
+    }
+    if (_page.hasClients) {
+      final position = _page.position;
+      if (position.isScrollingNotifier.value &&
+          position.userScrollDirection == ScrollDirection.idle) {
+        return;
+      }
+    }
+    final field = _sectionKey.currentState?.startDateContext
+        ?.findRenderObject();
+    if (field is! RenderBox || !field.attached || !field.hasSize) {
+      return;
+    }
+    final view = RenderAbstractViewport.maybeOf(field);
+    if (view == null) {
+      return;
+    }
+    final bottom = field
+        .localToGlobal(Offset(0.0, field.size.height), ancestor: view)
+        .dy;
+    final shown = bottom <= 0.0;
+    if (shown != _summaryShown) {
+      setState(() {
+        _summaryShown = shown;
+      });
+    }
+  }
+
   /// The field the first message shows on, in the page's order, the start's
   /// or the end's field, the overlap notice where it names an overlap the
   /// rules refuse, the title, then the type's fields, and the node that
@@ -1215,24 +1291,39 @@ class _ItemFormState extends State<_ItemForm> {
                 // no taller than its page, so the sheet is no taller than
                 // its contents.
                 Flexible(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(24.0, 12.0, 24.0, 12.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        schedulingCard,
-                        ScheduleOverlapNotice(
-                          key: _noticeKey,
-                          check: _scheduleCheck,
-                          hourLabelFormat: widget.hourLabelFormat,
-                          zone: widget.store.zone,
-                          locked: _locked,
-                          padding: const EdgeInsets.only(top: 12.0),
-                          onChanged: _scheduleChanged,
+                  child: ScheduleSummary(
+                    check: _scheduleCheck,
+                    hourLabelFormat: widget.hourLabelFormat,
+                    shown: _summaryShown,
+                    controller: _page,
+                    child: NotificationListener<Notification>(
+                      onNotification: _pageNotified,
+                      child: SingleChildScrollView(
+                        controller: _page,
+                        padding: const EdgeInsets.fromLTRB(
+                          24.0,
+                          12.0,
+                          24.0,
+                          12.0,
                         ),
-                        const SizedBox(height: 12.0),
-                        itemCard,
-                      ],
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            schedulingCard,
+                            ScheduleOverlapNotice(
+                              key: _noticeKey,
+                              check: _scheduleCheck,
+                              hourLabelFormat: widget.hourLabelFormat,
+                              zone: widget.store.zone,
+                              locked: _locked,
+                              padding: const EdgeInsets.only(top: 12.0),
+                              onChanged: _scheduleChanged,
+                            ),
+                            const SizedBox(height: 12.0),
+                            itemCard,
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),

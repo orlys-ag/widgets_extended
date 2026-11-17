@@ -350,18 +350,25 @@ Finder dayPickerFinder(String label) {
   );
 }
 
-/// Scrolls the date field labelled [label] into view where part of it lies
-/// outside, as a user does before a tap, and lets it settle; a field in
-/// view stays where it is.
-Future<void> _revealDateField(WidgetTester tester, String label) async {
-  final field = tester.element(formDateFinder(label));
+/// Scrolls what [finder] finds the least into view where part of it lies
+/// outside, as a user does before a tap: up until its top shows, or down
+/// until its bottom does; and lets it settle. What lies in view stays where
+/// it is.
+Future<void> revealForTap(WidgetTester tester, Finder finder) async {
+  final target = tester.element(finder);
   for (final policy in <ScrollPositionAlignmentPolicy>[
     ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
     ScrollPositionAlignmentPolicy.keepVisibleAtStart,
   ]) {
-    await Scrollable.ensureVisible(field, alignmentPolicy: policy);
+    await Scrollable.ensureVisible(target, alignmentPolicy: policy);
   }
   await tester.pumpAndSettle();
+}
+
+/// Scrolls the date field labelled [label] into view where part of it lies
+/// outside, as a user does before a tap ([revealForTap]).
+Future<void> _revealDateField(WidgetTester tester, String label) {
+  return revealForTap(tester, formDateFinder(label));
 }
 
 /// Opens the day picker of the form's date field labelled [label] with a

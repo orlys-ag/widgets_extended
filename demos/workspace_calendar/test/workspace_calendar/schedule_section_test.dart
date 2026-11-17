@@ -879,8 +879,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.byKey(scheduleOverlapCardKey("item-2")), findsOneWidget);
-    await tester.ensureVisible(find.text("Next free time"));
-    await tester.pumpAndSettle();
+    await revealForTap(tester, find.text("Next free time"));
     await tester.tap(find.text("Next free time"));
     await tester.pumpAndSettle();
     expect(timeFieldShows("Start time", "10:30"), findsOneWidget);
@@ -1306,8 +1305,7 @@ void main() {
     await openEdit(tester, store);
     await openTimePicker(tester, "Start time");
 
-    await tester.ensureVisible(find.text("Next free time"));
-    await tester.pumpAndSettle();
+    await revealForTap(tester, find.text("Next free time"));
     await tester.tap(find.text("Next free time"));
     await tester.pumpAndSettle();
     expect(formSchedule(tester), "Wed, Apr 22, 10:30\nWed, Apr 22, 11:30\n1h");
@@ -1730,8 +1728,7 @@ void main() {
     await tester.pump();
     expect(find.text("Project is required."), findsOneWidget);
 
-    await tester.ensureVisible(find.text("Request").last);
-    await tester.pumpAndSettle();
+    await revealForTap(tester, find.text("Request").last);
     await tester.tap(find.text("Request").last);
     await tester.pumpAndSettle();
     expect(find.text("Kind is required."), findsOneWidget);
@@ -1742,8 +1739,7 @@ void main() {
     await tester.enterText(fieldFinder("Link"), "https://example.org");
     await tester.pump();
     expect(find.text("Enter an http or https link."), findsNothing);
-    await tester.ensureVisible(dropdownFinder("Kind"));
-    await tester.pumpAndSettle();
+    await revealForTap(tester, dropdownFinder("Kind"));
     await chooseOption(tester, "Kind", "Travel");
     expect(find.text("Kind is required."), findsNothing);
   });
@@ -2173,8 +2169,7 @@ void main() {
     Future<void> tapNow() async {
       await openTimePicker(tester, "Start time");
       final now = inPicker("Start time", find.byKey(timePickerNowKey));
-      await tester.ensureVisible(now);
-      await tester.pumpAndSettle();
+      await revealForTap(tester, now);
       await tester.tap(now);
       await tester.pumpAndSettle();
     }
@@ -3821,8 +3816,7 @@ void main() {
 
     Future<void> tapInNotice(String label) async {
       final button = find.descendant(of: notice, matching: find.text(label));
-      await tester.ensureVisible(button);
-      await tester.pumpAndSettle();
+      await revealForTap(tester, button);
       await tester.tap(button);
       await tester.pumpAndSettle();
     }
@@ -3995,8 +3989,7 @@ void main() {
       of: find.byKey(scheduleOverlapKey),
       matching: find.text(label),
     );
-    await tester.ensureVisible(button);
-    await tester.pumpAndSettle();
+    await revealForTap(tester, button);
     return button;
   }
 
@@ -5488,6 +5481,347 @@ void main() {
     await openDayPicker(tester, "End date");
     expect(inPicker("End date", find.byTooltip("Next month")), findsOne);
   });
+
+  testWidgets("SU1 the summary writes a timed schedule's day and its times "
+      "on the form's clock, each day's across days, an end at a day's 24:00 "
+      "as it, and an all-day schedule's first day and, where it has more, "
+      "its last; each day and time keeping its words on one line", (
+    tester,
+  ) async {
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
+    for (final (schedule, format, summary)
+        in <(CalendarSchedule, CalendarHourLabelFormat, String)>[
+          (
+            CalendarSchedule.of(at(9), at(10), isAllDay: false),
+            CalendarHourLabelFormat.twentyFourHour,
+            unbroken("Wed, Apr 22, 09:00-10:00"),
+          ),
+          (
+            CalendarSchedule.of(at(9), at(10), isAllDay: false),
+            CalendarHourLabelFormat.twelveHour,
+            unbroken("Wed, Apr 22, 9 AM-10 AM"),
+          ),
+          (
+            CalendarSchedule.of(at(22), DateTime(2026, 4, 23), isAllDay: false),
+            CalendarHourLabelFormat.twentyFourHour,
+            unbroken("Wed, Apr 22, 22:00-24:00"),
+          ),
+          (
+            CalendarSchedule.of(
+              at(22),
+              DateTime(2026, 4, 23, 2),
+              isAllDay: false,
+            ),
+            CalendarHourLabelFormat.twentyFourHour,
+            "${unbroken("Wed, Apr 22, 22:00")} - ${unbroken("Thu, Apr 23, 02:00")}",
+          ),
+          (
+            CalendarSchedule.of(
+              wednesday,
+              DateTime(2026, 4, 23),
+              isAllDay: true,
+            ),
+            CalendarHourLabelFormat.twentyFourHour,
+            unbroken("Wed, Apr 22"),
+          ),
+          (
+            CalendarSchedule.of(
+              wednesday,
+              DateTime(2026, 4, 25),
+              isAllDay: true,
+            ),
+            CalendarHourLabelFormat.twentyFourHour,
+            "${unbroken("Wed, Apr 22")} - ${unbroken("Fri, Apr 24")}",
+          ),
+        ]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ScheduleSummary(
+              check: checkOf(schedule),
+              hourLabelFormat: format,
+              shown: true,
+              controller: controller,
+              child: const SizedBox(height: 100.0),
+            ),
+          ),
+        ),
+      );
+      expect(summaryText(tester), summary);
+    }
+  });
+
+  testWidgets("SU2 the summary shows under the heading, at the title's "
+      "start, once the Start date field has scrolled wholly out of the "
+      "page's view, which then starts under it, what the page shows staying "
+      "where it lies; and goes as soon as any of the field shows again, what "
+      "the page shows staying where it lies", (tester) async {
+    final page = await openScrolledForm(tester);
+    final summary = find.byKey(scheduleSummaryKey);
+    final item = find.byKey(formItemCardKey);
+    final heading = tester.getRect(find.byType(ScheduleHeading));
+    final past = startDatePast(tester);
+    // Setup sanity: the page scrolls the field out of its view.
+    expect(page.maxScrollExtent, greaterThan(past));
+    expect(fadeAbove(tester, summary), 0.0);
+    expect(summary.hitTestable(), findsNothing);
+
+    page.jumpTo(past - 1.0);
+    await tester.pumpAndSettle();
+    expect(fadeAbove(tester, summary), 0.0);
+
+    page.jumpTo(past);
+    await tester.pump();
+    final scrolled = tester.getRect(item);
+    await tester.pumpAndSettle();
+    expect(fadeAbove(tester, summary), 1.0);
+    expect(summary.hitTestable(), findsOneWidget);
+    expect(summaryText(tester), unbroken("Wed, Apr 22, 09:00-10:00"));
+    final shown = tester.getRect(summary);
+    expect(shown.left, tester.getRect(find.text("Edit Task")).left);
+    expect(shown.top, greaterThanOrEqualTo(heading.bottom));
+    expect(shown.top, lessThan(heading.bottom + 8.0));
+    expect(tester.getRect(formPage()).top, greaterThanOrEqualTo(shown.bottom));
+    expect(tester.getRect(item).top, moreOrLessEquals(scrolled.top));
+
+    page.jumpTo(past - 1.0);
+    await tester.pump();
+    final back = tester.getRect(item);
+    await tester.pumpAndSettle();
+    expect(fadeAbove(tester, summary), 0.0);
+    expect(summary.hitTestable(), findsNothing);
+    expect(tester.getRect(item).top, moreOrLessEquals(back.top));
+  });
+
+  testWidgets("SU3 the summary grows down and fades in over the theme's "
+      "motion as it comes, and shrinks back and fades out as it goes, "
+      "taking no pointer as it goes", (tester) async {
+    final page = await openScrolledForm(tester, theme: motionTheme);
+    final summary = find.byKey(scheduleSummaryKey);
+    final past = startDatePast(tester);
+    page.jumpTo(past);
+    // The frame whose end finds the field gone, then the one that starts
+    // the motion.
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 240));
+    expect(fadeAbove(tester, summary), moreOrLessEquals(0.5, epsilon: 0.05));
+    final coming = tester.getRect(summary).top;
+    await tester.pumpAndSettle();
+    final rest = tester.getRect(summary).top;
+    expect(coming, lessThan(rest));
+
+    page.jumpTo(past - 1.0);
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(summary.hitTestable(), findsNothing);
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(fadeAbove(tester, summary), moreOrLessEquals(0.5, epsilon: 0.05));
+    expect(tester.getRect(summary).top, lessThan(rest));
+  });
+
+  testWidgets("SU4 where the platform asks for no animations the summary "
+      "comes and goes in one frame", (tester) async {
+    disableAnimations(tester);
+    final page = await openScrolledForm(tester, theme: motionTheme);
+    final summary = find.byKey(scheduleSummaryKey);
+    final past = startDatePast(tester);
+    page.jumpTo(past);
+    await tester.pump();
+    await tester.pump();
+    expect(fadeAbove(tester, summary), 1.0);
+    page.jumpTo(past - 1.0);
+    await tester.pump();
+    await tester.pump();
+    expect(fadeAbove(tester, summary), 0.0);
+  });
+
+  testWidgets("SU5 the summary goes where the page's view grows and its "
+      "offset, held to the page's new extent, brings the Start date field "
+      "back with no scroll", (tester) async {
+    final page = await openScrolledForm(tester);
+    final summary = find.byKey(scheduleSummaryKey);
+    page.jumpTo(page.maxScrollExtent);
+    await tester.pumpAndSettle();
+    // Setup sanity: the field lies above the view.
+    expect(fadeAbove(tester, summary), 1.0);
+    tester.view.physicalSize = const Size(800.0, 1600.0);
+    await tester.pumpAndSettle();
+    // Setup sanity: the page now fits its view.
+    expect(page.pixels, 0.0);
+    expect(fadeAbove(tester, summary), 0.0);
+  });
+
+  testWidgets("SU6 as a drag of the page brings the summary in, and then "
+      "out, what the page shows stays under the finger", (tester) async {
+    final page = await openScrolledForm(tester, theme: motionTheme);
+    final summary = find.byKey(scheduleSummaryKey);
+    final item = find.byKey(formItemCardKey);
+    final past = startDatePast(tester);
+    final drag = await tester.startGesture(tester.getCenter(formPage()));
+    await drag.moveBy(const Offset(0.0, -40.0));
+    await tester.pump();
+    await drag.moveBy(Offset(0.0, page.pixels - past));
+    await tester.pump();
+    // Setup sanity: the drag has taken the field out of the view.
+    expect(page.pixels, past);
+    final held = tester.getRect(item);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 240));
+    // Setup sanity: the summary comes.
+    expect(fadeAbove(tester, summary), moreOrLessEquals(0.5, epsilon: 0.05));
+    expect(tester.getRect(item).top, moreOrLessEquals(held.top));
+    await tester.pump(const Duration(milliseconds: 480));
+    expect(tester.getRect(item).top, moreOrLessEquals(held.top));
+
+    await drag.moveBy(Offset(0.0, page.pixels - past + 1.0));
+    await tester.pump();
+    final back = tester.getRect(item);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 240));
+    // Setup sanity: the summary goes.
+    expect(fadeAbove(tester, summary), moreOrLessEquals(0.5, epsilon: 0.05));
+    expect(tester.getRect(item).top, moreOrLessEquals(back.top));
+    await tester.pump(const Duration(milliseconds: 480));
+    expect(tester.getRect(item).top, moreOrLessEquals(back.top));
+    await drag.up();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("SU7 an animated scroll of the page that takes the Start date "
+      "field out brings the summary in once it ends, what the page shows "
+      "staying where the scroll left it", (tester) async {
+    final page = await openScrolledForm(tester, theme: motionTheme);
+    final summary = find.byKey(scheduleSummaryKey);
+    final item = find.byKey(formItemCardKey);
+    final past = startDatePast(tester);
+    unawaited(
+      page.animateTo(
+        past + 60.0,
+        duration: const Duration(milliseconds: 480),
+        curve: Curves.linear,
+      ),
+    );
+    await tester.pump();
+    // Frame by frame, as a summary that came during the scroll would have
+    // come in by now.
+    for (var frame = 0; frame < 25; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    // Setup sanity: the scroll took the field out well before now.
+    expect(page.pixels, greaterThan(past + 20.0));
+    await tester.pump();
+    expect(fadeAbove(tester, summary), 0.0);
+    await tester.pump(const Duration(milliseconds: 80));
+    // Setup sanity: the scroll has ended.
+    expect(page.pixels, past + 60.0);
+    final ended = tester.getRect(item);
+    await tester.pumpAndSettle();
+    expect(fadeAbove(tester, summary), 1.0);
+    expect(tester.getRect(item).top, moreOrLessEquals(ended.top));
+  });
+
+  testWidgets("SU8 the summary's dry layout and intrinsic heights add the "
+      "share of the band that shows to the page's, and its intrinsic widths "
+      "are the wider of the band's and the page's", (tester) async {
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
+    Future<RenderBox> pumpSummary({required bool shown}) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: ScheduleSummary(
+                check: checkOf(
+                  CalendarSchedule.of(at(9), at(10), isAllDay: false),
+                ),
+                hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
+                shown: shown,
+                controller: controller,
+                child: const SizedBox(width: 40.0, height: 100.0),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return tester.renderObject<RenderBox>(find.byType(ScheduleSummary));
+    }
+
+    final hidden = await pumpSummary(shown: false);
+    expect(hidden.size, const Size(40.0, 100.0));
+    expect(hidden.getMinIntrinsicHeight(400.0), 100.0);
+    expect(hidden.getMaxIntrinsicHeight(400.0), 100.0);
+    const loose = BoxConstraints(maxWidth: 400.0, maxHeight: 600.0);
+    expect(hidden.getDryLayout(loose).height, 100.0);
+
+    final shown = await pumpSummary(shown: true);
+    final band = tester
+        .getRect(
+          find
+              .ancestor(
+                of: find.byKey(scheduleSummaryKey),
+                matching: find.byType(DecoratedBox),
+              )
+              .first,
+        )
+        .size;
+    expect(shown.size.height, band.height + 100.0);
+    expect(shown.getMinIntrinsicHeight(band.width), band.height + 100.0);
+    expect(shown.getMaxIntrinsicHeight(band.width), band.height + 100.0);
+    expect(
+      shown.getDryLayout(BoxConstraints.tightFor(width: band.width)),
+      Size(band.width, band.height + 100.0),
+    );
+    final text = tester.renderObject<RenderBox>(find.byKey(scheduleSummaryKey));
+    expect(
+      shown.getMaxIntrinsicWidth(100.0),
+      text.getMaxIntrinsicWidth(double.infinity) + 48.0,
+    );
+    expect(
+      shown.getMinIntrinsicWidth(100.0),
+      text.getMinIntrinsicWidth(double.infinity) + 48.0,
+    );
+  });
+}
+
+/// [text] with each space a no-break space, as the summary keeps a day's
+/// and a time's words on one line.
+String unbroken(String text) {
+  return text.replaceAll(" ", "\u00A0");
+}
+
+/// The text of the schedule's summary.
+String summaryText(WidgetTester tester) {
+  return tester.widget<Text>(find.byKey(scheduleSummaryKey)).data!;
+}
+
+/// Opens item-1, Write, from 09:00 to 10:00, in a view 450 logical pixels
+/// tall, short enough that the form's page scrolls the Start date field out
+/// of its view, the calendar drawing in [theme] where given; answers the
+/// page's scroll position.
+Future<ScrollPosition> openScrolledForm(
+  WidgetTester tester, {
+  CalendarThemeData? theme,
+}) async {
+  tester.view.devicePixelRatio = 1.0;
+  tester.view.physicalSize = const Size(800.0, 450.0);
+  addTearDown(tester.view.reset);
+  final store = storeOf(<CalendarItem>[task("item-1", "Write", at(9), at(10))]);
+  addTearDown(store.dispose);
+  await openEdit(tester, store, theme: theme);
+  return pagePosition(tester);
+}
+
+/// The page's offset at which the Start date field's bottom meets the top
+/// of the page's view.
+double startDatePast(WidgetTester tester) {
+  return pagePosition(tester).pixels +
+      tester.getRect(formDateFinder("Start date")).bottom -
+      tester.getRect(formPage()).top;
 }
 
 /// The circle of the day cell [cell] finds.
