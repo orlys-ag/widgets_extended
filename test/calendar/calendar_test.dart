@@ -331,6 +331,7 @@ void main() {
       "CalendarZonePanel",
       "CalendarTimePicker",
       "CalendarDayPicker",
+      "CalendarDateTimePicker",
     };
     const bases = <String>{
       "CalendarController",
@@ -560,6 +561,10 @@ void main() {
         path: "lib/calendar/composition/calendar_day_picker.dart",
         name: "CalendarDayPicker",
       ),
+      (
+        path: "lib/calendar/composition/calendar_date_time_picker.dart",
+        name: "CalendarDateTimePicker",
+      ),
     ];
     final asserts = RegExp(r"\bassert\(");
     for (final (:path, :name) in classes) {
@@ -592,6 +597,9 @@ void main() {
       "views/move_request.dart": <String>["CalendarMoveRequest({"],
       "views/time_picker.dart": <String>["CalendarTimePicker({"],
       "composition/calendar_day_picker.dart": <String>["CalendarDayPicker({"],
+      "composition/calendar_date_time_picker.dart": <String>[
+        "CalendarDateTimePicker({",
+      ],
       "composition/calendar_controller.dart": <String>[
         "CalendarController({",
         "double get minDayWidth",

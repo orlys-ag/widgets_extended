@@ -78,6 +78,7 @@ class CalendarDayPicker<T> extends StatefulWidget {
     this.browsesBeforeFirstDay = true,
     this.initialView = const CalendarDayPickerView(),
     this.onViewChanged,
+    this.headerTrailing,
   }) {
     if (firstColumn < 0 || firstColumn >= DateTime.daysPerWeek) {
       throw ArgumentError.value(
@@ -173,6 +174,13 @@ class CalendarDayPicker<T> extends StatefulWidget {
   /// and neither does a chevron, a swipe or a pick of a day, which leave
   /// the view as it is.
   final ValueChanged<CalendarDayPickerView>? onViewChanged;
+
+  /// A widget at the end of the header's row, after its next chevron and
+  /// centred on the row, whether the picker shows its week row, its month
+  /// or its month picker; null for none. A host that puts the picker
+  /// together with controls of its own, as [CalendarDateTimePicker] does
+  /// with its Time toggle, gives them here.
+  final Widget? headerTrailing;
 
   @override
   State<CalendarDayPicker<T>> createState() {
@@ -542,7 +550,10 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
         selectedDay: widget.value,
         today: cardToday,
         weekdays: _weekdays,
-        header: CalendarHeader(details: _headerDetails()),
+        header: CalendarHeader(
+          details: _headerDetails(),
+          trailing: widget.headerTrailing,
+        ),
         buildPicker: _buildMonthPicker,
         onSelectDay: widget.onChanged == null ? null : _selectDay,
         dayBadges: widget.dayBadges,

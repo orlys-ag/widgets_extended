@@ -197,6 +197,11 @@ const double _placeTolerance = 1e-6;
 /// [clearable], the footer's Clear reports null. With neither [now] nor
 /// [clearable], the picker has no footer.
 ///
+/// The picker draws no box of its own: its columns, their pills and its
+/// footer lie on whatever surface is behind it, inside its padding. Its
+/// columns fade their top and bottom rows into the theme's
+/// [CalendarThemeData.surface], so it lies on a surface of that colour.
+///
 /// The picker draws in the theme [CalendarTheme.of] gives, the nearest
 /// [CalendarTheme] or the built-in one, and reads no Material theme: a
 /// Material app puts a [CalendarTheme] above it of its
@@ -2292,71 +2297,64 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     final hasFooter = widget.now != null || widget.clearable;
     return FocusTraversalGroup(
       policy: OrderedTraversalPolicy(),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: theme.surface,
-          border: Border.all(color: theme.outline),
-          borderRadius: BorderRadius.circular(12.0),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: <Widget>[
-              Listener(
-                onPointerDown: _pointerDown,
-                onPointerUp: _pointerGone,
-                onPointerCancel: _pointerGone,
-                child: Directionality(
-                  textDirection: TextDirection.ltr,
-                  child: _TimeColumns(
-                    columnWidth: _shows(widget, _amPmColumn)
-                        ? math.max(_unboundedColumnWidth, _amPmWidth)
-                        : _unboundedColumnWidth,
-                    children: <Widget>[
-                      for (var column = 0; column < _columnCount; column++)
-                        if (_shows(widget, column))
-                          _cell(
-                            column,
-                            _headerOf(strings, column),
-                            headerStyle,
-                            _column(theme, strings, column),
-                          ),
-                    ],
-                  ),
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: <Widget>[
+            Listener(
+              onPointerDown: _pointerDown,
+              onPointerUp: _pointerGone,
+              onPointerCancel: _pointerGone,
+              child: Directionality(
+                textDirection: TextDirection.ltr,
+                child: _TimeColumns(
+                  columnWidth: _shows(widget, _amPmColumn)
+                      ? math.max(_unboundedColumnWidth, _amPmWidth)
+                      : _unboundedColumnWidth,
+                  children: <Widget>[
+                    for (var column = 0; column < _columnCount; column++)
+                      if (_shows(widget, column))
+                        _cell(
+                          column,
+                          _headerOf(strings, column),
+                          headerStyle,
+                          _column(theme, strings, column),
+                        ),
+                  ],
                 ),
               ),
-              if (hasFooter)
-                Align(
-                  alignment: AlignmentDirectional.centerEnd,
-                  child: Row(
-                    key: timePickerFooterKey,
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      if (widget.now != null)
-                        _action(
-                          theme: theme,
-                          key: timePickerNowKey,
-                          label: strings.timePickerNowLabel,
-                          order: 4.0,
-                          enabled: _takesInput && _nowEnabled,
-                          onTap: _pickNow,
-                        ),
-                      if (widget.clearable)
-                        _action(
-                          theme: theme,
-                          key: timePickerClearKey,
-                          label: strings.timePickerClearLabel,
-                          order: 5.0,
-                          enabled: _takesInput,
-                          onTap: _pickClear,
-                        ),
-                    ],
-                  ),
+            ),
+            if (hasFooter)
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: Row(
+                  key: timePickerFooterKey,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    if (widget.now != null)
+                      _action(
+                        theme: theme,
+                        key: timePickerNowKey,
+                        label: strings.timePickerNowLabel,
+                        order: 4.0,
+                        enabled: _takesInput && _nowEnabled,
+                        onTap: _pickNow,
+                      ),
+                    if (widget.clearable)
+                      _action(
+                        theme: theme,
+                        key: timePickerClearKey,
+                        label: strings.timePickerClearLabel,
+                        order: 5.0,
+                        enabled: _takesInput,
+                        onTap: _pickClear,
+                      ),
+                  ],
                 ),
-            ],
-          ),
+              ),
+          ],
         ),
       ),
     );

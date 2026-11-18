@@ -555,8 +555,8 @@ void main() {
   });
 
   testWidgets(
-    "TF6 with the settings' 12-hour clock, the form's time fields write "
-    "12-hour times",
+    "TF6 with the settings' 12-hour clock, the form's Start and End rows "
+    "write 12-hour times",
     (tester) async {
       final api = MockCalendarApi.seeded(today, latency: harnessLatency);
       final nine = await store(

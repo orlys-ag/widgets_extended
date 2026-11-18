@@ -355,6 +355,13 @@ abstract base class CalendarLocalizations {
     return "Clear";
   }
 
+  /// The label of the date-time picker's toggle that shows and hides its
+  /// time picker, which a screen reader hears as the toggle's name:
+  /// "Time".
+  String get dateTimePickerTimeLabel {
+    return "Time";
+  }
+
   /// The number of the time picker's hour row for [hour], 0 to 24, as the
   /// row shows it and a screen reader hears it: on the 24-hour clock "00"
   /// to "24"; on the 12-hour clock "12" for 0, 12 and 24, and otherwise

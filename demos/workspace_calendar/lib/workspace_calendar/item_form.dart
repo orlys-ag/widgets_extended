@@ -9,11 +9,11 @@
 /// other entries, and the item's own fields, generated from the item type's
 /// schema. The page's parts lie on the sheet with no card around them, at
 /// the page's margins, and nothing on it stays in place as it scrolls. Once
-/// the page has scrolled the Start date field wholly out of its view, a
+/// the page has scrolled the Start row wholly out of its view, a
 /// summary of the schedule's days and times ([ScheduleSummary]) grows in
 /// under the heading, the page's view then starting under it and what the
 /// page shows staying where it lies, and it shrinks out as soon as any of
-/// the field comes back; while the page scrolls itself, as to a message, the
+/// the row comes back; while the page scrolls itself, as to a message, the
 /// summary waits for that scroll's end. The
 /// heading and the notice show what the schedule's [CalendarScheduleCheck]
 /// answers. The check is made again
@@ -62,7 +62,7 @@ const ValueKey<String> formItemCardKey = ValueKey<String>("form-item-card");
 /// day on for an all-day range, its type chosen in the form, Task first;
 /// its Save [policy] checks at the time [now] reads then, its times step
 /// by [slotMinutes], and it writes them on [hourLabelFormat]'s clock. Its
-/// date fields' day pickers badge the days with entries of [store] as
+/// rows' day pickers badge the days with entries of [store] as
 /// [dayBadges] marks them, or with one primary dot where it is null, and
 /// start their weeks on the weekday column [firstColumn], 0 for Monday to
 /// 6 for Sunday. Completes when the form closes, whether or not an item
@@ -103,10 +103,10 @@ Future<void> showCreateFlow(
 /// Opens the form for the stored item [id], whose Save [policy] checks at
 /// the time [now] reads then, whose times step by [slotMinutes], and which
 /// writes them on [hourLabelFormat]'s clock. Of an item [policy], when the
-/// form opens, lets neither move nor resize its start, the start date, the
-/// start time and All day take no input; and the form offers Delete only
-/// where [policy] then lets the item be deleted. Its date fields' day
-/// pickers badge the days as [dayBadges] marks them and start their weeks
+/// form opens, lets neither move nor resize its start, the Start row and
+/// All day take no input; and the form offers Delete only where [policy]
+/// then lets the item be deleted. Its rows' day pickers badge the days as
+/// [dayBadges] marks them and start their weeks
 /// on [firstColumn], as [showCreateFlow]'s do. Does nothing when the store
 /// does not hold it.
 Future<void> showEditForm(
@@ -329,7 +329,7 @@ class _ItemForm extends StatefulWidget {
   /// The weekday column the day pickers' weeks start on.
   final int firstColumn;
 
-  /// The step of the time fields' slot boundaries.
+  /// The step of the time pickers' times.
   final int slotMinutes;
 
   /// The clock the schedule's summary and section write times on.
@@ -430,7 +430,7 @@ class _ItemFormState extends State<_ItemForm> {
       GlobalKey<ScheduleSectionState>();
 
   /// Whether the schedule's summary shows under the heading: once the
-  /// Start date field has scrolled wholly out of the page's view.
+  /// Start row has scrolled wholly out of the page's view.
   bool _summaryShown = false;
 
   /// Whether a [_placeSummary] waits for the end of a frame.
@@ -1027,8 +1027,8 @@ class _ItemFormState extends State<_ItemForm> {
     return false;
   }
 
-  /// Shows the schedule's summary where the Start date field lies wholly
-  /// above the page's view, and hides it where any of the field shows;
+  /// Shows the schedule's summary where the Start row lies wholly above
+  /// the page's view, and hides it where any of the row shows;
   /// while the page scrolls by no drag, as a reveal animates it, places
   /// nothing until that scroll ends, as an animated scroll would undo the
   /// summary's move of the offset ([ScheduleSummary]).
@@ -1043,8 +1043,7 @@ class _ItemFormState extends State<_ItemForm> {
         return;
       }
     }
-    final field = _sectionKey.currentState?.startDateContext
-        ?.findRenderObject();
+    final field = _sectionKey.currentState?.startRowContext?.findRenderObject();
     if (field is! RenderBox || !field.attached || !field.hasSize) {
       return;
     }
@@ -1227,7 +1226,6 @@ class _ItemFormState extends State<_ItemForm> {
         slotMinutes: widget.slotMinutes,
         hourLabelFormat: widget.hourLabelFormat,
         now: widget.now,
-        zone: widget.store.zone,
         store: widget.store,
         dayBadges: widget.dayBadges,
         firstColumn: widget.firstColumn,

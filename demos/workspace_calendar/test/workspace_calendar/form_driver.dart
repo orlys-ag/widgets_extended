@@ -4,6 +4,8 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/composition/calendar_date_time_picker.dart'
+    show dateTimePickerToggleKey;
 import 'package:widgets_extended/calendar/views/time_picker.dart'
     show
         TimePickerRules,
@@ -67,7 +69,7 @@ bool isEnabled(WidgetTester tester, Finder button) {
   return tester.widget<ButtonStyleButton>(button).onPressed != null;
 }
 
-/// The key of the form's time field labelled [label].
+/// The key of the form's time labelled [label].
 ValueKey<String> _timeFieldKey(String label) {
   switch (label) {
     case "Start time":
@@ -75,26 +77,40 @@ ValueKey<String> _timeFieldKey(String label) {
     case "End time":
       return scheduleEndTimeKey;
   }
-  throw ArgumentError.value(label, "label", "names no time field");
+  throw ArgumentError.value(label, "label", "names no time");
 }
 
-/// The form's time field labelled [label], "Start time" or "End time".
+/// The key of the row of the time labelled [label], "Start time" or
+/// "End time".
+ValueKey<String> _timeRowKey(String label) {
+  switch (label) {
+    case "Start time":
+      return scheduleStartKey;
+    case "End time":
+      return scheduleEndKey;
+  }
+  throw ArgumentError.value(label, "label", "names no time");
+}
+
+/// The time labelled [label], "Start time" or "End time", that the form's
+/// Start or End row shows after its day for a timed schedule; a tap on it
+/// is a tap on its row.
 Finder timeFieldFinder(String label) {
   return find.byKey(_timeFieldKey(label));
 }
 
-/// The text [time] in the form's time field labelled [label].
+/// The text [time] in the form's time labelled [label].
 Finder timeFieldShows(String label, String time) {
   return find.descendant(of: timeFieldFinder(label), matching: find.text(time));
 }
 
-/// Whether the [InkWell] of the form's time field labelled [label] has a
-/// tap, which a field whose picker is closed has where it takes input.
+/// Whether the [InkWell] of the row of the form's time labelled [label] has
+/// a tap, which a row whose picker is closed has where it takes input.
 bool timeFieldTakesInput(WidgetTester tester, String label) {
   return tester
           .widget<InkWell>(
             find.descendant(
-              of: timeFieldFinder(label),
+              of: find.byKey(_timeRowKey(label)),
               matching: find.byType(InkWell),
             ),
           )
@@ -102,11 +118,11 @@ bool timeFieldTakesInput(WidgetTester tester, String label) {
       null;
 }
 
-/// The picker of the form's time field labelled [label]: the
-/// [CalendarTimePicker] whose [CalendarTimePicker.subject] is that field's
+/// The time picker of the row of the form's time labelled [label]: the
+/// [CalendarTimePicker] whose [CalendarTimePicker.subject] is that row's
 /// key.
 Finder timePickerFinder(String label) {
-  final key = _timeFieldKey(label);
+  final key = _timeRowKey(label);
   return find.byWidgetPredicate((widget) {
     return widget is CalendarTimePicker && widget.subject == key;
   }, description: "the time picker of $label");
@@ -122,50 +138,57 @@ int clockMinute(String time) {
   return int.parse(match.group(1)!) * 60 + int.parse(match.group(2)!);
 }
 
-/// Scrolls the time field labelled [label] into view where part of it lies
-/// outside, as a user does before a tap, and lets it settle; a field in
-/// view stays where it is.
-Future<void> _revealTimeField(WidgetTester tester, String label) async {
-  final field = tester.element(timeFieldFinder(label));
-  for (final policy in <ScrollPositionAlignmentPolicy>[
-    ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
-    ScrollPositionAlignmentPolicy.keepVisibleAtStart,
-  ]) {
-    await Scrollable.ensureVisible(field, alignmentPolicy: policy);
-  }
-  await tester.pumpAndSettle();
-}
-
-/// Opens the picker of the form's time field labelled [label] with a tap
-/// on the field where it is closed, brought into view first, and lets it
-/// settle.
+/// Opens the time picker of the row of the form's time labelled [label]
+/// where it is not open: a tap on the row, brought into view first, where
+/// its panel is closed, then a tap on its picker's Time toggle where its
+/// time is hidden; each settles.
 Future<void> openTimePicker(WidgetTester tester, String label) async {
   if (timePickerFinder(label).evaluate().isNotEmpty) {
     return;
   }
-  await _revealTimeField(tester, label);
-  await tester.tap(timeFieldFinder(label));
-  await tester.pumpAndSettle();
+  final row = find.byKey(_timeRowKey(label));
+  final panel = find.byKey(
+    label == "Start time" ? scheduleStartPanelKey : scheduleEndPanelKey,
+  );
+  final picker = find.descendant(
+    of: panel,
+    matching: find.byType(CalendarDateTimePicker<ItemPayload>),
+  );
+  if (picker.evaluate().isEmpty) {
+    await revealForTap(tester, row);
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+  }
+  if (timePickerFinder(label).evaluate().isEmpty) {
+    final toggle = find.descendant(
+      of: panel,
+      matching: find.byKey(dateTimePickerToggleKey),
+    );
+    await revealForTap(tester, toggle);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+  }
 }
 
-/// Closes the picker of the form's time field labelled [label] with a tap
-/// on the field where it is open, brought into view first, and lets it
-/// settle.
+/// Closes the picker of the row of the form's time labelled [label] with a
+/// tap on the row where its time picker shows, brought into view first,
+/// and lets it settle.
 Future<void> closeTimePicker(WidgetTester tester, String label) async {
   if (timePickerFinder(label).evaluate().isEmpty) {
     return;
   }
-  await _revealTimeField(tester, label);
-  await tester.tap(timeFieldFinder(label));
+  final row = find.byKey(_timeRowKey(label));
+  await revealForTap(tester, row);
+  await tester.tap(row);
   await tester.pumpAndSettle();
 }
 
-/// The open picker of the form's time field labelled [label].
+/// The open time picker of the form's time labelled [label].
 CalendarTimePicker _openPicker(WidgetTester tester, String label) {
   return tester.widget<CalendarTimePicker>(timePickerFinder(label));
 }
 
-/// Whether the open picker of the form's time field labelled [label]
+/// Whether the open time picker of the form's time labelled [label]
 /// offers [time], as the [TimePickerRules] it builds its rows from give it:
 /// in its range, on its steps, and accepted by its own check. The read
 /// builds nothing and leaves the form as it is.
@@ -175,7 +198,7 @@ bool timeEnabled(WidgetTester tester, String label, String time) {
   ).offers(clockMinute(time));
 }
 
-/// The minutes the open picker of the form's time field labelled [label]
+/// The minutes the open time picker of the form's time labelled [label]
 /// offers, ascending, as the [TimePickerRules] it builds its rows from give
 /// them: neither a value it shows out of range or off its steps nor a time
 /// it refuses is among them. The read builds nothing and leaves the form as
@@ -184,12 +207,12 @@ List<int> offeredTimes(WidgetTester tester, String label) {
   return TimePickerRules.of(_openPicker(tester, label)).offeredTimes().toList();
 }
 
-/// Picks [time] in the form's time field labelled [label] as a user does:
+/// Picks [time] as the form's time labelled [label] as a user does:
 /// opens its picker, expects it to offer [time], brings it into view, and
 /// drags onto its pill each of its rows of [time] that lies off it, the
 /// AM/PM column's on the 12-hour clock, then the Hour column's and the
 /// Minute column's, each column's pick settling before the next drag. It
-/// expects the picker's value to be [time] after the last, brings the field
+/// expects the picker's value to be [time] after the last, brings the row
 /// back into view, and closes the picker.
 ///
 /// Each drag is a pick the form takes, so the form passes through the
@@ -231,15 +254,11 @@ Future<void> pickTime(WidgetTester tester, String label, String time) async {
     minute,
     reason: "$label shows $time",
   );
-  // Bringing the picker into view can scroll its field out of the form's
-  // view, where the tap that closes the picker would miss it.
-  await tester.ensureVisible(timeFieldFinder(label));
-  await tester.pumpAndSettle();
   await closeTimePicker(tester, label);
 }
 
-/// Drags the column keyed [columnKey] of the open picker of the form's
-/// time field labelled [label] until its row keyed [rowKey] lies on the
+/// Drags the column keyed [columnKey] of the open time picker of the
+/// form's time labelled [label] until its row keyed [rowKey] lies on the
 /// column's centre, where its pill is, and lets the pick settle; a row
 /// within 0.5 px of the centre is left.
 ///
@@ -308,15 +327,16 @@ Future<void> chooseOption(
   await tester.pumpAndSettle();
 }
 
-/// The form's date field named [label], "Start date" or "End date".
+/// The form's row of the day named [label]: the Start row for
+/// "Start date" and the End row for "End date".
 Finder formDateFinder(String label) {
   switch (label) {
     case "Start date":
-      return find.byKey(scheduleStartDateKey);
+      return find.byKey(scheduleStartKey);
     case "End date":
-      return find.byKey(scheduleEndDateKey);
+      return find.byKey(scheduleEndKey);
   }
-  throw ArgumentError.value(label, "label", "names no date field");
+  throw ArgumentError.value(label, "label", "names no day");
 }
 
 /// The message under the form's Start or End row, [row], that reads
@@ -338,15 +358,18 @@ Finder rowMessage(String row, String message) {
   );
 }
 
-/// The day or time the schedule's field [field] finds shows.
-String scheduleFieldValue(WidgetTester tester, Finder field) {
+/// The day the form's Start or End row, [row], shows: of the texts it
+/// shows, its label, its day and, for a timed schedule, its time, the
+/// second.
+String _rowDay(WidgetTester tester, Finder row) {
   return tester
-      .widget<Text>(find.descendant(of: field, matching: find.byType(Text)))
+      .widgetList<Text>(find.descendant(of: row, matching: find.byType(Text)))
+      .elementAt(1)
       .data!;
 }
 
-/// The form's date field labelled [label] showing the day [date] names,
-/// an ISO date, as the field writes it, with its weekday: "Wed, Apr 22".
+/// The form's row of the day labelled [label] showing the day [date] names,
+/// an ISO date, as the row writes it, with its weekday: "Wed, Apr 22".
 Finder formDateShows(String label, String date) {
   return find.descendant(
     of: formDateFinder(label),
@@ -358,8 +381,7 @@ Finder formDateShows(String label, String date) {
   );
 }
 
-/// The key of the panel under the row of the form's date field labelled
-/// [label].
+/// The key of the panel under the form's row of the day labelled [label].
 ValueKey<String> _datePanelKey(String label) {
   switch (label) {
     case "Start date":
@@ -367,11 +389,12 @@ ValueKey<String> _datePanelKey(String label) {
     case "End date":
       return scheduleEndPanelKey;
   }
-  throw ArgumentError.value(label, "label", "names no date field");
+  throw ArgumentError.value(label, "label", "names no day");
 }
 
-/// The day picker of the form's date field labelled [label], "Start date"
-/// or "End date": the [CalendarDayPicker] in the panel under its row.
+/// The day picker of the form's row of the day labelled [label],
+/// "Start date" or "End date": the [CalendarDayPicker] in the panel under
+/// the row.
 Finder dayPickerFinder(String label) {
   return find.descendant(
     of: find.byKey(_datePanelKey(label)),
@@ -394,15 +417,15 @@ Future<void> revealForTap(WidgetTester tester, Finder finder) async {
   await tester.pumpAndSettle();
 }
 
-/// Scrolls the date field labelled [label] into view where part of it lies
-/// outside, as a user does before a tap ([revealForTap]).
+/// Scrolls the row of the day labelled [label] into view where part of it
+/// lies outside, as a user does before a tap ([revealForTap]).
 Future<void> _revealDateField(WidgetTester tester, String label) {
   return revealForTap(tester, formDateFinder(label));
 }
 
-/// Opens the day picker of the form's date field labelled [label] with a
-/// tap on the field where it is closed, brought into view first, and lets
-/// it settle.
+/// Opens the day picker of the form's day labelled [label] with a tap on
+/// its row where it is closed, brought into view first, and lets it
+/// settle.
 Future<void> openDayPicker(WidgetTester tester, String label) async {
   if (dayPickerFinder(label).evaluate().isNotEmpty) {
     return;
@@ -412,9 +435,8 @@ Future<void> openDayPicker(WidgetTester tester, String label) async {
   await tester.pumpAndSettle();
 }
 
-/// Closes the day picker of the form's date field labelled [label] with a
-/// tap on the field where it is open, brought into view first, and lets it
-/// settle.
+/// Closes the day picker of the form's day labelled [label] with a tap on
+/// its row where it is open, brought into view first, and lets it settle.
 Future<void> closeDayPicker(WidgetTester tester, String label) async {
   if (dayPickerFinder(label).evaluate().isEmpty) {
     return;
@@ -424,8 +446,8 @@ Future<void> closeDayPicker(WidgetTester tester, String label) async {
   await tester.pumpAndSettle();
 }
 
-/// The cell of [day] in the week row of the day picker of the form's date
-/// field labelled [label].
+/// The cell of [day] in the week row of the day picker of the form's day
+/// labelled [label].
 Finder _weekCell(String label, DateTime day) {
   return find.descendant(
     of: dayPickerFinder(label),
@@ -433,9 +455,9 @@ Finder _weekCell(String label, DateTime day) {
   );
 }
 
-/// Picks [day] in the form's date field labelled [label] as a user does:
-/// opens its day picker, expects the picker's week row to hold [day], taps
-/// it, brings the field back into view and closes the picker.
+/// Picks [day] as the form's day labelled [label] as a user does: opens
+/// its day picker, expects the picker's week row to hold [day], taps it,
+/// brings the row back into view and closes the picker.
 Future<void> pickFormDay(
   WidgetTester tester,
   String label,
@@ -449,8 +471,8 @@ Future<void> pickFormDay(
   await closeDayPicker(tester, label);
 }
 
-/// Whether the open day picker of the form's date field labelled [label]
-/// takes [day], a day its week row holds: whether the [DayCell] of [day]
+/// Whether the open day picker of the form's day labelled [label] takes
+/// [day], a day its week row holds: whether the [DayCell] of [day]
 /// there is drawn other than disabled.
 bool dayEnabled(WidgetTester tester, String label, DateTime day) {
   return tester
@@ -480,12 +502,19 @@ void expectFormDays(String day, int days) {
 }
 
 /// The schedule the open form shows, its lines joined by "\n": its start,
-/// then its end, each its date field's day and, for a timed schedule, a
-/// comma and its time field's time; then the length its heading's pill
-/// writes, where it shows one: "Wed, Apr 22, 09:00\nWed, Apr 22, 10:00\n1h".
+/// then its end, each its row's day and, for a timed schedule, a comma and
+/// its row's time; then the length its heading's pill writes, where it
+/// shows one: "Wed, Apr 22, 09:00\nWed, Apr 22, 10:00\n1h".
 String formSchedule(WidgetTester tester) {
-  String shown(Finder field) {
-    return scheduleFieldValue(tester, field);
+  String timeOf(String label) {
+    return tester
+        .widget<Text>(
+          find.descendant(
+            of: timeFieldFinder(label),
+            matching: find.byType(Text),
+          ),
+        )
+        .data!;
   }
 
   final timed = timeFieldFinder("Start time").evaluate().isNotEmpty;
@@ -496,8 +525,8 @@ String formSchedule(WidgetTester tester) {
       ("End date", "End time"),
     ])
       timed
-          ? "${shown(formDateFinder(date))}, ${shown(timeFieldFinder(time))}"
-          : shown(formDateFinder(date)),
+          ? "${_rowDay(tester, formDateFinder(date))}, ${timeOf(time)}"
+          : _rowDay(tester, formDateFinder(date)),
     if (length.evaluate().isNotEmpty) tester.widget<Text>(length).data!,
   ].join("\n");
 }

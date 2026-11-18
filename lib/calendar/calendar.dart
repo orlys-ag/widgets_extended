@@ -66,6 +66,8 @@ export '../scheduling/scheduling.dart'
         NoOverlapsPolicy,
         UnrestrictedEditPolicy,
         compareCalendarEntries;
+export 'composition/calendar_date_time_picker.dart'
+    show CalendarDateTimePicker;
 export 'composition/calendar_day_picker.dart'
     show CalendarDayPicker, CalendarDayPickerView;
 export 'composition/calendar_header.dart'

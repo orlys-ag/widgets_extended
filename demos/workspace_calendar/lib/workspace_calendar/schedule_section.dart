@@ -70,22 +70,22 @@ ValueKey<String> scheduleOverlapAfterKey(String id) {
   return ValueKey<String>("schedule-overlap-after-$id");
 }
 
-/// The key of the [Focus] around the Start date field.
-const ValueKey<String> scheduleStartDateKey = ValueKey<String>(
-  "schedule-start-date",
-);
+/// The key of the [Focus] around the Start row, a button that shows the
+/// schedule's start and opens the Start row's picker.
+const ValueKey<String> scheduleStartKey = ValueKey<String>("schedule-start");
 
-/// The key of the [Focus] around the End date field.
-const ValueKey<String> scheduleEndDateKey = ValueKey<String>(
-  "schedule-end-date",
-);
+/// The key of the [Focus] around the End row, a button that shows the
+/// schedule's end and opens the End row's picker.
+const ValueKey<String> scheduleEndKey = ValueKey<String>("schedule-end");
 
-/// The key of the Start time field.
+/// The key of the Start row's time, which a timed schedule's row shows
+/// after its day.
 const ValueKey<String> scheduleStartTimeKey = ValueKey<String>(
   "schedule-start-time",
 );
 
-/// The key of the End time field.
+/// The key of the End row's time, which a timed schedule's row shows after
+/// its day.
 const ValueKey<String> scheduleEndTimeKey = ValueKey<String>(
   "schedule-end-time",
 );
@@ -105,89 +105,87 @@ const ValueKey<String> scheduleEndErrorKey = ValueKey<String>(
 /// The key of the All day switch.
 const ValueKey<String> scheduleAllDayKey = ValueKey<String>("schedule-all-day");
 
-/// The key of the panel under the Start row that holds Start date's day
-/// picker or Start time's picker.
+/// The key of the panel under the Start row that holds its date-time
+/// picker.
 const ValueKey<String> scheduleStartPanelKey = ValueKey<String>(
   "schedule-start-panel",
 );
 
-/// The key of the panel under the End row that holds End date's day picker
-/// or End time's picker.
+/// The key of the panel under the End row that holds its date-time picker.
 const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
   "schedule-end-panel",
 );
 
 /// The section of [check]'s schedule: an All day switch, where the kind
 /// takes all-day or the schedule is all-day, which turned off restores the
-/// times the schedule keeps; then a Start row, Start date beside Start time
-/// under the label "Start", above an End row, End date beside End time
-/// under "End", each date taking three fifths of its row; an all-day
-/// schedule's rows hold their dates alone. Each field is a button that
-/// shows its day or time ([_FieldButton]). A field's tap opens its own
-/// picker in a panel under the field's row, one of the four open at a
-/// time, the field drawn open while it is. A time
-/// field's picker is a [CalendarTimePicker], with its haptic feedback on,
-/// whose Hour column takes the focus. A date field's is a
-/// [CalendarDayPicker] on the week or month of the field's day, that day
-/// selected and the [CalendarNow.today] of [now] ringed, its weeks starting
-/// on the weekday column [firstColumn], and its days with entries of [store]
-/// badged as [dayBadges] marks them, the circles of its first and last
-/// columns on the row's sides ([CalendarDayPicker.daysToEdges]); the field
-/// keeps the focus. A tap on a day there moves the field's day to it and
-/// leaves the picker open, and its chevrons, swipes and month picks only
-/// browse, End date's to no week, month or year before the start day's
-/// ([CalendarDayPicker.browsesBeforeFirstDay]). Each opening of a date field
-/// shows its picker on the view either picker last turned to
-/// ([CalendarDayPicker.onViewChanged]): folded into its week row or unfolded
-/// into its month, and the month picker open or not, folded at first. A day
-/// picker draws disabled, and takes no tap on, the days its check's day
-/// answers rule out: Start date's those before
-/// [CalendarScheduleCheck.firstStartDay], End date's those outside
+/// times the schedule keeps; then a Start row above an End row. Each row is
+/// a button ([_RowButton]) that shows its label, "Start" or "End", then its
+/// day with its weekday and, for a timed schedule, its time, and a chevron
+/// at its end. A row's tap opens a panel under it holding the row's
+/// [CalendarDateTimePicker], one of the two open at a time, the row drawn
+/// open while it is and keeping the focus.
+///
+/// The picker's day picker lies on the week or month of the row's day,
+/// that day selected and the [CalendarNow.today] of [now] ringed, its weeks
+/// starting on the weekday column [firstColumn], and its days with entries
+/// of [store] badged as [dayBadges] marks them, the circles of its first
+/// and last columns on the row's sides
+/// ([CalendarDayPicker.daysToEdges]). Its chevrons, swipes and month picks
+/// only browse, End's to no week, month or year before the start day's
+/// ([CalendarDayPicker.browsesBeforeFirstDay]). It draws disabled, and
+/// takes no tap on, the days its check's day answers rule out: Start's
+/// those before [CalendarScheduleCheck.firstStartDay], End's those outside
 /// [CalendarScheduleCheck.endDays]; the section reads them of each check
-/// once, as a day picker first builds under it. Times are written on
-/// [hourLabelFormat]'s clock. [ScheduleHeading] shows the schedule's length
-/// and zone, and [ScheduleOverlapNotice] its overlaps.
+/// once, as a picker first builds under it. For a timed schedule the
+/// picker's time picker, with its haptic feedback on, lies under the day
+/// picker, and its Time toggle shows and hides it. Each opening of a row
+/// shows its day picker on the view either picker last turned to
+/// ([CalendarDateTimePicker.onViewChanged]), folded into its week row at
+/// first, and its time shown or hidden as either picker's Time toggle last
+/// left it, shown at first.
 ///
-/// A panel grows and fades in as its field's tap opens it, and shrinks and
-/// fades out as that field's tap closes it, over the [CalendarTheme]'s
-/// motion, or at once where the platform asks for no animations; it then
-/// scrolls into view, and again where its picker grows once it rests, as a
-/// day picker unfolds into its month. A tap on the other field of the
-/// panel's row swaps the panel's pickers in place over that motion, its
-/// height moving from the one picker's to the other's as the leaving one
-/// fades out over the motion's first half and the coming one fades in over
-/// its last. A tap on a field of the other row closes the panel as the
-/// field's own opens. A picker whose field is not the open one takes no
-/// pick.
+/// A tap on a day moves the row's day to it, Start's moving the end by as
+/// many days, and keeps the row's time where the time picker offers it on
+/// the new day, or moves it to the nearest time it offers there; a pick of
+/// a time moves the row's time; and an all-day schedule's picker picks days
+/// alone. Times are written on [hourLabelFormat]'s clock.
+/// [ScheduleHeading] shows the schedule's length and zone, and
+/// [ScheduleOverlapNotice] its overlaps.
 ///
-/// A picker refuses a time only for a problem some other time of it
-/// avoids: of the check of the schedule with each of the picker's times
-/// ([CalendarScheduleCheck.withSchedule]), it takes as witnesses those whose
-/// times are checked ([CalendarScheduleCheck.timesChecked]), or every time
-/// where none is, and refuses a time whose check names a problem that not
-/// every witness's check names. The start's picker offers the hours'
-/// starts, the end's its ends, on the start day only those after the
-/// start. A picker's Now shows only on a field whose day is [now]'s today,
-/// and where the time at or before now is refused picks the first later
-/// time the picker offers.
+/// A panel grows and fades in as its row's tap opens it, and shrinks and
+/// fades out as that row's tap closes it, or the other row's opens its
+/// own, over the [CalendarTheme]'s motion, or at once where the platform
+/// asks for no animations; it then scrolls into view, and again where its
+/// picker grows once it rests, as a day picker unfolds into its month or
+/// the time shows. A picker whose row is not the open one takes no pick.
+///
+/// A time picker refuses a time only for a problem some other time of it
+/// avoids: of the check of the schedule with each of the picker's times on
+/// its day ([CalendarScheduleCheck.withSchedule]), it takes as witnesses
+/// those whose times are checked ([CalendarScheduleCheck.timesChecked]),
+/// or every time where none is, and refuses a time whose check names a
+/// problem that not every witness's check names. The start's picker offers
+/// the hours' starts, the end's its ends, on the start day only those after
+/// the start. A time picker's Now shows only on a row whose day is [now]'s
+/// today, and where the time at or before now is refused picks the first
+/// later time the picker offers.
 ///
 /// The section pads its controls by nothing. Its rows reach its sides; at
 /// its top lies the All day row, the switch's touch target whole, or with
-/// no switch the Start row; and at its bottom the End row's fields, or its
-/// panel while open.
+/// no switch the Start row; and at its bottom the End row, or its panel
+/// while open.
 ///
 /// Every edit goes to [onChanged] as a new schedule. A [locked] section
 /// takes no input; a [CalendarScheduleCheck.startFixed] one takes none at
-/// its start or kind; and End date takes none where the options refuse
-/// spanning days ([CalendarScheduleOptions.spansDays]) and the schedule ends
-/// on its start day. An open picker stays open as its field locks, taking
-/// no pick, until its field's tap closes it, or for a time picker the All
-/// day switch. The switch turned on closes an open time picker and takes
-/// the focus from a time field; an open date field keeps its panel, its
-/// picker and the focus whichever way the switch turns.
-/// [errors] holds the form's messages keyed `start` and `end`, which show
-/// under the Start and End rows and tint Start time and End time with the
-/// soft error colour, or for an all-day schedule Start date and End date.
+/// its start or kind; and an all-day schedule's End row takes none where
+/// the options refuse spanning days ([CalendarScheduleOptions.spansDays])
+/// and the schedule ends on its start day. An open picker stays open as its
+/// row locks, taking no pick, until its row's tap closes it. The All day
+/// switch leaves an open row open, its picker hiding its time and Time
+/// toggle as the switch turns on and showing them as it turns off, and
+/// turned on takes the focus from the open picker. [errors] holds the
+/// form's messages keyed `start` and `end`, which show under the Start and
+/// End rows and tint those rows with the soft error colour.
 class ScheduleSection extends StatefulWidget {
   const ScheduleSection({
     super.key,
@@ -197,8 +195,7 @@ class ScheduleSection extends StatefulWidget {
     required this.hourLabelFormat,
     required this.now,
     required this.onChanged,
-    this.zone,
-    this.store,
+    required this.store,
     this.dayBadges,
     this.firstColumn = 0,
     this.locked = false,
@@ -216,20 +213,17 @@ class ScheduleSection extends StatefulWidget {
   /// The clock the time fields and the pickers write times on.
   final CalendarHourLabelFormat hourLabelFormat;
 
-  /// The current time, whose minute on [zone]'s clock the pickers' Now
-  /// picks; Now shows only on a field whose day is its
+  /// The current time, whose minute on the clock of [store]'s zone the
+  /// pickers' Now picks; Now shows only on a row whose day is its
   /// [CalendarNow.today].
   final ValueGetter<CalendarNow> now;
 
   final ValueChanged<CalendarSchedule> onChanged;
 
-  /// The zone the times are on, on whose clock the pickers' Now reads the
-  /// current minute; none for the device's.
-  final Location? zone;
-
-  /// The store whose entries badge the day pickers' days; none for no
-  /// badges.
-  final CalendarStore<ItemPayload>? store;
+  /// The store whose entries badge the day pickers' days, and on the clock
+  /// of whose zone, or of the device where it has none, the section reads
+  /// its days and times.
+  final CalendarStore<ItemPayload> store;
 
   /// The kinds of entry the day pickers' badges mark; none for one primary
   /// dot on a day with entries.
@@ -249,86 +243,49 @@ class ScheduleSection extends StatefulWidget {
   }
 }
 
-/// A row of the section, Start or End, and its time field.
-enum _TimeField {
-  start,
-  end;
-
-  /// The row's date field.
-  _ScheduleField get dateField {
-    return this == start ? _ScheduleField.startDate : _ScheduleField.endDate;
-  }
-
-  /// The row's time field.
-  _ScheduleField get timeField {
-    return this == start ? _ScheduleField.startTime : _ScheduleField.endTime;
-  }
-}
-
-/// A field of the section, each of which opens its own picker.
-enum _ScheduleField {
-  startDate,
-  startTime,
-  endDate,
-  endTime;
-
-  /// The row the field lies in.
-  _TimeField get row {
-    return this == startDate || this == startTime
-        ? _TimeField.start
-        : _TimeField.end;
-  }
-
-  /// Whether the field is a date field.
-  bool get isDate {
-    return this == startDate || this == endDate;
-  }
-}
+/// A row of the section, Start or End, each of which opens its own picker.
+enum _Row { start, end }
 
 /// The All day switch's size, as a share of a [Switch]'s.
 const double _allDaySwitchScale = 0.75;
 
-/// The shares of a Start or End row that its date and its time take: the
-/// date three fifths, the time two.
-const int _dateFlex = 3;
-const int _timeFlex = 2;
-
-/// The label above a Start or End row's fields.
-const TextStyle _rowLabelStyle = TextStyle(
-  color: HarborColors.textMuted,
-  fontSize: 12.0,
-  fontWeight: FontWeight.w500,
-);
-
-/// A Start or End row's date or time field: a button, named [name] to a
-/// screen reader, that shows [icon] and [value], and whose tap, [onTap],
-/// opens or closes its picker. A box with rounded corners and no outline
-/// holds them, filled with the page's grey, or where [error] with the soft
-/// error tint, its icon then in the error colour; while [open] it is filled
-/// with the primary tint, and its icon and value drawn in the primary
-/// colour, and it moves from the one look to the other over the
-/// [CalendarTheme]'s motion, or at once where the platform asks for no
-/// animations. A field with no [onTap], which takes no input, shows its
-/// value in the muted colour with no box around it, as text rather than a
-/// button, unless [error] tints it. The value keeps to one line, and
-/// shrinks to fit a box too narrow for it, as a 12-hour time in a narrow
-/// form or under a large text scale, rather than lose its end. A tap
-/// anywhere on the box, [_height] high, reaches [onTap], and [focusNode] is
-/// its [InkWell]'s.
-class _FieldButton extends StatelessWidget {
-  const _FieldButton({
-    required this.name,
-    required this.icon,
-    required this.value,
+/// A Start or End row of the section: a button whose tap, [onTap], opens
+/// or closes the row's picker. It shows [label] in a column [_labelWidth]
+/// wide in a 13-pixel medium weight, then [day] and, where not null, [time]
+/// 12 pixels after it under [timeKey], in a 15-pixel bold weight, and at
+/// its end a chevron that points down, turning to point up as the row
+/// opens. A box [_height] high with corners rounded by 12 and no outline
+/// holds them, filled with the page's grey, its label and chevron in the
+/// muted colour, or where [error] filled with the soft error tint, its
+/// label and chevron in the error colour; while [open] it is filled with
+/// the primary tint, and all it shows is drawn in the primary colour. It
+/// moves from the one look to the other over the [CalendarTheme]'s motion,
+/// the chevron turning with it, or at once where the platform asks for no
+/// animations. A row with no
+/// [onTap], which takes no input, shows its day and time in the muted
+/// colour with no box around them and no chevron, as text rather than a
+/// button, unless [error] tints it. The day and the time keep to one line,
+/// and shrink together to fit a box too narrow for them, as a 12-hour time
+/// in a narrow form or under a large text scale, rather than lose their
+/// end; so does the label in its column. A screen reader hears the label,
+/// the day and the time as one button, expanded while [open]. A tap
+/// anywhere on the box reaches [onTap], and [focusNode] is its [InkWell]'s.
+class _RowButton extends StatelessWidget {
+  const _RowButton({
+    required this.label,
+    required this.day,
+    required this.time,
+    required this.timeKey,
     required this.open,
     required this.error,
     required this.focusNode,
     required this.onTap,
   });
 
-  final String name;
-  final IconData icon;
-  final String value;
+  final String label;
+  final String day;
+  final String? time;
+  final Key timeKey;
   final bool open;
   final bool error;
   final FocusNode focusNode;
@@ -336,17 +293,20 @@ class _FieldButton extends StatelessWidget {
 
   static const BorderRadius _corners = BorderRadius.all(Radius.circular(12.0));
 
-  static const double _height = 44.0;
+  static const double _height = 48.0;
+
+  static const double _labelWidth = 48.0;
 
   @override
   Widget build(BuildContext context) {
     final theme = CalendarTheme.of(context);
     final takesInput = onTap != null;
+    final time = this.time;
     return Semantics(
       container: true,
       button: true,
       enabled: takesInput,
-      label: name,
+      expanded: takesInput ? open : null,
       child: TweenAnimationBuilder<double>(
         tween: Tween<double>(end: open ? 1.0 : 0.0),
         duration: MediaQuery.disableAnimationsOf(context)
@@ -373,6 +333,11 @@ class _FieldButton extends StatelessWidget {
           final mark = takesInput
               ? between(shutMark, HarborColors.primary)
               : shutMark;
+          final valueStyle = TextStyle(
+            color: ink,
+            fontSize: 15.0,
+            fontWeight: FontWeight.w600,
+          );
           return DecoratedBox(
             decoration: BoxDecoration(color: fill, borderRadius: _corners),
             child: Material(
@@ -389,23 +354,56 @@ class _FieldButton extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 12.0),
                     child: Row(
                       children: <Widget>[
-                        Icon(icon, size: 18.0, color: mark),
-                        const SizedBox(width: 8.0),
-                        Expanded(
+                        SizedBox(
+                          width: _labelWidth,
                           child: FittedBox(
                             fit: BoxFit.scaleDown,
                             alignment: AlignmentDirectional.centerStart,
                             child: Text(
-                              value,
+                              label,
                               maxLines: 1,
                               style: TextStyle(
-                                color: ink,
-                                fontSize: 15.0,
-                                fontWeight: FontWeight.w600,
+                                color: mark,
+                                fontSize: 13.0,
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
                           ),
                         ),
+                        Expanded(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: AlignmentDirectional.centerStart,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                Text(day, maxLines: 1, style: valueStyle),
+                                if (time != null) ...<Widget>[
+                                  const SizedBox(width: 12.0),
+                                  KeyedSubtree(
+                                    key: timeKey,
+                                    child: Text(
+                                      time,
+                                      maxLines: 1,
+                                      style: valueStyle,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (takesInput) ...<Widget>[
+                          const SizedBox(width: 8.0),
+                          Transform.rotate(
+                            angle: math.pi * opening,
+                            child: Icon(
+                              Icons.expand_more,
+                              size: 20.0,
+                              color: mark,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -429,81 +427,74 @@ int debugSchedulePickerAsks = 0;
 /// counts none.
 int debugScheduleDayRangeAsks = 0;
 
-/// Which times of [field]'s picker, from [min] to [max] on the [slot]
-/// grid, the picker offers under [check]: each time's check is
-/// [CalendarScheduleCheck.withSchedule] of the schedule with that time, or
-/// [check] itself at the field's own time; the witnesses are the times
-/// whose check has [CalendarScheduleCheck.timesChecked], or every time
-/// where none has; and a time is offered where each of its problems is a
-/// problem of every witness. Computed at the first lookup, and kept while
-/// the picker's [check], [field], [min], [max] and [slot] stay.
+/// Which times of [row]'s time picker, from [min] to [max], the picker
+/// offers under [check], whose schedule lies on the day the picker shows:
+/// each time's check is [CalendarScheduleCheck.withSchedule] of the
+/// schedule with that time, or [check] itself at the row's own time; the
+/// witnesses are the times on the [slot] grid whose check has
+/// [CalendarScheduleCheck.timesChecked], or every time on it where none
+/// has; and a time is offered where each of its problems is a problem of
+/// every witness. A time outside [min] to [max] is not offered. The grid's
+/// times are computed at the first lookup, and a time off it, as a stored
+/// item's own, at each.
 class _TimeTable {
   _TimeTable({
     required this.check,
-    required this.field,
+    required this.row,
     required this.min,
     required this.max,
     required this.slot,
   });
 
   final CalendarScheduleCheck<ItemPayload> check;
-  final _TimeField field;
+  final _Row row;
   final int min;
   final int max;
   final int slot;
 
   List<bool>? _offered;
 
+  /// The problems every witness's check names; null before the first
+  /// lookup.
+  Set<CalendarScheduleProblem>? _shared;
+
   /// The first time on the grid at or after [min].
   int get _first {
     return (min + slot - 1) ~/ slot * slot;
   }
 
-  /// Whether the table answers for these parameters.
-  bool holds(
-    CalendarScheduleCheck<ItemPayload> check,
-    _TimeField field,
-    int min,
-    int max,
-    int slot,
-  ) {
-    return identical(this.check, check) &&
-        this.field == field &&
-        this.min == min &&
-        this.max == max &&
-        this.slot == slot;
+  /// The check of the schedule with the row's time at [time].
+  CalendarScheduleCheck<ItemPayload> _checkAt(int time) {
+    final schedule = check.schedule;
+    final start = row == _Row.start;
+    if (time == (start ? schedule.startMinute : schedule.endMinute)) {
+      return check;
+    }
+    return check.withSchedule(
+      start ? schedule.withStartMinute(time) : schedule.withEndMinute(time),
+    );
   }
 
-  /// Whether the picker offers [minute], a time on the grid from [min] to
-  /// [max].
+  /// Whether the picker offers [minute].
   bool offers(int minute) {
     assert(() {
       debugSchedulePickerAsks++;
       return true;
     }());
-    final first = _first;
-    assert(
-      minute >= first && minute <= max && (minute - first) % slot == 0,
-      "$minute lies off the table of $first to $max by $slot",
-    );
+    if (minute < min || minute > max) {
+      return false;
+    }
     final offered = _offered ??= _compute();
-    return offered[(minute - first) ~/ slot];
+    final first = _first;
+    if (minute >= first && (minute - first) % slot == 0) {
+      return offered[(minute - first) ~/ slot];
+    }
+    return _checkAt(minute).problems.every(_shared!.contains);
   }
 
   List<bool> _compute() {
-    final schedule = check.schedule;
-    final start = field == _TimeField.start;
-    final own = start ? schedule.startMinute : schedule.endMinute;
     final checks = <CalendarScheduleCheck<ItemPayload>>[
-      for (var time = _first; time <= max; time += slot)
-        if (time == own)
-          check
-        else
-          check.withSchedule(
-            start
-                ? schedule.withStartMinute(time)
-                : schedule.withEndMinute(time),
-          ),
+      for (var time = _first; time <= max; time += slot) _checkAt(time),
     ];
     var witnesses = checks.where((each) {
       return each.timesChecked;
@@ -516,34 +507,142 @@ class _TimeTable {
       final problems = witness.problems.toSet();
       shared = shared == null ? problems : shared.intersection(problems);
     }
-    final every = shared ?? const <CalendarScheduleProblem>{};
+    final every = _shared = shared ?? <CalendarScheduleProblem>{};
     return <bool>[
       for (final each in checks) each.problems.every(every.contains),
     ];
   }
 }
 
-/// The state of a [ScheduleSection], which finds the field a message of
+/// The times [row]'s time picker offers on a day under [check], in [hours]
+/// on the [slot] grid: the first and last of them ([boundsOn]), and which
+/// it offers ([offers]), as a [_TimeTable] of the schedule with the row's
+/// day on that day answers. Keeps the table of the row's own day, and of
+/// the last other day asked of, as a tap on a day asks of the day it picks.
+/// The section keeps one while its check, hours and slot stay, so [offers]
+/// keeps one identity, by which the picker keeps the answers it has.
+class _RowTimes {
+  _RowTimes({
+    required this.check,
+    required this.row,
+    required this.hours,
+    required this.slot,
+  });
+
+  final CalendarScheduleCheck<ItemPayload> check;
+  final _Row row;
+  final CalendarDayHours hours;
+  final int slot;
+
+  /// The table of the row's own day; null before its first lookup.
+  _TimeTable? _own;
+
+  /// The table of the last other day asked of, by its day number.
+  ({int day, _TimeTable table})? _other;
+
+  /// Whether these are the times for these parameters.
+  bool holds(
+    CalendarScheduleCheck<ItemPayload> check,
+    _Row row,
+    CalendarDayHours hours,
+    int slot,
+  ) {
+    return identical(this.check, check) &&
+        this.row == row &&
+        this.hours == hours &&
+        this.slot == slot;
+  }
+
+  /// The schedule with the row's day moved to [day]; the start's end moves
+  /// by as many days.
+  CalendarSchedule _scheduleOn(DateTime day) {
+    final schedule = check.schedule;
+    return row == _Row.start
+        ? schedule.withStartDay(day)
+        : schedule.withEndDay(day);
+  }
+
+  /// The first and last time the picker offers on [day]: the start's the
+  /// hours' starts; the end's the hours' ends, on the start's day only
+  /// those after the start, or where the start leaves no such end in the
+  /// hours its own time alone.
+  ({int min, int max}) boundsOn(DateTime day) {
+    return _boundsOf(_scheduleOn(day));
+  }
+
+  ({int min, int max}) _boundsOf(CalendarSchedule schedule) {
+    if (row == _Row.start) {
+      return (min: hours.start, max: math.max(hours.start, hours.end - slot));
+    }
+    var min = hours.start + slot;
+    var max = hours.end;
+    if (!schedule.spansDays) {
+      min = math.max(min, schedule.startMinute + 1);
+    }
+    if (min > max) {
+      min = schedule.endMinute;
+      max = schedule.endMinute;
+    }
+    return (min: min, max: max);
+  }
+
+  /// Whether the picker offers [minute] on [day].
+  bool offers(DateTime day, int minute) {
+    final number = CalendarDates.dayNumber(day);
+    final schedule = check.schedule;
+    final own = row == _Row.start ? schedule.startDay : schedule.endDay;
+    if (number == CalendarDates.dayNumber(own)) {
+      return (_own ??= _tableOf(check)).offers(minute);
+    }
+    var other = _other;
+    if (other == null || other.day != number) {
+      other = (
+        day: number,
+        table: _tableOf(check.withSchedule(_scheduleOn(day))),
+      );
+      _other = other;
+    }
+    return other.table.offers(minute);
+  }
+
+  _TimeTable _tableOf(CalendarScheduleCheck<ItemPayload> check) {
+    final bounds = _boundsOf(check.schedule);
+    return _TimeTable(
+      check: check,
+      row: row,
+      min: bounds.min,
+      max: bounds.max,
+      slot: slot,
+    );
+  }
+}
+
+/// The state of a [ScheduleSection], which finds the row a message of
 /// [ScheduleSection.errors] shows on.
 class ScheduleSectionState extends State<ScheduleSection> {
-  /// The field whose picker is open; none where null.
-  _ScheduleField? _open;
+  /// The row whose picker is open; none where null.
+  _Row? _open;
 
-  /// How many times each date field has opened its picker, which keys the
-  /// row's day picker, so that each opening builds a new one, on
-  /// [_dayPickerView].
-  int _startDateOpenings = 0;
-  int _endDateOpenings = 0;
+  /// How many times each row has opened its picker, which keys the row's
+  /// picker, so that each opening builds a new one, on [_dayPickerView] and
+  /// [_showsTime].
+  int _startOpenings = 0;
+  int _endOpenings = 0;
 
   /// The view either day picker last turned to, which the next one opens
-  /// on; read only as a day picker is made, so a change needs no build.
+  /// on; read only as a picker is made, so a change needs no build.
   CalendarDayPickerView _dayPickerView = const CalendarDayPickerView();
 
-  /// Each field's picker's table, kept across builds while it holds.
-  final Map<_TimeField, _TimeTable> _tables = <_TimeField, _TimeTable>{};
+  /// Whether either picker's Time toggle last left its time shown, as the
+  /// next one opens; read only as a picker is made, so a change needs no
+  /// build.
+  bool _showsTime = true;
+
+  /// Each row's picker's times, kept across builds while they hold.
+  final Map<_Row, _RowTimes> _times = <_Row, _RowTimes>{};
 
   /// The check [_startRange] and [_endRange] were read of; none before a
-  /// day picker first builds.
+  /// picker first builds.
   CalendarScheduleCheck<ItemPayload>? _rangedCheck;
 
   /// The first and last day the Start row's and the End row's day pickers
@@ -551,58 +650,44 @@ class ScheduleSectionState extends State<ScheduleSection> {
   ({DateTime? first, DateTime? last}) _startRange = (first: null, last: null);
   ({DateTime? first, DateTime? last}) _endRange = (first: null, last: null);
 
-  final FocusNode _startDateNode = FocusNode(debugLabel: "Start date");
-  final FocusNode _endDateNode = FocusNode(debugLabel: "End date");
-  final FocusNode _startFieldNode = FocusNode(debugLabel: "Start time");
-  final FocusNode _endFieldNode = FocusNode(debugLabel: "End time");
+  final FocusNode _startNode = FocusNode(debugLabel: "Start");
+  final FocusNode _endNode = FocusNode(debugLabel: "End");
 
-  /// The nodes of the [Focus] around each field, which take the focus back
-  /// as a field that takes no input closes its picker: an [InkWell] with no
+  /// The nodes of the [Focus] around each row, which take the focus back
+  /// as a row that takes no input closes its picker: an [InkWell] with no
   /// tap takes none.
-  final FocusNode _startDateRestNode = FocusNode(
-    debugLabel: "Start date rest",
-    skipTraversal: true,
-  );
-  final FocusNode _endDateRestNode = FocusNode(
-    debugLabel: "End date rest",
-    skipTraversal: true,
-  );
   final FocusNode _startRestNode = FocusNode(
-    debugLabel: "Start time rest",
+    debugLabel: "Start rest",
     skipTraversal: true,
   );
   final FocusNode _endRestNode = FocusNode(
-    debugLabel: "End time rest",
+    debugLabel: "End rest",
     skipTraversal: true,
   );
 
-  /// The nodes of each picker's Hour column.
-  final FocusNode _startHourNode = FocusNode(debugLabel: "Start Hour column");
-  final FocusNode _endHourNode = FocusNode(debugLabel: "End Hour column");
+  /// The nodes of the [Focus] around each row's picker, which have the
+  /// focus while a control of the picker does.
+  final FocusNode _startPanelNode = FocusNode(
+    debugLabel: "Start picker",
+    canRequestFocus: false,
+    skipTraversal: true,
+  );
+  final FocusNode _endPanelNode = FocusNode(
+    debugLabel: "End picker",
+    canRequestFocus: false,
+    skipTraversal: true,
+  );
+
   final FocusNode _allDayNode = FocusNode(debugLabel: "All day");
 
   @override
-  void didUpdateWidget(ScheduleSection oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final open = _open;
-    // An all-day schedule has no time fields; an open date field stays.
-    if (_schedule.isAllDay && open != null && !open.isDate) {
-      _open = null;
-    }
-  }
-
-  @override
   void dispose() {
-    _startDateNode.dispose();
-    _endDateNode.dispose();
-    _startFieldNode.dispose();
-    _endFieldNode.dispose();
-    _startDateRestNode.dispose();
-    _endDateRestNode.dispose();
+    _startNode.dispose();
+    _endNode.dispose();
     _startRestNode.dispose();
     _endRestNode.dispose();
-    _startHourNode.dispose();
-    _endHourNode.dispose();
+    _startPanelNode.dispose();
+    _endPanelNode.dispose();
     _allDayNode.dispose();
     super.dispose();
   }
@@ -625,165 +710,105 @@ class ScheduleSectionState extends State<ScheduleSection> {
     }
   }
 
-  /// Whether [field] takes input: Start date and Start time where neither
-  /// the section is locked nor the start fixed; End time where the section
-  /// is not locked; and End date where it is not locked and the options
-  /// take spanning days or the schedule spans them.
-  bool _takesInput(_ScheduleField field) {
-    switch (field) {
-      case _ScheduleField.startDate:
-      case _ScheduleField.startTime:
-        return !_startLocked;
-      case _ScheduleField.endDate:
-        return !widget.locked && (_options.spansDays || _schedule.spansDays);
-      case _ScheduleField.endTime:
-        return !widget.locked;
+  /// Whether [row] takes input: Start where neither the section is locked
+  /// nor the start fixed; End where the section is not locked and the
+  /// schedule is timed, or the options take spanning days, or the schedule
+  /// spans them.
+  bool _takesInput(_Row row) {
+    if (row == _Row.start) {
+      return !_startLocked;
     }
+    final schedule = _schedule;
+    return !widget.locked &&
+        (!schedule.isAllDay || _options.spansDays || schedule.spansDays);
   }
 
-  /// The node of [field]'s [InkWell].
-  FocusNode _fieldNodeOf(_ScheduleField field) {
-    switch (field) {
-      case _ScheduleField.startDate:
-        return _startDateNode;
-      case _ScheduleField.startTime:
-        return _startFieldNode;
-      case _ScheduleField.endDate:
-        return _endDateNode;
-      case _ScheduleField.endTime:
-        return _endFieldNode;
-    }
+  /// The node of [row]'s [InkWell].
+  FocusNode _nodeOf(_Row row) {
+    return row == _Row.start ? _startNode : _endNode;
   }
 
-  /// The node of the [Focus] around [field].
-  FocusNode _restNodeOf(_ScheduleField field) {
-    switch (field) {
-      case _ScheduleField.startDate:
-        return _startDateRestNode;
-      case _ScheduleField.startTime:
-        return _startRestNode;
-      case _ScheduleField.endDate:
-        return _endDateRestNode;
-      case _ScheduleField.endTime:
-        return _endRestNode;
-    }
+  /// The node of the [Focus] around [row].
+  FocusNode _restNodeOf(_Row row) {
+    return row == _Row.start ? _startRestNode : _endRestNode;
   }
 
-  /// The context of the field that shows the message of
-  /// [ScheduleSection.errors] keyed [key], `start` or `end`: its row's time
-  /// field, or for an all-day schedule its date field, each built in every
-  /// build that shows its schedule; null before the section first builds.
+  /// The node of the [Focus] around [row]'s picker.
+  FocusNode _panelNodeOf(_Row row) {
+    return row == _Row.start ? _startPanelNode : _endPanelNode;
+  }
+
+  /// The context of the row that shows the message of
+  /// [ScheduleSection.errors] keyed [key], `start` or `end`, built in every
+  /// build; null before the section first builds.
   BuildContext? errorFieldOf(String key) {
-    final row = key == "start" ? _TimeField.start : _TimeField.end;
-    return _restNodeOf(
-      _schedule.isAllDay ? row.dateField : row.timeField,
-    ).context;
+    return _restNodeOf(key == "start" ? _Row.start : _Row.end).context;
   }
 
-  /// The context of the Start date field, whose box tells where the Start
-  /// row lies; null before the section builds.
-  BuildContext? get startDateContext {
-    return _startDateRestNode.context;
+  /// The context of the Start row, whose box tells where it lies; null
+  /// before the section builds.
+  BuildContext? get startRowContext {
+    return _startRestNode.context;
   }
 
-  /// Whether a time field, or anything under its [Focus], has the focus.
-  bool get _timeFieldHasFocus {
-    return _startFieldNode.hasFocus ||
-        _endFieldNode.hasFocus ||
-        _startRestNode.hasFocus ||
-        _endRestNode.hasFocus;
-  }
-
-  /// Opens [field]'s picker, closing or swapping out the open one, or
-  /// closes [field]'s where it is open. A spin of a time picker's columns
-  /// that the tap cuts off reports nothing: a picker whose field is not the
+  /// Opens [row]'s picker, closing the open one, or closes [row]'s where it
+  /// is open, the row taking the focus. A spin of a time picker's columns
+  /// that the tap cuts off reports nothing: a picker whose row is not the
   /// open one has a null `onChanged`.
-  void _tapField(_ScheduleField field) {
-    if (_open == field) {
+  void _tapRow(_Row row) {
+    if (_open == row) {
       setState(() {
         _open = null;
       });
-      // Made before the next frame, so the closing picker's Hour column no
+      // Made before the next frame, so a control of the closing picker no
       // longer holds the focus as the panel shrinks and leaves the tree.
-      if (_takesInput(field)) {
-        _fieldNodeOf(field).requestFocus();
+      if (_takesInput(row)) {
+        _nodeOf(row).requestFocus();
       } else {
-        _restNodeOf(field).requestFocus();
+        _restNodeOf(row).requestFocus();
       }
       return;
     }
     setState(() {
-      _open = field;
-      if (field == _ScheduleField.startDate) {
-        _startDateOpenings++;
-      } else if (field == _ScheduleField.endDate) {
-        _endDateOpenings++;
+      _open = row;
+      if (row == _Row.start) {
+        _startOpenings++;
+      } else {
+        _endOpenings++;
       }
     });
-    if (field.isDate) {
-      _fieldNodeOf(field).requestFocus();
-    } else {
-      // The picker's Hour column takes the focus as its panel opens, the
-      // request waiting for the column to join the tree.
-      (field.row == _TimeField.start ? _startHourNode : _endHourNode)
-          .requestFocus();
-    }
+    _nodeOf(row).requestFocus();
   }
 
-  /// The Start date or End date field of [row], showing the row's day with
-  /// its weekday ([MaterialLocalizations.formatMediumDate]), tinted with the
-  /// soft error colour where [error]; its tap opens or closes its day
-  /// picker.
-  Widget _dateField(_TimeField row, {required bool error}) {
-    final field = row.dateField;
-    final start = row == _TimeField.start;
-    final open = _open == field;
+  /// The button of [row], showing the row's day with its weekday
+  /// ([MaterialLocalizations.formatMediumDate]) and, for a timed schedule,
+  /// its time, tinted with the soft error colour where [error]; its tap
+  /// opens or closes the row's picker.
+  Widget _rowButton(_Row row, {required bool error}) {
+    final schedule = _schedule;
+    final start = row == _Row.start;
+    final open = _open == row;
     return Focus(
-      key: start ? scheduleStartDateKey : scheduleEndDateKey,
-      focusNode: _restNodeOf(field),
-      child: _FieldButton(
-        name: start ? "Start date" : "End date",
-        icon: Icons.calendar_today_outlined,
-        value: MaterialLocalizations.of(
+      key: start ? scheduleStartKey : scheduleEndKey,
+      focusNode: _restNodeOf(row),
+      child: _RowButton(
+        label: start ? "Start" : "End",
+        day: MaterialLocalizations.of(
           context,
-        ).formatMediumDate(start ? _schedule.startDay : _schedule.endDay),
+        ).formatMediumDate(start ? schedule.startDay : schedule.endDay),
+        time: schedule.isAllDay
+            ? null
+            : CalendarLocalizations.of(context).formatTime(
+                start ? schedule.startMinute : schedule.endMinute,
+                widget.hourLabelFormat,
+              ),
+        timeKey: start ? scheduleStartTimeKey : scheduleEndTimeKey,
         open: open,
         error: error,
-        focusNode: _fieldNodeOf(field),
-        onTap: open || _takesInput(field)
+        focusNode: _nodeOf(row),
+        onTap: open || _takesInput(row)
             ? () {
-                _tapField(field);
-              }
-            : null,
-      ),
-    );
-  }
-
-  /// The Start time or End time field of [row], showing [minute], tinted
-  /// with the soft error colour where [error]; its tap opens or closes its
-  /// picker.
-  Widget _timeField(
-    _TimeField row, {
-    required int minute,
-    required bool error,
-  }) {
-    final strings = CalendarLocalizations.of(context);
-    final field = row.timeField;
-    final start = row == _TimeField.start;
-    final open = _open == field;
-    return Focus(
-      key: start ? scheduleStartTimeKey : scheduleEndTimeKey,
-      focusNode: _restNodeOf(field),
-      child: _FieldButton(
-        name: start ? "Start time" : "End time",
-        icon: Icons.schedule,
-        value: strings.formatTime(minute, widget.hourLabelFormat),
-        open: open,
-        error: error,
-        focusNode: _fieldNodeOf(field),
-        onTap: open || _takesInput(field)
-            ? () {
-                _tapField(field);
+                _tapRow(row);
               }
             : null,
       ),
@@ -793,96 +818,45 @@ class ScheduleSectionState extends State<ScheduleSection> {
   /// The current minute after midnight on the zone's clock.
   int _nowMinute() {
     return CalendarDates.minuteOfDay(
-      CalendarDates.inZone(widget.now().time, zone: widget.zone),
+      CalendarDates.inZone(widget.now().time, zone: widget.store.zone),
     );
   }
 
-  /// The table of [field]'s picker from [min] to [max]: the kept one where
-  /// it holds for the section's check, these bounds and the slot, and a new
-  /// one otherwise.
-  _TimeTable _tableFor(_TimeField field, int min, int max) {
+  /// The times of [row]'s picker: the kept ones where they hold for the
+  /// section's check, hours and slot, and new ones otherwise.
+  _RowTimes _timesOf(_Row row) {
     final check = widget.check;
+    final hours = widget.hours;
     final slot = widget.slotMinutes;
-    final table = _tables[field];
-    if (table != null && table.holds(check, field, min, max, slot)) {
-      return table;
+    final times = _times[row];
+    if (times != null && times.holds(check, row, hours, slot)) {
+      return times;
     }
-    return _tables[field] = _TimeTable(
+    return _times[row] = _RowTimes(
       check: check,
-      field: field,
-      min: min,
-      max: max,
+      row: row,
+      hours: hours,
       slot: slot,
     );
   }
 
-  /// The current minute for a picker whose field lies on [day]: Now shows
-  /// only where [day] is the [CalendarNow.today] of [ScheduleSection.now].
-  ValueGetter<int>? _nowOn(DateTime day) {
-    final today = widget.now().today;
-    if (CalendarDates.dayNumber(day) != CalendarDates.dayNumber(today)) {
-      return null;
-    }
-    return _nowMinute;
-  }
-
-  /// The day of [field]'s time.
-  DateTime _dayOf(_TimeField field) {
-    return field == _TimeField.start ? _schedule.startDay : _schedule.endDay;
-  }
-
-  /// [field]'s picker, whose field's key is its
-  /// [CalendarTimePicker.subject]: the start's offers the hours' starts; the
-  /// end's the hours' ends, on the start's day only those after the start,
-  /// or where the start leaves no such end in the hours a row for its own
-  /// time alone. Each time is offered as its [_TimeTable] answers, so a time
-  /// is refused only for a problem some other time of the picker avoids. It
-  /// takes no pick while its panel closes or where [field] takes no input.
-  Widget _picker(_TimeField field) {
+  /// Moves [row]'s day to [day], and its time to [minute] where not null.
+  void _pick(_Row row, DateTime day, int? minute) {
+    final date = CalendarDates.dateOnly(day);
     final schedule = _schedule;
-    final hours = widget.hours;
-    final slot = widget.slotMinutes;
-    final start = field == _TimeField.start;
-    int min;
-    int max;
-    if (start) {
-      min = hours.start;
-      max = math.max(hours.start, hours.end - slot);
+    if (row == _Row.start) {
+      final moved = schedule.withStartDay(date);
+      _change(
+        minute == null || moved.isAllDay
+            ? moved
+            : moved.withStartMinute(minute),
+      );
     } else {
-      min = hours.start + slot;
-      max = hours.end;
-      if (!schedule.spansDays) {
-        min = math.max(min, schedule.startMinute + 1);
-      }
-      if (min > max) {
-        min = schedule.endMinute;
-        max = schedule.endMinute;
-      }
+      final moved = schedule.withEndDay(date);
+      _change(
+        minute == null || moved.isAllDay ? moved : moved.withEndMinute(minute),
+      );
     }
-    return CalendarTimePicker(
-      subject: start ? scheduleStartTimeKey : scheduleEndTimeKey,
-      value: start ? schedule.startMinute : schedule.endMinute,
-      onChanged: _open != field.timeField || !_takesInput(field.timeField)
-          ? null
-          : (minute) {
-              if (minute != null) {
-                _change(
-                  start
-                      ? schedule.withStartMinute(minute)
-                      : schedule.withEndMinute(minute),
-                );
-              }
-            },
-      hourLabelFormat: widget.hourLabelFormat,
-      minuteStep: slot,
-      min: min,
-      max: max,
-      isEnabled: _tableFor(field, min, max).offers,
-      now: _nowOn(_dayOf(field)),
-      nowPicksLater: true,
-      focusNode: start ? _startHourNode : _endHourNode,
-      hapticFeedback: true,
-    );
   }
 
   /// The All day switch, at [_allDaySwitchScale] of a [Switch]'s size, 8
@@ -914,21 +888,12 @@ class ScheduleSectionState extends State<ScheduleSection> {
                 onChanged: startLocked
                     ? null
                     : (on) {
-                        if (on) {
-                          // The time fields and an open time picker go
-                          // away; the focus they held moves to the switch,
-                          // not to the scope's last focused node. An open
-                          // date field keeps its picker and the focus.
-                          final open = _open;
-                          final keepsDate = open != null && open.isDate;
-                          if (open != null && !keepsDate) {
-                            setState(() {
-                              _open = null;
-                            });
-                          }
-                          if (!keepsDate || _timeFieldHasFocus) {
-                            _allDayNode.requestFocus();
-                          }
+                        // The open picker's time and Time toggle go away;
+                        // the focus a control of the picker held moves to
+                        // the switch, not to the scope's last focused node.
+                        final open = _open;
+                        if (on && open != null && _panelNodeOf(open).hasFocus) {
+                          _allDayNode.requestFocus();
                         }
                         _change(schedule.withAllDay(on));
                       },
@@ -944,7 +909,7 @@ class ScheduleSectionState extends State<ScheduleSection> {
   /// check's [CalendarScheduleCheck.firstStartDay] with no last day, End's
   /// the check's [CalendarScheduleCheck.endDays]. Both rows' are read anew
   /// only under a check other than the one they were read of.
-  ({DateTime? first, DateTime? last}) _dayRangeOf(_TimeField row) {
+  ({DateTime? first, DateTime? last}) _dayRangeOf(_Row row) {
     final check = widget.check;
     if (!identical(check, _rangedCheck)) {
       assert(() {
@@ -956,32 +921,36 @@ class ScheduleSectionState extends State<ScheduleSection> {
       final ends = check.endDays;
       _endRange = (first: ends.first, last: ends.last);
     }
-    return row == _TimeField.start ? _startRange : _endRange;
+    return row == _Row.start ? _startRange : _endRange;
   }
 
-  /// [row]'s day picker, on the week or month of the row's day, that day
-  /// selected and [ScheduleSection.now]'s today ringed, taking the days of
-  /// [_dayRangeOf], End date's browsing back no further than the first of
-  /// them. Keyed by the row's openings, so each opening of its date field
-  /// builds a new one, on the view either picker last turned to,
-  /// [_dayPickerView]. A tap on a day moves the row's day to it; the picker
-  /// takes no pick while its panel closes or swaps it out, or where the
-  /// field takes no input.
-  Widget _dayPicker(_TimeField row) {
+  /// [row]'s picker, whose row's key is its
+  /// [CalendarDateTimePicker.subject]: its day picker on the week or month
+  /// of the row's day, that day selected and [ScheduleSection.now]'s today
+  /// ringed, taking the days of [_dayRangeOf], End's browsing back no
+  /// further than the first of them; and for a timed schedule its time
+  /// picker on the row's time, offering the times of [_timesOf]. Keyed by
+  /// the row's openings, so each opening builds a new one, on the view
+  /// either picker last turned to, [_dayPickerView], and with its time
+  /// shown as [_showsTime] says. It takes no pick while its panel closes or
+  /// where the row takes no input.
+  Widget _picker(_Row row) {
     final schedule = _schedule;
-    final start = row == _TimeField.start;
-    final field = row.dateField;
+    final start = row == _Row.start;
     final range = _dayRangeOf(row);
-    return CalendarDayPicker<ItemPayload>(
-      key: ValueKey<int>(start ? _startDateOpenings : _endDateOpenings),
-      value: start ? schedule.startDay : schedule.endDay,
-      onChanged: _open != field || !_takesInput(field)
+    final times = _timesOf(row);
+    return CalendarDateTimePicker<ItemPayload>(
+      key: ValueKey<int>(start ? _startOpenings : _endOpenings),
+      day: start ? schedule.startDay : schedule.endDay,
+      minute: schedule.isAllDay
           ? null
-          : (day) {
-              final date = CalendarDates.dateOnly(day);
-              _change(
-                start ? schedule.withStartDay(date) : schedule.withEndDay(date),
-              );
+          : start
+          ? schedule.startMinute
+          : schedule.endMinute,
+      onChanged: _open != row || !_takesInput(row)
+          ? null
+          : (day, minute) {
+              _pick(row, day, minute);
             },
       store: widget.store,
       today: widget.now().today,
@@ -995,57 +964,35 @@ class ScheduleSectionState extends State<ScheduleSection> {
       onViewChanged: (view) {
         _dayPickerView = view;
       },
+      hourLabelFormat: widget.hourLabelFormat,
+      minuteStep: widget.slotMinutes,
+      timeBoundsOf: times.boundsOn,
+      isTimeEnabled: times.offers,
+      now: _nowMinute,
+      nowPicksLater: true,
+      hapticFeedback: true,
+      subject: start ? scheduleStartKey : scheduleEndKey,
+      initialShowsTime: _showsTime,
+      onShowsTimeChanged: (shows) {
+        _showsTime = shows;
+      },
     );
   }
 
-  /// The Start or End row of [row], above the panel that holds the picker
-  /// of the row's open field: under the label "Start" or "End", its date
-  /// field, and for a timed schedule its time field beside it, the date
-  /// taking three fifths of the row; [error] shows under the fields and
-  /// tints the time field, or for an all-day schedule the date field, with
-  /// the soft error colour. A screen reader skips the label, as each field
-  /// names itself ([_FieldButton]).
-  /// The date field and the panel keep their places in the tree whichever
-  /// way All day turns, and with them the panel's state and the field's
-  /// focus: a [Focus] that leaves the tree drops its focus. So does each
-  /// row as the All day switch above it comes or goes: a row's outermost
-  /// widget is a [Column], and the switch's row a [MergeSemantics], which
-  /// the section's [Column] does not match to it.
-  Widget _dateRow(_TimeField row, String? error) {
-    final schedule = _schedule;
-    final timed = !schedule.isAllDay;
-    final start = row == _TimeField.start;
-    final open = _open;
-    final showsTime = open == row.timeField;
+  /// The Start or End row of [row], above the panel that holds its picker:
+  /// [error] shows under the row's button and tints it with the soft error
+  /// colour. The button and the panel keep their places in the tree
+  /// whichever way All day turns, and with them the panel's state and the
+  /// button's focus: a [Focus] that leaves the tree drops its focus. So
+  /// does each row as the All day switch above it comes or goes: a row's
+  /// outermost widget is a [Column], and the switch's row a
+  /// [MergeSemantics], which the section's [Column] does not match to it.
+  Widget _row(_Row row, String? error) {
+    final start = row == _Row.start;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        ExcludeSemantics(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 6.0),
-            child: Text(start ? "Start" : "End", style: _rowLabelStyle),
-          ),
-        ),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Expanded(
-              flex: timed ? _dateFlex : 1,
-              child: _dateField(row, error: !timed && error != null),
-            ),
-            if (timed) ...<Widget>[
-              const SizedBox(width: 12.0),
-              Expanded(
-                flex: _timeFlex,
-                child: _timeField(
-                  row,
-                  minute: start ? schedule.startMinute : schedule.endMinute,
-                  error: error != null,
-                ),
-              ),
-            ],
-          ],
-        ),
+        _rowButton(row, error: error != null),
         if (error != null)
           Padding(
             padding: const EdgeInsets.only(top: 6.0),
@@ -1057,19 +1004,11 @@ class ScheduleSectionState extends State<ScheduleSection> {
           ),
         _PickerPanel(
           key: start ? scheduleStartPanelKey : scheduleEndPanelKey,
-          open: open != null && open.row == row,
-          showsTime: showsTime,
-          // The time picker shows its footer, Now, only on today's field.
-          revealKey: showsTime && _nowOn(_dayOf(row)) != null,
-          field: _restNodeOf(showsTime ? row.timeField : row.dateField),
-          dateBuilder: (context) {
-            return _dayPicker(row);
+          open: _open == row,
+          field: _restNodeOf(row),
+          builder: (context) {
+            return Focus(focusNode: _panelNodeOf(row), child: _picker(row));
           },
-          timeBuilder: timed
-              ? (context) {
-                  return _picker(row);
-                }
-              : null,
         ),
       ],
     );
@@ -1079,12 +1018,11 @@ class ScheduleSectionState extends State<ScheduleSection> {
   Widget build(BuildContext context) {
     final schedule = _schedule;
     final errors = widget.errors;
-    final startLocked = _startLocked;
     final allDayShows = _options.allowsAllDay || schedule.isAllDay;
     final children = <Widget>[
-      if (allDayShows) _allDayRow(schedule, startLocked),
-      _dateRow(_TimeField.start, errors["start"]),
-      _dateRow(_TimeField.end, errors["end"]),
+      if (allDayShows) _allDayRow(schedule, _startLocked),
+      _row(_Row.start, errors["start"]),
+      _row(_Row.end, errors["end"]),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1286,11 +1224,11 @@ class ScheduleHeading extends StatelessWidget {
 }
 
 /// The form's page, [child], under a band that writes [check]'s schedule
-/// where [shown]: its first day as the date fields write it
+/// where [shown]: its first day as the rows write it
 /// ([MaterialLocalizations.formatMediumDate]) and, for a timed schedule,
 /// its times on [hourLabelFormat]'s clock, as "Wed, Apr 22, 09:00-10:00",
 /// or each day's across days, as "Wed, Apr 22, 22:00 - Thu, Apr 23, 02:00",
-/// an end at a day's 24:00 written as the End time field writes it
+/// an end at a day's 24:00 written as the End row writes it
 /// ([CalendarSchedule.endMinute]); for an all-day schedule its first day,
 /// and its last after " - " where it has more, as
 /// "Wed, Apr 22 - Fri, Apr 24". The spaces within a day and a time do not
@@ -2671,57 +2609,38 @@ class _OverhangClipper extends CustomClipper<Rect> {
   }
 }
 
-/// The panel under a Start or End row that holds the picker of the row's
-/// open field: its date field's day picker, which [dateBuilder] builds, or
-/// where [showsTime] its time field's picker, which [timeBuilder] builds,
-/// null for an all-day row, which has no time field. Each is built only
-/// while the panel shows it. The panel and its pickers span the section,
-/// as the row's fields do, and the panel clips [_panelOverhang] past its
-/// sides, so what a picker paints a little past them shows.
+/// The panel under a Start or End row that holds the row's picker, which
+/// [builder] builds only while the panel shows. The panel and its picker
+/// span the section, as the row does, and the panel clips [_panelOverhang]
+/// past its sides, so what the picker paints a little past them shows.
 /// As [open] turns true the panel grows from no height to the picker's
 /// over the [CalendarTheme]'s motion, the picker fading in over the
 /// motion's first half, and as it turns false it shrinks over the motion,
-/// the picker fading out over its last half, the closing panel keeping the
-/// picker it showed. As [showsTime] changes while [open], the panel swaps
-/// its pickers in place over that motion: its height moves from the one
-/// picker's to the other's, the leaving picker fading out over the
-/// motion's first half and the coming one fading in over its last, and the
-/// leaving one takes no pointer. Each of these eases on the theme's curve
-/// whichever way it runs, so a closing, or a swap back, eases as an
-/// opening does. All of it happens at once where the platform asks for no
-/// animations ([MediaQuery.disableAnimationsOf]), a motion under way
-/// included; the panel shows nothing once closed. A panel made while
-/// [open], or opened once closed, shows its picker at once. A row that
-/// loses its time field, as [timeBuilder] turns null, drops its time
-/// picker at once.
+/// the picker fading out over its last half. Each eases on the theme's
+/// curve whichever way it runs, so a closing eases as an opening does. All
+/// of it happens at once where the platform asks for no animations
+/// ([MediaQuery.disableAnimationsOf]), a motion under way included; the
+/// panel shows nothing once closed.
 ///
-/// Once it has opened, once a swap has ended while it is open, again
-/// where [revealKey] changes while it is open, as the time picker's footer
-/// comes or goes, and where its picker grows once it rests, it scrolls into
-/// view: the open field, whose [Focus] has [field] for its node, where the
-/// field lies before the visible part of the form, then the panel where it
-/// lies past it, the panel winning where both do not fit, in one scroll
-/// over the [CalendarTheme]'s motion, or at once where the platform asks
-/// for no animations. A picker that
-/// grows over a motion or under a pointer, as a day picker unfolds, is
+/// Once it has opened, and where its picker grows once it rests, as a day
+/// picker unfolds into its month or the time shows, it scrolls into view:
+/// the row, whose [Focus] has [field] for its node, where the row lies
+/// before the visible part of the form, then the panel where it lies past
+/// it, the panel winning where both do not fit, in one scroll over the
+/// [CalendarTheme]'s motion, or at once where the platform asks for no
+/// animations. A picker that grows over a motion or under a pointer is
 /// revealed once that motion has ended and the pointer has lifted.
 class _PickerPanel extends StatefulWidget {
   const _PickerPanel({
     super.key,
     required this.open,
-    required this.showsTime,
-    required this.revealKey,
     required this.field,
-    required this.dateBuilder,
-    required this.timeBuilder,
+    required this.builder,
   });
 
   final bool open;
-  final bool showsTime;
-  final Object? revealKey;
   final FocusNode field;
-  final WidgetBuilder dateBuilder;
-  final WidgetBuilder? timeBuilder;
+  final WidgetBuilder builder;
 
   @override
   State<_PickerPanel> createState() {
@@ -2730,7 +2649,7 @@ class _PickerPanel extends StatefulWidget {
 }
 
 class _PickerPanelState extends State<_PickerPanel>
-    with TickerProviderStateMixin {
+    with SingleTickerProviderStateMixin {
   /// The share of the motion, from the panel's closed end, over which the
   /// picker fades.
   static const double _fadeShare = 0.5;
@@ -2746,27 +2665,6 @@ class _PickerPanelState extends State<_PickerPanel>
   /// mid-motion keeps the opacity continuous.
   late final CurvedAnimation _fade;
 
-  /// The swap of the panel's pickers, from 0 for the day picker to 1 for
-  /// the time picker.
-  late final AnimationController _swap;
-
-  /// [_swap] on the theme's curve, which the panel's height reads.
-  late final CurvedAnimation _swapCurved;
-
-  /// The time picker's opacity: the last half of [_swap] on the theme's
-  /// curve.
-  late final CurvedAnimation _timeOpacity;
-
-  /// The first half of [_swap] on the theme's curve, of which the day
-  /// picker's opacity, [_dateOpacity], is the complement. The two halves
-  /// do not meet, so at most one picker is partly faded at a time, and as
-  /// with [_fade], a reversal mid-swap keeps both opacities continuous.
-  late final CurvedAnimation _dateFade;
-  late final Animation<double> _dateOpacity;
-
-  /// Whether the panel shows, or swaps to, its time picker.
-  bool _showsTime = false;
-
   /// Whether the picker grew, while the panel was open with no motion of
   /// its own under way, and has not been revealed since.
   bool _grown = false;
@@ -2777,7 +2675,7 @@ class _PickerPanelState extends State<_PickerPanel>
   /// Whether [_revealGrowth] waits among the post-frame callbacks.
   bool _growthQueued = false;
 
-  /// The pointers down on the panel's pickers.
+  /// The pointers down on the panel's picker.
   int _pointers = 0;
 
   /// [_revealGrowth], torn off once.
@@ -2790,17 +2688,10 @@ class _PickerPanelState extends State<_PickerPanel>
       vsync: this,
       value: widget.open ? 1.0 : 0.0,
     )..addStatusListener(_statusChanged);
-    _showsTime = widget.showsTime && widget.timeBuilder != null;
-    _swap = AnimationController(vsync: this, value: _showsTime ? 1.0 : 0.0)
-      ..addStatusListener(_swapStatusChanged);
     // The theme's curve replaces these in didChangeDependencies, which
     // runs before the first build.
     _curved = CurvedAnimation(parent: _controller, curve: Curves.linear);
     _fade = CurvedAnimation(parent: _controller, curve: Curves.linear);
-    _swapCurved = CurvedAnimation(parent: _swap, curve: Curves.linear);
-    _timeOpacity = CurvedAnimation(parent: _swap, curve: Curves.linear);
-    _dateFade = CurvedAnimation(parent: _swap, curve: Curves.linear);
-    _dateOpacity = Tween<double>(begin: 1.0, end: 0.0).animate(_dateFade);
   }
 
   @override
@@ -2809,7 +2700,7 @@ class _PickerPanelState extends State<_PickerPanel>
     final theme = CalendarTheme.of(context);
     final curve = theme.motionCurve;
     // A reverse reads its curve from 1 down to 0, so the flip of the curve
-    // eases a closing, or a swap back, as the curve eases an opening.
+    // eases a closing as the curve eases an opening.
     final flipped = FlippedCurve(curve);
     _curved
       ..curve = curve
@@ -2817,20 +2708,10 @@ class _PickerPanelState extends State<_PickerPanel>
     _fade
       ..curve = Interval(0.0, _fadeShare, curve: curve)
       ..reverseCurve = Interval(0.0, _fadeShare, curve: flipped);
-    _swapCurved
-      ..curve = curve
-      ..reverseCurve = flipped;
-    _timeOpacity
-      ..curve = Interval(0.5, 1.0, curve: curve)
-      ..reverseCurve = Interval(0.5, 1.0, curve: flipped);
-    _dateFade
-      ..curve = Interval(0.0, 0.5, curve: curve)
-      ..reverseCurve = Interval(0.0, 0.5, curve: flipped);
     final duration = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero
         : theme.motionDuration;
     _retime(_controller, duration);
-    _retime(_swap, duration);
   }
 
   /// Gives [controller] [duration]. A running motion keeps the duration it
@@ -2853,20 +2734,6 @@ class _PickerPanelState extends State<_PickerPanel>
   @override
   void didUpdateWidget(_PickerPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final hasTime = widget.timeBuilder != null;
-    if (widget.open) {
-      if (!oldWidget.open && _controller.isDismissed) {
-        _showsTime = widget.showsTime && hasTime;
-        _swap.value = _showsTime ? 1.0 : 0.0;
-      } else if (widget.showsTime != _showsTime) {
-        _showsTime = widget.showsTime;
-        if (_showsTime) {
-          _swap.forward();
-        } else {
-          _swap.reverse();
-        }
-      }
-    }
     if (widget.open != oldWidget.open) {
       if (widget.open) {
         _controller.forward();
@@ -2874,28 +2741,10 @@ class _PickerPanelState extends State<_PickerPanel>
         _controller.reverse();
       }
     }
-    // A row that loses its time field drops its time picker in this frame,
-    // and a closing panel that showed it closes at once.
-    if (!hasTime && _swap.value > 0.0) {
-      _showsTime = false;
-      _swap.value = 0.0;
-      if (!widget.open) {
-        _controller.value = 0.0;
-      }
-    }
-    if (widget.revealKey != oldWidget.revealKey &&
-        widget.open &&
-        _controller.isCompleted) {
-      _revealAfterFrame();
-    }
   }
 
   @override
   void dispose() {
-    _dateFade.dispose();
-    _timeOpacity.dispose();
-    _swapCurved.dispose();
-    _swap.dispose();
     _fade.dispose();
     _curved.dispose();
     _controller.dispose();
@@ -2913,22 +2762,8 @@ class _PickerPanelState extends State<_PickerPanel>
     }
   }
 
-  /// Drops the picker a swap has left once it has ended, and reveals the
-  /// panel where it is open. Under a zero duration both come inside
-  /// [didUpdateWidget] or [didChangeDependencies], during a build.
-  void _swapStatusChanged(AnimationStatus status) {
-    if (status != AnimationStatus.completed &&
-        status != AnimationStatus.dismissed) {
-      return;
-    }
-    setState(() {});
-    if (widget.open && _controller.isCompleted) {
-      _revealAfterFrame();
-    }
-  }
-
-  /// Scrolls the field and then the panel into view after the frame, once
-  /// the panel has its height. The field can lie before the view where a
+  /// Scrolls the row and then the panel into view after the frame, once
+  /// the panel has its height. The row can lie before the view where a
   /// panel above it has closed as this one opened.
   void _revealAfterFrame() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2938,10 +2773,10 @@ class _PickerPanelState extends State<_PickerPanel>
     });
   }
 
-  /// Scrolls the form the least that shows the open field's leading edge,
-  /// and then the panel's trailing edge, which wins where both do not fit:
-  /// over the [CalendarTheme]'s motion, or at once where the platform asks
-  /// for no animations.
+  /// Scrolls the form the least that shows the row's leading edge, and
+  /// then the panel's trailing edge, which wins where both do not fit: over
+  /// the [CalendarTheme]'s motion, or at once where the platform asks for
+  /// no animations.
   void _reveal() {
     final position = Scrollable.maybeOf(context)?.position;
     final panel = context.findRenderObject();
@@ -2976,9 +2811,8 @@ class _PickerPanelState extends State<_PickerPanel>
     }
   }
 
-  /// [_PanelSwap] laid its pickers out taller than before, with no swap
-  /// under way. A growth while the panel opens needs nothing: its opening
-  /// reveals it.
+  /// [_GrowthBox] laid the picker out taller than before. A growth while
+  /// the panel opens needs nothing: its opening reveals it.
   void _grew() {
     if (!widget.open || !_controller.isCompleted) {
       return;
@@ -2997,11 +2831,11 @@ class _PickerPanelState extends State<_PickerPanel>
   }
 
   /// Reveals a grown picker once its height holds: after a frame in which
-  /// it grew, as each frame of a day picker's unfold does, this asks again
-  /// after the next frame, which it schedules, since no motion may be left
-  /// to; a pointer down on the pickers asks again as it lifts. So a growth
-  /// over many frames is revealed once, a frame after it ends, whatever
-  /// other motion runs.
+  /// it grew, as each frame of a day picker's unfold or of its time's
+  /// showing does, this asks again after the next frame, which it
+  /// schedules, since no motion may be left to; a pointer down on the
+  /// picker asks again as it lifts. So a growth over many frames is
+  /// revealed once, a frame after it ends, whatever other motion runs.
   void _revealGrowth(Duration timeStamp) {
     _growthQueued = false;
     if (!mounted || !_grown || _pointers > 0) {
@@ -3036,14 +2870,6 @@ class _PickerPanelState extends State<_PickerPanel>
     if (!widget.open && _controller.isDismissed) {
       return const SizedBox.shrink();
     }
-    final timeBuilder = widget.timeBuilder;
-    final swap = _swap.value;
-    final Widget datePicker = swap < 1.0 || !_showsTime
-        ? widget.dateBuilder(context)
-        : const SizedBox.shrink();
-    final Widget timePicker = timeBuilder != null && (swap > 0.0 || _showsTime)
-        ? timeBuilder(context)
-        : const SizedBox.shrink();
     return FadeTransition(
       opacity: _fade,
       // A SizeTransition of the panel's height, but for its clip, which
@@ -3068,26 +2894,7 @@ class _PickerPanelState extends State<_PickerPanel>
               onPointerDown: _pointerDown,
               onPointerUp: _pointerUp,
               onPointerCancel: _pointerUp,
-              child: _PanelSwap(
-                t: _swapCurved,
-                onGrow: _grew,
-                children: <Widget>[
-                  IgnorePointer(
-                    ignoring: _showsTime,
-                    child: FadeTransition(
-                      opacity: _dateOpacity,
-                      child: datePicker,
-                    ),
-                  ),
-                  IgnorePointer(
-                    ignoring: !_showsTime,
-                    child: FadeTransition(
-                      opacity: _timeOpacity,
-                      child: timePicker,
-                    ),
-                  ),
-                ],
-              ),
+              child: _GrowthBox(onGrow: _grew, child: widget.builder(context)),
             ),
           ),
         ),
@@ -3096,173 +2903,39 @@ class _PickerPanelState extends State<_PickerPanel>
   }
 }
 
-/// A panel's two pickers, the day picker first, laid over each other at
-/// the panel's width, its height [t] of the way from the first's to the
-/// second's: [t] marks it to lay out again at each tick, and neither child
-/// lays out again under its unchanged constraints, so a swap rebuilds no
-/// widget. It paints the first child, then the second, and hit-tests them
-/// the other way round. [onGrow] is told where it lays out taller than it
-/// last did while [t] rests.
-class _PanelSwap extends MultiChildRenderObjectWidget {
-  const _PanelSwap({
-    required this.t,
-    required this.onGrow,
-    required super.children,
-  });
+/// Lays [child] out as it is, and tells [onGrow] where it lays it out
+/// taller than it last did.
+class _GrowthBox extends SingleChildRenderObjectWidget {
+  const _GrowthBox({required this.onGrow, required super.child});
 
-  final Animation<double> t;
   final VoidCallback onGrow;
 
   @override
-  _RenderPanelSwap createRenderObject(BuildContext context) {
-    return _RenderPanelSwap(t: t, onGrow: onGrow);
+  _RenderGrowthBox createRenderObject(BuildContext context) {
+    return _RenderGrowthBox(onGrow: onGrow);
   }
 
   @override
-  void updateRenderObject(BuildContext context, _RenderPanelSwap renderObject) {
-    renderObject
-      ..t = t
-      ..onGrow = onGrow;
+  void updateRenderObject(BuildContext context, _RenderGrowthBox renderObject) {
+    renderObject.onGrow = onGrow;
   }
 }
 
-class _PanelSwapParentData extends ContainerBoxParentData<RenderBox> {}
+class _RenderGrowthBox extends RenderProxyBox {
+  _RenderGrowthBox({required this.onGrow});
 
-class _RenderPanelSwap extends RenderBox
-    with
-        ContainerRenderObjectMixin<RenderBox, _PanelSwapParentData>,
-        RenderBoxContainerDefaultsMixin<RenderBox, _PanelSwapParentData> {
-  _RenderPanelSwap({required Animation<double> t, required VoidCallback onGrow})
-    : _t = t,
-      _onGrow = onGrow;
-
-  Animation<double> _t;
-  set t(Animation<double> value) {
-    if (identical(value, _t)) {
-      return;
-    }
-    if (attached) {
-      _t.removeListener(markNeedsLayout);
-      value.addListener(markNeedsLayout);
-    }
-    _t = value;
-    markNeedsLayout();
-  }
-
-  VoidCallback _onGrow;
-  set onGrow(VoidCallback value) {
-    _onGrow = value;
-  }
+  VoidCallback onGrow;
 
   /// The height of the last layout; null before the first.
   double? _laidOutHeight;
 
   @override
-  void setupParentData(RenderBox child) {
-    if (child.parentData is! _PanelSwapParentData) {
-      child.parentData = _PanelSwapParentData();
-    }
-  }
-
-  @override
-  void attach(PipelineOwner owner) {
-    super.attach(owner);
-    _t.addListener(markNeedsLayout);
-  }
-
-  @override
-  void detach() {
-    _t.removeListener(markNeedsLayout);
-    super.detach();
-  }
-
-  /// The height [t] of the way from [first] to [second].
-  double _heightBetween(double first, double second) {
-    return first + (second - first) * _t.value;
-  }
-
-  @override
-  double computeMinIntrinsicWidth(double height) {
-    var width = 0.0;
-    for (var child = firstChild; child != null; child = childAfter(child)) {
-      width = math.max(width, child.getMinIntrinsicWidth(double.infinity));
-    }
-    return width;
-  }
-
-  @override
-  double computeMaxIntrinsicWidth(double height) {
-    var width = 0.0;
-    for (var child = firstChild; child != null; child = childAfter(child)) {
-      width = math.max(width, child.getMaxIntrinsicWidth(double.infinity));
-    }
-    return width;
-  }
-
-  @override
-  double computeMinIntrinsicHeight(double width) {
-    final first = firstChild!;
-    return _heightBetween(
-      first.getMinIntrinsicHeight(width),
-      childAfter(first)!.getMinIntrinsicHeight(width),
-    );
-  }
-
-  @override
-  double computeMaxIntrinsicHeight(double width) {
-    final first = firstChild!;
-    return _heightBetween(
-      first.getMaxIntrinsicHeight(width),
-      childAfter(first)!.getMaxIntrinsicHeight(width),
-    );
-  }
-
-  @override
-  Size computeDryLayout(BoxConstraints constraints) {
-    final childConstraints = BoxConstraints.tightFor(
-      width: constraints.maxWidth,
-    );
-    final first = firstChild!;
-    return constraints.constrain(
-      Size(
-        constraints.maxWidth,
-        _heightBetween(
-          first.getDryLayout(childConstraints).height,
-          childAfter(first)!.getDryLayout(childConstraints).height,
-        ),
-      ),
-    );
-  }
-
-  @override
   void performLayout() {
-    final childConstraints = BoxConstraints.tightFor(
-      width: constraints.maxWidth,
-    );
-    final first = firstChild!;
-    final second = childAfter(first)!;
-    first.layout(childConstraints, parentUsesSize: true);
-    second.layout(childConstraints, parentUsesSize: true);
-    size = constraints.constrain(
-      Size(
-        constraints.maxWidth,
-        _heightBetween(first.size.height, second.size.height),
-      ),
-    );
+    super.performLayout();
     final last = _laidOutHeight;
     _laidOutHeight = size.height;
-    if (last != null && size.height > last && !_t.isAnimating) {
-      _onGrow();
+    if (last != null && size.height > last) {
+      onGrow();
     }
-  }
-
-  @override
-  void paint(PaintingContext context, Offset offset) {
-    defaultPaint(context, offset);
-  }
-
-  @override
-  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
-    return defaultHitTestChildren(result, position: position);
   }
 }

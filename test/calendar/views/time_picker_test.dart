@@ -1161,8 +1161,9 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets("PK13 the picker draws its panel, pills, rows and headers in "
-      "the theme above it", (tester) async {
+  testWidgets("PK13 the picker draws its pills, rows and headers in the "
+      "theme above it, and no box of its own: nothing it draws fills with "
+      "the surface or has an outline", (tester) async {
     final theme = CalendarThemeData(
       surface: const Color(0xFF101820),
       outline: const Color(0xFF203040),
@@ -1203,11 +1204,7 @@ void main() {
                   .decoration
               as BoxDecoration;
       expect(pill.color, theme.primaryTint, reason: "$key");
-      expect(
-        pill.borderRadius,
-        BorderRadius.circular(8.0),
-        reason: "$key",
-      );
+      expect(pill.borderRadius, BorderRadius.circular(8.0), reason: "$key");
     }
     final enabled = rowStyle(tester, hourRow(9));
     expect(enabled.fontSize, 18.0);
@@ -1219,25 +1216,44 @@ void main() {
     expect(disabled.color!.r, theme.text.r);
     final header = tester
         .widget<RichText>(
-          find.descendant(of: find.text("Hour"), matching: find.byType(RichText)),
+          find.descendant(
+            of: find.text("Hour"),
+            matching: find.byType(RichText),
+          ),
         )
         .text
         .style!;
     expect(header.fontSize, 11.0);
     expect(header.fontWeight, FontWeight.w800);
     expect(header.color, theme.textSecondary);
-    final panel = tester
-        .widget<DecoratedBox>(
-          find
-              .descendant(
-                of: find.byType(CalendarTimePicker),
-                matching: find.byType(DecoratedBox),
-              )
-              .first,
-        )
-        .decoration as BoxDecoration;
-    expect(panel.color, theme.surface);
-    expect(panel.border, Border.all(color: theme.outline));
+    final boxes = <BoxDecoration>[
+      for (final box in tester.widgetList<DecoratedBox>(
+        find.descendant(
+          of: find.byType(CalendarTimePicker),
+          matching: find.byType(DecoratedBox),
+        ),
+      ))
+        if (box.decoration case final BoxDecoration decoration) decoration,
+    ];
+    // Setup sanity: the pills' boxes are among them.
+    expect(
+      boxes.where((box) {
+        return box.color == theme.primaryTint;
+      }),
+      hasLength(2),
+    );
+    expect(
+      boxes.where((box) {
+        return box.color == theme.surface;
+      }),
+      isEmpty,
+    );
+    expect(
+      boxes.where((box) {
+        return box.border != null;
+      }),
+      isEmpty,
+    );
   });
 
   test("PK15 the constructor names the first value it does not take", () {
