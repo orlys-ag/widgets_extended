@@ -1743,8 +1743,8 @@ class _RenderSummaryInset extends RenderBox
 /// check's start is fixed.
 ///
 /// Under them lies a card per overlapped item, in the order of their starts
-/// and then their ends. A white card, outlined in the item's colour, its
-/// type's edge colour down its leading side, holds its type's icon and its
+/// and then their ends. A white card with no outline, its type's edge
+/// colour down its leading side, holds its type's icon and its
 /// title across the card, its times under the title, the time it shares
 /// with the schedule, or "Covers all of this item" where that is all of it,
 /// in a chip, and a bar zoomed on the shared time; where the rules refuse
@@ -1812,7 +1812,7 @@ class ScheduleOverlapNotice extends StatefulWidget {
   final EdgeInsetsGeometry padding;
 
   /// How many cards show before the button that shows the rest.
-  static const int shownCards = 3;
+  static const int shownCards = 2;
 
   @override
   State<ScheduleOverlapNotice> createState() {
@@ -2395,7 +2395,6 @@ class _OverlapCard extends StatelessWidget {
       key: id == null ? null : scheduleOverlapCardKey(id),
       decoration: BoxDecoration(
         color: HarborColors.surface,
-        border: Border.all(color: item.color),
         borderRadius: BorderRadius.circular(_radius),
       ),
       child: ClipRRect(

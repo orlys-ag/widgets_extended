@@ -451,6 +451,19 @@ List<String> overlapCardTexts(WidgetTester tester, String id) {
   );
 }
 
+/// Shows each card of the overlap notice, past those it shows folded
+/// ([ScheduleOverlapNotice.shownCards]), with a tap on its Show more button,
+/// brought into view first, and lets the cards settle.
+Future<void> showAllOverlapCards(WidgetTester tester) async {
+  final more = find.descendant(
+    of: find.byKey(scheduleOverlapKey),
+    matching: find.textContaining(RegExp(r"^Show \d+ more$")),
+  );
+  await revealForTap(tester, more);
+  await tester.tap(more);
+  await tester.pumpAndSettle();
+}
+
 /// The texts of the bar of the overlap notice's card of the item [id], in
 /// the order they are laid out.
 List<String> overlapBarTexts(WidgetTester tester, String id) {
@@ -471,9 +484,9 @@ Color? decorationColor(WidgetTester tester, Finder finder) {
 }
 
 /// The fill of the chip of the time the overlap notice's card of [id]
-/// shares, the nearest [DecoratedBox] around its text, and the colour of
-/// the card's border.
-(Color?, Color?) overlapCardColors(WidgetTester tester, String id) {
+/// shares, the nearest [DecoratedBox] around its text, and the border of
+/// the card's box.
+(Color?, BoxBorder?) overlapCardMarks(WidgetTester tester, String id) {
   final card = find.byKey(scheduleOverlapCardKey(id));
   final chip = find
       .ancestor(
@@ -486,7 +499,7 @@ Color? decorationColor(WidgetTester tester, Finder finder) {
       .first;
   final shape = tester.widget<DecoratedBox>(chip).decoration;
   final box = tester.widget<DecoratedBox>(card).decoration as BoxDecoration;
-  return ((shape as ShapeDecoration).color, (box.border! as Border).top.color);
+  return ((shape as ShapeDecoration).color, box.border);
 }
 
 /// The corners of the box decoration of the widget [finder] finds.
@@ -3709,6 +3722,7 @@ void main() {
     const grey = HarborColors.textSecondary;
 
     await openEdit(tester, store);
+    await showAllOverlapCards(tester);
     // Write from 09:00 to 10:00 shares 09:00 to 09:15 with Early, from
     // 08:00: the axis runs from 08:45 to 09:30, Early's before the shared
     // time and Write's after it, the two parts meeting under its middle.
@@ -3784,6 +3798,7 @@ void main() {
     // Workshop, from 12:00 to 17:00, shares 13:00 to 13:15 with Call: the
     // axis runs from 12:45 to 13:30, Workshop's on both sides.
     await openEdit(tester, store, id: "item-5");
+    await showAllOverlapCards(tester);
     expect(spanOf("item-6", scheduleOverlapShareKey), (0.333, 0.667));
     expect(partColor("item-6", scheduleOverlapBeforeKey), grey);
     expect(partColor("item-6", scheduleOverlapAfterKey), grey);
@@ -3802,7 +3817,7 @@ void main() {
     expect(overlapBarTexts(tester, "item-8"), <String>["12:00", "13:00"]);
   });
 
-  testWidgets("FS10 the overlap notice shows three cards and a button that "
+  testWidgets("FS10 the overlap notice shows two cards and a button that "
       "shows the rest, which then shows fewer again", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
@@ -3838,17 +3853,17 @@ void main() {
       find.descendant(of: notice, matching: find.text("Overlaps 5 items")),
       findsOneWidget,
     );
-    expect(shown(), <bool>[true, true, true, false, false]);
-    await tapInNotice("Show 2 more");
+    expect(shown(), <bool>[true, true, false, false, false]);
+    await tapInNotice("Show 3 more");
     expect(shown(), <bool>[true, true, true, true, true]);
     await tapInNotice("Show fewer");
-    expect(shown(), <bool>[true, true, true, false, false]);
+    expect(shown(), <bool>[true, true, false, false, false]);
   });
 
   testWidgets("FS11 the overlap notice turns red where the policy refuses an "
       "overlap, saying how many it refuses, and draws each refused card's "
-      "chip and bar's shared column red, with no label of its own; each "
-      "card's outline is its item's colour, refused or not", (tester) async {
+      "chip and bar's shared column red, with no label of its own; no card "
+      "has an outline, refused or not", (tester) async {
     final standup = task("item-2", "Standup", at(9, 30), at(10, 30));
     final review = calendarItem(
       id: "item-3",
@@ -3857,8 +3872,6 @@ void main() {
       start: at(8, 30),
       end: at(11),
     );
-    // Setup sanity: the two items differ in colour.
-    expect(review.color, isNot(standup.color));
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       standup,
@@ -3870,14 +3883,14 @@ void main() {
       return find.descendant(of: notice, matching: find.text(text));
     }
 
-    final allowed = <(Color?, Color?)>[
-      (HarborColors.notice, standup.color),
-      (HarborColors.notice, review.color),
+    final allowed = <(Color?, BoxBorder?)>[
+      (HarborColors.notice, null),
+      (HarborColors.notice, null),
     ];
-    List<(Color?, Color?)> marked() {
-      return <(Color?, Color?)>[
+    List<(Color?, BoxBorder?)> marked() {
+      return <(Color?, BoxBorder?)>[
         for (final id in <String>["item-2", "item-3"])
-          overlapCardColors(tester, id),
+          overlapCardMarks(tester, id),
       ];
     }
 
@@ -3891,9 +3904,9 @@ void main() {
     await openEdit(tester, store, policy: const _RefusesOverlapWith("item-3"));
     expect(inNotice("Overlaps 2 items, 1 not allowed"), findsOneWidget);
     expect(decorationColor(tester, notice), HarborColors.errorNotice);
-    expect(marked(), <(Color?, Color?)>[
-      (HarborColors.notice, standup.color),
-      (HarborColors.errorNotice, review.color),
+    expect(marked(), <(Color?, BoxBorder?)>[
+      (HarborColors.notice, null),
+      (HarborColors.errorNotice, null),
     ]);
     expect(overlapCardTexts(tester, "item-3"), <String>[
       "Review",
@@ -3918,9 +3931,9 @@ void main() {
     );
     expect(inNotice("Can't overlap 2 items"), findsOneWidget);
     expect(decorationColor(tester, notice), HarborColors.errorNotice);
-    expect(marked(), <(Color?, Color?)>[
-      (HarborColors.errorNotice, standup.color),
-      (HarborColors.errorNotice, review.color),
+    expect(marked(), <(Color?, BoxBorder?)>[
+      (HarborColors.errorNotice, null),
+      (HarborColors.errorNotice, null),
     ]);
   });
 
@@ -3939,6 +3952,7 @@ void main() {
     ]);
     addTearDown(store.dispose);
     await openEdit(tester, store);
+    await showAllOverlapCards(tester);
     expect(overlapCardTexts(tester, "item-2"), <String>[
       "Overnight",
       "Tue 22:00-Wed 09:30",
@@ -4017,7 +4031,7 @@ void main() {
     final notice = find.byKey(scheduleOverlapKey);
     final fewer = tester.getSize(notice).height;
 
-    await tester.tap(await revealNoticeButton(tester, "Show 2 more"));
+    await tester.tap(await revealNoticeButton(tester, "Show 3 more"));
     await tester.pump();
     // A row's first tick in or out moves it by nothing, so the motion
     // runs from the frame after the tap's.
@@ -4026,7 +4040,7 @@ void main() {
     final growing = tester.getSize(notice).height;
     await tester.pumpAndSettle();
     final all = tester.getSize(notice).height;
-    // Setup sanity: the two cards make the notice taller.
+    // Setup sanity: the three cards make the notice taller.
     expect(all, greaterThan(fewer + 100.0));
     // Half way through the motion on a linear curve, half grown.
     expect(growing, moreOrLessEquals((fewer + all) / 2, epsilon: 0.01));
@@ -4048,7 +4062,6 @@ void main() {
       "grows in and one that stops shrinks out over the theme's motion, "
       "writing the time it shared until it has gone", (tester) async {
     final others = <CalendarItem>[
-      task("item-2", "Plan", at(8), at(12)),
       task("item-3", "Early", at(9), at(9, 30)),
       task("item-4", "Late", at(10, 30), at(11)),
     ];
@@ -4073,17 +4086,17 @@ void main() {
     // Late shares nothing with it.
     expect(early, <String>["Early", "09:00-09:30", "Shares 09:00-09:30, 30m"]);
     expect(find.byKey(scheduleOverlapCardKey("item-4")), findsNothing);
-    final two = tester.getSize(notice).height;
+    final one = tester.getSize(notice).height;
 
     // From 09:00 to 11:00 overlaps Late too.
     await pumpFrom(9, 11);
     await tester.pump(motionTheme.motionDuration ~/ 2);
     final growing = tester.getSize(notice).height;
     await tester.pumpAndSettle();
-    final three = tester.getSize(notice).height;
+    final two = tester.getSize(notice).height;
     // Setup sanity: Late's card makes the notice taller.
-    expect(three, greaterThan(two + 50.0));
-    expect(growing, moreOrLessEquals((two + three) / 2, epsilon: 0.01));
+    expect(two, greaterThan(one + 50.0));
+    expect(growing, moreOrLessEquals((one + two) / 2, epsilon: 0.01));
 
     // From 10:00 to 11:00 no longer overlaps Early.
     await pumpFrom(10, 11);
@@ -4094,7 +4107,7 @@ void main() {
     expect(
       shrinking,
       moreOrLessEquals(
-        (three + tester.getSize(notice).height) / 2,
+        (two + tester.getSize(notice).height) / 2,
         epsilon: 0.01,
       ),
     );
@@ -4142,17 +4155,17 @@ void main() {
     final notice = find.byKey(scheduleOverlapKey);
     final fewer = tester.getSize(notice).height;
 
-    await tester.tap(await revealNoticeButton(tester, "Show 2 more"));
+    await tester.tap(await revealNoticeButton(tester, "Show 3 more"));
     await tester.pump();
     final shown = tester.getSize(notice).height;
     await tester.pumpAndSettle();
     expect(tester.getSize(notice).height, shown);
-    // Setup sanity: the two cards make the notice taller.
+    // Setup sanity: the three cards make the notice taller.
     expect(shown, greaterThan(fewer + 100.0));
 
     await tester.tap(await revealNoticeButton(tester, "Show fewer"));
     await tester.pump();
-    expect(meetingCards(), <bool>[true, true, true, false, false]);
+    expect(meetingCards(), <bool>[true, true, false, false, false]);
   });
 
   /// Write, from 09:00 to 10:00, the item the reveal tests open.
@@ -4258,7 +4271,7 @@ void main() {
 
     final notice = find.byKey(scheduleOverlapKey);
     await pumpOver(others);
-    await tester.tap(await revealNoticeButton(tester, "Show 2 more"));
+    await tester.tap(await revealNoticeButton(tester, "Show 3 more"));
     await tester.pumpAndSettle();
     final open = tester.getSize(find.byType(ScheduleOverlapNotice)).height;
 
