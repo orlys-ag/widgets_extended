@@ -1115,6 +1115,48 @@ void main() {
       "CalendarDayPickerView(folded: false, picksMonth: true)",
     );
   });
+
+  testWidgets("DP16 headerTrailing lies at the end of the header's row, "
+      "centred on the row, folded, unfolded and over the month picker", (
+    tester,
+  ) async {
+    const trailing = SizedBox(
+      key: ValueKey<String>("trailing"),
+      width: 60.0,
+      height: 20.0,
+    );
+    final finder = find.byKey(const ValueKey<String>("trailing"));
+    for (final (step, view) in <(String, CalendarDayPickerView)>[
+      ("folded", const CalendarDayPickerView()),
+      ("unfolded", const CalendarDayPickerView(folded: false)),
+      ("month picker", const CalendarDayPickerView(picksMonth: true)),
+    ]) {
+      await tester.pumpWidget(
+        app(
+          CalendarDayPicker<String>(
+            key: ValueKey<String>(step),
+            value: DateTime(2026, 4, 22),
+            today: tuesday,
+            onChanged: (day) {},
+            initialView: view,
+            headerTrailing: trailing,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final header = tester.getRect(
+        find
+            .descendant(
+              of: find.byType(CalendarDayPicker<String>),
+              matching: find.byType(Row),
+            )
+            .first,
+      );
+      final box = tester.getRect(finder);
+      expect(box.right, header.right, reason: step);
+      expect(box.center.dy, header.center.dy, reason: step);
+    }
+  });
 }
 
 /// A data source each of whose reads waits until the test answers it, with

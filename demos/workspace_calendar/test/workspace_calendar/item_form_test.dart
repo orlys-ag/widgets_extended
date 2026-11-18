@@ -167,10 +167,9 @@ void main() {
     expect(find.textContaining("Standup"), findsOneWidget);
   });
 
-  testWidgets("IF1 the form shows Start date, Start time, End date, End "
-      "time and All day, and All day hides the times and saves day starts", (
-    tester,
-  ) async {
+  testWidgets("IF1 the form shows All day, a Start row and an End row, each "
+      "with its day and time, and All day hides the times and saves "
+      "day starts", (tester) async {
     final writes = <CalendarItem?>[];
     final store = MemoryCalendarStore<ItemPayload>(
       entries: <CalendarItem>[
@@ -318,9 +317,8 @@ void main() {
   });
 
   testWidgets("IF6 the form's day pickers start their weeks on the first "
-      "column it is given: Start date's week row opens on Sunday", (
-    tester,
-  ) async {
+      "column it is given: the Start row's picker's week row opens on "
+      "Sunday", (tester) async {
     final store = MemoryCalendarStore<ItemPayload>(
       entries: <CalendarItem>[
         task(DateTime(2026, 4, 22, 9), DateTime(2026, 4, 22, 10)),

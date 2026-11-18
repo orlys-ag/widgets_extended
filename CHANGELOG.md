@@ -936,6 +936,35 @@ may lie on as the policy's earliest starts of yesterday and today say, and
 from its start day, or for a fixed start the first day whose 24:00 the
 policy admits as its end, to the start day where the options take no
 spanning days, or the last day the day limit covers.
+- Changed `CalendarTimePicker` to draw no box of its own: it no longer
+fills a rounded box in the theme's `surface` with an `outline` border, and
+its columns, pills and footer lie on whatever surface is behind it, inside
+its 8-pixel padding. Its columns still fade their top and bottom rows into
+the theme's `surface`, so it lies on a surface of that colour. A host that
+wants the box draws it around the picker.
+- Added `CalendarDayPicker.headerTrailing`, a widget at the end of the day
+picker's header row, after its chevrons, centred on the row, folded,
+unfolded and over the month picker.
+- Added `CalendarDateTimePicker`, an inline picker of a day and a time of
+it: a `CalendarDayPicker` over a hairline in the theme's `outline` and a
+`CalendarTimePicker`, with a Time toggle at the end of the day picker's
+header, a pill filled with the theme's `primaryTint` and labelled in its
+`primary` while on, and filled with its `background` and labelled in its
+`textSecondary` while off. The toggle shows and hides the time picker over
+the theme's motion, the part under the day picker growing and shrinking
+while the divider and time picker fade, and reports through
+`onShowsTimeChanged`; the picker opens as `initialShowsTime` says. A tap on
+a day reports it through `onChanged` with the time, or, where the new day
+does not offer that time, with the offered time of the day nearest it on
+`minuteStep`; a pick of a time reports it with the day. The time picker
+offers the times `timeBoundsOf` and `isTimeEnabled` give for the day that
+the clock of the store's zone reads, and shows Now on `today` alone;
+`isTimeEnabled` is asked of each time of the day at most once while the
+day, the predicate and the zone stay. With a null `minute` it picks a day
+alone, showing no toggle and no time; a `minute` that turns null hides the
+time, which keeps the times it offered, asking `timeBoundsOf` and
+`isTimeEnabled` nothing more. Added
+`CalendarLocalizations.dateTimePickerTimeLabel`, the toggle's label.
 
 ## 0.0.35
 

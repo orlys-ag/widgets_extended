@@ -16,6 +16,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/composition/calendar_card.dart';
+import 'package:widgets_extended/calendar/composition/calendar_date_time_picker.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
@@ -392,6 +393,11 @@ final class _Marked extends DefaultCalendarLocalizations {
   @override
   String get timePickerClearLabel {
     return bracketed(super.timePickerClearLabel);
+  }
+
+  @override
+  String get dateTimePickerTimeLabel {
+    return bracketed(super.dateTimePickerTimeLabel);
   }
 
   @override
@@ -984,6 +990,41 @@ void main() {
         .getSemanticsData();
     expect(amPm.label, "[AM/PM]");
     expect(amPm.value, "[PM]");
+    semantics.dispose();
+  });
+
+  testWidgets("LZ7 the date-time picker's Time toggle, day picker and time "
+      "picker switch to the localizations above it", (tester) async {
+    useView(tester, 800.0, 1200.0);
+    final semantics = tester.ensureSemantics();
+    Widget picker({required bool marked}) {
+      return app(
+        SizedBox(
+          width: 360.0,
+          child: CalendarDateTimePicker<String>(
+            day: tuesday,
+            minute: 570,
+            today: tuesday,
+            onChanged: (day, minute) {},
+          ),
+        ),
+        marked: marked,
+      );
+    }
+
+    final from = find.byType(CalendarDateTimePicker<String>);
+    await tester.pumpWidget(picker(marked: false));
+    expect(unmarked(shownTexts(tester)), isNotEmpty);
+    expect(unmarked(heardTexts(tester, from: from)), isNotEmpty);
+
+    await tester.pumpWidget(picker(marked: true));
+    await tester.pumpAndSettle();
+    expect(find.byType(CalendarTimePicker), findsOneWidget);
+    expectMarked(tester, "the date-time picker", from: from);
+    expect(
+      tester.getSemantics(find.byKey(dateTimePickerToggleKey)).label,
+      "[Time]",
+    );
     semantics.dispose();
   });
 }

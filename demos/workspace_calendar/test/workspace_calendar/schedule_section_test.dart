@@ -3,9 +3,9 @@
 /// the message of each schedule problem, the messages before and after a
 /// failed Save and the field a failed Save reveals, the heading's length
 /// pill and zone box, the overlap notice and next free time, and the
-/// section's All day switch, its Start and End rows, End date, options and
-/// kept kind, and its time fields, the pickers they open under their rows,
-/// what each picker refuses, and where the focus goes.
+/// section's All day switch, its Start and End rows, the End row's days,
+/// options and kept kind, the pickers the rows open under them, what each
+/// picker refuses, and where the focus goes.
 library;
 
 import 'dart:async';
@@ -20,6 +20,8 @@ import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/calendar/composition/calendar_card.dart'
     show CalendarCard, calendarPullTabKey;
+import 'package:widgets_extended/calendar/composition/calendar_date_time_picker.dart'
+    show dateTimePickerToggleKey;
 import 'package:widgets_extended/calendar/views/day_cell.dart'
     show DayCell, dayCellKey;
 import 'package:widgets_extended/calendar/views/month_strip.dart'
@@ -181,8 +183,8 @@ CalendarScheduleCheck<ItemPayload> checkOf(
 /// "Schedule", and over its [ScheduleOverlapNotice], which shows while the
 /// check names overlaps, in the form's order, without the form, in the
 /// calendar's whole day of 15-minute slots on the 24-hour clock, on
-/// [zone]'s clock, the pickers' Now reading [now] or else Wednesday's
-/// start, the edits of the section and the notice going to [onChanged] or
+/// [zone]'s clock, the section's store an empty one on it, the pickers'
+/// Now reading [now] or else Wednesday's start, the edits of the section and the notice going to [onChanged] or
 /// else nowhere, and locked where [locked]. Where [follows], each edit also
 /// makes their check that of the edited schedule
 /// ([CalendarScheduleCheck.withSchedule]) before it goes to [onChanged], so
@@ -203,6 +205,8 @@ Future<void> pumpSection(
   TextDirection textDirection = TextDirection.ltr,
   Map<String, String> errors = const <String, String>{},
 }) {
+  final store = MemoryCalendarStore<ItemPayload>(zone: zone);
+  addTearDown(store.dispose);
   Widget sectionOf(
     CalendarScheduleCheck<ItemPayload> check,
     ValueChanged<CalendarSchedule> onChanged,
@@ -217,7 +221,7 @@ Future<void> pumpSection(
           slotMinutes: 15,
           hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
           now: now ?? wednesdayStart,
-          zone: zone,
+          store: store,
           locked: locked,
           errors: errors,
           onChanged: onChanged,
@@ -300,17 +304,20 @@ double panelHeight(WidgetTester tester, [String label = "Start time"]) {
   return tester.getSize(pickerPanel(label)).height;
 }
 
-/// The height of the open picker panel of the time field labelled [label]
+/// The date-time picker in the panel under the row of the field labelled
+/// [label].
+Finder panelPicker([String label = "Start time"]) {
+  return find.descendant(
+    of: pickerPanel(label),
+    matching: find.byType(CalendarDateTimePicker<ItemPayload>),
+  );
+}
+
+/// The height of the open panel of the row of the field labelled [label]
 /// at rest: its picker's, which the panel lays out at full height while it
 /// grows or shrinks, and the gap above it.
 double settledPanelHeight(WidgetTester tester, [String label = "Start time"]) {
-  return tester.getSize(timePickerFinder(label)).height + 12.0;
-}
-
-/// The height of the panel of the date field labelled [label] at rest with
-/// its day picker open: the day picker's, and the gap above it.
-double settledDayPanelHeight(WidgetTester tester, String label) {
-  return tester.getSize(dayPickerFinder(label)).height + 12.0;
+  return tester.getSize(panelPicker(label)).height + 12.0;
 }
 
 /// The opacity of the picker panel of the row of the field labelled
@@ -329,8 +336,8 @@ double panelOpacity(WidgetTester tester, [String label = "Start time"]) {
       .value;
 }
 
-/// The vertical distance from the pill of the Hour column of the picker of
-/// the time field labelled [label] to the centre of its row of [hour],
+/// The vertical distance from the pill of the Hour column of the time
+/// picker of the time labelled [label] to the centre of its row of [hour],
 /// positive below the pill.
 double hourRowFromPill(WidgetTester tester, String label, int hour) {
   final pill = tester
@@ -451,6 +458,19 @@ List<String> overlapCardTexts(WidgetTester tester, String id) {
   );
 }
 
+/// Shows each card of the overlap notice, past those it shows folded
+/// ([ScheduleOverlapNotice.shownCards]), with a tap on its Show more button,
+/// brought into view first, and lets the cards settle.
+Future<void> showAllOverlapCards(WidgetTester tester) async {
+  final more = find.descendant(
+    of: find.byKey(scheduleOverlapKey),
+    matching: find.textContaining(RegExp(r"^Show \d+ more$")),
+  );
+  await revealForTap(tester, more);
+  await tester.tap(more);
+  await tester.pumpAndSettle();
+}
+
 /// The texts of the bar of the overlap notice's card of the item [id], in
 /// the order they are laid out.
 List<String> overlapBarTexts(WidgetTester tester, String id) {
@@ -471,9 +491,9 @@ Color? decorationColor(WidgetTester tester, Finder finder) {
 }
 
 /// The fill of the chip of the time the overlap notice's card of [id]
-/// shares, the nearest [DecoratedBox] around its text, and the colour of
-/// the card's border.
-(Color?, Color?) overlapCardColors(WidgetTester tester, String id) {
+/// shares, the nearest [DecoratedBox] around its text, and the border of
+/// the card's box.
+(Color?, BoxBorder?) overlapCardMarks(WidgetTester tester, String id) {
   final card = find.byKey(scheduleOverlapCardKey(id));
   final chip = find
       .ancestor(
@@ -486,7 +506,7 @@ Color? decorationColor(WidgetTester tester, Finder finder) {
       .first;
   final shape = tester.widget<DecoratedBox>(chip).decoration;
   final box = tester.widget<DecoratedBox>(card).decoration as BoxDecoration;
-  return ((shape as ShapeDecoration).color, (box.border! as Border).top.color);
+  return ((shape as ShapeDecoration).color, box.border);
 }
 
 /// The corners of the box decoration of the widget [finder] finds.
@@ -495,40 +515,91 @@ BorderRadiusGeometry? decorationRadius(WidgetTester tester, Finder finder) {
   return (decoration as BoxDecoration).borderRadius;
 }
 
-/// The box of the schedule's field [field] finds: the decoration of the
-/// first [DecoratedBox] under it.
-BoxDecoration fieldBox(WidgetTester tester, Finder field) {
+/// The Start row or the End row, as [row], "Start" or "End", names it: the
+/// [Focus] around its button.
+Finder rowFinder(String row) {
+  switch (row) {
+    case "Start":
+      return find.byKey(scheduleStartKey);
+    case "End":
+      return find.byKey(scheduleEndKey);
+  }
+  throw ArgumentError.value(row, "row", "names no row");
+}
+
+/// The box of the schedule's row [row] finds: the decoration of the first
+/// [DecoratedBox] under it.
+BoxDecoration rowBox(WidgetTester tester, Finder row) {
   return tester
           .widget<DecoratedBox>(
-            find
-                .descendant(of: field, matching: find.byType(DecoratedBox))
-                .first,
+            find.descendant(of: row, matching: find.byType(DecoratedBox)).first,
           )
           .decoration
       as BoxDecoration;
 }
 
-/// The colour of the day or time the schedule's field [field] finds shows.
-Color fieldInk(WidgetTester tester, Finder field) {
+/// The texts the schedule's row [row] finds shows, in their order: its
+/// label, its day and, for a timed schedule, its time.
+List<Text> rowTexts(WidgetTester tester, Finder row) {
   return tester
-      .widget<Text>(find.descendant(of: field, matching: find.byType(Text)))
-      .style!
-      .color!;
+      .widgetList<Text>(find.descendant(of: row, matching: find.byType(Text)))
+      .toList();
 }
 
-/// The semantics node of the button of the schedule's field [field]
-/// finds, the node its [InkWell] lies in, inside the field's [Focus].
-SemanticsNode fieldSemantics(WidgetTester tester, Finder field) {
+/// The colours of the texts the schedule's row [row] finds shows
+/// ([rowTexts]).
+List<Color> rowInks(WidgetTester tester, Finder row) {
+  return <Color>[for (final text in rowTexts(tester, row)) text.style!.color!];
+}
+
+/// The semantics node of the button of the schedule's row [row] finds, the
+/// node its [InkWell] lies in, inside the row's [Focus].
+SemanticsNode rowSemantics(WidgetTester tester, Finder row) {
   return tester.getSemantics(
-    find.descendant(of: field, matching: find.byType(InkWell)),
+    find.descendant(of: row, matching: find.byType(InkWell)),
   );
 }
 
-/// The colour of the icon of the schedule's field [field] finds.
-Color fieldMark(WidgetTester tester, Finder field) {
+/// The chevron at the end of the schedule's row [row] finds.
+Finder rowChevron(Finder row) {
+  return find.descendant(of: row, matching: find.byIcon(Icons.expand_more));
+}
+
+/// The cosine of the angle the chevron of the row [row] finds is turned
+/// by: 1 where it points down, -1 where it points up.
+double chevronTurn(WidgetTester tester, Finder row) {
   return tester
-      .widget<Icon>(find.descendant(of: field, matching: find.byType(Icon)))
-      .color!;
+      .widget<Transform>(
+        find
+            .ancestor(of: rowChevron(row), matching: find.byType(Transform))
+            .first,
+      )
+      .transform
+      .storage[0];
+}
+
+/// The Time toggle of the picker in the panel under the row of the field
+/// labelled [label].
+Finder timeToggle([String label = "Start time"]) {
+  return find.descendant(
+    of: pickerPanel(label),
+    matching: find.byKey(dateTimePickerToggleKey),
+  );
+}
+
+/// The focus node of the Hour column of the open time picker of the field
+/// labelled [label].
+FocusNode hourColumnNode(WidgetTester tester, String label) {
+  return tester
+      .widget<Focus>(
+        find
+            .descendant(
+              of: inPicker(label, find.byKey(timePickerHourColumnKey)),
+              matching: find.byType(Focus),
+            )
+            .first,
+      )
+      .focusNode!;
 }
 
 /// The left and right of the part of the bar of the overlap notice's card
@@ -555,13 +626,13 @@ void disableAnimations(WidgetTester tester) {
   addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
 }
 
-/// What [finder] finds in the open picker of the form's time field
-/// labelled [label].
+/// What [finder] finds in the open time picker of the form's time labelled
+/// [label].
 Finder inPicker(String label, Finder finder) {
   return find.descendant(of: timePickerFinder(label), matching: finder);
 }
 
-/// Whether the row keyed [key] of the picker of the time field labelled
+/// Whether the row keyed [key] of the time picker of the time labelled
 /// [label] takes a tap, which a row with no time the picker may pick, in a
 /// picker that takes input, does not.
 bool rowTakesTap(WidgetTester tester, String label, Key key) {
@@ -571,7 +642,7 @@ bool rowTakesTap(WidgetTester tester, String label, Key key) {
       null;
 }
 
-/// The hours the Hour column of the picker of the time field labelled
+/// The hours the Hour column of the time picker of the time labelled
 /// [label] has rows for.
 List<int> hourRows(String label) {
   return <int>[
@@ -584,7 +655,7 @@ List<int> hourRows(String label) {
   ];
 }
 
-/// The minutes the Minute column of the picker of the time field labelled
+/// The minutes the Minute column of the time picker of the time labelled
 /// [label] has rows for.
 List<int> minuteRows(String label) {
   return <int>[
@@ -876,8 +947,8 @@ void main() {
     expect(formSchedule(tester), "Wed, Apr 22, 09:00\nWed, Apr 22, 10:00\n1h");
   });
 
-  testWidgets("SS3 End date names the item's last day, and a later day "
-      "picked there makes a one-day item span days", (tester) async {
+  testWidgets("SS3 the End row names the item's last day, and a later day "
+      "picked in its picker makes a one-day item span days", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task("item-2", "Trip", at(22), DateTime(2026, 4, 23, 2)),
@@ -962,13 +1033,14 @@ void main() {
   });
 
   testWidgets("SS6 options that refuse all-day and spanning days show no All "
-      "day switch, and their End date takes no tap while the item ends on "
-      "its start's day", (tester) async {
-    bool endDateTakesTap() {
+      "day switch; their End row takes its time, its day picker taking the "
+      "start's day alone, while an all-day item on one day has no End to "
+      "take and its End row takes no tap", (tester) async {
+    bool endTakesTap() {
       return tester
               .widget<InkWell>(
                 find.descendant(
-                  of: formDateFinder("End date"),
+                  of: rowFinder("End"),
                   matching: find.byType(InkWell),
                 ),
               )
@@ -976,11 +1048,13 @@ void main() {
           null;
     }
 
+    final thursday = DateTime(2026, 4, 23);
     final schedule = CalendarSchedule.of(at(9), at(10), isAllDay: false);
     await pumpSection(tester, checkOf(schedule));
     expect(allDaySwitch(), findsOneWidget);
-    // Setup sanity: under the standard options End date takes a tap.
-    expect(endDateTakesTap(), isTrue);
+    await openDayPicker(tester, "End date");
+    // Setup sanity: under the standard options End's picker takes Thursday.
+    expect(dayEnabled(tester, "End date", thursday), isTrue);
 
     const options = CalendarScheduleOptions(
       allowsAllDay: false,
@@ -989,18 +1063,29 @@ void main() {
     await pumpSection(tester, checkOf(schedule, options: options));
     expect(allDaySwitch(), findsNothing);
     expect(find.text("All day"), findsNothing);
-    expect(endDateTakesTap(), isFalse);
+    expect(dayEnabled(tester, "End date", wednesday), isTrue);
+    expect(dayEnabled(tester, "End date", thursday), isFalse);
+    await closeDayPicker(tester, "End date");
+    expect(endTakesTap(), isTrue);
 
-    // An item that spans days still takes its End date, which can bring it
-    // back onto one day.
+    // An all-day item on one day has nothing for its End row to take, and
+    // one that spans days takes it, which can bring it back onto one day.
     await pumpSection(
       tester,
       checkOf(
-        CalendarSchedule.of(at(22), DateTime(2026, 4, 23, 2), isAllDay: false),
+        CalendarSchedule.of(wednesday, thursday, isAllDay: true),
         options: options,
       ),
     );
-    expect(endDateTakesTap(), isTrue);
+    expect(endTakesTap(), isFalse);
+    await pumpSection(
+      tester,
+      checkOf(
+        CalendarSchedule.of(wednesday, DateTime(2026, 4, 24), isAllDay: true),
+        options: options,
+      ),
+    );
+    expect(endTakesTap(), isTrue);
   });
 
   testWidgets("SS7 the All day switch turned on hides the times, and turned "
@@ -1101,11 +1186,11 @@ void main() {
     expect(formSchedule(tester), "Wed, Apr 22, 09:30\nWed, Apr 22, 10:30\n1h");
   });
 
-  testWidgets("TF1 a tap on Start time opens its picker in the panel under "
-      "the Start row, a pick there settles into the schedule, a tap on End "
-      "time closes it and opens the end's picker alone in the panel under "
-      "the End row, and a second tap closes that; a fixed start's field "
-      "opens none", (tester) async {
+  testWidgets("TF1 a tap on the Start row opens its picker in the panel "
+      "under it, a pick there settles into the schedule, a tap on "
+      "the End row closes it and opens the end's picker alone in "
+      "the panel under the End row, and a second tap closes that; a "
+      "fixed start's row opens none", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
     ]);
@@ -1145,7 +1230,7 @@ void main() {
     );
     expect(timePickerFinder("Start time"), findsNothing);
     expect(panelHeight(tester), 0.0);
-    // The reveal of End's picker leaves its field where a tap misses it.
+    // The reveal of End's picker leaves its row where a tap misses it.
     await tester.ensureVisible(timeFieldFinder("End time"));
     await tester.pumpAndSettle();
     await tester.tap(timeFieldFinder("End time"));
@@ -1337,9 +1422,10 @@ void main() {
     expect(formSchedule(tester), "Wed, Apr 22, 09:00\nWed, Apr 22, 10:00\n1h");
   });
 
-  testWidgets("TF5 the start's picker stays open across Next free time, a "
-      "day picked in Start date's picker replaces it, and the All day switch "
-      "closes it and takes the focus", (tester) async {
+  testWidgets("TF5 the start's picker stays open across Next free time and "
+      "a day picked in its day picker, which keeps its time; the All day "
+      "switch hides its time, the picker staying open, and takes the focus "
+      "from its time picker", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task("item-2", "Standup", at(9, 30), at(10, 30)),
@@ -1354,53 +1440,58 @@ void main() {
     expect(formSchedule(tester), "Wed, Apr 22, 10:30\nWed, Apr 22, 11:30\n1h");
     expect(timePickerFinder("Start time"), findsOneWidget);
 
-    await pickFormDay(tester, "Start date", DateTime(2026, 4, 23));
+    final thursday = find.descendant(
+      of: dayPickerFinder("Start date"),
+      matching: find.byKey(weekStripDayKey(DateTime(2026, 4, 23))),
+    );
+    await revealForTap(tester, thursday);
+    await tester.tap(thursday);
+    await tester.pumpAndSettle();
     expect(formSchedule(tester), "Thu, Apr 23, 10:30\nThu, Apr 23, 11:30\n1h");
-    expect(timePickerFinder("Start time"), findsNothing);
-    await openTimePicker(tester, "Start time");
     expect(timePickerFinder("Start time"), findsOneWidget);
 
+    hourColumnNode(tester, "Start time").requestFocus();
+    await tester.pump();
     await tester.ensureVisible(allDaySwitch());
     await tester.pumpAndSettle();
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
     expect(formSchedule(tester), "Thu, Apr 23\nThu, Apr 23\nAll day");
     expect(timePickerFinder("Start time"), findsNothing);
+    expect(dayPickerFinder("Start date"), findsOneWidget);
     expect(focusUnder(allDaySwitch()), isTrue);
   });
 
-  testWidgets("TF8 the focus follows the open picker: its Hour column takes "
-      "it as the picker opens, the other picker's as a tap on the other "
-      "field opens that one, and the field takes it as its picker closes", (
-    tester,
-  ) async {
+  testWidgets("TF8 the focus follows the open row: a row takes it as its "
+      "picker opens, the other row as a tap on it opens its own, and a row "
+      "takes it back from a control of its picker in the frame of the tap "
+      "that closes it", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
     ]);
     addTearDown(store.dispose);
     await openEdit(tester, store);
-    await tester.tap(timeFieldFinder("Start time"));
+    await tester.tap(rowFinder("Start"));
     await tester.pumpAndSettle();
-    expect(
-      focusUnder(inPicker("Start time", find.byKey(timePickerHourColumnKey))),
-      isTrue,
-    );
+    expect(focusUnder(rowFinder("Start")), isTrue);
 
-    await tester.ensureVisible(timeFieldFinder("End time"));
+    await revealForTap(tester, rowFinder("End"));
+    await tester.tap(rowFinder("End"));
     await tester.pumpAndSettle();
-    await tester.tap(timeFieldFinder("End time"));
-    await tester.pumpAndSettle();
-    expect(
-      focusUnder(inPicker("End time", find.byKey(timePickerHourColumnKey))),
-      isTrue,
-    );
+    expect(focusUnder(rowFinder("End")), isTrue);
 
-    await tester.ensureVisible(timeFieldFinder("End time"));
+    hourColumnNode(tester, "End time").requestFocus();
+    await tester.pump();
+    // Setup sanity: a control of End's picker has the focus.
+    expect(focusUnder(panelPicker("End time")), isTrue);
+    await revealForTap(tester, rowFinder("End"));
+    await tester.tap(rowFinder("End"));
+    await tester.pump();
+    // Setup sanity: the panel still closes, its picker in the tree.
+    expect(panelPicker("End time"), findsOneWidget);
+    expect(focusUnder(rowFinder("End")), isTrue);
     await tester.pumpAndSettle();
-    await tester.tap(timeFieldFinder("End time"));
-    await tester.pumpAndSettle();
-    expect(timePickerFinder("End time"), findsNothing);
-    expect(focusUnder(timeFieldFinder("End time")), isTrue);
+    expect(panelPicker("End time"), findsNothing);
   });
 
   testWidgets("TF9 a picker opened past the bottom of the view scrolls into "
@@ -1427,10 +1518,8 @@ void main() {
     expect(picker.bottom, lessThanOrEqualTo(300.0));
   });
 
-  testWidgets("TF11 an open picker stays open as its field locks and takes "
-      "no pick, and closed from its field gives the field the focus", (
-    tester,
-  ) async {
+  testWidgets("TF11 an open picker stays open as its row locks and takes no "
+      "pick, and closed from its row gives the row the focus", (tester) async {
     final timed = task("item-2", "Write", DateTime(2026, 4, 21, 22), at(10));
     final schedule = CalendarSchedule.of(
       timed.start,
@@ -1444,7 +1533,8 @@ void main() {
       onChanged: changes.add,
     );
     await openTimePicker(tester, "Start time");
-    expect(timePickerFinder("Start time"), findsOneWidget);
+    hourColumnNode(tester, "Start time").requestFocus();
+    await tester.pump();
 
     final fixed = checkOf(
       schedule,
@@ -1460,30 +1550,36 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(changes, isEmpty);
-    expect(
-      focusUnder(inPicker("Start time", find.byKey(timePickerHourColumnKey))),
-      isTrue,
-    );
 
-    await tester.tap(timeFieldFinder("Start time"));
+    await revealForTap(tester, rowFinder("Start"));
+    await tester.tap(rowFinder("Start"));
     await tester.pumpAndSettle();
     expect(timePickerFinder("Start time"), findsNothing);
     expect(
       FocusManager.instance.primaryFocus?.context,
-      same(tester.element(timeFieldFinder("Start time"))),
+      same(tester.element(rowFinder("Start"))),
     );
 
     await openTimePicker(tester, "End time");
-    expect(timePickerFinder("End time"), findsOneWidget);
+    hourColumnNode(tester, "End time").requestFocus();
+    await tester.pump();
     await pumpSection(tester, fixed, onChanged: changes.add, locked: true);
     await tester.pumpAndSettle();
     expect(timePickerFinder("End time"), findsOneWidget);
-    await tester.tap(timeFieldFinder("End time"));
+    // Setup sanity: the End picker offers 11:00.
+    expect(timeEnabled(tester, "End time", "11:00"), isTrue);
+    await tester.tap(
+      inPicker("End time", find.byKey(timePickerHourRowKey(11))),
+    );
+    await tester.pumpAndSettle();
+    expect(changes, isEmpty);
+    await revealForTap(tester, rowFinder("End"));
+    await tester.tap(rowFinder("End"));
     await tester.pumpAndSettle();
     expect(timePickerFinder("End time"), findsNothing);
     expect(
       FocusManager.instance.primaryFocus?.context,
-      same(tester.element(timeFieldFinder("End time"))),
+      same(tester.element(rowFinder("End"))),
     );
   });
 
@@ -1520,11 +1616,15 @@ void main() {
     expect(rebuilt, isEmpty);
   });
 
-  testWidgets("TF13 a spin of the start's picker cut off by a tap on End "
-      "time, moving or held, picks nothing: the end's picker shows, and both "
-      "fields keep their times, also where they share a minute", (
+  testWidgets("TF13 a spin of the start's picker cut off by a tap on the "
+      "End row, moving or held, picks nothing: the end's picker shows, and "
+      "both rows keep their times, also where they share a minute", (
     tester,
   ) async {
+    // A view tall enough to show the End row under Start's open picker.
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(800.0, 1200.0);
+    addTearDown(tester.view.reset);
     final oneDay = task("item-1", "Write", at(9), at(10));
     // Tue 09:00 to Wed 09:00: Start time and End time both read 09:00.
     final twoDays = task("item-1", "Write", DateTime(2026, 4, 21, 9), at(9));
@@ -2045,6 +2145,10 @@ void main() {
 
   testWidgets("FV4 a failed Save's reveal moves over the theme's motion, and "
       "at once where the platform asks for no animations", (tester) async {
+    // A view short enough that the first message lies past it.
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(800.0, 540.0);
+    addTearDown(tester.view.reset);
     final store = storeOf(<CalendarItem>[]);
     addTearDown(store.dispose);
     // Opens a new Risk under the motion theme, titled, its page at its top.
@@ -2271,8 +2375,9 @@ void main() {
     expect(store.storedEntry("item-1")!.start, at(9, 30));
   });
 
-  testWidgets("FD1 Now shows only in the picker of a field whose day is "
-      "today", (tester) async {
+  testWidgets("FD1 Now shows only in the picker of a row whose day is today", (
+    tester,
+  ) async {
     final store = storeOf(<CalendarItem>[
       task(
         "item-1",
@@ -2397,10 +2502,13 @@ void main() {
     expect(asked.length, greaterThan(checks));
   });
 
-  testWidgets("FW1 All day is a switch, no chip, above Start date: turned "
-      "on it closes an open picker and takes the focus, turned off it "
-      "restores the times; it takes no tap for a kept kind, and shows where "
-      "the kind takes all-day or the schedule is all-day", (tester) async {
+  testWidgets("FW1 All day is a switch, no chip, above the Start row: turned "
+      "on it hides an open picker's time, the picker staying open, and takes "
+      "the focus from its time picker, turned off it restores the times and "
+      "shows the picker's time again; it takes no tap for a kept kind, and "
+      "shows where the kind takes all-day or the schedule is all-day", (
+    tester,
+  ) async {
     final schedule = CalendarSchedule.of(at(9), at(10), isAllDay: false);
     await pumpSection(tester, checkOf(schedule), follows: true);
     expect(
@@ -2412,23 +2520,26 @@ void main() {
     );
     expect(
       tester.getRect(allDaySwitch()).bottom,
-      lessThanOrEqualTo(tester.getRect(formDateFinder("Start date")).top),
+      lessThanOrEqualTo(tester.getRect(rowFinder("Start")).top),
     );
 
     await openTimePicker(tester, "Start time");
-    // Setup sanity: Start's picker is open.
-    expect(timePickerFinder("Start time"), findsOneWidget);
+    hourColumnNode(tester, "Start time").requestFocus();
+    await tester.pump();
+    await tester.ensureVisible(allDaySwitch());
+    await tester.pumpAndSettle();
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
     expect(timeFieldFinder("Start time"), findsNothing);
     expect(timeFieldFinder("End time"), findsNothing);
     expect(find.byType(CalendarTimePicker), findsNothing);
+    expect(dayPickerFinder("Start date"), findsOneWidget);
     expect(focusUnder(allDaySwitch()), isTrue);
-    expect(panelHeight(tester), 0.0);
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
     expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
     expect(timeFieldShows("End time", "10:00"), findsOneWidget);
+    expect(timePickerFinder("Start time"), findsOneWidget);
 
     // TF1's running item under the lock keeps its kind.
     final running = task("item-2", "Write", DateTime(2026, 4, 21, 22), at(10));
@@ -2441,6 +2552,8 @@ void main() {
     final reports = <CalendarSchedule>[];
     await pumpSection(tester, fixed, onChanged: reports.add, follows: true);
     expect(tester.widget<Switch>(allDaySwitch()).onChanged, isNull);
+    await tester.ensureVisible(allDaySwitch());
+    await tester.pumpAndSettle();
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
     expect(reports, isEmpty);
@@ -2459,15 +2572,15 @@ void main() {
     );
     expect(allDaySwitch(), findsOneWidget);
 
-    // Turned on while the panel still grows, the switch closes the panel at
-    // once, its motion running, and its time picker leaves the tree.
+    // Turned on while the panel still grows, the switch hides the time
+    // with no error in any frame.
     await pumpSection(
       tester,
       checkOf(schedule),
       follows: true,
       theme: motionTheme,
     );
-    await tester.tap(timeFieldFinder("Start time"));
+    await tester.tap(rowFinder("Start"));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
     // Setup sanity: the panel is growing.
@@ -2476,17 +2589,9 @@ void main() {
     await tester.tap(allDaySwitch());
     await tester.pump();
     expect(tester.takeException(), isNull);
-    expect(panelHeight(tester), 0.0);
-    expect(find.byType(CalendarTimePicker), findsNothing);
-    for (var elapsed = 16; elapsed <= 480; elapsed += 16) {
+    for (var elapsed = 16; elapsed <= 960; elapsed += 16) {
       await tester.pump(const Duration(milliseconds: 16));
       expect(tester.takeException(), isNull, reason: "at $elapsed ms");
-      expect(panelHeight(tester), 0.0, reason: "at $elapsed ms");
-      expect(
-        find.byType(CalendarTimePicker),
-        findsNothing,
-        reason: "at $elapsed ms",
-      );
     }
 
     // In the form, the switch lies in the scheduling card.
@@ -2539,7 +2644,7 @@ void main() {
   testWidgets("FW3 the scheduling part's controls reach its edges: All "
       "day's switch, its touch target whole, at the top, its label at the "
       "side, the switch 8 pixels after the label, and at the bottom the End "
-      "row's fields, or an all-day item's End date", (tester) async {
+      "row, of a timed item or an all-day one", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task(
@@ -2557,13 +2662,7 @@ void main() {
     expect(tester.getRect(allDaySwitch()).top, card.top);
     expect(label.left, card.left);
     expect(tester.getRect(allDaySwitch()).left, label.right + 8.0);
-    expect(
-      math.max(
-        tester.getRect(formDateFinder("End date")).bottom,
-        tester.getRect(timeFieldFinder("End time")).bottom,
-      ),
-      card.bottom,
-    );
+    expect(tester.getRect(rowFinder("End")).bottom, card.bottom);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
@@ -2571,11 +2670,11 @@ void main() {
     // Setup sanity: the item is all-day.
     expect(formAllDayOn(), isTrue);
     card = tester.getRect(find.byKey(formSchedulingCardKey));
-    expect(tester.getRect(formDateFinder("End date")).bottom, card.bottom);
+    expect(tester.getRect(rowFinder("End")).bottom, card.bottom);
     await tester.tap(formButton("Cancel"));
     await tester.pumpAndSettle();
 
-    // Without All day, the Start row's label lies at the top.
+    // Without All day, the Start row lies at the top.
     await pumpSection(
       tester,
       checkOf(
@@ -2586,17 +2685,14 @@ void main() {
     // Setup sanity: All day does not show.
     expect(allDaySwitch(), findsNothing);
     expect(
-      tester.getRect(find.text("Start")).top,
+      tester.getRect(rowFinder("Start")).top,
       tester.getRect(find.byType(ScheduleSection)).top,
     );
   });
 
-  testWidgets("FR1 the scheduling card shows a Start row, Start date then "
-      "Start time, above an End row, End date then End time, each date "
-      "three fifths of its row and 12 pixels from its time, and no Ends on "
-      "another day: a one-day item's End date names its start's day", (
-    tester,
-  ) async {
+  testWidgets("FR1 the scheduling card shows a Start row above an End row, "
+      "each across the card, 12 pixels apart, and no Ends on another day: a "
+      "one-day item's End row names its start's day", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
     ]);
@@ -2605,32 +2701,20 @@ void main() {
     expect(formDateShows("End date", "2026-04-22"), findsOneWidget);
     expect(find.text("Ends on another day"), findsNothing);
     final card = tester.getRect(find.byKey(formSchedulingCardKey));
-    final dates = <Rect>[
-      tester.getRect(formDateFinder("Start date")),
-      tester.getRect(formDateFinder("End date")),
-    ];
-    final times = <Rect>[
-      tester.getRect(timeFieldFinder("Start time")),
-      tester.getRect(timeFieldFinder("End time")),
-    ];
-    for (var row = 0; row < 2; row++) {
-      final date = dates[row];
-      final time = times[row];
-      expect(date.top, time.top, reason: "row $row");
-      expect(date.left, card.left, reason: "row $row");
-      expect(time.right, card.right, reason: "row $row");
-      expect(time.left - date.right, 12.0, reason: "row $row");
-      expect(
-        date.width / (date.width + time.width),
-        moreOrLessEquals(0.6),
-        reason: "row $row",
-      );
+    final start = tester.getRect(rowFinder("Start"));
+    final end = tester.getRect(rowFinder("End"));
+    for (final (name, row) in <(String, Rect)>[
+      ("Start", start),
+      ("End", end),
+    ]) {
+      expect(row.left, card.left, reason: name);
+      expect(row.right, card.right, reason: name);
     }
-    expect(dates[0].bottom, lessThanOrEqualTo(dates[1].top));
+    expect(end.top - start.bottom, 12.0);
   });
 
-  testWidgets("FR2 an all-day item's Start date and End date each take a "
-      "row of their own across the section", (tester) async {
+  testWidgets("FR2 an all-day item's Start row and End row each lie across "
+      "the section, one above the other", (tester) async {
     await pumpSection(
       tester,
       checkOf(
@@ -2647,10 +2731,9 @@ void main() {
     expect(start.bottom, lessThanOrEqualTo(end.top));
   });
 
-  testWidgets("FR3 Start time's picker opens in a panel between the Start "
-      "row and the End row, and End time's in a panel under the End row", (
-    tester,
-  ) async {
+  testWidgets("FR3 the Start row's picker opens in a panel between the "
+      "Start row and the End row, and the End row's in a panel "
+      "under the End row", (tester) async {
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
@@ -2689,11 +2772,11 @@ void main() {
     );
   });
 
-  testWidgets("FR4 a tap on End time while Start's picker is open shrinks "
+  testWidgets("FR4 a tap on the End row while Start's picker is open shrinks "
       "Start's panel while End's grows, over the theme's motion, Start's "
       "picker fading out over the motion's last half as End's fades in over "
       "its first, the closing picker taking no pick; then End's picker "
-      "alone shows, its Hour column holding the focus", (tester) async {
+      "alone shows, the End row holding the focus", (tester) async {
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(12), isAllDay: false)),
@@ -2754,14 +2837,11 @@ void main() {
       panelHeight(tester, "End time"),
       settledPanelHeight(tester, "End time"),
     );
-    expect(
-      focusUnder(inPicker("End time", find.byKey(timePickerHourColumnKey))),
-      isTrue,
-    );
+    expect(focusUnder(rowFinder("End")), isTrue);
   });
 
-  testWidgets("FR5 where the platform asks for no animations a tap on End "
-      "time while Start's picker is open closes Start's panel and opens "
+  testWidgets("FR5 where the platform asks for no animations a tap on the "
+      "End row while Start's picker is open closes Start's panel and opens "
       "End's at full height in the tap's own frame", (tester) async {
     disableAnimations(tester);
     await pumpSection(
@@ -2783,8 +2863,10 @@ void main() {
   });
 
   testWidgets("FR6 after a failed Save, the end's message of a timed item "
-      "that spans days shows under the End row and tints End time, not End "
-      "date, with the soft error colour", (tester) async {
+      "that spans days shows under the End row and tints that row with the "
+      "soft error colour, the Start row keeping the page's grey", (
+    tester,
+  ) async {
     final store = MemoryCalendarStore<ItemPayload>(
       hours: CalendarDayHours(8 * 60, 18 * 60),
     );
@@ -2801,21 +2883,14 @@ void main() {
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
     expect(rowMessage("End", endMessage), findsOneWidget);
-    expect(
-      fieldBox(tester, timeFieldFinder("End time")).color,
-      HarborColors.errorNotice,
-    );
-    expect(
-      fieldBox(tester, formDateFinder("End date")).color,
-      HarborColors.background,
-    );
+    expect(rowBox(tester, rowFinder("End")).color, HarborColors.errorNotice);
+    expect(rowBox(tester, rowFinder("Start")).color, HarborColors.background);
   });
 
-  testWidgets("FR7 a tap on End time while Start's picker is open, with the "
-      "End row at the top of the form's view, brings End's field back into "
-      "view once End's panel has opened, as Start's panel above it closed", (
-    tester,
-  ) async {
+  testWidgets("FR7 a tap on the End row while Start's picker is open, with "
+      "the End row at the top of the form's view, brings the End "
+      "row back into view once End's panel has opened, as Start's "
+      "panel above it closed", (tester) async {
     // A view short enough that the page scrolls End's row to its top, and
     // tall enough to hold End's field and its open panel.
     tester.view.devicePixelRatio = 1.0;
@@ -2850,11 +2925,11 @@ void main() {
     );
   });
 
-  testWidgets("FP1 the panel grows over the theme's motion as Start time "
-      "opens it, its picker fading in over the motion's first half, and "
-      "shrinks over it as the field closes it, the picker fading out over "
-      "the motion's last half, the picker neither rebuilt nor asked in "
-      "between", (tester) async {
+  testWidgets("FP1 the panel grows over the theme's motion as the Start row "
+      "opens it, its picker fading in over the motion's first half, "
+      "and shrinks over it as the row closes it, the picker fading "
+      "out over the motion's last half, the picker neither rebuilt "
+      "nor asked in between", (tester) async {
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
@@ -2938,7 +3013,7 @@ void main() {
     expect(picker.top, greaterThanOrEqualTo(0.0));
     expect(picker.bottom, lessThanOrEqualTo(300.0));
 
-    // Revealing the picker scrolled its field out of the view.
+    // Revealing the picker scrolled its row out of the view.
     await tester.ensureVisible(timeFieldFinder("Start time"));
     await tester.pump();
     // Setup sanity: the panel stays open.
@@ -2951,7 +3026,7 @@ void main() {
 
   testWidgets("FP3 the Start row keeps its open panel and picker as the All "
       "day switch above it goes, the panel at full height, and as the switch "
-      "comes back; and one tap on the field closes it", (tester) async {
+      "comes back; and one tap on the row closes it", (tester) async {
     final schedule = CalendarSchedule.of(at(9), at(10), isAllDay: false);
     await pumpSection(tester, checkOf(schedule), theme: motionTheme);
     await openTimePicker(tester, "Start time");
@@ -3078,40 +3153,32 @@ void main() {
     );
   });
 
-  testWidgets("FP7 on an ease-out curve the panel swaps back from its time "
-      "picker to its day picker easing out: a quarter of the way through, "
-      "its height has moved by the curve at a quarter and the time picker "
-      "has faded by the curve at a half; three quarters through, the day "
-      "picker has come in by the curve at a half", (tester) async {
+  testWidgets("FP7 the section keeps the Time toggle: the next opening of "
+      "either row shows its picker's time as the last toggle left it, hidden "
+      "or shown", (tester) async {
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
-      theme: easedTheme,
     );
     await openTimePicker(tester, "Start time");
-    final timeFull = settledPanelHeight(tester, "Start time");
-    await tester.tap(formDateFinder("Start date"));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 120));
-    final dayFull = settledDayPanelHeight(tester, "Start date");
-    // Setup sanity: the two pickers differ in height.
-    expect((dayFull - timeFull).abs(), greaterThan(40.0));
-    expect(
-      panelHeight(tester, "Start date"),
-      moreOrLessEquals(
-        timeFull + (dayFull - timeFull) * easeOut.transform(0.25),
-        epsilon: 1.0,
-      ),
-    );
-    expect(
-      fadeAbove(tester, timePickerFinder("Start time")),
-      moreOrLessEquals(1.0 - easeOut.transform(0.5), epsilon: 0.01),
-    );
-    await tester.pump(const Duration(milliseconds: 240));
-    expect(
-      fadeAbove(tester, dayPickerFinder("Start date")),
-      moreOrLessEquals(easeOut.transform(0.5), epsilon: 0.01),
-    );
+    await revealForTap(tester, timeToggle("Start time"));
+    await tester.tap(timeToggle("Start time"));
+    await tester.pumpAndSettle();
+    // Setup sanity: the toggle hid Start's time.
+    expect(timePickerFinder("Start time"), findsNothing);
+
+    await openDayPicker(tester, "End date");
+    // Setup sanity: End's picker opened.
+    expect(panelPicker("End time"), findsOneWidget);
+    expect(timePickerFinder("End time"), findsNothing);
+    await revealForTap(tester, timeToggle("End time"));
+    await tester.tap(timeToggle("End time"));
+    await tester.pumpAndSettle();
+    // Setup sanity: the toggle showed End's time.
+    expect(timePickerFinder("End time"), findsOneWidget);
+
+    await openDayPicker(tester, "Start date");
+    expect(timePickerFinder("Start time"), findsOneWidget);
   });
 
   testWidgets("FP8 a panel opened past the view's bottom scrolls into view "
@@ -3158,10 +3225,8 @@ void main() {
     expect(picker.bottom, lessThanOrEqualTo(300.0));
   });
 
-  testWidgets("FX3 the footer an open picker gains as its field's day "
-      "becomes today grows its panel at once and scrolls into view", (
-    tester,
-  ) async {
+  testWidgets("FX3 the footer an open picker gains as its row's day becomes "
+      "today grows its panel at once and scrolls into view", (tester) async {
     tester.view.devicePixelRatio = 1.0;
     tester.view.physicalSize = const Size(390.0, 300.0);
     addTearDown(tester.view.reset);
@@ -3709,6 +3774,7 @@ void main() {
     const grey = HarborColors.textSecondary;
 
     await openEdit(tester, store);
+    await showAllOverlapCards(tester);
     // Write from 09:00 to 10:00 shares 09:00 to 09:15 with Early, from
     // 08:00: the axis runs from 08:45 to 09:30, Early's before the shared
     // time and Write's after it, the two parts meeting under its middle.
@@ -3784,6 +3850,7 @@ void main() {
     // Workshop, from 12:00 to 17:00, shares 13:00 to 13:15 with Call: the
     // axis runs from 12:45 to 13:30, Workshop's on both sides.
     await openEdit(tester, store, id: "item-5");
+    await showAllOverlapCards(tester);
     expect(spanOf("item-6", scheduleOverlapShareKey), (0.333, 0.667));
     expect(partColor("item-6", scheduleOverlapBeforeKey), grey);
     expect(partColor("item-6", scheduleOverlapAfterKey), grey);
@@ -3802,7 +3869,7 @@ void main() {
     expect(overlapBarTexts(tester, "item-8"), <String>["12:00", "13:00"]);
   });
 
-  testWidgets("FS10 the overlap notice shows three cards and a button that "
+  testWidgets("FS10 the overlap notice shows two cards and a button that "
       "shows the rest, which then shows fewer again", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
@@ -3838,17 +3905,17 @@ void main() {
       find.descendant(of: notice, matching: find.text("Overlaps 5 items")),
       findsOneWidget,
     );
-    expect(shown(), <bool>[true, true, true, false, false]);
-    await tapInNotice("Show 2 more");
+    expect(shown(), <bool>[true, true, false, false, false]);
+    await tapInNotice("Show 3 more");
     expect(shown(), <bool>[true, true, true, true, true]);
     await tapInNotice("Show fewer");
-    expect(shown(), <bool>[true, true, true, false, false]);
+    expect(shown(), <bool>[true, true, false, false, false]);
   });
 
   testWidgets("FS11 the overlap notice turns red where the policy refuses an "
       "overlap, saying how many it refuses, and draws each refused card's "
-      "chip and bar's shared column red, with no label of its own; each "
-      "card's outline is its item's colour, refused or not", (tester) async {
+      "chip and bar's shared column red, with no label of its own; no card "
+      "has an outline, refused or not", (tester) async {
     final standup = task("item-2", "Standup", at(9, 30), at(10, 30));
     final review = calendarItem(
       id: "item-3",
@@ -3857,8 +3924,6 @@ void main() {
       start: at(8, 30),
       end: at(11),
     );
-    // Setup sanity: the two items differ in colour.
-    expect(review.color, isNot(standup.color));
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       standup,
@@ -3870,14 +3935,14 @@ void main() {
       return find.descendant(of: notice, matching: find.text(text));
     }
 
-    final allowed = <(Color?, Color?)>[
-      (HarborColors.notice, standup.color),
-      (HarborColors.notice, review.color),
+    final allowed = <(Color?, BoxBorder?)>[
+      (HarborColors.notice, null),
+      (HarborColors.notice, null),
     ];
-    List<(Color?, Color?)> marked() {
-      return <(Color?, Color?)>[
+    List<(Color?, BoxBorder?)> marked() {
+      return <(Color?, BoxBorder?)>[
         for (final id in <String>["item-2", "item-3"])
-          overlapCardColors(tester, id),
+          overlapCardMarks(tester, id),
       ];
     }
 
@@ -3891,9 +3956,9 @@ void main() {
     await openEdit(tester, store, policy: const _RefusesOverlapWith("item-3"));
     expect(inNotice("Overlaps 2 items, 1 not allowed"), findsOneWidget);
     expect(decorationColor(tester, notice), HarborColors.errorNotice);
-    expect(marked(), <(Color?, Color?)>[
-      (HarborColors.notice, standup.color),
-      (HarborColors.errorNotice, review.color),
+    expect(marked(), <(Color?, BoxBorder?)>[
+      (HarborColors.notice, null),
+      (HarborColors.errorNotice, null),
     ]);
     expect(overlapCardTexts(tester, "item-3"), <String>[
       "Review",
@@ -3918,9 +3983,9 @@ void main() {
     );
     expect(inNotice("Can't overlap 2 items"), findsOneWidget);
     expect(decorationColor(tester, notice), HarborColors.errorNotice);
-    expect(marked(), <(Color?, Color?)>[
-      (HarborColors.errorNotice, standup.color),
-      (HarborColors.errorNotice, review.color),
+    expect(marked(), <(Color?, BoxBorder?)>[
+      (HarborColors.errorNotice, null),
+      (HarborColors.errorNotice, null),
     ]);
   });
 
@@ -3939,6 +4004,7 @@ void main() {
     ]);
     addTearDown(store.dispose);
     await openEdit(tester, store);
+    await showAllOverlapCards(tester);
     expect(overlapCardTexts(tester, "item-2"), <String>[
       "Overnight",
       "Tue 22:00-Wed 09:30",
@@ -4017,7 +4083,7 @@ void main() {
     final notice = find.byKey(scheduleOverlapKey);
     final fewer = tester.getSize(notice).height;
 
-    await tester.tap(await revealNoticeButton(tester, "Show 2 more"));
+    await tester.tap(await revealNoticeButton(tester, "Show 3 more"));
     await tester.pump();
     // A row's first tick in or out moves it by nothing, so the motion
     // runs from the frame after the tap's.
@@ -4026,7 +4092,7 @@ void main() {
     final growing = tester.getSize(notice).height;
     await tester.pumpAndSettle();
     final all = tester.getSize(notice).height;
-    // Setup sanity: the two cards make the notice taller.
+    // Setup sanity: the three cards make the notice taller.
     expect(all, greaterThan(fewer + 100.0));
     // Half way through the motion on a linear curve, half grown.
     expect(growing, moreOrLessEquals((fewer + all) / 2, epsilon: 0.01));
@@ -4048,7 +4114,6 @@ void main() {
       "grows in and one that stops shrinks out over the theme's motion, "
       "writing the time it shared until it has gone", (tester) async {
     final others = <CalendarItem>[
-      task("item-2", "Plan", at(8), at(12)),
       task("item-3", "Early", at(9), at(9, 30)),
       task("item-4", "Late", at(10, 30), at(11)),
     ];
@@ -4073,17 +4138,17 @@ void main() {
     // Late shares nothing with it.
     expect(early, <String>["Early", "09:00-09:30", "Shares 09:00-09:30, 30m"]);
     expect(find.byKey(scheduleOverlapCardKey("item-4")), findsNothing);
-    final two = tester.getSize(notice).height;
+    final one = tester.getSize(notice).height;
 
     // From 09:00 to 11:00 overlaps Late too.
     await pumpFrom(9, 11);
     await tester.pump(motionTheme.motionDuration ~/ 2);
     final growing = tester.getSize(notice).height;
     await tester.pumpAndSettle();
-    final three = tester.getSize(notice).height;
+    final two = tester.getSize(notice).height;
     // Setup sanity: Late's card makes the notice taller.
-    expect(three, greaterThan(two + 50.0));
-    expect(growing, moreOrLessEquals((two + three) / 2, epsilon: 0.01));
+    expect(two, greaterThan(one + 50.0));
+    expect(growing, moreOrLessEquals((one + two) / 2, epsilon: 0.01));
 
     // From 10:00 to 11:00 no longer overlaps Early.
     await pumpFrom(10, 11);
@@ -4094,7 +4159,7 @@ void main() {
     expect(
       shrinking,
       moreOrLessEquals(
-        (three + tester.getSize(notice).height) / 2,
+        (two + tester.getSize(notice).height) / 2,
         epsilon: 0.01,
       ),
     );
@@ -4142,17 +4207,17 @@ void main() {
     final notice = find.byKey(scheduleOverlapKey);
     final fewer = tester.getSize(notice).height;
 
-    await tester.tap(await revealNoticeButton(tester, "Show 2 more"));
+    await tester.tap(await revealNoticeButton(tester, "Show 3 more"));
     await tester.pump();
     final shown = tester.getSize(notice).height;
     await tester.pumpAndSettle();
     expect(tester.getSize(notice).height, shown);
-    // Setup sanity: the two cards make the notice taller.
+    // Setup sanity: the three cards make the notice taller.
     expect(shown, greaterThan(fewer + 100.0));
 
     await tester.tap(await revealNoticeButton(tester, "Show fewer"));
     await tester.pump();
-    expect(meetingCards(), <bool>[true, true, true, false, false]);
+    expect(meetingCards(), <bool>[true, true, false, false, false]);
   });
 
   /// Write, from 09:00 to 10:00, the item the reveal tests open.
@@ -4258,7 +4323,7 @@ void main() {
 
     final notice = find.byKey(scheduleOverlapKey);
     await pumpOver(others);
-    await tester.tap(await revealNoticeButton(tester, "Show 2 more"));
+    await tester.tap(await revealNoticeButton(tester, "Show 3 more"));
     await tester.pumpAndSettle();
     final open = tester.getSize(find.byType(ScheduleOverlapNotice)).height;
 
@@ -4346,8 +4411,8 @@ void main() {
     );
   });
 
-  testWidgets("IP1 a tap on Start date or End date opens no dialog but the "
-      "calendar card under its row, folded on the field's week, its day "
+  testWidgets("IP1 a tap on the Start row or the End row opens no dialog but "
+      "the calendar card under it, folded on the row's week, its day "
       "selected and the form's today ringed", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
@@ -4362,8 +4427,7 @@ void main() {
         return find.descendant(of: find.byKey(panel), matching: finder);
       }
 
-      await tester.tap(formDateFinder(label));
-      await tester.pumpAndSettle();
+      await openDayPicker(tester, label);
       expect(find.byType(DatePickerDialog), findsNothing, reason: label);
       expect(
         under(find.byType(CalendarDayPicker<ItemPayload>)),
@@ -4403,9 +4467,9 @@ void main() {
     }
   });
 
-  testWidgets("IP2 a day picked in Start date's picker moves the item there "
-      "and leaves the picker open, and one picked in End date's moves the "
-      "end alone", (tester) async {
+  testWidgets("IP2 a day picked in the Start row's picker moves the item "
+      "there and leaves the picker open, and one picked in the End row's "
+      "moves the end alone", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
     ]);
@@ -4440,8 +4504,8 @@ void main() {
     );
 
     final saturday = DateTime(2026, 4, 25);
-    await tester.tap(formDateFinder("End date"));
-    await tester.pumpAndSettle();
+    await openDayPicker(tester, "End date");
+    await revealForTap(tester, cellUnder(scheduleEndPanelKey, saturday));
     await tester.tap(cellUnder(scheduleEndPanelKey, saturday));
     await tester.pumpAndSettle();
     expect(formDateShows("Start date", "2026-04-24"), findsOneWidget);
@@ -4452,15 +4516,15 @@ void main() {
     );
   });
 
-  testWidgets("IP3 Start date's panel grows and fades in over the theme's "
-      "motion as the field opens it, and where the platform asks for no "
-      "animations is open in the tap's own frame", (tester) async {
+  testWidgets("IP3 the Start row's panel grows and fades in over the "
+      "theme's motion as the row opens it, and where the platform "
+      "asks for no animations is open in the tap's own frame", (tester) async {
     final check = checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false));
     await pumpSection(tester, check, theme: motionTheme);
     await tester.tap(formDateFinder("Start date"));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
-    final full = settledDayPanelHeight(tester, "Start date");
+    final full = settledPanelHeight(tester, "Start date");
     expect(panelHeight(tester, "Start date"), greaterThan(0.0));
     expect(panelHeight(tester, "Start date"), lessThan(full));
     expect(panelOpacity(tester, "Start date"), lessThan(1.0));
@@ -4478,16 +4542,15 @@ void main() {
     await tester.pump();
     expect(
       panelHeight(tester, "Start date"),
-      settledDayPanelHeight(tester, "Start date"),
+      settledPanelHeight(tester, "Start date"),
     );
     expect(panelOpacity(tester, "Start date"), 1.0);
   });
 
-  testWidgets("IP4 a tap on Start date while Start time's picker is open "
-      "swaps the panel's pickers in place over the theme's motion, rebuilding "
-      "under the panel only the time picker's focus scopes, once, in the "
-      "frame after the tap's; a tap on End date then closes it, and its day "
-      "picker takes no tap as it shrinks", (tester) async {
+  testWidgets("IP4 a tap on the End row while the Start row's picker is open "
+      "closes it, its picker taking no tap as it shrinks, and opens End's", (
+    tester,
+  ) async {
     final reports = <CalendarSchedule>[];
     await pumpSection(
       tester,
@@ -4496,87 +4559,11 @@ void main() {
       follows: true,
       theme: motionTheme,
     );
-    await openTimePicker(tester, "Start time");
-    final timeFull = settledPanelHeight(tester, "Start time");
-    // Setup sanity: the panel rests at the time picker's height.
-    expect(panelHeight(tester, "Start date"), timeFull);
-
-    await tester.tap(formDateFinder("Start date"));
-    await tester.pump();
-    // Each element rebuilt at or under the Start panel, with the frame after
-    // the tap's own it rebuilt in, counted from 1, and whether it lies under
-    // the CalendarTimePicker.
-    final rebuilt = <({int frame, Element element, bool underTimePicker})>[];
-    var frame = 0;
-    debugOnRebuildDirtyWidget = (element, builtOnce) {
-      var underPanel = element.widget.key == scheduleStartPanelKey;
-      var underTimePicker = false;
-      element.visitAncestorElements((ancestor) {
-        underTimePicker =
-            underTimePicker || ancestor.widget is CalendarTimePicker;
-        underPanel = underPanel || ancestor.widget.key == scheduleStartPanelKey;
-        return !underPanel;
-      });
-      if (underPanel) {
-        rebuilt.add((
-          frame: frame,
-          element: element,
-          underTimePicker: underTimePicker,
-        ));
-      }
-    };
-    try {
-      for (var elapsed = 20; elapsed < 480; elapsed += 20) {
-        frame++;
-        await tester.pump(const Duration(milliseconds: 20));
-        expect(
-          panelHeight(tester, "Start date"),
-          greaterThan(0.0),
-          reason: "at $elapsed ms",
-        );
-        if (elapsed == 120) {
-          // A quarter of the theme's linear 480 ms, from the time picker's
-          // height toward the day picker's.
-          final dayFull = settledDayPanelHeight(tester, "Start date");
-          expect(
-            panelHeight(tester, "Start date"),
-            moreOrLessEquals(timeFull + (dayFull - timeFull) / 4, epsilon: 1.0),
-          );
-        }
-      }
-    } finally {
-      debugOnRebuildDirtyWidget = null;
-    }
-    // The tap's frame gives the time picker a null onChanged, which flips the
-    // skipTraversal of its Focus nodes; FocusManager notifies those nodes in
-    // a microtask after that frame, so their scopes rebuild in the next one.
-    expect([
-      for (final r in rebuilt)
-        if (r.frame == 1 && !r.underTimePicker) r.element,
-    ], isEmpty);
-    expect([
-      for (final r in rebuilt)
-        if (r.frame > 1) r.element,
-    ], isEmpty);
-    await tester.pumpAndSettle();
-    expect(panelHeight(tester, "Start date"), greaterThan(0.0));
-    expect(dayPickerFinder("Start date"), findsOneWidget);
-    expect(
-      find.descendant(
-        of: pickerPanel("Start date"),
-        matching: find.byType(CalendarTimePicker),
-      ),
-      findsNothing,
-    );
-    expect(
-      panelHeight(tester, "Start date"),
-      settledDayPanelHeight(tester, "Start date"),
-    );
-
-    await tester.ensureVisible(formDateFinder("End date"));
+    await openDayPicker(tester, "Start date");
+    await tester.ensureVisible(rowFinder("End"));
     await tester.pumpAndSettle();
     reports.clear();
-    await tester.tap(formDateFinder("End date"));
+    await tester.tap(rowFinder("End"));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
     final friday = find.descendant(
@@ -4591,21 +4578,14 @@ void main() {
     expect(formDateShows("Start date", "2026-04-22"), findsOneWidget);
     expect(formDateShows("End date", "2026-04-22"), findsOneWidget);
     await tester.pumpAndSettle();
-    expect(
-      find.descendant(
-        of: pickerPanel("Start date"),
-        matching: find.byWidgetPredicate((widget) {
-          return widget is CalendarDayPicker || widget is CalendarTimePicker;
-        }),
-      ),
-      findsNothing,
-    );
+    expect(panelPicker("Start date"), findsNothing);
     expect(panelHeight(tester, "Start date"), 0.0);
     expect(dayPickerFinder("End date"), findsOneWidget);
   });
 
   testWidgets("IP5 a day picker draws disabled a day on which no time is "
-      "admitted, and enabled one some time is admitted on", (tester) async {
+      "admitted, and enabled one some time is admitted on, a pick of which "
+      "moves a time refused there to the nearest one admitted", (tester) async {
     final thursday = DateTime(2026, 4, 23);
     Finder cell(String label, DateTime day) {
       return find.descendant(
@@ -4653,8 +4633,10 @@ void main() {
     expect(dayEnabled(tester, "End date", thursday), isFalse);
     expect(dayEnabled(tester, "End date", wednesday), isTrue);
 
-    // An overlap depends on the times, so its day stays enabled, and the
-    // form names the overlap once the day is picked.
+    // An overlap depends on the times, so its day stays enabled; the
+    // policy refuses the start's 09:00 there, which overlaps Review, so the
+    // pick moves it to the nearest start that does not, the later of 08:00
+    // and 10:00.
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task(
@@ -4672,115 +4654,122 @@ void main() {
     );
     await openDayPicker(tester, "Start date");
     expect(dayEnabled(tester, "Start date", thursday), isTrue);
+    await revealForTap(tester, cell("Start date", thursday));
     await tester.tap(cell("Start date", thursday));
     await tester.pumpAndSettle();
-    expect(formDateShows("Start date", "2026-04-23"), findsOneWidget);
-    expect(find.byKey(scheduleOverlapKey), findsOneWidget);
+    expect(formSchedule(tester), "Thu, Apr 23, 10:00\nThu, Apr 23, 11:00\n1h");
   });
 
-  testWidgets("IP6 browsing Start date's picker, by its chevrons, a fling and "
-      "a drag of its week row and its month picker, changes no date", (
-    tester,
-  ) async {
-    final store = storeOf(<CalendarItem>[
-      task("item-1", "Write", at(9), at(10)),
-    ]);
-    addTearDown(store.dispose);
-    await openEdit(tester, store);
-    await openDayPicker(tester, "Start date");
-    final picker = dayPickerFinder("Start date");
-    Finder inDayPicker(Finder finder) {
-      return find.descendant(of: picker, matching: finder);
-    }
+  testWidgets(
+    "IP6 browsing the Start row's picker, by its chevrons, a fling and "
+    "a drag of its week row and its month picker, changes no date",
+    (tester) async {
+      final store = storeOf(<CalendarItem>[
+        task("item-1", "Write", at(9), at(10)),
+      ]);
+      addTearDown(store.dispose);
+      await openEdit(tester, store);
+      await openDayPicker(tester, "Start date");
+      final picker = dayPickerFinder("Start date");
+      Finder inDayPicker(Finder finder) {
+        return find.descendant(of: picker, matching: finder);
+      }
 
-    String title() {
-      return tester
-          .widget<Text>(
-            inDayPicker(
-              find.descendant(
-                of: find.byTooltip("Pick a month"),
-                matching: find.byType(Text),
+      String title() {
+        return tester
+            .widget<Text>(
+              inDayPicker(
+                find.descendant(
+                  of: find.byTooltip("Pick a month"),
+                  matching: find.byType(Text),
+                ),
               ),
-            ),
-          )
-          .data!;
-    }
+            )
+            .data!;
+      }
 
-    final before = formSchedule(tester);
-    void expectUnchanged(String step) {
-      expect(formSchedule(tester), before, reason: step);
+      final before = formSchedule(tester);
+      void expectUnchanged(String step) {
+        expect(formSchedule(tester), before, reason: step);
+        expect(
+          formDateShows("Start date", "2026-04-22"),
+          findsOneWidget,
+          reason: step,
+        );
+        expect(
+          formDateShows("End date", "2026-04-22"),
+          findsOneWidget,
+          reason: step,
+        );
+      }
+
+      await revealForTap(tester, inDayPicker(find.byTooltip("Next week")));
+      await tester.tap(inDayPicker(find.byTooltip("Next week")));
+      await tester.pumpAndSettle();
       expect(
-        formDateShows("Start date", "2026-04-22"),
+        inDayPicker(
+          find.byKey(weekStripDayKey(DateTime(2026, 4, 27))),
+        ).hitTestable(),
         findsOneWidget,
-        reason: step,
       );
       expect(
-        formDateShows("End date", "2026-04-22"),
-        findsOneWidget,
-        reason: step,
+        inDayPicker(find.byKey(weekStripDayKey(wednesday))).hitTestable(),
+        findsNothing,
       );
-    }
+      expectUnchanged("Next week");
 
-    await tester.tap(inDayPicker(find.byTooltip("Next week")));
-    await tester.pumpAndSettle();
-    expect(
-      inDayPicker(
-        find.byKey(weekStripDayKey(DateTime(2026, 4, 27))),
-      ).hitTestable(),
-      findsOneWidget,
-    );
-    expect(
-      inDayPicker(find.byKey(weekStripDayKey(wednesday))).hitTestable(),
-      findsNothing,
-    );
-    expectUnchanged("Next week");
+      final weekRow = inDayPicker(find.byType(WeekStrip<ItemPayload>));
+      await tester.fling(weekRow, const Offset(-200.0, 0.0), 1000.0);
+      await tester.pumpAndSettle();
+      expectUnchanged("the fling");
 
-    final weekRow = inDayPicker(find.byType(WeekStrip<ItemPayload>));
-    await tester.fling(weekRow, const Offset(-200.0, 0.0), 1000.0);
-    await tester.pumpAndSettle();
-    expectUnchanged("the fling");
+      await tester.drag(weekRow, const Offset(0.0, 40.0));
+      await tester.pumpAndSettle();
+      expect(inDayPicker(find.byType(MonthStrip<ItemPayload>)), findsOneWidget);
+      final shown = title();
+      expectUnchanged("the drag");
 
-    await tester.drag(weekRow, const Offset(0.0, 40.0));
-    await tester.pumpAndSettle();
-    expect(inDayPicker(find.byType(MonthStrip<ItemPayload>)), findsOneWidget);
-    final shown = title();
-    expectUnchanged("the drag");
+      await revealForTap(tester, inDayPicker(find.byTooltip("Next month")));
+      await tester.tap(inDayPicker(find.byTooltip("Next month")));
+      await tester.pumpAndSettle();
+      const strings = DefaultCalendarLocalizations();
+      final month =
+          <DateTime>[
+            for (var offset = -12; offset <= 12; offset++)
+              DateTime(2026, 4 + offset),
+          ].singleWhere((month) {
+            return strings.shortMonthYear(month) == shown;
+          });
+      final next = DateTime(month.year, month.month + 1);
+      expect(title(), strings.shortMonthYear(next));
+      expect(
+        inDayPicker(
+          find.byKey(dayCellKey(DateTime(next.year, next.month, 15))),
+        ).hitTestable(),
+        findsOneWidget,
+      );
+      expectUnchanged("Next month");
 
-    await tester.tap(inDayPicker(find.byTooltip("Next month")));
-    await tester.pumpAndSettle();
-    const strings = DefaultCalendarLocalizations();
-    final month =
-        <DateTime>[
-          for (var offset = -12; offset <= 12; offset++)
-            DateTime(2026, 4 + offset),
-        ].singleWhere((month) {
-          return strings.shortMonthYear(month) == shown;
-        });
-    final next = DateTime(month.year, month.month + 1);
-    expect(title(), strings.shortMonthYear(next));
-    expect(
-      inDayPicker(
-        find.byKey(dayCellKey(DateTime(next.year, next.month, 15))),
-      ).hitTestable(),
-      findsOneWidget,
-    );
-    expectUnchanged("Next month");
+      await revealForTap(tester, inDayPicker(find.byTooltip("Pick a month")));
+      await tester.tap(inDayPicker(find.byTooltip("Pick a month")));
+      await tester.pumpAndSettle();
+      await revealForTap(tester, inDayPicker(find.text("July")));
+      await tester.tap(inDayPicker(find.text("July")));
+      await tester.pumpAndSettle();
+      expect(inDayPicker(find.text("July")), findsNothing);
+      expect(
+        inDayPicker(
+          find.byKey(dayCellKey(DateTime(2026, 7, 15))),
+        ).hitTestable(),
+        findsOneWidget,
+      );
+      expectUnchanged("the month picker");
+    },
+  );
 
-    await tester.tap(inDayPicker(find.byTooltip("Pick a month")));
-    await tester.pumpAndSettle();
-    await tester.tap(inDayPicker(find.text("July")));
-    await tester.pumpAndSettle();
-    expect(inDayPicker(find.text("July")), findsNothing);
-    expect(
-      inDayPicker(find.byKey(dayCellKey(DateTime(2026, 7, 15)))).hitTestable(),
-      findsOneWidget,
-    );
-    expectUnchanged("the month picker");
-  });
-
-  testWidgets("IP7 a tap on Start date gives its field the focus, where an "
-      "arrow key changes no date, and once the unfolded month has the focus "
-      "an arrow moves the start a day", (tester) async {
+  testWidgets("IP7 a tap on the Start row gives the row the focus, where an "
+      "arrow key changes no date, and once the unfolded month has "
+      "the focus an arrow moves the start a day", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
     ]);
@@ -4788,7 +4777,7 @@ void main() {
     await openEdit(tester, store);
     await tester.tap(formDateFinder("Start date"));
     await tester.pumpAndSettle();
-    expect(focusUnder(find.byKey(scheduleStartDateKey)), isTrue);
+    expect(focusUnder(find.byKey(scheduleStartKey)), isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
     expect(formDateShows("Start date", "2026-04-22"), findsOneWidget);
@@ -4813,10 +4802,11 @@ void main() {
     expect(formDateShows("Start date", "2026-04-24"), findsOneWidget);
   });
 
-  testWidgets("IP8 an all-day item's Start date opens its day picker, which "
-      "stays with its height and its field's focus as All day turns off; "
-      "All day turned on closes a time picker at once, and keeps an open "
-      "End date's picker and focus", (tester) async {
+  testWidgets("IP8 an all-day item's Start row opens its picker on days "
+      "alone, which keeps its state and the row's focus as All day turns "
+      "off, its time coming in under its day picker; All day turned on "
+      "hides that time and keeps the picker, taking the focus from its time "
+      "picker and leaving it on the row", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Trip", wednesday, DateTime(2026, 4, 23), isAllDay: true),
     ]);
@@ -4824,13 +4814,12 @@ void main() {
     await openEdit(tester, store, theme: motionTheme);
     // Setup sanity: the item is all-day.
     expect(formAllDayOn(), isTrue);
-    await tester.tap(formDateFinder("Start date"));
+    await tester.tap(rowFinder("Start"));
     await tester.pumpAndSettle();
     expect(dayPickerFinder("Start date"), findsOneWidget);
-    final full = settledDayPanelHeight(tester, "Start date");
-    expect(panelHeight(tester, "Start date"), full);
+    expect(find.byType(CalendarTimePicker), findsNothing);
+    final picker = tester.state(panelPicker("Start date"));
 
-    final picker = tester.state(dayPickerFinder("Start date"));
     await tester.ensureVisible(allDaySwitch());
     await tester.pumpAndSettle();
     await tester.tap(allDaySwitch());
@@ -4838,58 +4827,51 @@ void main() {
     // Setup sanity: the item turned timed.
     expect(timeFieldFinder("Start time"), findsOneWidget);
     for (var elapsed = 0; elapsed <= 480; elapsed += 16) {
-      expect(panelHeight(tester, "Start date"), full, reason: "at $elapsed ms");
       expect(
-        tester.state(dayPickerFinder("Start date")),
+        tester.state(panelPicker("Start date")),
         same(picker),
         reason: "at $elapsed ms",
       );
-      expect(
-        focusUnder(find.byKey(scheduleStartDateKey)),
-        isTrue,
-        reason: "at $elapsed ms",
-      );
+      expect(focusUnder(rowFinder("Start")), isTrue, reason: "at $elapsed ms");
       await tester.pump(const Duration(milliseconds: 16));
     }
-
-    await tester.tap(timeFieldFinder("Start time"));
     await tester.pumpAndSettle();
-    // Setup sanity: the time picker swapped in.
     expect(timePickerFinder("Start time"), findsOneWidget);
+
+    hourColumnNode(tester, "Start time").requestFocus();
+    await tester.pump();
     await tester.ensureVisible(allDaySwitch());
     await tester.pumpAndSettle();
     await tester.tap(allDaySwitch());
-    await tester.pump();
-    expect(panelHeight(tester, "Start date"), 0.0);
-    expect(find.byType(CalendarTimePicker), findsNothing);
     await tester.pumpAndSettle();
+    expect(formAllDayOn(), isTrue);
+    expect(find.byType(CalendarTimePicker), findsNothing);
+    expect(focusUnder(allDaySwitch()), isTrue);
 
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
-    // Setup sanity: the item is timed again.
-    expect(formAllDayOn(), isFalse);
-    await openDayPicker(tester, "End date");
-    expect(focusUnder(find.byKey(scheduleEndDateKey)), isTrue);
-    final endPicker = tester.state(dayPickerFinder("End date"));
+    tester
+        .widget<InkWell>(
+          find.descendant(
+            of: rowFinder("Start"),
+            matching: find.byType(InkWell),
+          ),
+        )
+        .focusNode!
+        .requestFocus();
+    await tester.pump();
     await tester.ensureVisible(allDaySwitch());
     await tester.pumpAndSettle();
     await tester.tap(allDaySwitch());
     await tester.pumpAndSettle();
-    // Setup sanity: the item turned all-day.
+    // Setup sanity: the item turned all-day again.
     expect(formAllDayOn(), isTrue);
-    expect(tester.state(dayPickerFinder("End date")), same(endPicker));
-    expect(
-      panelHeight(tester, "End date"),
-      settledDayPanelHeight(tester, "End date"),
-    );
-    expect(focusUnder(find.byKey(scheduleEndDateKey)), isTrue);
+    expect(focusUnder(rowFinder("Start")), isTrue);
   });
 
-  testWidgets("IP9 each opening of Start date's picker builds a new one, on "
-      "the field's own month in the view the last one left, a reopening "
-      "while the panel closes or swaps out the day picker included", (
-    tester,
-  ) async {
+  testWidgets("IP9 each opening of the Start row's picker builds a new one, "
+      "on the row's own month in the view the last one left, a reopening "
+      "while the panel closes included", (tester) async {
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
@@ -4900,56 +4882,39 @@ void main() {
       return find.descendant(of: picker, matching: finder);
     }
 
-    /// Browses the open picker's month on to May.
-    Future<void> browseOn() async {
-      await tester.tap(inPicker(find.byTooltip("Next month")));
-      await tester.pumpAndSettle();
-      // Setup sanity: the picker browsed to May.
-      expect(inPicker(find.text("May 2026")), findsOneWidget);
-    }
-
-    void expectNew(String step) {
-      expect(
-        find.descendant(
-          of: pickerPanel("Start date"),
-          matching: find.byType(MonthStrip<ItemPayload>),
-        ),
-        findsOneWidget,
-        reason: step,
-      );
-      expect(
-        find.descendant(
-          of: pickerPanel("Start date"),
-          matching: find.text("Apr 2026"),
-        ),
-        findsOneWidget,
-        reason: step,
-      );
-    }
-
-    await tester.tap(formDateFinder("Start date"));
+    await tester.tap(rowFinder("Start"));
     await tester.pumpAndSettle();
+    await revealForTap(tester, inPicker(find.byKey(calendarPullTabKey)));
     await tester.tap(inPicker(find.byKey(calendarPullTabKey)));
     await tester.pumpAndSettle();
-    await browseOn();
-    await tester.tap(formDateFinder("Start date"));
+    await revealForTap(tester, inPicker(find.byTooltip("Next month")));
+    await tester.tap(inPicker(find.byTooltip("Next month")));
+    await tester.pumpAndSettle();
+    // Setup sanity: the picker browsed to May.
+    expect(inPicker(find.text("May 2026")), findsOneWidget);
+
+    await revealForTap(tester, rowFinder("Start"));
+    await tester.tap(rowFinder("Start"));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 120));
     // Setup sanity: the panel still closes.
     expect(panelHeight(tester, "Start date"), greaterThan(0.0));
-    await tester.tap(formDateFinder("Start date"));
+    await tester.tap(rowFinder("Start"));
     await tester.pumpAndSettle();
-    expectNew("reopened while it closed");
-
-    await browseOn();
-    await tester.tap(timeFieldFinder("Start time"));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 120));
-    // Setup sanity: the day picker still swaps out.
-    expect(picker, findsOneWidget);
-    await tester.tap(formDateFinder("Start date"));
-    await tester.pumpAndSettle();
-    expectNew("reopened while it swapped out");
+    expect(
+      find.descendant(
+        of: pickerPanel("Start date"),
+        matching: find.byType(MonthStrip<ItemPayload>),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: pickerPanel("Start date"),
+        matching: find.text("Apr 2026"),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets("IP10 the section reads its check's day ranges once per "
@@ -4998,6 +4963,7 @@ void main() {
     await expectNoCheckThrough("the panel's motion");
 
     Future<void> tapThrough(Finder finder, String step) async {
+      await revealForTap(tester, finder);
       await tester.tap(finder);
       await tester.pump();
       await expectNoCheckThrough(step);
@@ -5018,14 +4984,17 @@ void main() {
     await tester.pump();
     await expectNoCheckThrough("fling");
 
-    // A new day picker under the same check reads no range.
-    await openTimePicker(tester, "Start time");
-    expect(debugScheduleDayRangeAsks, 1);
+    // A new picker under the same check reads no range.
+    await closeDayPicker(tester, "Start date");
     await openDayPicker(tester, "Start date");
     expect(debugScheduleDayRangeAsks, 1);
 
     // A pick makes a new check, whose ranges the picker reads once.
     final thursday = DateTime(2026, 4, 23);
+    await revealForTap(
+      tester,
+      inDayPicker(find.byKey(weekStripDayKey(thursday))),
+    );
     await tester.tap(inDayPicker(find.byKey(weekStripDayKey(thursday))));
     await tester.pumpAndSettle();
     // Setup sanity: the tap picked Thursday.
@@ -5039,6 +5008,7 @@ void main() {
       ("Next month again", inDayPicker(find.byTooltip("Next month"))),
       ("fold", inDayPicker(find.byKey(calendarPullTabKey))),
     ]) {
+      await revealForTap(tester, finder);
       await tester.tap(finder);
       await tester.pumpAndSettle();
       expect(debugScheduleDayRangeAsks, reads, reason: step);
@@ -5046,10 +5016,9 @@ void main() {
     }
   });
 
-  testWidgets("IP11 a swipe of the week row of Start date's picker released "
-      "with no speed comes to rest on any day, and changes no date", (
-    tester,
-  ) async {
+  testWidgets("IP11 a swipe of the week row of the Start row's picker "
+      "released with no speed comes to rest on any day, and changes "
+      "no date", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
     ]);
@@ -5127,8 +5096,10 @@ void main() {
     expect(find.byKey(scheduleOverlapKey), findsOneWidget);
   });
 
-  testWidgets("IP13 End date's picker unfolded at the bottom of the form's "
-      "view scrolls into it once the month has unfolded", (tester) async {
+  testWidgets("IP13 the End row's picker unfolded at the bottom of the "
+      "form's view scrolls into it once the month has unfolded", (
+    tester,
+  ) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
     ]);
@@ -5176,8 +5147,9 @@ void main() {
     );
   });
 
-  testWidgets("IP14 End date's picker unfolded at the bottom of the form's "
-      "view scrolls into it while an unrelated animation runs", (tester) async {
+  testWidgets("IP14 the End row's picker unfolded at the bottom of the "
+      "form's view scrolls into it while an unrelated animation "
+      "runs", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
     ]);
@@ -5229,12 +5201,10 @@ void main() {
     }
   });
 
-  testWidgets("IP15 the day picker under Start date or End date lies on its "
-      "row's sides, folded and unfolded: the circles of its first and last "
-      "columns reach the date field's left edge and the time field's right "
-      "edge; and the badges of a day in its last column draw whole", (
-    tester,
-  ) async {
+  testWidgets("IP15 the day picker under the Start row or the End row lies "
+      "on the row's sides, folded and unfolded: the circles of its first and "
+      "last columns reach the row's left and right edges; and the badges of "
+      "a day in its last column draw whole", (tester) async {
     final sunday = DateTime(2026, 4, 26);
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
@@ -5264,10 +5234,7 @@ void main() {
         dayBadges: harborDayBadges,
       );
     });
-    for (final (date, time) in <(String, String)>[
-      ("Start date", "Start time"),
-      ("End date", "End time"),
-    ]) {
+    for (final date in <String>["Start date", "End date"]) {
       final picker = dayPickerFinder(date);
       Rect circleOf(Key cell) {
         return tester.getRect(
@@ -5277,7 +5244,7 @@ void main() {
 
       await openDayPicker(tester, date);
       final left = tester.getRect(formDateFinder(date)).left;
-      final right = tester.getRect(timeFieldFinder(time)).right;
+      final right = tester.getRect(formDateFinder(date)).right;
       expect(
         circleOf(weekStripDayKey(DateTime(2026, 4, 20))).left,
         moreOrLessEquals(left),
@@ -5305,7 +5272,7 @@ void main() {
           })
           .toList();
       // Setup sanity: Sunday carries two badges, one of them past the
-      // field's right edge.
+      // row's right edge.
       expect(badges, hasLength(2), reason: date);
       expect(
         badges.any((box) {
@@ -5325,9 +5292,12 @@ void main() {
         );
       }
 
-      await tester.tap(
-        find.descendant(of: picker, matching: find.byKey(calendarPullTabKey)),
+      final pullTab = find.descendant(
+        of: picker,
+        matching: find.byKey(calendarPullTabKey),
       );
+      await revealForTap(tester, pullTab);
+      await tester.tap(pullTab);
       await tester.pumpAndSettle();
       expect(
         circleOf(dayCellKey(DateTime(2026, 4, 6))).left,
@@ -5340,16 +5310,16 @@ void main() {
         reason: date,
       );
       // Folded back, so the next picker opens on its week row.
-      await tester.tap(
-        find.descendant(of: picker, matching: find.byKey(calendarPullTabKey)),
-      );
+      await revealForTap(tester, pullTab);
+      await tester.tap(pullTab);
       await tester.pumpAndSettle();
       await closeDayPicker(tester, date);
     }
   });
 
-  testWidgets("IP16 Start date and End date show a calendar icon before "
-      "their day, and Start time and End time a clock before their time, on "
+  testWidgets("IP16 the Start row and the End row show their label, Start or "
+      "End, before their day, and a chevron after their day and time at "
+      "their end, 12 pixels in, which turns to point up as the row opens, on "
       "a timed item and on an all-day one", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
@@ -5362,49 +5332,47 @@ void main() {
       ),
     ]);
     addTearDown(store.dispose);
-    for (final (id, fields) in <(String, List<(Finder, IconData)>)>[
-      (
-        "item-1",
-        <(Finder, IconData)>[
-          (formDateFinder("Start date"), Icons.calendar_today_outlined),
-          (timeFieldFinder("Start time"), Icons.schedule),
-          (formDateFinder("End date"), Icons.calendar_today_outlined),
-          (timeFieldFinder("End time"), Icons.schedule),
-        ],
-      ),
-      (
-        "item-2",
-        <(Finder, IconData)>[
-          (formDateFinder("Start date"), Icons.calendar_today_outlined),
-          (formDateFinder("End date"), Icons.calendar_today_outlined),
-        ],
-      ),
-    ]) {
+    for (final id in <String>["item-1", "item-2"]) {
       await openEdit(tester, store, id: id);
-      for (final (field, icon) in fields) {
-        final shown = find.descendant(of: field, matching: find.byType(Icon));
-        expect(tester.widget<Icon>(shown).icon, icon, reason: "$id $field");
+      for (final name in <String>["Start", "End"]) {
+        final row = rowFinder(name);
+        final texts = rowTexts(tester, row);
+        expect(texts.first.data, name, reason: "$id $name");
+        Rect textRect(int index) {
+          return tester.getRect(
+            find.descendant(of: row, matching: find.byType(Text)).at(index),
+          );
+        }
+
         expect(
-          tester.getRect(shown).right,
-          lessThan(
-            tester
-                .getRect(
-                  find.descendant(of: field, matching: find.byType(Text)),
-                )
-                .left,
-          ),
-          reason: "$id $field",
+          textRect(0).right,
+          lessThanOrEqualTo(textRect(1).left),
+          reason: "$id $name",
         );
+        final chevron = tester.getRect(rowChevron(row));
+        expect(
+          chevron.left,
+          greaterThan(textRect(texts.length - 1).right),
+          reason: "$id $name",
+        );
+        expect(
+          chevron.right,
+          tester.getRect(row).right - 12.0,
+          reason: "$id $name",
+        );
+        expect(chevronTurn(tester, row), 1.0, reason: "$id $name");
       }
+      await tester.tap(rowFinder("Start"));
+      await tester.pumpAndSettle();
+      expect(chevronTurn(tester, rowFinder("Start")), moreOrLessEquals(-1.0));
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     }
   });
 
-  testWidgets("IP17 Start date and End date write their days with the "
-      "weekday, on a timed item that spans days and on an all-day one", (
-    tester,
-  ) async {
+  testWidgets("IP17 the Start row and the End row write their days with the "
+      "weekday, on a timed item that spans days and on an all-day "
+      "one", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), DateTime(2026, 4, 23, 10)),
       task(
@@ -5436,10 +5404,10 @@ void main() {
     }
   });
 
-  testWidgets("IP18 End date's picker browses back, by its previous chevron "
-      "or a fling of its week row, to no week before the start day's, the "
-      "chevron drawn disabled there, while Start date's browses past its "
-      "first day", (tester) async {
+  testWidgets("IP18 the End row's picker browses back, by its previous "
+      "chevron or a fling of its week row, to no week before the "
+      "start day's, the chevron drawn disabled there, while the "
+      "Start row's browses past its first day", (tester) async {
     await pumpSection(
       tester,
       checkOf(
@@ -5497,12 +5465,10 @@ void main() {
   });
 
   testWidgets("IP19 a day picker opens on the view the last one turned to, "
-      "on its own day: End date's on its month where Start date's unfolded, "
-      "Start date's on the month picker of its own year where End date's "
-      "opened it, closing on the month; a fold brings the week row back in "
-      "the next one, and the same field reopened opens on its last view", (
-    tester,
-  ) async {
+      "on its own day: End's on its month where Start's unfolded, Start's "
+      "on the month picker of its own year where End's opened it, closing on "
+      "the month; a fold brings the week row back in the next one, and the "
+      "same row reopened opens on its last view", (tester) async {
     await pumpSection(
       tester,
       checkOf(
@@ -5623,9 +5589,9 @@ void main() {
   });
 
   testWidgets("SU2 the summary shows under the heading, at the title's "
-      "start, once the Start date field has scrolled wholly out of the "
+      "start, once the Start row has scrolled wholly out of the "
       "page's view, which then starts under it, what the page shows staying "
-      "where it lies; and goes as soon as any of the field shows again, what "
+      "where it lies; and goes as soon as any of the row shows again, what "
       "the page shows staying where it lies", (tester) async {
     final page = await openScrolledForm(tester);
     final summary = find.byKey(scheduleSummaryKey);
@@ -5709,7 +5675,7 @@ void main() {
   });
 
   testWidgets("SU5 the summary goes where the page's view grows and its "
-      "offset, held to the page's new extent, brings the Start date field "
+      "offset, held to the page's new extent, brings the Start row "
       "back with no scroll", (tester) async {
     final page = await openScrolledForm(tester);
     final summary = find.byKey(scheduleSummaryKey);
@@ -5760,8 +5726,8 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets("SU7 an animated scroll of the page that takes the Start date "
-      "field out brings the summary in once it ends, what the page shows "
+  testWidgets("SU7 an animated scroll of the page that takes the Start row "
+      "out brings the summary in once it ends, what the page shows "
       "staying where the scroll left it", (tester) async {
     final page = await openScrolledForm(tester, theme: motionTheme);
     final summary = find.byKey(scheduleSummaryKey);
@@ -5857,24 +5823,43 @@ void main() {
     );
   });
 
-  testWidgets("SB1 the Start row and the End row each show one label above "
-      "their fields, Start or End, at the fields' left and 6 pixels above "
-      "them, which a screen reader skips; each field is a button that names "
-      "itself before its day or time; an all-day schedule's rows keep their "
-      "labels", (tester) async {
+  testWidgets("SB1 the Start row and the End row each show their label, "
+      "Start or End, inside them, 12 pixels in, before their day, which lies "
+      "48 pixels after the label's start; a screen reader hears a row's "
+      "label, day and time as one button, expanded while open; an all-day "
+      "schedule's rows show their label and day alone", (tester) async {
     final handle = tester.ensureSemantics();
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
     );
-    for (final (label, date) in <(String, String)>[
-      ("Start", "Start date"),
-      ("End", "End date"),
+    for (final (name, time) in <(String, String)>[
+      ("Start", "09:00"),
+      ("End", "10:00"),
     ]) {
-      final text = tester.getRect(find.text(label));
-      final field = tester.getRect(formDateFinder(date));
-      expect(text.left, field.left, reason: label);
-      expect(text.bottom + 6.0, field.top, reason: label);
+      final row = rowFinder(name);
+      final box = tester.getRect(row);
+      final label = tester.getRect(
+        find.descendant(of: row, matching: find.text(name)),
+      );
+      final day = tester.getRect(
+        find.descendant(of: row, matching: find.text("Wed, Apr 22")),
+      );
+      expect(label.left, box.left + 12.0, reason: name);
+      expect(day.left, box.left + 12.0 + 48.0, reason: name);
+      expect(
+        rowSemantics(tester, row),
+        isSemantics(
+          label: "$name\nWed, Apr 22\n$time",
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: true,
+          hasTapAction: true,
+          hasExpandedState: true,
+          isExpanded: false,
+        ),
+        reason: name,
+      );
     }
     for (final name in <String>[
       "Start date",
@@ -5884,26 +5869,12 @@ void main() {
     ]) {
       expect(find.text(name), findsNothing, reason: name);
     }
-    expect(find.bySemanticsLabel("Start"), findsNothing);
-    expect(find.bySemanticsLabel("End"), findsNothing);
-    for (final (field, label) in <(Finder, String)>[
-      (formDateFinder("Start date"), "Start date\nWed, Apr 22"),
-      (timeFieldFinder("Start time"), "Start time\n09:00"),
-      (formDateFinder("End date"), "End date\nWed, Apr 22"),
-      (timeFieldFinder("End time"), "End time\n10:00"),
-    ]) {
-      expect(
-        fieldSemantics(tester, field),
-        isSemantics(
-          label: label,
-          isButton: true,
-          hasEnabledState: true,
-          isEnabled: true,
-          hasTapAction: true,
-        ),
-        reason: label,
-      );
-    }
+    await tester.tap(rowFinder("Start"));
+    await tester.pumpAndSettle();
+    expect(
+      rowSemantics(tester, rowFinder("Start")),
+      isSemantics(hasExpandedState: true, isExpanded: true),
+    );
 
     await pumpSection(
       tester,
@@ -5911,50 +5882,67 @@ void main() {
         CalendarSchedule.of(wednesday, DateTime(2026, 4, 23), isAllDay: true),
       ),
     );
-    // Setup sanity: the rows hold their dates alone.
+    // Setup sanity: the rows hold their days alone.
     expect(timeFieldFinder("Start time"), findsNothing);
     expect(
-      tester.getRect(find.text("End")).bottom + 6.0,
-      tester.getRect(formDateFinder("End date")).top,
+      rowSemantics(tester, rowFinder("End")),
+      isSemantics(label: "End\nWed, Apr 22", isButton: true),
     );
     handle.dispose();
   });
 
-  testWidgets("SB2 a field is a box 44 high with corners rounded by 12 and "
-      "no outline, filled with the page's grey, its icon in the muted colour "
-      "and its day or time in the text colour, and a tap anywhere on it "
-      "opens its picker", (tester) async {
+  testWidgets("SB2 a row is a box 48 high with corners rounded by 12 and no "
+      "outline, filled with the page's grey, its label at 13 pixels in a "
+      "medium weight and its chevron in the muted colour, its day and time at "
+      "15 pixels in a bold weight in the text colour, and a tap anywhere on "
+      "it opens its picker", (tester) async {
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
     );
-    for (final field in <Finder>[
-      formDateFinder("Start date"),
-      timeFieldFinder("Start time"),
-      formDateFinder("End date"),
-      timeFieldFinder("End time"),
-    ]) {
-      final box = fieldBox(tester, field);
-      expect(tester.getSize(field).height, 44.0, reason: "$field");
-      expect(box.color, HarborColors.background, reason: "$field");
+    for (final name in <String>["Start", "End"]) {
+      final row = rowFinder(name);
+      final box = rowBox(tester, row);
+      expect(tester.getSize(row).height, 48.0, reason: name);
+      expect(box.color, HarborColors.background, reason: name);
       expect(
         box.borderRadius,
         const BorderRadius.all(Radius.circular(12.0)),
-        reason: "$field",
+        reason: name,
       );
-      expect(box.border, isNull, reason: "$field");
-      expect(fieldMark(tester, field), HarborColors.textMuted);
-      expect(fieldInk(tester, field), HarborColors.text);
+      expect(box.border, isNull, reason: name);
+      expect(rowInks(tester, row), <Color>[
+        HarborColors.textMuted,
+        HarborColors.text,
+        HarborColors.text,
+      ], reason: name);
+      expect(
+        <(double?, FontWeight?)>[
+          for (final text in rowTexts(tester, row))
+            (text.style!.fontSize, text.style!.fontWeight),
+        ],
+        <(double?, FontWeight?)>[
+          (13.0, FontWeight.w500),
+          (15.0, FontWeight.w600),
+          (15.0, FontWeight.w600),
+        ],
+        reason: name,
+      );
+      expect(
+        tester.widget<Icon>(rowChevron(row)).color,
+        HarborColors.textMuted,
+        reason: name,
+      );
     }
-    final time = tester.getRect(timeFieldFinder("End time"));
-    await tester.tapAt(time.bottomRight - const Offset(3.0, 3.0));
+    final end = tester.getRect(rowFinder("End"));
+    await tester.tapAt(end.bottomRight - const Offset(3.0, 3.0));
     await tester.pumpAndSettle();
-    expect(timePickerFinder("End time"), findsOneWidget);
+    expect(panelPicker("End time"), findsOneWidget);
   });
 
-  testWidgets("SB3 a field whose picker is open is filled with the primary "
-      "tint, and its icon and its time drawn in the primary colour, the "
-      "other fields keeping their look; it turns so over the "
+  testWidgets("SB3 a row whose picker is open is filled with the primary "
+      "tint, all it shows drawn in the primary colour and its chevron "
+      "pointing up, the other row keeping its look; it turns so over the "
       "theme's motion as its picker opens, and back as it closes, and at "
       "once where the platform asks for no animations", (tester) async {
     await pumpSection(
@@ -5962,8 +5950,8 @@ void main() {
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
       theme: motionTheme,
     );
-    final time = timeFieldFinder("Start time");
-    await tester.tap(time);
+    final row = rowFinder("Start");
+    await tester.tap(row);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 240));
     final half = Color.lerp(
@@ -5971,70 +5959,69 @@ void main() {
       HarborColors.primaryTint,
       0.5,
     );
-    expect(fieldBox(tester, time).color, half);
+    expect(rowBox(tester, row).color, half);
+    expect(chevronTurn(tester, row), moreOrLessEquals(0.0, epsilon: 1e-9));
     await tester.pump(const Duration(milliseconds: 240));
-    expect(fieldBox(tester, time).color, HarborColors.primaryTint);
-    expect(fieldMark(tester, time), HarborColors.primary);
-    expect(fieldInk(tester, time), HarborColors.primary);
-    for (final other in <Finder>[
-      formDateFinder("Start date"),
-      formDateFinder("End date"),
-      timeFieldFinder("End time"),
-    ]) {
-      expect(fieldBox(tester, other).color, HarborColors.background);
-    }
+    expect(rowBox(tester, row).color, HarborColors.primaryTint);
+    expect(rowInks(tester, row), <Color>[
+      HarborColors.primary,
+      HarborColors.primary,
+      HarborColors.primary,
+    ]);
+    expect(tester.widget<Icon>(rowChevron(row)).color, HarborColors.primary);
+    expect(chevronTurn(tester, row), moreOrLessEquals(-1.0));
+    expect(rowBox(tester, rowFinder("End")).color, HarborColors.background);
 
-    await tester.tap(time);
+    await tester.tap(row);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 240));
-    expect(fieldBox(tester, time).color, half);
+    expect(rowBox(tester, row).color, half);
     await tester.pumpAndSettle();
-    expect(fieldBox(tester, time).color, HarborColors.background);
+    expect(rowBox(tester, row).color, HarborColors.background);
 
     disableAnimations(tester);
     await tester.pump();
-    await tester.tap(time);
+    await tester.tap(row);
     await tester.pump();
-    expect(fieldBox(tester, time).color, HarborColors.primaryTint);
+    expect(rowBox(tester, row).color, HarborColors.primaryTint);
   });
 
-  testWidgets("SB4 a field that takes no input shows its day or time in the "
-      "muted colour with no box around it: End date where the options refuse "
-      "spanning days and the item ends on its start's day, and each field of "
-      "a locked section, unless a message tints it", (tester) async {
+  testWidgets("SB4 a row that takes no input shows its day and time in the "
+      "muted colour with no box around them and no chevron, which a screen "
+      "reader hears as a disabled button: an all-day item's End row where "
+      "the options refuse spanning days and the item ends on its start's "
+      "day, and each row of a locked section, unless a message tints it", (
+    tester,
+  ) async {
     final handle = tester.ensureSemantics();
-    final schedule = CalendarSchedule.of(at(9), at(10), isAllDay: false);
     await pumpSection(
       tester,
       checkOf(
-        schedule,
+        CalendarSchedule.of(wednesday, DateTime(2026, 4, 23), isAllDay: true),
         options: const CalendarScheduleOptions(
           allowsAllDay: false,
           spansDays: false,
         ),
       ),
     );
-    final end = formDateFinder("End date");
-    expect(fieldBox(tester, end).color, Colors.transparent);
-    expect(fieldInk(tester, end), HarborColors.textMuted);
+    final end = rowFinder("End");
+    expect(rowBox(tester, end).color, Colors.transparent);
+    expect(rowInks(tester, end).last, HarborColors.textMuted);
+    expect(rowChevron(end), findsNothing);
     expect(
-      fieldSemantics(tester, end),
+      rowSemantics(tester, end),
       isSemantics(isButton: true, hasEnabledState: true, isEnabled: false),
     );
-    // Setup sanity: End time takes input.
-    expect(
-      fieldBox(tester, timeFieldFinder("End time")).color,
-      HarborColors.background,
-    );
+    // Setup sanity: the Start row takes input.
+    expect(rowBox(tester, rowFinder("Start")).color, HarborColors.background);
 
+    final schedule = CalendarSchedule.of(at(9), at(10), isAllDay: false);
     await pumpSection(tester, checkOf(schedule), locked: true);
-    for (final field in <Finder>[
-      formDateFinder("Start date"),
-      timeFieldFinder("Start time"),
-      formDateFinder("End date"),
-      timeFieldFinder("End time"),
-    ]) {
-      expect(fieldBox(tester, field).color, Colors.transparent);
+    for (final name in <String>["Start", "End"]) {
+      final row = rowFinder(name);
+      expect(rowBox(tester, row).color, Colors.transparent, reason: name);
+      expect(rowInks(tester, row).last, HarborColors.textMuted, reason: name);
+      expect(rowChevron(row), findsNothing, reason: name);
     }
     await pumpSection(
       tester,
@@ -6042,53 +6029,38 @@ void main() {
       locked: true,
       errors: const <String, String>{"end": "Too late."},
     );
-    expect(
-      fieldBox(tester, timeFieldFinder("End time")).color,
-      HarborColors.errorNotice,
-    );
+    expect(rowBox(tester, end).color, HarborColors.errorNotice);
     handle.dispose();
   });
 
-  testWidgets("SB5 a row's message shows under its fields, at their left and "
-      "6 pixels under them, in the error colour, and tints the row's time "
-      "field, or an all-day schedule's date field, with the soft error "
-      "colour, its icon in the error colour, while its picker is closed; the "
-      "other fields keep the page's grey", (tester) async {
+  testWidgets("SB5 a row's message shows under it, at its left and 6 pixels "
+      "under it, in the error colour, and tints the row with the soft error "
+      "colour, its label and chevron in the error colour, while its picker "
+      "is closed; the other row keeps the page's grey", (tester) async {
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
       errors: const <String, String>{"end": "Too late."},
     );
     final message = find.byKey(scheduleEndErrorKey);
+    final end = rowFinder("End");
     expect(tester.widget<Text>(message).data, "Too late.");
     expect(tester.widget<Text>(message).style!.color, HarborColors.error);
-    expect(
-      tester.getRect(message).left,
-      tester.getRect(formDateFinder("End date")).left,
-    );
-    expect(
-      tester.getRect(message).top,
-      tester.getRect(timeFieldFinder("End time")).bottom + 6.0,
-    );
+    expect(tester.getRect(message).left, tester.getRect(end).left);
+    expect(tester.getRect(message).top, tester.getRect(end).bottom + 6.0);
     expect(find.byKey(scheduleStartErrorKey), findsNothing);
-    final endTime = timeFieldFinder("End time");
-    expect(fieldBox(tester, endTime).color, HarborColors.errorNotice);
-    expect(fieldMark(tester, endTime), HarborColors.error);
-    expect(
-      fieldBox(tester, formDateFinder("End date")).color,
-      HarborColors.background,
-    );
-    expect(
-      fieldBox(tester, timeFieldFinder("Start time")).color,
-      HarborColors.background,
-    );
-    await tester.tap(endTime);
+    expect(rowBox(tester, end).color, HarborColors.errorNotice);
+    expect(rowInks(tester, end).first, HarborColors.error);
+    expect(tester.widget<Icon>(rowChevron(end)).color, HarborColors.error);
+    expect(rowBox(tester, rowFinder("Start")).color, HarborColors.background);
+    await tester.tap(end);
     await tester.pumpAndSettle();
-    expect(fieldBox(tester, endTime).color, HarborColors.primaryTint);
-    expect(fieldMark(tester, endTime), HarborColors.primary);
-    await tester.tap(endTime);
+    expect(rowBox(tester, end).color, HarborColors.primaryTint);
+    expect(rowInks(tester, end).first, HarborColors.primary);
+    await revealForTap(tester, end);
+    await tester.tap(end);
     await tester.pumpAndSettle();
-    expect(fieldBox(tester, endTime).color, HarborColors.errorNotice);
+    expect(rowBox(tester, end).color, HarborColors.errorNotice);
 
     await pumpSection(
       tester,
@@ -6098,24 +6070,23 @@ void main() {
       errors: const <String, String>{"start": "Too early."},
     );
     await tester.pumpAndSettle();
-    expect(
-      fieldBox(tester, formDateFinder("Start date")).color,
-      HarborColors.errorNotice,
-    );
+    final start = rowFinder("Start");
+    expect(rowBox(tester, start).color, HarborColors.errorNotice);
     expect(
       tester.getRect(find.byKey(scheduleStartErrorKey)).top,
-      tester.getRect(formDateFinder("Start date")).bottom + 6.0,
+      tester.getRect(start).bottom + 6.0,
     );
-    expect(
-      fieldBox(tester, formDateFinder("End date")).color,
-      HarborColors.background,
-    );
+    expect(rowBox(tester, rowFinder("End")).color, HarborColors.background);
   });
 
-  testWidgets("SB6 a field's day or time too wide for its box, as a 12-hour "
-      "time in a narrow section, shrinks to fit inside the box's padding, "
-      "whole", (tester) async {
-    tester.view.physicalSize = const Size(320.0, 900.0);
+  testWidgets("SB6 a row's day and time too wide for its box, as a 12-hour "
+      "time in a narrow section, shrink together to fit between the row's "
+      "label and its chevron, 8 pixels before the chevron, whole", (
+    tester,
+  ) async {
+    final store = storeOf(<CalendarItem>[]);
+    addTearDown(store.dispose);
+    tester.view.physicalSize = const Size(240.0, 900.0);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
@@ -6129,19 +6100,26 @@ void main() {
             slotMinutes: 15,
             hourLabelFormat: CalendarHourLabelFormat.twelveHour,
             now: wednesdayStart,
+            store: store,
             onChanged: (schedule) {},
           ),
         ),
       ),
     );
-    final field = timeFieldFinder("Start time");
-    final text = find.descendant(of: field, matching: find.text("12:30 PM"));
+    final row = rowFinder("Start");
+    final text = find.descendant(of: row, matching: find.text("12:30 PM"));
     final paragraph = tester.renderObject<RenderParagraph>(text);
     // The time shows narrower than it lays out, on its one line.
     expect(tester.getRect(text).width, lessThan(paragraph.size.width));
     expect(
       tester.getRect(text).right,
-      lessThanOrEqualTo(tester.getRect(field).right - 12.0),
+      moreOrLessEquals(tester.getRect(rowChevron(row)).left - 8.0),
+    );
+    expect(
+      tester
+          .getRect(find.descendant(of: row, matching: find.text("Wed, Apr 22")))
+          .left,
+      tester.getRect(row).left + 12.0 + 48.0,
     );
   });
 }
@@ -6158,8 +6136,8 @@ String summaryText(WidgetTester tester) {
 }
 
 /// Opens item-1, Write, from 09:00 to 10:00, in a view 450 logical pixels
-/// tall, short enough that the form's page scrolls the Start date field out
-/// of its view, the calendar drawing in [theme] where given; answers the
+/// tall, short enough that the form's page scrolls the Start row out of
+/// its view, the calendar drawing in [theme] where given; answers the
 /// page's scroll position.
 Future<ScrollPosition> openScrolledForm(
   WidgetTester tester, {
@@ -6174,8 +6152,8 @@ Future<ScrollPosition> openScrolledForm(
   return pagePosition(tester);
 }
 
-/// The page's offset at which the Start date field's bottom meets the top
-/// of the page's view.
+/// The page's offset at which the Start row's bottom meets the top of the
+/// page's view.
 double startDatePast(WidgetTester tester) {
   return pagePosition(tester).pixels +
       tester.getRect(formDateFinder("Start date")).bottom -

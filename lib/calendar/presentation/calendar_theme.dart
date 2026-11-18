@@ -458,8 +458,9 @@ final class CalendarThemeData with Diagnosticable {
   final Color background;
 
   /// The timed grid's body, header and gutter cells, the ring of a grip and
-  /// of a badge, and the entry card's menu; the default entries' tints
-  /// blend into it.
+  /// of a badge, the entry card's menu, and the surface the time picker's
+  /// columns fade their top and bottom rows into; the default entries'
+  /// tints blend into it.
   final Color surface;
 
   /// The grid lines of Week, Day and Month, and Agenda's dashed gaps.

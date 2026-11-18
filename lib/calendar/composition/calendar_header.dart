@@ -190,9 +190,14 @@ Widget defaultCalendarHeaderBuilder(
 
 /// The built-in header of a calendar: [defaultCalendarHeaderBuilder]'s.
 class CalendarHeader extends StatelessWidget {
-  const CalendarHeader({super.key, required this.details});
+  const CalendarHeader({super.key, required this.details, this.trailing});
 
   final CalendarHeaderDetails details;
+
+  /// What lies at the row's end, after the edit mode toggle and the view
+  /// button, 4 logical pixels after whichever of them shows, and centred on
+  /// the row; null for nothing.
+  final Widget? trailing;
 
   /// The diameter of the header's round buttons, the chevrons included.
   static const double _circle = 32.0;
@@ -323,6 +328,7 @@ class CalendarHeader extends StatelessWidget {
     final onToday = details.onToday;
     final onEditableChanged = details.onEditableChanged;
     final picksView = details.views.length > 1;
+    final trailing = this.trailing;
     final row = Row(
       children: <Widget>[
         Expanded(
@@ -441,6 +447,11 @@ class CalendarHeader extends StatelessWidget {
               ),
             ),
           ),
+        if (trailing != null) ...<Widget>[
+          if (onEditableChanged != null || picksView)
+            const SizedBox(width: 4.0),
+          trailing,
+        ],
       ],
     );
     // The chevrons, the title's ink and the menu need a Material above
