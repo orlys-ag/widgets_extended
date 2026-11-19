@@ -527,12 +527,16 @@ class _RowTimes {
     required this.row,
     required this.hours,
     required this.slot,
+    required this.zone,
   });
 
   final CalendarScheduleCheck<ItemPayload> check;
   final _Row row;
   final CalendarDayHours hours;
   final int slot;
+
+  /// The zone the schedule's times are on; none for the device's.
+  final Location? zone;
 
   /// The table of the row's own day; null before its first lookup.
   _TimeTable? _own;
@@ -546,11 +550,13 @@ class _RowTimes {
     _Row row,
     CalendarDayHours hours,
     int slot,
+    Location? zone,
   ) {
     return identical(this.check, check) &&
         this.row == row &&
         this.hours == hours &&
-        this.slot == slot;
+        this.slot == slot &&
+        this.zone == zone;
   }
 
   /// The schedule with the row's day moved to [day]; the start's end moves
@@ -564,8 +570,8 @@ class _RowTimes {
 
   /// The first and last time the picker offers on [day]: the start's the
   /// hours' starts; the end's the hours' ends, on the start's day only
-  /// those after the start, or where the start leaves no such end in the
-  /// hours its own time alone.
+  /// those whose instant is after the start's, or where the start leaves no
+  /// such end in the hours its own time alone.
   ({int min, int max}) boundsOn(DateTime day) {
     return _boundsOf(_scheduleOn(day));
   }
@@ -577,13 +583,50 @@ class _RowTimes {
     var min = hours.start + slot;
     var max = hours.end;
     if (!schedule.spansDays) {
-      min = math.max(min, schedule.startMinute + 1);
+      min = math.max(min, _firstEndAfterStart(schedule, min));
     }
     if (min > max) {
       min = schedule.endMinute;
       max = schedule.endMinute;
     }
     return (min: min, max: max);
+  }
+
+  /// The least end minute from [from] to [schedule]'s start minute plus one
+  /// whose end, in the pass [CalendarSchedule.withEndMinute] keeps, lies
+  /// after the start as instants on [zone]'s clock, for a timed [schedule]
+  /// that ends on its start day; the start minute plus one where none
+  /// does. A later-pass end can read a wall minute before the start's only
+  /// where the start day's clock repeats a stretch
+  /// ([CalendarDates.repeatedStretchOf]), so only there is the clock read,
+  /// by bisection over the minutes, as the ends rise with the minute in
+  /// one pass; elsewhere, and where the clock skips an edge, the start
+  /// minute plus one.
+  int _firstEndAfterStart(CalendarSchedule schedule, int from) {
+    final after = schedule.startMinute + 1;
+    if (schedule.isAllDay ||
+        CalendarDates.repeatedStretchOf(
+              CalendarDates.dateOfDayNumber(
+                CalendarDates.dayNumber(schedule.startDay),
+                zone: zone,
+              ),
+            ) ==
+            Duration.zero ||
+        schedule.timesOn(zone) == null) {
+      return after;
+    }
+    var low = from;
+    var high = after;
+    while (low < high) {
+      final middle = (low + high) ~/ 2;
+      final times = schedule.withEndMinute(middle).timesOn(zone);
+      if (times != null && times.end.isAfter(times.start)) {
+        high = middle;
+      } else {
+        low = middle + 1;
+      }
+    }
+    return low;
   }
 
   /// Whether the picker offers [minute] on [day].
@@ -828,8 +871,9 @@ class ScheduleSectionState extends State<ScheduleSection> {
     final check = widget.check;
     final hours = widget.hours;
     final slot = widget.slotMinutes;
+    final zone = widget.store.zone;
     final times = _times[row];
-    if (times != null && times.holds(check, row, hours, slot)) {
+    if (times != null && times.holds(check, row, hours, slot, zone)) {
       return times;
     }
     return _times[row] = _RowTimes(
@@ -837,6 +881,7 @@ class ScheduleSectionState extends State<ScheduleSection> {
       row: row,
       hours: hours,
       slot: slot,
+      zone: zone,
     );
   }
 
@@ -1155,6 +1200,7 @@ class ScheduleHeading extends StatelessWidget {
     final schedule = check.schedule;
     final day = CalendarDates.dayNumber(schedule.startDay);
     final start =
+        schedule.timesOn(zone)?.start ??
         CalendarDates.timeAtWallMinute(
           day * CalendarDates.minutesPerDay + schedule.startMinute,
           zone: zone,

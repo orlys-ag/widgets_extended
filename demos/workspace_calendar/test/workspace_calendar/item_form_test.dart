@@ -578,52 +578,48 @@ void main() {
       expect(utcOf(writes.single!.end), DateTime.utc(2026, 11, 1, 8));
     });
 
-    testWidgets(
-      "IF8 the end picker of an item from 01:30 EDT to 01:15 EST "
-      "offers the later-pass ends before the start's wall time",
-      skip: true,
-      (tester) async {
-        final store = storeInNewYork(
-          DateTime.utc(2026, 11, 1, 5, 30),
-          DateTime.utc(2026, 11, 1, 6, 15),
-        );
-        addTearDown(store.dispose);
-        await openBeforeTheChange(tester, store);
-        // Setup sanity: the end reads 01:15.
-        expect(timeFieldShows("End time", "01:15"), findsOneWidget);
-        await openTimePicker(tester, "End time");
-        final ends = offeredTimes(tester, "End time");
-        expect(ends, containsAll(<int>[60, 75]));
-        expect(ends, isNot(contains(45)));
+    testWidgets("IF8 the end picker of an item from 01:30 EDT to 01:15 EST "
+        "offers the later-pass ends before the start's wall time", (
+      tester,
+    ) async {
+      final store = storeInNewYork(
+        DateTime.utc(2026, 11, 1, 5, 30),
+        DateTime.utc(2026, 11, 1, 6, 15),
+      );
+      addTearDown(store.dispose);
+      await openBeforeTheChange(tester, store);
+      // Setup sanity: the end reads 01:15.
+      expect(timeFieldShows("End time", "01:15"), findsOneWidget);
+      await openTimePicker(tester, "End time");
+      final ends = offeredTimes(tester, "End time");
+      expect(ends, containsAll(<int>[60, 75]));
+      expect(ends, isNot(contains(45)));
 
-        await pickTime(tester, "End time", "01:00");
-        // Setup sanity: the pick took.
-        expect(timeFieldShows("End time", "01:00"), findsOneWidget);
-        await openTimePicker(tester, "End time");
-        expect(offeredTimes(tester, "End time"), containsAll(<int>[60, 75]));
-      },
-    );
+      await pickTime(tester, "End time", "01:00");
+      // Setup sanity: the pick took.
+      expect(timeFieldShows("End time", "01:00"), findsOneWidget);
+      await openTimePicker(tester, "End time");
+      expect(offeredTimes(tester, "End time"), containsAll(<int>[60, 75]));
+    });
 
-    testWidgets(
-      "IF9 the zone box names the offset at a later-pass start",
-      skip: true,
-      (tester) async {
-        final store = storeInNewYork(
-          DateTime.utc(2026, 11, 1, 6, 30),
-          DateTime.utc(2026, 11, 1, 8),
-        );
-        addTearDown(store.dispose);
-        await openBeforeTheChange(tester, store);
-        expect(
-          find.descendant(
-            of: find.byKey(scheduleZoneKey),
-            matching: find.text(
-              const DefaultCalendarLocalizations().utcOffset(-300),
-            ),
+    testWidgets("IF9 the zone box names the offset at a later-pass start", (
+      tester,
+    ) async {
+      final store = storeInNewYork(
+        DateTime.utc(2026, 11, 1, 6, 30),
+        DateTime.utc(2026, 11, 1, 8),
+      );
+      addTearDown(store.dispose);
+      await openBeforeTheChange(tester, store);
+      expect(
+        find.descendant(
+          of: find.byKey(scheduleZoneKey),
+          matching: find.text(
+            const DefaultCalendarLocalizations().utcOffset(-300),
           ),
-          findsOneWidget,
-        );
-      },
-    );
+        ),
+        findsOneWidget,
+      );
+    });
   });
 }
