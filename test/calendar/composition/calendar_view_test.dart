@@ -3,7 +3,7 @@
 /// report and the routes it opens, the cost of a pinch, a fold and the
 /// month picker, the store's hours and range, the theme's motion and
 /// strip row, a move of the calendar under a new parent, a clock reading
-/// UTC, and the source rules a release build depends on.
+/// UTC or a `TZDateTime`, and the source rules a release build depends on.
 library;
 
 import 'dart:async';
@@ -15,6 +15,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/composition/calendar_card.dart';
@@ -46,6 +47,7 @@ import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 
 import '../../scheduling/dst_days.dart';
+import '../../scheduling/zones.dart';
 import 'recording_store.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
@@ -2285,6 +2287,48 @@ void main() {
 
       expect(controller.selectedDay, tuesday);
       expect(card().today, tuesday);
+
+      reading = DateTime(2026, 4, 22, reading.hour, reading.minute);
+      await tester.pump(const Duration(minutes: 1));
+      expect(card().today, wednesday);
+    });
+
+    testWidgets("RC11 over a store with no zone, a clock reading a "
+        "TZDateTime marks as today the local day of each reading, and the "
+        "views take the reading as its local time", (tester) async {
+      ensureZones();
+      var reading = offUtcTime!;
+      final controller = CalendarController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            store: store,
+            controller: controller,
+            clock: () {
+              return tz.TZDateTime.from(reading, tz.UTC);
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      CalendarCard<String> card() {
+        return tester.widget<CalendarCard<String>>(
+          find.byType(CalendarCard<String>),
+        );
+      }
+
+      CalendarNow viewsNow() {
+        return tester
+            .widget<DayList<String>>(find.byType(DayList<String>))
+            .now
+            .value;
+      }
+
+      expect(controller.selectedDay, tuesday);
+      expect(card().today, tuesday);
+      // A plain local time of the reading's instant.
+      expect(viewsNow().time, reading);
 
       reading = DateTime(2026, 4, 22, reading.hour, reading.minute);
       await tester.pump(const Duration(minutes: 1));
