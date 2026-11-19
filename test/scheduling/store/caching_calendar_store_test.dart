@@ -3997,10 +3997,13 @@ void main() {
     readTuesday.succeed(<CalendarEntry<String>>[onDay(item, tuesday)]);
     await settle();
     expect(store.storedEntry("item-1"), isNull);
-    expect(<(DateTime?, DateTime?)>[
-      for (final call in harness.source.calls.skip(calls))
-        (call.first, call.last),
-    ], <(DateTime?, DateTime?)>[(tuesday, tuesday)]);
+    expect(
+      <(DateTime?, DateTime?)>[
+        for (final call in harness.source.calls.skip(calls))
+          (call.first, call.last),
+      ],
+      <(DateTime?, DateTime?)>[(tuesday, tuesday)],
+    );
   });
 
   test("FR76 a read sent since an update, before the read sent since that "
@@ -4041,10 +4044,13 @@ void main() {
     readTuesday.succeed(<CalendarEntry<String>>[onDay(item, tuesday)]);
     await settle();
     expect(store.storedEntry("item-1"), isNull);
-    expect(<(DateTime?, DateTime?)>[
-      for (final call in harness.source.calls.skip(calls))
-        (call.first, call.last),
-    ], <(DateTime?, DateTime?)>[(tuesday, tuesday)]);
+    expect(
+      <(DateTime?, DateTime?)>[
+        for (final call in harness.source.calls.skip(calls))
+          (call.first, call.last),
+      ],
+      <(DateTime?, DateTime?)>[(tuesday, tuesday)],
+    );
   });
 
   test("FR75 after a read sent since an update that changes nothing agrees "
@@ -4080,10 +4086,56 @@ void main() {
     later.succeed(<CalendarEntry<String>>[]);
     await settle();
     expect(store.storedEntry("item-1"), item);
-    expect(<(DateTime?, DateTime?)>[
-      for (final call in harness.source.calls.skip(calls))
-        (call.first, call.last),
-    ], <(DateTime?, DateTime?)>[(monday, monday)]);
+    expect(
+      <(DateTime?, DateTime?)>[
+        for (final call in harness.source.calls.skip(calls))
+          (call.first, call.last),
+      ],
+      <(DateTime?, DateTime?)>[(monday, monday)],
+    );
+  });
+
+  test("FR77 after a change announced since a delete contradicts its "
+      "answer, a read sent since the change that answers after the answer "
+      "with the entry on another day contradicts it too: the store keeps "
+      "what it holds and reads that day again", () async {
+    final changes = StreamController<CalendarSourceChange<String>>();
+    addTearDown(changes.close);
+    final harness = Harness(changes: changes.stream);
+    final store = harness.store;
+    final monday = DateTime(2026, 4, 20);
+    final wednesday = DateTime(2026, 4, 22);
+    final item = task("item-1", monday, 600, 660);
+    final retitled = item.copyWith(title: "Retitled");
+    store.show(monday, wednesday);
+    harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+    await settle();
+    final deleting = store.requestDelete("item-1");
+    final write = harness.lastCall;
+    // Another client retitles the entry, and the source announces it.
+    changes.add(CalendarEntryPut<String>(retitled));
+    await settle();
+    store.invalidate(wednesday, wednesday);
+    final readWednesday = harness.lastCall;
+    expect((readWednesday.first, readWednesday.last), (wednesday, wednesday));
+
+    // Another client moved the entry to Wednesday, and the source applied
+    // the delete after it served the read of Wednesday.
+    write.succeed();
+    await settle();
+    await deleting;
+    expect(store.storedEntry("item-1"), retitled);
+    final calls = harness.source.calls.length;
+    readWednesday.succeed(<CalendarEntry<String>>[onDay(retitled, wednesday)]);
+    await settle();
+    expect(store.storedEntry("item-1"), retitled);
+    expect(
+      <(DateTime?, DateTime?)>[
+        for (final call in harness.source.calls.skip(calls))
+          (call.first, call.last),
+      ],
+      <(DateTime?, DateTime?)>[(wednesday, wednesday)],
+    );
   });
 
   group("CF the changes the source announces", () {

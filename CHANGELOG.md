@@ -1093,13 +1093,14 @@ locale and keeping the app's text direction, and the package depends on
 the calendar cannot read, gives the calendar its theme through a
 `CalendarTheme`.
 - Fix: `CachingCalendarStore` could keep a read's out-of-date answer of an
-entry that had a write in flight. Where a read sent since the write had
-contradicted the write's answer, or the answer changed nothing because a
-read sent since agreed with it, a later read sent before the answer that
-answered after it was stored as it came, with no read again: an entry
-another client had moved showed on its old day, or one the write put back
-was lost, while the status was ready. The store now keeps what it holds
-and reads the days of both again, as for such a read that answers first.
+entry that had a write in flight. Where a read sent or a change announced
+since the write had contradicted the write's answer, or the answer changed
+nothing because a read sent since agreed with it, a later read sent before
+the answer that answered after it was stored as it came, with no read
+again: an entry another client had moved showed on its old day, or one the
+write put back was lost, while the status was ready. The store now keeps
+what it holds and reads the days of both again, as for such a read that
+answers first.
 - Fix: `CalendarEditRules.firstSlot` searched from a `from` before the
 hours' start and up to an `until` after their end, so
 `CalendarScheduleCheck.nextFree` of a stored entry kept before the hours
