@@ -1033,23 +1033,19 @@ void main() {
       },
     );
 
-    test(
-      "SC22 the next free range starts at the earliest start in its "
-      "pass, after a first-pass start",
-      skip: true,
-      () {
-        final check = newCheck(
-          lockNow,
-          CalendarSchedule.of(
-            tz.TZDateTime(newYork, 2026, 11, 1, 1, 50),
-            tz.TZDateTime(newYork, 2026, 11, 1, 2, 20),
-            isAllDay: false,
-          ),
-          nowOnTheChange(DateTime.utc(2026, 11, 1, 6, 45)),
-        );
-        expect(check.nextFree!.startMinute, 105);
-      },
-    );
+    test("SC22 the next free range starts at the earliest start in its "
+        "pass, after a first-pass start", () {
+      final check = newCheck(
+        lockNow,
+        CalendarSchedule.of(
+          tz.TZDateTime(newYork, 2026, 11, 1, 1, 50),
+          tz.TZDateTime(newYork, 2026, 11, 1, 2, 20),
+          isAllDay: false,
+        ),
+        nowOnTheChange(DateTime.utc(2026, 11, 1, 6, 45)),
+      );
+      expect(check.nextFree!.startMinute, 105);
+    });
 
     test(
       "SC23 the next free range lasts the schedule's elapsed length, so "

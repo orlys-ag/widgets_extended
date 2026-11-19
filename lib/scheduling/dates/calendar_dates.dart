@@ -909,12 +909,20 @@ bool isLaterMidnight(DateTime time) {
 /// [occurrence]'s occurrence where [day]'s clock repeats it, as
 /// [CalendarDates.timeAtWallMinute]'s `from` picks; the clock is the zone's
 /// of a [day] that is a `TZDateTime`, and the device's otherwise.
+///
+/// Where [elapsed], a range lasts [length] minutes of elapsed time instead,
+/// its end its start plus them, and ends by [until] where its wall span
+/// ([CalendarDates.wallSpanOf]) does, as the hours read a range's end
+/// ([hoursEndMinuteOf]); the search takes each start from [from] before
+/// [until], since across the instant a clock goes back a later start's
+/// range can end at an earlier wall minute.
 ({DateTime start, DateTime end})? firstReadableSlot(
   DateTime day,
   int from,
   int until,
   int slotMinutes, {
   int? length,
+  bool elapsed = false,
   DateTime? occurrence,
   bool Function(DateTime start, DateTime end)? isFree,
 }) {
@@ -922,6 +930,25 @@ bool isLaterMidnight(DateTime time) {
   final base = CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay;
   final span = length ?? slotMinutes;
   var minute = from;
+  if (elapsed) {
+    final duration = Duration(minutes: span);
+    while (minute < until) {
+      final start = CalendarDates.timeAtWallMinute(
+        base + minute,
+        from: occurrence,
+        zone: zone,
+      );
+      if (start != null) {
+        final end = start.add(duration);
+        if (CalendarDates.wallSpanOf(start, end).end - base <= until &&
+            (isFree?.call(start, end) ?? true)) {
+          return (start: start, end: end);
+        }
+      }
+      minute = (minute ~/ slotMinutes + 1) * slotMinutes;
+    }
+    return null;
+  }
   while (minute + span <= until) {
     final start = CalendarDates.timeAtWallMinute(
       base + minute,

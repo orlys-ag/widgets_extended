@@ -1743,6 +1743,75 @@ void main() {
       );
     });
 
+    test("ZC9 firstReadableSlot's elapsed slots each ask the zone a fixed "
+        "number of times", () {
+      final zone = CountingLocation(tz.getLocation("America/Havana"));
+      int count(void Function() call) {
+        zone.lookups = 0;
+        call();
+        return zone.lookups;
+      }
+
+      tz.TZDateTime instant(DateTime utc) {
+        return tz.TZDateTime.fromMillisecondsSinceEpoch(
+          zone,
+          utc.millisecondsSinceEpoch,
+        );
+      }
+
+      bool never(DateTime start, DateTime end) {
+        return false;
+      }
+
+      void row(
+        String name,
+        int expected,
+        DateTime day,
+        int from,
+        int until,
+        int length,
+      ) {
+        expect(
+          count(() {
+            firstReadableSlot(
+              day,
+              from,
+              until,
+              30,
+              length: length,
+              elapsed: true,
+              isFree: never,
+            );
+          }),
+          expected,
+          reason: name,
+        );
+      }
+
+      // A quiet day: no offset change within two days either side. Each
+      // slot reads its start (two lookups), adds its length (one) and
+      // reads its end's wall span (one).
+      final quiet = tz.TZDateTime(zone, 2025, 7, 16);
+      row("per slot", 4, quiet, 600, 630, 30);
+      row("two slots", 8, quiet, 600, 660, 30);
+      // A day of a clock change: exactly one change in its window.
+      final repeat = instant(DateTime.utc(2025, 11, 2, 4));
+      row("per slot, one change", 6, repeat, 600, 630, 30);
+      row("two slots, one change", 12, repeat, 600, 660, 30);
+      // 23:30 for 90 minutes ends at the later 00:00 of 2025-11-02, whose
+      // wall span reads the most.
+      row(
+        "end at the later 00:00",
+        12,
+        tz.TZDateTime(zone, 2025, 11, 1),
+        1410,
+        1440,
+        90,
+      );
+      // 2025-03-09's clock skips its midnight hour.
+      row("start skipped", 2, instant(DateTime.utc(2025, 3, 9, 5)), 0, 30, 30);
+    });
+
     test("ZC6 loadedZones lists the loaded database's zones sorted by name, "
         "in an unmodifiable list of its own", () {
       // The data loads in name order, so a zone added after it puts the

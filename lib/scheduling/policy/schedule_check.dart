@@ -412,6 +412,13 @@ final class CalendarScheduleCheck<T> {
   /// entry shares time with, as [CalendarEditRules.firstSlot] finds it with
   /// that length; null for an all-day schedule, one that spans days or has
   /// no length, and where the day leaves no such range.
+  ///
+  /// Where [now]'s clock gives the schedule times, the search reads the
+  /// day's clock in the occurrence of the later instant of its start and
+  /// the earliest start's [CalendarEarliestStart.occurrence], from the
+  /// first wall minute in that occurrence not before its start
+  /// ([CalendarDates.firstWallMinuteNotBefore]), so a range in a repeated
+  /// stretch's second pass is searched for in that pass.
   late final CalendarSchedule? nextFree = _findNextFree();
 
   CalendarSchedule? _findNextFree() {
@@ -419,13 +426,30 @@ final class CalendarScheduleCheck<T> {
       return null;
     }
     final id = entry?.id;
+    final earliest = rules.earliestStartOn(schedule.startDay, now);
+    final times = _times;
+    var from = schedule.startMinute;
+    DateTime? occurrence;
+    if (times != null) {
+      final earliestOccurrence = earliest.occurrence;
+      final searched =
+          earliestOccurrence != null && earliestOccurrence.isAfter(times.start)
+          ? earliestOccurrence
+          : times.start;
+      occurrence = searched;
+      from =
+          CalendarDates.firstWallMinuteNotBefore(times.start, from: searched) -
+          CalendarDates.dayNumber(schedule.startDay) *
+              CalendarDates.minutesPerDay;
+    }
     final slot = rules.firstSlot(
-      rules.earliestStartOn(schedule.startDay, now),
+      earliest,
       clearOf: _others.where((other) {
         return id == null || other.id != id;
       }),
-      from: schedule.startMinute,
+      from: from,
       lengthMinutes: schedule.lengthMinutes,
+      occurrence: occurrence,
     );
     if (slot == null) {
       return null;

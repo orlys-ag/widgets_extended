@@ -1120,5 +1120,161 @@ void main() {
         expect(other == noneA, isFalse);
       }
     });
+
+    /// The instant [utc] on New York's clock, whose clock reads 01:00 to
+    /// 02:00 twice on 2026-11-01, going back at 06:00Z, and skips 02:00 to
+    /// 03:00 on 2027-03-14.
+    tz.TZDateTime inNewYork(DateTime utc) {
+      return tz.TZDateTime.from(utc, tz.getLocation("America/New_York"));
+    }
+
+    /// Expects [slot] to run from the instants [start] to [end], each a
+    /// `TZDateTime` of New York.
+    void expectSlot(
+      ({DateTime start, DateTime end})? slot,
+      DateTime start,
+      DateTime end,
+    ) {
+      final newYork = tz.getLocation("America/New_York");
+      expect(slot, isNotNull);
+      for (final time in <DateTime>[slot!.start, slot.end]) {
+        expect(time, isA<tz.TZDateTime>());
+        expect((time as tz.TZDateTime).location, newYork);
+      }
+      expect(
+        (slot.start.millisecondsSinceEpoch, slot.end.millisecondsSinceEpoch),
+        (start.millisecondsSinceEpoch, end.millisecondsSinceEpoch),
+      );
+    }
+
+    test("EZ3 a given occurrence reads the day's clock in its pass", () {
+      final day = tz.TZDateTime(
+        tz.getLocation("America/New_York"),
+        2026,
+        11,
+        1,
+      );
+      expectSlot(
+        rulesOf().firstSlot(
+          CalendarEarliestStart(day, day),
+          from: 90,
+          lengthMinutes: 30,
+          occurrence: inNewYork(DateTime.utc(2026, 11, 1, 6, 30)),
+        ),
+        DateTime.utc(2026, 11, 1, 6, 30),
+        DateTime.utc(2026, 11, 1, 7),
+      );
+    });
+
+    test("EZ4 a given occurrence reads the earliest start's floor in its "
+        "pass", () {
+      final day = tz.TZDateTime(
+        tz.getLocation("America/New_York"),
+        2026,
+        11,
+        1,
+      );
+      expectSlot(
+        rulesOf().firstSlot(
+          CalendarEarliestStart(
+            day,
+            inNewYork(DateTime.utc(2026, 11, 1, 5, 45)),
+          ),
+          from: 60,
+          lengthMinutes: 30,
+          occurrence: inNewYork(DateTime.utc(2026, 11, 1, 6)),
+        ),
+        DateTime.utc(2026, 11, 1, 6),
+        DateTime.utc(2026, 11, 1, 6, 30),
+      );
+    });
+
+    test("EZ5 an elapsed length fits between entries across the clock going "
+        "back, where a wall length does not", () {
+      final day = tz.TZDateTime(
+        tz.getLocation("America/New_York"),
+        2026,
+        11,
+        1,
+      );
+      final entries = <CalendarEntry<String>>[
+        entryOf(
+          "early",
+          inNewYork(DateTime.utc(2026, 11, 1, 5)),
+          inNewYork(DateTime.utc(2026, 11, 1, 5, 20)),
+        ),
+        entryOf(
+          "late",
+          inNewYork(DateTime.utc(2026, 11, 1, 6, 30)),
+          inNewYork(DateTime.utc(2026, 11, 1, 7)),
+        ),
+      ];
+      expectSlot(
+        rulesOf().firstSlot(
+          CalendarEarliestStart(day, day),
+          clearOf: entries,
+          from: 75,
+          elapsedMinutes: 55,
+        ),
+        DateTime.utc(2026, 11, 1, 5, 30),
+        DateTime.utc(2026, 11, 1, 6, 25),
+      );
+      expectSlot(
+        rulesOf().firstSlot(
+          CalendarEarliestStart(day, day),
+          clearOf: entries,
+          from: 75,
+          lengthMinutes: 55,
+        ),
+        DateTime.utc(2026, 11, 1, 7),
+        DateTime.utc(2026, 11, 1, 7, 55),
+      );
+    });
+
+    test("EZ6 an elapsed length across a skipped hour ends by until where "
+        "its wall span does", () {
+      final day = tz.TZDateTime(
+        tz.getLocation("America/New_York"),
+        2027,
+        3,
+        14,
+      );
+      final rules = rulesOf();
+      final earliest = CalendarEarliestStart(day, day);
+      for (final until in <int?>[null, 210]) {
+        expectSlot(
+          rules.firstSlot(earliest, from: 90, until: until, elapsedMinutes: 60),
+          DateTime.utc(2027, 3, 14, 6, 30),
+          DateTime.utc(2027, 3, 14, 7, 30),
+        );
+      }
+      expect(
+        rules.firstSlot(earliest, from: 90, until: 209, elapsedMinutes: 60),
+        isNull,
+      );
+    });
+
+    test("EZ7 an elapsed length under 1, or beside a wall length, is "
+        "refused", () {
+      final day = tz.TZDateTime(
+        tz.getLocation("America/New_York"),
+        2026,
+        11,
+        1,
+      );
+      final earliest = CalendarEarliestStart(day, day);
+      expect(
+        () => rulesOf().firstSlot(earliest, elapsedMinutes: 0),
+        throwsArgumentNamed("elapsedMinutes"),
+      );
+      expect(
+        () => rulesOf().firstSlot(
+          earliest,
+          lengthMinutes: 30,
+          elapsedMinutes: 30,
+        ),
+        throwsArgumentNamed("elapsedMinutes"),
+      );
+    });
   });
 }
