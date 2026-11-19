@@ -1,14 +1,20 @@
 /// The day list, the week strip and the month strip read the days they
 /// show once a scroll of theirs ends: after the frame, never during the
 /// layout a scroll can end in, and with a frame asked for where the
-/// scroll ends outside one.
+/// scroll ends outside one. Given another store, each reads the days it
+/// shows from that store, after the frame.
 library;
+
+import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
+import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_strip.dart';
@@ -26,6 +32,36 @@ final class PhaseStore extends MemoryCalendarStore<String> {
   void prefetch(DateTime first, DateTime last) {
     prefetches.add(SchedulerBinding.instance.schedulerPhase);
     reads.add((first, last));
+  }
+}
+
+/// A data source whose reads never answer, which records the scheduler's
+/// phase at each read, and the days it reads, so every day a store over it
+/// shows stays loading.
+final class UnansweredReads implements CalendarDataSource<String> {
+  final List<SchedulerPhase> phases = <SchedulerPhase>[];
+  final List<(DateTime, DateTime)> reads = <(DateTime, DateTime)>[];
+
+  @override
+  Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    phases.add(SchedulerBinding.instance.schedulerPhase);
+    reads.add((first, last));
+    return Completer<List<CalendarEntry<String>>>().future;
+  }
+
+  @override
+  Future<CalendarEntry<String>> create(CalendarEntry<String> draft) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<CalendarEntry<String>> replace(CalendarEntry<String> entry) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<void> delete(String id) {
+    throw UnimplementedError();
   }
 }
 
@@ -230,5 +266,88 @@ void main() {
       (DateTime(2026, 3, 30), DateTime(2026, 5, 3)),
     ]);
     expect(asked, isTrue);
+  });
+
+  testWidgets("SE4 given another store, the day list, the week strip and "
+      "the month strip each read the days they show from it once, after the "
+      "frame, though no row changes, every day loading on both stores", (
+    tester,
+  ) async {
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 21, 9), today: tuesday),
+    );
+    addTearDown(now.dispose);
+    final width = ValueNotifier<double>(400.0);
+    addTearDown(width.dispose);
+    final height = ValueNotifier<double>(600.0);
+    addTearDown(height.dispose);
+    final views = <String, Widget Function(CachingCalendarStore<String> store)>{
+      "day list": (store) {
+        return DayList<String>(
+          store: store,
+          weekdays: CalendarWeekdaySet.all,
+          format: CalendarHourLabelFormat.twentyFourHour,
+          hours: CalendarDayHours.allDay,
+          editable: false,
+          selectedDay: tuesday,
+          now: now,
+          onTopDay: (day) {},
+          onCreateRange: (range) async {},
+          onEdit: (id) {},
+          onDelete: (id) {},
+          loadingBuilder: (context, state) {
+            return const SizedBox(height: 24.0);
+          },
+        );
+      },
+      "week strip": (store) {
+        return WeekStrip<String>(
+          store: store,
+          selectedDay: tuesday,
+          today: tuesday,
+          weekdays: CalendarWeekdaySet.all,
+          onSelectDay: (day) {},
+          onBrowse: (day) {},
+        );
+      },
+      "month strip": (store) {
+        return MonthStrip<String>(
+          store: store,
+          month: DateTime(2026, 4),
+          selectedDay: tuesday,
+          today: tuesday,
+          weekdays: CalendarWeekdaySet.all,
+          rowHeight: 48.0,
+          collapse: kAlwaysDismissedAnimation,
+          onSelectDay: (day) {},
+          onBrowse: (month) {},
+        );
+      },
+    };
+    final shows = <String, (DateTime, DateTime)>{
+      // The weeks of the rows mounted.
+      "day list": (DateTime(2026, 4, 13), DateTime(2026, 5, 3)),
+      // Tuesday's week, from Monday.
+      "week strip": (DateTime(2026, 4, 20), DateTime(2026, 4, 26)),
+      // April's grid, from the Monday before its first day to the Sunday
+      // after its last.
+      "month strip": (DateTime(2026, 3, 30), DateTime(2026, 5, 3)),
+    };
+    for (final MapEntry(key: name, value: viewOf) in views.entries) {
+      final store = CachingCalendarStore<String>(dataSource: UnansweredReads());
+      addTearDown(store.dispose);
+      final given = UnansweredReads();
+      final next = CachingCalendarStore<String>(dataSource: given);
+      addTearDown(next.dispose);
+      await pumpSized(tester, viewOf(store), width: width, height: height);
+
+      await pumpSized(tester, viewOf(next), width: width, height: height);
+      expect(given.phases, <SchedulerPhase>[
+        SchedulerPhase.postFrameCallbacks,
+      ], reason: name);
+      expect(given.reads, <(DateTime, DateTime)>[shows[name]!], reason: name);
+      // Each view leaves the tree before the next is pumped.
+      await tester.pumpWidget(const SizedBox());
+    }
   });
 }

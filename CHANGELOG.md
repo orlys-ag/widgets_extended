@@ -1112,6 +1112,10 @@ stacked a bar before a bar being moved or resized cancelled that bar's,
 so the release requested nothing. The strip now keeps its rows under a
 block's drag until it requests its landing or ends, and a dragged bar
 keeps its row, the other bars stacking around it.
+- Fix: given another store, Agenda's day list, the week strip and the
+month strip asked it to read none of the days they showed, so a day past
+the store's shown range stayed loading until a scroll. Each now reads the
+days it shows from the new store, after the frame that gives it.
 
 ## 0.0.35
 

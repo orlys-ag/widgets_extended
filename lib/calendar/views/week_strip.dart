@@ -32,8 +32,9 @@ ValueKey<String> weekStripDayKey(DateTime day) {
 /// to rest on a whole day, the nearest to where a fling would carry the
 /// strip. While the strip moves other than to follow the selected day, it
 /// reports each day that comes to its middle through [onBrowse]; once it
-/// rests, it asks the store to read the shown days of the weeks of the
-/// days it shows, so their markers show, and Day, which reads
+/// rests, and after the frame that gives it a new [store], it asks the
+/// store to read the shown days of the weeks of the days it shows, so
+/// their markers show, and Day, which reads
 /// a selected day's whole week, shows any of them at once on a tap. A new
 /// [selectedDay] the strip does not show the middle of brings the strip,
 /// after the frame, to the shown days of that day's week, sliding there
@@ -241,6 +242,9 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
     if (widget.today != oldWidget.today) {
       _today = _plainTwinOf(widget.today);
     }
+    if (widget.store != oldWidget.store) {
+      _schedulePrefetch();
+    }
     // Any new selected date, even one the strip showed, since a drag may
     // have moved it away since; the same date given on another clock moves
     // nothing.
@@ -399,8 +403,8 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
   }
 
   /// After the frame, reads the weeks of the days the strip shows, once
-  /// however many scrolls end in it, and asks for that frame where none is
-  /// under way: a scroll can end during layout, as
+  /// however many scrolls end and stores are given in it, and asks for that
+  /// frame where none is under way: a scroll can end during layout, as
   /// [BallisticScrollActivity.applyNewDimensions] ends one where the
   /// physics gives it no new simulation, when the store must not notify.
   void _schedulePrefetch() {
