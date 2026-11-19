@@ -760,7 +760,8 @@ void main() {
           "addDays(date, 1).timeZoneOffset; return change > Duration.zero ? "
           "change : Duration.zero;",
       "isLaterOccurrence":
-          "final minute = time.subtract( Duration( seconds: time.second, "
+          "if (time.isUtc) { return false; } final minute = time.subtract( "
+          "Duration( seconds: time.second, "
           "milliseconds: time.millisecond, microseconds: time.microsecond, ), "
           "); return minute != timeAtWallMinute(wallMinuteOf(time));",
       "firstWallMinuteNotBefore":
@@ -791,8 +792,9 @@ void main() {
           "time; } DateTime? earliest; DateTime? latest; for (final candidate "
           "in <DateTime>[ time.subtract(change), time, time.add(change), ]) { "
           "if (reads(candidate)) { earliest ??= candidate; latest = "
-          "candidate; } } if (from != null && dayNumber(from) == day && "
-          "isLaterOccurrence(from)) { return latest; } return earliest;",
+          "candidate; } } final fromHere = from?.toLocal(); if (fromHere != "
+          "null && dayNumber(fromHere) == day && isLaterOccurrence(fromHere)) "
+          "{ return latest; } return earliest;",
     };
     final statics = staticsOf(
       classBody(

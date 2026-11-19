@@ -2,6 +2,7 @@
 /// its divider and time picker, its Time toggle's look, what a screen
 /// reader hears of it and what a tap on it does over the theme's motion,
 /// the view it opens on, what a tap on a day and a pick of a time report,
+/// a picked time's day as a day start on the store's clock,
 /// the time a tap on a day keeps or moves to, the times the clock of the
 /// store's zone skips, Now on today alone, a minute that turns null, a
 /// column held as the time hides, the focus the toggle takes, the
@@ -392,6 +393,41 @@ void main() {
     await tester.tap(find.byKey(timePickerHourRowKey(11)));
     await tester.pumpAndSettle();
     expect(picks, <(DateTime, int?)>[(wednesday, 660)]);
+  });
+
+  testWidgets("DT16 a pick of a time reports its day as the start of its "
+      "date on the clock of the store's zone, and of the device with no "
+      "store, whatever time of it day holds", (tester) async {
+    final havana = tz.getLocation("America/Havana");
+    final store = MemoryCalendarStore<String>(zone: havana);
+    addTearDown(store.dispose);
+    Future<List<(DateTime, int?)>> pickEleven(
+      CalendarStore<String>? store,
+    ) async {
+      final picks = <(DateTime, int?)>[];
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        app(
+          CalendarDateTimePicker<String>(
+            day: DateTime(2026, 4, 22, 9, 30),
+            minute: 600,
+            today: tuesday,
+            store: store,
+            onChanged: (day, minute) {
+              picks.add((day, minute));
+            },
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(timePickerHourRowKey(11)));
+      await tester.pumpAndSettle();
+      return picks;
+    }
+
+    expect(await pickEleven(store), <(DateTime, int?)>[
+      (tz.TZDateTime(havana, 2026, 4, 22), 660),
+    ]);
+    expect(await pickEleven(null), <(DateTime, int?)>[(wednesday, 660)]);
   });
 
   testWidgets("DT7 with a null minute the picker shows no toggle and no "

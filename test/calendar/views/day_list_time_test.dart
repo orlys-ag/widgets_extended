@@ -2,13 +2,15 @@
 /// it covers with that day's part of it, all-day entries above the timed
 /// ones, the local zone's DST days listed once, the history lock read on
 /// start and end, a gap shorter than a slot offering no add button, the
-/// slot an add button creates, and on a day whose clock repeats a stretch,
+/// slot an add button creates, on a day whose clock repeats a stretch,
 /// the gap rows, their adds and the marker of the current time in the order
-/// of their instants.
+/// of their instants, and on a zoned day whose clock skips its midnight,
+/// the part of an entry carried from the day before.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
@@ -20,6 +22,7 @@ import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 
 import '../../scheduling/dst_days.dart';
+import '../../scheduling/zones.dart';
 
 typedef Shown = CalendarShownEntry<String>;
 
@@ -734,4 +737,70 @@ void main() {
       });
     },
   );
+
+  group("on a store zoned to Havana, whose clock skips 00:00 to 01:00 on "
+      "2026-03-08", () {
+    setUpAll(ensureZones);
+
+    /// 2026-03-08's start on Havana's clock, and a store on that clock
+    /// holding [entries].
+    (DateTime, MemoryCalendarStore<String>) havanaDay(
+      List<CalendarEntry<String>> Function(tz.Location havana) entries,
+    ) {
+      final havana = tz.getLocation("America/Havana");
+      final store = MemoryCalendarStore<String>(
+        entries: entries(havana),
+        zone: havana,
+      );
+      addTearDown(store.dispose);
+      return (
+        CalendarDates.dateOfDayNumber(
+          CalendarDates.dayNumber(DateTime(2026, 3, 8)),
+          zone: havana,
+        ),
+        store,
+      );
+    }
+
+    testWidgets("AG19 an entry carried from the day before is listed from "
+        "01:00, the minute the day's clock starts at, and reads "
+        "01:00-03:00", (tester) async {
+      final (day, store) = havanaDay((havana) {
+        return <CalendarEntry<String>>[
+          entryOf(
+            "carried",
+            tz.TZDateTime(havana, 2026, 3, 7, 22),
+            tz.TZDateTime(havana, 2026, 3, 8, 3),
+          ),
+        ];
+      });
+      // Setup sanity: the day's clock starts at 01:00.
+      expect(CalendarDates.minuteOfDay(day), 60);
+      expect(rowsOf(store, day), <Object>[("carried", 60, 180, false)]);
+      await pumpList(tester, store, day, editable: false);
+      expect(
+        find.descendant(
+          of: find.byKey(dayListTimeKey("carried")),
+          matching: find.text("01:00-03:00"),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    test("AG20 under 00:00-00:30, an entry carried from the day before to "
+        "01:20 has no row on the day and counts after the hours", () {
+      final (day, store) = havanaDay((havana) {
+        return <CalendarEntry<String>>[
+          entryOf(
+            "late",
+            tz.TZDateTime(havana, 2026, 3, 7, 23, 50),
+            tz.TZDateTime(havana, 2026, 3, 8, 1, 20),
+          ),
+        ];
+      });
+      expect(rowsOf(store, day, hours: CalendarDayHours(0, 30)), <Object>[
+        ("after", 1),
+      ]);
+    });
+  });
 }

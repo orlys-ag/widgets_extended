@@ -331,6 +331,24 @@ void main() {
       expect(CalendarDates.isLaterOccurrence(at(monday, 1, 30)), isFalse);
     });
 
+    test("DT31 timeAtWallMinute reads a plain UTC from: as its instant on "
+        "the device's clock: 01:45 from the first 01:30 is the first 01:45, "
+        "and from the second 01:30 the second", () {
+      final wall =
+          CalendarDates.dayNumber(longDayStart) * CalendarDates.minutesPerDay +
+          105;
+      final first = longDayStart.add(const Duration(minutes: 90));
+      final second = secondHalfPastOne;
+      expect(
+        CalendarDates.timeAtWallMinute(wall, from: first.toUtc()),
+        first.add(const Duration(minutes: 15)),
+      );
+      expect(
+        CalendarDates.timeAtWallMinute(wall, from: second.toUtc()),
+        second.add(const Duration(minutes: 15)),
+      );
+    });
+
     test("DT14 isLaterOccurrence of a time past its minute in the repeated "
         "hour tells the occurrences apart as its minute does, and "
         "timeAtWallMinute keeps the first occurrence of from: there", () {
@@ -871,6 +889,20 @@ void main() {
       ),
       isFalse,
     );
+  });
+
+  group("in a zone off UTC", skip: offUtcSkip, () {
+    test("DT30 isLaterOccurrence of a plain UTC time is false: its clock, "
+        "UTC's, reads every time once", () {
+      final utc = offUtcTime!.toUtc();
+      // Setup sanity: UTC's clock reads the instant on another day than the
+      // device's, so the two clocks name another wall minute for it.
+      expect(
+        CalendarDates.dayNumber(utc),
+        isNot(CalendarDates.dayNumber(offUtcTime!)),
+      );
+      expect(CalendarDates.isLaterOccurrence(utc), isFalse);
+    });
   });
 
   group(

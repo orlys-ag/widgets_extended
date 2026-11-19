@@ -379,7 +379,11 @@ abstract final class CalendarDates {
         latest = candidate;
       }
     }
-    if (from != null && dayNumber(from) == day && isLaterOccurrence(from)) {
+    // A plain UTC [from] names its instant, which the device's clock reads.
+    final fromHere = from?.toLocal();
+    if (fromHere != null &&
+        dayNumber(fromHere) == day &&
+        isLaterOccurrence(fromHere)) {
       return latest;
     }
     return earliest;
@@ -407,10 +411,13 @@ abstract final class CalendarDates {
 
   /// Whether [time] is the later instant of a wall time its day's clock
   /// reads twice, told as of its whole minute, so the seconds past it play
-  /// no part.
+  /// no part; false for a plain UTC `DateTime`, whose clock repeats nothing.
   static bool isLaterOccurrence(DateTime time) {
     if (time is TZDateTime) {
       return _ZoneClock.around(time).isLater(time);
+    }
+    if (time.isUtc) {
+      return false;
     }
     // The minute's own instant in time's occurrence: [timeAtWallMinute]
     // answers whole minutes.

@@ -1054,6 +1054,25 @@ minutes, and fits by `until` where its wall span ends by it, so a slot across
 the instant a clock goes back or skips ahead lasts its length too. `firstSlot`
 throws an `ArgumentError` for an `elapsedMinutes` under 1 or given beside a
 `lengthMinutes`.
+- Fix: on a day whose clock skips its midnight, Agenda listed an entry
+carried from the day before from 00:00, a time that day's clock never
+reads, where it lists one from the day's start from 01:00; and Month's
+hours split counted such a part inside hours that end before the day's
+first time, so under 00:00-00:30 an entry on America/Havana's clock from
+2026-03-07 23:50 to 2026-03-08 01:20 had a chip. Both now start the part at
+the minute the day's clock starts at.
+- Fix: `CalendarDates.isLaterOccurrence` answered true for a plain UTC
+`DateTime` wherever the device's offset is not zero, reading its UTC fields
+as a wall time on the device's clock; it now answers false, as a UTC clock
+reads every time once. On the device's clock, `CalendarDates.timeAtWallMinute`,
+`endAtWallMinute`, `rangeEndAtWallMinute`, `firstWallMinuteNotBefore` and
+`lastWallMinuteNotAfter` read a plain UTC `from` by its UTC fields, so in a
+stretch the clock repeats they could pick the other occurrence; they now
+read it as its instant on the device's clock, as their documents say.
+- Fix: `CalendarDateTimePicker` reported a pick of a time with its `day` as
+the host gave it, a time past midnight included, where `onChanged` promises
+the start of that date on the clock of the store's zone, as a tap on a day
+reports it. A pick of a time now reports that day start.
 
 ## 0.0.35
 

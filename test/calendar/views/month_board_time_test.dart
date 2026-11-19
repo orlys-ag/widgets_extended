@@ -1,13 +1,14 @@
 /// The month board on start and end: an entry covering more than one day,
 /// timed or all-day, as a bar across its days and a one-day timed entry as
-/// a chip, the hours split per piece, and the local zone's DST days shown
-/// once with their entries.
+/// a chip, the hours split per piece, on the clock of a zone where given,
+/// and the local zone's DST days shown once with their entries.
 library;
 
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
@@ -16,6 +17,7 @@ import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 
 import '../../scheduling/dst_days.dart';
+import '../../scheduling/zones.dart';
 
 typedef Shown = CalendarShownEntry<String>;
 
@@ -404,4 +406,29 @@ void main() {
       });
     },
   );
+
+  test("MT9 on Havana's clock, which skips 00:00 to 01:00 on 2026-03-08, "
+      "under 00:00-00:30 an entry from 03-07 23:50 to 03-08 01:20 lies "
+      "after the hours on both days", () {
+    ensureZones();
+    final havana = tz.getLocation("America/Havana");
+    final grid = CalendarMonthGrid(2026, 3);
+    final split = splitMonthHours(
+      <Shown>[
+        shownOf(
+          "late",
+          tz.TZDateTime(havana, 2026, 3, 7, 23, 50),
+          tz.TZDateTime(havana, 2026, 3, 8, 1, 20),
+        ),
+      ],
+      grid,
+      CalendarDayHours(0, 30),
+      zone: havana,
+    );
+    expect(split.inside, isEmpty);
+    expect(countsByDay(split.later, grid), <DateTime, int>{
+      DateTime(2026, 3, 7): 1,
+      DateTime(2026, 3, 8): 1,
+    });
+  });
 }

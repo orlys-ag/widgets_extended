@@ -528,7 +528,13 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
 
   void _pickTime(int? minute) {
     if (minute != null) {
-      widget.onChanged?.call(widget.day, minute);
+      widget.onChanged?.call(
+        CalendarDates.dateOfDayNumber(
+          CalendarDates.dayNumber(widget.day),
+          zone: widget.store?.zone,
+        ),
+        minute,
+      );
     }
   }
 
