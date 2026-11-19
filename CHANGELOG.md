@@ -880,16 +880,16 @@ disposes them; a row still waits for a running enter, exit or extent animation
 or FLIP slide before it goes. `TreeChildManager.removeChild`, which
 `SliverTreeElement` left empty, now removes the row, and the render object
 calls it inside its layout.
-- Added `CalendarSchedule`, the schedule a form edits for any kind of
-entry: its civil days and wall minutes, its length kept as its start
-moves, all-day turned on and back, and its times on a zone's clock, null
-where the clock skips one; and `CalendarScheduleCheck`, which names, as
-`CalendarScheduleProblem`s, which of the edit rules' and the policy's
-answers refuse a schedule, lists the entries it overlaps, gives the first
-minute its start may take and the next free range of its length, under a
+- Added `CalendarSchedule`, the schedule a form edits for any kind of entry:
+its civil days and wall minutes, its length kept by a new start time and both
+wall times by a new start day, all-day turned on and back, and its times on a
+zone's clock, null where the clock skips one; and `CalendarScheduleCheck`,
+which names, as `CalendarScheduleProblem`s, which of the edit rules' and the
+policy's answers refuse a schedule, lists the entries it overlaps, gives the
+first minute its start may take and the next free range of its length, under a
 kind's `CalendarScheduleOptions`. `CalendarEditRules.firstSlot` takes an
-optional `lengthMinutes`, the length of the range it finds, still
-stepping by the slot.
+optional `lengthMinutes`, the length of the range it finds, still stepping by
+the slot.
 - Added `CalendarScheduleCheck.timesChecked`, whether a schedule's end is
 after its start and the clock reads both its times, so that its problems
 hold every rule's answer, and `CalendarScheduleCheck.withSchedule`, the
@@ -985,6 +985,75 @@ longer than the limit was held at the range the limit admits, which ends
 before the entry does, or for a bar's leading edge starts after it, so a
 drag that lengthened the entry wrote a shorter one. Such a release now
 requests nothing.
+- Fix: `CalendarSchedule` kept no pass of a repeated stretch, the wall time a
+clock turned back reads twice, and measured its length in wall minutes.
+`CalendarSchedule.of` kept each edge's wall minute alone and
+`CalendarSchedule.timesOn` gave the earlier instant of a time read twice, so
+the schedule of an entry from 01:30 EST to 03:00 EST on New York's 2026-11-01
+started at 01:30 EDT, an hour early. `CalendarSchedule.of` now keeps the clock
+its start was read on and the pass each edge lies in: a start in the later
+pass, and an end in the first pass, the later one or neither, an end its clock
+reads once holding the start's later pass, or none. An end at the instant a
+clock goes back reads as the stretch's end in the first pass, so
+`CalendarSchedule.endMinute` stays from 1 to 1440: an end at Havana's later
+00:00 of 2026-11-01 reads 01:00, where it read minute 0.
+`CalendarSchedule.timesOn` applies each pass on the clock it is asked, so on
+the schedule's clock it gives back the instants the schedule was read from,
+and ends an end holding no pass as `CalendarDates.rangeEndAtWallMinute` ends a
+range from the start, as Week's create does: a schedule from 01:30 to 02:00
+moved onto New York's 2026-11-01 lasts 30 minutes from the first 01:30, where
+it lasted 90. `CalendarSchedule.lengthMinutes` is the elapsed minutes between
+the schedule's instants on its clock, and its wall minutes where that clock
+skips an edge: on New York's clock, 55 for 01:15 EDT to 01:10 EST of
+2026-11-01, where it was -5, 210 for 00:30 EDT to 03:00 EST that day, where it
+was 150, and 120 for 01:00 EST to 04:00 EDT of 2027-03-14, where it was 180.
+`CalendarSchedule.withStartMinute` and `CalendarSchedule.withLength` keep that
+length, the end at the new start's instant plus it, in the pass that instant
+reads, or that many wall minutes after a start the clock skips;
+`CalendarSchedule.withStartDay` keeps both wall times, as before, and the
+passes and the clock, a pass having an effect only on a day whose clock reads
+its edge's time twice; and `CalendarSchedule.withEndDay`,
+`CalendarSchedule.withEndMinute` and `CalendarSchedule.withAllDay` keep the
+passes and the clock. `CalendarSchedule.startMinute` and
+`CalendarSchedule.endMinute` are getters where they were fields, read the
+same. A length ending before 1970 now ends on the day it runs to: 10:00 to
+11:00 of 1969-12-31 with `withLength(60)` ended at minute -780 of 1970-01-01.
+`CalendarSchedule.==` and `CalendarSchedule.hashCode` compare the days, the
+kind, the timed minutes, now held once, the passes and the clock, so two timed
+schedules of the same days, minutes, passes and clock compare equal however
+they were reached, where a new start or end minute left a stale copy of the
+timed minutes that made them unequal. `CalendarSchedule.toString` marks a
+later start, a later end and a first-pass end.
+- Fix: `CalendarScheduleCheck` compared wall minutes where a clock reads a
+stretch twice. `CalendarScheduleCheck.problems` reported
+`CalendarScheduleBeforeEarliest` from the start's wall minute, so with now in
+the later pass a new start in the first pass, before now, was admitted, such
+as 01:50 EDT at 01:45 EST on New York's 2026-11-01 under a `HistoryLockPolicy`
+that locks earlier today; it now reports it where the start's instant on now's
+clock is before the policy's earliest start.
+`CalendarScheduleCheck.timesChecked` and the
+`CalendarScheduleEndNotAfterStart` of `CalendarScheduleCheck.problems` tell
+whether the end is after the start from its instants on now's clock where that
+clock reads both times, and from `CalendarSchedule.lengthMinutes` only where
+it skips one. `CalendarScheduleCheck.nextFree` keeps the passes of the range
+it finds, searches from the later instant of the schedule's start and the
+earliest start, in that one's pass, so a schedule starting in a later pass no
+longer gets a range an hour before it, and finds a range of the schedule's
+length in elapsed minutes, so a schedule across the instant a clock goes back
+fits a gap as long as it lasts. `CalendarScheduleCheck.firstStartMinute` keeps
+its value, the first wall minute in the earliest start's occurrence.
+- Added `occurrence` and `elapsedMinutes`, optional named parameters of
+`CalendarEditRules.firstSlot`. With `occurrence`, the search reads the day's
+clock in that instant's occurrence, and its slots start no earlier than the
+first wall minute in that occurrence not before the earliest start, rounded up
+to the slot grid; without it the search reads the day's clock as before, in
+`CalendarEarliestStart.occurrence`, the occurrence `firstSlot` reads where its
+caller names none. With `elapsedMinutes`, a slot lasts that many minutes of
+elapsed time, its end its start plus them, in place of `lengthMinutes`' wall
+minutes, and fits by `until` where its wall span ends by it, so a slot across
+the instant a clock goes back or skips ahead lasts its length too. `firstSlot`
+throws an `ArgumentError` for an `elapsedMinutes` under 1 or given beside a
+`lengthMinutes`.
 
 ## 0.0.35
 
