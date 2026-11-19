@@ -3318,7 +3318,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// day-edge resize of the bar ([_barResizeOf]) past
   /// [CalendarEditRules.dayLimit]'s days is refused, and holds the drag's
   /// [_Dragging.heldBar] at the range the limit admits, which the release
-  /// writes; every other span of that resize clears it.
+  /// writes, unless that range moves the dragged edge against the drag
+  /// ([_holdsAgainstDrag]); every other span of that resize clears it.
   bool _canDropBar(GridKey key, BoardSpan span) {
     if (span.rowStart < _stripStart ||
         span.endTrackOn(Axis.vertical) >
@@ -3348,15 +3349,23 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         return false;
       }
       if (times != null && !_rules.coversAtMost(times.start, times.end)) {
+        final atEnd = edge == BoardResizeEdges.trailing;
         final held = _rules.heldToLimit(
           times.start,
           times.end,
-          atEnd: edge == BoardResizeEdges.trailing,
+          atEnd: atEnd,
           isAllDay: true,
         );
         _holdBar(
           held != null &&
                   (held.start != entry.start || held.end != entry.end) &&
+                  !(atEnd
+                      ? _holdsAgainstDrag(entry.end, times.end, held.end)
+                      : _holdsAgainstDrag(
+                          entry.start,
+                          times.start,
+                          held.start,
+                        )) &&
                   _rules.admitsTimes(
                     entry,
                     held.start,
@@ -4085,7 +4094,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// slot's end on that column's day, the earlier instant of a time the
   /// clock repeats, held at [CalendarEditRules.dayLimit]'s days
   /// ([CalendarEditRules.heldToLimit]); null where that end is a time the
-  /// clock skips, where [_policy] does not let the entry's end resize or
+  /// clock skips, where the hold would end the entry earlier than it ends,
+  /// as for an entry already past the limit ([_holdsAgainstDrag]), where
+  /// [_policy] does not let the entry's end resize or
   /// refuses the range from the entry's start to it, or its answer throws
   /// ([_reportPolicyThrow]), where the hours ([CalendarDayHours.holdsTimes])
   /// refuse that range, or where the policy's
@@ -4107,7 +4118,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final start = entry.start;
     if (!_rules.coversAtMost(start, end)) {
       final held = _rules.heldToLimit(start, end, atEnd: true, isAllDay: false);
-      if (held == null) {
+      if (held == null || _holdsAgainstDrag(entry.end, end, held.end)) {
         return null;
       }
       end = held.end;
@@ -4136,6 +4147,19 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
     }
     return end;
+  }
+
+  /// Whether [held], where [CalendarEditRules.heldToLimit] holds a resized
+  /// edge, lies on the other side of [stored], the edge as stored, from
+  /// [dragged], where the drag took it: a hold that moves the edge against
+  /// the drag, as one of an entry already past the day limit does, which
+  /// would shorten an entry its drag lengthens.
+  static bool _holdsAgainstDrag(
+    DateTime stored,
+    DateTime dragged,
+    DateTime held,
+  ) {
+    return held.compareTo(stored).sign * dragged.compareTo(stored).sign < 0;
   }
 
   /// Reports a throw of [_policy]'s answer in a gate the grid asks inside

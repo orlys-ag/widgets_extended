@@ -3474,6 +3474,35 @@ void main() {
     }
   });
 
+  testWidgets("TX38 in Week under maxDayCount 3, either day edge of a bar "
+      "already over the limit, dragged outward and released, writes "
+      "nothing: the limit never shortens a bar", (tester) async {
+    final shown = Shown.week(monday);
+    for (final (bar, side, over)
+        in <(CalendarEntry<String>, AxisDirection, DateTime)>[
+          (allDayOf("m", monday, days: 4), AxisDirection.right, friday),
+          (allDayOf("m", tuesday, days: 4), AxisDirection.left, monday),
+        ]) {
+      final store = storeOf(<CalendarEntry<String>>[bar]);
+      await Harness(store, shown, maxDayCount: 3).pump(tester);
+      await selectBar(tester, "m");
+      final cell = stripRect(tester, shown, over);
+      final gesture = await holdEdge(
+        tester,
+        "m",
+        side,
+        Offset(
+          side == AxisDirection.left ? cell.left + 4.0 : cell.right - 4.0,
+          tester.getCenter(barFinder("m")).dy,
+        ),
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(store.moves, isEmpty, reason: "$side");
+      expectTimes(store, "m", bar.start, bar.end, reason: "$side");
+    }
+  });
+
   testWidgets("TX36 in Week, leaving edit mode while a block's move, its "
       "move onto a strip cell, or its end handle's resize into a later day "
       "runs ends it: the frame that leaves edit mode asks the policy "
@@ -5645,6 +5674,24 @@ void main() {
     expect(store.moves, <CalendarEntry<String>>[
       entryOf("night", at(monday, 22), at(wednesday, 12, 15)),
     ]);
+  });
+
+  testWidgets("LD5 under maxDayCount 2, the end handle of an entry already "
+      "over the limit, released on a later day's slot, writes nothing: the "
+      "limit never ends an entry earlier than it ends", (tester) async {
+    final store = await releaseEndOver(
+      tester,
+      entries: <CalendarEntry<String>>[
+        entryOf("long", at(monday, 22), at(wednesday, 2)),
+      ],
+      id: "long",
+      day: wednesday,
+      over: thursday,
+      minute: 12 * 60,
+      limit: 2,
+    );
+    expect(store.moves, isEmpty);
+    expectTimes(store, "long", at(monday, 22), at(wednesday, 2));
   });
 
   testWidgets("PG3 in Week, the Saturday piece of Saturday 23:30 to Sunday "
