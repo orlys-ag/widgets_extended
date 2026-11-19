@@ -72,7 +72,7 @@
 /// deletes. A write that fails says why.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'workspace_calendar/calendar_api.dart';

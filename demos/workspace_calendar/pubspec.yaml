@@ -12,6 +12,7 @@ dependencies:
   widgets_extended:
     path: ../..
   timezone: ">=0.11.2 <1.0.0"
+  material_ui: ^1.11.1
 
 dev_dependencies:
   flutter_test:

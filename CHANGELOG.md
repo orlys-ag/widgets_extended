@@ -1054,6 +1054,14 @@ minutes, and fits by `until` where its wall span ends by it, so a slot across
 the instant a clock goes back or skips ahead lasts its length too. `firstSlot`
 throws an `ArgumentError` for an `elapsedMinutes` under 1 or given beside a
 `lengthMinutes`.
+- The calendar's composition layer (`CalendarView`, its header, the
+calendar card, the day and date-time pickers, the zone panel and
+`CalendarThemeExtension`) builds on `package:material_ui`, which Flutter
+names in place of `package:flutter/material.dart` from 3.47, and the
+package depends on `material_ui`. Its `Theme`, `Material` and
+`MaterialLocalizations` are types apart from the legacy library's, so the
+calendar reads an app's Material theme, and its view menu the
+`MaterialLocalizations` it needs, only from an app built on `material_ui`.
 
 ## 0.0.35
 

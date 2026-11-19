@@ -1,7 +1,7 @@
 /// CALENDAR EXAMPLE
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 
 import 'workspace_calendar_example.dart';

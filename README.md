@@ -607,7 +607,11 @@ a change share time with some entries: the views ask it about each timed
 entry a change would share time with, given a `CalendarOverlapCandidate`
 of the change's times and the entry it changes.
 
-**Look and words.** A `CalendarThemeData` holds every colour, text style,
+**Look and words.** The calendar's Material parts are those of
+`package:material_ui`, whose `Theme`, `Material` and
+`MaterialLocalizations` are types apart from those of
+`package:flutter/material.dart`, so a Material app below is one built on
+`material_ui`. A `CalendarThemeData` holds every colour, text style,
 motion and icon the views draw. Give it through a `CalendarTheme`, or in a
 Material app through a `CalendarThemeExtension`. A Material app with
 neither gets one derived from its `ColorScheme`, and an app with no

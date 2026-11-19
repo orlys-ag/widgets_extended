@@ -5,7 +5,7 @@
 /// the next layout install a FLIP slide via the existing engine.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/sliver_tree.dart';
 

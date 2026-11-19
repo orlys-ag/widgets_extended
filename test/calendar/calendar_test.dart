@@ -35,12 +35,32 @@ const Set<String> widgetsAndBelow = <String>{
   "services",
 };
 
-/// The Flutter libraries each layer's rule lets its files import.
+/// The Flutter libraries each layer's rule lets its files import: those of
+/// `package:flutter/` by name, and `material_ui` for Material's own
+/// package, `package:material_ui/material_ui.dart`.
 const Map<String, Set<String>> flutterLibrariesOf = <String, Set<String>>{
   "presentation": widgetsAndBelow,
   "views": widgetsAndBelow,
-  "composition": <String>{...widgetsAndBelow, "material", "cupertino"},
+  "composition": <String>{...widgetsAndBelow, "material_ui", "cupertino"},
 };
+
+/// The name [flutterLibrariesOf] gives the Flutter library [uri] names:
+/// a `package:flutter/` library's name, `material_ui` for
+/// `package:material_ui/material_ui.dart`, and [uri] itself for any other
+/// file of `material_ui`, which no layer may import; null for a URI of
+/// neither package.
+String? flutterLibraryOf(String uri) {
+  final flutter = RegExp(
+    r"^package:flutter/([a-z_]+)\.dart$",
+  ).firstMatch(uri)?.group(1);
+  if (flutter != null) {
+    return flutter;
+  }
+  if (uri == "package:material_ui/material_ui.dart") {
+    return "material_ui";
+  }
+  return uri.startsWith("package:material_ui/") ? uri : null;
+}
 
 /// The first directory under lib/calendar/ of [path], a path from the
 /// package root.
@@ -430,7 +450,7 @@ void main() {
       expect(layers, contains(layer), reason: path);
       final source = File(path).readAsStringSync();
       for (final uri in directiveUris(source)) {
-        if (uri.startsWith("dart:") || uri.startsWith("package:flutter/")) {
+        if (uri.startsWith("dart:") || flutterLibraryOf(uri) != null) {
           continue;
         }
         expect(Uri.parse(uri).hasScheme, isFalse, reason: "$path: $uri");
@@ -456,9 +476,7 @@ void main() {
       final allowed = flutterLibrariesOf[layerOf(path)] ?? const <String>{};
       final source = File(path).readAsStringSync();
       for (final uri in directiveUris(source)) {
-        final library = RegExp(
-          r"^package:flutter/([a-z_]+)\.dart$",
-        ).firstMatch(uri)?.group(1);
+        final library = flutterLibraryOf(uri);
         if (library == null) {
           continue;
         }

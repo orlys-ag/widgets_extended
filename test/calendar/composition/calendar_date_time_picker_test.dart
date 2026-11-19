@@ -9,7 +9,7 @@
 /// its constructor refuses.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/calendar/composition/calendar_date_time_picker.dart'

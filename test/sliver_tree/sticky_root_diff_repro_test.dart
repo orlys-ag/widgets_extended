@@ -22,7 +22,7 @@
 /// `parentData.layoutOffset` and is honest.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/sliver_tree/types.dart' show StickyHeaderInfo;
 import 'package:widgets_extended/widgets_extended.dart';

@@ -15,7 +15,7 @@
 /// slots may be frozen too. Points are paint space in the board's frame.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/board/_board_axis.dart';
 import 'package:widgets_extended/board/_board_span.dart';

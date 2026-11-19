@@ -7,7 +7,7 @@
 /// read; and the calendar keeps its last week clear of it.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart'
     show calendarEditToggleKey;

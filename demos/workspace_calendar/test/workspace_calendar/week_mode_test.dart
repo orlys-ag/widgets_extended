@@ -12,7 +12,7 @@ import 'package:workspace_calendar/workspace_calendar/schedule_section.dart'
     show debugScheduleDayRangeAsks, scheduleOverlapKey;
 import 'package:workspace_calendar/workspace_calendar/settings_sheet.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';

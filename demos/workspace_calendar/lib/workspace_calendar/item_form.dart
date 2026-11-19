@@ -34,7 +34,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show clampDouble, listEquals;
 import 'package:flutter/gestures.dart'
     show GestureRecognizer, VerticalDragGestureRecognizer;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart'
     show RenderAbstractViewport, ScrollDirection;
 import 'package:flutter/scheduler.dart' show SchedulerBinding;

@@ -3,7 +3,7 @@
 /// of the composition draws in.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../presentation/calendar_theme.dart';
 

@@ -12,7 +12,7 @@ import 'package:widgets_extended/calendar/composition/calendar_header.dart'
     show calendarViewButtonKey;
 import 'package:widgets_extended/calendar/composition/calendar_view.dart'
     show CalendarView;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
