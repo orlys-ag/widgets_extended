@@ -147,13 +147,7 @@ final class CalendarSchedule {
       later = null;
     }
     if (isClockGoingBackAt(whole)) {
-      final wall = CalendarDates.wallMinuteOf(before) + 1;
-      final day = _dayEnding(wall);
-      return (
-        day: day,
-        minute: wall - day * CalendarDates.minutesPerDay,
-        later: later,
-      );
+      return _endingAt(CalendarDates.wallMinuteOf(before) + 1, later);
     }
     final minute = CalendarDates.endMinuteOfDay(end);
     final day = minute == CalendarDates.minutesPerDay
@@ -162,13 +156,23 @@ final class CalendarSchedule {
     return (day: day, minute: minute, later: later);
   }
 
-  /// The day number of the day the wall minute [wallEnd] ends: its 24:00
-  /// ends the day before. Floored, so an end before the epoch's day keeps
+  /// An end at the wall minute [wall] in the pass [endLater] names, split
+  /// into the day that minute ends and its minute there: its 24:00 ends the
+  /// day before. The day is floored, so an end before the epoch's day keeps
   /// its minute from 1 to 1440.
-  static int _dayEnding(int wallEnd) {
-    final before = wallEnd - 1;
-    return (before - before % CalendarDates.minutesPerDay) ~/
+  static ({int day, int minute, bool? later}) _endingAt(
+    int wall,
+    bool? endLater,
+  ) {
+    final before = wall - 1;
+    final day =
+        (before - before % CalendarDates.minutesPerDay) ~/
         CalendarDates.minutesPerDay;
+    return (
+      day: day,
+      minute: wall - day * CalendarDates.minutesPerDay,
+      later: endLater,
+    );
   }
 
   final int _startDay;
@@ -279,23 +283,13 @@ final class CalendarSchedule {
       later: _startLater,
       zone: _clock,
     );
-    if (start != null) {
-      final reading = _endReading(
-        start.add(Duration(minutes: length)),
-        _startLater,
-      );
-      return _copy(
-        endDayNumber: reading.day,
-        endMinute: reading.minute,
-        end: (later: reading.later),
-      );
-    }
-    final wall = _wallStart + length;
-    final day = _dayEnding(wall);
+    final end = start == null
+        ? _endingAt(_wallStart + length, _startLater ? true : null)
+        : _endReading(start.add(Duration(minutes: length)), _startLater);
     return _copy(
-      endDayNumber: day,
-      endMinute: wall - day * CalendarDates.minutesPerDay,
-      end: (later: _startLater ? true : null),
+      endDayNumber: end.day,
+      endMinute: end.minute,
+      end: (later: end.later),
     );
   }
 
