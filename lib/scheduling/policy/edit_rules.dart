@@ -338,9 +338,9 @@ final class CalendarEditRules<T> {
   }
 
   /// The first slot of [slotMinutes] on [start]'s day that a new entry may
-  /// take: from the later of [from], or with none the [hours]' start, and
-  /// [start]'s first slot minute ([CalendarEarliestStart.firstSlotMinute]),
-  /// the first slot ending by [until], or with none the hours' end, whose
+  /// take: from the latest of [from], the [hours]' start and [start]'s
+  /// first slot minute ([CalendarEarliestStart.firstSlotMinute]), the first
+  /// slot ending by the earlier of [until] and the hours' end, whose
   /// start and end the day's clock reads, each in [start]'s occurrence
   /// ([CalendarEarliestStart.occurrence]), that the entries of [clearOf]
   /// sharing its time ([NoOverlapsPolicy.rangeSharesTime]) leave it, as the
@@ -417,8 +417,8 @@ final class CalendarEditRules<T> {
     ({DateTime start, DateTime end})? held;
     final free = firstReadableSlot(
       start.day,
-      math.max(from ?? hours.start, floor),
-      until ?? hours.end,
+      math.max(math.max(from ?? hours.start, hours.start), floor),
+      math.min(until ?? hours.end, hours.end),
       slotMinutes,
       length: elapsedMinutes ?? lengthMinutes,
       elapsed: elapsedMinutes != null,

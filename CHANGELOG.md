@@ -1100,6 +1100,12 @@ answered after it was stored as it came, with no read again: an entry
 another client had moved showed on its old day, or one the write put back
 was lost, while the status was ready. The store now keeps what it holds
 and reads the days of both again, as for such a read that answers first.
+- Fix: `CalendarEditRules.firstSlot` searched from a `from` before the
+hours' start and up to an `until` after their end, so
+`CalendarScheduleCheck.nextFree` of a stored entry kept before the hours
+offered a range outside them, which the same check then refused as
+`CalendarScheduleOutsideHours`. A first slot now always lies in the
+hours.
 
 ## 0.0.35
 
