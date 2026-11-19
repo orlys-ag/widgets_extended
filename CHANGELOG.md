@@ -965,6 +965,26 @@ alone, showing no toggle and no time; a `minute` that turns null hides the
 time, which keeps the times it offered, asking `timeBoundsOf` and
 `isTimeEnabled` nothing more. Added
 `CalendarLocalizations.dateTimePickerTimeLabel`, the toggle's label.
+- Fix: over a store with no zone, a `CalendarView.clock` reading a
+`TZDateTime` marked as today, and opened on, the date package timezone's
+`local` location reads, UTC unless an app sets it, and gave the views that
+`TZDateTime` as the current time. The calendar now takes such a reading as
+the device's local time, the same instant, as it takes any reading with no
+zone.
+- Fix: `create` held a draft whose id names a stored entry, and that keeps
+that entry's times and kind, to no hours: a `CachingCalendarStore` sent
+such a draft outside its `hours` to its data source, and a
+`MemoryCalendarStore` failed it with an `ArgumentError` for its id. On both
+stores a draft outside the hours now fails with a `CalendarHoursException`,
+whatever its id, a `MemoryCalendarStore` checking the hours before the id;
+`update` and `requestMove` still take an entry that keeps its stored times
+outside the hours.
+- Fix: in Week and Day under a `dayLimit`, an end handle released over a
+later day, or a bar's day edge released past the limit, of an entry already
+longer than the limit was held at the range the limit admits, which ends
+before the entry does, or for a bar's leading edge starts after it, so a
+drag that lengthened the entry wrote a shorter one. Such a release now
+requests nothing.
 
 ## 0.0.35
 
