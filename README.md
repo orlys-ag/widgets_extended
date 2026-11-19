@@ -494,9 +494,9 @@ for the device's, and each added zone has a button that removes it. Its pill
 opens a second list of every loaded zone, or of the `zones` you give it,
 sorted by id and filtered by city and id as the user types, where a tap adds
 a zone or removes an added one. The panel draws in the calendar's theme, takes
-its words from `CalendarLocalizations`, fills the height its parent gives and
-needs a `MaterialLocalizations` above it. Beside a calendar, rebuilt with the
-store:
+its words from `CalendarLocalizations` and fills the height its parent gives;
+its search field's text menu takes Material's words, as the view menu does
+(see **Look and words**). Beside a calendar, rebuilt with the store:
 
 ```dart
 final zones = CalendarZoneController(
@@ -614,18 +614,21 @@ of the change's times and the entry it changes.
 `material_ui`. A `CalendarThemeData` holds every colour, text style,
 motion and icon the views draw. Give it through a `CalendarTheme`, or in a
 Material app through a `CalendarThemeExtension`. A Material app with
-neither gets one derived from its `ColorScheme`, and an app with no
-Material theme the built-in one. `CalendarTimePicker`, which stands apart
-from `CalendarView`, reads only a `CalendarTheme` above it, and the
-built-in theme where there is none. In an app with no `Material` above the
-calendar, the built-in header puts a transparent one above itself; its
-view menu, shown where the calendar lists more than one view, needs
-`MaterialLocalizations`, which a `MaterialApp` gives and another app adds
-with `DefaultMaterialLocalizations.delegate`. With a `headerBuilder` of
-yours, or `showsHeader: false`, the calendar needs neither. The block,
-chip, card, add-button, loading and failure builders replace what the
-views draw, and `CalendarLocalizations` writes every word, in US English
-by default.
+neither gets one derived from its `ColorScheme`, and any other app the
+built-in one: an app still on `package:flutter/material.dart`, whose theme
+the calendar cannot read, gives its theme through a `CalendarTheme`.
+`CalendarTimePicker`, which stands apart from `CalendarView`, reads only a
+`CalendarTheme` above it, and the built-in theme where there is none. In an
+app with no `Material` above the calendar, the built-in header puts a
+transparent one above itself. The view menu, shown where the calendar lists
+more than one view, and the zone panel's search field take Material's few
+words of their own, such as Copy and Paste, from the app's
+`MaterialLocalizations` of `material_ui`, which a `MaterialApp` gives; in
+any other app, one on `package:flutter/material.dart` included, the
+calendar puts in US English ones, which an app translates by adding
+`material_ui`'s localizations. The block, chip, card, add-button, loading
+and failure builders replace what the views draw, and
+`CalendarLocalizations` writes every word, in US English by default.
 
 **Testing.** A test drives a real `CalendarController` and fills a
 `MemoryCalendarStore` with the entries it needs; a `CachingCalendarStore`

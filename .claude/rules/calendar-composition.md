@@ -8,8 +8,9 @@ paths:
 
 The contract of `CalendarView`, `CalendarController`, the header, the zone panel and the default chrome. The conventions every layer follows are in `calendar.md` and `shared-calendar-conventions.md`.
 
-- **Imports**: of Flutter, `package:material_ui/material_ui.dart` and the
-  libraries below it; the scheduling module, through
+- **Imports**: of Flutter, `package:material_ui/material_ui.dart`,
+  `package:cupertino_ui/cupertino_ui.dart` and the libraries below them;
+  the scheduling module, through
   `lib/scheduling/scheduling.dart`; and the board and sliver_tree modules.
 - **`CalendarView`** offers in its view menu the views its parameters list,
   opening on the one they name, and builds no `Scaffold` or app bar. Its

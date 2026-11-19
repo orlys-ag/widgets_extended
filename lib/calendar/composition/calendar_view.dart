@@ -25,6 +25,7 @@ import 'calendar_card.dart';
 import 'calendar_card_controller.dart';
 import 'calendar_header.dart';
 import 'calendar_theme_extension.dart';
+import 'material_app_localizations_fallback.dart';
 
 part 'calendar_controller.dart';
 
@@ -193,8 +194,11 @@ final class CalendarEntryTapDetails<T> {
 /// opens the view menu. [headerBuilder] builds the header in place of the built-in
 /// one, and [showsHeader] false builds none, nor in Week and Month the
 /// header's card. The built-in header puts a transparent [Material] above
-/// itself where none is above, and its view menu needs
-/// [MaterialLocalizations] above the calendar.
+/// itself where none is above. Its view menu reads the
+/// [MaterialLocalizations] of `material_ui` above the calendar; where the
+/// app gives none, as one on `package:flutter/material.dart`, whose
+/// localizations are types apart, gives none, the calendar puts in the US
+/// English ones a `material_ui` [MaterialApp] gives by default.
 ///
 /// [controller] holds the view and the selected day, which the host sets
 /// and listens to, the range of days the calendar asks [store] to show,
@@ -224,13 +228,16 @@ final class CalendarEntryTapDetails<T> {
 /// switch zones over one sets it to 2; otherwise the views draw the
 /// loading state over the days the new zone's re-read has not answered.
 /// It disposes no store. It draws in the [CalendarTheme]
-/// above it; with none, under a Material [Theme], in a
+/// above it; with none, under a [Theme] of `material_ui`, in a
 /// [CalendarThemeExtension] of the [ThemeData], or with none the theme
 /// [CalendarThemeExtension.fromColorScheme] gives the [ColorScheme]; and
-/// with no [Theme] either, in the built-in theme. Under a [Theme] with no
-/// [Material] above, it builds a transparent one under it, which sets the
-/// theme's `bodyMedium` as the text style the views draw over. The card's
-/// fold and the month picker move over the theme's motion.
+/// with no such [Theme] either, in the built-in theme, as under the theme
+/// of an app on `package:flutter/material.dart`, which is a type apart, so
+/// such an app gives the calendar its theme through a [CalendarTheme].
+/// Under a [Theme] with no [Material] above, it builds a transparent one
+/// under it, which sets the theme's `bodyMedium` as the text style the
+/// views draw over. The card's fold and the month picker move over the
+/// theme's motion.
 ///
 /// [views] lists the views the header's menu offers, in its order; a list
 /// that is empty or names a view twice throws an [ArgumentError] from the
@@ -1900,7 +1907,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     if (_themes.hasTheme && !_themes.hasMaterial) {
       content = Material(type: MaterialType.transparency, child: content);
     }
-    return content;
+    return MaterialAppLocalizationsFallback(child: content);
   }
 }
 

@@ -179,8 +179,8 @@ typedef CalendarHeaderBuilder =
 /// while hidden, when it takes no pointer, no focus and no screen reader's
 /// attention. Drawn in the [CalendarTheme] above [context], under a
 /// transparent [Material] of the ambient text style that it puts in where
-/// no [Material] is above it. Its menu needs [MaterialLocalizations] above
-/// it.
+/// no [Material] is above it. Its menu reads the [MaterialLocalizations]
+/// above it, which a `CalendarView` puts in where the app gives none.
 Widget defaultCalendarHeaderBuilder(
   BuildContext context,
   CalendarHeaderDetails details,

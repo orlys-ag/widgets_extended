@@ -27,10 +27,11 @@ Normative for `lib/calendar/`, the calendar module: `CalendarView`, a calendar o
   `lib/sliver_tree/sliver_tree.dart`, never through the package barrel,
   `lib/widgets_extended.dart`.
 - **Material in composition only.** No file under `lib/calendar/` outside
-  `lib/calendar/composition/` imports `package:material_ui/material_ui.dart`,
-  Material's own package, or a library that exports it; the other layers
-  build on the widgets layer. No file imports
-  `package:flutter/material.dart`, which `material_ui` replaces.
+  `lib/calendar/composition/` imports `package:material_ui/material_ui.dart`
+  or `package:cupertino_ui/cupertino_ui.dart`, Material's and Cupertino's
+  own packages, or a library that exports either; the other layers build on
+  the widgets layer. No file imports `package:flutter/material.dart` or
+  `package:flutter/cupertino.dart`, which those packages replace.
 - **The demo's own code stays in the demo.** The module holds nothing that
   `demos/workspace_calendar/` owns: no item form, no Harbor colour value,
   and no settings sheet, calendar bar or app bar. Code enters

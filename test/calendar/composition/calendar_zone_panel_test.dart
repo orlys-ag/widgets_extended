@@ -669,6 +669,137 @@ void main() {
     expect(find.byType(CalendarView<String>), findsOneWidget);
     expect(markedRows(tester), <String>{"Asia/Tokyo"});
   });
+
+  testWidgets(
+    "ZP8 in an app with no Material localizations, the search field builds "
+    "and its text menu shows",
+    (tester) async {
+      ensureZones();
+      final controller = CalendarZoneController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        WidgetsApp(
+          color: const Color(0xFF000000),
+          pageRouteBuilder: <T>(settings, builder) {
+            return PageRouteBuilder<T>(
+              settings: settings,
+              pageBuilder: (context, animation, secondaryAnimation) {
+                return builder(context);
+              },
+            );
+          },
+          home: CalendarZonePanel(
+            value: null,
+            onChanged: (zone) {},
+            controller: controller,
+            clock: fixedClock,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await openAdding(tester);
+      expect(tester.takeException(), isNull);
+      await tester.enterText(find.byType(TextField), "new york");
+      await selectWord(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text("Copy"), findsOneWidget);
+    },
+    variant: const TargetPlatformVariant(<TargetPlatform>{
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+    }),
+  );
+
+  testWidgets("ZP9 the app's own Material localizations write the search "
+      "field's text menu", (tester) async {
+    ensureZones();
+    final controller = CalendarZoneController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: const <LocalizationsDelegate<Object?>>[
+          _SpanishCopyDelegate(),
+        ],
+        home: Scaffold(
+          body: CalendarZonePanel(
+            value: null,
+            onChanged: (zone) {},
+            controller: controller,
+            clock: fixedClock,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await openAdding(tester);
+    await tester.enterText(find.byType(TextField), "new york");
+    await selectWord(tester);
+    expect(find.text("Copiar"), findsOneWidget);
+  });
+
+  testWidgets("ZP10 with no Localizations above, the search field builds",
+      (tester) async {
+    ensureZones();
+    final controller = CalendarZoneController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Overlay.wrap(
+          child: CalendarZonePanel(
+            value: null,
+            onChanged: (zone) {},
+            controller: controller,
+            clock: fixedClock,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await openAdding(tester);
+    expect(tester.takeException(), isNull);
+    expect(find.byType(TextField), findsOneWidget);
+  });
+}
+
+/// Double-taps the first word of the panel's search field, which selects
+/// it and shows the field's text menu.
+Future<void> selectWord(WidgetTester tester) async {
+  final box = tester.getRect(find.byType(EditableText));
+  final field = Offset(box.left + 8.0, box.center.dy);
+  await tester.tapAt(field);
+  await tester.pump(const Duration(milliseconds: 50));
+  await tester.tapAt(field);
+  await tester.pumpAndSettle();
+}
+
+/// The default Material localizations, with "Copiar" for Copy.
+final class _SpanishCopy extends DefaultMaterialLocalizations {
+  const _SpanishCopy();
+
+  @override
+  String get copyButtonLabel {
+    return "Copiar";
+  }
+}
+
+class _SpanishCopyDelegate extends LocalizationsDelegate<MaterialLocalizations> {
+  const _SpanishCopyDelegate();
+
+  @override
+  bool isSupported(Locale locale) {
+    return true;
+  }
+
+  @override
+  Future<MaterialLocalizations> load(Locale locale) {
+    return SynchronousFuture<MaterialLocalizations>(const _SpanishCopy());
+  }
+
+  @override
+  bool shouldReload(_SpanishCopyDelegate old) {
+    return false;
+  }
 }
 
 /// Every word of the zone panel marked, so a word it writes some other way

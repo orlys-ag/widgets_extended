@@ -12,6 +12,7 @@ import '../../sliver_tree/sliver_tree.dart';
 import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import 'calendar_theme_extension.dart';
+import 'material_app_localizations_fallback.dart';
 
 /// The key of the zone panel's row of the zone named [key], or with the
 /// empty key the row of the device's zone.
@@ -116,9 +117,13 @@ final class CalendarZoneController extends ChangeNotifier {
 /// ([CalendarThemeExtension]); every word comes from
 /// [CalendarLocalizations].
 ///
-/// It fills the bounded height its parent gives. It needs a
-/// [MaterialLocalizations] above it, as its [TextField] does, and builds a
-/// transparent [Material] under it where none is above.
+/// It fills the bounded height its parent gives, and builds a transparent
+/// [Material] under it where none is above. Its [TextField] and the field's
+/// text menu read the [MaterialLocalizations] of `material_ui` and the
+/// `CupertinoLocalizations` of `cupertino_ui` above; where the app gives
+/// none, as one on `package:flutter/material.dart`, whose localizations are
+/// types apart, gives none, the panel puts in the US English ones a
+/// `material_ui` [MaterialApp] gives by default.
 class CalendarZonePanel extends StatefulWidget {
   /// A panel marking [value] and reporting a pick through [onChanged], over
   /// the zones [controller] holds.
@@ -369,9 +374,11 @@ class _CalendarZonePanelState extends State<CalendarZonePanel> {
       content = _buildUsers(theme, strings);
     }
     if (_themes.hasMaterial) {
-      return content;
+      return MaterialAppLocalizationsFallback(child: content);
     }
-    return Material(type: MaterialType.transparency, child: content);
+    return MaterialAppLocalizationsFallback(
+      child: Material(type: MaterialType.transparency, child: content),
+    );
   }
 
   /// The first list: the bar with its button, the device's row and the
@@ -437,6 +444,26 @@ class _CalendarZonePanelState extends State<CalendarZonePanel> {
     );
   }
 
+  /// The search field's text menu, as [TextField]'s own: the system's where
+  /// the field can show it, and otherwise the adaptive toolbar, under the
+  /// localizations its words need, which the menu's overlay entry reads
+  /// from above the overlay, not from the panel.
+  static Widget _buildFieldMenu(
+    BuildContext context,
+    EditableTextState editableTextState,
+  ) {
+    if (SystemContextMenu.isSupportedByField(editableTextState)) {
+      return SystemContextMenu.editableText(
+        editableTextState: editableTextState,
+      );
+    }
+    return MaterialAppLocalizationsFallback(
+      child: AdaptiveTextSelectionToolbar.editableText(
+        editableTextState: editableTextState,
+      ),
+    );
+  }
+
   /// The second list: the back button and the search field, then the zones
   /// the search text matches, or the message where there is no zone.
   Widget _buildAdding(CalendarThemeData theme, CalendarLocalizations strings) {
@@ -459,6 +486,7 @@ class _CalendarZonePanelState extends State<CalendarZonePanel> {
               hintStyle: TextStyle(fontSize: 16.0, color: theme.textMuted),
               border: InputBorder.none,
             ),
+            contextMenuBuilder: _buildFieldMenu,
           ),
         ),
       ],

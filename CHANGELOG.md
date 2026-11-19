@@ -1081,6 +1081,17 @@ package depends on `material_ui`. Its `Theme`, `Material` and
 `MaterialLocalizations` are types apart from the legacy library's, so the
 calendar reads an app's Material theme, and its view menu the
 `MaterialLocalizations` it needs, only from an app built on `material_ui`.
+- Fix: in an app that gives no `MaterialLocalizations` of `material_ui`, as
+one still on `package:flutter/material.dart` gives none, a `CalendarView`
+listing more than one view threw at its first build, and so did
+`CalendarZonePanel`'s search field; the field's text menu threw there too,
+and on iOS and macOS for want of `cupertino_ui`'s `CupertinoLocalizations`.
+Where the app gives none of them, the calendar and the panel now put in
+the US English ones a `material_ui` `MaterialApp` gives by default, in any
+locale and keeping the app's text direction, and the package depends on
+`cupertino_ui`, on which `material_ui` depends. Such an app, whose theme
+the calendar cannot read, gives the calendar its theme through a
+`CalendarTheme`.
 
 ## 0.0.35
 

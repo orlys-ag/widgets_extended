@@ -36,19 +36,25 @@ const Set<String> widgetsAndBelow = <String>{
 };
 
 /// The Flutter libraries each layer's rule lets its files import: those of
-/// `package:flutter/` by name, and `material_ui` for Material's own
-/// package, `package:material_ui/material_ui.dart`.
+/// `package:flutter/` by name, and `material_ui` and `cupertino_ui` for
+/// Material's and Cupertino's own packages,
+/// `package:material_ui/material_ui.dart` and
+/// `package:cupertino_ui/cupertino_ui.dart`.
 const Map<String, Set<String>> flutterLibrariesOf = <String, Set<String>>{
   "presentation": widgetsAndBelow,
   "views": widgetsAndBelow,
-  "composition": <String>{...widgetsAndBelow, "material_ui", "cupertino"},
+  "composition": <String>{...widgetsAndBelow, "material_ui", "cupertino_ui"},
 };
 
+/// The packages of Flutter's design libraries, each imported through its
+/// library of its own name.
+const List<String> designPackages = <String>["material_ui", "cupertino_ui"];
+
 /// The name [flutterLibrariesOf] gives the Flutter library [uri] names:
-/// a `package:flutter/` library's name, `material_ui` for
-/// `package:material_ui/material_ui.dart`, and [uri] itself for any other
-/// file of `material_ui`, which no layer may import; null for a URI of
-/// neither package.
+/// a `package:flutter/` library's name, a design package's name for its
+/// library of that name, such as `package:material_ui/material_ui.dart`,
+/// and [uri] itself for any other file of a design package, which no layer
+/// may import; null for a URI of none of these packages.
 String? flutterLibraryOf(String uri) {
   final flutter = RegExp(
     r"^package:flutter/([a-z_]+)\.dart$",
@@ -56,10 +62,15 @@ String? flutterLibraryOf(String uri) {
   if (flutter != null) {
     return flutter;
   }
-  if (uri == "package:material_ui/material_ui.dart") {
-    return "material_ui";
+  for (final package in designPackages) {
+    if (uri == "package:$package/$package.dart") {
+      return package;
+    }
+    if (uri.startsWith("package:$package/")) {
+      return uri;
+    }
   }
-  return uri.startsWith("package:material_ui/") ? uri : null;
+  return null;
 }
 
 /// The first directory under lib/calendar/ of [path], a path from the
