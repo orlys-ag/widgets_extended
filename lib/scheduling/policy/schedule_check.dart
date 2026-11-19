@@ -410,8 +410,9 @@ final class CalendarScheduleCheck<T> {
   /// The first timed schedule of this one's length on its start day, from
   /// the later of its start and the day's earliest start, that no other
   /// entry shares time with, as [CalendarEditRules.firstSlot] finds it with
-  /// that length; null for an all-day schedule, one that spans days or has
-  /// no length, and where the day leaves no such range.
+  /// that length in elapsed minutes ([CalendarSchedule.lengthMinutes]);
+  /// null for an all-day schedule, one that spans days or has no length,
+  /// and where the day leaves no such range.
   ///
   /// Where [now]'s clock gives the schedule times, the search reads the
   /// day's clock in the occurrence of the later instant of its start and
@@ -448,8 +449,8 @@ final class CalendarScheduleCheck<T> {
         return id == null || other.id != id;
       }),
       from: from,
-      lengthMinutes: schedule.lengthMinutes,
       occurrence: occurrence,
+      elapsedMinutes: schedule.lengthMinutes,
     );
     if (slot == null) {
       return null;

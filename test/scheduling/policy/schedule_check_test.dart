@@ -436,7 +436,11 @@ void main() {
     expect(
       problemsOf(
         unrestricted,
-        timed(DateTime(2026, 3, 7), 23 * 60, 1440).withLength(90),
+        timed(
+          DateTime(2026, 3, 7),
+          23 * 60,
+          1440,
+        ).withEndDay(DateTime(2026, 3, 8)).withEndMinute(30),
         now: inHavana,
       ),
       <CalendarScheduleProblem>[const CalendarScheduleEndSkipped()],
@@ -607,7 +611,11 @@ void main() {
     // Havana's clock skips 00:00 to 01:00 on 2026-03-08, so this end, 00:30
     // of the eighth, is no time on it.
     final skippedEnd = checkOf(
-      timed(DateTime(2026, 3, 7), 23 * 60, 1440).withLength(90),
+      timed(
+        DateTime(2026, 3, 7),
+        23 * 60,
+        1440,
+      ).withEndDay(DateTime(2026, 3, 8)).withEndMinute(30),
       now: inHavana,
     );
     // Setup sanity: the clock skips the end, which is after the start.
@@ -836,7 +844,7 @@ void main() {
       );
     }
 
-    test("SC12 01:15 EDT to 01:10 EST is admitted", skip: true, () {
+    test("SC12 01:15 EDT to 01:10 EST is admitted", () {
       expect(
         newCheck(
           unrestricted,
@@ -850,29 +858,21 @@ void main() {
       );
     });
 
-    test(
-      "SC13 an unchanged in-progress entry that started in the later "
-      "pass is admitted under the lock of earlier today",
-      skip: true,
-      () {
-        final entry = entryInNewYork(
-          "running",
-          DateTime.utc(2026, 11, 1, 6, 30),
-          DateTime.utc(2026, 11, 1, 8),
-        );
-        final check = CalendarScheduleCheck<String>(
-          schedule: CalendarSchedule.of(
-            entry.start,
-            entry.end,
-            isAllDay: false,
-          ),
-          rules: rulesOf(lockNow),
-          now: nowOnTheChange(DateTime.utc(2026, 11, 1, 6, 45)),
-          entry: entry,
-        );
-        expect(check.problems, isEmpty);
-      },
-    );
+    test("SC13 an unchanged in-progress entry that started in the later "
+        "pass is admitted under the lock of earlier today", () {
+      final entry = entryInNewYork(
+        "running",
+        DateTime.utc(2026, 11, 1, 6, 30),
+        DateTime.utc(2026, 11, 1, 8),
+      );
+      final check = CalendarScheduleCheck<String>(
+        schedule: CalendarSchedule.of(entry.start, entry.end, isAllDay: false),
+        rules: rulesOf(lockNow),
+        now: nowOnTheChange(DateTime.utc(2026, 11, 1, 6, 45)),
+        entry: entry,
+      );
+      expect(check.problems, isEmpty);
+    });
 
     test(
       "SC14 a first-pass start before a later-pass now is before the "
@@ -900,96 +900,80 @@ void main() {
       },
     );
 
-    test(
-      "SC15 the next free range under the lock never starts before now",
-      skip: true,
-      () {
-        final check = newCheck(
-          lockNow,
-          inNewYorkFrom(
-            DateTime.utc(2026, 11, 1, 5, 30),
-            DateTime.utc(2026, 11, 1, 7, 30),
-          ),
-          nowOnTheChange(DateTime.utc(2026, 11, 1, 6, 45)),
-        );
-        final free = check.nextFree!;
-        expect(
-          utcOf(
-            free.timesOn(newYork)!.start,
-          ).isBefore(DateTime.utc(2026, 11, 1, 6, 45)),
-          isFalse,
-        );
-        expect(check.withSchedule(free).admitted, isTrue);
-      },
-    );
+    test("SC15 the next free range under the lock never starts before now", () {
+      final check = newCheck(
+        lockNow,
+        inNewYorkFrom(
+          DateTime.utc(2026, 11, 1, 5, 30),
+          DateTime.utc(2026, 11, 1, 7, 30),
+        ),
+        nowOnTheChange(DateTime.utc(2026, 11, 1, 6, 45)),
+      );
+      final free = check.nextFree!;
+      expect(
+        utcOf(
+          free.timesOn(newYork)!.start,
+        ).isBefore(DateTime.utc(2026, 11, 1, 6, 45)),
+        isFalse,
+      );
+      expect(check.withSchedule(free).admitted, isTrue);
+    });
 
-    test(
-      "SC16 the next free range of 01:30 to 02:00 in the first pass "
-      "lasts 30 minutes and is admitted",
-      skip: true,
-      () {
-        final check = newCheck(
-          unrestricted,
-          inNewYorkFrom(
-            DateTime.utc(2026, 11, 1, 5, 30),
-            DateTime.utc(2026, 11, 1, 5, 45),
-          ).withEndMinute(120),
-          beforeTheChange,
-        );
-        final free = check.nextFree!;
-        expect(free.lengthMinutes, 30);
-        expect(check.withSchedule(free).admitted, isTrue);
-      },
-    );
+    test("SC16 the next free range of 01:30 to 02:00 in the first pass "
+        "lasts 30 minutes and is admitted", () {
+      final check = newCheck(
+        unrestricted,
+        inNewYorkFrom(
+          DateTime.utc(2026, 11, 1, 5, 30),
+          DateTime.utc(2026, 11, 1, 5, 45),
+        ).withEndMinute(120),
+        beforeTheChange,
+      );
+      final free = check.nextFree!;
+      expect(free.lengthMinutes, 30);
+      expect(check.withSchedule(free).admitted, isTrue);
+    });
 
-    test(
-      "SC17 the next free range of a later-pass schedule lies in that "
-      "pass",
-      skip: true,
-      () {
-        final shared = entryInNewYork(
-          "shared",
-          DateTime.utc(2026, 11, 1, 6, 30),
-          DateTime.utc(2026, 11, 1, 6, 45),
-        );
-        final check = newCheck(
-          unrestricted,
-          inNewYorkFrom(
-            DateTime.utc(2026, 11, 1, 6, 30),
-            DateTime.utc(2026, 11, 1, 7),
-          ),
-          beforeTheChange,
-          others: <CalendarEntry<String>>[shared],
-        );
-        // Setup sanity: the schedule shares time with the entry.
-        expect(check.overlaps, <CalendarEntry<String>>[shared]);
-        expect(
-          utcOf(check.nextFree!.timesOn(newYork)!.start),
-          DateTime.utc(2026, 11, 1, 6, 45),
-        );
-      },
-    );
-
-    test(
-      "SC18 a free later-pass schedule is its own next free range",
-      skip: true,
-      () {
-        final free = newCheck(
-          unrestricted,
-          inNewYorkFrom(
-            DateTime.utc(2026, 11, 1, 6, 30),
-            DateTime.utc(2026, 11, 1, 7),
-          ),
-          beforeTheChange,
-        ).nextFree!;
-        expect(free.lengthMinutes, 30);
-        expectTimes(
-          free.timesOn(newYork),
+    test("SC17 the next free range of a later-pass schedule lies in that "
+        "pass", () {
+      final shared = entryInNewYork(
+        "shared",
+        DateTime.utc(2026, 11, 1, 6, 30),
+        DateTime.utc(2026, 11, 1, 6, 45),
+      );
+      final check = newCheck(
+        unrestricted,
+        inNewYorkFrom(
           DateTime.utc(2026, 11, 1, 6, 30),
           DateTime.utc(2026, 11, 1, 7),
-        );
-      },
-    );
+        ),
+        beforeTheChange,
+        others: <CalendarEntry<String>>[shared],
+      );
+      // Setup sanity: the schedule shares time with the entry.
+      expect(check.overlaps, <CalendarEntry<String>>[shared]);
+      expect(
+        utcOf(check.nextFree!.timesOn(newYork)!.start),
+        DateTime.utc(2026, 11, 1, 6, 45),
+      );
+    });
+
+    test("SC18 a free later-pass schedule is its own next free range", () {
+      final free = newCheck(
+        unrestricted,
+        inNewYorkFrom(
+          DateTime.utc(2026, 11, 1, 6, 30),
+          DateTime.utc(2026, 11, 1, 7),
+        ),
+        beforeTheChange,
+      ).nextFree!;
+      expect(free.lengthMinutes, 30);
+      expectTimes(
+        free.timesOn(newYork),
+        DateTime.utc(2026, 11, 1, 6, 30),
+        DateTime.utc(2026, 11, 1, 7),
+      );
+    });
 
     test(
       "SC21 a later-pass start after a first-pass now is admitted, and "
@@ -1047,39 +1031,35 @@ void main() {
       expect(check.nextFree!.startMinute, 105);
     });
 
-    test(
-      "SC23 the next free range lasts the schedule's elapsed length, so "
-      "it fits between entries across the clock going back",
-      skip: true,
-      () {
-        final free = newCheck(
-          unrestricted,
-          inNewYorkFrom(
-            DateTime.utc(2026, 11, 1, 5, 15),
-            DateTime.utc(2026, 11, 1, 6, 10),
+    test("SC23 the next free range lasts the schedule's elapsed length, so "
+        "it fits between entries across the clock going back", () {
+      final free = newCheck(
+        unrestricted,
+        inNewYorkFrom(
+          DateTime.utc(2026, 11, 1, 5, 15),
+          DateTime.utc(2026, 11, 1, 6, 10),
+        ),
+        beforeTheChange,
+        others: <CalendarEntry<String>>[
+          entryInNewYork(
+            "early",
+            DateTime.utc(2026, 11, 1, 5),
+            DateTime.utc(2026, 11, 1, 5, 20),
           ),
-          beforeTheChange,
-          others: <CalendarEntry<String>>[
-            entryInNewYork(
-              "early",
-              DateTime.utc(2026, 11, 1, 5),
-              DateTime.utc(2026, 11, 1, 5, 20),
-            ),
-            entryInNewYork(
-              "late",
-              DateTime.utc(2026, 11, 1, 6, 30),
-              DateTime.utc(2026, 11, 1, 7),
-            ),
-          ],
-        ).nextFree;
-        expect(free, isNotNull);
-        expectTimes(
-          free!.timesOn(newYork),
-          DateTime.utc(2026, 11, 1, 5, 30),
-          DateTime.utc(2026, 11, 1, 6, 25),
-        );
-        expect(free.lengthMinutes, 55);
-      },
-    );
+          entryInNewYork(
+            "late",
+            DateTime.utc(2026, 11, 1, 6, 30),
+            DateTime.utc(2026, 11, 1, 7),
+          ),
+        ],
+      ).nextFree;
+      expect(free, isNotNull);
+      expectTimes(
+        free!.timesOn(newYork),
+        DateTime.utc(2026, 11, 1, 5, 30),
+        DateTime.utc(2026, 11, 1, 6, 25),
+      );
+      expect(free.lengthMinutes, 55);
+    });
   });
 }

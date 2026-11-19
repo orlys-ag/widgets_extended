@@ -558,29 +558,25 @@ void main() {
       );
     }
 
-    testWidgets(
-      "IF7 an item from 01:30 EST to 03:00 EST saved unchanged is "
-      "written at the same instants",
-      skip: true,
-      (tester) async {
-        final writes = <CalendarItem?>[];
-        final store = storeInNewYork(
-          DateTime.utc(2026, 11, 1, 6, 30),
-          DateTime.utc(2026, 11, 1, 8),
-          writes: writes,
-        );
-        addTearDown(store.dispose);
-        await openBeforeTheChange(tester, store);
-        // Setup sanity: the form shows the item's wall times.
-        expect(timeFieldShows("Start time", "01:30"), findsOneWidget);
-        expect(timeFieldShows("End time", "03:00"), findsOneWidget);
-        await tester.tap(find.widgetWithText(FilledButton, "Save"));
-        await tester.pumpAndSettle();
-        expect(writes, hasLength(1));
-        expect(utcOf(writes.single!.start), DateTime.utc(2026, 11, 1, 6, 30));
-        expect(utcOf(writes.single!.end), DateTime.utc(2026, 11, 1, 8));
-      },
-    );
+    testWidgets("IF7 an item from 01:30 EST to 03:00 EST saved unchanged is "
+        "written at the same instants", (tester) async {
+      final writes = <CalendarItem?>[];
+      final store = storeInNewYork(
+        DateTime.utc(2026, 11, 1, 6, 30),
+        DateTime.utc(2026, 11, 1, 8),
+        writes: writes,
+      );
+      addTearDown(store.dispose);
+      await openBeforeTheChange(tester, store);
+      // Setup sanity: the form shows the item's wall times.
+      expect(timeFieldShows("Start time", "01:30"), findsOneWidget);
+      expect(timeFieldShows("End time", "03:00"), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, "Save"));
+      await tester.pumpAndSettle();
+      expect(writes, hasLength(1));
+      expect(utcOf(writes.single!.start), DateTime.utc(2026, 11, 1, 6, 30));
+      expect(utcOf(writes.single!.end), DateTime.utc(2026, 11, 1, 8));
+    });
 
     testWidgets(
       "IF8 the end picker of an item from 01:30 EDT to 01:15 EST "

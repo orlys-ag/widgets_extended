@@ -3310,10 +3310,13 @@ void main() {
   });
 
   testWidgets("FS2 the pill writes a timed schedule's days, hours and "
-      "minutes, each that is not none, a day being 24 hours of the wall "
-      "clock, and an all-day one's All day for one day or All day and its "
-      "count of days in parentheses for more, across a change of the clock "
+      "minutes, each that is not none, a day being 24 hours of real time, "
+      "and an all-day one's All day for one day or All day and its count of "
+      "days in parentheses for more, across a change of the clock "
       "included", (tester) async {
+    final havana = tz.getLocation("America/Havana");
+    final santiago = tz.getLocation("America/Santiago");
+    final newYork = tz.getLocation("America/New_York");
     for (final (schedule, pill) in <(CalendarSchedule, String)>[
       (CalendarSchedule.of(at(9), at(9, 45), isAllDay: false), "45m"),
       (CalendarSchedule.of(at(9), at(10), isAllDay: false), "1h"),
@@ -3351,17 +3354,43 @@ void main() {
         "2d",
       ),
       // Havana's clock skips its midnight on March 8, and Santiago's repeats
-      // an hour on April 4; across each, the same time the next day is one
-      // day on.
-      for (final day in <DateTime>[DateTime(2026, 3, 7), DateTime(2026, 4, 4)])
-        (
-          CalendarSchedule.of(
-            DateTime(day.year, day.month, day.day, 9),
-            DateTime(day.year, day.month, day.day + 1, 9),
-            isAllDay: false,
-          ),
-          "1d",
+      // an hour on April 4; across each, the same time the next day is 23
+      // and 25 hours on.
+      (
+        CalendarSchedule.of(
+          tz.TZDateTime(havana, 2026, 3, 7, 9),
+          tz.TZDateTime(havana, 2026, 3, 8, 9),
+          isAllDay: false,
         ),
+        "23h",
+      ),
+      (
+        CalendarSchedule.of(
+          tz.TZDateTime(santiago, 2026, 4, 4, 9),
+          tz.TZDateTime(santiago, 2026, 4, 5, 9),
+          isAllDay: false,
+        ),
+        "1d 1h",
+      ),
+      // New York's clock repeats 01:00 to 02:00 on 2026-11-01 and skips
+      // 02:00 to 03:00 on 2027-03-14: 00:30 EDT to 03:00 EST lasts three
+      // and a half hours, and 01:00 EST to 04:00 EDT two.
+      (
+        CalendarSchedule.of(
+          tz.TZDateTime.from(DateTime.utc(2026, 11, 1, 4, 30), newYork),
+          tz.TZDateTime.from(DateTime.utc(2026, 11, 1, 8), newYork),
+          isAllDay: false,
+        ),
+        "3h 30m",
+      ),
+      (
+        CalendarSchedule.of(
+          tz.TZDateTime.from(DateTime.utc(2027, 3, 14, 6), newYork),
+          tz.TZDateTime.from(DateTime.utc(2027, 3, 14, 8), newYork),
+          isAllDay: false,
+        ),
+        "2h",
+      ),
       (
         CalendarSchedule.of(wednesday, DateTime(2026, 4, 23), isAllDay: true),
         "All day",

@@ -1036,8 +1036,8 @@ class ScheduleSectionState extends State<ScheduleSection> {
   }
 }
 
-/// [minutes], a positive count of wall minutes, written in days of 24
-/// hours, hours and minutes, each that is not none, as "2d 4h 30m", "1d",
+/// [minutes], a positive count of minutes, written in days of 24 hours,
+/// hours and minutes, each that is not none, as "2d 4h 30m", "1d",
 /// "1h 30m" or "45m".
 String _lengthLabel(int minutes) {
   assert(minutes > 0);

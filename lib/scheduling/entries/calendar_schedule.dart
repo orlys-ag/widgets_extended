@@ -3,8 +3,9 @@ import 'package:flutter/foundation.dart';
 import '../dates/calendar_dates.dart';
 
 /// The times a form edits for one entry: a civil start day and minute, a
-/// civil last day and the minute the entry ends at on it, and whether it is
-/// all-day.
+/// civil last day and the minute the entry ends at on it, whether it is
+/// all-day, the clock its times were read on, and the pass of a repeated
+/// stretch each edge lies in.
 ///
 /// The days are civil days ([CalendarDates.dayNumber]) and the minutes wall
 /// minutes, as a clock reads them, so a schedule holds a time a clock
@@ -12,14 +13,23 @@ import '../dates/calendar_dates.dart';
 /// end minute runs from 1 to [CalendarDates.minutesPerDay], 1440 ending the
 /// last day at its 24:00, the next day's start.
 ///
-/// Immutable: each `with...` call returns a new schedule. [withStartDay]
-/// and [withStartMinute] move the end by the same wall minutes, so the
-/// schedule keeps its length; [withEndDay] and [withEndMinute] may leave
-/// the end not after the start, for a check to report. An all-day schedule
-/// keeps the timed minutes it had, which [withAllDay] off restores.
+/// Where a clock turned back reads a stretch of wall time twice, the
+/// schedule keeps whether its start lies in the later pass, and whether its
+/// end lies in the first pass, the later one or neither, so [timesOn] on
+/// the clock its times were read on gives those times back. A pass only
+/// picks between the two instants of one wall time, on whichever clock
+/// [timesOn] is asked, and has no effect where that clock reads the time
+/// once.
 ///
-/// Two compare equal where their days, kind and timed minutes, those an
-/// all-day schedule keeps included, do.
+/// Immutable: each `with...` call returns a new schedule. [withStartMinute]
+/// and [withLength] keep [lengthMinutes], the elapsed minutes between the
+/// schedule's instants, and [withStartDay] keeps both wall times;
+/// [withEndDay] and [withEndMinute] may leave the end not after the start,
+/// for a check to report. An all-day schedule keeps the timed minutes and
+/// passes it had, which [withAllDay] off restores.
+///
+/// Two compare equal where their days, kind, timed minutes, passes and
+/// clock, those an all-day schedule keeps included, do.
 @immutable
 final class CalendarSchedule {
   const CalendarSchedule._({
@@ -28,18 +38,35 @@ final class CalendarSchedule {
     required int endDayNumber,
     required int endMinute,
     required this.isAllDay,
+    required bool startLater,
+    required bool? endLater,
+    required Location? clock,
   }) : _startDay = startDayNumber,
        _startMinute = startMinute,
        _endDay = endDayNumber,
-       _endMinute = endMinute;
+       _endMinute = endMinute,
+       _startLater = startLater,
+       _endLater = endLater,
+       _clock = clock;
 
   /// The schedule of an entry or a range from [start] to [end], all-day
-  /// where [isAllDay], each read on its own clock: the start's day and
+  /// where [isAllDay], each edge read on its own clock: the start's day and
   /// minute, and the last day the range has a part in
   /// ([CalendarDates.lastDayNumberOf]) with the minute it ends at there
-  /// ([CalendarDates.endMinuteOfDay]). An all-day schedule runs from its
-  /// first day's 00:00 to its last day's 24:00, and keeps those minutes as
-  /// its timed ones.
+  /// ([CalendarDates.endMinuteOfDay]). An end at the instant its clock goes
+  /// back, which ends a repeated stretch's first pass, reads as the
+  /// stretch's end in that pass, its 02:00 where the clock goes back from
+  /// 02:00 to 01:00, so the end minute stays from 1 to 1440. The schedule's
+  /// clock is [start]'s.
+  ///
+  /// A timed start in the later pass of a stretch its clock reads twice
+  /// holds that pass; the end holds the pass of the minute before it, the
+  /// later one or the first where its clock reads that minute twice, and
+  /// otherwise the start's later pass, or none, except that beside a later
+  /// start an end at the first instant of a repeated stretch's start holds
+  /// the first pass. A plain UTC time holds none. An all-day schedule runs from its first day's 00:00 to its last
+  /// day's 24:00, keeps those minutes as its timed ones, and holds no
+  /// pass.
   ///
   /// Throws an [ArgumentError], in every build, where [end] is not after
   /// [start].
@@ -51,17 +78,97 @@ final class CalendarSchedule {
     if (!end.isAfter(start)) {
       throw ArgumentError.value(end, "end", "is not after start, $start");
     }
-    final startMinute = isAllDay ? 0 : CalendarDates.minuteOfDay(start);
-    final endMinute = isAllDay
-        ? CalendarDates.minutesPerDay
-        : CalendarDates.endMinuteOfDay(end);
+    final clock = clockOf(start);
+    if (isAllDay) {
+      return CalendarSchedule._(
+        startDayNumber: CalendarDates.dayNumber(start),
+        startMinute: 0,
+        endDayNumber: CalendarDates.lastDayNumberOf(start, end),
+        endMinute: CalendarDates.minutesPerDay,
+        isAllDay: true,
+        startLater: false,
+        endLater: null,
+        clock: clock,
+      );
+    }
+    final startLater = _readsLater(start);
+    final reading = _endReading(end, startLater);
     return CalendarSchedule._(
       startDayNumber: CalendarDates.dayNumber(start),
-      startMinute: startMinute,
-      endDayNumber: CalendarDates.lastDayNumberOf(start, end),
-      endMinute: endMinute,
-      isAllDay: isAllDay,
+      startMinute: CalendarDates.minuteOfDay(start),
+      endDayNumber: reading.day,
+      endMinute: reading.minute,
+      isAllDay: false,
+      startLater: startLater,
+      endLater: reading.later,
+      clock: clock,
     );
+  }
+
+  /// Whether [time] is the later instant of a time its clock reads twice;
+  /// false for a plain UTC time, whose clock repeats nothing.
+  static bool _readsLater(DateTime time) {
+    return (time is TZDateTime || !time.isUtc) &&
+        CalendarDates.isLaterOccurrence(time);
+  }
+
+  /// The day, the minute and the pass an end at [end] reads, beside a start
+  /// holding the later pass where [startLater]: at the instant the clock
+  /// goes back, the minute after the one before it, the stretch's end, on
+  /// the day that minute ends; otherwise [end]'s last day and its minute
+  /// there. The pass is the minute before [end]'s: later where that is the
+  /// later instant of a time read twice, first where it is the first, and
+  /// otherwise the start's, later where [startLater] and none where not,
+  /// except that beside a later start an end at the first instant of a
+  /// time read twice, a repeated stretch's start, holds the first pass.
+  static ({int day, int minute, bool? later}) _endReading(
+    DateTime end,
+    bool startLater,
+  ) {
+    final whole = end.subtract(
+      Duration(
+        seconds: end.second,
+        milliseconds: end.millisecond,
+        microseconds: end.microsecond,
+      ),
+    );
+    final before = whole.subtract(const Duration(minutes: 1));
+    final bool? later;
+    if (_readsLater(before)) {
+      later = true;
+    } else if (isRepeatedTime(before)) {
+      later = false;
+    } else if (startLater) {
+      // An end at the first instant of a repeated stretch's start reads the
+      // minute before it once but its own minute twice: it holds the first
+      // pass its instant reads, which a later pass would move an hour on.
+      later = !isRepeatedTime(whole);
+    } else {
+      later = null;
+    }
+    if (isClockGoingBackAt(whole)) {
+      final wall = CalendarDates.wallMinuteOf(before) + 1;
+      final day = _dayEnding(wall);
+      return (
+        day: day,
+        minute: wall - day * CalendarDates.minutesPerDay,
+        later: later,
+      );
+    }
+    final minute = CalendarDates.endMinuteOfDay(end);
+    final day = minute == CalendarDates.minutesPerDay
+        ? CalendarDates.dayNumber(end) - 1
+        : CalendarDates.dayNumber(end);
+    return (day: day, minute: minute, later: later);
+  }
+
+  /// The day number of the day the wall minute [wallEnd] ends: its 24:00
+  /// ends the day before. Floored, so an end before the epoch's day keeps
+  /// its minute from 1 to 1440.
+  static int _dayEnding(int wallEnd) {
+    final before = wallEnd - 1;
+    return (before - before % CalendarDates.minutesPerDay) ~/
+        CalendarDates.minutesPerDay;
   }
 
   final int _startDay;
@@ -74,13 +181,27 @@ final class CalendarSchedule {
   /// The timed end's minute of [endDay], which an all-day schedule keeps.
   final int _endMinute;
 
+  /// Whether the start lies in the later pass of a stretch its clock reads
+  /// twice.
+  final bool _startLater;
+
+  /// The pass the end lies in: true for the later one, false for the
+  /// first, and null for none, which [timesOn] reads as a range's end
+  /// ([CalendarDates.rangeEndAtWallMinute]).
+  final bool? _endLater;
+
+  /// The clock the schedule's times were read on, its start's
+  /// ([clockOf]): null for the device's.
+  final Location? _clock;
+
   /// The start's minute of [startDay], 0 for an all-day schedule.
   int get startMinute {
     return isAllDay ? 0 : _startMinute;
   }
 
   /// The end's minute of [endDay], from 1 to 1440; 1440 for an all-day
-  /// schedule.
+  /// schedule. An end at the instant a clock goes back reads the repeated
+  /// stretch's end.
   int get endMinute {
     return isAllDay ? CalendarDates.minutesPerDay : _endMinute;
   }
@@ -112,9 +233,18 @@ final class CalendarSchedule {
     return _endDay * CalendarDates.minutesPerDay + endMinute;
   }
 
-  /// The wall minutes from the start to the end, not above 0 where the end
-  /// is not after the start; whole days times 1440 for an all-day schedule.
+  /// The length in minutes: for a timed schedule, the elapsed minutes from
+  /// its start to its end as [timesOn] gives them on the clock its times
+  /// were read on, and the wall minutes from its start to its end where
+  /// that clock skips either; not above 0 where the end is not after the
+  /// start. Whole days times 1440 for an all-day schedule.
   int get lengthMinutes {
+    if (!isAllDay) {
+      final times = timesOn(_clock);
+      if (times != null) {
+        return times.end.difference(times.start).inMinutes;
+      }
+    }
     return _wallEnd - _wallStart;
   }
 
@@ -124,6 +254,7 @@ final class CalendarSchedule {
     int? endDayNumber,
     int? endMinute,
     bool? isAllDay,
+    ({bool? later})? end,
   }) {
     return CalendarSchedule._(
       startDayNumber: startDayNumber ?? _startDay,
@@ -131,25 +262,46 @@ final class CalendarSchedule {
       endDayNumber: endDayNumber ?? _endDay,
       endMinute: endMinute ?? _endMinute,
       isAllDay: isAllDay ?? this.isAllDay,
+      startLater: _startLater,
+      endLater: end == null ? _endLater : end.later,
+      clock: _clock,
     );
   }
 
-  /// This schedule with its end at the wall minute [wallEnd], on the day
-  /// that minute ends: its 24:00 ends the day before. The day is floored,
-  /// so an end before the epoch's day keeps its minute from 1 to 1440.
-  CalendarSchedule _endingAt(int wallEnd) {
-    final before = wallEnd - 1;
-    final day =
-        (before - before % CalendarDates.minutesPerDay) ~/
-        CalendarDates.minutesPerDay;
+  /// This schedule with its end [length] minutes after its start: the
+  /// start's instant in its pass on the schedule's clock plus [length]
+  /// minutes of elapsed time, read as [CalendarSchedule.of] reads an end;
+  /// and where that clock skips the start, [length] wall minutes after it,
+  /// holding the start's later pass or none.
+  CalendarSchedule _endingAfter(int length) {
+    final start = timeAtWallMinuteInPass(
+      _wallStart,
+      later: _startLater,
+      zone: _clock,
+    );
+    if (start != null) {
+      final reading = _endReading(
+        start.add(Duration(minutes: length)),
+        _startLater,
+      );
+      return _copy(
+        endDayNumber: reading.day,
+        endMinute: reading.minute,
+        end: (later: reading.later),
+      );
+    }
+    final wall = _wallStart + length;
+    final day = _dayEnding(wall);
     return _copy(
       endDayNumber: day,
-      endMinute: wallEnd - day * CalendarDates.minutesPerDay,
+      endMinute: wall - day * CalendarDates.minutesPerDay,
+      end: (later: _startLater ? true : null),
     );
   }
 
   /// This schedule starting on [day]'s civil day, its end moved by as many
-  /// days, so its length is kept.
+  /// days, so it keeps both wall times, its passes and its clock. A pass
+  /// has an effect only on a day whose clock reads its edge's time twice.
   CalendarSchedule withStartDay(DateTime day) {
     final shift = CalendarDates.dayNumber(day) - _startDay;
     return _copy(
@@ -158,8 +310,11 @@ final class CalendarSchedule {
     );
   }
 
-  /// This timed schedule starting at [minute] of its start day, its end
-  /// moved by as many wall minutes, so its length is kept.
+  /// This timed schedule starting at [minute] of its start day in its
+  /// start's pass, its end placed to keep [lengthMinutes]: at the new
+  /// start's instant plus that many elapsed minutes, in the pass that
+  /// instant reads, or where the clock skips the new start, that many wall
+  /// minutes after it.
   ///
   /// Throws a [StateError] for an all-day schedule, and an [ArgumentError]
   /// for a [minute] outside 0 to 1439.
@@ -172,16 +327,17 @@ final class CalendarSchedule {
       "minute",
     );
     final length = lengthMinutes;
-    final moved = _copy(startMinute: minute);
-    return moved._endingAt(moved._wallStart + length);
+    return _copy(startMinute: minute)._endingAfter(length);
   }
 
-  /// This schedule ending on [day]'s civil day at its end minute.
+  /// This schedule ending on [day]'s civil day at its end minute, in its
+  /// end's pass.
   CalendarSchedule withEndDay(DateTime day) {
     return _copy(endDayNumber: CalendarDates.dayNumber(day));
   }
 
-  /// This timed schedule ending at [minute] of its end day.
+  /// This timed schedule ending at [minute] of its end day, in its end's
+  /// pass.
   ///
   /// Throws a [StateError] for an all-day schedule, and an [ArgumentError]
   /// for a [minute] outside 1 to 1440.
@@ -196,8 +352,11 @@ final class CalendarSchedule {
     return _copy(endMinute: minute);
   }
 
-  /// This timed schedule ending [minutes] wall minutes after its start,
-  /// on a later day where they run past its start day's 24:00.
+  /// This timed schedule whose [lengthMinutes] is [minutes]: its end at its
+  /// start's instant plus [minutes] elapsed minutes, in the pass that
+  /// instant reads, on a later day where they run past its start day's
+  /// 24:00, or where the clock skips the start, [minutes] wall minutes
+  /// after it.
   ///
   /// Throws a [StateError] for an all-day schedule, and an [ArgumentError]
   /// for [minutes] under 1.
@@ -206,11 +365,12 @@ final class CalendarSchedule {
     if (minutes < 1) {
       throw ArgumentError.value(minutes, "minutes", "is under 1");
     }
-    return _endingAt(_wallStart + minutes);
+    return _endingAfter(minutes);
   }
 
   /// This schedule all-day where [on], over the same days, keeping its
-  /// timed minutes; and timed otherwise, at the timed minutes it kept.
+  /// timed minutes, passes and clock; and timed otherwise, at the timed
+  /// minutes and passes it kept.
   CalendarSchedule withAllDay(bool on) {
     if (on == isAllDay) {
       return this;
@@ -226,10 +386,14 @@ final class CalendarSchedule {
 
   /// The start and end on [zone]'s clock, the device's where it is null: an
   /// all-day schedule's day starts ([CalendarDates.dateOfDayNumber]), and a
-  /// timed one's start at its wall minute
-  /// ([CalendarDates.timeAtWallMinute]) and end at its
-  /// ([CalendarDates.endAtWallMinute]), each the earlier instant of a time
-  /// the clock repeats. Null where the clock skips the start or the end.
+  /// timed one's start at its wall minute in its pass, the earlier instant
+  /// of a time the clock reads twice or the later one for the later pass
+  /// ([CalendarDates.timeAtWallMinute]). The end is at its wall minute in
+  /// its pass ([CalendarDates.endAtWallMinute]), a first pass ending at the
+  /// instant the clock goes back where it ends as the repeated stretch
+  /// does; an end holding no pass ends as a range from the start does
+  /// ([CalendarDates.rangeEndAtWallMinute]). Null where the clock skips the
+  /// start or the end.
   ({DateTime start, DateTime end})? timesOn(Location? zone) {
     if (isAllDay) {
       return (
@@ -237,9 +401,19 @@ final class CalendarSchedule {
         end: CalendarDates.dateOfDayNumber(_endDay + 1, zone: zone),
       );
     }
-    final start = CalendarDates.timeAtWallMinute(_wallStart, zone: zone);
-    final end = CalendarDates.endAtWallMinute(_wallEnd, zone: zone);
-    if (start == null || end == null) {
+    final start = timeAtWallMinuteInPass(
+      _wallStart,
+      later: _startLater,
+      zone: zone,
+    );
+    if (start == null) {
+      return null;
+    }
+    final endLater = _endLater;
+    final end = endLater == null
+        ? CalendarDates.rangeEndAtWallMinute(start, _wallEnd)
+        : endAtWallMinuteInPass(_wallEnd, later: endLater, zone: zone);
+    if (end == null) {
       return null;
     }
     return (start: start, end: end);
@@ -264,12 +438,24 @@ final class CalendarSchedule {
         other._startMinute == _startMinute &&
         other._endDay == _endDay &&
         other._endMinute == _endMinute &&
-        other.isAllDay == isAllDay;
+        other.isAllDay == isAllDay &&
+        other._startLater == _startLater &&
+        other._endLater == _endLater &&
+        other._clock == _clock;
   }
 
   @override
   int get hashCode {
-    return Object.hash(_startDay, _startMinute, _endDay, _endMinute, isAllDay);
+    return Object.hash(
+      _startDay,
+      _startMinute,
+      _endDay,
+      _endMinute,
+      isAllDay,
+      _startLater,
+      _endLater,
+      _clock,
+    );
   }
 
   @override
@@ -279,7 +465,13 @@ final class CalendarSchedule {
     if (isAllDay) {
       return "CalendarSchedule($start to $end, all-day)";
     }
-    return "CalendarSchedule($start ${CalendarDates.isoTime(startMinute)} to "
-        "$end ${CalendarDates.isoTime(endMinute)})";
+    final startPass = _startLater ? " (later pass)" : "";
+    final endPass = switch (_endLater) {
+      true => " (later pass)",
+      false => " (first pass)",
+      null => "",
+    };
+    return "CalendarSchedule($start ${CalendarDates.isoTime(startMinute)}"
+        "$startPass to $end ${CalendarDates.isoTime(endMinute)}$endPass)";
   }
 }
