@@ -363,40 +363,32 @@ void main() {
       },
     );
 
-    test(
-      "CS12 a length before 1970 ends on the day it runs to",
-      skip: true,
-      () {
-        final schedule = CalendarSchedule.of(
-          DateTime(1969, 12, 31, 10),
-          DateTime(1969, 12, 31, 11),
-          isAllDay: false,
-        ).withLength(60);
-        expect(schedule.endDay, DateTime(1969, 12, 31));
-        expect(schedule.endMinute, 660);
-        expect(schedule.spansDays, isFalse);
-      },
-    );
+    test("CS12 a length before 1970 ends on the day it runs to", () {
+      final schedule = CalendarSchedule.of(
+        DateTime(1969, 12, 31, 10),
+        DateTime(1969, 12, 31, 11),
+        isAllDay: false,
+      ).withLength(60);
+      expect(schedule.endDay, DateTime(1969, 12, 31));
+      expect(schedule.endMinute, 660);
+      expect(schedule.spansDays, isFalse);
+    });
 
-    test(
-      "CS13 two timed schedules of the same days and minutes compare "
-      "equal however they were reached",
-      skip: true,
-      () {
-        final made = CalendarSchedule.of(
-          DateTime(2026, 4, 21, 10),
-          DateTime(2026, 4, 21, 11),
-          isAllDay: false,
-        );
-        final moved = CalendarSchedule.of(
-          DateTime(2026, 4, 21, 9),
-          DateTime(2026, 4, 21, 10),
-          isAllDay: false,
-        ).withStartMinute(600);
-        expect(made == moved, isTrue);
-        expect(made.hashCode, moved.hashCode);
-      },
-    );
+    test("CS13 two timed schedules of the same days and minutes compare "
+        "equal however they were reached", () {
+      final made = CalendarSchedule.of(
+        DateTime(2026, 4, 21, 10),
+        DateTime(2026, 4, 21, 11),
+        isAllDay: false,
+      );
+      final moved = CalendarSchedule.of(
+        DateTime(2026, 4, 21, 9),
+        DateTime(2026, 4, 21, 10),
+        isAllDay: false,
+      ).withStartMinute(600);
+      expect(made == moved, isTrue);
+      expect(made.hashCode, moved.hashCode);
+    });
 
     test(
       "CS14 every quarter-hour range around a clock going back gives "

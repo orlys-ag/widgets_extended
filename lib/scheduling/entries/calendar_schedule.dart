@@ -18,22 +18,20 @@ import '../dates/calendar_dates.dart';
 /// the end not after the start, for a check to report. An all-day schedule
 /// keeps the timed minutes it had, which [withAllDay] off restores.
 ///
-/// Two compare equal where their days, minutes, kind and kept timed
-/// minutes do.
+/// Two compare equal where their days, kind and timed minutes, those an
+/// all-day schedule keeps included, do.
 @immutable
 final class CalendarSchedule {
   const CalendarSchedule._({
     required int startDayNumber,
-    required this.startMinute,
+    required int startMinute,
     required int endDayNumber,
-    required this.endMinute,
+    required int endMinute,
     required this.isAllDay,
-    required int timedStartMinute,
-    required int timedEndMinute,
   }) : _startDay = startDayNumber,
+       _startMinute = startMinute,
        _endDay = endDayNumber,
-       _timedStart = timedStartMinute,
-       _timedEnd = timedEndMinute;
+       _endMinute = endMinute;
 
   /// The schedule of an entry or a range from [start] to [end], all-day
   /// where [isAllDay], each read on its own clock: the start's day and
@@ -63,22 +61,29 @@ final class CalendarSchedule {
       endDayNumber: CalendarDates.lastDayNumberOf(start, end),
       endMinute: endMinute,
       isAllDay: isAllDay,
-      timedStartMinute: startMinute,
-      timedEndMinute: endMinute,
     );
   }
 
   final int _startDay;
   final int _endDay;
-  final int _timedStart;
-  final int _timedEnd;
+
+  /// The timed start's minute of [startDay], which an all-day schedule
+  /// keeps.
+  final int _startMinute;
+
+  /// The timed end's minute of [endDay], which an all-day schedule keeps.
+  final int _endMinute;
 
   /// The start's minute of [startDay], 0 for an all-day schedule.
-  final int startMinute;
+  int get startMinute {
+    return isAllDay ? 0 : _startMinute;
+  }
 
   /// The end's minute of [endDay], from 1 to 1440; 1440 for an all-day
   /// schedule.
-  final int endMinute;
+  int get endMinute {
+    return isAllDay ? CalendarDates.minutesPerDay : _endMinute;
+  }
 
   /// Whether the schedule covers whole days, from [startDay]'s start to
   /// the start of the day after [endDay].
@@ -119,24 +124,24 @@ final class CalendarSchedule {
     int? endDayNumber,
     int? endMinute,
     bool? isAllDay,
-    int? timedStartMinute,
-    int? timedEndMinute,
   }) {
     return CalendarSchedule._(
       startDayNumber: startDayNumber ?? _startDay,
-      startMinute: startMinute ?? this.startMinute,
+      startMinute: startMinute ?? _startMinute,
       endDayNumber: endDayNumber ?? _endDay,
-      endMinute: endMinute ?? this.endMinute,
+      endMinute: endMinute ?? _endMinute,
       isAllDay: isAllDay ?? this.isAllDay,
-      timedStartMinute: timedStartMinute ?? _timedStart,
-      timedEndMinute: timedEndMinute ?? _timedEnd,
     );
   }
 
   /// This schedule with its end at the wall minute [wallEnd], on the day
-  /// that minute ends: its 24:00 ends the day before.
+  /// that minute ends: its 24:00 ends the day before. The day is floored,
+  /// so an end before the epoch's day keeps its minute from 1 to 1440.
   CalendarSchedule _endingAt(int wallEnd) {
-    final day = (wallEnd - 1) ~/ CalendarDates.minutesPerDay;
+    final before = wallEnd - 1;
+    final day =
+        (before - before % CalendarDates.minutesPerDay) ~/
+        CalendarDates.minutesPerDay;
     return _copy(
       endDayNumber: day,
       endMinute: wallEnd - day * CalendarDates.minutesPerDay,
@@ -210,20 +215,7 @@ final class CalendarSchedule {
     if (on == isAllDay) {
       return this;
     }
-    if (on) {
-      return _copy(
-        startMinute: 0,
-        endMinute: CalendarDates.minutesPerDay,
-        isAllDay: true,
-        timedStartMinute: startMinute,
-        timedEndMinute: endMinute,
-      );
-    }
-    return _copy(
-      startMinute: _timedStart,
-      endMinute: _timedEnd,
-      isAllDay: false,
-    );
+    return _copy(isAllDay: on);
   }
 
   void _checkTimed(String method) {
@@ -269,25 +261,15 @@ final class CalendarSchedule {
   bool operator ==(Object other) {
     return other is CalendarSchedule &&
         other._startDay == _startDay &&
-        other.startMinute == startMinute &&
+        other._startMinute == _startMinute &&
         other._endDay == _endDay &&
-        other.endMinute == endMinute &&
-        other.isAllDay == isAllDay &&
-        other._timedStart == _timedStart &&
-        other._timedEnd == _timedEnd;
+        other._endMinute == _endMinute &&
+        other.isAllDay == isAllDay;
   }
 
   @override
   int get hashCode {
-    return Object.hash(
-      _startDay,
-      startMinute,
-      _endDay,
-      endMinute,
-      isAllDay,
-      _timedStart,
-      _timedEnd,
-    );
+    return Object.hash(_startDay, _startMinute, _endDay, _endMinute, isAllDay);
   }
 
   @override
