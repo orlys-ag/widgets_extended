@@ -317,7 +317,9 @@ final class DayListClock {
   }
 
   /// The unfolded minute a part on [day] of a range from [start] starts
-  /// at: 0 for a [start] before [day], as [CalendarDates.pieceOn] clips it.
+  /// at, as the gap rows read it: 0 for a [start] before [day], which
+  /// leaves no gap above the part, even where [day]'s clock starts past
+  /// 00:00.
   int startOf(DateTime start) {
     return start.isBefore(day) ? 0 : minuteOf(start);
   }
@@ -662,7 +664,10 @@ final class DayListFailed extends DayListRow {
 
 /// The rows of [day]'s block for [entries], the entries the store answers
 /// on [day], sorted as [CalendarStore.entriesOn] sorts them, each row
-/// holding the entry's piece on [day] ([CalendarDates.pieceOn]). The all-day
+/// holding the entry's piece on [day] ([CalendarDates.pieceOn]), a timed
+/// one's from no earlier than the minute [day]'s clock starts at, so on a
+/// day whose clock skips its midnight a piece carried from the day before
+/// starts where that clock does. The all-day
 /// entries come first, in that order. A timed entry whose piece has no minute
 /// inside [hours] has no row: a [DayListHidden] after the all-day rows counts
 /// those before the hours, and one last those after them, as the timed
@@ -686,6 +691,7 @@ List<DayListRow> dayListRowsOf<T>(
   final number = CalendarDates.dayNumber(day);
   final clock = DayListClock.of(day);
   final runs = clock.hoursRunsOf(hours);
+  final dayStart = CalendarDates.minuteOfDay(day);
   var before = 0;
   var after = 0;
   // The latest unfolded end among the timed entries so far, or the hours'
@@ -703,17 +709,21 @@ List<DayListRow> dayListRowsOf<T>(
 
   for (final entry in entries) {
     final calendarEntry = entry.entry;
-    final piece = CalendarDates.pieceOn(
+    final whole = CalendarDates.pieceOn(
       CalendarDates.wallSpanOf(calendarEntry.start, calendarEntry.end),
       number,
     );
-    if (piece == null) {
+    if (whole == null) {
       continue;
     }
     if (calendarEntry.isAllDay) {
-      allDay.add(DayListEntry<T>(day, entry, piece.start, piece.end, true));
+      allDay.add(DayListEntry<T>(day, entry, whole.start, whole.end, true));
       continue;
     }
+    if (whole.end <= dayStart) {
+      continue;
+    }
+    final piece = (start: math.max(whole.start, dayStart), end: whole.end);
     // An entry with no row still covers its time, which a run of the
     // hours holds where the clock reads part of it twice.
     final start = clock.startOf(calendarEntry.start);

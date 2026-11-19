@@ -352,13 +352,18 @@ List<BoardPlacement<MonthChip<T>>> monthPlacementsOf<T>(
 /// grid has a minute inside them; every other entry has no chip, and each of
 /// its pieces counts on its own day where the grid shows that day, in
 /// `earlier` where it ends at or before the hours' start and in `later`
-/// otherwise, as Agenda's `dayListRowsOf` counts it.
+/// otherwise, as Agenda's `dayListRowsOf` counts it. A piece starts no
+/// earlier than the minute its day's clock starts at, on [zone]'s clock or
+/// the device's where it is null, so on a day whose clock skips its
+/// midnight a piece carried from the day before starts where that clock
+/// does.
 ({List<CalendarShownEntry<T>> inside, Int32List earlier, Int32List later})
 splitMonthHours<T>(
   Iterable<CalendarShownEntry<T>> shown,
   CalendarMonthGrid grid,
-  CalendarDayHours hours,
-) {
+  CalendarDayHours hours, {
+  Location? zone,
+}) {
   final columns = grid.columnCount;
   final inside = <CalendarShownEntry<T>>[];
   final earlier = Int32List(grid.weekCount * columns);
@@ -369,6 +374,22 @@ splitMonthHours<T>(
       for (var col = 0; col < columns; col++)
         CalendarDates.dayNumber(grid.dateAt(row, col)): row * columns + col,
   };
+  // The minute each shown day's clock starts at, read once per call.
+  final dayStarts = <int, int>{
+    for (final day in cells.keys)
+      day: CalendarDates.minuteOfDay(
+        CalendarDates.dateOfDayNumber(day, zone: zone),
+      ),
+  };
+  ({int start, int end})? pieceOn(({int start, int end}) span, int day) {
+    final piece = CalendarDates.pieceOn(span, day);
+    final start = dayStarts[day] ?? 0;
+    if (piece == null || piece.end <= start) {
+      return null;
+    }
+    return (start: math.max(piece.start, start), end: piece.end);
+  }
+
   // A day outside the grid's first and last has no cell, so each entry's
   // days are walked only inside them; a grid of no weekdays has none.
   final days = cells.keys;
@@ -394,7 +415,7 @@ splitMonthHours<T>(
     );
     var holds = false;
     for (var day = first; day <= last && !holds; day++) {
-      final piece = CalendarDates.pieceOn(span, day);
+      final piece = pieceOn(span, day);
       holds =
           cells.containsKey(day) &&
           piece != null &&
@@ -406,7 +427,7 @@ splitMonthHours<T>(
     }
     for (var day = first; day <= last; day++) {
       final cell = cells[day];
-      final piece = CalendarDates.pieceOn(span, day);
+      final piece = pieceOn(span, day);
       if (cell == null || piece == null) {
         continue;
       }
@@ -1677,7 +1698,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
         placements: <BoardPlacement<MonthChip<T>>>[],
       );
     }
-    final split = splitMonthHours(read, grid, hours);
+    final split = splitMonthHours(read, grid, hours, zone: _zone);
     return (
       read: read,
       grid: grid,
