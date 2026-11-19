@@ -4,6 +4,8 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/data/latest_all.dart' as tz_data;
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/calendar/views/week_strip.dart'
     show WeekStrip, weekStripDayKey;
 import 'package:widgets_extended/widgets_extended.dart';
@@ -31,8 +33,8 @@ CalendarItem task(DateTime start, DateTime end) {
 
 /// Pumps a host over [store] whose one button opens the form of the item
 /// "item-1", its times stepping by [slotMinutes], its Save checked by
-/// [policy] and its day pickers' weeks starting on [firstColumn], and opens
-/// it.
+/// [policy] at [now] on [today], Wednesday where they are null, and its day
+/// pickers' weeks starting on [firstColumn], and opens it.
 Future<void> openForm(
   WidgetTester tester,
   CalendarStore<ItemPayload> store, {
@@ -40,6 +42,7 @@ Future<void> openForm(
   CalendarEditPolicy<ItemPayload> policy =
       const UnrestrictedEditPolicy<ItemPayload>(),
   DateTime? now,
+  DateTime? today,
   int firstColumn = 0,
 }) async {
   await tester.pumpWidget(
@@ -58,7 +61,7 @@ Future<void> openForm(
                   now: () {
                     return CalendarNow(
                       time: now ?? wednesday,
-                      today: wednesday,
+                      today: today ?? wednesday,
                     );
                   },
                   hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
@@ -506,4 +509,125 @@ void main() {
       });
     },
   );
+
+  group("the passes of a repeated stretch", () {
+    setUpAll(tz_data.initializeTimeZones);
+
+    /// The instant [utc] on New York's clock, whose clock reads 01:00 to
+    /// 02:00 twice on 2026-11-01, going back at 06:00Z.
+    tz.TZDateTime inNewYork(DateTime utc) {
+      return tz.TZDateTime.from(utc, tz.getLocation("America/New_York"));
+    }
+
+    /// [time]'s instant as a plain UTC time.
+    DateTime utcOf(DateTime time) {
+      return DateTime.fromMicrosecondsSinceEpoch(
+        time.microsecondsSinceEpoch,
+        isUtc: true,
+      );
+    }
+
+    /// A store zoned New York holding the task "item-1" from [start] to
+    /// [end], given in UTC, that adds each item it writes to [writes].
+    MemoryCalendarStore<ItemPayload> storeInNewYork(
+      DateTime start,
+      DateTime end, {
+      List<CalendarItem?>? writes,
+    }) {
+      return MemoryCalendarStore<ItemPayload>(
+        entries: <CalendarItem>[task(inNewYork(start), inNewYork(end))],
+        zone: tz.getLocation("America/New_York"),
+        onChanged: (old, entry) {
+          writes?.add(entry);
+        },
+      );
+    }
+
+    /// Opens the form of [store]'s item at 09:00 on 2026-10-30 in New York.
+    Future<void> openBeforeTheChange(
+      WidgetTester tester,
+      CalendarStore<ItemPayload> store,
+    ) {
+      final newYork = tz.getLocation("America/New_York");
+      return openForm(
+        tester,
+        store,
+        slotMinutes: 15,
+        now: tz.TZDateTime(newYork, 2026, 10, 30, 9),
+        today: tz.TZDateTime(newYork, 2026, 10, 30),
+      );
+    }
+
+    testWidgets(
+      "IF7 an item from 01:30 EST to 03:00 EST saved unchanged is "
+      "written at the same instants",
+      skip: true,
+      (tester) async {
+        final writes = <CalendarItem?>[];
+        final store = storeInNewYork(
+          DateTime.utc(2026, 11, 1, 6, 30),
+          DateTime.utc(2026, 11, 1, 8),
+          writes: writes,
+        );
+        addTearDown(store.dispose);
+        await openBeforeTheChange(tester, store);
+        // Setup sanity: the form shows the item's wall times.
+        expect(timeFieldShows("Start time", "01:30"), findsOneWidget);
+        expect(timeFieldShows("End time", "03:00"), findsOneWidget);
+        await tester.tap(find.widgetWithText(FilledButton, "Save"));
+        await tester.pumpAndSettle();
+        expect(writes, hasLength(1));
+        expect(utcOf(writes.single!.start), DateTime.utc(2026, 11, 1, 6, 30));
+        expect(utcOf(writes.single!.end), DateTime.utc(2026, 11, 1, 8));
+      },
+    );
+
+    testWidgets(
+      "IF8 the end picker of an item from 01:30 EDT to 01:15 EST "
+      "offers the later-pass ends before the start's wall time",
+      skip: true,
+      (tester) async {
+        final store = storeInNewYork(
+          DateTime.utc(2026, 11, 1, 5, 30),
+          DateTime.utc(2026, 11, 1, 6, 15),
+        );
+        addTearDown(store.dispose);
+        await openBeforeTheChange(tester, store);
+        // Setup sanity: the end reads 01:15.
+        expect(timeFieldShows("End time", "01:15"), findsOneWidget);
+        await openTimePicker(tester, "End time");
+        final ends = offeredTimes(tester, "End time");
+        expect(ends, containsAll(<int>[60, 75]));
+        expect(ends, isNot(contains(45)));
+
+        await pickTime(tester, "End time", "01:00");
+        // Setup sanity: the pick took.
+        expect(timeFieldShows("End time", "01:00"), findsOneWidget);
+        await openTimePicker(tester, "End time");
+        expect(offeredTimes(tester, "End time"), containsAll(<int>[60, 75]));
+      },
+    );
+
+    testWidgets(
+      "IF9 the zone box names the offset at a later-pass start",
+      skip: true,
+      (tester) async {
+        final store = storeInNewYork(
+          DateTime.utc(2026, 11, 1, 6, 30),
+          DateTime.utc(2026, 11, 1, 8),
+        );
+        addTearDown(store.dispose);
+        await openBeforeTheChange(tester, store);
+        expect(
+          find.descendant(
+            of: find.byKey(scheduleZoneKey),
+            matching: find.text(
+              const DefaultCalendarLocalizations().utcOffset(-300),
+            ),
+          ),
+          findsOneWidget,
+        );
+      },
+    );
+  });
 }
