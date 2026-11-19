@@ -1042,15 +1042,12 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     );
   }
 
-  /// The clock reading [time] on the day the calendar marks as today:
-  /// [CalendarView.today], or with none [time]'s day, both on the clock of
-  /// the store's zone where it has one, and otherwise [time]'s local day.
+  /// The clock reading [time], taken on the clock of the store's zone, or
+  /// with none as the device's local time, whatever clock [time] carries
+  /// ([CalendarDates.inZone]), on the day the calendar marks as today:
+  /// [CalendarView.today], or with none that reading's day.
   CalendarNow _nowAt(DateTime time) {
-    final zone = _storeZone;
-    if (zone == null) {
-      return CalendarNow(time: time, today: widget.today ?? time.toLocal());
-    }
-    final zoned = CalendarDates.inZone(time, zone: zone);
+    final zoned = CalendarDates.inZone(time, zone: _storeZone);
     return CalendarNow(time: zoned, today: widget.today ?? zoned);
   }
 

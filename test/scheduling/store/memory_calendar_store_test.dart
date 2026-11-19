@@ -245,6 +245,10 @@ void main() {
     final created = errorOf(store.create(task(null, day, 1050, 1110)));
     await pumpEventQueue();
     expect(created(), isA<CalendarHoursException>());
+    // A draft copying a held entry outside the hours, its id included.
+    final copied = errorOf(store.create(early));
+    await pumpEventQueue();
+    expect(copied(), isA<CalendarHoursException>());
     expect(store.entries, hasLength(3));
     expect(recorder.events, isEmpty);
 
