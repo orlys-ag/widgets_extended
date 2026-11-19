@@ -174,6 +174,72 @@ final class _Counting extends CalendarEditPolicy<String> {
   }
 }
 
+/// America/New_York, whose clock reads 01:00 to 02:00 twice on 2026-11-01,
+/// going back at 06:00Z.
+tz.Location get newYork {
+  ensureZones();
+  return tz.getLocation("America/New_York");
+}
+
+/// The instant [utc] on New York's clock.
+tz.TZDateTime inNewYork(DateTime utc) {
+  return tz.TZDateTime.from(utc, newYork);
+}
+
+/// [time]'s instant as a plain UTC time, which compares by instant with a
+/// [DateTime.utc].
+DateTime utcOf(DateTime time) {
+  return DateTime.fromMicrosecondsSinceEpoch(
+    time.microsecondsSinceEpoch,
+    isUtc: true,
+  );
+}
+
+/// The schedule of the instants [start] to [end], given in UTC, read on New
+/// York's clock.
+CalendarSchedule inNewYorkFrom(DateTime start, DateTime end) {
+  return CalendarSchedule.of(inNewYork(start), inNewYork(end), isAllDay: false);
+}
+
+/// An entry [id] from the instants [start] to [end], given in UTC, on New
+/// York's clock.
+CalendarEntry<String> entryInNewYork(String id, DateTime start, DateTime end) {
+  return CalendarEntry<String>(
+    id: id,
+    start: inNewYork(start),
+    end: inNewYork(end),
+    title: id,
+    color: const Color(0xFF336699),
+    payload: id,
+  );
+}
+
+/// 09:00 on 2026-10-30 in New York, days before its clock goes back.
+CalendarNow get beforeTheChange {
+  return CalendarNow(
+    time: tz.TZDateTime(newYork, 2026, 10, 30, 9),
+    today: tz.TZDateTime(newYork, 2026, 10, 30),
+  );
+}
+
+/// The instant [utc] on 2026-11-01 in New York, as the time now.
+CalendarNow nowOnTheChange(DateTime utc) {
+  return CalendarNow(
+    time: inNewYork(utc),
+    today: tz.TZDateTime(newYork, 2026, 11, 1),
+  );
+}
+
+/// Expects [times] to be exactly the instants [start] and [end].
+void expectTimes(
+  ({DateTime start, DateTime end})? times,
+  DateTime start,
+  DateTime end,
+) {
+  expect(times, isNotNull);
+  expect((utcOf(times!.start), utcOf(times.end)), (utcOf(start), utcOf(end)));
+}
+
 /// Matches the plain local date of [date], a local midnight: that instant,
 /// not a UTC time and not a zone's `TZDateTime`.
 Matcher plainDate(DateTime date) {
@@ -370,7 +436,11 @@ void main() {
     expect(
       problemsOf(
         unrestricted,
-        timed(DateTime(2026, 3, 7), 23 * 60, 1440).withLength(90),
+        timed(
+          DateTime(2026, 3, 7),
+          23 * 60,
+          1440,
+        ).withEndDay(DateTime(2026, 3, 8)).withEndMinute(30),
         now: inHavana,
       ),
       <CalendarScheduleProblem>[const CalendarScheduleEndSkipped()],
@@ -541,7 +611,11 @@ void main() {
     // Havana's clock skips 00:00 to 01:00 on 2026-03-08, so this end, 00:30
     // of the eighth, is no time on it.
     final skippedEnd = checkOf(
-      timed(DateTime(2026, 3, 7), 23 * 60, 1440).withLength(90),
+      timed(
+        DateTime(2026, 3, 7),
+        23 * 60,
+        1440,
+      ).withEndDay(DateTime(2026, 3, 8)).withEndMinute(30),
       now: inHavana,
     );
     // Setup sanity: the clock skips the end, which is after the start.
@@ -589,7 +663,11 @@ void main() {
       expect(made.schedule, schedule);
       expect(made.problems, fresh.problems, reason: "$schedule");
       expect(made.overlaps, fresh.overlaps, reason: "$schedule");
-      expect(made.firstStartMinute, fresh.firstStartMinute, reason: "$schedule");
+      expect(
+        made.firstStartMinute,
+        fresh.firstStartMinute,
+        reason: "$schedule",
+      );
       expect(made.nextFree, fresh.nextFree, reason: "$schedule");
       expect(made.startFixed, fresh.startFixed, reason: "$schedule");
     }
@@ -745,5 +823,296 @@ void main() {
     // Setup sanity: the counting policy answers as the lock.
     expect(days.first, plainDate(tuesday));
     expect(counting.changeAsked.length - before, lessThanOrEqualTo(3));
+  });
+
+  group("the passes of a repeated stretch", () {
+    const lockNow = HistoryLockPolicy<String>(lockEarlierToday: true);
+
+    /// The check of [schedule] for a new entry under [policy] at [now],
+    /// against [others].
+    CalendarScheduleCheck<String> newCheck(
+      CalendarEditPolicy<String> policy,
+      CalendarSchedule schedule,
+      CalendarNow now, {
+      Iterable<CalendarEntry<String>> others = const <Never>[],
+    }) {
+      return CalendarScheduleCheck<String>(
+        schedule: schedule,
+        rules: rulesOf(policy),
+        now: now,
+        others: others,
+      );
+    }
+
+    test("SC12 01:15 EDT to 01:10 EST is admitted", () {
+      expect(
+        newCheck(
+          unrestricted,
+          inNewYorkFrom(
+            DateTime.utc(2026, 11, 1, 5, 15),
+            DateTime.utc(2026, 11, 1, 6, 10),
+          ),
+          beforeTheChange,
+        ).problems,
+        isEmpty,
+      );
+    });
+
+    test("SC13 an unchanged in-progress entry that started in the later "
+        "pass is admitted under the lock of earlier today", () {
+      final entry = entryInNewYork(
+        "running",
+        DateTime.utc(2026, 11, 1, 6, 30),
+        DateTime.utc(2026, 11, 1, 8),
+      );
+      final check = CalendarScheduleCheck<String>(
+        schedule: CalendarSchedule.of(entry.start, entry.end, isAllDay: false),
+        rules: rulesOf(lockNow),
+        now: nowOnTheChange(DateTime.utc(2026, 11, 1, 6, 45)),
+        entry: entry,
+      );
+      expect(check.problems, isEmpty);
+    });
+
+    test("SC14 a first-pass start before a later-pass now is before the "
+        "earliest start", () {
+      final schedule = CalendarSchedule.of(
+        tz.TZDateTime(newYork, 2026, 11, 1, 1, 50),
+        tz.TZDateTime(newYork, 2026, 11, 1, 2, 20),
+        isAllDay: false,
+      );
+      // Setup sanity: the start is the first 01:50.
+      expect(
+        utcOf(schedule.timesOn(newYork)!.start),
+        DateTime.utc(2026, 11, 1, 5, 50),
+      );
+      expect(
+        newCheck(
+          lockNow,
+          schedule,
+          nowOnTheChange(DateTime.utc(2026, 11, 1, 6, 45)),
+        ).problems,
+        <CalendarScheduleProblem>[const CalendarScheduleBeforeEarliest()],
+      );
+    });
+
+    test("SC15 the next free range under the lock never starts before now", () {
+      final check = newCheck(
+        lockNow,
+        inNewYorkFrom(
+          DateTime.utc(2026, 11, 1, 5, 30),
+          DateTime.utc(2026, 11, 1, 7, 30),
+        ),
+        nowOnTheChange(DateTime.utc(2026, 11, 1, 6, 45)),
+      );
+      final free = check.nextFree!;
+      expect(
+        utcOf(
+          free.timesOn(newYork)!.start,
+        ).isBefore(DateTime.utc(2026, 11, 1, 6, 45)),
+        isFalse,
+      );
+      expect(check.withSchedule(free).admitted, isTrue);
+    });
+
+    test("SC16 the next free range of 01:30 to 02:00 in the first pass "
+        "lasts 30 minutes and is admitted", () {
+      final check = newCheck(
+        unrestricted,
+        inNewYorkFrom(
+          DateTime.utc(2026, 11, 1, 5, 30),
+          DateTime.utc(2026, 11, 1, 5, 45),
+        ).withEndMinute(120),
+        beforeTheChange,
+      );
+      final free = check.nextFree!;
+      expect(free.lengthMinutes, 30);
+      expect(check.withSchedule(free).admitted, isTrue);
+    });
+
+    test("SC17 the next free range of a later-pass schedule lies in that "
+        "pass", () {
+      final shared = entryInNewYork(
+        "shared",
+        DateTime.utc(2026, 11, 1, 6, 30),
+        DateTime.utc(2026, 11, 1, 6, 45),
+      );
+      final check = newCheck(
+        unrestricted,
+        inNewYorkFrom(
+          DateTime.utc(2026, 11, 1, 6, 30),
+          DateTime.utc(2026, 11, 1, 7),
+        ),
+        beforeTheChange,
+        others: <CalendarEntry<String>>[shared],
+      );
+      // Setup sanity: the schedule shares time with the entry.
+      expect(check.overlaps, <CalendarEntry<String>>[shared]);
+      expect(
+        utcOf(check.nextFree!.timesOn(newYork)!.start),
+        DateTime.utc(2026, 11, 1, 6, 45),
+      );
+    });
+
+    test("SC18 a free later-pass schedule is its own next free range", () {
+      final free = newCheck(
+        unrestricted,
+        inNewYorkFrom(
+          DateTime.utc(2026, 11, 1, 6, 30),
+          DateTime.utc(2026, 11, 1, 7),
+        ),
+        beforeTheChange,
+      ).nextFree!;
+      expect(free.lengthMinutes, 30);
+      expectTimes(
+        free.timesOn(newYork),
+        DateTime.utc(2026, 11, 1, 6, 30),
+        DateTime.utc(2026, 11, 1, 7),
+      );
+    });
+
+    test("SC19 an end after the start on the schedule's clock but before it "
+        "on now's is not after the start", () {
+      ensureZones();
+      final havana = tz.getLocation("America/Havana");
+      // 01:15 EDT to 01:10 EST, 55 minutes on New York's clock.
+      final schedule = inNewYorkFrom(
+        DateTime.utc(2026, 11, 1, 5, 15),
+        DateTime.utc(2026, 11, 1, 6, 10),
+      );
+      // Setup sanity: the schedule's own clock puts its end after its start.
+      expect(schedule.lengthMinutes, 55);
+      // Havana's clock repeats 00:00 to 01:00 on 2026-11-01, so it reads
+      // 01:15 once, at 06:15Z, and 01:10 at 06:10Z.
+      final check = newCheck(
+        unrestricted,
+        schedule,
+        CalendarNow(
+          time: tz.TZDateTime(havana, 2026, 10, 30, 9),
+          today: tz.TZDateTime(havana, 2026, 10, 30),
+        ),
+      );
+      expect(
+        (
+          check.problems.contains(const CalendarScheduleEndNotAfterStart()),
+          check.timesChecked,
+        ),
+        (true, false),
+      );
+    });
+
+    test("SC20 making the check asks the zone as often for a schedule two "
+        "years long as for one a year long", () {
+      final zone = CountingLocation(newYork);
+      final now = CalendarNow(
+        time: tz.TZDateTime(zone, 2026, 10, 30, 9),
+        today: tz.TZDateTime(zone, 2026, 10, 30),
+      );
+      // From the later 01:30 of 2026-11-01 to that of 2027-11-07 and of
+      // 2028-11-05.
+      final start = tz.TZDateTime.from(DateTime.utc(2026, 11, 1, 6, 30), zone);
+      int lookupsTo(DateTime end) {
+        final schedule = CalendarSchedule.of(
+          start,
+          tz.TZDateTime.from(end, zone),
+          isAllDay: false,
+        );
+        zone.lookups = 0;
+        newCheck(unrestricted, schedule, now);
+        return zone.lookups;
+      }
+
+      final yearLong = lookupsTo(DateTime.utc(2027, 11, 7, 6, 30));
+      // Setup sanity: making the check reads the counting zone.
+      expect(yearLong, greaterThan(0));
+      expect(lookupsTo(DateTime.utc(2028, 11, 5, 6, 30)), yearLong);
+    });
+
+    test("SC21 a later-pass start after a first-pass now is admitted, and "
+        "its next free range lies in its pass", () {
+      final now = nowOnTheChange(DateTime.utc(2026, 11, 1, 5, 45));
+      final start = inNewYork(DateTime.utc(2026, 11, 1, 6));
+      // Setup sanity: 06:00Z reads 01:00 at -5h.
+      expect(
+        (start.hour, start.minute, start.timeZoneOffset),
+        (1, 0, const Duration(hours: -5)),
+      );
+      final schedule = inNewYorkFrom(
+        DateTime.utc(2026, 11, 1, 6),
+        DateTime.utc(2026, 11, 1, 6, 30),
+      );
+      final check = newCheck(lockNow, schedule, now);
+      final shared = newCheck(
+        lockNow,
+        schedule,
+        now,
+        others: <CalendarEntry<String>>[
+          entryInNewYork(
+            "shared",
+            DateTime.utc(2026, 11, 1, 6),
+            DateTime.utc(2026, 11, 1, 6, 15),
+          ),
+        ],
+      );
+      final free = check.nextFree?.timesOn(newYork);
+      final sharedFree = shared.nextFree?.timesOn(newYork);
+      expect(
+        (
+          check.admitted,
+          free == null ? null : (utcOf(free.start), utcOf(free.end)),
+          sharedFree == null ? null : utcOf(sharedFree.start),
+        ),
+        (
+          true,
+          (DateTime.utc(2026, 11, 1, 6), DateTime.utc(2026, 11, 1, 6, 30)),
+          DateTime.utc(2026, 11, 1, 6, 15),
+        ),
+      );
+    });
+
+    test("SC22 the next free range starts at the earliest start in its "
+        "pass, after a first-pass start", () {
+      final check = newCheck(
+        lockNow,
+        CalendarSchedule.of(
+          tz.TZDateTime(newYork, 2026, 11, 1, 1, 50),
+          tz.TZDateTime(newYork, 2026, 11, 1, 2, 20),
+          isAllDay: false,
+        ),
+        nowOnTheChange(DateTime.utc(2026, 11, 1, 6, 45)),
+      );
+      expect(check.nextFree!.startMinute, 105);
+    });
+
+    test("SC23 the next free range lasts the schedule's elapsed length, so "
+        "it fits between entries across the clock going back", () {
+      final free = newCheck(
+        unrestricted,
+        inNewYorkFrom(
+          DateTime.utc(2026, 11, 1, 5, 15),
+          DateTime.utc(2026, 11, 1, 6, 10),
+        ),
+        beforeTheChange,
+        others: <CalendarEntry<String>>[
+          entryInNewYork(
+            "early",
+            DateTime.utc(2026, 11, 1, 5),
+            DateTime.utc(2026, 11, 1, 5, 20),
+          ),
+          entryInNewYork(
+            "late",
+            DateTime.utc(2026, 11, 1, 6, 30),
+            DateTime.utc(2026, 11, 1, 7),
+          ),
+        ],
+      ).nextFree;
+      expect(free, isNotNull);
+      expectTimes(
+        free!.timesOn(newYork),
+        DateTime.utc(2026, 11, 1, 5, 30),
+        DateTime.utc(2026, 11, 1, 6, 25),
+      );
+      expect(free.lengthMinutes, 55);
+    });
   });
 }

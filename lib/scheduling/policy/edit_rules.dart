@@ -69,8 +69,10 @@ final class CalendarEarliestStart {
 
   /// The instant whose occurrence a range starting on [day] takes its
   /// times in where [day]'s clock repeats them
-  /// ([CalendarDates.timeAtWallMinute]): [earliest] where it lies after
-  /// [day]'s start, and null otherwise.
+  /// ([CalendarDates.timeAtWallMinute]), and which
+  /// [CalendarEditRules.firstSlot] reads the day's clock in where its caller
+  /// names no occurrence: [earliest] where it lies after [day]'s start, and
+  /// null otherwise.
   DateTime? get occurrence {
     final earliest = this.earliest;
     return earliest != null && earliest.isAfter(day) ? earliest : null;
@@ -363,29 +365,64 @@ final class CalendarEditRules<T> {
   /// stretch, one from the stretch's first pass to a time after the
   /// stretch's end lasts that stretch longer, and one from the first pass
   /// to the stretch's end ends with that pass, as the clock goes back.
+  /// Where [elapsedMinutes] is given, a slot lasts that many minutes of
+  /// elapsed time instead, its end its start plus them, and ends by [until]
+  /// where its wall span ([CalendarDates.wallSpanOf]) does, so one across
+  /// the instant a clock goes back or skips ahead lasts its length too.
   ///
-  /// Throws an [ArgumentError], in every build, for a [lengthMinutes]
-  /// under 1.
+  /// Where [occurrence] is given, the search reads the day's clock in its
+  /// occurrence in place of [start]'s, and the slots start from the first
+  /// wall minute in that occurrence not before [start]'s earliest start
+  /// ([CalendarDates.firstWallMinuteNotBefore]), rounded up to the slot
+  /// grid: the day's 24:00 where [start] closes the day, and its minute 0
+  /// where it admits the day's start. Where the clock reads the earliest
+  /// start once, that is [CalendarEarliestStart.firstSlotMinute].
+  ///
+  /// Throws an [ArgumentError], in every build, for a [lengthMinutes] or
+  /// an [elapsedMinutes] under 1, and for an [elapsedMinutes] given beside
+  /// a [lengthMinutes].
   ({DateTime start, DateTime end})? firstSlot(
     CalendarEarliestStart start, {
     Iterable<CalendarEntry<T>> clearOf = const <Never>[],
     int? from,
     int? until,
     int? lengthMinutes,
+    DateTime? occurrence,
+    int? elapsedMinutes,
   }) {
     if (lengthMinutes != null && lengthMinutes < 1) {
       throw ArgumentError.value(lengthMinutes, "lengthMinutes", "is under 1");
     }
+    if (elapsedMinutes != null) {
+      if (elapsedMinutes < 1) {
+        throw ArgumentError.value(
+          elapsedMinutes,
+          "elapsedMinutes",
+          "is under 1",
+        );
+      }
+      if (lengthMinutes != null) {
+        throw ArgumentError.value(
+          elapsedMinutes,
+          "elapsedMinutes",
+          "is given beside lengthMinutes, $lengthMinutes",
+        );
+      }
+    }
+    final floor = occurrence == null
+        ? start.firstSlotMinute(slotMinutes)
+        : _firstSlotMinuteIn(start, occurrence);
     // The first slot whose sharing entries the policy all allows, which the
     // scan holds while it looks on for a slot no entry shares.
     ({DateTime start, DateTime end})? held;
     final free = firstReadableSlot(
       start.day,
-      math.max(from ?? hours.start, start.firstSlotMinute(slotMinutes)),
+      math.max(from ?? hours.start, floor),
       until ?? hours.end,
       slotMinutes,
-      length: lengthMinutes,
-      occurrence: start.occurrence,
+      length: elapsedMinutes ?? lengthMinutes,
+      elapsed: elapsedMinutes != null,
+      occurrence: occurrence ?? start.occurrence,
       isFree: (slotStart, slotEnd) {
         CalendarOverlapCandidate<T>? candidate;
         for (final other in clearOf) {
@@ -411,6 +448,28 @@ final class CalendarEditRules<T> {
       },
     );
     return free ?? held;
+  }
+
+  /// The minute of [start]'s day from which the slots of [slotMinutes]
+  /// start no earlier than its earliest start, read in [occurrence]'s
+  /// occurrence: [CalendarDates.minutesPerDay] where it closes the day, 0
+  /// where it admits the day's start, and otherwise the first wall minute
+  /// in that occurrence not before the earliest start, rounded up to the
+  /// slot grid.
+  int _firstSlotMinuteIn(CalendarEarliestStart start, DateTime occurrence) {
+    if (start.closesDay) {
+      return CalendarDates.minutesPerDay;
+    }
+    if (start.admitsDayStart) {
+      return 0;
+    }
+    final minute =
+        CalendarDates.firstWallMinuteNotBefore(
+          start.earliest!,
+          from: occurrence,
+        ) -
+        CalendarDates.dayNumber(start.day) * CalendarDates.minutesPerDay;
+    return (minute + slotMinutes - 1) ~/ slotMinutes * slotMinutes;
   }
 
   @override

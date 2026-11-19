@@ -328,6 +328,28 @@ final class CalendarScheduleCheck<T> {
   /// where the clock skips either end.
   late final ({DateTime start, DateTime end})? _times;
 
+  /// Where a new entry may start on the schedule's start day
+  /// ([CalendarEditRules.earliestStartOn]), which [firstStartMinute],
+  /// [nextFree] and [problems] read: the policy is asked once.
+  late final CalendarEarliestStart _startEarliest = rules.earliestStartOn(
+    schedule.startDay,
+    now,
+  );
+
+  /// Whether the schedule's end is after its start: as instants on [now]'s
+  /// clock where it reads both times, and otherwise where its
+  /// [CalendarSchedule.lengthMinutes] is positive. [timesChecked] and the
+  /// end-not-after-start problem read it.
+  late final bool _endAfterStart = _findEndAfterStart();
+
+  bool _findEndAfterStart() {
+    final times = _times;
+    if (times != null) {
+      return times.end.isAfter(times.start);
+    }
+    return schedule.lengthMinutes > 0;
+  }
+
   /// Why the schedule is not admitted, in this order: end not after
   /// start, too many days, spanning days, all-day not allowed, start
   /// skipped, end skipped, outside the hours, past day, before the earliest
@@ -340,12 +362,13 @@ final class CalendarScheduleCheck<T> {
     return problems.isEmpty;
   }
 
-  /// Whether the schedule's end is after its start and [now]'s clock reads
-  /// both its times, so that [problems] holds every rule's answer. Where
-  /// false, [problems] holds at most end not after start, spanning days,
-  /// all-day not allowed, start skipped and end skipped.
+  /// Whether [now]'s clock reads both the schedule's times and its end is
+  /// after its start there, as instants, so that [problems] holds every
+  /// rule's answer. Where false, [problems] holds at most end not after
+  /// start, spanning days, all-day not allowed, start skipped and end
+  /// skipped.
   bool get timesChecked {
-    return schedule.lengthMinutes > 0 && _times != null;
+    return _times != null && _endAfterStart;
   }
 
   /// The check of [schedule] under this check's [rules] at its [now], for
@@ -392,13 +415,14 @@ final class CalendarScheduleCheck<T> {
     );
   }
 
-  /// The first minute of the schedule's start day a start may take
+  /// The first minute of the schedule's start day a start may take, the
+  /// first wall minute in the earliest start's occurrence
   /// ([CalendarEarliestStart.firstWallMinute]), 0 where the whole day
   /// may; null where none may ([CalendarEarliestStart.closesDay]).
   late final int? firstStartMinute = _findFirstStartMinute();
 
   int? _findFirstStartMinute() {
-    final start = rules.earliestStartOn(schedule.startDay, now);
+    final start = _startEarliest;
     if (start.closesDay) {
       return null;
     }
@@ -410,8 +434,16 @@ final class CalendarScheduleCheck<T> {
   /// The first timed schedule of this one's length on its start day, from
   /// the later of its start and the day's earliest start, that no other
   /// entry shares time with, as [CalendarEditRules.firstSlot] finds it with
-  /// that length; null for an all-day schedule, one that spans days or has
-  /// no length, and where the day leaves no such range.
+  /// that length in elapsed minutes ([CalendarSchedule.lengthMinutes]);
+  /// null for an all-day schedule, one that spans days or has no length,
+  /// and where the day leaves no such range.
+  ///
+  /// Where [now]'s clock gives the schedule times, the search reads the
+  /// day's clock in the occurrence of the later instant of its start and
+  /// the earliest start's [CalendarEarliestStart.occurrence], from the
+  /// first wall minute in that occurrence not before its start
+  /// ([CalendarDates.firstWallMinuteNotBefore]), so a range in a repeated
+  /// stretch's second pass is searched for in that pass.
   late final CalendarSchedule? nextFree = _findNextFree();
 
   CalendarSchedule? _findNextFree() {
@@ -419,13 +451,30 @@ final class CalendarScheduleCheck<T> {
       return null;
     }
     final id = entry?.id;
+    final earliest = _startEarliest;
+    final times = _times;
+    var from = schedule.startMinute;
+    DateTime? occurrence;
+    if (times != null) {
+      final earliestOccurrence = earliest.occurrence;
+      final searched =
+          earliestOccurrence != null && earliestOccurrence.isAfter(times.start)
+          ? earliestOccurrence
+          : times.start;
+      occurrence = searched;
+      from =
+          CalendarDates.firstWallMinuteNotBefore(times.start, from: searched) -
+          CalendarDates.dayNumber(schedule.startDay) *
+              CalendarDates.minutesPerDay;
+    }
     final slot = rules.firstSlot(
-      rules.earliestStartOn(schedule.startDay, now),
+      earliest,
       clearOf: _others.where((other) {
         return id == null || other.id != id;
       }),
-      from: schedule.startMinute,
-      lengthMinutes: schedule.lengthMinutes,
+      from: from,
+      occurrence: occurrence,
+      elapsedMinutes: schedule.lengthMinutes,
     );
     if (slot == null) {
       return null;
@@ -523,7 +572,7 @@ final class CalendarScheduleCheck<T> {
 
   List<CalendarScheduleProblem> _findProblems() {
     final found = <CalendarScheduleProblem>[];
-    if (schedule.lengthMinutes <= 0) {
+    if (!_endAfterStart) {
       found.add(const CalendarScheduleEndNotAfterStart());
     }
     final zone = zoneOf(now.time);
@@ -600,10 +649,13 @@ final class CalendarScheduleCheck<T> {
       }
     }
     if (asksEarliest) {
-      final first = firstStartMinute;
-      if (first == null) {
+      final earliest = _startEarliest;
+      if (earliest.closesDay) {
         found.add(const CalendarSchedulePastDay());
-      } else if (schedule.startMinute < first) {
+      } else if (!earliest.admitsDayStart &&
+          times.start.isBefore(earliest.earliest!)) {
+        // A start inside a minute that has begun is before it, as
+        // CalendarEarliestStart.firstWallMinute rounds that minute up.
         found.add(const CalendarScheduleBeforeEarliest());
       }
     }

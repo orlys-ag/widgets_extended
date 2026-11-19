@@ -18,8 +18,9 @@ The contract of `CalendarEntry<T>`, `CalendarCreateRange`, `CalendarSchedule` an
   in `CalendarEntry`'s order, so an entry of its times constructs.
 - **`CalendarSchedule`** is the immutable schedule a form edits: civil
   days and wall minutes, so it holds a time a clock skips, which its
-  `timesOn` reports as null instead of moving it. A new start keeps its
-  length in wall minutes.
+  `timesOn` reports as null instead of moving it. A new start time or
+  length keeps its `lengthMinutes`, the elapsed minutes between the
+  schedule's instants, and a new start day keeps both wall times.
 - **The data-source contract**: asynchronous reads of the entries covering a
   range of days, and writes that create, replace or delete one entry. A read
   or write completes with what it stored, or fails with an error.
