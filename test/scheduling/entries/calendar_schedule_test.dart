@@ -854,5 +854,40 @@ void main() {
       expect(sized.lengthMinutes, length);
       expectTimes(sized.timesOn(newYork), start, end);
     });
+
+    test("CS27 an end before 1970 at the instant the clock goes back, or "
+        "after a start the clock skips, ends on the day it runs to", () {
+      // Setup sanity: New York's clock reads 01:30 twice on 1969-10-26, at
+      // 05:30Z and 06:30Z, going back at 06:00Z.
+      final first = inNewYork(DateTime.utc(1969, 10, 26, 5, 30));
+      final second = inNewYork(DateTime.utc(1969, 10, 26, 6, 30));
+      expect(
+        (
+          (first.hour, first.minute, first.timeZoneOffset),
+          (second.hour, second.minute, second.timeZoneOffset),
+        ),
+        (
+          (1, 30, const Duration(hours: -4)),
+          (1, 30, const Duration(hours: -5)),
+        ),
+      );
+      final back = CalendarSchedule.of(
+        inNewYork(DateTime.utc(1969, 10, 26, 4)),
+        inNewYork(DateTime.utc(1969, 10, 26, 6)),
+        isAllDay: false,
+      );
+      // 01:00 EST to 04:00 EDT of 1969-04-27, moved to the skipped 02:30.
+      final skipped = CalendarSchedule.of(
+        inNewYork(DateTime.utc(1969, 4, 27, 6)),
+        inNewYork(DateTime.utc(1969, 4, 27, 8)),
+        isAllDay: false,
+      ).withStartMinute(150);
+      // Setup sanity: the clock skips the new start.
+      expect(skipped.startSkippedOn(newYork), isTrue);
+      expect(
+        (back.endDay, back.endMinute, skipped.endDay, skipped.endMinute),
+        (DateTime(1969, 10, 26), 120, DateTime(1969, 4, 27), 270),
+      );
+    });
   });
 }
