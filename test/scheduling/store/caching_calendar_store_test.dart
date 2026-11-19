@@ -3959,6 +3959,133 @@ void main() {
     });
   });
 
+  test("FR74 after a read sent since an update contradicts its answer, a "
+      "second read sent since that answers after the answer, with the entry "
+      "on another day as it was, contradicts it too: the store keeps what "
+      "it holds and reads that day again", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final monday = DateTime(2026, 4, 20);
+    final tuesday = DateTime(2026, 4, 21);
+    final item = task("item-1", monday, 600, 660);
+    final renamed = item.copyWith(title: "Renamed");
+    store.show(monday, tuesday);
+    harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+    await settle();
+    store.show(tuesday, tuesday);
+    final saving = store.update(renamed);
+    final write = harness.lastCall;
+    store.invalidate(monday, monday);
+    store.prefetch(monday, monday);
+    final readMonday = harness.lastCall;
+    store.invalidate(tuesday, tuesday);
+    final readTuesday = harness.lastCall;
+    expect(harness.source.calls, hasLength(4));
+    expect((readMonday.first, readMonday.last), (monday, monday));
+    expect((readTuesday.first, readTuesday.last), (tuesday, tuesday));
+
+    // Another client moved the entry to Tuesday, then the source applied
+    // the update, which put it back on Monday; the read of Tuesday was
+    // served between the two.
+    readMonday.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    expect(store.storedEntry("item-1"), isNull);
+    write.succeed(renamed);
+    await settle();
+    expect(await saving, renamed);
+    final calls = harness.source.calls.length;
+    readTuesday.succeed(<CalendarEntry<String>>[onDay(item, tuesday)]);
+    await settle();
+    expect(store.storedEntry("item-1"), isNull);
+    expect(<(DateTime?, DateTime?)>[
+      for (final call in harness.source.calls.skip(calls))
+        (call.first, call.last),
+    ], <(DateTime?, DateTime?)>[(tuesday, tuesday)]);
+  });
+
+  test("FR76 a read sent since an update, before the read sent since that "
+      "forgot the entry and contradicted the update's answer, that answers "
+      "after the answer with the entry on another day contradicts it too: "
+      "the store keeps what it holds and reads that day again", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final monday = DateTime(2026, 4, 20);
+    final tuesday = DateTime(2026, 4, 21);
+    final item = task("item-1", monday, 600, 660);
+    final renamed = item.copyWith(title: "Renamed");
+    store.show(monday, tuesday);
+    harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+    await settle();
+    store.show(tuesday, tuesday);
+    final saving = store.update(renamed);
+    final write = harness.lastCall;
+    store.invalidate(tuesday, tuesday);
+    final readTuesday = harness.lastCall;
+    store.invalidate(monday, monday);
+    store.prefetch(monday, monday);
+    final readMonday = harness.lastCall;
+    expect(harness.source.calls, hasLength(4));
+    expect((readTuesday.first, readTuesday.last), (tuesday, tuesday));
+    expect((readMonday.first, readMonday.last), (monday, monday));
+
+    // Another client moved the entry to Tuesday, then the source applied
+    // the update, which put it back on Monday; the read of Tuesday was
+    // served between the two.
+    readMonday.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    expect(store.storedEntry("item-1"), isNull);
+    write.succeed(renamed);
+    await settle();
+    expect(await saving, renamed);
+    final calls = harness.source.calls.length;
+    readTuesday.succeed(<CalendarEntry<String>>[onDay(item, tuesday)]);
+    await settle();
+    expect(store.storedEntry("item-1"), isNull);
+    expect(<(DateTime?, DateTime?)>[
+      for (final call in harness.source.calls.skip(calls))
+        (call.first, call.last),
+    ], <(DateTime?, DateTime?)>[(tuesday, tuesday)]);
+  });
+
+  test("FR75 after a read sent since an update that changes nothing agrees "
+      "with its answer, a read sent after that one that answers after the "
+      "answer without the entry contradicts it: the store keeps the entry "
+      "and reads its day again", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final monday = DateTime(2026, 4, 20);
+    final item = task("item-1", monday, 600, 660);
+    store.show(monday, monday);
+    harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+    await settle();
+    final saving = store.update(item);
+    final write = harness.lastCall;
+    store.invalidate(monday, monday);
+    final agreeing = harness.lastCall;
+    // Another client moved the entry off Monday while that read was in
+    // flight, so the day is read once more when it answers.
+    store.invalidate(monday, monday);
+    expect(harness.source.calls, hasLength(3));
+    agreeing.succeed(<CalendarEntry<String>>[item]);
+    await settle();
+    expect(harness.source.calls, hasLength(4));
+    final later = harness.lastCall;
+
+    // The source applied the update, which put the entry back, after it
+    // served the later read.
+    write.succeed(item);
+    await settle();
+    expect(await saving, item);
+    final calls = harness.source.calls.length;
+    later.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    expect(store.storedEntry("item-1"), item);
+    expect(<(DateTime?, DateTime?)>[
+      for (final call in harness.source.calls.skip(calls))
+        (call.first, call.last),
+    ], <(DateTime?, DateTime?)>[(monday, monday)]);
+  });
+
   group("CF the changes the source announces", () {
     late StreamController<CalendarSourceChange<String>> changes;
 
