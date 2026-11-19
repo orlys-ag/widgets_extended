@@ -819,6 +819,12 @@ void main() {
       final length = end.difference(start).inMinutes;
       expectTimes(schedule.timesOn(newYork), start, end);
       expect(schedule.lengthMinutes, length);
+      // The end holds the first pass: moved to 02:00, it ends as that pass
+      // does, at the instant the clock goes back.
+      expect(
+        utcOf(schedule.withEndMinute(120).timesOn(newYork)!.end),
+        DateTime.utc(2027, 11, 7, 6),
+      );
 
       // Havana's clock goes back from 01:00 to 00:00 at 2027-11-07T05:00Z,
       // so 04:00Z is the day's first 00:00.

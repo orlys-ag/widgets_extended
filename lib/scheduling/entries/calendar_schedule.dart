@@ -64,9 +64,10 @@ final class CalendarSchedule {
   /// later one or the first where its clock reads that minute twice, and
   /// otherwise the start's later pass, or none, except that beside a later
   /// start an end at the first instant of a repeated stretch's start holds
-  /// the first pass. A plain UTC time holds none. An all-day schedule runs from its first day's 00:00 to its last
-  /// day's 24:00, keeps those minutes as its timed ones, and holds no
-  /// pass.
+  /// the first pass. A plain UTC time's clock reads every time once, so a
+  /// plain UTC start holds no pass. An all-day schedule runs from its first
+  /// day's 00:00 to its last day's 24:00, keeps those minutes as its timed
+  /// ones, and holds no pass.
   ///
   /// Throws an [ArgumentError], in every build, where [end] is not after
   /// [start].
