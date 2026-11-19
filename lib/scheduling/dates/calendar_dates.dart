@@ -13,7 +13,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:timezone/timezone.dart'
-    show Location, TZDateTime, TzInstant, timeZoneDatabase;
+    show Location, TZDateTime, TzInstant, UTC, timeZoneDatabase;
 
 export 'package:timezone/timezone.dart' show Location, TZDateTime;
 
@@ -592,6 +592,135 @@ abstract final class CalendarDates {
     final minutes = (minute % 60).toString().padLeft(2, "0");
     return "$hours:$minutes";
   }
+}
+
+/// The instant the wall minute [wall] names as a start or a time of day in
+/// a pass of a stretch its day's clock reads twice, on [zone]'s clock, the
+/// device's where it is null: the earliest instant reading [wall], or the
+/// latest where [later], the same one where the clock reads it once; null
+/// where the clock skips it. A `TZDateTime` of [zone] where it is given.
+DateTime? timeAtWallMinuteInPass(
+  int wall, {
+  required bool later,
+  Location? zone,
+}) {
+  if (zone != null) {
+    final instant = _ZoneClock(
+      zone,
+      wall * Duration.millisecondsPerMinute,
+    ).instantInPass(wall, later: later, end: false);
+    return instant == null ? null : _zoneTime(zone, instant);
+  }
+  final earliest = CalendarDates.timeAtWallMinute(wall);
+  if (earliest == null || !later) {
+    return earliest;
+  }
+  return _latestOnDevice(earliest, wall);
+}
+
+/// The instant a range ending at the wall minute [wall] ends at in a pass
+/// of a stretch its day's clock reads twice, on [zone]'s clock, the
+/// device's where it is null. Where [later], the latest instant reading
+/// [wall], the day's start for minute 0 of a day whose clock skips its
+/// midnight, and null where the clock skips [wall]. Otherwise the instant
+/// the clock goes back at where a first pass ends as [wall] ends, so a
+/// range ending at a repeated stretch's end in its first pass ends with
+/// it, and [CalendarDates.endAtWallMinute]'s instant elsewhere. A
+/// `TZDateTime` of [zone] where it is given.
+DateTime? endAtWallMinuteInPass(
+  int wall, {
+  required bool later,
+  Location? zone,
+}) {
+  if (zone != null) {
+    final clock = _ZoneClock(zone, wall * Duration.millisecondsPerMinute);
+    final instant = later
+        ? clock.instantInPass(wall, later: true, end: true)
+        : clock.firstPassEndAt(wall) ??
+              clock.instantAtWall(wall, null, end: true);
+    return instant == null ? null : _zoneTime(zone, instant);
+  }
+  final end = CalendarDates.endAtWallMinute(wall);
+  if (end == null) {
+    return null;
+  }
+  if (later) {
+    return _latestOnDevice(end, wall);
+  }
+  // The first pass ends where the offset falls one minute after the first
+  // reading of the minute before.
+  final before = CalendarDates.timeAtWallMinute(wall - 1);
+  if (before != null) {
+    final after = before.add(const Duration(minutes: 1));
+    if (after.timeZoneOffset < before.timeZoneOffset) {
+      return after;
+    }
+  }
+  return end;
+}
+
+/// The latest instant reading the wall minute [wall] on the device's clock,
+/// [earliest] being the earliest: [earliest] plus the stretch its day's
+/// clock reads twice ([CalendarDates.repeatedStretchOf]) where that instant
+/// reads [wall] too, and [earliest] otherwise.
+DateTime _latestOnDevice(DateTime earliest, int wall) {
+  final minute = wall % CalendarDates.minutesPerDay;
+  final day = (wall - minute) ~/ CalendarDates.minutesPerDay;
+  final stretch = CalendarDates.repeatedStretchOf(
+    CalendarDates.dateOfDayNumber(day),
+  );
+  if (stretch == Duration.zero) {
+    return earliest;
+  }
+  final later = earliest.add(stretch);
+  return CalendarDates.wallMinuteOf(later) == wall ? later : earliest;
+}
+
+/// Whether [time]'s clock reads its whole minute twice, as in a stretch a
+/// clock turned back repeats; false for a plain UTC `DateTime`, whose clock
+/// repeats nothing.
+bool isRepeatedTime(DateTime time) {
+  if (time is TZDateTime) {
+    return _ZoneClock.around(time).isRepeated(time);
+  }
+  if (time.isUtc) {
+    return false;
+  }
+  final wall = CalendarDates.wallMinuteOf(time);
+  final earliest = CalendarDates.timeAtWallMinute(wall);
+  return earliest != null &&
+      !_latestOnDevice(earliest, wall).isAtSameMomentAs(earliest);
+}
+
+/// Whether [time]'s clock goes back at its whole minute: the offset there
+/// is below the offset a minute before, so the minute is the instant a
+/// repeated stretch's first pass ends. False for a plain UTC `DateTime`.
+bool isClockGoingBackAt(DateTime time) {
+  if (time is TZDateTime) {
+    return _ZoneClock.around(time).goesBackAt(time);
+  }
+  if (time.isUtc) {
+    return false;
+  }
+  final minute = time.subtract(
+    Duration(
+      seconds: time.second,
+      milliseconds: time.millisecond,
+      microseconds: time.microsecond,
+    ),
+  );
+  return minute.timeZoneOffset <
+      minute.subtract(const Duration(minutes: 1)).timeZoneOffset;
+}
+
+/// The clock [time] is read on: a `TZDateTime`'s location, package
+/// timezone's `UTC` for a plain UTC `DateTime`, and null, the device's, for
+/// a plain local one. Reads no clock.
+Location? clockOf(DateTime time) {
+  if (time is TZDateTime) {
+    return time.location;
+  }
+  return time.isUtc ? UTC : null;
 }
 
 int daysInMonth(int year, int month) {
@@ -1340,6 +1469,51 @@ final class _ZoneClock {
       return _lastReading(wallMs);
     }
     return earliest;
+  }
+
+  /// The earliest instant reading [wall], or where [later] the latest;
+  /// where [end], minute 0 of a day whose clock skips its midnight is the
+  /// day's start, as [instantAtWall] reads an end. Null where the clock
+  /// skips [wall] otherwise.
+  int? instantInPass(int wall, {required bool later, required bool end}) {
+    final wallMs = wall * Duration.millisecondsPerMinute;
+    final reading = later ? _lastReading(wallMs) : _firstReading(wallMs);
+    if (reading != null) {
+      return reading;
+    }
+    final minute = wall % CalendarDates.minutesPerDay;
+    return end && minute == 0
+        ? dayStartMs((wall - minute) ~/ CalendarDates.minutesPerDay)
+        : null;
+  }
+
+  /// The instant a first pass ends at as [wall] ends: one minute after the
+  /// first reading of the minute before [wall], where the offset falls
+  /// there, as the clock goes back; null elsewhere.
+  int? firstPassEndAt(int wall) {
+    final before = _firstReading((wall - 1) * Duration.millisecondsPerMinute);
+    if (before == null) {
+      return null;
+    }
+    final after = before + Duration.millisecondsPerMinute;
+    return offsetAt(after) < offsetAt(before) ? after : null;
+  }
+
+  /// Whether this clock reads [time]'s whole minute twice.
+  bool isRepeated(TZDateTime time) {
+    final wallMs =
+        CalendarDates.wallMinuteOf(time) * Duration.millisecondsPerMinute;
+    return _firstReading(wallMs) != _lastReading(wallMs);
+  }
+
+  /// Whether the offset at [time]'s whole minute is below the offset a
+  /// minute before it.
+  bool goesBackAt(TZDateTime time) {
+    final minute =
+        time.millisecondsSinceEpoch -
+        time.second * Duration.millisecondsPerSecond -
+        time.millisecond;
+    return offsetAt(minute) < offsetAt(minute - Duration.millisecondsPerMinute);
   }
 
   /// [CalendarDates.rangeEndAtWallMinute]'s instant on this clock: the

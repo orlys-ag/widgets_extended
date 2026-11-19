@@ -619,6 +619,41 @@ void main() {
           at(day, 1),
         );
       });
+
+      test("DT28 the passes of 00:30 are an hour apart, the first pass ends "
+          "at 01:00 as the clock goes back, and 00:30 is a time read "
+          "twice", () {
+        final day = longDayStart;
+        expectRepeatedMidnight(day);
+        final wall = CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay;
+        const half = Duration(minutes: 30);
+        final firstHalf = day.add(half);
+        final laterHalf = laterMidnight.add(half);
+        expect(
+          <DateTime?>[
+            timeAtWallMinuteInPass(wall + 30, later: false),
+            timeAtWallMinuteInPass(wall + 30, later: true),
+            endAtWallMinuteInPass(wall + 60, later: false),
+            endAtWallMinuteInPass(wall + 60, later: true),
+          ],
+          <DateTime>[
+            firstHalf,
+            laterHalf,
+            laterMidnight,
+            laterMidnight.add(const Duration(hours: 1)),
+          ],
+        );
+        expect(
+          <bool>[
+            isRepeatedTime(firstHalf),
+            isRepeatedTime(laterHalf),
+            isRepeatedTime(laterMidnight.add(const Duration(hours: 1))),
+            isClockGoingBackAt(laterMidnight),
+            isClockGoingBackAt(day),
+          ],
+          <bool>[true, true, false, true, false],
+        );
+      });
     },
   );
 
@@ -670,6 +705,49 @@ void main() {
         expect(
           CalendarDates.rangeEndAtWallMinute(at(day, 22, 45), next),
           DateTime(day.year, day.month, day.day + 1),
+        );
+      });
+
+      test("DT29 the passes of 23:30 are an hour apart, the first pass ends "
+          "at 24:00 as the clock goes back, and 23:30 is a time read "
+          "twice", () {
+        final day = longDayStart;
+        expectRepeatedLastHour(day);
+        final wall = CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay;
+        final firstHalf = day.add(const Duration(minutes: 23 * 60 + 30));
+        final laterHalf = laterLastHour.add(const Duration(minutes: 30));
+        final beforeHour = day.add(const Duration(minutes: 22 * 60 + 59));
+        // Setup sanity: the passes are an hour apart.
+        expect(laterHalf.difference(firstHalf), const Duration(hours: 1));
+        expect(
+          <DateTime?>[
+            timeAtWallMinuteInPass(wall + 1410, later: false),
+            timeAtWallMinuteInPass(wall + 1410, later: true),
+            endAtWallMinuteInPass(
+              wall + CalendarDates.minutesPerDay,
+              later: false,
+            ),
+            endAtWallMinuteInPass(
+              wall + CalendarDates.minutesPerDay,
+              later: true,
+            ),
+          ],
+          <DateTime>[
+            firstHalf,
+            laterHalf,
+            laterLastHour,
+            DateTime(day.year, day.month, day.day + 1),
+          ],
+        );
+        expect(
+          <bool>[
+            isRepeatedTime(firstHalf),
+            isRepeatedTime(laterHalf),
+            isRepeatedTime(beforeHour),
+            isClockGoingBackAt(laterLastHour),
+            isClockGoingBackAt(beforeHour),
+          ],
+          <bool>[true, true, false, true, false],
         );
       });
     },
@@ -1410,6 +1488,259 @@ void main() {
         expect(local.hour, plain.hour, reason: "$time");
         expect(local.day, plain.day, reason: "$time");
       }
+    });
+
+    test("ZC7 the readings in a pass give each instant of a repeated time, "
+        "the first pass ending as the clock goes back", () {
+      final newYork = tz.getLocation("America/New_York");
+      final havana = tz.getLocation("America/Havana");
+      final santiago = tz.getLocation("America/Santiago");
+      const perDay = CalendarDates.minutesPerDay;
+      final newYorkDay = numberOf(2026, 11, 1) * perDay;
+      final havanaDay = numberOf(2026, 11, 1) * perDay;
+      final santiagoDay = numberOf(2026, 4, 4) * perDay;
+      final skipDay = numberOf(2026, 3, 8) * perDay;
+
+      /// [time] as a plain UTC time where it is a `TZDateTime` of [zone],
+      /// and a note saying it is not otherwise.
+      Object? inUtc(DateTime? time, tz.Location zone) {
+        if (time is! tz.TZDateTime || time.location != zone) {
+          return "not a TZDateTime of ${zone.name}: $time";
+        }
+        return DateTime.fromMillisecondsSinceEpoch(
+          time.millisecondsSinceEpoch,
+          isUtc: true,
+        );
+      }
+
+      expect(
+        <Object?>[
+          for (final later in <bool>[false, true])
+            inUtc(
+              timeAtWallMinuteInPass(
+                newYorkDay + 90,
+                later: later,
+                zone: newYork,
+              ),
+              newYork,
+            ),
+          for (final later in <bool>[false, true])
+            inUtc(
+              timeAtWallMinuteInPass(havanaDay, later: later, zone: havana),
+              havana,
+            ),
+          for (final later in <bool>[false, true])
+            inUtc(
+              timeAtWallMinuteInPass(
+                santiagoDay + 1410,
+                later: later,
+                zone: santiago,
+              ),
+              santiago,
+            ),
+        ],
+        <Object?>[
+          DateTime.utc(2026, 11, 1, 5, 30),
+          DateTime.utc(2026, 11, 1, 6, 30),
+          DateTime.utc(2026, 11, 1, 4),
+          DateTime.utc(2026, 11, 1, 5),
+          DateTime.utc(2026, 4, 5, 2, 30),
+          DateTime.utc(2026, 4, 5, 3, 30),
+        ],
+      );
+      // Havana's clock skips 00:00 to 01:00 on 2026-03-08.
+      expect(
+        <DateTime?>[
+          for (final later in <bool>[false, true])
+            timeAtWallMinuteInPass(skipDay + 30, later: later, zone: havana),
+        ],
+        <DateTime?>[null, null],
+      );
+
+      expect(
+        <Object?>[
+          for (final later in <bool>[false, true])
+            inUtc(
+              endAtWallMinuteInPass(
+                newYorkDay + 120,
+                later: later,
+                zone: newYork,
+              ),
+              newYork,
+            ),
+          for (final later in <bool>[false, true])
+            inUtc(
+              endAtWallMinuteInPass(havanaDay + 60, later: later, zone: havana),
+              havana,
+            ),
+          for (final later in <bool>[false, true])
+            inUtc(
+              endAtWallMinuteInPass(
+                santiagoDay + perDay,
+                later: later,
+                zone: santiago,
+              ),
+              santiago,
+            ),
+          // Minute 0 of a day whose clock skips its midnight ends at the
+          // day's start, 01:00.
+          for (final later in <bool>[false, true])
+            inUtc(
+              endAtWallMinuteInPass(skipDay, later: later, zone: havana),
+              havana,
+            ),
+        ],
+        <Object?>[
+          DateTime.utc(2026, 11, 1, 6),
+          DateTime.utc(2026, 11, 1, 7),
+          DateTime.utc(2026, 11, 1, 5),
+          DateTime.utc(2026, 11, 1, 6),
+          DateTime.utc(2026, 4, 5, 3),
+          DateTime.utc(2026, 4, 5, 4),
+          DateTime.utc(2026, 3, 8, 5),
+          DateTime.utc(2026, 3, 8, 5),
+        ],
+      );
+    });
+
+    test("ZC8 a time read twice, the clock going back, and a time's clock, "
+        "each read as often as the wall-minute helpers read", () {
+      final newYork = tz.getLocation("America/New_York");
+      final havana = tz.getLocation("America/Havana");
+      final santiago = tz.getLocation("America/Santiago");
+      tz.TZDateTime of(tz.Location zone, DateTime utc) {
+        return tz.TZDateTime.from(utc, zone);
+      }
+
+      // A plain UTC time reading 01:30 of 2026-11-01, which New York's
+      // clock reads twice, and one reading 06:00, where it goes back.
+      final utcHalfPastOne = DateTime.utc(2026, 11, 1, 1, 30);
+      final utcSix = DateTime.utc(2026, 11, 1, 6);
+      expect(
+        <bool>[
+          isRepeatedTime(of(newYork, DateTime.utc(2026, 11, 1, 5, 30))),
+          isRepeatedTime(of(newYork, DateTime.utc(2026, 11, 1, 6, 30))),
+          isRepeatedTime(of(newYork, DateTime.utc(2026, 11, 1, 8))),
+          isRepeatedTime(utcHalfPastOne),
+        ],
+        <bool>[true, true, false, false],
+      );
+      expect(
+        <bool>[
+          for (final (zone, utc) in <(tz.Location, DateTime)>[
+            (newYork, DateTime.utc(2026, 11, 1, 6)),
+            (havana, DateTime.utc(2026, 11, 1, 5)),
+            (santiago, DateTime.utc(2026, 4, 5, 3)),
+          ]) ...<bool>[
+            isClockGoingBackAt(of(zone, utc)),
+            isClockGoingBackAt(
+              of(zone, utc.subtract(const Duration(minutes: 1))),
+            ),
+            isClockGoingBackAt(of(zone, utc.add(const Duration(minutes: 1)))),
+          ],
+          isClockGoingBackAt(utcSix),
+        ],
+        <bool>[
+          true,
+          false,
+          false,
+          true,
+          false,
+          false,
+          true,
+          false,
+          false,
+          false,
+        ],
+      );
+      expect(
+        <Object?>[
+          clockOf(of(havana, DateTime.utc(2026, 11, 1, 5))),
+          clockOf(utcSix),
+          clockOf(DateTime(2026, 11, 1, 6)),
+        ],
+        <Object?>[havana, tz.UTC, null],
+      );
+
+      final counting = CountingLocation(havana);
+      int count(void Function() call) {
+        counting.lookups = 0;
+        call();
+        return counting.lookups;
+      }
+
+      tz.TZDateTime counted(DateTime utc) {
+        return tz.TZDateTime.from(utc, counting);
+      }
+
+      const perDay = CalendarDates.minutesPerDay;
+      final repeated = numberOf(2026, 11, 1) * perDay;
+      final skipped = numberOf(2026, 3, 8) * perDay;
+      final quiet = numberOf(2026, 7, 15) * perDay + 600;
+      for (final wall in <int>[
+        repeated + 30,
+        repeated + 60,
+        repeated,
+        skipped + 30,
+        skipped,
+        quiet,
+      ]) {
+        final times = count(() {
+          CalendarDates.timeAtWallMinute(wall, zone: counting);
+        });
+        final ends = count(() {
+          CalendarDates.endAtWallMinute(wall, zone: counting);
+        });
+        for (final later in <bool>[false, true]) {
+          expect(
+            count(() {
+              timeAtWallMinuteInPass(wall, later: later, zone: counting);
+            }),
+            times,
+            reason: "timeAtWallMinuteInPass($wall, later: $later)",
+          );
+          expect(
+            count(() {
+              endAtWallMinuteInPass(wall, later: later, zone: counting);
+            }),
+            ends,
+            reason: "endAtWallMinuteInPass($wall, later: $later)",
+          );
+        }
+      }
+      for (final utc in <DateTime>[
+        DateTime.utc(2026, 11, 1, 4, 30),
+        DateTime.utc(2026, 11, 1, 5),
+        DateTime.utc(2026, 11, 1, 5, 30),
+        DateTime.utc(2026, 7, 15, 14),
+      ]) {
+        final time = counted(utc);
+        final occurrence = count(() {
+          CalendarDates.isLaterOccurrence(time);
+        });
+        expect(
+          count(() {
+            isRepeatedTime(time);
+          }),
+          occurrence,
+          reason: "isRepeatedTime($utc)",
+        );
+        expect(
+          count(() {
+            isClockGoingBackAt(time);
+          }),
+          occurrence,
+          reason: "isClockGoingBackAt($utc)",
+        );
+      }
+      expect(
+        count(() {
+          clockOf(counted(DateTime.utc(2026, 11, 1, 5)));
+        }),
+        count(() {
+          counted(DateTime.utc(2026, 11, 1, 5));
+        }),
+      );
     });
 
     test("ZC6 loadedZones lists the loaded database's zones sorted by name, "
