@@ -202,9 +202,15 @@ base class MemoryCalendarStore<T> extends CalendarStore<T> {
   @override
   Future<CalendarEntry<T>> create(CalendarEntry<T> draft) async {
     final zoned = zonedEntryOf(draft, zone);
-    final refusal = hoursRefusalOf(zoned);
-    if (refusal != null) {
-      throw refusal;
+    // Held to the hours whatever held entry its id names: the exemption
+    // [hoursRefusalOf] makes for a write keeping a stored entry's times is
+    // for a write on that entry.
+    if (!hours.holdsTimes(zoned.start, zoned.end, isAllDay: zoned.isAllDay)) {
+      throw CalendarHoursException(
+        hours: hours,
+        start: zoned.start,
+        end: zoned.end,
+      );
     }
     var id = zoned.id;
     if (id != null && _index.stored(id) != null) {

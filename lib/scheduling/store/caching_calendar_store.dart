@@ -1562,9 +1562,17 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     } on ArgumentError catch (error) {
       return _refuse(error);
     }
-    final refusal = hoursRefusalOf(zoned);
-    if (refusal != null) {
-      return _refuse(refusal);
+    // Held to the hours whatever stored entry its id names: the exemption
+    // [hoursRefusalOf] makes for a write keeping a stored entry's times is
+    // for a write on that entry.
+    if (!hours.holdsTimes(zoned.start, zoned.end, isAllDay: zoned.isAllDay)) {
+      return _refuse(
+        CalendarHoursException(
+          hours: hours,
+          start: zoned.start,
+          end: zoned.end,
+        ),
+      );
     }
     return _write<CalendarEntry<T>, CalendarEntry<T>>(
       send: () {

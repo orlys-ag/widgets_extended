@@ -835,8 +835,8 @@ void main() {
     expect(moving(), same(writeFailed));
   });
 
-  test("M8 the hours hold a new entry and a change of an entry's days or "
-      "minutes", () async {
+  test("M8 the hours hold a new entry, one copying a stored entry's id and "
+      "times included, and a change of an entry's days or minutes", () async {
     final harness = Harness();
     final store = harness.store;
     final early = task("item-1", DateTime(2026, 4, 21), 420, 540);
@@ -858,6 +858,11 @@ void main() {
     expect(created(), hoursRefusal(startOutside: false));
     expect(moved(), hoursRefusal(startOutside: true));
     expect(store.isPending("item-1"), isFalse);
+
+    final copied = errorOf(store.create(early));
+    expect(harness.source.calls, hasLength(calls));
+    await settle();
+    expect(copied(), hoursRefusal(startOutside: true));
 
     final refused = errorOf(store.requestMove(retimed(early, 450, 510)));
     expect(store.isPending("item-1"), isFalse);
