@@ -278,8 +278,8 @@ class RecordingCanvas implements Canvas {
 
   /// Each paragraph with the offset of its top left and the rect the
   /// canvas was last clipped to since its last restore, or null.
-  final List<({ui.Paragraph paragraph, Offset offset, Rect? clip})>
-  paragraphs = <({ui.Paragraph paragraph, Offset offset, Rect? clip})>[];
+  final List<({ui.Paragraph paragraph, Offset offset, Rect? clip})> paragraphs =
+      <({ui.Paragraph paragraph, Offset offset, Rect? clip})>[];
 
   Rect? _clip;
 
@@ -3042,24 +3042,105 @@ void main() {
             bool notice,
           })
         >[
-          (slot: 15, hours: day, nextSlot: 30, nextHours: day, from: 540,
-           to: 540, entries: const [], above: 1, notice: false),
-          (slot: 15, hours: day, nextSlot: 60, nextHours: day, from: 540,
-           to: 540, entries: const [], above: 1, notice: false),
-          (slot: 60, hours: day, nextSlot: 5, nextHours: day, from: 540,
-           to: 540, entries: const [], above: 1, notice: false),
-          (slot: 15, hours: day, nextSlot: 15, nextHours: office, from: 540,
-           to: 540, entries: const [], above: 1, notice: false),
-          (slot: 15, hours: office, nextSlot: 15, nextHours: day, from: 540,
-           to: 540, entries: const [], above: 1, notice: false),
-          (slot: 15, hours: day, nextSlot: 15, nextHours: office, from: 300,
-           to: 360, entries: const [], above: 1, notice: false),
-          (slot: 15, hours: day, nextSlot: 15, nextHours: office, from: 1380,
-           to: null, entries: const [], above: 1, notice: false),
-          (slot: 15, hours: day, nextSlot: 30, nextHours: day, from: 540,
-           to: 540, entries: bar, above: 3, notice: false),
-          (slot: 15, hours: day, nextSlot: 15, nextHours: office, from: 540,
-           to: 540, entries: early, above: 1, notice: true),
+          (
+            slot: 15,
+            hours: day,
+            nextSlot: 30,
+            nextHours: day,
+            from: 540,
+            to: 540,
+            entries: const [],
+            above: 1,
+            notice: false,
+          ),
+          (
+            slot: 15,
+            hours: day,
+            nextSlot: 60,
+            nextHours: day,
+            from: 540,
+            to: 540,
+            entries: const [],
+            above: 1,
+            notice: false,
+          ),
+          (
+            slot: 60,
+            hours: day,
+            nextSlot: 5,
+            nextHours: day,
+            from: 540,
+            to: 540,
+            entries: const [],
+            above: 1,
+            notice: false,
+          ),
+          (
+            slot: 15,
+            hours: day,
+            nextSlot: 15,
+            nextHours: office,
+            from: 540,
+            to: 540,
+            entries: const [],
+            above: 1,
+            notice: false,
+          ),
+          (
+            slot: 15,
+            hours: office,
+            nextSlot: 15,
+            nextHours: day,
+            from: 540,
+            to: 540,
+            entries: const [],
+            above: 1,
+            notice: false,
+          ),
+          (
+            slot: 15,
+            hours: day,
+            nextSlot: 15,
+            nextHours: office,
+            from: 300,
+            to: 360,
+            entries: const [],
+            above: 1,
+            notice: false,
+          ),
+          (
+            slot: 15,
+            hours: day,
+            nextSlot: 15,
+            nextHours: office,
+            from: 1380,
+            to: null,
+            entries: const [],
+            above: 1,
+            notice: false,
+          ),
+          (
+            slot: 15,
+            hours: day,
+            nextSlot: 30,
+            nextHours: day,
+            from: 540,
+            to: 540,
+            entries: bar,
+            above: 3,
+            notice: false,
+          ),
+          (
+            slot: 15,
+            hours: day,
+            nextSlot: 15,
+            nextHours: office,
+            from: 540,
+            to: 540,
+            entries: early,
+            above: 1,
+            notice: true,
+          ),
         ];
     for (final week in <bool>[true, false]) {
       for (final c in cases) {
@@ -3183,7 +3264,9 @@ void main() {
       expect(last.bottom, lessThanOrEqualTo(400.0), reason: shown.name);
       expect(
         last.top,
-        greaterThanOrEqualTo(stripRect(tester, shown, tuesday, kept - 1).bottom),
+        greaterThanOrEqualTo(
+          stripRect(tester, shown, tuesday, kept - 1).bottom,
+        ),
         reason: shown.name,
       );
       expect(
@@ -3406,6 +3489,165 @@ void main() {
         stripRect(tester, shown, tuesday, kept + 1).top,
         moreOrLessEquals(before),
         reason: shown.name,
+      );
+    }
+  });
+
+  testWidgets("TS41 a store change that gives the strip another number of "
+      "rows while a block's move or resize runs leaves the drag running, so "
+      "its release requests what it lands on, and the strip takes the new "
+      "rows when the drag ends, also one let go where it lifted, which "
+      "requests nothing", (tester) async {
+    final shown = Shown.week(monday);
+    final expected = <String, (DateTime, DateTime)?>{
+      "move": (at(tuesday, 11), at(tuesday, 12)),
+      "start": (at(tuesday, 9), at(tuesday, 11)),
+      "end": (at(tuesday, 10), at(tuesday, 12)),
+      "in place": null,
+    };
+    for (final MapEntry(key: drag, value: landing) in expected.entries) {
+      final entries = <CalendarEntry<String>>[
+        allDayOf("bar1", monday),
+        entryOf("a", at(tuesday, 10), at(tuesday, 11)),
+      ];
+      final store = storeOf(entries);
+      await Harness(store, shown).pump(tester);
+      final rows = rowCountNow();
+      final block = tester.getRect(blockFinder("a", tuesday));
+      final TestGesture gesture;
+      if (drag == "in place") {
+        gesture = await liftTo(tester, block.center, block.center);
+      } else if (drag == "move") {
+        final hour =
+            slotRect(tester, shown, tuesday, 11 * 60).top -
+            slotRect(tester, shown, tuesday, 10 * 60).top;
+        gesture = await liftTo(
+          tester,
+          block.center,
+          block.center + Offset(0.0, hour),
+        );
+      } else {
+        final selecting = await lift(tester, block.center);
+        await selecting.up();
+        await tester.pumpAndSettle();
+        final from = drag == "start"
+            ? Offset(block.center.dx, block.top + 2.0)
+            : Offset(block.center.dx, block.bottom - 2.0);
+        final to = drag == "start"
+            ? Offset(
+                from.dx,
+                slotRect(tester, shown, tuesday, 9 * 60).top + 2.0,
+              )
+            : Offset(
+                from.dx,
+                slotRect(tester, shown, tuesday, 11 * 60 + 45).bottom - 2.0,
+              );
+        gesture = await tester.startGesture(from);
+        await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+        await tester.pump();
+        await gesture.moveTo(to);
+        await tester.pump();
+      }
+
+      // A second bar on Monday needs a second strip row.
+      store.entries = <CalendarEntry<String>>[
+        ...entries,
+        allDayOf("bar2", monday),
+      ];
+      await tester.pump();
+      expect(rowCountNow(), rows, reason: drag);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(
+        <(DateTime, DateTime)>[
+          for (final moved in store.moves) (moved.start, moved.end),
+        ],
+        <(DateTime, DateTime)>[?landing],
+        reason: drag,
+      );
+      expect(rowCountNow(), rows + 1, reason: drag);
+      expect(barFinder("bar2"), findsOneWidget, reason: drag);
+    }
+  });
+
+  testWidgets("TS42 a store change that stacks a bar before a bar being "
+      "moved or resized keeps the dragged bar in its row, so its drag runs "
+      "on and its release requests what it lands on, and the bars stack "
+      "anew when the drag ends, also one let go where it lifted, which "
+      "requests nothing", (tester) async {
+    final shown = Shown.week(monday);
+    final expected = <String, (DateTime, DateTime)?>{
+      "move": (wednesday, thursday),
+      "end": (tuesday, friday),
+      "in place": null,
+    };
+    for (final MapEntry(key: drag, value: landing) in expected.entries) {
+      final entries = <CalendarEntry<String>>[allDayOf("a", tuesday)];
+      final store = storeOf(entries);
+      await Harness(store, shown).pump(tester);
+      final row = boardOf(tester).controller.spanOf(GridKey.bar("a"))!.rowStart;
+      // Setup sanity: the bar lies in the strip's first row.
+      expect(row, shown.stripStart, reason: drag);
+      final TestGesture gesture;
+      if (drag == "in place") {
+        final bar = tester.getCenter(barFinder("a"));
+        gesture = await liftTo(tester, bar, bar);
+      } else if (drag == "move") {
+        gesture = await liftTo(
+          tester,
+          tester.getCenter(barFinder("a")),
+          stripRect(tester, shown, wednesday).center,
+        );
+      } else {
+        await selectBar(tester, "a");
+        gesture = await holdEdge(
+          tester,
+          "a",
+          AxisDirection.right,
+          Offset(
+            stripRect(tester, shown, thursday).right - 4.0,
+            tester.getCenter(barFinder("a")).dy,
+          ),
+        );
+      }
+
+      // A bar from Monday to Wednesday stacks before the dragged one.
+      store.entries = <CalendarEntry<String>>[
+        ...entries,
+        allDayOf("b", monday, days: 3),
+      ];
+      await tester.pump();
+      expect(
+        boardOf(tester).controller.spanOf(GridKey.bar("a"))!.rowStart,
+        row,
+        reason: drag,
+      );
+      expect(
+        boardOf(tester).controller.spanOf(GridKey.bar("b"))!.rowStart,
+        row + 1,
+        reason: drag,
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(
+        <(DateTime, DateTime, bool)>[
+          for (final moved in store.moves)
+            (moved.start, moved.end, moved.isAllDay),
+        ],
+        <(DateTime, DateTime, bool)>[
+          if (landing != null) (landing.$1, landing.$2, true),
+        ],
+        reason: drag,
+      );
+      expect(
+        boardOf(tester).controller.spanOf(GridKey.bar("b"))!.rowStart,
+        row,
+        reason: drag,
+      );
+      expect(
+        boardOf(tester).controller.spanOf(GridKey.bar("a"))!.rowStart,
+        row + 1,
+        reason: drag,
       );
     }
   });

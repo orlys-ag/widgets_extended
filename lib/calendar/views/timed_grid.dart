@@ -701,7 +701,14 @@ CalendarCreateRange? _createRangeOf(
 /// requests nothing, and ends a create range in flight and clears the range a
 /// create flow marks. A new [editPolicy] cancels a move or a resize in flight,
 /// which then requests nothing, and ends a create range in flight, which then
-/// creates nothing; the range a create flow marks stays.
+/// creates nothing; the range a create flow marks stays. A store change that
+/// gives the all-day strip another number of rows while a block is moved or
+/// resized leaves the strip its rows until the drag requests its landing or
+/// ends, so no slot row moves under the block and its drag runs on; a bar
+/// the change adds past those rows shows then. While a bar is moved or
+/// resized the strip takes its new rows at once, and the dragged bar keeps
+/// its row, the other bars stacking around it, until the drag requests its
+/// landing or ends.
 ///
 /// With no [storeRange], the days are ready while the store's shown range
 /// holds every one of them and its status is ready. With one, they are
@@ -1132,6 +1139,12 @@ final class _Dragging extends _GridMode {
   /// Set once a crossing's release wrote or refused its landing, so the
   /// drop gate refuses the board's own report of that release.
   bool spent = false;
+
+  /// Set once the drag requests its landing
+  /// ([_TimedGridState._requestMove]). Until then a store change keeps the
+  /// strip's rows under a block's drag and the row of a dragged bar; the
+  /// request's own sync places the entry as any change does.
+  bool requested = false;
 
   /// Whether the crossing names a cell, whose landing the label and the
   /// marks show in place of the board target's.
@@ -2368,8 +2381,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// create flow's marks, kept as times, stay on their slots, and a
   /// crossing drag reads its cell again once the board has laid the new
   /// rows out. The caller places the kept split on the new rows.
+  ///
+  /// While the board drags a block that has not requested its landing
+  /// ([_Dragging.requested]) it keeps the rows the grid has and returns
+  /// false: the block's span would move with the slot rows, which cancels
+  /// its drag, so the rows wait for the drag's end ([_handleDragEnd]). A
+  /// bar's span, in the strip, keeps its row ([_keptBar]).
   bool _applyStripRows(int rows) {
-    if (rows == _stripRows) {
+    final drag = _drag;
+    final holds = drag != null && !drag.requested && !drag.key.isBar;
+    if (rows == _stripRows || holds) {
       _strip.value = _stripStateOf();
       return false;
     }
@@ -2846,7 +2867,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// Hands [request] to [TimedGrid.onMoveRequest], or with none writes it
   /// ([CalendarStore.requestMove]), holding it in [_held] until the future
   /// completes, or fails, a throw within the call included. The hold syncs
-  /// within the call ([_handleStore]), as a store write's notify does.
+  /// within the call ([_handleStore]), as a store write's notify does, a
+  /// drag of the entry noted as requested first ([_Dragging.requested]).
   ///
   /// A failure of the store's write, whether [CalendarStore.requestMove]
   /// throws within the call or its future fails, is caught, as a failed
@@ -2854,6 +2876,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// [TimedGrid.onMoveRequest], either way, is left uncaught in the zone.
   void _requestMove(CalendarMoveRequest<T> request) {
     final id = request.entry.id!;
+    final drag = _drag;
+    if (drag != null && drag.key.id == id) {
+      drag.requested = true;
+    }
     _held[id] = (request: request, shown: request.requested);
     _handleStore();
     final onMoveRequest = widget.onMoveRequest;
@@ -3017,7 +3043,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final shown = ready
         ? _shownBetween(widget.firstDay, _lastDay)
         : <CalendarShownEntry<T>>[];
-    final layout = TimedGridLayout<T>.of(shown, _tracks, previous: _layout);
+    final layout = TimedGridLayout<T>.of(
+      shown,
+      _tracks,
+      previous: _layout,
+      keptBar: _keptBar(),
+    );
     _layout = layout;
     final hidden = layout.hidden;
     // While the days are not ready the strip keeps the rows it showed, so
@@ -3046,6 +3077,23 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     _syncedReady = ready;
     _hiddenCount.value = hidden;
+  }
+
+  /// The strip row of the bar the board drags, which the split keeps it in
+  /// ([TimedGridLayout.of]): another row would be a new span, which
+  /// cancels the drag. Null where the board drags no bar, and once the
+  /// drag requests its landing ([_Dragging.requested]).
+  ({String id, int row})? _keptBar() {
+    final drag = _drag;
+    if (drag == null || drag.requested || !drag.key.isBar) {
+      return null;
+    }
+    final key = drag.key;
+    final span = _board.spanOf(key);
+    if (span == null || span.rowStart < _stripStart) {
+      return null;
+    }
+    return (id: key.id, row: span.rowStart - _stripStart);
   }
 
   /// Turns the kept split into the board's items on the current tracks:
@@ -3856,9 +3904,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Delivered after the drop's report, and possibly after the board has
-  /// left the tree. Puts back a lifted entry's pieces the drop's request
-  /// did not, under the board's style as it stands, so a drop's glide runs
-  /// on and they enter as added blocks do.
+  /// left the tree. Syncs ([_sync]), so the strip takes the rows a block's
+  /// drag kept ([_applyStripRows]), the bars stack with no row kept
+  /// ([_keptBar]), and a lifted entry's pieces the drop's request did not
+  /// put back come back, under the board's style as it stands where the
+  /// rows stay, so a drop's glide runs on and they enter as added blocks
+  /// do.
   void _handleDragEnd(GridKey key, bool committed) {
     final drag = _drag;
     if (!mounted || drag == null) {
@@ -3868,9 +3919,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _mode = const _Idle();
       _clearCross();
     });
-    if (drag.lifted != null) {
-      _placeLayout(disable: false);
-    }
+    _sync();
   }
 
   /// Whether [drag] reads the cell under its pointer as it moves, to cross

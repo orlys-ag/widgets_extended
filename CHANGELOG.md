@@ -1106,6 +1106,12 @@ hours' start and up to an `until` after their end, so
 offered a range outside them, which the same check then refused as
 `CalendarScheduleOutsideHours`. A first slot now always lies in the
 hours.
+- Fix: in Week and Day, a store change that gave the all-day strip another
+number of rows cancelled a block's move or resize in flight, and one that
+stacked a bar before a bar being moved or resized cancelled that bar's,
+so the release requested nothing. The strip now keeps its rows under a
+block's drag until it requests its landing or ends, and a dragged bar
+keeps its row, the other bars stacking around it.
 
 ## 0.0.35
 

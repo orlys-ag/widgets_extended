@@ -703,9 +703,14 @@ class TimedGridLayout<T> {
   /// clock repeats a stretch, where a piece's rows do not order as its
   /// instants do ([GridTracks.repeatsStretchAt]).
   ///
+  /// Where [keptBar] is given, the bar of the all-day entry it names keeps
+  /// the strip row it names, and the other bars stack around it
+  /// ([_stackBars]), as a grid splits while the board drags that bar.
+  ///
   /// Where [previous] split the identical entries, with the same pending
   /// flags in the same order, on the same days, weekdays, hours and zone,
-  /// the split is [previous], and runs nothing: a store notify that changes
+  /// keeping the same bar's row, the split is [previous], and runs
+  /// nothing: a store notify that changes
   /// nothing the grid shows splits nothing; and a store that notifies as
   /// it is asked for new days, before the grid has them, syncs on the
   /// days shown before, whose split it keeps, so the step splits once.
@@ -714,6 +719,7 @@ class TimedGridLayout<T> {
     List<CalendarShownEntry<T>> shown,
     GridTracks tracks, {
     TimedGridLayout<T>? previous,
+    ({String id, int row})? keptBar,
   }) {
     if (previous != null) {
       final read = previous._read;
@@ -723,6 +729,7 @@ class TimedGridLayout<T> {
           read.weekdays == tracks.weekdays &&
           read.hours == tracks.hours &&
           read.zone == tracks.zone &&
+          read.keptBar == keptBar &&
           _sameShown(read.shown, shown)) {
         return previous;
       }
@@ -796,7 +803,7 @@ class TimedGridLayout<T> {
         loose.add(entry);
       }
     }
-    final stacked = _stackBars(tracks, allDay);
+    final stacked = _stackBars(tracks, allDay, keptBar: keptBar);
     return TimedGridLayout<T>._(
       (
         shown: shown,
@@ -805,6 +812,7 @@ class TimedGridLayout<T> {
         weekdays: tracks.weekdays,
         hours: tracks.hours,
         zone: tracks.zone,
+        keptBar: keptBar,
       ),
       pieces: pieces,
       bars: stacked.bars,
@@ -825,6 +833,7 @@ class TimedGridLayout<T> {
     CalendarWeekdaySet weekdays,
     CalendarDayHours hours,
     Location? zone,
+    ({String id, int row})? keptBar,
   })?
   _read;
 
@@ -873,10 +882,16 @@ class TimedGridLayout<T> {
   /// a min-heap by last column and the free ones in a min-heap by row, so
   /// the stack is O(n log n). Also counts, per column, the bars below the
   /// third row.
+  ///
+  /// The bar of the entry [keptBar] names, where [allDay] holds one, takes
+  /// the row it names before the sweep, which holds that row from the
+  /// sweep's start to the bar's last column, so no other bar shares it
+  /// there; the rows above it start free.
   static ({List<GridBar<T>> bars, int rows, List<int> below}) _stackBars<T>(
     GridTracks tracks,
-    List<({CalendarShownEntry<T> shown, int first, int last})> allDay,
-  ) {
+    List<({CalendarShownEntry<T> shown, int first, int last})> allDay, {
+    ({String id, int row})? keptBar,
+  }) {
     final below = List<int>.filled(tracks.columnCount, 0);
     if (allDay.isEmpty) {
       return (bars: <GridBar<T>>[], rows: 0, below: below);
@@ -900,19 +915,42 @@ class TimedGridLayout<T> {
       }
       return a.shown.id.compareTo(b.shown.id);
     });
+    var kept = -1;
+    if (keptBar != null) {
+      kept = allDay.indexWhere((bar) {
+        return bar.shown.id == keptBar.id;
+      });
+    }
     // A row in use is held as `last * stride + row`, so the heap's least is
-    // the row whose bar ends at the earliest column.
-    final stride = allDay.length;
+    // the row whose bar ends at the earliest column; a kept row may lie
+    // past the bars' count.
+    final stride = kept < 0
+        ? allDay.length
+        : math.max(allDay.length, keptBar!.row + 1);
     final used = _IntHeap();
     final free = _IntHeap();
     var rows = 0;
-    final bars = <GridBar<T>>[];
-    for (final bar in allDay) {
-      while (used.isNotEmpty && used.peek ~/ stride < bar.first) {
-        free.push(used.pop() % stride);
+    if (kept >= 0) {
+      final row = keptBar!.row;
+      for (var above = 0; above < row; above++) {
+        free.push(above);
       }
-      final row = free.isNotEmpty ? free.pop() : rows++;
-      used.push(bar.last * stride + row);
+      rows = row + 1;
+      used.push(allDay[kept].last * stride + row);
+    }
+    final bars = <GridBar<T>>[];
+    for (var index = 0; index < allDay.length; index++) {
+      final bar = allDay[index];
+      final int row;
+      if (index == kept) {
+        row = keptBar!.row;
+      } else {
+        while (used.isNotEmpty && used.peek ~/ stride < bar.first) {
+          free.push(used.pop() % stride);
+        }
+        row = free.isNotEmpty ? free.pop() : rows++;
+        used.push(bar.last * stride + row);
+      }
       final entry = bar.shown.entry;
       final firstDay = tracks.dayAt(bar.first);
       final lastDay = tracks.dayAt(bar.last);

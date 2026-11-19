@@ -227,6 +227,49 @@ void main() {
     expect(fri.continuesBefore, isFalse);
   });
 
+  test("GL12 a kept bar takes the row it names, past the bars' count too, "
+      "before the sweep, the rows above it free from the start and its own "
+      "freed past its last column; the split of the same entries keeping "
+      "the same bar's row is the previous one, and another splits again", () {
+    final shown = <CalendarShownEntry<String>>[
+      allDayOf("mon", monday, 1),
+      allDayOf("trip", tuesday, 3),
+      allDayOf("wed", wednesday, 1),
+    ];
+    const kept = (id: "mon", row: 3);
+    final layout = TimedGridLayout<String>.of(
+      shown,
+      workweek(),
+      keptBar: kept,
+    );
+    expect(
+      <(String, int)>[for (final bar in layout.bars) (bar.shown.id, bar.row)],
+      <(String, int)>[("mon", 3), ("trip", 0), ("wed", 1)],
+    );
+    expect(layout.barRows, 4);
+    debugEntrySplitCount = 0;
+    expect(
+      TimedGridLayout<String>.of(
+        shown,
+        workweek(),
+        previous: layout,
+        keptBar: kept,
+      ),
+      same(layout),
+    );
+    expect(debugEntrySplitCount, 0);
+    final unkept = TimedGridLayout<String>.of(
+      shown,
+      workweek(),
+      previous: layout,
+    );
+    expect(debugEntrySplitCount, 1);
+    expect(
+      <(String, int)>[for (final bar in unkept.bars) (bar.shown.id, bar.row)],
+      <(String, int)>[("mon", 0), ("trip", 0), ("wed", 1)],
+    );
+  });
+
   test("GL5 the split of the identical entries on the same days, weekdays "
       "and hours is the previous one and counts no split, whatever the slots "
       "and rows; any other input splits again", () {
