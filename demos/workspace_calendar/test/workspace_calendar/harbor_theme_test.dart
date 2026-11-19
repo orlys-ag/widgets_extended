@@ -6,7 +6,7 @@ import 'dart:math' as math;
 
 import 'package:workspace_calendar/workspace_calendar/calendar_schema.dart';
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// An sRGB colour as three 8-bit channels, fractional after compositing.

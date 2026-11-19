@@ -4,7 +4,6 @@ library;
 
 import 'dart:ui' show lerpDouble;
 
-import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';

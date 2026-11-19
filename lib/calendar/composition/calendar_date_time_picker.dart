@@ -2,7 +2,7 @@
 /// [CalendarTimePicker], with a toggle that shows and hides the time.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../scheduling/scheduling.dart';
 import '../presentation/calendar_day_badges.dart';

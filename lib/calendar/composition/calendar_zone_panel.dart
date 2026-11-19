@@ -5,7 +5,7 @@ library;
 
 import 'dart:collection';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../scheduling/scheduling.dart';
 import '../../sliver_tree/sliver_tree.dart';

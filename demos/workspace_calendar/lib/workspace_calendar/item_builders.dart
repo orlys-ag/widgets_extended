@@ -3,7 +3,7 @@
 /// look, and the bundle the composition hands them to the views in.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_api_source.dart';

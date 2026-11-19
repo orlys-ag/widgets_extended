@@ -1073,6 +1073,14 @@ read it as its instant on the device's clock, as their documents say.
 the host gave it, a time past midnight included, where `onChanged` promises
 the start of that date on the clock of the store's zone, as a tap on a day
 reports it. A pick of a time now reports that day start.
+- The calendar's composition layer (`CalendarView`, its header, the
+calendar card, the day and date-time pickers, the zone panel and
+`CalendarThemeExtension`) builds on `package:material_ui`, which Flutter
+names in place of `package:flutter/material.dart` from 3.47, and the
+package depends on `material_ui`. Its `Theme`, `Material` and
+`MaterialLocalizations` are types apart from the legacy library's, so the
+calendar reads an app's Material theme, and its view menu the
+`MaterialLocalizations` it needs, only from an app built on `material_ui`.
 
 ## 0.0.35
 

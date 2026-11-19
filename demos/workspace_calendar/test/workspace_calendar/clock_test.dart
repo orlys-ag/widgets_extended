@@ -4,7 +4,7 @@
 library;
 
 import 'package:workspace_calendar/workspace_calendar/harbor_theme.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';

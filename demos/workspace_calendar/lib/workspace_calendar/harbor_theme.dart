@@ -3,7 +3,7 @@
 /// with, and the Material theme the calendar applies to itself.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:widgets_extended/widgets_extended.dart';
 
 import 'calendar_schema.dart';
