@@ -438,7 +438,15 @@ class CalendarHeader extends StatelessWidget {
                           children: <Widget>[
                             Icon(_viewIcon(value), color: theme.text),
                             const SizedBox(width: 12.0),
-                            Flexible(child: Text(_viewLabel(strings, value))),
+                            Flexible(
+                              child: Text(
+                                _viewLabel(strings, value),
+                                // The menu's own label style sets the
+                                // size; the colour is the calendar's, on
+                                // the calendar's surface.
+                                style: TextStyle(color: theme.text),
+                              ),
+                            ),
                           ],
                         ),
                       ),

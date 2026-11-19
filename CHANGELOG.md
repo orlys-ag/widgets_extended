@@ -1116,6 +1116,11 @@ keeps its row, the other bars stacking around it.
 month strip asked it to read none of the days they showed, so a day past
 the store's shown range stayed loading until a scroll. Each now reads the
 days it shows from the new store, after the frame that gives it.
+- Fix: the header's view menu drew its names in the Material theme's text
+colour on the calendar theme's surface, so a dark calendar theme in a
+light app, or the default `CalendarThemeExtension` in a dark app, drew
+them nearly invisible. They now draw in the calendar theme's text colour,
+as the menu's icons do.
 
 ## 0.0.35
 
