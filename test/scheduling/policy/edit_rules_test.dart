@@ -1231,14 +1231,11 @@ void main() {
       );
     });
 
-    test("EZ6 an elapsed length across a skipped hour ends by until where "
-        "its wall span does", () {
-      final day = tz.TZDateTime(
-        tz.getLocation("America/New_York"),
-        2027,
-        3,
-        14,
-      );
+    test("EZ6 an elapsed length ends by until where its wall span does, "
+        "across a skipped hour, and past a slot the clock going back ends "
+        "after until", () {
+      final newYork = tz.getLocation("America/New_York");
+      final day = tz.TZDateTime(newYork, 2027, 3, 14);
       final rules = rulesOf();
       final earliest = CalendarEarliestStart(day, day);
       for (final until in <int?>[null, 210]) {
@@ -1251,6 +1248,20 @@ void main() {
       expect(
         rules.firstSlot(earliest, from: 90, until: 209, elapsedMinutes: 60),
         isNull,
+      );
+
+      // 74 minutes from 00:45 EDT end at 01:59 EDT, after until, while from
+      // the later start 01:00 EDT they end at 01:14 EST, before it.
+      final back = tz.TZDateTime(newYork, 2026, 11, 1);
+      expectSlot(
+        rules.firstSlot(
+          CalendarEarliestStart(back, back),
+          from: 45,
+          until: 100,
+          elapsedMinutes: 74,
+        ),
+        DateTime.utc(2026, 11, 1, 5),
+        DateTime.utc(2026, 11, 1, 6, 14),
       );
     });
 
