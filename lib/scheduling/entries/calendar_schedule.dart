@@ -92,7 +92,7 @@ final class CalendarSchedule {
         clock: clock,
       );
     }
-    final startLater = _readsLater(start);
+    final startLater = CalendarDates.isLaterOccurrence(start);
     final reading = _endReading(end, startLater);
     return CalendarSchedule._(
       startDayNumber: CalendarDates.dayNumber(start),
@@ -104,13 +104,6 @@ final class CalendarSchedule {
       endLater: reading.later,
       clock: clock,
     );
-  }
-
-  /// Whether [time] is the later instant of a time its clock reads twice;
-  /// false for a plain UTC time, whose clock repeats nothing.
-  static bool _readsLater(DateTime time) {
-    return (time is TZDateTime || !time.isUtc) &&
-        CalendarDates.isLaterOccurrence(time);
   }
 
   /// The day, the minute and the pass an end at [end] reads, beside a start
@@ -135,7 +128,7 @@ final class CalendarSchedule {
     );
     final before = whole.subtract(const Duration(minutes: 1));
     final bool? later;
-    if (_readsLater(before)) {
+    if (CalendarDates.isLaterOccurrence(before)) {
       later = true;
     } else if (isRepeatedTime(before)) {
       later = false;
