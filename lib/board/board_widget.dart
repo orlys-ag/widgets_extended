@@ -166,6 +166,15 @@ class Board<TKey, TItem> extends StatefulWidget {
   final Axis mainAxis;
 
   /// Whether a drag gesture may move both axes at once.
+  ///
+  /// Under any value but [DiagonalDragBehavior.none], removing the board
+  /// while a pointer that went down on it is still contested between the
+  /// board's scrolling and another gesture recognizer, such as an item's
+  /// tap or an ancestor's long press, reports a null-check error from the
+  /// framework's `TwoDimensionalScrollable`: its outer scrollable cancels
+  /// that drag after its inner scrollable is unmounted, and reads the inner
+  /// one. The framework catches and reports the error, and the board's
+  /// teardown completes.
   final DiagonalDragBehavior diagonalDragBehavior;
 
   /// How the board clips what it paints to its bounds: the viewport's
