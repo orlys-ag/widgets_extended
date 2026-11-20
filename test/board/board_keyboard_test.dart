@@ -66,6 +66,7 @@ Widget _board(
   BoardSelectionConfig? selection,
   BoardDragConfig<String>? drag,
   ScrollableDetails verticalDetails = const ScrollableDetails.vertical(),
+  FocusOnKeyEventCallback? onKeyEvent,
 }) {
   return SizedBox(
     key: _frameKey,
@@ -76,6 +77,7 @@ Widget _board(
       selection: selection,
       drag: drag,
       verticalDetails: verticalDetails,
+      onKeyEvent: onKeyEvent,
       cellBuilder: (context, cell) {
         return const SizedBox(width: 40.0, height: 50.0);
       },
@@ -578,5 +580,88 @@ void main() {
     await tester.pump();
     // TARGET: a tap focuses the same node.
     expect(node.hasPrimaryFocus, isTrue);
+  });
+
+  // Test 13.
+  testWidgets("onKeyEvent sees each key before the board: an answer other "
+      "than ignored ends the key there, Escape included, and ignored leaves "
+      "it to the board", (tester) async {
+    final controller = _controller(tester);
+    _unmountFirst(tester);
+    controller.addItem(
+      const _Item("m"),
+      const BoardSpan(rowStart: 2, colStart: 1),
+    );
+    final first = <LogicalKeyboardKey>[];
+    final app = <LogicalKeyboardKey>[];
+    var answer = KeyEventResult.ignored;
+    await tester.pumpWidget(
+      _app(
+        Focus(
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent) {
+              app.add(event.logicalKey);
+            }
+            return KeyEventResult.handled;
+          },
+          child: _board(
+            controller,
+            selection: _cells(),
+            drag: BoardDragConfig<String>(onItemMoved: (key, span) {}),
+            onKeyEvent: (node, event) {
+              if (event is KeyDownEvent) {
+                first.add(event.logicalKey);
+              }
+              return answer;
+            },
+          ),
+        ),
+      ),
+    );
+    // Cell (1, 1)'s centre is (60, 75).
+    await tester.tapAt(_global(tester, const Offset(60.0, 75.0)));
+    await tester.pump();
+    // Setup sanity: the tap selected (1, 1) and focused the board.
+    expect(_focusCell(controller), (row: 1, col: 1));
+    expect(_boardHasFocus(), isTrue);
+
+    await _press(tester, LogicalKeyboardKey.arrowRight);
+    // Ignored: the callback saw the arrow, and the board moved by it.
+    expect(first, <LogicalKeyboardKey>[LogicalKeyboardKey.arrowRight]);
+    expect(_focusCell(controller), (row: 1, col: 2));
+    expect(app, isEmpty);
+
+    answer = KeyEventResult.handled;
+    await _press(tester, LogicalKeyboardKey.arrowRight);
+    // Handled: the board did not move ...
+    expect(first, hasLength(2));
+    expect(_focusCell(controller), (row: 1, col: 2));
+    // ... and a key the board has no use for goes no further.
+    await _press(tester, LogicalKeyboardKey.keyA);
+    expect(app, isEmpty);
+    answer = KeyEventResult.ignored;
+    await _press(tester, LogicalKeyboardKey.keyA);
+    expect(app, <LogicalKeyboardKey>[LogicalKeyboardKey.keyA]);
+
+    // Item m paints (40, 100) to (80, 150); a long press lifts it.
+    final gesture = await tester.startGesture(
+      _global(tester, const Offset(60.0, 125.0)),
+    );
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+    await gesture.moveBy(const Offset(0.0, 60.0));
+    await tester.pump();
+    // Setup sanity: a live session.
+    expect(controller.isDragging("m"), isTrue);
+    answer = KeyEventResult.handled;
+    await _press(tester, LogicalKeyboardKey.escape);
+    // Handled: Escape cancelled nothing.
+    expect(first.last, LogicalKeyboardKey.escape);
+    expect(controller.isDragging("m"), isTrue);
+    answer = KeyEventResult.ignored;
+    await _press(tester, LogicalKeyboardKey.escape);
+    // Setup sanity: Escape left to the board cancels the session.
+    expect(controller.isDragging("m"), isFalse);
+    await gesture.up();
+    await tester.pump();
   });
 }

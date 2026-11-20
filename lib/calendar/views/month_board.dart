@@ -7,6 +7,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../board/board.dart';
@@ -672,8 +673,11 @@ enum CalendarMonthLayout {
 /// A tap on a chip reports [onOpenEntry], a tap anywhere else on a day
 /// [onOpenDay], and a long press on a day outside its chips
 /// [onCreateOnDay], or where there is none [onOpenDay] as a tap does; the
-/// last two give the board the keyboard, whose arrow
-/// keys move the selected day and report it through [onSelectDay]. The
+/// last two give the board the keyboard. Its arrow keys report through
+/// [onSelectDay] the shown day before or after the selected one on the
+/// screen, or the day a week before or after it, in whatever month that
+/// day lies, and scroll it into view once it is selected; Home, End and
+/// the page keys report a day of [grid] as the board moves to it. The
 /// days are ready while the store shows exactly [grid]'s days and its
 /// status is ready, or, while it shows another range, as it does in the
 /// frame before the board's owner asks it for [grid]'s, once it has read
@@ -762,7 +766,9 @@ class MonthBoard<T> extends StatefulWidget {
   /// builds no cell.
   final ValueListenable<CalendarNow> now;
 
-  /// A key moved the selection onto this day.
+  /// A key moved the selection onto this day, which an arrow key can find
+  /// in the month before or after [grid]'s: the owner then shows that
+  /// day's month, as [selectedDay] is a day of [grid]'s month.
   final ValueChanged<DateTime> onSelectDay;
 
   /// This day was tapped outside its chips.
@@ -1055,6 +1061,11 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// the write reports nothing to [MonthBoard.onSelectDay].
   bool _writingSelection = false;
 
+  /// The day the last arrow key reported, until the frame after it: the
+  /// next arrow steps from it, so two keys before a frame both step, and a
+  /// new [MonthBoard.selectedDay] while it is set is scrolled into view.
+  DateTime? _keyDay;
+
   /// The bars the item builders returned, by chip key, kept so a payload
   /// that did not change returns the same instance and builds nothing.
   /// Holds no key but those the latest sync placed and those in [_dropped],
@@ -1207,6 +1218,15 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       // runs in the build.
       _writeSelection();
     }
+    if (!gridChanged &&
+        _keyDay != null &&
+        widget.selectedDay != oldWidget.selectedDay) {
+      // A new grid's layout reveals the selected day itself.
+      final grid = widget.grid;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        _revealSelected(grid, again: true);
+      });
+    }
   }
 
   @override
@@ -1335,6 +1355,40 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     } finally {
       _writingSelection = false;
     }
+  }
+
+  /// An arrow key, which the board hands this state before its own keys:
+  /// reports the shown day before or after the selected day, as the
+  /// board's columns run left to right whatever the ambient
+  /// [Directionality], or the day a week before or after it, in whatever
+  /// month that day lies. The board keeps every other key.
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final from = _keyDay ?? widget.selectedDay;
+    final key = event.logicalKey;
+    final DateTime day;
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      day = CalendarDates.nextShownDay(from, -1, widget.grid.weekdays);
+    } else if (key == LogicalKeyboardKey.arrowRight) {
+      day = CalendarDates.nextShownDay(from, 1, widget.grid.weekdays);
+    } else if (key == LogicalKeyboardKey.arrowUp) {
+      day = CalendarDates.addDays(from, -DateTime.daysPerWeek);
+    } else if (key == LogicalKeyboardKey.arrowDown) {
+      day = CalendarDates.addDays(from, DateTime.daysPerWeek);
+    } else {
+      return KeyEventResult.ignored;
+    }
+    if (_keyDay == null) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        _keyDay = null;
+      });
+      SchedulerBinding.instance.ensureVisualUpdate();
+    }
+    _keyDay = day;
+    widget.onSelectDay(day);
+    return KeyEventResult.handled;
   }
 
   /// A key moved the board's selection: reports the day of its focus cell
@@ -2028,6 +2082,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
                         background: _background,
                         selection: _selectionConfig,
                         focusNode: _focusNode,
+                        onKeyEvent: _handleKey,
                         // The board scrolls on its own, not with the screen's
                         // primary scroll controller.
                         primary: false,

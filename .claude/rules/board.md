@@ -118,5 +118,5 @@ Normative for `lib/board/`. This rule holds the conventions every layer follows;
   frozen bands inset targets by default; `revealCell` scrolls only as far
   as a hidden cell needs.
 - **Keyboard**: pass a `BoardSelectionConfig`; the board takes focus
-  from a tap, Tab or `autofocus`, and `Board.focusNode` lends it the
-  app's node.
+  from a tap, Tab or `autofocus`, `Board.focusNode` lends it the app's
+  node, and `Board.onKeyEvent` takes a key before the board's own.

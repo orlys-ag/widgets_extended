@@ -137,10 +137,11 @@ The contract of `Board`. The conventions every layer follows are in `board.md`.
   detector, on the node `Board.focusNode` gives or the state owns for its
   life: focusable while selection is active or a drag config is present,
   a Tab stop only while selection is active, focused by a cell tap, a
-  range press and a drag session's start, whose key handler moves the
-  selection by screen direction and reveals the new focus cell through
-  `revealCell`, and consumes Escape to cancel a live session, leaving
-  every other key to propagate). Both the host and the selection layer track the pointer
+  range press and a drag session's start, whose key handler first hands
+  each key to `Board.onKeyEvent`, any answer of which but `ignored` ends
+  the key there, then moves the selection by screen direction and reveals
+  the new focus cell through `revealCell`, and consumes Escape to cancel a
+  live session, leaving every other key to propagate). Both the host and the selection layer track the pointer
   by DELTA from where the gesture began: a multi-drag recognizer accepted
   inside a scrollable reports the accepting move as a delta against the
   initial position, so an update's position alone would drop that move.

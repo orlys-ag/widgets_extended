@@ -352,7 +352,8 @@ BoardSelectionMode.cell`). On touch a range starts with a long press, so a
 plain drag scrolls. The selection lives on the controller
 (`controller.selection`, `setSelection`). A focused board moves it with the
 arrow keys, extends it with Shift, jumps with Home, End and Page Up/Down,
-and Escape cancels a drag.
+and Escape cancels a drag. `onKeyEvent` sees each key first, and can take
+it from the board.
 
 **Axes.** `UniformAxis`, `ExplicitAxis` and `DerivedAxis` give tracks fixed
 extents; `LazyContentAxis` measures them from their cells. `frozenStart`

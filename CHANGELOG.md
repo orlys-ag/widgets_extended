@@ -559,6 +559,9 @@ screen direction; Shift extends a range, Home and End go to the row's ends
 (with Control or Meta, the board's), and Page Up and Page Down move by the rows
 in view. Each move scrolls only as far as the new cell needs. Escape cancels a
 live drag. `Board.focusNode` and `Board.autofocus` are new.
+- Added `Board.onKeyEvent`, which sees each key the board's focus node
+receives before the board's own keys; an answer other than
+`KeyEventResult.ignored` ends the key there, Escape included.
 - Added `BoardController.revealCell`, which scrolls the least that shows a
 cell between the frozen bands, and not at all when it already shows.
 - Added `BoardController.landSwappedAxisAt`. A new axis instance keeps the
@@ -1136,6 +1139,14 @@ right to left over a board whose columns run left to right, so Monday's
 letter sat over Sunday's column, and a board that scrolled across started
 its letters at the wrong edge. The letters now run left to right, as the
 columns under them do.
+- Fix: Month's arrow keys moved the board's selection by cell, held at the
+grid's edges: no key left the first cell of a month that starts on the
+grid's first weekday, so Monday to Friday a month starting on a weekend
+had no key to the month before, and a key past a row's end did nothing.
+Left and Right now step to the shown day before or after, and Up and Down
+to the day a week before or after, into the next row and the next or
+previous month, as the week strip's keys do; the day is scrolled into
+view once selected.
 
 ## 0.0.35
 
