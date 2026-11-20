@@ -2001,10 +2001,15 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            WeekdayHeader(
-              weekdays: widget.grid.weekdays,
-              columnWidth: _columnWidth,
-              horizontal: _horizontal,
+            // The board reads no Directionality, so its columns run left
+            // to right; the letters over them run the same way.
+            Directionality(
+              textDirection: TextDirection.ltr,
+              child: WeekdayHeader(
+                weekdays: widget.grid.weekdays,
+                columnWidth: _columnWidth,
+                horizontal: _horizontal,
+              ),
             ),
             Expanded(
               child: Stack(

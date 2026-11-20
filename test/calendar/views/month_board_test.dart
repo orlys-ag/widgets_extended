@@ -26,6 +26,8 @@ import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
+import 'package:widgets_extended/calendar/views/pinch_zoom.dart'
+    show minDayWidthHigh, minDayWidthLow;
 
 import '../../scheduling/store/zone_support.dart';
 import '../../scheduling/zones.dart';
@@ -792,6 +794,94 @@ void main() {
       });
     }
   });
+  testWidgets("MB5 under right-to-left each weekday letter sits over the "
+      "column of its weekday, whether the days share the width or the board "
+      "scrolls across, before and after a scroll", (tester) async {
+    final store = MemoryCalendarStore<String>();
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 21, 9), today: april(21)),
+    );
+    addTearDown(now.dispose);
+    // Column 0 is Monday, and April 20 2026 is a Monday.
+    DateTime dayOfColumn(int column) {
+      return april(20 + column);
+    }
+
+    final letters = find.descendant(
+      of: find.byKey(const ValueKey<String>("weekday-header")),
+      matching: find.byType(Text),
+    );
+
+    /// The columns whose cell the board built, after checking that each
+    /// letter's centre lies over its weekday's cell.
+    int expectLettersOverColumns(String reason) {
+      final columns = grid.weekdays.columns.toList();
+      expect(letters, findsNWidgets(columns.length), reason: reason);
+      var compared = 0;
+      for (var i = 0; i < columns.length; i++) {
+        final cell = find.byKey(monthDayKey(dayOfColumn(columns[i])));
+        if (cell.evaluate().isEmpty) {
+          continue;
+        }
+        compared++;
+        expect(
+          tester.getCenter(letters.at(i)).dx,
+          moreOrLessEquals(tester.getCenter(cell).dx, epsilon: 0.5),
+          reason: "$reason: column ${columns[i]}",
+        );
+      }
+      return compared;
+    }
+
+    for (final minDayWidth in <double>[minDayWidthLow, minDayWidthHigh]) {
+      final reason = "minDayWidth $minDayWidth";
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Directionality(
+            textDirection: TextDirection.rtl,
+            child: MonthBoard<String>(
+              store: store,
+              grid: grid,
+              selectedDay: april(20),
+              now: now,
+              minDayWidth: minDayWidth,
+              onSelectDay: (day) {},
+              onOpenDay: (day) {},
+              onCreateOnDay: null,
+              onOpenEntry: (id) {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final scrolls =
+          minDayWidth * 7 >
+          tester.view.physicalSize.width / tester.view.devicePixelRatio;
+      // Setup sanity: the low width shares the view, the high one does not.
+      expect(scrolls, minDayWidth == minDayWidthHigh, reason: reason);
+      final shown = expectLettersOverColumns(reason);
+      // Setup sanity: the shared width builds every column.
+      if (!scrolls) {
+        expect(shown, 7, reason: reason);
+        continue;
+      }
+      final monday = tester.getCenter(find.byKey(monthDayKey(april(20))));
+      await tester.drag(
+        find.byKey(monthDayKey(april(21))),
+        const Offset(-300.0, 0.0),
+      );
+      await tester.pumpAndSettle();
+      // Setup sanity: the drag scrolls the board across.
+      expect(
+        tester.getCenter(find.byKey(monthDayKey(april(20)))).dx,
+        lessThan(monday.dx - 100.0),
+        reason: reason,
+      );
+      expectLettersOverColumns("$reason, scrolled");
+    }
+  });
+
   testWidgets("MBZ1 a month board over a zoned store marks the zone's today, "
       "moves a running create's mark to the day holding its start on a new "
       "zone's clock, and names its cover's days on the zone's clock", (

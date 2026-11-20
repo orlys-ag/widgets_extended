@@ -1131,6 +1131,11 @@ colour on the calendar theme's surface, so a dark calendar theme in a
 light app, or the default `CalendarThemeExtension` in a dark app, drew
 them nearly invisible. They now draw in the calendar theme's text colour,
 as the menu's icons do.
+- Fix: under a right-to-left `Directionality`, Month's weekday letters ran
+right to left over a board whose columns run left to right, so Monday's
+letter sat over Sunday's column, and a board that scrolled across started
+its letters at the wrong edge. The letters now run left to right, as the
+columns under them do.
 
 ## 0.0.35
 
