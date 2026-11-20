@@ -1101,6 +1101,15 @@ again: an entry another client had moved showed on its old day, or one the
 write put back was lost, while the status was ready. The store now keeps
 what it holds and reads the days of both again, as for such a read that
 answers first.
+- Fix: once a newer read found an entry gone, `CachingCalendarStore`
+forgot what a write's answer, an announced change or a read sent since an
+older read had told it of that entry, so the older read's answer, arriving
+later, was stored as current: an entry another client had moved or deleted
+showed on its old day while the status was ready, and nothing was read
+again. Such an answer is now superseded as it was before the entry was
+forgotten, one that contradicts a write's answer has its days read again,
+and a write's answer arriving after the entry was forgotten is checked
+against those changes too.
 - Fix: `CalendarEditRules.firstSlot` searched from a `from` before the
 hours' start and up to an `until` after their end, so
 `CalendarScheduleCheck.nextFree` of a stored entry kept before the hours
