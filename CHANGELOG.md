@@ -320,14 +320,14 @@ than four, under the day header, with a rule along the last; its other
 rows scroll with the hours. Expanding it shows them under the kept rows,
 and collapsing it brings back the time at the hours' top before the
 expand.
-- In Week and Day, the all-day strip and the hours read as one grid. Each
+- In Week and Day, the all-day strip's day columns continue the hours'. Each
 day's strip cells take the fill of its column below, today's tint and the
 weekend's background, and the rule along each day's left edge, the first
 day's beside the gutter included, lies inside its column from the strip's
 top edge down, through the hours and the rows counting the entries outside
 them in one line. While the strip has rows, the room above the first
 slot that keeps the first hour label whole stays under the strip as its
-margin rather than scrolling with the hours, and the rule parting the strip
+margin rather than scrolling with the hours, and the rule parting the margin
 from the hours runs along its bottom edge: with the hours at their top that
 rule is the first slot's line, and the grid opens with the opening hour's
 line on it, its label whole beside the margin; it does so on the edge of a
@@ -559,6 +559,9 @@ screen direction; Shift extends a range, Home and End go to the row's ends
 (with Control or Meta, the board's), and Page Up and Page Down move by the rows
 in view. Each move scrolls only as far as the new cell needs. Escape cancels a
 live drag. `Board.focusNode` and `Board.autofocus` are new.
+- Added `Board.onKeyEvent`, which sees each key the board's focus node
+receives before the board's own keys; an answer other than
+`KeyEventResult.ignored` ends the key there, Escape included.
 - Added `BoardController.revealCell`, which scrolls the least that shows a
 cell between the frozen bands, and not at all when it already shows.
 - Added `BoardController.landSwappedAxisAt`. A new axis instance keeps the
@@ -1081,6 +1084,103 @@ package depends on `material_ui`. Its `Theme`, `Material` and
 `MaterialLocalizations` are types apart from the legacy library's, so the
 calendar reads an app's Material theme, and its view menu the
 `MaterialLocalizations` it needs, only from an app built on `material_ui`.
+- Fix: in an app that gives no `MaterialLocalizations` of `material_ui`, as
+one still on `package:flutter/material.dart` gives none, a `CalendarView`
+listing more than one view threw at its first build, and so did
+`CalendarZonePanel`'s search field; the field's text menu threw there too,
+and on iOS and macOS for want of `cupertino_ui`'s `CupertinoLocalizations`.
+Where the app gives none of them, the calendar and the panel now put in
+the US English ones a `material_ui` `MaterialApp` gives by default, in any
+locale and keeping the app's text direction, and the package depends on
+`cupertino_ui`, on which `material_ui` depends. Such an app, whose theme
+the calendar cannot read, gives the calendar its theme through a
+`CalendarTheme`.
+- Fix: `CachingCalendarStore` could keep a read's out-of-date answer of an
+entry that had a write in flight. Where a read sent or a change announced
+since the write had contradicted the write's answer, or the answer changed
+nothing because a read sent since agreed with it, a later read sent before
+the answer that answered after it was stored as it came, with no read
+again: an entry another client had moved showed on its old day, or one the
+write put back was lost, while the status was ready. The store now keeps
+what it holds and reads the days of both again, as for such a read that
+answers first.
+- Fix: once a newer read found an entry gone, `CachingCalendarStore`
+forgot what a write's answer, an announced change or a read sent since an
+older read had told it of that entry, so the older read's answer, arriving
+later, was stored as current: an entry another client had moved or deleted
+showed on its old day while the status was ready, and nothing was read
+again. Such an answer is now superseded as it was before the entry was
+forgotten, one that contradicts a write's answer has its days read again,
+and a write's answer arriving after the entry was forgotten is checked
+against those changes too.
+- Fix: `CalendarEditRules.firstSlot` searched from a `from` before the
+hours' start and up to an `until` after their end, so
+`CalendarScheduleCheck.nextFree` of a stored entry kept before the hours
+offered a range outside them, which the same check then refused as
+`CalendarScheduleOutsideHours`. A first slot now always lies in the
+hours.
+- Fix: in Week and Day, a store change that gave the all-day strip another
+number of rows cancelled a block's move or resize in flight, and one that
+stacked a bar before a bar being moved or resized cancelled that bar's,
+so the release requested nothing. The strip now keeps its rows under a
+block's drag until it requests its landing or ends, and a dragged bar
+keeps its row, the other bars stacking around it.
+- Fix: given another store, Agenda's day list, the week strip and the
+month strip asked it to read none of the days they showed, so a day past
+the store's shown range stayed loading until a scroll. Each now reads the
+days it shows from the new store, after the frame that gives it.
+- Fix: the header's view menu drew its names in the Material theme's text
+colour on the calendar theme's surface, so a dark calendar theme in a
+light app, or the default `CalendarThemeExtension` in a dark app, drew
+them nearly invisible. They now draw in the calendar theme's text colour,
+as the menu's icons do.
+- Fix: under a right-to-left `Directionality`, Month's weekday letters ran
+right to left over a board whose columns run left to right, so Monday's
+letter sat over Sunday's column, and a board that scrolled across started
+its letters at the wrong edge. The letters now run left to right, as the
+columns under them do.
+- Fix: Month's arrow keys moved the board's selection by cell, held at the
+grid's edges: no key left the first cell of a month that starts on the
+grid's first weekday, so Monday to Friday a month starting on a weekend
+had no key to the month before, and a key past a row's end did nothing.
+Left and Right now step to the shown day before or after on the screen,
+and Up and Down to the day a week before or after, into the next row and
+the next or previous month. A day the grid shows is selected and scrolled
+into view at once, as the board's own keys do, and a day of another month
+once that month shows.
+- Fix: at a large text size, or under the platform's line height override,
+the days' labels did not fit their fixed boxes. Week's day header, 40 px
+tall, cut off each day's number and overflowed. The weekday names in the
+week strip and in the folded day and date-time pickers wrapped and
+overflowed their days. The day numbers in their circles, Month's day
+numbers, and the weekday letters and names heading Month and the calendar
+card were cut off. Week's day header now grows to hold its names and
+numbers, and the week strip's days to hold their tallest weekday name,
+each as its text lays out at the text size and line height override.
+Each weekday name and day number keeps to one line and, where its day
+cannot hold it, scales down; every label of a kind in a row scales alike,
+so a row's names keep one size and line up, as do its numbers. Today's
+ring and the selected day's pill grow with the number, keep the room they
+leave around it, and stay round at each end.
+- Fix: a board whose tracks filled its viewport could still scroll by a
+rounding residue. Tracks sized to share the viewport's extent can sum to a
+hair past it in doubles (96 rows of 1636 / 96 px come to 1.8e-12 px past
+1636 px), which the board gave its scroll position as the scroll range, so
+the axis's scrollable took drags with nothing to scroll. Where an axis's
+tracks pass the viewport by no more than `precisionErrorTolerance`, the
+board now gives it no scroll range.
+- Week's and Day's all-day strip stands apart from the hours. Its rows are
+24 px tall, with each bar and "+N more" chip 2 px inside its row's top and
+bottom, so the bars of neighbouring rows lie 4 px apart rather than 2 px,
+and a tap in a bar's row above or below the bar opens the bar. A rule runs
+along the strip's bottom edge across the hour gutter and every day, also
+where the room above the first hour lies under it, and the strip casts a
+shadow from that edge onto the hours and onto any of its own rows
+scrolling under it. The shadows are the new
+`CalendarThemeData.allDayStripShadows`, which
+`CalendarThemeExtension.fromColorScheme` gives in the scheme's `shadow`
+colour; an empty list casts none. A block lifted across the edge paints
+over the shadow.
 
 ## 0.0.35
 

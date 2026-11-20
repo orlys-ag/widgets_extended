@@ -179,8 +179,8 @@ typedef CalendarHeaderBuilder =
 /// while hidden, when it takes no pointer, no focus and no screen reader's
 /// attention. Drawn in the [CalendarTheme] above [context], under a
 /// transparent [Material] of the ambient text style that it puts in where
-/// no [Material] is above it. Its menu needs [MaterialLocalizations] above
-/// it.
+/// no [Material] is above it. Its menu reads the [MaterialLocalizations]
+/// above it, which a `CalendarView` puts in where the app gives none.
 Widget defaultCalendarHeaderBuilder(
   BuildContext context,
   CalendarHeaderDetails details,
@@ -438,7 +438,15 @@ class CalendarHeader extends StatelessWidget {
                           children: <Widget>[
                             Icon(_viewIcon(value), color: theme.text),
                             const SizedBox(width: 12.0),
-                            Flexible(child: Text(_viewLabel(strings, value))),
+                            Flexible(
+                              child: Text(
+                                _viewLabel(strings, value),
+                                // The menu's own label style sets the
+                                // size; the colour is the calendar's, on
+                                // the calendar's surface.
+                                style: TextStyle(color: theme.text),
+                              ),
+                            ),
                           ],
                         ),
                       ),

@@ -11,6 +11,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,6 +27,8 @@ import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
+import 'package:widgets_extended/calendar/views/pinch_zoom.dart'
+    show minDayWidthHigh, minDayWidthLow;
 
 import '../../scheduling/store/zone_support.dart';
 import '../../scheduling/zones.dart';
@@ -792,6 +795,281 @@ void main() {
       });
     }
   });
+  testWidgets("MB5 under right-to-left each weekday letter sits over the "
+      "column of its weekday, whether the days share the width or the board "
+      "scrolls across, before and after a scroll", (tester) async {
+    final store = MemoryCalendarStore<String>();
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 21, 9), today: april(21)),
+    );
+    addTearDown(now.dispose);
+    // Column 0 is Monday, and April 20 2026 is a Monday.
+    DateTime dayOfColumn(int column) {
+      return april(20 + column);
+    }
+
+    final letters = find.descendant(
+      of: find.byKey(const ValueKey<String>("weekday-header")),
+      matching: find.byType(Text),
+    );
+
+    /// The columns whose cell the board built, after checking that each
+    /// letter's centre lies over its weekday's cell.
+    int expectLettersOverColumns(String reason) {
+      final columns = grid.weekdays.columns.toList();
+      expect(letters, findsNWidgets(columns.length), reason: reason);
+      var compared = 0;
+      for (var i = 0; i < columns.length; i++) {
+        final cell = find.byKey(monthDayKey(dayOfColumn(columns[i])));
+        if (cell.evaluate().isEmpty) {
+          continue;
+        }
+        compared++;
+        expect(
+          tester.getCenter(letters.at(i)).dx,
+          moreOrLessEquals(tester.getCenter(cell).dx, epsilon: 0.5),
+          reason: "$reason: column ${columns[i]}",
+        );
+      }
+      return compared;
+    }
+
+    for (final minDayWidth in <double>[minDayWidthLow, minDayWidthHigh]) {
+      final reason = "minDayWidth $minDayWidth";
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Directionality(
+            textDirection: TextDirection.rtl,
+            child: MonthBoard<String>(
+              store: store,
+              grid: grid,
+              selectedDay: april(20),
+              now: now,
+              minDayWidth: minDayWidth,
+              onSelectDay: (day) {},
+              onOpenDay: (day) {},
+              onCreateOnDay: null,
+              onOpenEntry: (id) {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final scrolls =
+          minDayWidth * 7 >
+          tester.view.physicalSize.width / tester.view.devicePixelRatio;
+      // Setup sanity: the low width shares the view, the high one does not.
+      expect(scrolls, minDayWidth == minDayWidthHigh, reason: reason);
+      final shown = expectLettersOverColumns(reason);
+      // The letters keep the ambient direction as text.
+      expect(
+        tester.renderObject<RenderParagraph>(letters.first).textDirection,
+        TextDirection.rtl,
+        reason: reason,
+      );
+      // Setup sanity: the shared width builds every column.
+      if (!scrolls) {
+        expect(shown, 7, reason: reason);
+        continue;
+      }
+      final monday = tester.getCenter(find.byKey(monthDayKey(april(20))));
+      await tester.drag(
+        find.byKey(monthDayKey(april(21))),
+        const Offset(-300.0, 0.0),
+      );
+      await tester.pumpAndSettle();
+      // Setup sanity: the drag scrolls the board across.
+      expect(
+        tester.getCenter(find.byKey(monthDayKey(april(20)))).dx,
+        lessThan(monday.dx - 100.0),
+        reason: reason,
+      );
+      expectLettersOverColumns("$reason, scrolled");
+    }
+  });
+
+  testWidgets("MB6 the arrow keys step to the shown day before or after on "
+      "the screen and to the day a week before or after, past a row's end "
+      "and into the month before or after, and reveal the day", (tester) async {
+    final store = MemoryCalendarStore<String>();
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 6, 1, 9), today: DateTime(2026, 6, 1)),
+    );
+    addTearDown(now.dispose);
+    DateTime june(int day) {
+      return DateTime(2026, 6, day);
+    }
+
+    final reported = <DateTime>[];
+    var selected = june(1);
+    var shows = 0;
+
+    /// Shows [day]'s month as its owner would, moving to the month of each
+    /// day a key reports unless [takes] is false, and focuses the board
+    /// with a tap on [day].
+    Future<void> show(
+      DateTime day, {
+      CalendarWeekdaySet weekdays = CalendarWeekdaySet.all,
+      double minDayWidth = minDayWidthLow,
+      TextDirection direction = TextDirection.ltr,
+      bool takes = true,
+    }) async {
+      selected = day;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Directionality(
+            // A new board each time, scrolled to [day].
+            key: ValueKey<int>(shows++),
+            textDirection: direction,
+            child: StatefulBuilder(
+              builder: (context, setState) {
+                return MonthBoard<String>(
+                  store: store,
+                  grid: CalendarMonthGrid.of(selected, weekdays: weekdays),
+                  selectedDay: selected,
+                  now: now,
+                  minDayWidth: minDayWidth,
+                  onSelectDay: (day) {
+                    reported.add(day);
+                    if (takes) {
+                      setState(() {
+                        selected = day;
+                      });
+                    }
+                  },
+                  onOpenDay: (day) {},
+                  onCreateOnDay: null,
+                  onOpenEntry: (id) {},
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+      await tester.tap(find.byKey(monthStripKey(day)));
+      await tester.pumpAndSettle();
+      // Setup sanity: the tap focuses the board.
+      expect(
+        FocusManager.instance.primaryFocus?.context
+            ?.findAncestorWidgetOfExactType<MonthBoard<String>>(),
+        isNotNull,
+      );
+      reported.clear();
+    }
+
+    Future<void> press(LogicalKeyboardKey key) async {
+      await tester.sendKeyEvent(key);
+      await tester.pumpAndSettle();
+    }
+
+    // The grid of June 2026 starts on Monday June 1: no day of May before it.
+    await show(june(1));
+    await press(LogicalKeyboardKey.arrowLeft);
+    expect(selected, DateTime(2026, 5, 31));
+    await show(june(1));
+    await press(LogicalKeyboardKey.arrowUp);
+    expect(selected, DateTime(2026, 5, 25));
+    // Sunday June 7 ends the grid's first row.
+    await show(june(7));
+    await press(LogicalKeyboardKey.arrowRight);
+    expect(selected, june(8));
+    // Tuesday June 30 lies in the grid's last row.
+    await show(june(30));
+    await press(LogicalKeyboardKey.arrowDown);
+    expect(selected, DateTime(2026, 7, 7));
+    // August 2026 starts on a Saturday, so Monday to Friday its grid starts
+    // on Monday August 3.
+    await show(DateTime(2026, 8, 3), weekdays: CalendarWeekdaySet.workweek);
+    await press(LogicalKeyboardKey.arrowLeft);
+    expect(selected, DateTime(2026, 7, 31));
+    await show(DateTime(2026, 8, 3), weekdays: CalendarWeekdaySet.workweek);
+    await press(LogicalKeyboardKey.arrowUp);
+    expect(selected, DateTime(2026, 7, 27));
+    await show(DateTime(2026, 8, 7), weekdays: CalendarWeekdaySet.workweek);
+    await press(LogicalKeyboardKey.arrowRight);
+    expect(selected, DateTime(2026, 8, 10));
+    // The board's columns run left to right under right-to-left too.
+    await show(june(10), direction: TextDirection.rtl);
+    await press(LogicalKeyboardKey.arrowLeft);
+    expect(selected, june(9));
+
+    // Two keys before a frame: the second steps from the first's day.
+    await show(june(10));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(reported, <DateTime>[june(11), june(12)]);
+
+    // Home is the board's: the first cell of the row.
+    await show(june(10));
+    await press(LogicalKeyboardKey.home);
+    expect(selected, june(8));
+
+    // An arrow and a key of the board's before a frame, either way round:
+    // each steps from the day the other selected.
+    await show(june(7));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.home);
+    await tester.pumpAndSettle();
+    expect(selected, june(8));
+    await show(june(3));
+    await tester.sendKeyEvent(LogicalKeyboardKey.home);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(selected, june(2));
+    await show(june(10));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.home);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(selected, june(9));
+    // A key of the board's before the frame that shows an arrow's day of
+    // another month does nothing: from June 3, Home would select June 1.
+    await show(june(3));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyEvent(LogicalKeyboardKey.home);
+    await tester.pumpAndSettle();
+    expect(reported, <DateTime>[DateTime(2026, 5, 27)]);
+
+    // Days wider than the view: a day a key selects is scrolled into view.
+    await show(june(1), minDayWidth: minDayWidthHigh);
+    final view = tester.getRect(find.byType(MonthBoard<String>));
+    // Setup sanity: Friday June 5 lies past the view's right edge.
+    expect(
+      tester.getRect(find.byKey(monthDayKey(june(5)))).right,
+      greaterThan(view.right),
+    );
+    for (var i = 0; i < 4; i++) {
+      await press(LogicalKeyboardKey.arrowRight);
+    }
+    expect(selected, june(5));
+    final shown = tester.getRect(find.byKey(monthDayKey(june(5))));
+    expect(
+      shown.left >= view.left - 0.5 && shown.right <= view.right + 0.5,
+      isTrue,
+      reason: "$shown in $view",
+    );
+
+    // An owner that takes no day: the keys still select and reveal on the
+    // board, each stepping from the day the one before selected.
+    await show(june(1), minDayWidth: minDayWidthHigh, takes: false);
+    for (var i = 0; i < 4; i++) {
+      await press(LogicalKeyboardKey.arrowRight);
+    }
+    expect(reported, <DateTime>[june(2), june(3), june(4), june(5)]);
+    final kept = tester.getRect(find.byKey(monthDayKey(june(5))));
+    expect(
+      kept.left >= view.left - 0.5 && kept.right <= view.right + 0.5,
+      isTrue,
+      reason: "$kept in $view",
+    );
+  });
+
   testWidgets("MBZ1 a month board over a zoned store marks the zone's today, "
       "moves a running create's mark to the day holding its start on a new "
       "zone's clock, and names its cover's days on the zone's clock", (

@@ -225,6 +225,21 @@ void main() {
     );
   });
 
+  test("ER19 a first slot lies in the hours whatever from and until name: "
+      "a from before their start searches from their start, and an until "
+      "after their end ends by their end", () {
+    final rules = rulesOf(hours: office);
+    final start = CalendarEarliestStart(tuesday, tuesday);
+    expect(
+      rules.firstSlot(start, from: 7 * 60),
+      slot(at(tuesday, 8), at(tuesday, 8, 15)),
+    );
+    final busy = <CalendarEntry<String>>[
+      entryOf("busy", at(tuesday, 8), at(tuesday, 18)),
+    ];
+    expect(rules.firstSlot(start, clearOf: busy, until: 20 * 60), isNull);
+  });
+
   test("ER2 the first slot is the earliest of the hours clear of the given "
       "entries, the hours' first with none given, and none where every "
       "slot meets one", () {

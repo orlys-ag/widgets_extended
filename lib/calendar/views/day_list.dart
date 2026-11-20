@@ -797,7 +797,8 @@ List<DayListRow> dayListRowsOf<T>(
 /// of the list reported; one too far from the list's days re-centres the
 /// list on it at once. While a drag or a fling scrolls it, the list
 /// reports through [onTopDay] each new day under its top, and reads the
-/// weeks of the days it holds built once it rests. A top day near the end of
+/// weeks of the days it holds built once it rests, as it does from a new
+/// [store], after the frame that gives it. A top day near the end of
 /// the list's days adds as many again after them, and one near their start
 /// re-centres the list on it.
 ///
@@ -1147,6 +1148,9 @@ class _DayListState<T> extends State<DayList<T>> {
     if (widget.store != oldWidget.store) {
       oldWidget.store.removeListener(_handleStore);
       widget.store.addListener(_handleStore);
+      // A new store mounts no row where the rows keep their heights, so no
+      // mount need ask it.
+      _schedulePrefetch();
     }
     if (widget.store.zone != _zone) {
       _takeZone();
@@ -1632,10 +1636,10 @@ class _DayListState<T> extends State<DayList<T>> {
   }
 
   /// After the frame, reads the weeks of the days the list holds built,
-  /// once however many rows mount and scrolls end in it, and asks for that
-  /// frame where none is under way. A row can mount with no scroll to end,
-  /// as when the tree corrects its offset for a height it measured, and a
-  /// scroll can end during layout, as
+  /// once however many rows mount, scrolls end and stores are given in it,
+  /// and asks for that frame where none is under way. A row can mount with
+  /// no scroll to end, as when the tree corrects its offset for a height it
+  /// measured, and a scroll can end during layout, as
   /// [BallisticScrollActivity.applyNewDimensions] ends one where the
   /// physics gives it no new simulation, when the store must not notify.
   void _schedulePrefetch() {

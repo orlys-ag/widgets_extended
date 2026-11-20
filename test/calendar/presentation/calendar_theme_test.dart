@@ -78,8 +78,12 @@ const List<String> styleNames = <String>[
   "timePickerHeaderStyle",
 ];
 
-/// The two shadow fields, in the order the theme declares them.
-const List<String> shadowNames = <String>["gripShadows", "liftedBlockShadows"];
+/// The three shadow fields, in the order the theme declares them.
+const List<String> shadowNames = <String>[
+  "gripShadows",
+  "liftedBlockShadows",
+  "allDayStripShadows",
+];
 
 /// Every field: the colours, the ring width, the dragged block's, the entry
 /// tint's, the pending entry's and the disabled opacities, the shadows, the
@@ -143,6 +147,8 @@ Object valueOf(CalendarThemeData theme, String name) {
       return theme.gripShadows;
     case "liftedBlockShadows":
       return theme.liftedBlockShadows;
+    case "allDayStripShadows":
+      return theme.allDayStripShadows;
     case "motionDuration":
       return theme.motionDuration;
     case "motionCurve":
@@ -279,6 +285,8 @@ CalendarThemeData withValue(
       return theme.copyWith(gripShadows: value as List<BoxShadow>);
     case "liftedBlockShadows":
       return theme.copyWith(liftedBlockShadows: value as List<BoxShadow>);
+    case "allDayStripShadows":
+      return theme.copyWith(allDayStripShadows: value as List<BoxShadow>);
     case "motionDuration":
       return theme.copyWith(motionDuration: value as Duration);
     case "motionCurve":
@@ -515,6 +523,15 @@ Object fullValueOf(String name, int index) {
           spreadRadius: 0.5,
         ),
       ];
+    case "allDayStripShadows":
+      return const <BoxShadow>[
+        BoxShadow(
+          color: Color(0x30405060),
+          offset: Offset(0.0, 3.0),
+          blurRadius: 6.0,
+          spreadRadius: 1.0,
+        ),
+      ];
     case "motionDuration":
       return const Duration(milliseconds: 450);
     case "motionCurve":
@@ -557,6 +574,7 @@ CalendarThemeData fullTheme() {
     disabledOpacity: full("disabledOpacity"),
     gripShadows: full("gripShadows"),
     liftedBlockShadows: full("liftedBlockShadows"),
+    allDayStripShadows: full("allDayStripShadows"),
     motionDuration: full("motionDuration"),
     motionCurve: full("motionCurve"),
     beforeHoursIcon: full("beforeHoursIcon"),
@@ -651,8 +669,8 @@ Widget themed(CalendarThemeData? data, Widget child) {
 void main() {
   final builtIn = CalendarThemeData();
 
-  test("the field lists name 62 distinct fields, 34 of them text styles", () {
-    expect(fieldNames.toSet(), hasLength(62));
+  test("the field lists name 63 distinct fields, 34 of them text styles", () {
+    expect(fieldNames.toSet(), hasLength(63));
     expect(colourNames, hasLength(14));
     expect(styleNames, hasLength(34));
     final full = fullTheme();
@@ -937,6 +955,13 @@ void main() {
         offset: Offset(0.0, 1.0),
         blurRadius: 3.0,
         spreadRadius: -1.0,
+      ),
+    ]);
+    expect(builtIn.allDayStripShadows, const <BoxShadow>[
+      BoxShadow(
+        color: Color(0x33000000),
+        offset: Offset(0.0, 1.0),
+        blurRadius: 4.0,
       ),
     ]);
   });

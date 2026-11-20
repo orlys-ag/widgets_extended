@@ -51,6 +51,8 @@ import 'render_board_viewport.dart';
 /// Each move scrolls the least that shows the new cell, through
 /// [BoardController.revealCell]. Escape cancels a live drag. Every other
 /// key, and these with nothing to do, reach the rest of the app.
+/// [onKeyEvent], when given, sees each key before all of these, and can
+/// take it from the board.
 class Board<TKey, TItem> extends StatefulWidget {
   /// Creates a board over [controller].
   ///
@@ -82,6 +84,7 @@ class Board<TKey, TItem> extends StatefulWidget {
     this.primary,
     this.focusNode,
     this.autofocus = false,
+    this.onKeyEvent,
     this.scrollCacheExtent,
     this.dragStartBehavior = DragStartBehavior.start,
     this.keyboardDismissBehavior,
@@ -166,6 +169,15 @@ class Board<TKey, TItem> extends StatefulWidget {
   final Axis mainAxis;
 
   /// Whether a drag gesture may move both axes at once.
+  ///
+  /// Under any value but [DiagonalDragBehavior.none], removing the board
+  /// while a pointer that went down on it is still contested between the
+  /// board's scrolling and another gesture recognizer, such as an item's
+  /// tap or an ancestor's long press, reports a null-check error from the
+  /// framework's `TwoDimensionalScrollable`: its outer scrollable cancels
+  /// that drag after its inner scrollable is unmounted, and reads the inner
+  /// one. The framework catches and reports the error, and the board's
+  /// teardown completes.
   final DiagonalDragBehavior diagonalDragBehavior;
 
   /// How the board clips what it paints to its bounds: the viewport's
@@ -215,12 +227,18 @@ class Board<TKey, TItem> extends StatefulWidget {
   /// `canRequestFocus` and `skipTraversal` are the board's. Listen to it
   /// or focus it; to handle keys of the app's own, wrap the board in a
   /// `Focus` of the app's instead, which the board's unhandled keys
-  /// reach.
+  /// reach, or take a key before the board does through [onKeyEvent].
   final FocusNode? focusNode;
 
   /// Whether the board takes focus when it is first built, if nothing
   /// else in its scope already has.
   final bool autofocus;
+
+  /// Called with each key event the board's focus node receives, before
+  /// the board's own keys. An answer other than [KeyEventResult.ignored]
+  /// ends the event there: the board acts on none of it, Escape included,
+  /// and that answer is the board's. Null leaves every key to the board.
+  final FocusOnKeyEventCallback? onKeyEvent;
 
   @override
   State<Board<TKey, TItem>> createState() {
@@ -654,6 +672,7 @@ class _BoardState<TKey, TItem> extends State<Board<TKey, TItem>>
       restorationId: widget.restorationId,
       focusNode: _focusNode,
       autofocus: widget.autofocus,
+      onKeyEvent: widget.onKeyEvent,
       dragController: _dragController,
     );
     final drag = _dragController;
@@ -1788,6 +1807,7 @@ class _BoardScrollView<TKey, TItem> extends TwoDimensionalScrollView {
     required this.selection,
     required this.focusNode,
     required this.autofocus,
+    required this.onKeyEvent,
     required this.dragController,
     required super.delegate,
     required super.mainAxis,
@@ -1815,6 +1835,7 @@ class _BoardScrollView<TKey, TItem> extends TwoDimensionalScrollView {
 
   final FocusNode focusNode;
   final bool autofocus;
+  final FocusOnKeyEventCallback? onKeyEvent;
   final BoardDragController<TKey>? dragController;
 
   /// The base's build (`widgets/two_dimensional_scroll_view.dart:165-236`)
@@ -1924,6 +1945,7 @@ class _BoardScrollView<TKey, TItem> extends TwoDimensionalScrollView {
       config: selection,
       focusNode: focusNode,
       autofocus: autofocus,
+      onKeyEvent: onKeyEvent,
       dragController: dragController,
       verticalDirection: verticalDetails.direction,
       horizontalDirection: horizontalDetails.direction,
@@ -1945,6 +1967,7 @@ class _SelectionLayer<TKey, TItem> extends StatefulWidget {
     required this.config,
     required this.focusNode,
     required this.autofocus,
+    required this.onKeyEvent,
     required this.dragController,
     required this.verticalDirection,
     required this.horizontalDirection,
@@ -1961,6 +1984,9 @@ class _SelectionLayer<TKey, TItem> extends StatefulWidget {
   /// with; see [Board]'s keyboard doc.
   final FocusNode focusNode;
   final bool autofocus;
+
+  /// [Board.onKeyEvent], which sees each key before this layer does.
+  final FocusOnKeyEventCallback? onKeyEvent;
 
   /// The board's drag controller, or null without a drag config: Escape
   /// cancels its live session.
@@ -2222,6 +2248,10 @@ class _SelectionLayerState<TKey, TItem>
   /// The board's keys; see [Board]'s keyboard doc. Handled only when the
   /// key has something to act on, so everything else reaches the app.
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    final first = widget.onKeyEvent?.call(node, event);
+    if (first != null && first != KeyEventResult.ignored) {
+      return first;
+    }
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.escape) {
       final drag = widget.dragController;

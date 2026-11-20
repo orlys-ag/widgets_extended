@@ -15,6 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/composition/calendar_card.dart'
     show calendarPullTabKey;
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
+import 'package:widgets_extended/calendar/composition/calendar_theme_extension.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/calendar/views/day_cell.dart';
@@ -840,6 +841,59 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text("Mar 2026"), findsOneWidget, reason: reason);
       }
+    }
+  });
+
+  testWidgets("HD15 the view menu's names draw in the calendar theme's text "
+      "colour, as its icons do, on its surface, whatever the app's theme: "
+      "under a dark calendar theme in a light app and under the default "
+      "extension, the built-in theme, in a dark app", (tester) async {
+    final apps = <String, Widget>{
+      "dark calendar, light app": app(
+        CalendarTheme(
+          data: CalendarThemeData.builtIn.copyWith(
+            surface: const Color(0xFF16181C),
+            text: const Color(0xFFE6E8EB),
+          ),
+          child: CalendarView<String>(store: store, clock: fixedClock),
+        ),
+      ),
+      "default extension, dark app": MaterialApp(
+        theme: ThemeData(
+          brightness: Brightness.dark,
+          splashFactory: NoSplash.splashFactory,
+          extensions: const <ThemeExtension<dynamic>>[CalendarThemeExtension()],
+        ),
+        home: CalendarView<String>(store: store, clock: fixedClock),
+      ),
+    };
+    for (final MapEntry(key: name, value: calendar) in apps.entries) {
+      await tester.pumpWidget(calendar);
+      await tester.pumpAndSettle();
+      final theme = headerTheme(tester);
+      await tester.tap(find.byKey(calendarViewButtonKey));
+      await tester.pumpAndSettle();
+      final items = find.byType(PopupMenuItem<CalendarViewKind>);
+      // Setup sanity: the app's text on a surface is not the calendar's.
+      expect(
+        Theme.of(tester.element(items.first)).colorScheme.onSurface,
+        isNot(theme.text),
+        reason: name,
+      );
+      final names = find.descendant(
+        of: find.descendant(of: items, matching: find.byType(Text)),
+        matching: find.byType(RichText),
+      );
+      expect(
+        <Color?>[
+          for (final text in tester.widgetList<RichText>(names))
+            text.text.style?.color,
+        ],
+        List<Color?>.filled(4, theme.text),
+        reason: name,
+      );
+      // The next app starts with no menu open.
+      await tester.pumpWidget(const SizedBox());
     }
   });
 }

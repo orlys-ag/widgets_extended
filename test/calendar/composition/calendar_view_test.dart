@@ -1195,6 +1195,73 @@ void main() {
     expect(controller.view, CalendarViewKind.month);
   });
 
+  testWidgets("CV66 in an app with no Material localizations, in English or "
+      "in a locale Material's defaults do not support, the built-in "
+      "header's menu opens and switches the view", (tester) async {
+    for (final locale in const <Locale>[Locale("en", "US"), Locale("es")]) {
+      final controller = CalendarController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        WidgetsApp(
+          key: ValueKey<Locale>(locale),
+          color: const Color(0xFF000000),
+          locale: locale,
+          supportedLocales: <Locale>[locale],
+          pageRouteBuilder: <T>(settings, builder) {
+            return PageRouteBuilder<T>(
+              settings: settings,
+              pageBuilder: (context, animation, secondaryAnimation) {
+                return builder(context);
+              },
+            );
+          },
+          home: CalendarView<String>(
+            store: store,
+            controller: controller,
+            clock: fixedClock,
+            views: const <CalendarViewKind>[
+              CalendarViewKind.week,
+              CalendarViewKind.month,
+            ],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: "$locale");
+      await tester.tap(find.byTooltip("Calendar view"));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: "$locale");
+      await tester.tap(find.text("Month").last);
+      await tester.pumpAndSettle();
+      expect(controller.view, CalendarViewKind.month, reason: "$locale");
+    }
+  });
+
+  testWidgets("CV67 the Material localizations the calendar puts in keep "
+      "the text direction the app gives it", (tester) async {
+    await tester.pumpWidget(
+      widgetsApp(
+        Directionality(
+          textDirection: TextDirection.rtl,
+          child: CalendarView<String>(
+            store: store,
+            clock: fixedClock,
+            views: const <CalendarViewKind>[
+              CalendarViewKind.week,
+              CalendarViewKind.month,
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(
+      Directionality.of(tester.element(find.byKey(calendarViewButtonKey))),
+      TextDirection.rtl,
+    );
+  });
+
   testWidgets("CV11 taps, creates, edits and deletes reach the host's "
       "callbacks and open no route, and with no callbacks raise nothing and "
       "leave no slot marked", (tester) async {

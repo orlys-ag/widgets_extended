@@ -22,19 +22,38 @@ import '../presentation/calendar_theme.dart';
 import 'answer_builder.dart';
 import 'create_details.dart';
 import 'create_press.dart';
+import 'day_cell.dart' show fittedLabel, labelSizeIn, numberBoxIn;
 import 'entry_split.dart';
 import 'move_request.dart';
 import 'pinch_zoom.dart';
 import 'timed_grid_layout.dart';
 
-const double _headerHeight = 40.0;
+/// The least height of the day header, which a text too tall for it grows
+/// ([_TimedGridState._measureHeader]).
+const double _leastHeaderHeight = 40.0;
+
+/// The size of the box holding a day header's number, which today's ring
+/// draws around, at no text scaling; a larger text grows it, keeping the
+/// room around the numbers ([numberBoxIn]).
+const double _numberBoxWidth = 30.0;
+const double _numberBoxHeight = 20.0;
 
 /// The height of the rows above and below the slots that count the items
 /// outside the hours.
 const double _noticeHeight = 24.0;
 
-/// The height of one row of the all-day strip.
-const double _allDayRowHeight = 22.0;
+/// The height of one row of the all-day strip: a bar's 20 px and the room
+/// [_barInset] keeps above and below it.
+const double _allDayRowHeight = 24.0;
+
+/// The room a bar of the all-day strip, and the chip counting the bars the
+/// collapsed strip hides, keep inside their lane or cell: 1 px from either
+/// side of the day, and 2 px above and below, so the bars of neighbouring
+/// rows lie 4 px apart.
+const EdgeInsets _barInset = EdgeInsets.symmetric(
+  horizontal: 1.0,
+  vertical: 2.0,
+);
 
 /// The share of the grid's height that the day header, the room above the
 /// all-day strip and the strip's frozen rows keep within where an expanded
@@ -99,7 +118,7 @@ class _GridStyles {
       headerToday = theme.dayHeaderNumberStyle.copyWith(color: theme.primary),
       headerRing = BoxDecoration(
         border: Border.all(color: theme.todayRing, width: theme.todayRingWidth),
-        borderRadius: BorderRadius.circular(10.0),
+        borderRadius: BorderRadius.circular(_numberBoxHeight / 2.0),
       ),
       hiddenPill = BoxDecoration(
         color: theme.primaryTint,
@@ -119,6 +138,11 @@ class _GridStyles {
       ),
       _noticeCells = _noticeCellsOf(theme),
       _stripCells = _stripCellsOf(theme),
+      _stripGutters = _stripGuttersOf(theme),
+      stripShadows = <({BoxShadow shadow, Paint paint})>[
+        for (final shadow in theme.allDayStripShadows)
+          (shadow: shadow, paint: shadow.toPaint()),
+      ],
       stripTop = BoxDecoration(
         color: theme.surface,
         border: Border(bottom: BorderSide(color: theme.outline)),
@@ -217,11 +241,11 @@ class _GridStyles {
     ];
   }
 
-  /// A strip cell's fill and rules, for each [_DayFill], in the strip's
-  /// last row or another: the fill of the day's column below, the rule
-  /// along the day's left edge, inside the cell as [_TimedGridPainter]
-  /// draws the slots' day rules, and one parting the last row from the
-  /// hours.
+  /// A strip cell's fill and rules, for each [_DayFill], in a row ending
+  /// the strip or the band ([_StripCell.last]) or another: the fill of the
+  /// day's column below, the rule along the day's left edge, inside the
+  /// cell as [_TimedGridPainter] draws the slots' day rules, and in a row
+  /// ending the strip or the band the rule along its bottom.
   static List<BoxDecoration> _stripCellsOf(CalendarThemeData theme) {
     final edge = BorderSide(color: theme.outline);
     return <BoxDecoration>[
@@ -235,6 +259,22 @@ class _GridStyles {
             },
             border: Border(left: edge, bottom: last ? edge : BorderSide.none),
           ),
+    ];
+  }
+
+  /// A strip row's gutter cell, in a row ending the strip or the band
+  /// ([_StripCell.last]) or another: the surface, and in a row ending the
+  /// strip or the band the rule along its bottom, which carries the day
+  /// cells' rule across the gutter.
+  static List<BoxDecoration> _stripGuttersOf(CalendarThemeData theme) {
+    return <BoxDecoration>[
+      for (final last in const <bool>[true, false])
+        BoxDecoration(
+          color: theme.surface,
+          border: last
+              ? Border(bottom: BorderSide(color: theme.outline))
+              : null,
+        ),
     ];
   }
 
@@ -265,6 +305,16 @@ class _GridStyles {
   final TextStyle headerToday;
   final BoxDecoration headerRing;
 
+  /// [headerRing] around a number box of [box], its ends round.
+  BoxDecoration headerRingAround(Size box) {
+    if (box.height == _numberBoxHeight) {
+      return headerRing;
+    }
+    return headerRing.copyWith(
+      borderRadius: BorderRadius.circular(box.height / 2.0),
+    );
+  }
+
   /// The pill counting the items on no shown day.
   final BoxDecoration hiddenPill;
   final TextStyle hiddenLabel;
@@ -281,6 +331,13 @@ class _GridStyles {
   final List<BoxDecoration> _stripCells;
   final BoxDecoration stripTop;
   final BoxDecoration stripMarked;
+
+  /// A strip row's gutter cell ([stripGutter]).
+  final List<BoxDecoration> _stripGutters;
+
+  /// The shadows the all-day strip casts from its bottom edge, each with
+  /// the paint it draws with ([CalendarThemeData.allDayStripShadows]).
+  final List<({BoxShadow shadow, Paint paint})> stripShadows;
 
   /// The chip counting the bars the collapsed strip hides on a day, in
   /// the look of Month's.
@@ -303,10 +360,16 @@ class _GridStyles {
     return _noticeCells[above ? 0 : 1];
   }
 
-  /// The fill and rules of a strip cell of a day column [fill] fills, in
-  /// the strip's [last] row or another.
+  /// The fill and rules of a strip cell of a day column [fill] fills, in a
+  /// row ending the strip or the band ([last]) or another.
   BoxDecoration stripCell({required _DayFill fill, required bool last}) {
     return _stripCells[fill.index * 2 + (last ? 0 : 1)];
+  }
+
+  /// The fill and rule of a strip row's gutter cell, in a row ending the
+  /// strip or the band ([last]) or another.
+  BoxDecoration stripGutter({required bool last}) {
+    return _stripGutters[last ? 0 : 1];
   }
 }
 
@@ -701,7 +764,14 @@ CalendarCreateRange? _createRangeOf(
 /// requests nothing, and ends a create range in flight and clears the range a
 /// create flow marks. A new [editPolicy] cancels a move or a resize in flight,
 /// which then requests nothing, and ends a create range in flight, which then
-/// creates nothing; the range a create flow marks stays.
+/// creates nothing; the range a create flow marks stays. A store change that
+/// gives the all-day strip another number of rows while a block is moved or
+/// resized leaves the strip its rows until the drag requests its landing or
+/// ends, so no slot row moves under the block and its drag runs on; a bar
+/// the change adds past those rows shows then. While a bar is moved or
+/// resized the strip takes its new rows at once, and the dragged bar keeps
+/// its row, the other bars stacking around it, until the drag requests its
+/// landing or ends.
 ///
 /// With no [storeRange], the days are ready while the store's shown range
 /// holds every one of them and its status is ready. With one, they are
@@ -764,7 +834,9 @@ class TimedGrid<T> extends StatefulWidget {
 
   /// Whether row 0 is a frozen header naming each column's day, whose
   /// corner over the gutter holds the pill counting the items on no shown
-  /// day. Fixed for the grid's life.
+  /// day. Fixed for the grid's life. The header is 40 logical pixels tall,
+  /// or as tall as its names and numbers take at a larger text size, and a
+  /// day too narrow for either scales it down, every day's alike.
   final bool showsDayHeader;
 
   /// The first day of the range the grid shows.
@@ -952,6 +1024,27 @@ typedef _HeaderState = ({
   DateTime today,
 });
 
+/// The boxes a day header's short name and number lie in, each day's
+/// alike: the widest short name in [_GridStyles.headerWeekday]
+/// ([labelSizeIn]), and the box of the numbers in
+/// [_GridStyles.headerNumber] ([numberBoxIn]), which today's ring draws
+/// around. Today's number differs from the rest only in colour.
+({Size name, Size number}) _headerBoxesIn(
+  BuildContext context,
+  _GridStyles styles,
+  CalendarLocalizations strings,
+) {
+  return (
+    name: labelSizeIn(context, styles.headerWeekday, <String>[
+      for (var day = DateTime.monday; day <= DateTime.sunday; day++)
+        strings.weekdayShortName(day),
+    ]),
+    number: numberBoxIn(context, <TextStyle>[
+      styles.headerNumber,
+    ], const Size(_numberBoxWidth, _numberBoxHeight)),
+  );
+}
+
 /// The gesture a grid runs, one at a time: none ([_Idle]), a pinch
 /// ([_Pinching]), a create range ([_Ranging]), or the board's drag of a
 /// block or a bar ([_Dragging]). A pinch and a create range start only
@@ -1132,6 +1225,12 @@ final class _Dragging extends _GridMode {
   /// Set once a crossing's release wrote or refused its landing, so the
   /// drop gate refuses the board's own report of that release.
   bool spent = false;
+
+  /// Set once the drag requests its landing
+  /// ([_TimedGridState._requestMove]). Until then a store change keeps the
+  /// strip's rows under a block's drag and the row of a dragged bar; the
+  /// request's own sync places the entry as any change does.
+  bool requested = false;
 
   /// Whether the crossing names a cell, whose landing the label and the
   /// marks show in place of the board target's.
@@ -1555,6 +1654,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     today: widget.now.value.today,
   ));
 
+  /// The day header's height as the last build measured it
+  /// ([_measureHeader]), which [_rowsConfig] gives the rows it makes.
+  double _headerHeight = _leastHeaderHeight;
+
   /// The extents the axes were last given and the tracks they were given
   /// for. [_fitAxes] replaces an axis only when one of these changes.
   double _gutterWidth = _HourLabels.minGutter;
@@ -1564,6 +1667,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   late CalendarDayHours _rowHours = _tracks.hours;
   late int _rowSlotMinutes = _tracks.slotMinutes;
   double _rowRoom = _initialLabelRoom;
+  double _rowHeaderHeight = _leastHeaderHeight;
   late _Notices _rowNotices = _notices;
   late int _rowStripRows = _stripRows;
   late CalendarHourLabelFormat _rowFormat = widget.hourLabelFormat;
@@ -2251,7 +2355,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return _stripRows;
     }
     final fit =
-        ((size.height * _frozenStripShare - _headerExtent - _labelRoom) /
+        ((size.height * _frozenStripShare -
+                    _measuredHeaderExtent -
+                    _labelRoom) /
                 _allDayRowHeight)
             .floor();
     return math.min(_stripRows, math.max(collapsedStripRows + 1, fit));
@@ -2368,8 +2474,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// create flow's marks, kept as times, stay on their slots, and a
   /// crossing drag reads its cell again once the board has laid the new
   /// rows out. The caller places the kept split on the new rows.
+  ///
+  /// While the board drags a block that has not requested its landing
+  /// ([_Dragging.requested]) it keeps the rows the grid has and returns
+  /// false: the block's span would move with the slot rows, which cancels
+  /// its drag, so the rows wait for the drag's end ([_handleDragEnd]). A
+  /// bar's span, in the strip, keeps its row ([_keptBar]).
   bool _applyStripRows(int rows) {
-    if (rows == _stripRows) {
+    final drag = _drag;
+    final holds = drag != null && !drag.requested && !drag.key.isBar;
+    if (rows == _stripRows || holds) {
       _strip.value = _stripStateOf();
       return false;
     }
@@ -2408,6 +2522,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _rowHours = _tracks.hours;
     _rowSlotMinutes = _tracks.slotMinutes;
     _rowRoom = _labelRoom;
+    _rowHeaderHeight = _headerHeight;
     _rowNotices = _notices;
     _rowStripRows = _stripRows;
     _rowFormat = widget.hourLabelFormat;
@@ -2419,9 +2534,31 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _board.rows = _rowsConfig();
   }
 
-  /// The day header's height, or 0 where the grid shows none.
+  /// The day header's height in the rows the board has, or 0 where the
+  /// grid shows none.
   double get _headerExtent {
+    return widget.showsDayHeader ? _rowHeaderHeight : 0.0;
+  }
+
+  /// The day header's height as the last build measured it, or 0 where the
+  /// grid shows none: the height of the rows [_fitAxes] fits.
+  double get _measuredHeaderExtent {
     return widget.showsDayHeader ? _headerHeight : 0.0;
+  }
+
+  /// Measures [_headerHeight] in [context]: a day's short name over its
+  /// number, each in its box ([_headerBoxesIn]), and never less than
+  /// [_leastHeaderHeight].
+  void _measureHeader(
+    BuildContext context,
+    _GridStyles styles,
+    CalendarLocalizations strings,
+  ) {
+    final boxes = _headerBoxesIn(context, styles, strings);
+    _headerHeight = math.max(
+      _leastHeaderHeight,
+      boxes.name.height + boxes.number.height,
+    );
   }
 
   /// The all-day strip's height.
@@ -2519,7 +2656,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       widget.minSlotHeight,
       _share(
         size.height -
-            _headerExtent -
+            _measuredHeaderExtent -
             (_stripRows > 0 ? _labelRoom : 0.0) -
             _stripExtent -
             _edgeAbove -
@@ -2539,6 +2676,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _tracks.hours != _rowHours ||
         _tracks.slotMinutes != _rowSlotMinutes ||
         _labelRoom != _rowRoom ||
+        _headerHeight != _rowHeaderHeight ||
         _notices != _rowNotices ||
         _stripRows != _rowStripRows ||
         _frozenStripRows != _rowFrozenStripRows ||
@@ -2846,7 +2984,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// Hands [request] to [TimedGrid.onMoveRequest], or with none writes it
   /// ([CalendarStore.requestMove]), holding it in [_held] until the future
   /// completes, or fails, a throw within the call included. The hold syncs
-  /// within the call ([_handleStore]), as a store write's notify does.
+  /// within the call ([_handleStore]), as a store write's notify does, a
+  /// drag of the entry noted as requested first ([_Dragging.requested]).
   ///
   /// A failure of the store's write, whether [CalendarStore.requestMove]
   /// throws within the call or its future fails, is caught, as a failed
@@ -2854,6 +2993,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// [TimedGrid.onMoveRequest], either way, is left uncaught in the zone.
   void _requestMove(CalendarMoveRequest<T> request) {
     final id = request.entry.id!;
+    final drag = _drag;
+    if (drag != null && drag.key.id == id) {
+      drag.requested = true;
+    }
     _held[id] = (request: request, shown: request.requested);
     _handleStore();
     final onMoveRequest = widget.onMoveRequest;
@@ -3017,7 +3160,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final shown = ready
         ? _shownBetween(widget.firstDay, _lastDay)
         : <CalendarShownEntry<T>>[];
-    final layout = TimedGridLayout<T>.of(shown, _tracks, previous: _layout);
+    final layout = TimedGridLayout<T>.of(
+      shown,
+      _tracks,
+      previous: _layout,
+      keptBar: _keptBar(),
+    );
     _layout = layout;
     final hidden = layout.hidden;
     // While the days are not ready the strip keeps the rows it showed, so
@@ -3046,6 +3194,23 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     _syncedReady = ready;
     _hiddenCount.value = hidden;
+  }
+
+  /// The strip row of the bar the board drags, which the split keeps it in
+  /// ([TimedGridLayout.of]): another row would be a new span, which
+  /// cancels the drag. Null where the board drags no bar, and once the
+  /// drag requests its landing ([_Dragging.requested]).
+  ({String id, int row})? _keptBar() {
+    final drag = _drag;
+    if (drag == null || drag.requested || !drag.key.isBar) {
+      return null;
+    }
+    final key = drag.key;
+    final span = _board.spanOf(key);
+    if (span == null || span.rowStart < _stripStart) {
+      return null;
+    }
+    return (id: key.id, row: span.rowStart - _stripStart);
   }
 
   /// Turns the kept split into the board's items on the current tracks:
@@ -3856,9 +4021,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// Delivered after the drop's report, and possibly after the board has
-  /// left the tree. Puts back a lifted entry's pieces the drop's request
-  /// did not, under the board's style as it stands, so a drop's glide runs
-  /// on and they enter as added blocks do.
+  /// left the tree. Syncs ([_sync]), so the strip takes the rows a block's
+  /// drag kept ([_applyStripRows]), the bars stack with no row kept
+  /// ([_keptBar]), and a lifted entry's pieces the drop's request did not
+  /// put back come back, under the board's style as it stands where the
+  /// rows stay, so a drop's glide runs on and they enter as added blocks
+  /// do.
   void _handleDragEnd(GridKey key, bool committed) {
     final drag = _drag;
     if (!mounted || drag == null) {
@@ -3868,9 +4036,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _mode = const _Idle();
       _clearCross();
     });
-    if (drag.lifted != null) {
-      _placeLayout(disable: false);
-    }
+    _sync();
   }
 
   /// Whether [drag] reads the cell under its pointer as it moves, to cross
@@ -4277,7 +4443,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final int row;
     if (y < _leadingExtent) {
       var top = y;
-      if (widget.showsDayHeader && top < _headerHeight) {
+      if (widget.showsDayHeader && top < _rowHeaderHeight) {
         row = 0;
       } else if (_stripRows > 0 && top < _headerExtent + _stripRoom) {
         row = _stripStart - 1;
@@ -5806,23 +5972,29 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     if (_isStripRow(cell.row)) {
       final row = cell.row - _stripStart;
+      // The strip's last row carries the rule along the strip's bottom
+      // edge, and the band's last strip row the rule along the band's edge
+      // where strip rows scroll under it, each across the gutter and every
+      // day.
+      final last =
+          row == _stripRows - 1 ||
+          (_stripPartial && row == _rowFrozenStripRows - 1);
       if (cell.col == 0) {
         if (row == 1) {
-          return _StripCollapse(strip: _strip, onCollapse: _collapseStrip);
+          return _StripCollapse(
+            strip: _strip,
+            last: last,
+            onCollapse: _collapseStrip,
+          );
         }
-        return const _GutterCell();
+        return _StripGutterCell(last: last);
       }
       return _StripCell(
         strip: _strip,
         mark: _stripMark,
         column: cell.col,
         row: row,
-        // A room frozen under the strip carries the rule above the hours,
-        // and the band's last strip row the rule along the band's edge
-        // where strip rows scroll under it.
-        last:
-            (row == _stripRows - 1 && !_roomFrozen) ||
-            (_stripPartial && row == _rowFrozenStripRows - 1),
+        last: last,
         onExpand: _expandStrip,
       );
     }
@@ -6087,6 +6259,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       widget.onZoom == null ? widget.minSlotHeight : minSlotHeightLow,
     );
     _labelRoom = _hourLabels.height / 2 + _HourLabels.gap;
+    if (widget.showsDayHeader) {
+      _measureHeader(context, styles, strings);
+    }
     final slotRange = range == null || range.strip || range.refused
         ? null
         : range;
@@ -6125,6 +6300,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             labelsVersion: _hourLabels.version,
             now: _nowMark,
             reachBelow: _notices.below ? _noticeHeight : 0.0,
+            stripRows: _stripRows,
           ),
           drag: widget.editable
               ? ((drag?.key.isBar ?? false) || _allowsOverlaps
@@ -6243,6 +6419,8 @@ class _DayHeaderCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final styles = _GridStyles.of(context);
+    final strings = CalendarLocalizations.of(context);
+    final boxes = _headerBoxesIn(context, styles, strings);
     return ValueListenableBuilder<_HeaderState>(
       valueListenable: header,
       builder: (context, value, child) {
@@ -6255,6 +6433,7 @@ class _DayHeaderCell extends StatelessWidget {
         final day = value.tracks.dateAt(column);
         final isToday = day == value.today;
         final isSelected = day == value.selectedDay;
+        final numberStyle = isToday ? styles.headerToday : styles.headerNumber;
         return GestureDetector(
           key: dayHeaderKey(day),
           onTap: () {
@@ -6262,24 +6441,38 @@ class _DayHeaderCell extends StatelessWidget {
           },
           child: ColoredBox(
             color: isSelected ? styles.theme.primaryTint : styles.theme.surface,
+            // The grid measures the header as tall as both boxes
+            // ([_TimedGridState._measureHeader]), from the same text
+            // style, scale and words as these; a day too narrow for a box
+            // scales it down, each day's alike.
             child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Text(
-                    CalendarLocalizations.of(
-                      context,
-                    ).weekdayShortName(day.weekday),
-                    style: styles.headerWeekday,
+                  fittedLabel(
+                    boxes.name,
+                    Text(
+                      strings.weekdayShortName(day.weekday),
+                      maxLines: 1,
+                      style: styles.headerWeekday,
+                    ),
                   ),
-                  Container(
-                    width: 30.0,
-                    height: 20.0,
-                    alignment: Alignment.center,
-                    foregroundDecoration: isToday ? styles.headerRing : null,
-                    child: Text(
-                      "${day.day}",
-                      style: isToday ? styles.headerToday : styles.headerNumber,
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Container(
+                      constraints: BoxConstraints(
+                        minWidth: boxes.number.width,
+                        minHeight: boxes.number.height,
+                      ),
+                      alignment: Alignment.center,
+                      foregroundDecoration: isToday
+                          ? styles.headerRingAround(boxes.number)
+                          : null,
+                      child: Text(
+                        "${day.day}",
+                        maxLines: 1,
+                        style: numberStyle,
+                      ),
                     ),
                   ),
                 ],
@@ -6486,9 +6679,10 @@ CalendarResizeEdges _edgesOf<T>(
       : limits.policy.resizableEdges(entry, limits.now);
 }
 
-/// One bar of the all-day strip: the lane the board places it in, inset
-/// 1 px, which what [builder] draws for [entry] and [details] fills. It
-/// takes presses as a [_Block] does: a tap reports [onOpen], which is null
+/// One bar of the all-day strip: the lane the board places it in, inset by
+/// [_barInset], which what [builder] draws for [entry] and [details] fills.
+/// It takes presses across the whole lane, its inset included, in the ways
+/// a [_Block] takes them: a tap reports [onOpen], which is null
 /// while the entry is pending; a long press moves its entry where the
 /// policy [limits] hold lets it move ([_movesOf]), and otherwise reports
 /// [onSelect] where it lets an edge of it resize; and while [selection]
@@ -6564,19 +6758,16 @@ class _Bar<T> extends StatelessWidget {
           children: <Widget>[
             BoardDelayedDragHandle(
               enabled: moves,
-              child: Padding(
-                padding: const EdgeInsets.all(1.0),
-                child: GestureDetector(
-                  // Opaque, so the lane takes a press wherever the builder
-                  // paints nothing, and the drag handle deferring to it
-                  // does too.
-                  behavior: HitTestBehavior.opaque,
-                  onTap: onOpen,
-                  onLongPress: !moves && edges != CalendarResizeEdges.none
-                      ? onSelect
-                      : null,
-                  child: child,
-                ),
+              child: GestureDetector(
+                // Opaque and around the inset, so the lane takes a press
+                // wherever the builder paints nothing, the inset included,
+                // and the drag handle deferring to it does too.
+                behavior: HitTestBehavior.opaque,
+                onTap: onOpen,
+                onLongPress: !moves && edges != CalendarResizeEdges.none
+                    ? onSelect
+                    : null,
+                child: Padding(padding: _barInset, child: child),
               ),
             ),
             if (selected)
@@ -6950,9 +7141,9 @@ class _NoticeCell extends StatelessWidget {
 }
 
 /// A day column's cell in a row of the all-day strip: filled as its column
-/// is ([_dayFillOf]), with a rule along the day's left edge and one under
-/// the strip's last row where [last], tinted and edged in the primary
-/// colour while [mark] covers its column. The first
+/// is ([_dayFillOf]), with a rule along the day's left edge and one along
+/// its bottom where [last], tinted and edged in the primary colour while
+/// [mark] covers its column. The first
 /// row's cell carries [allDayCellKey]. In the collapsed strip's count row,
 /// while the day hides bars, a [_StripMore] chip counting them, which a
 /// screen reader hears as [CalendarLocalizations.allDayMore] and a tap on
@@ -6976,7 +7167,11 @@ class _StripCell extends StatelessWidget {
   /// The cell's strip row, from 0.
   final int row;
 
+  /// Whether the cell's row ends the strip, as its last row does, or ends
+  /// the band, as the band's last strip row does where the strip's later
+  /// rows scroll under the band.
   final bool last;
+
   final VoidCallback onExpand;
 
   @override
@@ -7119,22 +7314,46 @@ class _StripLabel extends StatelessWidget {
   }
 }
 
-/// The all-day strip's second row over the gutter: the surface, holding
-/// while the strip is expanded past four rows a
-/// [CalendarLocalizations.showLess] pill ([allDayLessKey]), which a screen
-/// reader hears as [CalendarLocalizations.allDayLess] and a tap on which
-/// reports [onCollapse].
+/// The gutter's cell in a row of the all-day strip other than its second:
+/// the surface, with a rule along its bottom where [last], as a strip cell
+/// has ([_StripCell.last], [_GridStyles.stripGutter]).
+class _StripGutterCell extends StatelessWidget {
+  const _StripGutterCell({required this.last});
+
+  final bool last;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: _GridStyles.of(context).stripGutter(last: last),
+      child: const SizedBox.expand(),
+    );
+  }
+}
+
+/// The all-day strip's second row over the gutter: the surface, with a rule
+/// along its bottom where [last], as a strip cell has
+/// ([_StripCell.last]), holding while the strip is expanded past four rows
+/// a [CalendarLocalizations.showLess] pill
+/// ([allDayLessKey]), which a screen reader hears as
+/// [CalendarLocalizations.allDayLess] and a tap on which reports
+/// [onCollapse].
 class _StripCollapse extends StatelessWidget {
-  const _StripCollapse({required this.strip, required this.onCollapse});
+  const _StripCollapse({
+    required this.strip,
+    required this.last,
+    required this.onCollapse,
+  });
 
   final ValueListenable<_StripState> strip;
+  final bool last;
   final VoidCallback onCollapse;
 
   @override
   Widget build(BuildContext context) {
     final styles = _GridStyles.of(context);
-    return ColoredBox(
-      color: styles.theme.surface,
+    return DecoratedBox(
+      decoration: styles.stripGutter(last: last),
       child: ValueListenableBuilder<_StripState>(
         valueListenable: strip,
         builder: (context, state, child) {
@@ -7185,9 +7404,9 @@ class _StripPill extends StatelessWidget {
 
 /// The chip counting the bars the collapsed all-day strip hides on a day:
 /// [text] in the look of Month's "+N more", on the soft yellow of the rows
-/// counting entries outside the hours, inset in its cell as a bar is in
-/// its lane and rounded as the default bar is, scaled down rather than cut
-/// off in a day too narrow for it.
+/// counting entries outside the hours, inset in its cell by [_barInset], as
+/// a bar is in its lane, and rounded as the default bar is, scaled down
+/// rather than cut off in a day too narrow for it.
 class _StripMore extends StatelessWidget {
   const _StripMore({super.key, required this.text, required this.styles});
 
@@ -7197,7 +7416,7 @@ class _StripMore extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(1.0),
+      padding: _barInset,
       child: DecoratedBox(
         decoration: styles.stripMore,
         child: Padding(
@@ -7458,6 +7677,11 @@ class _TimedGridPainter extends BoardBackgroundPainter {
 /// hours lies on the last row's bottom edge. It is clipped to the scrolled
 /// region, so the frozen header and gutter cover it as they cover the
 /// blocks.
+///
+/// Over both, the all-day strip casts its shadows from its bottom edge
+/// ([_paintStripShadows]). The board lays a move's proxy above its
+/// foreground ([BoardDragConfig.dragProxyBuilder]), so a block lifted
+/// across that edge paints over them.
 class _GridForegroundPainter extends BoardForegroundPainter {
   const _GridForegroundPainter({
     required this.styles,
@@ -7466,6 +7690,7 @@ class _GridForegroundPainter extends BoardForegroundPainter {
     required this.labelsVersion,
     required this.now,
     required this.reachBelow,
+    required this.stripRows,
   });
 
   /// Holds the paint of the line marking the current time.
@@ -7510,6 +7735,10 @@ class _GridForegroundPainter extends BoardForegroundPainter {
   /// it is not 0, that row draws the end's line inside it.
   final double reachBelow;
 
+  /// The all-day strip's rows, which end in the row above the row above
+  /// the first slot.
+  final int stripRows;
+
   @override
   void paint(Canvas canvas, BoardGeometryView geometry) {
     _paintLabels(canvas, geometry);
@@ -7517,6 +7746,64 @@ class _GridForegroundPainter extends BoardForegroundPainter {
     if (now != null) {
       _paintNow(canvas, geometry, now);
     }
+    _paintStripShadows(canvas, geometry);
+  }
+
+  /// The all-day strip's bottom edge as the board paints it: the bottom of
+  /// its last row that the leading band holds, which is its last row where
+  /// the band holds them all, or null where it has no rows. Read from the
+  /// rows the board paints, as [_reachAboveOf] reads them.
+  double? _stripEdgeOf(BoardGeometryView geometry) {
+    if (stripRows == 0) {
+      return null;
+    }
+    final last = tracks.firstSlotRow - 2;
+    final first = last - stripRows + 1;
+    var edge = -1;
+    for (final row in geometry.frozenTracksOf(Axis.vertical)) {
+      if (row >= first && row <= last && row > edge) {
+        edge = row;
+      }
+    }
+    if (edge < 0) {
+      return null;
+    }
+    return geometry.visibleCellRect(edge, 0).bottom;
+  }
+
+  /// Paints [_GridStyles.stripShadows] under the all-day strip's edge
+  /// ([_stripEdgeOf]) across the viewport, each as the shadow of a box whose
+  /// bottom is that edge and whose top and sides lie past the viewport's by
+  /// more than the shadow reaches, clipped to below the edge.
+  void _paintStripShadows(Canvas canvas, BoardGeometryView geometry) {
+    final shadows = styles.stripShadows;
+    if (shadows.isEmpty) {
+      return;
+    }
+    final edge = _stripEdgeOf(geometry);
+    if (edge == null) {
+      return;
+    }
+    final size = geometry.viewportDimension;
+    canvas.save();
+    canvas.clipRect(Rect.fromLTRB(0.0, edge, size.width, size.height));
+    for (final (:shadow, :paint) in shadows) {
+      // A blur fades out within three of its sigmas.
+      final reach =
+          3.0 * shadow.blurSigma +
+          shadow.spreadRadius.abs() +
+          shadow.offset.distance;
+      canvas.drawRect(
+        Rect.fromLTRB(
+          -reach,
+          edge - size.height - reach,
+          size.width + reach,
+          edge,
+        ).shift(shadow.offset).inflate(shadow.spreadRadius),
+        paint,
+      );
+    }
+    canvas.restore();
   }
 
   void _paintLabels(Canvas canvas, BoardGeometryView geometry) {
@@ -7626,7 +7913,8 @@ class _GridForegroundPainter extends BoardForegroundPainter {
         old.now != now ||
         !identical(old.labels, labels) ||
         old.labelsVersion != labelsVersion ||
-        old.reachBelow != reachBelow;
+        old.reachBelow != reachBelow ||
+        old.stripRows != stripRows;
   }
 }
 

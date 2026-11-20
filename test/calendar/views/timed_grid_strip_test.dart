@@ -12,6 +12,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/semantics.dart';
@@ -278,8 +279,8 @@ class RecordingCanvas implements Canvas {
 
   /// Each paragraph with the offset of its top left and the rect the
   /// canvas was last clipped to since its last restore, or null.
-  final List<({ui.Paragraph paragraph, Offset offset, Rect? clip})>
-  paragraphs = <({ui.Paragraph paragraph, Offset offset, Rect? clip})>[];
+  final List<({ui.Paragraph paragraph, Offset offset, Rect? clip})> paragraphs =
+      <({ui.Paragraph paragraph, Offset offset, Rect? clip})>[];
 
   Rect? _clip;
 
@@ -1370,6 +1371,72 @@ Future<TestGesture> holdLateEndOverWednesday(WidgetTester tester) async {
 
 const DefaultCalendarLocalizations english = DefaultCalendarLocalizations();
 
+/// The key of the repaint boundary [pumpFramed] lays the grid under.
+const ValueKey<String> frameKey = ValueKey<String>("frame");
+
+/// The device pixels of a logical one in a view [pumpFramed] lays out, so
+/// an edge on a half logical pixel, where the room above the strip puts
+/// the strip's rules, lies on a whole device pixel.
+const double framedPixelRatio = 2.0;
+
+/// Pumps [harness]'s grid as [Harness.pump] does, at [framedPixelRatio],
+/// under a repaint boundary whose last frame [pixelsAt] reads.
+Future<void> pumpFramed(WidgetTester tester, Harness harness) async {
+  tester.view.devicePixelRatio = framedPixelRatio;
+  tester.view.physicalSize = harness.size * framedPixelRatio;
+  addTearDown(tester.view.reset);
+  addTearDown(harness.now.dispose);
+  await tester.pumpWidget(
+    RepaintBoundary(
+      key: frameKey,
+      child: MaterialApp(home: harness.themed()),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+/// The colours the last frame [pumpFramed] laid out shows at the global
+/// [points], each the device pixel holding it.
+Future<List<Color>> pixelsAt(WidgetTester tester, List<Offset> points) async {
+  final boundary = tester.renderObject<RenderRepaintBoundary>(
+    find.byKey(frameKey),
+  );
+  final colors = <Color>[];
+  await tester.runAsync(() async {
+    final image = await boundary.toImage(pixelRatio: framedPixelRatio);
+    final bytes = (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+    for (final point in points) {
+      final device = point * framedPixelRatio;
+      final at = (device.dy.floor() * image.width + device.dx.floor()) * 4;
+      colors.add(
+        Color.fromARGB(
+          bytes.getUint8(at + 3),
+          bytes.getUint8(at),
+          bytes.getUint8(at + 1),
+          bytes.getUint8(at + 2),
+        ),
+      );
+    }
+    image.dispose();
+  });
+  return colors;
+}
+
+/// The global rect of what the default chip builder draws for [id]'s bar,
+/// inside the lane the board gives the bar.
+Rect chipRectOf(WidgetTester tester, String id) {
+  return tester.getRect(
+    find.descendant(of: barFinder(id), matching: find.byType(ClipRRect)).first,
+  );
+}
+
+/// Pure red, and a shadow of it, unblurred and falling 3 px: a strip under
+/// a theme casting it paints the three pixel rows under its edge [red].
+const Color red = Color(0xFFFF0000);
+const List<BoxShadow> redShadows = <BoxShadow>[
+  BoxShadow(color: red, offset: Offset(0.0, 3.0)),
+];
+
 void main() {
   testWidgets("TS1 the strip lies under a room as tall as the one above the "
       "first slot, on the surface and ruled along the strip's top edge, "
@@ -1496,9 +1563,17 @@ void main() {
       final chip = find
           .descendant(of: more, matching: find.byType(DecoratedBox))
           .first;
+      final cell = stripRect(tester, shown, tuesday, 3);
       expect(
         tester.getRect(chip),
-        rectMoreOrLessEquals(stripRect(tester, shown, tuesday, 3).deflate(1.0)),
+        rectMoreOrLessEquals(
+          Rect.fromLTRB(
+            cell.left + 1.0,
+            cell.top + 2.0,
+            cell.right - 1.0,
+            cell.bottom - 2.0,
+          ),
+        ),
         reason: shown.name,
       );
       // In the place of bar a's chip, three rows down.
@@ -1960,9 +2035,9 @@ void main() {
   testWidgets("TS15 while the strip has rows the room above the first slot "
       "stays under it as its margin: the grid opens with the opening hour's "
       "line on the margin's bottom edge, which carries the rule above the "
-      "hours in place of the strip's last row and no slot line, and the "
-      "margin keeps its rect as the hours scroll; with no strip the room "
-      "scrolls with them", (tester) async {
+      "hours and no slot line, under the strip's last row with its own rule "
+      "along the strip's bottom edge, and the margin keeps its rect as the "
+      "hours scroll; with no strip the room scrolls with them", (tester) async {
     for (final shown in bothGrids()) {
       final store = storeOf(<CalendarEntry<String>>[allDayOf("off", tuesday)]);
       await Harness(
@@ -1987,7 +2062,7 @@ void main() {
               as BoxDecoration;
       expect(
         (last.border! as Border).bottom,
-        BorderSide.none,
+        BorderSide(color: CalendarThemeData().outline),
         reason: shown.name,
       );
       expect(
@@ -3042,24 +3117,105 @@ void main() {
             bool notice,
           })
         >[
-          (slot: 15, hours: day, nextSlot: 30, nextHours: day, from: 540,
-           to: 540, entries: const [], above: 1, notice: false),
-          (slot: 15, hours: day, nextSlot: 60, nextHours: day, from: 540,
-           to: 540, entries: const [], above: 1, notice: false),
-          (slot: 60, hours: day, nextSlot: 5, nextHours: day, from: 540,
-           to: 540, entries: const [], above: 1, notice: false),
-          (slot: 15, hours: day, nextSlot: 15, nextHours: office, from: 540,
-           to: 540, entries: const [], above: 1, notice: false),
-          (slot: 15, hours: office, nextSlot: 15, nextHours: day, from: 540,
-           to: 540, entries: const [], above: 1, notice: false),
-          (slot: 15, hours: day, nextSlot: 15, nextHours: office, from: 300,
-           to: 360, entries: const [], above: 1, notice: false),
-          (slot: 15, hours: day, nextSlot: 15, nextHours: office, from: 1380,
-           to: null, entries: const [], above: 1, notice: false),
-          (slot: 15, hours: day, nextSlot: 30, nextHours: day, from: 540,
-           to: 540, entries: bar, above: 3, notice: false),
-          (slot: 15, hours: day, nextSlot: 15, nextHours: office, from: 540,
-           to: 540, entries: early, above: 1, notice: true),
+          (
+            slot: 15,
+            hours: day,
+            nextSlot: 30,
+            nextHours: day,
+            from: 540,
+            to: 540,
+            entries: const [],
+            above: 1,
+            notice: false,
+          ),
+          (
+            slot: 15,
+            hours: day,
+            nextSlot: 60,
+            nextHours: day,
+            from: 540,
+            to: 540,
+            entries: const [],
+            above: 1,
+            notice: false,
+          ),
+          (
+            slot: 60,
+            hours: day,
+            nextSlot: 5,
+            nextHours: day,
+            from: 540,
+            to: 540,
+            entries: const [],
+            above: 1,
+            notice: false,
+          ),
+          (
+            slot: 15,
+            hours: day,
+            nextSlot: 15,
+            nextHours: office,
+            from: 540,
+            to: 540,
+            entries: const [],
+            above: 1,
+            notice: false,
+          ),
+          (
+            slot: 15,
+            hours: office,
+            nextSlot: 15,
+            nextHours: day,
+            from: 540,
+            to: 540,
+            entries: const [],
+            above: 1,
+            notice: false,
+          ),
+          (
+            slot: 15,
+            hours: day,
+            nextSlot: 15,
+            nextHours: office,
+            from: 300,
+            to: 360,
+            entries: const [],
+            above: 1,
+            notice: false,
+          ),
+          (
+            slot: 15,
+            hours: day,
+            nextSlot: 15,
+            nextHours: office,
+            from: 1380,
+            to: null,
+            entries: const [],
+            above: 1,
+            notice: false,
+          ),
+          (
+            slot: 15,
+            hours: day,
+            nextSlot: 30,
+            nextHours: day,
+            from: 540,
+            to: 540,
+            entries: bar,
+            above: 3,
+            notice: false,
+          ),
+          (
+            slot: 15,
+            hours: day,
+            nextSlot: 15,
+            nextHours: office,
+            from: 540,
+            to: 540,
+            entries: early,
+            above: 1,
+            notice: true,
+          ),
         ];
     for (final week in <bool>[true, false]) {
       for (final c in cases) {
@@ -3183,7 +3339,9 @@ void main() {
       expect(last.bottom, lessThanOrEqualTo(400.0), reason: shown.name);
       expect(
         last.top,
-        greaterThanOrEqualTo(stripRect(tester, shown, tuesday, kept - 1).bottom),
+        greaterThanOrEqualTo(
+          stripRect(tester, shown, tuesday, kept - 1).bottom,
+        ),
         reason: shown.name,
       );
       expect(
@@ -3410,6 +3568,502 @@ void main() {
     }
   });
 
+  testWidgets("TS41 a store change that gives the strip another number of "
+      "rows while a block's move or resize runs leaves the drag running, so "
+      "its release requests what it lands on, and the strip takes the new "
+      "rows when the drag ends, also one let go where it lifted, which "
+      "requests nothing", (tester) async {
+    final shown = Shown.week(monday);
+    final expected = <String, (DateTime, DateTime)?>{
+      "move": (at(tuesday, 11), at(tuesday, 12)),
+      "start": (at(tuesday, 9), at(tuesday, 11)),
+      "end": (at(tuesday, 10), at(tuesday, 12)),
+      "in place": null,
+    };
+    for (final MapEntry(key: drag, value: landing) in expected.entries) {
+      final entries = <CalendarEntry<String>>[
+        allDayOf("bar1", monday),
+        entryOf("a", at(tuesday, 10), at(tuesday, 11)),
+      ];
+      final store = storeOf(entries);
+      await Harness(store, shown).pump(tester);
+      final rows = rowCountNow();
+      final block = tester.getRect(blockFinder("a", tuesday));
+      final TestGesture gesture;
+      if (drag == "in place") {
+        gesture = await liftTo(tester, block.center, block.center);
+      } else if (drag == "move") {
+        final hour =
+            slotRect(tester, shown, tuesday, 11 * 60).top -
+            slotRect(tester, shown, tuesday, 10 * 60).top;
+        gesture = await liftTo(
+          tester,
+          block.center,
+          block.center + Offset(0.0, hour),
+        );
+      } else {
+        final selecting = await lift(tester, block.center);
+        await selecting.up();
+        await tester.pumpAndSettle();
+        final from = drag == "start"
+            ? Offset(block.center.dx, block.top + 2.0)
+            : Offset(block.center.dx, block.bottom - 2.0);
+        final to = drag == "start"
+            ? Offset(
+                from.dx,
+                slotRect(tester, shown, tuesday, 9 * 60).top + 2.0,
+              )
+            : Offset(
+                from.dx,
+                slotRect(tester, shown, tuesday, 11 * 60 + 45).bottom - 2.0,
+              );
+        gesture = await tester.startGesture(from);
+        await gesture.moveTo(Offset.lerp(from, to, 0.5)!);
+        await tester.pump();
+        await gesture.moveTo(to);
+        await tester.pump();
+      }
+
+      // A second bar on Monday needs a second strip row.
+      store.entries = <CalendarEntry<String>>[
+        ...entries,
+        allDayOf("bar2", monday),
+      ];
+      await tester.pump();
+      expect(rowCountNow(), rows, reason: drag);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(
+        <(DateTime, DateTime)>[
+          for (final moved in store.moves) (moved.start, moved.end),
+        ],
+        <(DateTime, DateTime)>[?landing],
+        reason: drag,
+      );
+      expect(rowCountNow(), rows + 1, reason: drag);
+      expect(barFinder("bar2"), findsOneWidget, reason: drag);
+    }
+  });
+
+  testWidgets("TS42 a store change that stacks a bar before a bar being "
+      "moved or resized keeps the dragged bar in its row, so its drag runs "
+      "on and its release requests what it lands on, and the bars stack "
+      "anew when the drag ends, also one let go where it lifted, which "
+      "requests nothing", (tester) async {
+    final shown = Shown.week(monday);
+    final expected = <String, (DateTime, DateTime)?>{
+      "move": (wednesday, thursday),
+      "end": (tuesday, friday),
+      "in place": null,
+    };
+    for (final MapEntry(key: drag, value: landing) in expected.entries) {
+      final entries = <CalendarEntry<String>>[allDayOf("a", tuesday)];
+      final store = storeOf(entries);
+      await Harness(store, shown).pump(tester);
+      final row = boardOf(tester).controller.spanOf(GridKey.bar("a"))!.rowStart;
+      // Setup sanity: the bar lies in the strip's first row.
+      expect(row, shown.stripStart, reason: drag);
+      final TestGesture gesture;
+      if (drag == "in place") {
+        final bar = tester.getCenter(barFinder("a"));
+        gesture = await liftTo(tester, bar, bar);
+      } else if (drag == "move") {
+        gesture = await liftTo(
+          tester,
+          tester.getCenter(barFinder("a")),
+          stripRect(tester, shown, wednesday).center,
+        );
+      } else {
+        await selectBar(tester, "a");
+        gesture = await holdEdge(
+          tester,
+          "a",
+          AxisDirection.right,
+          Offset(
+            stripRect(tester, shown, thursday).right - 4.0,
+            tester.getCenter(barFinder("a")).dy,
+          ),
+        );
+      }
+
+      // A bar from Monday to Wednesday stacks before the dragged one.
+      store.entries = <CalendarEntry<String>>[
+        ...entries,
+        allDayOf("b", monday, days: 3),
+      ];
+      await tester.pump();
+      expect(
+        boardOf(tester).controller.spanOf(GridKey.bar("a"))!.rowStart,
+        row,
+        reason: drag,
+      );
+      expect(
+        boardOf(tester).controller.spanOf(GridKey.bar("b"))!.rowStart,
+        row + 1,
+        reason: drag,
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(
+        <(DateTime, DateTime, bool)>[
+          for (final moved in store.moves)
+            (moved.start, moved.end, moved.isAllDay),
+        ],
+        <(DateTime, DateTime, bool)>[
+          if (landing != null) (landing.$1, landing.$2, true),
+        ],
+        reason: drag,
+      );
+      expect(
+        boardOf(tester).controller.spanOf(GridKey.bar("b"))!.rowStart,
+        row,
+        reason: drag,
+      );
+      expect(
+        boardOf(tester).controller.spanOf(GridKey.bar("a"))!.rowStart,
+        row + 1,
+        reason: drag,
+      );
+    }
+  });
+
+  testWidgets("TS43 a bar lies 2 px inside its row's top and bottom and 1 px "
+      "inside its day's sides, in rows 24 px tall, so the bars of neighbouring "
+      "rows lie 4 px apart, and the collapsed strip's count chip lies in its "
+      "cell as a bar does", (tester) async {
+    for (final shown in bothGrids()) {
+      final store = storeOf(<CalendarEntry<String>>[
+        for (var i = 0; i < 5; i++) allDayOf("a$i", tuesday),
+      ]);
+      await Harness(
+        store,
+        shown,
+        editable: false,
+        size: const Size(800.0, 600.0),
+      ).pump(tester);
+      // Setup sanity: collapsed, three rows of bars and the count row.
+      expect(
+        shown.firstSlotRow - shown.stripStart - 1,
+        collapsedStripRows + 1,
+        reason: shown.name,
+      );
+      expect(allBars(), findsNWidgets(collapsedStripRows), reason: shown.name);
+      final rows = <Rect>[
+        for (var row = 0; row <= collapsedStripRows; row++)
+          stripRect(tester, shown, tuesday, row),
+      ];
+      for (final row in rows) {
+        expect(row.height, moreOrLessEquals(24.0), reason: shown.name);
+      }
+      final chips = <Rect>[];
+      for (var i = 0; i < 5; i++) {
+        if (barFinder("a$i").evaluate().isNotEmpty) {
+          chips.add(chipRectOf(tester, "a$i"));
+        }
+      }
+      chips.sort((a, b) {
+        return a.top.compareTo(b.top);
+      });
+      chips.add(
+        tester.getRect(
+          find
+              .descendant(
+                of: find.byKey(allDayMoreKey(tuesday)),
+                matching: find.byType(DecoratedBox),
+              )
+              .first,
+        ),
+      );
+      for (var row = 0; row <= collapsedStripRows; row++) {
+        final cell = rows[row];
+        final chip = chips[row];
+        final reason = "${shown.name} row $row";
+        expect(chip.top - cell.top, moreOrLessEquals(2.0), reason: reason);
+        expect(
+          cell.bottom - chip.bottom,
+          moreOrLessEquals(2.0),
+          reason: reason,
+        );
+        expect(chip.left - cell.left, moreOrLessEquals(1.0), reason: reason);
+        expect(cell.right - chip.right, moreOrLessEquals(1.0), reason: reason);
+        if (row > 0) {
+          expect(
+            chip.top - chips[row - 1].bottom,
+            moreOrLessEquals(4.0),
+            reason: reason,
+          );
+        }
+      }
+    }
+  });
+
+  testWidgets("TS44 the strip's last row draws a rule along its bottom edge "
+      "across the gutter and every day, whether the room or the row counting "
+      "the entries before the hours lies under it, and whichever row is last", (
+    tester,
+  ) async {
+    final theme = CalendarThemeData();
+    final late = CalendarDayHours(8 * 60, CalendarDates.minutesPerDay);
+    for (final before in <bool>[false, true]) {
+      final hours = before ? late : CalendarDayHours.allDay;
+      for (final shown in bothGrids(hours: hours)) {
+        for (final barRows in <int>[1, 2, 5]) {
+          final store = storeOf(<CalendarEntry<String>>[
+            for (var i = 0; i < barRows; i++) allDayOf("a$i", tuesday),
+            if (before) entryOf("early", at(tuesday, 6), at(tuesday, 7)),
+          ], hours: hours);
+          await pumpFramed(
+            tester,
+            Harness(
+              store,
+              shown,
+              editable: false,
+              size: const Size(800.0, 600.0),
+            ),
+          );
+          final rows = barRows > collapsedStripRows + 1
+              ? collapsedStripRows + 1
+              : barRows;
+          final reason = "${shown.name} before $before rows $barRows";
+          // Setup sanity: the strip's rows, and under them the row counting
+          // the entries before the hours, or the room, which the hours'
+          // first slot lies under.
+          expect(
+            shown.firstSlotRow - shown.stripStart - 1,
+            rows,
+            reason: reason,
+          );
+          expect(
+            cellRect(tester, shown.firstSlotRow - 1, 1).height,
+            before ? 24.0 : lessThan(24.0),
+            reason: reason,
+          );
+          final last = stripRect(tester, shown, tuesday, rows - 1);
+          final y = last.bottom - 0.25;
+          final xs = <double>[
+            cellRect(tester, shown.stripStart + rows - 1, 0).left + 1.5,
+            last.center.dx,
+            if (shown.week) stripRect(tester, shown, thursday).center.dx,
+          ];
+          final colors = await pixelsAt(tester, <Offset>[
+            for (final x in xs) Offset(x, y),
+          ]);
+          for (var i = 0; i < xs.length; i++) {
+            expect(colors[i], theme.outline, reason: "$reason at ${xs[i]}");
+          }
+        }
+      }
+    }
+  });
+
+  testWidgets("TS45 the strip casts the theme's allDayStripShadows from its "
+      "bottom edge across the gutter and every day onto what lies under it, "
+      "and over nothing above that edge; none where the theme gives none, "
+      "and none where the grid shows no strip", (tester) async {
+    final surface = CalendarThemeData().surface;
+    for (final shown in bothGrids()) {
+      for (final shadows in <List<BoxShadow>>[redShadows, <BoxShadow>[]]) {
+        final store = storeOf(<CalendarEntry<String>>[allDayOf("a0", tuesday)]);
+        await pumpFramed(
+          tester,
+          Harness(
+            store,
+            shown,
+            editable: false,
+            size: const Size(800.0, 600.0),
+            theme: CalendarThemeData(allDayStripShadows: shadows),
+          ),
+        );
+        final reason = "${shown.name} shadows ${shadows.length}";
+        final last = stripRect(tester, shown, tuesday);
+        final edge = last.bottom;
+        // Setup sanity: one strip row, whose edge lies on a whole device
+        // pixel.
+        expect(shown.firstSlotRow - shown.stripStart - 1, 1, reason: reason);
+        expect(
+          edge * framedPixelRatio,
+          (edge * framedPixelRatio).roundToDouble(),
+          reason: reason,
+        );
+        final xs = <double>[
+          cellRect(tester, shown.stripStart, 0).left + 1.5,
+          last.center.dx,
+          if (shown.week) stripRect(tester, shown, thursday).center.dx,
+        ];
+        for (final x in xs) {
+          final colors = await pixelsAt(tester, <Offset>[
+            Offset(x, edge + 0.25),
+            Offset(x, edge + 2.75),
+            Offset(x, edge + 3.25),
+            Offset(x, edge - 0.25),
+            Offset(x, edge - 3.25),
+          ]);
+          final at = "$reason at $x";
+          if (shadows.isEmpty) {
+            expect(colors[0], surface, reason: at);
+            expect(colors[1], surface, reason: at);
+          } else {
+            expect(colors[0], red, reason: at);
+            expect(colors[1], red, reason: at);
+            expect(colors[2], isNot(red), reason: at);
+            expect(colors[3], isNot(red), reason: at);
+            expect(colors[4], isNot(red), reason: at);
+          }
+        }
+      }
+      final store = storeOf(<CalendarEntry<String>>[
+        entryOf("talk", at(tuesday, 9), at(tuesday, 10)),
+      ]);
+      await pumpFramed(
+        tester,
+        Harness(
+          store,
+          shown,
+          editable: false,
+          size: const Size(800.0, 600.0),
+          theme: CalendarThemeData(allDayStripShadows: redShadows),
+        ),
+      );
+      // Setup sanity: no strip row.
+      expect(shown.stripStart, shown.week ? 1 : 0, reason: shown.name);
+      expect(shown.firstSlotRow, shown.stripStart + 1, reason: shown.name);
+      final top = shown.week ? cellRect(tester, 0, 1).bottom : 0.0;
+      final colors = await pixelsAt(tester, <Offset>[
+        for (final dy in <double>[0.25, 1.25, 2.75])
+          for (final x in <double>[
+            1.5,
+            firstSlotRect(tester, shown, tuesday).center.dx,
+          ])
+            Offset(x, top + dy),
+      ]);
+      expect(colors, everyElement(isNot(red)), reason: shown.name);
+    }
+  });
+
+  testWidgets("TS46 an expanded strip whose rows past the band scroll draws "
+      "its edge and casts its shadows from the band's last strip row, across "
+      "the gutter, over the strip rows scrolling under it", (tester) async {
+    final outline = CalendarThemeData().outline;
+    for (final shown in bothGrids()) {
+      final store = storeOf(<CalendarEntry<String>>[
+        for (var i = 0; i < 20; i++) allDayOf("a${i + 10}", tuesday),
+      ]);
+      await pumpFramed(
+        tester,
+        Harness(
+          store,
+          shown,
+          editable: false,
+          size: const Size(800.0, 400.0),
+          theme: CalendarThemeData(allDayStripShadows: redShadows),
+        ),
+      );
+      await tester.tap(find.byKey(allDayMoreKey(tuesday)));
+      await tester.pumpAndSettle();
+      final kept = keptStripRows(tester, shown, 20, 400.0);
+      final edge = stripRect(tester, shown, tuesday, kept - 1).bottom;
+      // Setup sanity: expanded, some strip rows past the band, the first of
+      // them under the band's edge.
+      expect(shown.firstSlotRow - shown.stripStart - 1, 20, reason: shown.name);
+      expect(kept, lessThan(20), reason: shown.name);
+      expect(
+        boardOf(tester).controller.rows.frozenStart,
+        shown.stripStart + kept,
+        reason: shown.name,
+      );
+      expect(
+        stripRect(tester, shown, tuesday, kept).top,
+        edge,
+        reason: shown.name,
+      );
+      for (final x in <double>[
+        cellRect(tester, shown.stripStart + kept - 1, 0).left + 1.5,
+        stripRect(tester, shown, tuesday).center.dx,
+      ]) {
+        final colors = await pixelsAt(tester, <Offset>[
+          Offset(x, edge - 0.25),
+          Offset(x, edge + 0.25),
+          Offset(x, edge + 2.75),
+          Offset(x, edge + 3.25),
+        ]);
+        final at = "${shown.name} at $x";
+        expect(colors[0], outline, reason: at);
+        expect(colors[1], red, reason: at);
+        expect(colors[2], red, reason: at);
+        expect(colors[3], isNot(red), reason: at);
+      }
+    }
+  });
+
+  testWidgets("TS47 a block lifted across the strip's edge paints over the "
+      "strip's shadow", (tester) async {
+    final shown = Shown.week(monday);
+    final store = storeOf(<CalendarEntry<String>>[
+      allDayOf("a0", tuesday),
+      entryOf("talk", at(tuesday, 8), at(tuesday, 11)),
+    ]);
+    await pumpFramed(
+      tester,
+      Harness(
+        store,
+        shown,
+        size: const Size(800.0, 600.0),
+        theme: CalendarThemeData(allDayStripShadows: redShadows),
+      ),
+    );
+    final edge = stripRect(tester, shown, tuesday).bottom;
+    final block = tester.getRect(blockFinder("talk", tuesday));
+    final probe = Offset(block.center.dx, edge + 1.5);
+    // Setup sanity: the block's top lies under the edge, and the shadow
+    // shows at the probe.
+    expect(block.top, greaterThan(edge));
+    expect((await pixelsAt(tester, <Offset>[probe])).single, red);
+    final grab = Offset(block.center.dx, block.top + 40.0);
+    final gesture = await liftTo(
+      tester,
+      grab,
+      grab.translate(0.0, edge - 10.0 - block.top),
+    );
+    final beside = Offset(
+      stripRect(tester, shown, thursday).center.dx,
+      probe.dy,
+    );
+    final held = await pixelsAt(tester, <Offset>[probe, beside]);
+    // Setup sanity: the shadow still shows beside the held block.
+    expect(held[1], red);
+    expect(held[0], isNot(red));
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("TS48 a tap in a bar's lane above or below what the builder "
+      "draws there opens the bar, in and out of edit mode", (tester) async {
+    for (final editable in <bool>[false, true]) {
+      for (final shown in bothGrids()) {
+        final reason = "${shown.name} editable $editable";
+        final store = storeOf(<CalendarEntry<String>>[allDayOf("a0", tuesday)]);
+        final harness = Harness(
+          store,
+          shown,
+          editable: editable,
+          size: const Size(800.0, 600.0),
+        );
+        await harness.pump(tester);
+        final lane = tester.getRect(barFinder("a0"));
+        final chip = chipRectOf(tester, "a0");
+        // Setup sanity: the builder draws inside the lane, short of its
+        // top and bottom.
+        expect(chip.top, greaterThan(lane.top + 1.0), reason: reason);
+        expect(chip.bottom, lessThan(lane.bottom - 1.0), reason: reason);
+        for (final y in <double>[lane.top + 0.5, lane.bottom - 0.5]) {
+          await tester.tapAt(Offset(chip.center.dx, y));
+          await tester.pumpAndSettle();
+        }
+        expect(harness.opened, <String>["a0", "a0"], reason: reason);
+      }
+    }
+  });
+
   testWidgets("TX37 in a strip whose rows past the band scroll, a bar of a "
       "scrolled row let go on a slot showing under it writes that slot's "
       "hour, and in Week one let go on Wednesday's cell of its row moves to "
@@ -3429,7 +4083,9 @@ void main() {
         await tester.pumpAndSettle();
         final kept = keptStripRows(tester, shown, 20, 400.0);
         // The last strip row right under the band.
-        viewportOf(tester).verticalPosition!.jumpTo((20 - kept - 1) * 22.0);
+        viewportOf(tester).verticalPosition!.jumpTo(
+          (20 - kept - 1) * stripRect(tester, shown, tuesday).height,
+        );
         await tester.pumpAndSettle();
         final from = stripRect(tester, shown, tuesday, 19);
         // Setup sanity: the row shows under the band.
@@ -3501,6 +4157,47 @@ void main() {
       expect(store.moves, isEmpty, reason: "$side");
       expectTimes(store, "m", bar.start, bar.end, reason: "$side");
     }
+  });
+
+  testWidgets("TX39 at text scale 2, under Week's day header grown to hold "
+      "its text, a block dropped on Tuesday's strip cell writes Tuesday's "
+      "start to Wednesday's", (tester) async {
+    final shown = Shown.week(monday);
+    final store = storeOf(<CalendarEntry<String>>[
+      entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
+      allDayOf("other", tuesday),
+    ]);
+    final harness = Harness(store, shown);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = harness.size;
+    addTearDown(tester.view.reset);
+    addTearDown(harness.now.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) {
+          return MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(2.0)),
+            child: child!,
+          );
+        },
+        home: Material(child: harness.themed()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // Setup sanity: the header is taller than its least height by more
+    // than a strip row.
+    expect(
+      tester.getRect(find.byKey(dayHeaderKey(tuesday))).height,
+      greaterThan(40.0 + stripRect(tester, shown, tuesday).height),
+    );
+    await dragTo(
+      tester,
+      tester.getCenter(blockFinder("meet", tuesday)),
+      stripRect(tester, shown, tuesday).center,
+    );
+    expectTimes(store, "meet", tuesday, wednesday);
   });
 
   testWidgets("TX36 in Week, leaving edit mode while a block's move, its "

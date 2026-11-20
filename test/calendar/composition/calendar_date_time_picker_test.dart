@@ -6,10 +6,11 @@
 /// the time a tap on a day keeps or moves to, the times the clock of the
 /// store's zone skips, Now on today alone, a minute that turns null, a
 /// column held as the time hides, the focus the toggle takes, the
-/// parameters it hands its pickers, the theme it draws in and the values
-/// its constructor refuses.
+/// parameters it hands its pickers, the theme it draws in, the values its
+/// constructor refuses and its days at large text.
 library;
 
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/timezone.dart' as tz;
@@ -18,11 +19,13 @@ import 'package:widgets_extended/calendar/composition/calendar_date_time_picker.
         dateTimePickerDividerKey,
         dateTimePickerTimeKey,
         dateTimePickerToggleKey;
+import 'package:widgets_extended/calendar/views/day_cell.dart' show DayCell;
 import 'package:widgets_extended/calendar/views/time_picker.dart'
     show timePickerHourColumnKey, timePickerHourRowKey, timePickerNowKey;
 import 'package:widgets_extended/widgets_extended.dart';
 
 import '../../scheduling/zones.dart';
+import '../recording_errors.dart';
 
 final DateTime tuesday = DateTime(2026, 4, 21);
 final DateTime wednesday = DateTime(2026, 4, 22);
@@ -808,5 +811,80 @@ void main() {
         firstColumn: 7,
       );
     }, throwsA(isArgumentError.having((e) => e.name, "name", "firstColumn")));
+  });
+
+  testWidgets("DT17 folded at text scale 2, the picker's days lay each label "
+      "out whole on one line in its day, and nothing overflows", (
+    tester,
+  ) async {
+    await recordingErrors((errors) async {
+      await tester.pumpWidget(
+        app(
+          Builder(
+            builder: (context) {
+              return MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: const TextScaler.linear(2.0)),
+                child: CalendarDateTimePicker<String>(
+                  day: wednesday,
+                  minute: 600,
+                  today: tuesday,
+                  onChanged: (day, minute) {},
+                ),
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(errors, isEmpty);
+      final cut = <String>[];
+      final outside = <String>[];
+      for (final cell in find.byType(DayCell).evaluate()) {
+        final box = cell.renderObject! as RenderBox;
+        final cellRect = box.localToGlobal(Offset.zero) & box.size;
+        for (final label
+            in find
+                .descendant(
+                  of: find.byElementPredicate((element) {
+                    return element == cell;
+                  }),
+                  matching: find.byType(RichText),
+                )
+                .evaluate()) {
+          final paragraph = label.renderObject! as RenderParagraph;
+          final text = paragraph.text.toPlainText();
+          if (paragraph.size.width <
+                  paragraph.getMaxIntrinsicWidth(double.infinity) - 0.01 ||
+              paragraph.size.height <
+                  paragraph.getMinIntrinsicHeight(double.infinity) - 0.01) {
+            cut.add(text);
+          }
+          final painted = Rect.fromPoints(
+            paragraph.localToGlobal(Offset.zero),
+            paragraph.localToGlobal(paragraph.size.bottomRight(Offset.zero)),
+          );
+          if (painted.left < cellRect.left - 0.01 ||
+              painted.top < cellRect.top - 0.01 ||
+              painted.right > cellRect.right + 0.01 ||
+              painted.bottom > cellRect.bottom + 0.01) {
+            outside.add(text);
+          }
+        }
+      }
+      // Setup sanity: the picker is folded, each of its days at a full
+      // collapse.
+      final days = tester.widgetList<DayCell>(find.byType(DayCell)).toList();
+      expect(days, hasLength(greaterThanOrEqualTo(7)));
+      expect(
+        days.where((day) {
+          return day.collapse.value != 1.0;
+        }),
+        isEmpty,
+      );
+      expect(cut, isEmpty);
+      expect(outside, isEmpty);
+    });
   });
 }

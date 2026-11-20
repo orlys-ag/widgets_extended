@@ -72,12 +72,18 @@ The contract of `CalendarStore` and its two stores. The layer's imports are in `
   are read again; the read's answer may arrive before the write's or
   after it. A read contradicts the answer where it answers the entry
   otherwise or answers a day the answer covers without the entry, and not
-  where it removed the entry from days the answer does not cover. The
-  write completes with its data source's answer all the same. A read sent
-  later that removed an entry tells nothing of the days it did not cover,
-  so an older read's answer of the entry stands, unless a read sent later
-  filled a day the answered entry covers, which leaves it unstored and its
-  days in the older read to read again. A grid move or resize shows the
+  where it removed the entry from days the answer does not cover, unless a
+  change announced or a read sent since the write was sent set or removed
+  the entry before that read. The write completes with its data source's
+  answer all the same. A read sent later that removed an entry tells nothing
+  of the days it did not cover, so an older read's answer of the entry
+  stands, unless a read sent later filled a day the answered entry covers,
+  which leaves it unstored and its days in the older read to read again, or
+  a later read, a write confirmed or a change announced since the older read
+  was sent set or removed the entry before that removal: that still
+  supersedes the older read's answer, or, where it is a write's answer the
+  older read is checked against, leaves the older read's entry unstored and
+  its days to read again. A grid move or resize shows the
   requested entry, pending, until the data source answers; a delete and
   an update show the stored entry pending, as it is stored meanwhile; a
   create shows nothing until the entry is stored.

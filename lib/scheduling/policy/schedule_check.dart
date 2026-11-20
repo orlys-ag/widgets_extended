@@ -431,12 +431,13 @@ final class CalendarScheduleCheck<T> {
             CalendarDates.minutesPerDay;
   }
 
-  /// The first timed schedule of this one's length on its start day, from
-  /// the later of its start and the day's earliest start, that no other
-  /// entry shares time with, as [CalendarEditRules.firstSlot] finds it with
-  /// that length in elapsed minutes ([CalendarSchedule.lengthMinutes]);
-  /// null for an all-day schedule, one that spans days or has no length,
-  /// and where the day leaves no such range.
+  /// The first timed schedule of this one's length on its start day, in
+  /// the rules' hours, from the later of its start and the day's earliest
+  /// start, that no other entry shares time with, as
+  /// [CalendarEditRules.firstSlot] finds it with that length in elapsed
+  /// minutes ([CalendarSchedule.lengthMinutes]); null for an all-day
+  /// schedule, one that spans days or has no length, and where the day
+  /// leaves no such range.
   ///
   /// Where [now]'s clock gives the schedule times, the search reads the
   /// day's clock in the occurrence of the later instant of its start and

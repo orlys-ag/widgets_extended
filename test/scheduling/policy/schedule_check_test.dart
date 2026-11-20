@@ -1115,4 +1115,27 @@ void main() {
       expect(free.lengthMinutes, 55);
     });
   });
+
+  test("SC24 the next free range of a stored entry kept before the hours "
+      "lies in the hours, so the check admits it", () {
+    final stored = entryOf("stored", tuesday, 7 * 60, 8 * 60);
+    final check = CalendarScheduleCheck<String>(
+      schedule: timed(tuesday, 7 * 60, 8 * 60),
+      rules: rulesOf(
+        unrestricted,
+        hours: CalendarDayHours(9 * 60, 17 * 60),
+      ),
+      now: CalendarNow(time: DateTime(2026, 4, 20, 12), today: monday),
+      others: <CalendarEntry<String>>[
+        stored,
+        entryOf("other", tuesday, 7 * 60, 7 * 60 + 30),
+      ],
+      entry: stored,
+    );
+    expect(check.admitted, isTrue);
+    expect(check.overlaps.map((entry) => entry.id), <String>["other"]);
+    final free = check.nextFree;
+    expect(free, timed(tuesday, 9 * 60, 10 * 60));
+    expect(check.withSchedule(free!).problems, isEmpty);
+  });
 }

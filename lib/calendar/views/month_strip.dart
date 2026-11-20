@@ -81,9 +81,11 @@ DateTime monthFoldDay(
 /// first day of the month at its middle each time a scroll brings a new
 /// one there, the last report naming the month it rests on; once it rests, it
 /// asks [store] to read the days of that month's grid, so their markers
-/// show. A new [month] the strip does not rest on slides it there, after
-/// the frame, over the [CalendarTheme]'s motion, or at once where its
-/// duration is zero, from a month short of it when it is further away.
+/// show, as it asks a new [store] after the frame that gives it, for the
+/// month it rests on or slides to. A new [month] the strip does not rest
+/// on slides it there, after the frame, over the [CalendarTheme]'s motion,
+/// or at once where its duration is zero, from a month short of it when it
+/// is further away.
 ///
 /// [collapse] runs from 0, the month, to 1, its week. As it runs the strip
 /// shrinks to one row and moves up by the rows above the week of
@@ -310,6 +312,15 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
     if (widget.collapse != oldWidget.collapse) {
       oldWidget.collapse.removeListener(_handleCollapse);
       widget.collapse.addListener(_handleCollapse);
+    }
+    if (widget.store != oldWidget.store) {
+      // After the frame, as in initState. The month the strip rests on or
+      // slides to, which a slide's end reads again where it moves on.
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _prefetch(_month);
+        }
+      });
     }
     if (widget.month != _month) {
       _month = widget.month;

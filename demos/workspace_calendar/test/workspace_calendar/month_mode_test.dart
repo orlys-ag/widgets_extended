@@ -795,10 +795,15 @@ void main() {
 
       await longPressDay(tester, april(30));
       await dismissPicker(tester);
+      // Down from the grid's last row reaches the next month's day.
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
-      expect(pilledDays(tester), <DateTime>[april(30)]);
+      expect(find.text("May 2026"), findsOneWidget);
+      expect(pilledDays(tester), <DateTime>[may(7)]);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
       expect(find.text("Apr 2026"), findsOneWidget);
+      expect(pilledDays(tester), <DateTime>[april(30)]);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();

@@ -65,7 +65,12 @@ class _Read {
 /// ([CachingCalendarStore._setTime]).
 @immutable
 class _EntryTime {
-  const _EntryTime(this.at, {this.forgottenBy, this.writeSentAt});
+  const _EntryTime(
+    this.at, {
+    this.forgottenBy,
+    this.checksReadsAfter,
+    this.beneath,
+  });
 
   /// The store's clock of what last set or removed the entry: a read's
   /// send, a confirmed write or an announced change.
@@ -75,9 +80,18 @@ class _EntryTime {
   /// stamps.
   final _Read? forgottenBy;
 
-  /// The store's clock when the write was sent whose answer set or removed
-  /// the entry, where that is what [at] stamps.
-  final int? writeSentAt;
+  /// Where [at] stamps a write's answer, the store's clock after which a
+  /// read sent before [at] is checked against the entry the store holds:
+  /// the write's send where the store holds the answer, and otherwise the
+  /// later of that and the clock of what set the entry it kept.
+  final int? checksReadsAfter;
+
+  /// Where [forgottenBy] removed the entry, the latest stamp before that
+  /// removal of what else set or removed it: a read sent before it that
+  /// answers the entry is still superseded by that stamp, or checked
+  /// against it, as before the removal. Never itself a removal by a read,
+  /// so no chain runs deeper than one.
+  final _EntryTime? beneath;
 }
 
 /// The failure that marked an unread day [CachingCalendarStore.readFailed]:
@@ -160,7 +174,9 @@ class _Day {
 /// write's answer or after it: which of the two the source holds is then
 /// unknown, so the store keeps what it holds and reads the days of both
 /// again. A read whose answer removed the entry from days the write's
-/// answer does not cover leaves that answer standing. A write completes
+/// answer does not cover leaves that answer standing, unless a change
+/// announced or a read sent since the write was sent set or removed the
+/// entry before that read. A write completes
 /// with the data source's answer once the source answers, whether or not
 /// the store keeps it.
 ///
@@ -1152,18 +1168,22 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// Applies [entries], the answer of [read], and returns whether what the
   /// store answers changed.
   ///
-  /// The read fills its unread days, and its read ones that no read sent
-  /// later filled. Each entry it answers replaces the held one, and each
-  /// held entry on a day it fills that it does not answer is forgotten,
-  /// except an entry a write confirmed, a change announced or a read sent
-  /// since set or removed. A read sent later that removed an entry told
-  /// nothing of the days it did not cover, so the entry is answered still,
-  /// at this read's clock, which a read sent before this one does not
-  /// override. A forgotten entry leaves changed the read days it covers
-  /// outside the read. An answered entry covering a day a read sent later
-  /// filled without it is out of date there, so the days it covers here are
-  /// left changed, to be read again; so are those with a change announced
-  /// while the read was in flight.
+  /// The read fills its unread days, and its read ones that no read sent later
+  /// filled. Each entry it answers replaces the held one, and each held entry
+  /// on a day it fills that it does not answer is forgotten, except an entry a
+  /// write confirmed, a change announced or a read sent since set or removed. A
+  /// read sent later that removed an entry told nothing of the days it did not
+  /// cover, so the entry is answered still, at this read's clock, which a read
+  /// sent before this one does not override; unless a write confirmed, a change
+  /// announced or a read sent since this one set or removed the entry before
+  /// that removal ([_EntryTime.beneath]), which supersedes this read's answer
+  /// as it did before the removal, or, for a write's answer it is checked
+  /// against, leaves the days of the answered entry changed, to be read again,
+  /// where no read sent later filled one of them. A forgotten entry leaves
+  /// changed the read days it covers outside the read. An answered entry
+  /// covering a day a read sent later filled without it is out of date there,
+  /// so the days it covers here are left changed, to be read again; so are
+  /// those with a change announced while the read was in flight.
   ///
   /// The answer of a write sent before the read and stored since it was
   /// sent stays, though the read may contradict it, as it can whichever of
@@ -1205,7 +1225,7 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
       answered.add(id);
       final time = _entryTimes[id];
       if (time != null && time.at > at) {
-        if (_answeredSince(time, at)) {
+        if (_checksRead(time, at)) {
           final held = _index.stored(id);
           if (_differs(held, entry)) {
             _markBoth(held, entry);
@@ -1214,6 +1234,18 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
         }
         if (time.forgottenBy == null) {
           continue;
+        }
+        final beneath = time.beneath;
+        if (beneath != null && beneath.at > at) {
+          if (!_checksRead(beneath, at)) {
+            continue;
+          }
+          // The entry held under the write's stamp is forgotten, by a read
+          // that filled its days, so only this read's entry is read again.
+          if (!(_newestFillAt > at && _filledAfter(entry, at))) {
+            _markBoth(null, entry);
+            continue;
+          }
         }
       }
       if (_newestFillAt > at && _filledAfter(entry, at)) {
@@ -1251,14 +1283,20 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
         }
         final time = _entryTimes[id];
         if (time != null && time.at > at) {
-          if (_answeredSince(time, at) &&
-              (contradicted ??= <String>{}).add(id)) {
+          if (_checksRead(time, at) && (contradicted ??= <String>{}).add(id)) {
             _markBoth(entry, null);
           }
           continue;
         }
         _index.forget(id);
-        _setTime(id, at, forgottenBy: read);
+        _setTime(
+          id,
+          at,
+          forgottenBy: read,
+          beneath: time == null || time.forgottenBy == null
+              ? time
+              : time.beneath,
+        );
         _markDaysOf(entry, at, except: read);
         changed = true;
       }
@@ -1308,16 +1346,25 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
 
   /// Records that what happened at the clock [at] set or removed the entry
   /// [id], while a read or a write is in flight: the answer of the read
-  /// [forgottenBy], if given, removed it, and the answer of a write sent at
-  /// the clock [writeSentAt], if given, set or removed it.
-  void _setTime(String id, int at, {_Read? forgottenBy, int? writeSentAt}) {
+  /// [forgottenBy], if given, removed it, over the stamp [beneath] of what
+  /// else last set or removed it; and where [checksReadsAfter] is given, a
+  /// write's answer was stamped, against which a read sent after that
+  /// clock and before [at] is checked.
+  void _setTime(
+    String id,
+    int at, {
+    _Read? forgottenBy,
+    int? checksReadsAfter,
+    _EntryTime? beneath,
+  }) {
     if (!_inFlight) {
       return;
     }
     _entryTimes[id] = _EntryTime(
       at,
       forgottenBy: forgottenBy,
-      writeSentAt: writeSentAt,
+      checksReadsAfter: checksReadsAfter,
+      beneath: beneath,
     );
   }
 
@@ -1328,12 +1375,14 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     }
   }
 
-  /// Whether [time] stamps a write's answer that a read sent at the clock
-  /// [at], since that write was sent and before its answer was stored, may
-  /// contradict.
-  bool _answeredSince(_EntryTime time, int at) {
-    final writeSentAt = time.writeSentAt;
-    return writeSentAt != null && writeSentAt < at;
+  /// Whether [time] stamps a write's answer against which a read sent at
+  /// the clock [at], before the answer was stamped, is checked: one sent
+  /// after its [_EntryTime.checksReadsAfter], which the source may have
+  /// served before it applied the write, and which nothing set since it
+  /// was sent supersedes.
+  bool _checksRead(_EntryTime time, int at) {
+    final after = time.checksReadsAfter;
+    return after != null && after < at;
   }
 
   /// Leaves changed, at a new tick of the clock, the days of [held], the
@@ -1854,17 +1903,30 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// differs from the entry held and a change announced or a read sent
   /// since contradicts it ([_contradicted]). Which of the two the source
   /// holds is then unknown, so the store keeps what it holds and reads the
-  /// days of both again. A stored answer's time keeps [sentAt], so a read
-  /// sent since that answers after it can contradict it too ([_applyRead]);
-  /// except that an answer that changes nothing keeps the time of a change
-  /// announced or a read sent since that set or removed the entry as the
-  /// answer does, which a read sent before it does not contradict.
+  /// days of both again.
+  ///
+  /// Either way the answer is stamped at a new tick of the clock, so a
+  /// read sent since that answers after it is checked against the entry
+  /// held ([_applyRead]): one sent since [sentAt] where the store holds
+  /// the answer. Where it keeps what it holds, over a contradicted answer
+  /// or over one that changes nothing because a change announced or a
+  /// read sent since set the entry as the answer does, one sent since
+  /// what set the entry it keeps, which supersedes a read sent before it.
   void _storeAnswer(String id, CalendarEntry<T>? answer, int sentAt) {
     final held = _index.stored(id);
     final differs = _differs(held, answer);
+    final time = _entryTimes[id];
     if (differs && _contradicted(id, answer, sentAt)) {
       _markBoth(held, answer);
+      _stampKept(id, time, sentAt);
       _readChangedShown();
+      return;
+    }
+    if (!differs &&
+        time != null &&
+        time.at > sentAt &&
+        time.forgottenBy == null) {
+      _stampKept(id, time, sentAt);
       return;
     }
     if (answer == null) {
@@ -1872,26 +1934,37 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     } else {
       _index.put(answer);
     }
-    final time = _entryTimes[id];
-    if (!differs &&
-        time != null &&
-        time.at > sentAt &&
-        time.forgottenBy == null) {
-      return;
-    }
-    _setTime(id, ++_clock, writeSentAt: sentAt);
+    _setTime(id, ++_clock, checksReadsAfter: sentAt);
+  }
+
+  /// Stamps the answer of a write sent at the clock [sentAt] under [id],
+  /// over which the store keeps what it holds, as [time], if given, last
+  /// set or removed it: a read sent after the later of [sentAt] and the
+  /// clock of the read's answer or the change that set what [time] stamps
+  /// is checked against the entry held. A read whose answer removed the
+  /// entry supersedes no read that answers it elsewhere, so then the check
+  /// runs from [sentAt].
+  void _stampKept(String id, _EntryTime? time, int sentAt) {
+    final setAt = time != null && time.forgottenBy == null ? time.at : sentAt;
+    _setTime(id, ++_clock, checksReadsAfter: math.max(sentAt, setAt));
   }
 
   /// Whether a change announced since the clock [sentAt], or a read sent
   /// since, contradicts [answer], a write's answer under [id] other than
   /// the entry held: the change or the read's answer set or removed the
   /// entry, unless the latest to do so was a read whose answer removed it
-  /// from days [answer] does not cover; or the read filled a day [answer]
-  /// covers, and so left the entry other than [answer] there.
+  /// from days [answer] does not cover and nothing else set or removed it
+  /// since [sentAt] before that read ([_EntryTime.beneath]); or the read
+  /// filled a day [answer] covers, and so left the entry other than
+  /// [answer] there.
   bool _contradicted(String id, CalendarEntry<T>? answer, int sentAt) {
     final time = _entryTimes[id];
-    if (time != null && time.at > sentAt && !_removedElsewhere(time, answer)) {
-      return true;
+    if (time != null && time.at > sentAt) {
+      final beneath = time.beneath;
+      if (!_removedElsewhere(time, answer) ||
+          (beneath != null && beneath.at > sentAt)) {
+        return true;
+      }
     }
     return answer != null && _filledAfter(answer, sentAt);
   }

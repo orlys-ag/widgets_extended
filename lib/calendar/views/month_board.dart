@@ -7,6 +7,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../board/board.dart';
@@ -24,6 +25,12 @@ import 'pinch_zoom.dart';
 /// The height of a day's number strip, which the weeks' lanes start
 /// below: the row axis's lane padding.
 const double monthStripHeight = 28.0;
+
+/// The size of the box holding each day's number, the selected day's on
+/// its pill and today's in its ring, at no text scaling; a larger text
+/// grows it, keeping the room around the numbers ([numberBoxIn]).
+const double _numberBoxWidth = 30.0;
+const double _numberBoxHeight = 22.0;
 
 /// The height of one chip lane: the row axis's lane extent while the days
 /// show chips.
@@ -113,11 +120,11 @@ class _MonthStyles {
       ),
       selectedPill = BoxDecoration(
         color: theme.primary,
-        borderRadius: BorderRadius.circular(11.0),
+        borderRadius: BorderRadius.circular(_numberBoxHeight / 2.0),
       ),
       ring = BoxDecoration(
         border: Border.all(color: theme.todayRing, width: theme.todayRingWidth),
-        borderRadius: BorderRadius.circular(11.0),
+        borderRadius: BorderRadius.circular(_numberBoxHeight / 2.0),
       ),
       more = BoxDecoration(
         color: theme.notice,
@@ -179,6 +186,17 @@ class _MonthStyles {
   final TextStyle todayNumber;
   final BoxDecoration selectedPill;
   final BoxDecoration ring;
+
+  /// [decoration], [selectedPill] or [ring], around a number box of
+  /// [box], its ends round.
+  static BoxDecoration around(BoxDecoration decoration, Size box) {
+    if (box.height == _numberBoxHeight) {
+      return decoration;
+    }
+    return decoration.copyWith(
+      borderRadius: BorderRadius.circular(box.height / 2.0),
+    );
+  }
 
   /// A day's "+N more".
   final BoxDecoration more;
@@ -672,8 +690,13 @@ enum CalendarMonthLayout {
 /// A tap on a chip reports [onOpenEntry], a tap anywhere else on a day
 /// [onOpenDay], and a long press on a day outside its chips
 /// [onCreateOnDay], or where there is none [onOpenDay] as a tap does; the
-/// last two give the board the keyboard, whose arrow
-/// keys move the selected day and report it through [onSelectDay]. The
+/// last two give the board the keyboard. Its arrow keys report through
+/// [onSelectDay] the shown day before or after the selected one on the
+/// screen, or the day a week before or after it, in whatever month that
+/// day lies: a day the grid shows is selected on the board and scrolled
+/// into view at once, and a day of another month once the owner shows its
+/// month. Home, End and the page keys move the board's selection within
+/// [grid] and report its day. The
 /// days are ready while the store shows exactly [grid]'s days and its
 /// status is ready, or, while it shows another range, as it does in the
 /// frame before the board's owner asks it for [grid]'s, once it has read
@@ -762,7 +785,9 @@ class MonthBoard<T> extends StatefulWidget {
   /// builds no cell.
   final ValueListenable<CalendarNow> now;
 
-  /// A key moved the selection onto this day.
+  /// A key moved the selection onto this day, which an arrow key can find
+  /// in the month before or after [grid]'s: the owner then shows that
+  /// day's month, as [selectedDay] is a day of [grid]'s month.
   final ValueChanged<DateTime> onSelectDay;
 
   /// This day was tapped outside its chips.
@@ -1055,6 +1080,12 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// the write reports nothing to [MonthBoard.onSelectDay].
   bool _writingSelection = false;
 
+  /// The day the last move of the selection reported, by an arrow key of
+  /// this state's or a key or tap of the board's, until the frame after it:
+  /// an arrow steps from it, so keys before a frame each step from the one
+  /// before whichever of the two took it.
+  DateTime? _movedDay;
+
   /// The bars the item builders returned, by chip key, kept so a payload
   /// that did not change returns the same instance and builds nothing.
   /// Holds no key but those the latest sync placed and those in [_dropped],
@@ -1337,21 +1368,120 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     }
   }
 
-  /// A key moved the board's selection: reports the day of its focus cell
-  /// when the cell lies in the grid. Two keys before a frame both report,
-  /// the second stepping from the cell the first selected.
+  /// A key, which the board hands this state before its own keys. An
+  /// arrow reports the shown day before or after the day the selection is
+  /// on, as the board's columns run left to right whatever the ambient
+  /// [Directionality], or the day a week before or after it, in whatever
+  /// month that day lies, and selects it on the board and scrolls it into
+  /// view at once where the grid shows it, as the board does for its own
+  /// keys. Home, End and the page keys are the board's, which moves from
+  /// its selection; until the frame after a move that reported a day
+  /// outside the grid, which the selection is not on, they do nothing.
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final grid = widget.grid;
+    final moved = _movedDay;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.home ||
+        key == LogicalKeyboardKey.end ||
+        key == LogicalKeyboardKey.pageUp ||
+        key == LogicalKeyboardKey.pageDown) {
+      if (moved != null && _cellShowing(grid, moved) == null) {
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+    final from = moved ?? _selectedCellDay(grid) ?? widget.selectedDay;
+    final DateTime day;
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      day = CalendarDates.nextShownDay(from, -1, grid.weekdays);
+    } else if (key == LogicalKeyboardKey.arrowRight) {
+      day = CalendarDates.nextShownDay(from, 1, grid.weekdays);
+    } else if (key == LogicalKeyboardKey.arrowUp) {
+      day = CalendarDates.addDays(from, -DateTime.daysPerWeek);
+    } else if (key == LogicalKeyboardKey.arrowDown) {
+      day = CalendarDates.addDays(from, DateTime.daysPerWeek);
+    } else {
+      return KeyEventResult.ignored;
+    }
+    _noteMoved(day);
+    final cell = _cellShowing(grid, day);
+    if (cell != null) {
+      _writingSelection = true;
+      try {
+        _board.setSelection(BoardSelection(anchor: cell, focus: cell));
+      } finally {
+        _writingSelection = false;
+      }
+      _board.revealCell(cell.row, cell.col);
+    }
+    widget.onSelectDay(day);
+    return KeyEventResult.handled;
+  }
+
+  /// Notes [day] as the day the last move of the selection reported, until
+  /// the frame after it.
+  void _noteMoved(DateTime day) {
+    if (_movedDay == null) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        _movedDay = null;
+      });
+      SchedulerBinding.instance.ensureVisualUpdate();
+    }
+    _movedDay = day;
+  }
+
+  /// The day of the board's selected cell, or null where the selection is
+  /// on no cell of [grid].
+  DateTime? _selectedCellDay(CalendarMonthGrid grid) {
+    final focus = _board.selection.value.focus;
+    if (focus == null ||
+        focus.row >= grid.weekCount ||
+        focus.col >= grid.columnCount) {
+      return null;
+    }
+    return grid.dateAt(focus.row, focus.col);
+  }
+
+  /// The cell of [grid] that shows [day], a day of its month or another,
+  /// or null where no cell does. A shown day lies less than seven days
+  /// after the first cell of its row, the earliest day the row shows.
+  static ({int row, int col})? _cellShowing(
+    CalendarMonthGrid grid,
+    DateTime day,
+  ) {
+    final number = CalendarDates.dayNumber(day);
+    final offset = number - CalendarDates.dayNumber(grid.firstDay);
+    if (offset < 0) {
+      return null;
+    }
+    final row = offset ~/ DateTime.daysPerWeek;
+    if (row >= grid.weekCount) {
+      return null;
+    }
+    for (var col = 0; col < grid.columnCount; col++) {
+      if (CalendarDates.dayNumber(grid.dateAt(row, col)) == number) {
+        return (row: row, col: col);
+      }
+    }
+    return null;
+  }
+
+  /// The board's keys or a tap moved its selection: reports the day of its
+  /// focus cell when the cell lies in the grid. Keys before a frame each
+  /// report, each stepping from the day the one before selected.
   void _handleBoardSelection(BoardSelection selection) {
     if (_writingSelection) {
       return;
     }
-    final focus = selection.focus;
-    final grid = widget.grid;
-    if (focus == null ||
-        focus.row >= grid.weekCount ||
-        focus.col >= grid.columnCount) {
+    final day = _selectedCellDay(widget.grid);
+    if (day == null) {
       return;
     }
-    widget.onSelectDay(grid.dateAt(focus.row, focus.col));
+    _noteMoved(day);
+    widget.onSelectDay(day);
   }
 
   void _openDay(DateTime day) {
@@ -2005,6 +2135,9 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
               weekdays: widget.grid.weekdays,
               columnWidth: _columnWidth,
               horizontal: _horizontal,
+              // The board reads no Directionality: its columns run left to
+              // right.
+              columnDirection: TextDirection.ltr,
             ),
             Expanded(
               child: Stack(
@@ -2023,6 +2156,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
                         background: _background,
                         selection: _selectionConfig,
                         focusNode: _focusNode,
+                        onKeyEvent: _handleKey,
                         // The board scrolls on its own, not with the screen's
                         // primary scroll controller.
                         primary: false,
@@ -2239,7 +2373,7 @@ class _MonthDayCell extends StatelessWidget {
                 SizedBox(
                   key: monthStripKey(day),
                   height: monthStripHeight,
-                  child: Center(child: _buildNumber(isToday, styles)),
+                  child: Center(child: _buildNumber(context, isToday, styles)),
                 ),
                 if (hides.earlier > 0)
                   Positioned(
@@ -2307,7 +2441,7 @@ class _MonthDayCell extends StatelessWidget {
     );
   }
 
-  Widget _buildNumber(bool isToday, _MonthStyles styles) {
+  Widget _buildNumber(BuildContext context, bool isToday, _MonthStyles styles) {
     final TextStyle style;
     if (isSelected) {
       style = styles.selectedNumber;
@@ -2318,17 +2452,29 @@ class _MonthDayCell extends StatelessWidget {
     } else {
       style = styles.mutedNumber;
     }
-    final number = Text("${day.day}", style: style);
+    final number = Text("${day.day}", maxLines: 1, style: style);
+    // Every day's number lies in a box of one size, so each scales down
+    // alike, rather than being cut off, in a number strip too small for it.
+    final box = numberBoxIn(context, <TextStyle>[
+      styles.number,
+      styles.selectedNumber,
+    ], const Size(_numberBoxWidth, _numberBoxHeight));
     if (!isSelected && !isToday) {
-      return number;
+      return fittedLabel(box, number);
     }
-    return Container(
-      width: 30.0,
-      height: 22.0,
-      alignment: Alignment.center,
-      decoration: isSelected ? styles.selectedPill : null,
-      foregroundDecoration: isToday ? styles.ring : null,
-      child: number,
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Container(
+        constraints: BoxConstraints(minWidth: box.width, minHeight: box.height),
+        alignment: Alignment.center,
+        decoration: isSelected
+            ? _MonthStyles.around(styles.selectedPill, box)
+            : null,
+        foregroundDecoration: isToday
+            ? _MonthStyles.around(styles.ring, box)
+            : null,
+        child: number,
+      ),
     );
   }
 }
