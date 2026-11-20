@@ -1010,7 +1010,7 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         ? ((content - oldAxis.offsetOf(track)) / extent).clamp(0.0, 1.0)
         : 0.0;
     final anchor = (track + into).clamp(0.0, newAxis.trackCount.toDouble());
-    final maxTarget = math.max(0.0, newAxis.totalExtent - viewportExtent);
+    final maxTarget = _scrollMaxOf(newAxis.totalExtent, viewportExtent);
     final target = (newAxis.offsetOfFraction(anchor) - newBand).clamp(
       0.0,
       maxTarget,
@@ -3119,6 +3119,19 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
     return (first: first, last: last);
   }
 
+  /// The maximum scroll extent of an axis whose tracks total [total] in a
+  /// viewport [extent] long: how far the total passes the viewport, and 0
+  /// where it passes it by no more than `precisionErrorTolerance`. Tracks
+  /// sized to share a viewport's extent can sum to a residue past it in
+  /// doubles, and a range of that residue would have the axis's scrollable
+  /// accept drags, as `ScrollPhysics.shouldAcceptUserOffset` compares the
+  /// extents exactly, and take part in the gestures on the board with
+  /// nothing to scroll.
+  static double _scrollMaxOf(double total, double extent) {
+    final past = total - extent;
+    return past > precisionErrorTolerance ? past : 0.0;
+  }
+
   /// Gives BOTH offsets content dimensions, on every layout including an
   /// empty board, and reports whether both accepted them.
   ///
@@ -3126,9 +3139,9 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
   /// (`widgets/scroll_position.dart:655`) and the frame would otherwise
   /// paint against a superseded offset, so the loop treats it as another
   /// round. Neither call is skipped when the other fails: both
-  /// offsets must receive dimensions. The maximum is clamped at zero,
-  /// because `applyContentDimensions` asserts
-  /// `minScrollExtent <= maxScrollExtent`.
+  /// offsets must receive dimensions. The maximum is [_scrollMaxOf] the
+  /// axis's total, never below zero, because `applyContentDimensions`
+  /// asserts `minScrollExtent <= maxScrollExtent`.
   ///
   /// On the content axis it also attributes to the own scroll shift what
   /// the scope's preview made the position do ([_attributeOwnScroll]).
@@ -3151,13 +3164,13 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
         _ownScrollStandsOn(contentAxis!)) {
       record.gate = _springGate;
     }
-    final verticalMax = math.max(
-      0.0,
-      _controller.rows.axis.totalExtent - extent.height,
+    final verticalMax = _scrollMaxOf(
+      _controller.rows.axis.totalExtent,
+      extent.height,
     );
-    final horizontalMax = math.max(
-      0.0,
-      _controller.columns.axis.totalExtent - extent.width,
+    final horizontalMax = _scrollMaxOf(
+      _controller.columns.axis.totalExtent,
+      extent.width,
     );
     final verticalAccepted = verticalOffset.applyContentDimensions(
       0.0,
@@ -3173,11 +3186,10 @@ class RenderBoardViewport<TKey> extends RenderTwoDimensionalViewport
       final changed = maxPassed != _lastContentMaxPassed;
       _lastContentMaxPassed = maxPassed;
       if (before != null) {
-        final ownMax = math.max(
-          0.0,
+        final ownMax = _scrollMaxOf(
           _contentAxisInstance!.totalExtent -
-              (_ownCount == 0 ? 0.0 : _ownPrefix![_ownCount]) -
-              (vertical ? extent.height : extent.width),
+              (_ownCount == 0 ? 0.0 : _ownPrefix![_ownCount]),
+          vertical ? extent.height : extent.width,
         );
         _ownFreeMax = ownMax;
         final pixels = contentOffset!.pixels;

@@ -1162,6 +1162,13 @@ cannot hold it, scales down; every label of a kind in a row scales alike,
 so a row's names keep one size and line up, as do its numbers. Today's
 ring and the selected day's pill grow with the number, keep the room they
 leave around it, and stay round at each end.
+- Fix: a board whose tracks filled its viewport could still scroll by a
+rounding residue. Tracks sized to share the viewport's extent can sum to a
+hair past it in doubles (96 rows of 1636 / 96 px come to 1.8e-12 px past
+1636 px), which the board gave its scroll position as the scroll range, so
+the axis's scrollable took drags with nothing to scroll. Where an axis's
+tracks pass the viewport by no more than `precisionErrorTolerance`, the
+board now gives it no scroll range.
 
 ## 0.0.35
 
