@@ -4,15 +4,20 @@
 /// predicate refuse, when it asks the predicate, what a store given in a
 /// later build reads, where its days and its previous chevron lie with
 /// daysToEdges, the weeks, months and years it browses back to with
-/// browsesBeforeFirstDay false, and the view it opens on and reports.
+/// browsesBeforeFirstDay false, the view it opens on and reports, and the
+/// days onDayTap reports.
 library;
 
 import 'dart:async';
 import 'dart:ui' show Tristate;
 
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/widgets_extended.dart';
+
+import '../../scheduling/zones.dart';
 
 /// The day cell of [day], as a screen reader names a day with no badge.
 Finder dayCell(DateTime day) {
@@ -1156,6 +1161,123 @@ void main() {
       expect(box.right, header.right, reason: step);
       expect(box.center.dy, header.center.dy, reason: step);
     }
+  });
+
+  testWidgets("DP17 onDayTap reports a day tapped in the week row or the "
+      "month, or activated by a screen reader, right after onChanged, and "
+      "the value's day too, as the start of its date on the clock of the "
+      "store's zone; a day an arrow key reaches, a day the picker refuses "
+      "and a picker with no onChanged report nothing", (tester) async {
+    ensureZones();
+    final semantics = tester.ensureSemantics();
+    final havana = tz.getLocation("America/Havana");
+    final store = MemoryCalendarStore<String>(zone: havana);
+    addTearDown(store.dispose);
+    final wednesday = DateTime(2026, 4, 22);
+    final thursday = DateTime(2026, 4, 23);
+    final friday = DateTime(2026, 4, 24);
+    final events = <(String, DateTime)>[];
+    Widget picker(
+      CalendarDayPickerView view, {
+      bool takesDays = true,
+      bool reportsTaps = true,
+    }) {
+      return app(
+        CalendarDayPicker<String>(
+          key: ValueKey<(CalendarDayPickerView, bool)>((view, takesDays)),
+          value: wednesday,
+          today: tuesday,
+          store: store,
+          initialView: view,
+          isEnabled: (day) {
+            return CalendarDates.dayNumber(day) !=
+                CalendarDates.dayNumber(friday);
+          },
+          onChanged: takesDays
+              ? (day) {
+                  events.add(("changed", day));
+                }
+              : null,
+          onDayTap: reportsTaps
+              ? (day) {
+                  events.add(("tap", day));
+                }
+              : null,
+        ),
+      );
+    }
+
+    final thursdayInHavana = tz.TZDateTime(havana, 2026, 4, 23);
+    for (final view in <CalendarDayPickerView>[
+      const CalendarDayPickerView(),
+      const CalendarDayPickerView(folded: false),
+    ]) {
+      final step = view.folded ? "week row" : "month";
+      await tester.pumpWidget(picker(view));
+      await tester.pumpAndSettle();
+      events.clear();
+      await tester.tap(dayCell(thursday));
+      await tester.pump();
+      expect(events, <(String, DateTime)>[
+        ("changed", thursdayInHavana),
+        ("tap", thursdayInHavana),
+      ], reason: step);
+      final (_, reported) = events.last;
+      expect(reported, isA<tz.TZDateTime>(), reason: step);
+
+      events.clear();
+      await tester.tap(dayCell(wednesday));
+      await tester.pump();
+      expect(events, <(String, DateTime)>[
+        ("tap", tz.TZDateTime(havana, 2026, 4, 22)),
+      ], reason: step);
+
+      events.clear();
+      await tester.tap(dayCell(friday));
+      await tester.pump();
+      expect(events, isEmpty, reason: step);
+
+      events.clear();
+      tester.semantics.tap(
+        find.semantics.byLabel(
+          const DefaultCalendarLocalizations().dayWithBadges(
+            thursday,
+            const <String?>[],
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(events, <(String, DateTime)>[
+        ("changed", thursdayInHavana),
+        ("tap", thursdayInHavana),
+      ], reason: step);
+    }
+
+    // The month took the focus with the taps above, so the arrow keys
+    // select.
+    events.clear();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(events, <(String, DateTime)>[("changed", thursdayInHavana)]);
+
+    await tester.pumpWidget(
+      picker(const CalendarDayPickerView(), takesDays: false),
+    );
+    events.clear();
+    await tester.tap(dayCell(thursday));
+    await tester.pump();
+    expect(events, isEmpty);
+
+    // Setup sanity: with no onDayTap a tap still reports through
+    // onChanged.
+    await tester.pumpWidget(
+      picker(const CalendarDayPickerView(), reportsTaps: false),
+    );
+    events.clear();
+    await tester.tap(dayCell(thursday));
+    await tester.pump();
+    expect(events, <(String, DateTime)>[("changed", thursdayInHavana)]);
+    semantics.dispose();
   });
 }
 

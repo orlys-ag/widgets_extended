@@ -396,6 +396,11 @@ final class _Marked extends DefaultCalendarLocalizations {
   }
 
   @override
+  String get dateTimePickerDateLabel {
+    return bracketed(super.dateTimePickerDateLabel);
+  }
+
+  @override
   String get dateTimePickerTimeLabel {
     return bracketed(super.dateTimePickerTimeLabel);
   }
@@ -993,8 +998,10 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets("LZ7 the date-time picker's Time toggle, day picker and time "
-      "picker switch to the localizations above it", (tester) async {
+  testWidgets("LZ7 the date-time picker's view control, day picker, time "
+      "view's header and time picker switch to the localizations above it", (
+    tester,
+  ) async {
     useView(tester, 800.0, 1200.0);
     final semantics = tester.ensureSemantics();
     Widget picker({required bool marked}) {
@@ -1005,6 +1012,7 @@ void main() {
             day: tuesday,
             minute: 570,
             today: tuesday,
+            initialShowsTime: true,
             onChanged: (day, minute) {},
           ),
         ),
@@ -1022,7 +1030,11 @@ void main() {
     expect(find.byType(CalendarTimePicker), findsOneWidget);
     expectMarked(tester, "the date-time picker", from: from);
     expect(
-      tester.getSemantics(find.byKey(dateTimePickerToggleKey)).label,
+      tester.getSemantics(find.byKey(dateTimePickerDateSegmentKey)).label,
+      "[Date]",
+    );
+    expect(
+      tester.getSemantics(find.byKey(dateTimePickerTimeSegmentKey)).label,
       "[Time]",
     );
     semantics.dispose();

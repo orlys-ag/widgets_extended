@@ -202,6 +202,33 @@ class CalendarHeader extends StatelessWidget {
   /// The diameter of the header's round buttons, the chevrons included.
   static const double _circle = 32.0;
 
+  /// The style of the header's title in [theme].
+  static TextStyle titleStyleOf(CalendarThemeData theme) {
+    return TextStyle(
+      fontSize: 16.0,
+      fontWeight: FontWeight.w600,
+      color: theme.text,
+    );
+  }
+
+  /// The height of the chevrons' tap targets under the Material theme at
+  /// [context], which the header's row is at least as tall as: a
+  /// [_chevronButton]'s, whose compact density takes 8 logical pixels from
+  /// the theme's [MaterialTapTargetSize.padded] target, and which with
+  /// [MaterialTapTargetSize.shrinkWrap] is its [_circle].
+  static double chevronExtentOf(BuildContext context) {
+    switch (Theme.of(context).materialTapTargetSize) {
+      case MaterialTapTargetSize.padded:
+        return math.max(
+          _circle,
+          kMinInteractiveDimension +
+              VisualDensity.compact.baseSizeAdjustment.dy,
+        );
+      case MaterialTapTargetSize.shrinkWrap:
+        return _circle;
+    }
+  }
+
   /// The style of the chevrons: a [_circle] circle around a 24 px icon.
   static const ButtonStyle _chevronButton = ButtonStyle(
     visualDensity: VisualDensity.compact,
@@ -317,11 +344,7 @@ class CalendarHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = CalendarTheme.of(context);
-    final titleStyle = TextStyle(
-      fontSize: 16.0,
-      fontWeight: FontWeight.w600,
-      color: theme.text,
-    );
+    final titleStyle = titleStyleOf(theme);
     final strings = CalendarLocalizations.of(context);
     final year = details.pickerYear;
     final day = details.day;

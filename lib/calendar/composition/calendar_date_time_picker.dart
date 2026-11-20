@@ -1,8 +1,13 @@
-/// An inline picker of a day and a time of it: a [CalendarDayPicker] over a
-/// [CalendarTimePicker], with a toggle that shows and hides the time.
+/// An inline picker of a day and a time of it: a [CalendarDayPicker] and a
+/// [CalendarTimePicker] that take turns, with a control that switches
+/// between them.
 library;
 
+import 'dart:math' as math;
+import 'dart:ui' show lerpDouble;
+
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/rendering.dart';
 
 import '../../scheduling/scheduling.dart';
 import '../presentation/calendar_day_badges.dart';
@@ -10,38 +15,46 @@ import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import '../views/time_picker.dart';
 import 'calendar_day_picker.dart';
+import 'calendar_header.dart';
 import 'calendar_theme_extension.dart';
 
-/// The key of a [CalendarDateTimePicker]'s Time toggle.
-const ValueKey<String> dateTimePickerToggleKey = ValueKey<String>(
-  "date-time-picker-toggle",
+/// The key of the label of the Date segment of the view control in the
+/// header of the view a [CalendarDateTimePicker] shows.
+const ValueKey<String> dateTimePickerDateSegmentKey = ValueKey<String>(
+  "date-time-picker-date-segment",
 );
 
-/// The key of the part of a [CalendarDateTimePicker] under its day picker,
-/// which holds the divider and the time picker and grows and shrinks as the
-/// time shows and hides.
+/// The key of the label of the Time segment of the view control in the
+/// header of the view a [CalendarDateTimePicker] shows.
+const ValueKey<String> dateTimePickerTimeSegmentKey = ValueKey<String>(
+  "date-time-picker-time-segment",
+);
+
+/// The key of a [CalendarDateTimePicker]'s time view: the card that holds
+/// its header, which names the day, over its time picker.
 const ValueKey<String> dateTimePickerTimeKey = ValueKey<String>(
   "date-time-picker-time",
 );
 
-/// The key of the line between a [CalendarDateTimePicker]'s day picker and
-/// its time picker.
-const ValueKey<String> dateTimePickerDividerKey = ValueKey<String>(
-  "date-time-picker-divider",
-);
-
 /// An inline picker of a day and a time of it, put together of a
 /// [CalendarDayPicker] and a [CalendarTimePicker], each as it is on its
-/// own: the day picker on top, its header holding, at its end, a Time
-/// toggle, and under it a hairline in the theme's
-/// [CalendarThemeData.outline] over the time picker, while the toggle is on.
+/// own, which take turns: its date view is the day picker, and its time
+/// view, on a card as the day picker's, a header row naming [day], as
+/// [CalendarLocalizations.dayTitle] names it against [today], over the time
+/// picker. At the end of each view's header row lies a view control of two
+/// segments, labelled [CalendarLocalizations.dateTimePickerDateLabel] and
+/// [CalendarLocalizations.dateTimePickerTimeLabel], which switch to the
+/// date view and the time view; the time view's header row is at least as
+/// tall as the day picker's chevrons, so the control lies at the same place
+/// in both views.
 ///
 /// The picker's value is [day] and [minute], a minute after midnight of it
 /// on the clock of [store]'s zone, or of the device where [store] is null.
 /// A tap on a day reports that day with the minute through [onChanged], and
 /// a pick of a time reports the time with [day], so a host takes the two
-/// together. With a null [minute] the picker picks a day alone: it shows no
-/// toggle and no time, and a tap on a day reports the day with null.
+/// together. With a null [minute] the picker picks a day alone: it shows
+/// its date view with no control, and a tap on a day reports the day with
+/// null.
 ///
 /// The time picker offers the times of [day] alone: from the first to the
 /// last time [timeBoundsOf] gives for it, those [isTimeEnabled] accepts on
@@ -52,33 +65,47 @@ const ValueKey<String> dateTimePickerDividerKey = ValueKey<String>(
 /// [minuteStep], the later of two as near, or the time unchanged where the
 /// day offers none. The time picker's Now shows only on [today]'s day.
 ///
-/// The toggle, a pill labelled with
-/// [CalendarLocalizations.dateTimePickerTimeLabel], is on while the time
-/// shows: filled with the theme's [CalendarThemeData.primaryTint], its
-/// label in [CalendarThemeData.primary]; and off filled with
-/// [CalendarThemeData.background], its label in
-/// [CalendarThemeData.textSecondary]; its label in the theme's
-/// [CalendarThemeData.actionLabelStyle]. A screen reader hears it as a
-/// button that is toggled or not. A tap on it turns it, reports the time's
-/// new state through [onShowsTimeChanged], and changes nothing of the
-/// value. The picker opens with the time shown where [initialShowsTime]
-/// says, and a later build's has no effect.
+/// The picker opens on its time view where [initialShowsTime] says, and on
+/// its date view otherwise; a later build's has no effect. A tap on the
+/// control's other segment switches the view, and so does a tap on a day,
+/// or a screen reader's activation of one, which turns the date view to the
+/// time view after [onChanged] reports the day, as
+/// [CalendarDayPicker.onDayTap] reports it, the value's day included; a day
+/// an arrow key reaches switches nothing. Each switch reports through
+/// [onShowsTimeChanged] whether it turned to the time view, and changes
+/// nothing of the value.
 ///
-/// As the time shows, the part under the day picker grows from no height
-/// to the divider's and the time picker's over the theme's
+/// The control is a stadium track filled with the theme's
+/// [CalendarThemeData.background], whose two segments share its width; a
+/// stadium pill filled with [CalendarThemeData.primaryTint] lies under the
+/// shown view's segment, whose label is in [CalendarThemeData.primary], the
+/// other's in [CalendarThemeData.textSecondary], both in the theme's
+/// [CalendarThemeData.actionLabelStyle]. A screen reader hears each segment
+/// as a button in a mutually exclusive group, the shown view's selected.
+/// The control takes at most half its header row's width, scaling down as
+/// a whole where its labels would take more, so the day picker's chevrons
+/// and title keep the rest at any text size.
+///
+/// As the view switches, the picker's height moves from the height of the
+/// view it leaves to that of the view it turns to over the theme's
 /// [CalendarThemeData.motionDuration] on its
-/// [CalendarThemeData.motionCurve], the divider and the time picker fading
-/// in over the motion's last half; as it hides, the part shrinks over the
-/// motion, still showing the time it showed, its divider and time picker
-/// fading out over the motion's first half, taking no pointer and no pick,
-/// so a column held or spinning picks nothing. The toggle turns between
-/// its colours over that motion. A [minute] that turns null hides the time
-/// as the toggle does, the time picker keeping the bounds and the times it
-/// offered, so the picker asks [timeBoundsOf] and [isTimeEnabled] nothing
-/// more, and the toggle fades out over the motion; one that turns back
-/// shows them again. All of it happens at once where the
-/// platform asks for no animations. Where the toggle hides the time with
-/// the focus in the time picker, the focus moves to the toggle.
+/// [CalendarThemeData.motionCurve], clipping what lies below it; the view
+/// it turns to lies at full opacity under the view it leaves, which fades
+/// out over the motion, taking no pointer and no pick, so a column held or
+/// spinning picks nothing; and the pill slides to the new segment as the
+/// labels turn between their colours. A [minute] that turns null shows the
+/// date view in the same way, the time view keeping the time, the bounds
+/// and the times it offered, so the picker asks [timeBoundsOf] and
+/// [isTimeEnabled] nothing more, and the control fades out over the motion;
+/// one that turns back shows the view the control last turned to. All of it
+/// happens at once where the platform asks for no animations. Where a
+/// switch leaves the focus in the view it hides, the focus moves to the
+/// segment that names the shown view in the shown view's control.
+///
+/// The date view keeps its state while the time view shows, its fold, its
+/// browse and its month picker included, taking no pointer, no focus and no
+/// screen reader's attention, and running no animation; the time view is
+/// built only while it shows or fades out.
 ///
 /// The picker draws in the theme a `CalendarView` would resolve there, as
 /// [CalendarDayPicker] does, and its words come from
@@ -114,7 +141,7 @@ class CalendarDateTimePicker<T> extends StatefulWidget {
     this.timeFocusNode,
     this.hapticFeedback = false,
     this.subject,
-    this.initialShowsTime = true,
+    this.initialShowsTime = false,
     this.onShowsTimeChanged,
   }) {
     final minute = this.minute;
@@ -138,7 +165,8 @@ class CalendarDateTimePicker<T> extends StatefulWidget {
     }
   }
 
-  /// The selected day, which the day picker shows selected and opens on.
+  /// The selected day, which the day picker shows selected and opens on,
+  /// and which the time view's header names.
   final DateTime day;
 
   /// The selected time, a minute after midnight of [day], 0 to 1440, where
@@ -157,9 +185,10 @@ class CalendarDateTimePicker<T> extends StatefulWidget {
   /// clock.
   final CalendarStore<T>? store;
 
-  /// The day the day picker rings as today, and on which the time picker
-  /// shows Now; null for the date the device's clock reads on [store]'s
-  /// zone as the picker builds.
+  /// The day the day picker rings as today, against which the time view's
+  /// header names [day], and on which the time picker shows Now; null for
+  /// the date the device's clock reads on [store]'s zone as the picker
+  /// builds.
   final DateTime? today;
 
   /// The first day the picker takes, as [CalendarDayPicker.firstDay].
@@ -179,7 +208,8 @@ class CalendarDateTimePicker<T> extends StatefulWidget {
   final CalendarDayBadges<T>? dayBadges;
 
   /// Whether the circles of the day picker's first and last columns reach
-  /// its sides, as [CalendarDayPicker.daysToEdges].
+  /// its sides, as [CalendarDayPicker.daysToEdges]; the time view's header
+  /// then pads no side either.
   final bool daysToEdges;
 
   /// Whether the day picker browses before [firstDay]'s week and month, as
@@ -234,11 +264,12 @@ class CalendarDateTimePicker<T> extends StatefulWidget {
   /// What the picker edits, as [CalendarTimePicker.subject].
   final Object? subject;
 
-  /// Whether the picker opens with the time shown.
+  /// Whether the picker opens on its time view; false, the default, opens
+  /// it on its date view.
   final bool initialShowsTime;
 
-  /// Reports whether the time shows, as a tap on the toggle turns it; null
-  /// reports nothing.
+  /// Reports the view a tap on the view control or on a day turns the
+  /// picker to: true for the time view. Null reports nothing.
   final ValueChanged<bool>? onShowsTimeChanged;
 
   @override
@@ -256,40 +287,58 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
   /// [CalendarTheme], so a resolve that adds or drops one keeps its state.
   final GlobalKey _contentKey = GlobalKey();
 
-  /// Whether the toggle is on.
+  /// Whether the view control last turned to the time view.
   late bool _showsTime;
 
-  /// How far the time is in, from 0, hidden, to 1, shown.
-  late final AnimationController _time;
+  /// Where the picker lies between its views, from 0, the date view, to 1,
+  /// the time view.
+  late final AnimationController _view;
 
-  /// [_time] on the theme's curve, which the time part's height reads.
-  late final CurvedAnimation _timeSize;
+  /// [_view] on the theme's curve, which the picker's height, the
+  /// control's pill and its labels' colours read, and the opacity of the
+  /// time view as it fades out.
+  late final CurvedAnimation _viewCurve;
 
-  /// [_time] over its last half on the theme's curve, which the opacity of
-  /// the divider and the time picker reads.
-  late final CurvedAnimation _timeFade;
+  /// [_viewCurve] from 1 down, the opacity of the date view as it fades
+  /// out.
+  late final Animation<double> _dateFade;
 
-  /// How far the toggle is in, from 0, gone, to 1, shown: shown while
+  /// How far the control is in, from 0, gone, to 1, shown: shown while
   /// [CalendarDateTimePicker.minute] is not null.
-  late final AnimationController _toggle;
+  late final AnimationController _control;
 
-  /// [_toggle] on the theme's curve, which the toggle's opacity reads.
-  late final CurvedAnimation _toggleFade;
+  /// [_control] on the theme's curve, which the control's opacity reads.
+  late final CurvedAnimation _controlFade;
 
-  /// The toggle's focus node, which takes the focus from the time picker
-  /// as the toggle hides it.
-  final FocusNode _toggleFocus = FocusNode(debugLabel: "Time toggle");
+  /// The focus nodes of the date view's control's segments, the Date
+  /// segment's and the Time segment's.
+  final List<FocusNode> _dateViewSegments = <FocusNode>[
+    FocusNode(debugLabel: "Date view's Date segment"),
+    FocusNode(debugLabel: "Date view's Time segment"),
+  ];
 
-  /// The node of the time part, which has the focus while the time picker
-  /// does.
+  /// The focus nodes of the time view's control's segments, the Date
+  /// segment's and the Time segment's.
+  final List<FocusNode> _timeViewSegments = <FocusNode>[
+    FocusNode(debugLabel: "Time view's Date segment"),
+    FocusNode(debugLabel: "Time view's Time segment"),
+  ];
+
+  /// The nodes of the views, each of which has the focus while a node in
+  /// its view does.
+  final FocusNode _dateArea = FocusNode(
+    debugLabel: "Date view",
+    canRequestFocus: false,
+    skipTraversal: true,
+  );
   final FocusNode _timeArea = FocusNode(
-    debugLabel: "Time",
+    debugLabel: "Time view",
     canRequestFocus: false,
     skipTraversal: true,
   );
 
-  /// The time the time part shows: [CalendarDateTimePicker.minute], or
-  /// while it shrinks out after that turned null, the last it was.
+  /// The time the time view shows: [CalendarDateTimePicker.minute], or
+  /// while the view fades out after that turned null, the last it was.
   int? _shownMinute;
 
   /// [_offers], the time picker's predicate of the day numbered
@@ -302,12 +351,19 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
   Location? _offersZone;
 
   /// The bounds the time picker last built with while the minute was not
-  /// null, which it keeps, with [_offers], while it hides after the minute
-  /// turned null, so it asks the host nothing more.
+  /// null, which it keeps, with [_offers], while it fades out after the
+  /// minute turned null, so it asks the host nothing more.
   ({int min, int max})? _shownBounds;
 
+  /// Whether the picker shows its time view.
   bool get _timeShown {
     return _showsTime && widget.minute != null;
+  }
+
+  /// The day the picker counts as today, on the clock of the store's zone.
+  DateTime get _today {
+    return widget.today ??
+        CalendarDates.inZone(DateTime.now(), zone: widget.store?.zone);
   }
 
   @override
@@ -315,15 +371,15 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
     super.initState();
     _showsTime = widget.initialShowsTime;
     _shownMinute = widget.minute;
-    _time = AnimationController(vsync: this, value: _timeShown ? 1.0 : 0.0)
-      ..addStatusListener(_timeStatusChanged);
-    _timeSize = CurvedAnimation(parent: _time, curve: Curves.linear);
-    _timeFade = CurvedAnimation(parent: _time, curve: Curves.linear);
-    _toggle = AnimationController(
+    _view = AnimationController(vsync: this, value: _timeShown ? 1.0 : 0.0)
+      ..addStatusListener(_viewStatusChanged);
+    _viewCurve = CurvedAnimation(parent: _view, curve: Curves.linear);
+    _dateFade = ReverseAnimation(_viewCurve);
+    _control = AnimationController(
       vsync: this,
       value: widget.minute != null ? 1.0 : 0.0,
-    )..addStatusListener(_toggleStatusChanged);
-    _toggleFade = CurvedAnimation(parent: _toggle, curve: Curves.linear);
+    )..addStatusListener(_controlStatusChanged);
+    _controlFade = CurvedAnimation(parent: _control, curve: Curves.linear);
   }
 
   @override
@@ -348,23 +404,28 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
     }
     if ((minute != null) != (oldWidget.minute != null)) {
       if (minute != null) {
-        _toggle.forward();
+        _control.forward();
       } else {
-        _toggle.reverse();
+        _control.reverse();
       }
     }
-    _showTime();
+    _showView();
   }
 
   @override
   void dispose() {
-    _timeSize.dispose();
-    _timeFade.dispose();
-    _time.dispose();
-    _toggleFade.dispose();
-    _toggle.dispose();
-    _toggleFocus.dispose();
-    _timeArea.dispose();
+    _viewCurve.dispose();
+    _view.dispose();
+    _controlFade.dispose();
+    _control.dispose();
+    for (final node in <FocusNode>[
+      ..._dateViewSegments,
+      ..._timeViewSegments,
+      _dateArea,
+      _timeArea,
+    ]) {
+      node.dispose();
+    }
     super.dispose();
   }
 
@@ -376,62 +437,77 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
     final duration = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero
         : theme.motionDuration;
-    _time.duration = duration;
-    _toggle.duration = duration;
+    _view.duration = duration;
+    _control.duration = duration;
     final curve = theme.motionCurve;
     // A reverse reads its curve from 1 down to 0, so the flip of the curve
-    // eases a hiding as the curve eases a showing.
+    // eases a turn to the date view as the curve eases one to the time
+    // view.
     final flipped = FlippedCurve(curve);
-    _timeSize
+    _viewCurve
       ..curve = curve
       ..reverseCurve = flipped;
-    _timeFade
-      ..curve = Interval(0.5, 1.0, curve: curve)
-      ..reverseCurve = Interval(0.5, 1.0, curve: flipped);
-    _toggleFade
+    _controlFade
       ..curve = curve
       ..reverseCurve = flipped;
   }
 
-  /// Shows or hides the time as the toggle and the minute say.
-  void _showTime() {
+  /// Moves to the view the control and the minute say.
+  void _showView() {
     if (_timeShown) {
-      _time.forward();
+      _view.forward();
     } else {
-      _time.reverse();
+      _view.reverse();
     }
   }
 
-  /// Builds the time part anew as it comes and as it goes.
-  void _timeStatusChanged(AnimationStatus status) {
-    if (status == AnimationStatus.dismissed ||
-        status == AnimationStatus.forward) {
-      setState(() {
-        if (status == AnimationStatus.dismissed) {
-          _shownMinute = widget.minute;
-        }
-      });
-    }
+  /// Builds the views anew as the switch starts, turns and ends: the time
+  /// view comes and goes, and the date view runs its animations only while
+  /// it paints.
+  void _viewStatusChanged(AnimationStatus status) {
+    setState(() {
+      if (status == AnimationStatus.dismissed) {
+        _shownMinute = widget.minute;
+      }
+    });
   }
 
-  /// Builds the toggle anew as it comes and as it goes.
-  void _toggleStatusChanged(AnimationStatus status) {
+  /// Builds the control anew as it comes and as it goes.
+  void _controlStatusChanged(AnimationStatus status) {
     if (status == AnimationStatus.dismissed ||
         status == AnimationStatus.forward) {
       setState(() {});
     }
   }
 
-  void _toggleTime() {
-    final shows = !_showsTime;
-    if (!shows && _timeArea.hasFocus) {
-      _toggleFocus.requestFocus();
+  /// Turns to the time view where [time], and to the date view otherwise,
+  /// from a tap on the control or on a day, and reports the turn.
+  void _select(bool time) {
+    if (time == _showsTime || widget.minute == null) {
+      return;
+    }
+    final leaving = time ? _dateArea : _timeArea;
+    final segment = time ? _timeViewSegments[1] : _dateViewSegments[0];
+    if (leaving.hasFocus) {
+      // The view turned to takes focus only once built anew: until then
+      // the date view's nodes lie under its ExcludeFocus, and the time
+      // view is not yet built.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _showsTime == time) {
+          segment.requestFocus();
+        }
+      });
     }
     setState(() {
-      _showsTime = shows;
+      _showsTime = time;
     });
-    _showTime();
-    widget.onShowsTimeChanged?.call(shows);
+    _showView();
+    widget.onShowsTimeChanged?.call(time);
+  }
+
+  /// A tap on [day] in the day picker, after [_pickDay] reported it.
+  void _tapDay(DateTime day) {
+    _select(true);
   }
 
   /// The first and last time [day] offers.
@@ -541,63 +617,45 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
   /// Whether [CalendarDateTimePicker.day] is today, on the clock of the
   /// store's zone.
   bool get _onToday {
-    final today =
-        widget.today ??
-        CalendarDates.inZone(DateTime.now(), zone: widget.store?.zone);
-    return CalendarDates.dayNumber(today) ==
+    return CalendarDates.dayNumber(_today) ==
         CalendarDates.dayNumber(widget.day);
   }
 
-  Widget _timePart(CalendarThemeData theme) {
-    final minute = _shownMinute;
-    if (minute == null || _time.isDismissed) {
-      return const SizedBox.shrink();
-    }
-    final live = widget.minute != null;
-    final bounds = live ? _boundsOn(widget.day) : _shownBounds!;
-    final offers = live ? _offersOfDay() : _offers!;
-    _shownBounds = bounds;
-    final shown = _timeShown;
-    final onChanged = widget.onChanged;
-    return SizeTransition(
-      key: dateTimePickerTimeKey,
-      sizeFactor: _timeSize,
-      alignment: AlignmentDirectional.topStart,
-      child: FadeTransition(
-        opacity: _timeFade,
+  /// The view control in the header of the time view where [inTimeView],
+  /// and of the date view otherwise, fading with [_controlFade], at most
+  /// [maxWidth] wide, scaled down to it where its labels take more; its
+  /// segments carry their keys in the shown view's header alone.
+  Widget _controlIn(
+    CalendarThemeData theme,
+    CalendarLocalizations strings, {
+    required bool inTimeView,
+    required double maxWidth,
+  }) {
+    final gone = widget.minute == null;
+    final nodes = inTimeView ? _timeViewSegments : _dateViewSegments;
+    return FadeTransition(
+      opacity: _controlFade,
+      child: ExcludeFocus(
+        excluding: gone,
         child: IgnorePointer(
-          ignoring: !shown,
+          ignoring: gone,
           child: ExcludeSemantics(
-            excluding: !shown,
-            child: Focus(
-              focusNode: _timeArea,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4.0),
-                    child: SizedBox(
-                      key: dateTimePickerDividerKey,
-                      height: 1.0,
-                      child: ColoredBox(color: theme.outline),
-                    ),
-                  ),
-                  CalendarTimePicker(
-                    value: minute,
-                    onChanged: onChanged == null || !shown ? null : _pickTime,
-                    hourLabelFormat: widget.hourLabelFormat,
-                    minuteStep: widget.minuteStep,
-                    min: bounds.min,
-                    max: bounds.max,
-                    isEnabled: offers,
-                    now: _onToday ? widget.now : null,
-                    nowPicksLater: widget.nowPicksLater,
-                    focusNode: widget.timeFocusNode,
-                    hapticFeedback: widget.hapticFeedback,
-                    subject: widget.subject,
-                  ),
-                ],
+            excluding: gone,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxWidth),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: _ViewControl(
+                  position: _viewCurve,
+                  showsTime: _timeShown,
+                  keyed: inTimeView == _timeShown,
+                  theme: theme,
+                  dateLabel: strings.dateTimePickerDateLabel,
+                  timeLabel: strings.dateTimePickerTimeLabel,
+                  dateNode: nodes[0],
+                  timeNode: nodes[1],
+                  onSelect: _select,
+                ),
               ),
             ),
           ),
@@ -606,55 +664,184 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = _themes.theme;
-    final strings = CalendarLocalizations.of(context);
-    final motion = MediaQuery.disableAnimationsOf(context)
-        ? Duration.zero
-        : theme.motionDuration;
-    Widget content = KeyedSubtree(
-      key: _contentKey,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          CalendarDayPicker<T>(
-            value: widget.day,
-            onChanged: widget.onChanged == null ? null : _pickDay,
-            store: widget.store,
-            today: widget.today,
-            firstDay: widget.firstDay,
-            lastDay: widget.lastDay,
-            isEnabled: widget.isDayEnabled,
-            firstColumn: widget.firstColumn,
-            dayBadges: widget.dayBadges,
-            daysToEdges: widget.daysToEdges,
-            browsesBeforeFirstDay: widget.browsesBeforeFirstDay,
-            initialView: widget.initialView,
-            onViewChanged: widget.onViewChanged,
-            headerTrailing: _toggle.isDismissed
-                ? null
-                : FadeTransition(
-                    opacity: _toggleFade,
-                    child: IgnorePointer(
-                      ignoring: widget.minute == null,
-                      child: ExcludeSemantics(
-                        excluding: widget.minute == null,
-                        child: _TimeToggle(
-                          on: _showsTime,
-                          label: strings.dateTimePickerTimeLabel,
-                          theme: theme,
-                          duration: motion,
-                          focusNode: _toggleFocus,
-                          onPressed: _toggleTime,
+  /// [view] as the switch shows it: taking pointers, focus and a screen
+  /// reader's attention only while [active], running its animations only
+  /// while [painted], at [opacity], under the focus node [area].
+  Widget _viewSlot({
+    required Widget view,
+    required FocusNode area,
+    required bool active,
+    required bool painted,
+    required Animation<double> opacity,
+  }) {
+    return TickerMode(
+      enabled: painted,
+      child: ExcludeFocus(
+        excluding: !active,
+        child: ExcludeSemantics(
+          excluding: !active,
+          child: IgnorePointer(
+            ignoring: !active,
+            child: FadeTransition(
+              opacity: opacity,
+              child: Focus(focusNode: area, child: view),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The time view: on a card as the day picker's, a header row naming the
+  /// day, at least as tall as the day picker's chevrons, with the control,
+  /// at most [controlWidth] wide, at its end, over the time picker of the
+  /// shown minute.
+  Widget _timeView(
+    CalendarThemeData theme,
+    CalendarLocalizations strings,
+    double controlWidth,
+  ) {
+    final minute = _shownMinute!;
+    final live = widget.minute != null;
+    final bounds = live ? _boundsOn(widget.day) : _shownBounds!;
+    final offers = live ? _offersOfDay() : _offers!;
+    _shownBounds = bounds;
+    final onChanged = widget.onChanged;
+    return DecoratedBox(
+      key: dateTimePickerTimeKey,
+      decoration: BoxDecoration(
+        color: theme.surface,
+        borderRadius: BorderRadius.circular(16.0),
+      ),
+      child: Padding(
+        // The day picker's card pads its header so.
+        padding: widget.daysToEdges
+            ? const EdgeInsets.only(top: 8.0)
+            : const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 0.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: CalendarHeader.chevronExtentOf(context),
+              ),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          strings.dayTitle(widget.day, _today),
+                          maxLines: 1,
+                          style: CalendarHeader.titleStyleOf(theme),
                         ),
                       ),
                     ),
                   ),
-          ),
-          _timePart(theme),
-        ],
+                  if (!_control.isDismissed) ...<Widget>[
+                    const SizedBox(width: 4.0),
+                    _controlIn(
+                      theme,
+                      strings,
+                      inTimeView: true,
+                      maxWidth: controlWidth,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 4.0),
+            CalendarTimePicker(
+              value: minute,
+              onChanged: onChanged == null || !_timeShown ? null : _pickTime,
+              hourLabelFormat: widget.hourLabelFormat,
+              minuteStep: widget.minuteStep,
+              min: bounds.min,
+              max: bounds.max,
+              isEnabled: offers,
+              now: _onToday ? widget.now : null,
+              nowPicksLater: widget.nowPicksLater,
+              focusNode: widget.timeFocusNode,
+              hapticFeedback: widget.hapticFeedback,
+              subject: widget.subject,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The views, in [width]: the date view, and the time view while it shows
+  /// or fades out, under the switch between them.
+  Widget _views(
+    CalendarThemeData theme,
+    CalendarLocalizations strings,
+    double width,
+  ) {
+    final timeShown = _timeShown;
+    // Half the header row, which the day picker's card pads as the time
+    // view does.
+    final controlWidth =
+        math.max(0.0, width - (widget.daysToEdges ? 0.0 : 16.0)) / 2.0;
+    final dateView = CalendarDayPicker<T>(
+      value: widget.day,
+      onChanged: widget.onChanged == null ? null : _pickDay,
+      store: widget.store,
+      today: widget.today,
+      firstDay: widget.firstDay,
+      lastDay: widget.lastDay,
+      isEnabled: widget.isDayEnabled,
+      firstColumn: widget.firstColumn,
+      dayBadges: widget.dayBadges,
+      daysToEdges: widget.daysToEdges,
+      browsesBeforeFirstDay: widget.browsesBeforeFirstDay,
+      initialView: widget.initialView,
+      onViewChanged: widget.onViewChanged,
+      headerTrailing: _control.isDismissed
+          ? null
+          : _controlIn(
+              theme,
+              strings,
+              inTimeView: false,
+              maxWidth: controlWidth,
+            ),
+      onDayTap: widget.minute == null ? null : _tapDay,
+    );
+    return _ViewSwitch(
+      progress: _viewCurve,
+      timeOnTop: !timeShown,
+      date: _viewSlot(
+        view: dateView,
+        area: _dateArea,
+        active: !timeShown,
+        painted: !timeShown || !_view.isCompleted,
+        opacity: timeShown ? _dateFade : kAlwaysCompleteAnimation,
+      ),
+      time: _view.isDismissed
+          ? null
+          : _viewSlot(
+              view: _timeView(theme, strings, controlWidth),
+              area: _timeArea,
+              active: timeShown,
+              painted: true,
+              opacity: timeShown ? kAlwaysCompleteAnimation : _viewCurve,
+            ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = _themes.theme;
+    final strings = CalendarLocalizations.of(context);
+    Widget content = KeyedSubtree(
+      key: _contentKey,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return _views(theme, strings, constraints.maxWidth);
+        },
       ),
     );
     final inserted = _themes.inserted;
@@ -668,66 +855,375 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
   }
 }
 
-/// The Time toggle: a pill labelled [label], on filled with [theme]'s
-/// primary tint, its label in its primary colour, and off filled with its
-/// background, its label in its secondary text colour, turning between the
-/// two over [duration] on the theme's curve; a tap reaches [onPressed].
-class _TimeToggle extends StatelessWidget {
-  const _TimeToggle({
-    required this.on,
-    required this.label,
+/// The view control: a segment for each view, the date view's first,
+/// sharing the control's width equally, on a stadium track filled with
+/// [theme]'s background; a stadium pill filled with its primary tint lies
+/// under the segment of the view [position] lies at, sliding between the
+/// segments as [position] runs from 0, the date view, to 1, the time view,
+/// and each label turns from the theme's secondary text colour to its
+/// primary colour as the pill comes under it. A tap on a segment reaches
+/// [onSelect] with whether it is the time view's. Where [keyed], its
+/// segments' labels carry [dateTimePickerDateSegmentKey] and
+/// [dateTimePickerTimeSegmentKey]; a label alone, so that the keys moving
+/// between the views' controls at a switch build no segment anew.
+class _ViewControl extends StatelessWidget {
+  const _ViewControl({
+    required this.position,
+    required this.showsTime,
+    required this.keyed,
     required this.theme,
-    required this.duration,
-    required this.focusNode,
-    required this.onPressed,
+    required this.dateLabel,
+    required this.timeLabel,
+    required this.dateNode,
+    required this.timeNode,
+    required this.onSelect,
   });
 
-  final bool on;
-  final String label;
+  final Animation<double> position;
+
+  /// Whether the time view's segment is the selected one.
+  final bool showsTime;
+
+  final bool keyed;
   final CalendarThemeData theme;
-  final Duration duration;
-  final FocusNode focusNode;
-  final VoidCallback onPressed;
+  final String dateLabel;
+  final String timeLabel;
+  final FocusNode dateNode;
+  final FocusNode timeNode;
+  final ValueChanged<bool> onSelect;
 
   static const ShapeBorder _shape = StadiumBorder();
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _segment(bool time, double at) {
+    // How far the pill lies under this segment, from 0 to 1.
+    final under = time ? at : 1.0 - at;
+    final ink = Color.lerp(theme.textSecondary, theme.primary, under)!;
     return Semantics(
       container: true,
       button: true,
-      toggled: on,
-      child: TweenAnimationBuilder<double>(
-        tween: Tween<double>(end: on ? 1.0 : 0.0),
-        duration: duration,
-        curve: theme.motionCurve,
-        builder: (context, t, child) {
-          final fill = Color.lerp(theme.background, theme.primaryTint, t)!;
-          final ink = Color.lerp(theme.textSecondary, theme.primary, t)!;
-          return DecoratedBox(
-            decoration: ShapeDecoration(color: fill, shape: _shape),
-            child: Material(
-              type: MaterialType.transparency,
-              child: InkWell(
-                key: dateTimePickerToggleKey,
-                focusNode: focusNode,
-                customBorder: _shape,
-                onTap: onPressed,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14.0,
-                    vertical: 6.0,
-                  ),
-                  child: Text(
-                    label,
-                    style: theme.actionLabelStyle.copyWith(color: ink),
-                  ),
-                ),
+      selected: time == showsTime,
+      inMutuallyExclusiveGroup: true,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          focusNode: time ? timeNode : dateNode,
+          customBorder: _shape,
+          onTap: () {
+            onSelect(time);
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 14.0,
+              vertical: 6.0,
+            ),
+            child: Center(
+              widthFactor: 1.0,
+              heightFactor: 1.0,
+              child: Text(
+                time ? timeLabel : dateLabel,
+                key: keyed
+                    ? (time
+                          ? dateTimePickerTimeSegmentKey
+                          : dateTimePickerDateSegmentKey)
+                    : null,
+                maxLines: 1,
+                style: theme.actionLabelStyle.copyWith(color: ink),
               ),
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: position,
+      builder: (context, child) {
+        final at = position.value;
+        // Both segments take the width of the wider one's label.
+        return IntrinsicWidth(
+          child: DecoratedBox(
+            decoration: ShapeDecoration(color: theme.background, shape: _shape),
+            child: Stack(
+              children: <Widget>[
+                Positioned.fill(
+                  child: Align(
+                    alignment: AlignmentDirectional(at * 2.0 - 1.0, 0.0),
+                    child: FractionallySizedBox(
+                      widthFactor: 0.5,
+                      heightFactor: 1.0,
+                      child: DecoratedBox(
+                        decoration: ShapeDecoration(
+                          color: theme.primaryTint,
+                          shape: _shape,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: <Widget>[
+                    Expanded(child: _segment(false, at)),
+                    Expanded(child: _segment(true, at)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// The slots of a [_ViewSwitch].
+enum _View { date, time }
+
+/// Lays out [date] and, where given, [time], each as wide as the switch and
+/// as tall as it takes, from the switch's top; the switch is as tall as
+/// [date] at a [progress] of 0, as [time] at 1, and between the two heights
+/// in between, clipping what lies below it. It paints [time] over [date]
+/// where [timeOnTop] and [date] over [time] otherwise, and a hit reaches
+/// the one on top first.
+class _ViewSwitch
+    extends SlottedMultiChildRenderObjectWidget<_View, RenderBox> {
+  const _ViewSwitch({
+    required this.progress,
+    required this.timeOnTop,
+    required this.date,
+    required this.time,
+  });
+
+  final Animation<double> progress;
+  final bool timeOnTop;
+  final Widget date;
+  final Widget? time;
+
+  @override
+  Iterable<_View> get slots {
+    return _View.values;
+  }
+
+  @override
+  Widget? childForSlot(_View slot) {
+    switch (slot) {
+      case _View.date:
+        return date;
+      case _View.time:
+        return time;
+    }
+  }
+
+  @override
+  _RenderViewSwitch createRenderObject(BuildContext context) {
+    return _RenderViewSwitch(progress: progress, timeOnTop: timeOnTop);
+  }
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderViewSwitch renderObject,
+  ) {
+    renderObject
+      ..progress = progress
+      ..timeOnTop = timeOnTop;
+  }
+}
+
+class _RenderViewSwitch extends RenderBox
+    with SlottedContainerRenderObjectMixin<_View, RenderBox> {
+  _RenderViewSwitch({
+    required Animation<double> progress,
+    required bool timeOnTop,
+  }) : _progress = progress,
+       _timeOnTop = timeOnTop;
+
+  Animation<double> _progress;
+  set progress(Animation<double> value) {
+    if (identical(value, _progress)) {
+      return;
+    }
+    if (attached) {
+      _progress.removeListener(markNeedsLayout);
+      value.addListener(markNeedsLayout);
+    }
+    _progress = value;
+    markNeedsLayout();
+  }
+
+  bool _timeOnTop;
+  set timeOnTop(bool value) {
+    if (value == _timeOnTop) {
+      return;
+    }
+    _timeOnTop = value;
+    markNeedsPaint();
+  }
+
+  final LayerHandle<ClipRectLayer> _clip = LayerHandle<ClipRectLayer>();
+
+  RenderBox? get _date {
+    return childForSlot(_View.date);
+  }
+
+  RenderBox? get _time {
+    return childForSlot(_View.time);
+  }
+
+  /// The children from the one painted first to the one on top.
+  List<RenderBox> get _paintOrder {
+    final bottom = _timeOnTop ? _date : _time;
+    final top = _timeOnTop ? _time : _date;
+    return <RenderBox>[?bottom, ?top];
+  }
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    _progress.addListener(markNeedsLayout);
+  }
+
+  @override
+  void detach() {
+    _progress.removeListener(markNeedsLayout);
+    super.detach();
+  }
+
+  @override
+  void dispose() {
+    _clip.layer = null;
+    super.dispose();
+  }
+
+  /// The switch's height between a date view [date] tall and a time view
+  /// [time] tall, or none.
+  double _heightBetween(double date, double? time) {
+    if (time == null) {
+      return date;
+    }
+    return lerpDouble(date, time, _progress.value)!;
+  }
+
+  static BoxConstraints _childConstraints(BoxConstraints constraints) {
+    return BoxConstraints.tightFor(width: constraints.maxWidth);
+  }
+
+  @override
+  void performLayout() {
+    final inner = _childConstraints(constraints);
+    final date = _date;
+    final time = _time;
+    date?.layout(inner, parentUsesSize: true);
+    time?.layout(inner, parentUsesSize: true);
+    size = constraints.constrain(
+      Size(
+        constraints.maxWidth,
+        _heightBetween(date?.size.height ?? 0.0, time?.size.height),
+      ),
+    );
+  }
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) {
+    final inner = _childConstraints(constraints);
+    return constraints.constrain(
+      Size(
+        constraints.maxWidth,
+        _heightBetween(
+          _date?.getDryLayout(inner).height ?? 0.0,
+          _time?.getDryLayout(inner).height,
+        ),
+      ),
+    );
+  }
+
+  double _widest(double Function(RenderBox child) extent) {
+    var widest = 0.0;
+    for (final child in children) {
+      final width = extent(child);
+      if (width > widest) {
+        widest = width;
+      }
+    }
+    return widest;
+  }
+
+  @override
+  double computeMinIntrinsicWidth(double height) {
+    return _widest((child) {
+      return child.getMinIntrinsicWidth(height);
+    });
+  }
+
+  @override
+  double computeMaxIntrinsicWidth(double height) {
+    return _widest((child) {
+      return child.getMaxIntrinsicWidth(height);
+    });
+  }
+
+  @override
+  double computeMinIntrinsicHeight(double width) {
+    return _heightBetween(
+      _date?.getMinIntrinsicHeight(width) ?? 0.0,
+      _time?.getMinIntrinsicHeight(width),
+    );
+  }
+
+  @override
+  double computeMaxIntrinsicHeight(double width) {
+    return _heightBetween(
+      _date?.getMaxIntrinsicHeight(width) ?? 0.0,
+      _time?.getMaxIntrinsicHeight(width),
+    );
+  }
+
+  /// Whether a child lies taller than the switch, below its bottom.
+  bool get _clips {
+    for (final child in children) {
+      if (child.size.height > size.height) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (!_clips) {
+      _clip.layer = null;
+      _paintChildren(context, offset);
+      return;
+    }
+    _clip.layer = context.pushClipRect(
+      needsCompositing,
+      offset,
+      Offset.zero & size,
+      _paintChildren,
+      oldLayer: _clip.layer,
+    );
+  }
+
+  void _paintChildren(PaintingContext context, Offset offset) {
+    for (final child in _paintOrder) {
+      context.paintChild(child, offset);
+    }
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
+    for (final child in _paintOrder.reversed) {
+      if (child.hitTest(result, position: position)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  @override
+  Rect? describeApproximatePaintClip(RenderObject child) {
+    return _clips ? Offset.zero & size : null;
   }
 }

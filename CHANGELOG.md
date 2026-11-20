@@ -947,27 +947,42 @@ the theme's `surface`, so it lies on a surface of that colour. A host that
 wants the box draws it around the picker.
 - Added `CalendarDayPicker.headerTrailing`, a widget at the end of the day
 picker's header row, after its chevrons, centred on the row, folded,
-unfolded and over the month picker.
+unfolded and over the month picker; and `CalendarDayPicker.onDayTap`,
+which reports a day the user tapped, or a screen reader activated, right
+after `onChanged` reports it, and also the value's day, which `onChanged`
+does not report. A day an arrow key reaches in the month is reported
+through `onChanged` alone.
 - Added `CalendarDateTimePicker`, an inline picker of a day and a time of
-it: a `CalendarDayPicker` over a hairline in the theme's `outline` and a
-`CalendarTimePicker`, with a Time toggle at the end of the day picker's
-header, a pill filled with the theme's `primaryTint` and labelled in its
-`primary` while on, and filled with its `background` and labelled in its
-`textSecondary` while off. The toggle shows and hides the time picker over
-the theme's motion, the part under the day picker growing and shrinking
-while the divider and time picker fade, and reports through
-`onShowsTimeChanged`; the picker opens as `initialShowsTime` says. A tap on
-a day reports it through `onChanged` with the time, or, where the new day
-does not offer that time, with the offered time of the day nearest it on
-`minuteStep`; a pick of a time reports it with the day. The time picker
-offers the times `timeBoundsOf` and `isTimeEnabled` give for the day that
-the clock of the store's zone reads, and shows Now on `today` alone;
-`isTimeEnabled` is asked of each time of the day at most once while the
-day, the predicate and the zone stay. With a null `minute` it picks a day
-alone, showing no toggle and no time; a `minute` that turns null hides the
-time, which keeps the times it offered, asking `timeBoundsOf` and
+it, whose two views take turns: its date view, a `CalendarDayPicker`, and
+its time view, a header naming the day over a `CalendarTimePicker`, on a
+card as the day picker's. A view control at the end of each view's
+header, at the same place in both, switches between them: a stadium track
+filled with the theme's `background`, whose Date and Time segments share
+its width, and a pill in its `primaryTint` under the shown view's segment,
+whose label is in its `primary` and the other's in its `textSecondary`; a
+screen reader hears the segments as buttons in a mutually exclusive group.
+The control takes at most half its header row, scaling down where its
+labels would take more.
+The picker opens on its date view, or on its time view where
+`initialShowsTime` says, and a tap on a day turns it to its time view
+after reporting the day, as a tap on a segment turns it; each turn reports
+through `onShowsTimeChanged`. Over the theme's motion the picker's height
+moves between the views' heights, the view turned to lying at full
+opacity under the one left, which fades out, as the pill slides to the new
+segment; the date view keeps its state, its fold and browse included,
+while the time view shows. A tap on a day reports it through `onChanged`
+with the time, or, where the new day does not offer that time, with the
+offered time of the day nearest it on `minuteStep`; a pick of a time
+reports it with the day. The time picker offers the times `timeBoundsOf`
+and `isTimeEnabled` give for the day that the clock of the store's zone
+reads, and shows Now on `today` alone; `isTimeEnabled` is asked of each
+time of the day at most once while the day, the predicate and the zone
+stay. With a null `minute` it picks a day alone, showing its date view with
+no control; a `minute` that turns null turns it to its date view, the time
+view keeping the times it offered, asking `timeBoundsOf` and
 `isTimeEnabled` nothing more. Added
-`CalendarLocalizations.dateTimePickerTimeLabel`, the toggle's label.
+`CalendarLocalizations.dateTimePickerDateLabel` and
+`dateTimePickerTimeLabel`, the segments' labels.
 - Fix: over a store with no zone, a `CalendarView.clock` reading a
 `TZDateTime` marked as today, and opened on, the date package timezone's
 `local` location reads, UTC unless an app sets it, and gave the views that

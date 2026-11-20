@@ -1,25 +1,31 @@
-/// The date-time picker through the package barrel: its day picker over
-/// its divider and time picker, its Time toggle's look, what a screen
-/// reader hears of it and what a tap on it does over the theme's motion,
-/// the view it opens on, what a tap on a day and a pick of a time report,
-/// a picked time's day as a day start on the store's clock,
-/// the time a tap on a day keeps or moves to, the times the clock of the
-/// store's zone skips, Now on today alone, a minute that turns null, a
-/// column held as the time hides, the focus the toggle takes, the
-/// parameters it hands its pickers, the theme it draws in, the values its
-/// constructor refuses and its days at large text.
+/// The date-time picker through the package barrel: the date view it
+/// opens on and the view control at the end of its header, the control's
+/// look and what a screen reader hears of it, a switch to the time view and
+/// back over the theme's motion, the control's place in both views, the
+/// view it opens on, a tap on a day that turns to the time view and an
+/// arrow key that does not, the state the date view keeps, what a tap on a
+/// day and a pick of a time report, a picked time's day as a day start on
+/// the store's clock, the time a tap on a day keeps or moves to, the times
+/// the clock of the store's zone skips, Now on today alone, a minute that
+/// turns null, a column held as the view switches, the focus a switch
+/// moves, the parameters it hands its pickers, the theme it draws in, the
+/// values its constructor refuses and its days at large text.
 library;
 
-import 'package:flutter/rendering.dart' show RenderParagraph;
+import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart' show OpacityLayer, RenderParagraph;
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/calendar/composition/calendar_date_time_picker.dart'
     show
-        dateTimePickerDividerKey,
+        dateTimePickerDateSegmentKey,
         dateTimePickerTimeKey,
-        dateTimePickerToggleKey;
+        dateTimePickerTimeSegmentKey;
 import 'package:widgets_extended/calendar/views/day_cell.dart' show DayCell;
+import 'package:widgets_extended/calendar/views/month_strip.dart'
+    show MonthStrip;
 import 'package:widgets_extended/calendar/views/time_picker.dart'
     show timePickerHourColumnKey, timePickerHourRowKey, timePickerNowKey;
 import 'package:widgets_extended/widgets_extended.dart';
@@ -29,6 +35,7 @@ import '../recording_errors.dart';
 
 final DateTime tuesday = DateTime(2026, 4, 21);
 final DateTime wednesday = DateTime(2026, 4, 22);
+final DateTime thursday = DateTime(2026, 4, 23);
 
 /// A theme whose motion is 400 ms on a linear curve.
 final CalendarThemeData motionTheme = CalendarThemeData(
@@ -59,39 +66,87 @@ Finder dayCell(DateTime day) {
   );
 }
 
-final Finder toggle = find.byKey(dateTimePickerToggleKey);
+/// The [DayCell] of [day], found by its widget, so that whether it takes a
+/// pointer is checked apart from what a screen reader hears of it.
+Finder dayTarget(DateTime day) {
+  return find.byWidgetPredicate((widget) {
+    return widget is DayCell &&
+        widget.day.year == day.year &&
+        widget.day.month == day.month &&
+        widget.day.day == day.day;
+  });
+}
 
-final Finder timePart = find.byKey(dateTimePickerTimeKey);
+/// The labels of the segments of the shown view's control.
+final Finder dateSegment = find.byKey(dateTimePickerDateSegmentKey);
+final Finder timeSegment = find.byKey(dateTimePickerTimeSegmentKey);
 
-/// The fill of the toggle's pill.
-Color? toggleFill(WidgetTester tester) {
-  final box = tester.widget<DecoratedBox>(
-    find.ancestor(of: toggle, matching: find.byType(DecoratedBox)).first,
+final Finder timeView = find.byKey(dateTimePickerTimeKey);
+
+final Finder dayPicker = find.byType(CalendarDayPicker<String>);
+
+/// The tap target of the segment whose label [label] finds.
+Finder segmentOf(Finder label) {
+  return find.ancestor(of: label, matching: find.byType(InkWell)).first;
+}
+
+/// The track of the shown view's control.
+Finder control() {
+  return find
+      .ancestor(
+        of: dateSegment,
+        matching: find.byWidgetPredicate((widget) {
+          return widget is DecoratedBox &&
+              widget.decoration is ShapeDecoration &&
+              (widget.decoration as ShapeDecoration).shape is StadiumBorder;
+        }),
+      )
+      .first;
+}
+
+/// The pill under the shown view's segment.
+Finder pill() {
+  return find.descendant(
+    of: control(),
+    matching: find.byType(FractionallySizedBox),
   );
-  return (box.decoration as ShapeDecoration).color;
 }
 
-/// The colour of the toggle's label.
-Color? toggleInk(WidgetTester tester) {
-  return tester
-      .widget<Text>(find.descendant(of: toggle, matching: find.byType(Text)))
-      .style!
-      .color;
+/// The fill of the box [box] finds.
+Color? fillOf(WidgetTester tester, Finder box) {
+  return (tester.widget<DecoratedBox>(box).decoration as ShapeDecoration).color;
 }
 
-/// The opacity the time part's [FadeTransition] draws at.
-double timeOpacity(WidgetTester tester) {
+/// The fill of the pill.
+Color? pillFill(WidgetTester tester) {
+  return fillOf(
+    tester,
+    find.descendant(of: pill(), matching: find.byType(DecoratedBox)),
+  );
+}
+
+/// The colour of the label [label] finds.
+Color? inkOf(WidgetTester tester, Finder label) {
+  return tester.widget<Text>(label).style!.color;
+}
+
+/// The opacity of the view that holds what [finder] finds.
+double viewOpacity(WidgetTester tester, Finder finder) {
   return tester
       .widget<FadeTransition>(
-        find.descendant(of: timePart, matching: find.byType(FadeTransition)),
+        find.ancestor(of: finder, matching: find.byType(FadeTransition)).first,
       )
       .opacity
       .value;
 }
 
+double pickerHeight(WidgetTester tester) {
+  return tester.getSize(find.byType(CalendarDateTimePicker<String>)).height;
+}
+
 /// The theme the picker draws in.
 CalendarThemeData pickerTheme(WidgetTester tester) {
-  return CalendarTheme.of(tester.element(toggle));
+  return CalendarTheme.of(tester.element(dayPicker));
 }
 
 /// Whether the row keyed [key] of the time picker takes a tap.
@@ -99,15 +154,36 @@ bool rowTakesTap(WidgetTester tester, Key key) {
   return tester.widget<GestureDetector>(find.byKey(key)).onTap != null;
 }
 
+/// Whether the focus lies on the segment whose label [label] finds.
+bool focusedOn(Finder label) {
+  final focused = FocusManager.instance.primaryFocus?.context;
+  if (focused == null) {
+    return false;
+  }
+  // The segment's own node, under its InkWell: a scope above the picker
+  // holds the focus of no segment, though it is an ancestor of each.
+  return find
+      .descendant(
+        of: segmentOf(label),
+        matching: find.byElementPredicate((element) {
+          return element == focused;
+        }),
+      )
+      .evaluate()
+      .isNotEmpty;
+}
+
 void main() {
   setUpAll(ensureZones);
 
-  testWidgets("DT1 the barrel shows CalendarDateTimePicker: a day picker on "
-      "the day, over a divider 1 high in the theme's outline across the "
-      "picker, over a time picker on the minute; at the end of the day "
-      "picker's header a pill reading Time, on, filled with the primary "
-      "tint, its label in the primary colour, which a screen reader hears "
-      "as a toggled button", (tester) async {
+  testWidgets("DT1 the barrel shows CalendarDateTimePicker, which opens on "
+      "its date view: the day picker on the day and no time picker; at the "
+      "end of the day picker's header, centred on its row, the view control, "
+      "a stadium track in the theme's background whose Date and Time "
+      "segments share its width, a pill in the primary tint under the Date "
+      "segment, whose label is in the primary colour and the Time segment's "
+      "in the secondary text colour, which a screen reader hears as buttons "
+      "in a mutually exclusive group, Date selected", (tester) async {
     final semantics = tester.ensureSemantics();
     await tester.pumpWidget(
       app(
@@ -119,58 +195,64 @@ void main() {
         ),
       ),
     );
-    final picker = tester.getRect(find.byType(CalendarDateTimePicker<String>));
-    final dayPicker = find.byType(CalendarDayPicker<String>);
     expect(
       tester.widget<CalendarDayPicker<String>>(dayPicker).value,
       wednesday,
     );
-    final timePicker = find.byType(CalendarTimePicker);
-    expect(tester.widget<CalendarTimePicker>(timePicker).value, 600);
-    final divider = find.byKey(dateTimePickerDividerKey);
-    final line = tester.getRect(divider);
-    expect(line.height, 1.0);
-    expect(line.left, picker.left);
-    expect(line.right, picker.right);
-    expect(line.top, greaterThanOrEqualTo(tester.getRect(dayPicker).bottom));
-    expect(tester.getRect(timePicker).top, line.bottom);
-    final theme = pickerTheme(tester);
-    expect(
-      tester
-          .widget<ColoredBox>(
-            find.descendant(of: divider, matching: find.byType(ColoredBox)),
-          )
-          .color,
-      theme.outline,
-    );
+    expect(find.byType(CalendarTimePicker), findsNothing);
+    expect(timeView, findsNothing);
     final header = tester.getRect(
       find.descendant(of: dayPicker, matching: find.byType(Row)).first,
     );
-    final pill = tester.getRect(toggle);
-    expect(pill.right, header.right);
-    expect(pill.center.dy, moreOrLessEquals(header.center.dy));
-    expect(find.descendant(of: toggle, matching: find.text("Time")), findsOne);
-    expect(toggleFill(tester), theme.primaryTint);
-    expect(toggleInk(tester), theme.primary);
+    final track = tester.getRect(control());
+    expect(track.right, header.right);
+    expect(track.center.dy, moreOrLessEquals(header.center.dy));
+    final date = tester.getRect(segmentOf(dateSegment));
+    final time = tester.getRect(segmentOf(timeSegment));
+    expect(date.width, moreOrLessEquals(time.width));
+    expect(date.left, track.left);
+    expect(time.right, track.right);
+    expect(tester.getRect(pill()), date);
+    final theme = pickerTheme(tester);
+    expect(fillOf(tester, control()), theme.background);
+    expect(pillFill(tester), theme.primaryTint);
+    expect(inkOf(tester, dateSegment), theme.primary);
+    expect(inkOf(tester, timeSegment), theme.textSecondary);
     expect(
-      tester.getSemantics(toggle),
+      tester.getSemantics(dateSegment),
+      isSemantics(
+        label: "Date",
+        isButton: true,
+        isSelected: true,
+        isInMutuallyExclusiveGroup: true,
+        hasTapAction: true,
+        isFocusable: true,
+      ),
+    );
+    expect(
+      tester.getSemantics(timeSegment),
       isSemantics(
         label: "Time",
         isButton: true,
-        hasToggledState: true,
-        isToggled: true,
+        isSelected: false,
+        isInMutuallyExclusiveGroup: true,
         hasTapAction: true,
+        isFocusable: true,
       ),
     );
     semantics.dispose();
   });
 
-  testWidgets("DT2 a tap on the toggle hides the time over the theme's "
-      "motion, the part under the day picker shrinking to no height, its "
-      "divider and time picker fading out over the motion's first half and "
-      "taking no pointer, as the toggle turns off between its colours; it "
-      "reports false and no value; a second tap shows the time the reverse "
-      "way and reports true", (tester) async {
+  testWidgets("DT2 a tap on the Time segment turns to the time view over the "
+      "theme's motion: the picker's height moves from the date view's to "
+      "the time view's, the time view lying at full opacity under the date "
+      "view, which fades out and takes no pointer and no screen reader's "
+      "attention, as the pill slides to "
+      "the Time segment and the labels turn between their colours; the time "
+      "view's header names the day against today, the control where it lay, "
+      "over the time picker on the minute; it reports true and no value; a "
+      "tap on the Date segment turns back the reverse way and reports "
+      "false", (tester) async {
     final semantics = tester.ensureSemantics();
     final shows = <bool>[];
     final picks = <(DateTime, int?)>[];
@@ -189,58 +271,103 @@ void main() {
       ),
     );
     final theme = pickerTheme(tester);
-    final full = tester.getSize(timePart).height;
-    // Setup sanity: the part holds the divider and the time picker.
-    expect(full, greaterThan(200.0));
-    final hour = find.byKey(timePickerHourRowKey(11));
-    expect(hour.hitTestable(), findsOne);
+    final dateHeight = pickerHeight(tester);
+    final track = tester.getRect(control());
+    final dateSegmentRect = tester.getRect(segmentOf(dateSegment));
+    // Setup sanity: Thursday takes a tap.
+    expect(dayTarget(thursday).hitTestable(), findsOne);
+    final heard = find.semantics.byLabel(
+      const DefaultCalendarLocalizations().dayWithBadges(
+        thursday,
+        const <String?>[],
+      ),
+    );
+    // Setup sanity: a screen reader hears Thursday.
+    expect(heard, findsOne);
 
-    await tester.tap(toggle);
+    await tester.tap(segmentOf(timeSegment));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(timeOpacity(tester), moreOrLessEquals(0.5));
-    expect(hour.hitTestable(), findsNothing);
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(tester.getSize(timePart).height, moreOrLessEquals(full * 0.5));
+    await tester.pump(const Duration(milliseconds: 200));
+    final timeHeight = tester.getSize(timeView).height;
+    // Setup sanity: the views differ in height.
+    expect((timeHeight - dateHeight).abs(), greaterThan(50.0));
     expect(
-      toggleFill(tester),
-      Color.lerp(theme.background, theme.primaryTint, 0.5),
+      pickerHeight(tester),
+      moreOrLessEquals((dateHeight + timeHeight) / 2.0),
     );
+    expect(viewOpacity(tester, timeView), 1.0);
+    expect(viewOpacity(tester, dayPicker), moreOrLessEquals(0.5));
+    expect(dayTarget(thursday).hitTestable(), findsNothing);
+    expect(heard, findsNothing);
+    // The date view fades over the time view: its layer is the last of
+    // the switch's, after the time view's.
+    final fading = tester.layers.whereType<OpacityLayer>().where((layer) {
+      return layer.alpha == 128;
+    }).toList();
+    expect(fading, hasLength(1));
+    expect(fading.single.nextSibling, isNull);
+    final under = fading.single.previousSibling;
+    expect(under, isA<OpacityLayer>());
+    expect((under! as OpacityLayer).alpha, 255);
     expect(
-      toggleInk(tester),
-      Color.lerp(theme.textSecondary, theme.primary, 0.5),
+      tester.getRect(pill()).left,
+      moreOrLessEquals(dateSegmentRect.left + dateSegmentRect.width * 0.5),
     );
+    final half = Color.lerp(theme.textSecondary, theme.primary, 0.5);
+    expect(inkOf(tester, dateSegment), half);
+    expect(inkOf(tester, timeSegment), half);
+
     await tester.pumpAndSettle();
-    expect(find.byType(CalendarTimePicker), findsNothing);
+    expect(pickerHeight(tester), moreOrLessEquals(timeHeight));
+    expect(viewOpacity(tester, dayPicker), 0.0);
     expect(
-      tester.getSemantics(toggle),
+      tester.widget<CalendarTimePicker>(find.byType(CalendarTimePicker)).value,
+      600,
+    );
+    expect(
+      find.descendant(of: timeView, matching: find.text("Tomorrow, April 22")),
+      findsOne,
+    );
+    expect(tester.getRect(control()), track);
+    expect(tester.getRect(pill()), tester.getRect(segmentOf(timeSegment)));
+    expect(inkOf(tester, timeSegment), theme.primary);
+    expect(inkOf(tester, dateSegment), theme.textSecondary);
+    expect(
+      tester.getSemantics(timeSegment),
       isSemantics(
         label: "Time",
         isButton: true,
-        hasToggledState: true,
-        isToggled: false,
+        isSelected: true,
+        isInMutuallyExclusiveGroup: true,
         hasTapAction: true,
+        isFocusable: true,
       ),
     );
-    expect(shows, <bool>[false]);
+    expect(find.byKey(timePickerHourRowKey(11)).hitTestable(), findsOne);
+    expect(shows, <bool>[true]);
 
-    await tester.tap(toggle);
+    await tester.tap(segmentOf(dateSegment));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(tester.getSize(timePart).height, moreOrLessEquals(full * 0.25));
-    expect(timeOpacity(tester), 0.0);
-    await tester.pump(const Duration(milliseconds: 200));
-    expect(timeOpacity(tester), moreOrLessEquals(0.5));
+    expect(
+      pickerHeight(tester),
+      moreOrLessEquals(timeHeight + (dateHeight - timeHeight) * 0.25),
+    );
+    expect(viewOpacity(tester, timeView), moreOrLessEquals(0.75));
+    expect(viewOpacity(tester, dayPicker), 1.0);
+    expect(find.byKey(timePickerHourRowKey(11)).hitTestable(), findsNothing);
     await tester.pumpAndSettle();
-    expect(shows, <bool>[false, true]);
+    expect(timeView, findsNothing);
+    expect(pickerHeight(tester), moreOrLessEquals(dateHeight));
+    expect(dayTarget(thursday).hitTestable(), findsOne);
+    expect(shows, <bool>[true, false]);
     expect(picks, isEmpty);
     semantics.dispose();
   });
 
-  testWidgets("DT3 with initialShowsTime false the picker opens with the "
-      "time hidden and the toggle off, and a later build's leaves it; where "
-      "the platform asks for no animations a tap shows and hides the time "
-      "in its frame", (tester) async {
+  testWidgets("DT3 with initialShowsTime the picker opens on its time view, "
+      "and a later build's leaves the view; where the platform asks for no "
+      "animations a tap switches in its frame", (tester) async {
     Widget picker({required bool showsTime}) {
       return app(
         CalendarDateTimePicker<String>(
@@ -254,25 +381,274 @@ void main() {
       );
     }
 
-    await tester.pumpWidget(picker(showsTime: false));
-    expect(find.byType(CalendarTimePicker), findsNothing);
-    expect(toggleFill(tester), pickerTheme(tester).background);
-    expect(toggleInk(tester), pickerTheme(tester).textSecondary);
     await tester.pumpWidget(picker(showsTime: true));
+    expect(viewOpacity(tester, timeView), 1.0);
+    expect(viewOpacity(tester, dayPicker), 0.0);
+    expect(inkOf(tester, timeSegment), pickerTheme(tester).primary);
+    await tester.pumpWidget(picker(showsTime: false));
     await tester.pumpAndSettle();
-    expect(find.byType(CalendarTimePicker), findsNothing);
+    expect(timeView, findsOne);
+    expect(viewOpacity(tester, timeView), 1.0);
 
     tester.platformDispatcher.accessibilityFeaturesTestValue =
         const FakeAccessibilityFeatures(disableAnimations: true);
     addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
     await tester.pump();
-    await tester.tap(toggle);
+    await tester.tap(segmentOf(dateSegment));
     await tester.pump();
-    expect(timeOpacity(tester), 1.0);
+    expect(timeView, findsNothing);
+    expect(viewOpacity(tester, dayPicker), 1.0);
+    await tester.tap(segmentOf(timeSegment));
+    await tester.pump();
+    expect(viewOpacity(tester, timeView), 1.0);
+    expect(viewOpacity(tester, dayPicker), 0.0);
+  });
+
+  testWidgets("DT18 a tap on a day reports it and turns to the time view, "
+      "and so does a tap on the value's day and a screen reader's "
+      "activation of a day, each reporting true; a day an arrow key reaches "
+      "in the month turns nothing, nor does a tap with a null minute", (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final shows = <bool>[];
+    final picks = <(DateTime, int?)>[];
+    var built = 0;
+    Widget picker({
+      int? minute = 600,
+      CalendarDayPickerView view = const CalendarDayPickerView(),
+    }) {
+      built++;
+      return app(
+        CalendarDateTimePicker<String>(
+          key: ValueKey<int>(built),
+          day: wednesday,
+          minute: minute,
+          today: tuesday,
+          initialView: view,
+          onChanged: (day, minute) {
+            picks.add((day, minute));
+          },
+          onShowsTimeChanged: shows.add,
+        ),
+      );
+    }
+
+    Future<void> expectTurned(String step) async {
+      await tester.pumpAndSettle();
+      expect(shows, <bool>[true], reason: step);
+      expect(viewOpacity(tester, timeView), 1.0, reason: step);
+      expect(dayTarget(thursday).hitTestable(), findsNothing, reason: step);
+    }
+
+    await tester.pumpWidget(picker());
+    await tester.tap(dayCell(thursday));
+    expect(picks, <(DateTime, int?)>[(thursday, 600)]);
+    await expectTurned("a tap");
+
+    shows.clear();
+    picks.clear();
+    await tester.pumpWidget(picker());
+    await tester.tap(dayCell(wednesday));
+    expect(picks, isEmpty);
+    await expectTurned("the value's day");
+
+    shows.clear();
+    await tester.pumpWidget(picker());
+    tester.semantics.tap(
+      find.semantics.byLabel(
+        const DefaultCalendarLocalizations().dayWithBadges(
+          thursday,
+          const <String?>[],
+        ),
+      ),
+    );
+    expect(picks, <(DateTime, int?)>[(thursday, 600)]);
+    await expectTurned("a screen reader");
+
+    shows.clear();
+    picks.clear();
+    await tester.pumpWidget(
+      picker(view: const CalendarDayPickerView(folded: false)),
+    );
     await tester.pumpAndSettle();
-    await tester.tap(toggle);
+    tester
+        .widget<Focus>(
+          find
+              .descendant(
+                of: find.byType(MonthStrip<String>),
+                matching: find.byType(Focus),
+              )
+              .first,
+        )
+        .focusNode!
+        .requestFocus();
     await tester.pump();
-    expect(timePart, findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(picks, <(DateTime, int?)>[(thursday, 600)]);
+    expect(shows, isEmpty);
+    expect(timeView, findsNothing);
+
+    picks.clear();
+    await tester.pumpWidget(picker(minute: null));
+    await tester.tap(dayCell(thursday));
+    await tester.pumpAndSettle();
+    expect(picks, <(DateTime, int?)>[(thursday, null)]);
+    expect(shows, isEmpty);
+    expect(timeView, findsNothing);
+    semantics.dispose();
+  });
+
+  testWidgets("DT19 the control lies at the same place in the date view and "
+      "the time view, at the end of each header's row and centred on it, "
+      "the rows as tall, on a padded and a shrink-wrapped tap target, at "
+      "text scale 1 and 2, and with daysToEdges", (tester) async {
+    for (final platform in <TargetPlatform>[
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+    ]) {
+      for (final scale in <double>[1.0, 2.0]) {
+        for (final edges in <bool>[false, true]) {
+          final step = "$platform x$scale edges $edges";
+          debugDefaultTargetPlatformOverride = platform;
+          Widget picker(bool showsTime) {
+            return app(
+              Builder(
+                builder: (context) {
+                  return MediaQuery(
+                    data: MediaQuery.of(
+                      context,
+                    ).copyWith(textScaler: TextScaler.linear(scale)),
+                    child: CalendarDateTimePicker<String>(
+                      key: ValueKey<bool>(showsTime),
+                      day: wednesday,
+                      minute: 600,
+                      today: tuesday,
+                      daysToEdges: edges,
+                      initialShowsTime: showsTime,
+                      onChanged: (day, minute) {},
+                    ),
+                  );
+                },
+              ),
+            );
+          }
+
+          await tester.pumpWidget(picker(false));
+          final inDate = tester.getRect(control());
+          final dateHeader = tester.getRect(
+            find.descendant(of: dayPicker, matching: find.byType(Row)).first,
+          );
+          await tester.pumpWidget(picker(true));
+          final inTime = tester.getRect(control());
+          final timeHeader = tester.getRect(
+            find.descendant(of: timeView, matching: find.byType(Row)).first,
+          );
+          debugDefaultTargetPlatformOverride = null;
+          expect(inTime, inDate, reason: step);
+          expect(timeHeader, dateHeader, reason: step);
+          expect(inTime.right, timeHeader.right, reason: step);
+          expect(
+            inTime.center.dy,
+            moreOrLessEquals(timeHeader.center.dy),
+            reason: step,
+          );
+        }
+      }
+    }
+  });
+
+  testWidgets("DT20 the date view keeps its state while the time view "
+      "shows, unfolded and browsed to another month, taking no pointer and "
+      "no screen reader's attention and running no animation; it shows "
+      "that month again on the turn back", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final may15 = DateTime(2026, 5, 15);
+    await tester.pumpWidget(
+      app(
+        CalendarDateTimePicker<String>(
+          day: wednesday,
+          minute: 600,
+          today: tuesday,
+          initialView: const CalendarDayPickerView(folded: false),
+          onChanged: (day, minute) {},
+        ),
+      ),
+    );
+    await tester.tap(find.byTooltip("Next month"));
+    await tester.pumpAndSettle();
+    // Setup sanity: the month shows May.
+    expect(dayCell(may15).hitTestable(), findsOne);
+    final heard = find.semantics.byLabel(
+      const DefaultCalendarLocalizations().dayWithBadges(
+        may15,
+        const <String?>[],
+      ),
+    );
+    // Setup sanity: a screen reader hears May 15.
+    expect(heard, findsOne);
+    await tester.tap(segmentOf(timeSegment));
+    await tester.pumpAndSettle();
+    expect(heard, findsNothing);
+    expect(find.byType(DayCell).hitTestable(), findsNothing);
+    expect(TickerMode.valuesOf(tester.element(dayPicker)).enabled, isFalse);
+    await tester.tap(segmentOf(dateSegment));
+    await tester.pumpAndSettle();
+    expect(dayCell(may15).hitTestable(), findsOne);
+    expect(TickerMode.valuesOf(tester.element(dayPicker)).enabled, isTrue);
+    semantics.dispose();
+  });
+
+  testWidgets("DT21 the control's segments share its width whatever their "
+      "labels, each as wide as the wider label takes; a control whose labels "
+      "would take more than half its header row scales down to half of it, "
+      "in both views, and nothing overflows", (tester) async {
+    await tester.pumpWidget(
+      app(
+        Builder(
+          builder: (context) {
+            return Localizations.override(
+              context: context,
+              delegates: const <LocalizationsDelegate<Object?>>[
+                _LongTimeDelegate(),
+              ],
+              child: CalendarDateTimePicker<String>(
+                day: wednesday,
+                minute: 600,
+                today: tuesday,
+                onChanged: (day, minute) {},
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    // Setup sanity: the Time label is the wider.
+    expect(
+      tester.getRect(timeSegment).width,
+      greaterThan(tester.getRect(dateSegment).width + 20.0),
+    );
+    final track = tester.getRect(control());
+    expect(
+      tester.getRect(segmentOf(dateSegment)).width,
+      moreOrLessEquals(track.width / 2.0),
+    );
+    expect(
+      tester.getRect(segmentOf(timeSegment)).width,
+      moreOrLessEquals(track.width / 2.0),
+    );
+    final header = tester.getRect(
+      find.descendant(of: dayPicker, matching: find.byType(Row)).first,
+    );
+    // Setup sanity: the labels, unscaled, take more than half the row.
+    expect(tester.getSize(control()).width, greaterThan(header.width / 2.0));
+    expect(track.width, moreOrLessEquals(header.width / 2.0));
+    expect(track.right, header.right);
+
+    await tester.tap(segmentOf(timeSegment));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(control()), track);
   });
 
   testWidgets("DT4 a tap on a day reports it with the time where the day "
@@ -289,32 +665,6 @@ void main() {
       CalendarDates.dayNumber(saturday): <int>{600, 615},
     };
     final picks = <(DateTime, int?)>[];
-    await tester.pumpWidget(
-      app(
-        CalendarDateTimePicker<String>(
-          day: wednesday,
-          minute: 600,
-          today: wednesday,
-          onChanged: (day, minute) {
-            picks.add((day, minute));
-          },
-          timeBoundsOf: (day) {
-            return CalendarDates.dayNumber(day) ==
-                    CalendarDates.dayNumber(sunday)
-                ? (min: 660, max: 1439)
-                : (min: 0, max: 1439);
-          },
-          isTimeEnabled: (day, minute) {
-            if (CalendarDates.dayNumber(day) ==
-                CalendarDates.dayNumber(tuesday)) {
-              return false;
-            }
-            final number = CalendarDates.dayNumber(day);
-            return !(refused[number]?.contains(minute) ?? false);
-          },
-        ),
-      ),
-    );
     for (final (day, kept) in <(DateTime, int)>[
       (friday, 600),
       // 570 and 630 lie as near.
@@ -324,6 +674,34 @@ void main() {
       (sunday, 660),
       (tuesday, 600),
     ]) {
+      // A tap turns to the time view, so each day's tap is a new picker's.
+      await tester.pumpWidget(
+        app(
+          CalendarDateTimePicker<String>(
+            key: ValueKey<DateTime>(day),
+            day: wednesday,
+            minute: 600,
+            today: wednesday,
+            onChanged: (day, minute) {
+              picks.add((day, minute));
+            },
+            timeBoundsOf: (day) {
+              return CalendarDates.dayNumber(day) ==
+                      CalendarDates.dayNumber(sunday)
+                  ? (min: 660, max: 1439)
+                  : (min: 0, max: 1439);
+            },
+            isTimeEnabled: (day, minute) {
+              if (CalendarDates.dayNumber(day) ==
+                  CalendarDates.dayNumber(tuesday)) {
+                return false;
+              }
+              final number = CalendarDates.dayNumber(day);
+              return !(refused[number]?.contains(minute) ?? false);
+            },
+          ),
+        ),
+      );
       picks.clear();
       await tester.tap(dayCell(day));
       await tester.pump();
@@ -354,6 +732,7 @@ void main() {
           minute: minute,
           store: store,
           today: saturday,
+          initialShowsTime: true,
           onChanged: (day, minute) {
             picks.add((day, minute));
           },
@@ -365,6 +744,8 @@ void main() {
     await tester.pumpAndSettle();
     // Setup sanity: Saturday's clock reads 00:30.
     expect(rowTakesTap(tester, timePickerHourRowKey(0)), isTrue);
+    await tester.tap(segmentOf(dateSegment));
+    await tester.pumpAndSettle();
     await tester.tap(dayCell(sunday));
     await tester.pump();
     expect(
@@ -387,6 +768,7 @@ void main() {
           day: wednesday,
           minute: 600,
           today: tuesday,
+          initialShowsTime: true,
           onChanged: (day, minute) {
             picks.add((day, minute));
           },
@@ -416,6 +798,7 @@ void main() {
             minute: 600,
             today: tuesday,
             store: store,
+            initialShowsTime: true,
             onChanged: (day, minute) {
               picks.add((day, minute));
             },
@@ -433,42 +816,49 @@ void main() {
     expect(await pickEleven(null), <(DateTime, int?)>[(wednesday, 660)]);
   });
 
-  testWidgets("DT7 with a null minute the picker shows no toggle and no "
-      "time, and a tap on a day reports it with null; a minute that turns "
-      "null hides the time, still showing its last, and fades the toggle "
-      "out over the theme's motion; one that turns from null shows both", (
-    tester,
-  ) async {
+  testWidgets("DT7 with a null minute the picker shows its date view with no "
+      "control, and a tap on a day reports it with null; a minute that "
+      "turns null in the time view turns to the date view, the time view "
+      "still showing its last time as it fades, and fades the control out "
+      "over the theme's motion; one that turns from null shows the time "
+      "view again, as the control last turned to", (tester) async {
     final semantics = tester.ensureSemantics();
     final picks = <(DateTime, int?)>[];
-    Widget picker(int? minute) {
+    final shows = <bool>[];
+    Widget picker(int? minute, {Key? key, bool showsTime = true}) {
       return app(
         CalendarDateTimePicker<String>(
+          key: key,
           day: wednesday,
           minute: minute,
           today: tuesday,
+          initialShowsTime: showsTime,
           onChanged: (day, minute) {
             picks.add((day, minute));
           },
+          onShowsTimeChanged: shows.add,
         ),
         theme: motionTheme,
       );
     }
 
-    await tester.pumpWidget(picker(null));
-    expect(toggle, findsNothing);
-    expect(find.byType(CalendarTimePicker), findsNothing);
-    await tester.tap(dayCell(DateTime(2026, 4, 23)));
-    await tester.pump();
-    expect(picks.single.$2, isNull);
-
-    await tester.pumpWidget(picker(600));
+    await tester.pumpWidget(picker(null, key: const ValueKey<int>(1)));
+    expect(dateSegment, findsNothing);
+    expect(timeSegment, findsNothing);
+    expect(timeView, findsNothing);
+    expect(viewOpacity(tester, dayPicker), 1.0);
+    await tester.tap(dayCell(thursday));
     await tester.pumpAndSettle();
-    expect(toggle, findsOne);
-    final full = tester.getSize(timePart).height;
-    await tester.pumpWidget(picker(null));
+    expect(picks.single.$2, isNull);
+    expect(timeView, findsNothing);
+
+    await tester.pumpWidget(picker(600, key: const ValueKey<int>(2)));
+    final timeHeight = tester.getSize(timeView).height;
+    await tester.pumpWidget(picker(null, key: const ValueKey<int>(2)));
     await tester.pump(const Duration(milliseconds: 200));
-    expect(tester.getSize(timePart).height, moreOrLessEquals(full * 0.5));
+    expect(viewOpacity(tester, timeView), moreOrLessEquals(0.5));
+    expect(viewOpacity(tester, dayPicker), 1.0);
+    expect(pickerHeight(tester), lessThan(timeHeight));
     expect(
       tester.widget<CalendarTimePicker>(find.byType(CalendarTimePicker)).value,
       600,
@@ -477,7 +867,10 @@ void main() {
       tester
           .widget<FadeTransition>(
             find
-                .ancestor(of: toggle, matching: find.byType(FadeTransition))
+                .ancestor(
+                  of: dateSegment,
+                  matching: find.byType(FadeTransition),
+                )
                 .first,
           )
           .opacity
@@ -485,15 +878,39 @@ void main() {
       moreOrLessEquals(0.5),
     );
     expect(find.semantics.byLabel("Time"), findsNothing);
+    expect(find.semantics.byLabel("Date"), findsNothing);
     await tester.pumpAndSettle();
-    expect(toggle, findsNothing);
-    expect(timePart, findsNothing);
+    expect(dateSegment, findsNothing);
+    expect(timeView, findsNothing);
+
+    await tester.pumpWidget(picker(600, key: const ValueKey<int>(2)));
+    await tester.pumpAndSettle();
+    expect(timeView, findsOne);
+    expect(viewOpacity(tester, timeView), 1.0);
+    expect(viewOpacity(tester, dayPicker), 0.0);
+    expect(dateSegment, findsOne);
+    expect(shows, isEmpty);
+
+    // A minute that turns null and back while the control shows the date
+    // view leaves the date view shown.
+    const third = ValueKey<int>(3);
+    await tester.pumpWidget(picker(600, key: third, showsTime: false));
+    await tester.pumpWidget(picker(null, key: third, showsTime: false));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(picker(600, key: third, showsTime: false));
+    await tester.pumpAndSettle();
+    // Setup sanity: the control came back.
+    expect(dateSegment, findsOne);
+    expect(timeView, findsNothing);
+    expect(shows, isEmpty);
     semantics.dispose();
   });
 
-  testWidgets("DT14 as a minute that turns null hides the time, the time "
-      "picker keeps the bounds and the times it offered, and the picker "
-      "asks timeBoundsOf and isTimeEnabled nothing more", (tester) async {
+  testWidgets("DT14 as a minute that turns null turns to the date view, the "
+      "time picker keeps the bounds and the times it offered, and the "
+      "picker asks timeBoundsOf and isTimeEnabled nothing more", (
+    tester,
+  ) async {
     final asks = <String>[];
     Widget picker(int? minute) {
       // New callbacks at each build, as a host's whose schedule changes,
@@ -503,6 +920,7 @@ void main() {
           day: wednesday,
           minute: minute,
           today: tuesday,
+          initialShowsTime: true,
           onChanged: (day, minute) {},
           timeBoundsOf: (day) {
             asks.add("bounds");
@@ -560,6 +978,7 @@ void main() {
           day: day,
           minute: minute,
           today: tuesday,
+          initialShowsTime: true,
           onChanged: (day, minute) {},
           isTimeEnabled: isTimeEnabled,
         ),
@@ -581,12 +1000,9 @@ void main() {
     expect(asks, contains((wednesdayNumber, 600)));
 
     asks.clear();
-    await tester.pumpWidget(picker(DateTime(2026, 4, 23), 600, second));
+    await tester.pumpWidget(picker(thursday, 600, second));
     await tester.pumpAndSettle();
-    expect(
-      asks,
-      contains((CalendarDates.dayNumber(DateTime(2026, 4, 23)), 600)),
-    );
+    expect(asks, contains((CalendarDates.dayNumber(thursday), 600)));
   });
 
   testWidgets("DT8 the time picker shows Now on today's day alone", (
@@ -598,6 +1014,7 @@ void main() {
           day: day,
           minute: 600,
           today: wednesday,
+          initialShowsTime: true,
           now: () {
             return 615;
           },
@@ -608,11 +1025,11 @@ void main() {
 
     await tester.pumpWidget(picker(wednesday));
     expect(find.byKey(timePickerNowKey), findsOne);
-    await tester.pumpWidget(picker(DateTime(2026, 4, 23)));
+    await tester.pumpWidget(picker(thursday));
     expect(find.byKey(timePickerNowKey), findsNothing);
   });
 
-  testWidgets("DT9 a column held as the toggle hides the time picks "
+  testWidgets("DT9 a column held as the view turns to the date view picks "
       "nothing", (tester) async {
     final picks = <(DateTime, int?)>[];
     await tester.pumpWidget(
@@ -621,6 +1038,7 @@ void main() {
           day: wednesday,
           minute: 600,
           today: tuesday,
+          initialShowsTime: true,
           onChanged: (day, minute) {
             picks.add((day, minute));
           },
@@ -635,25 +1053,36 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     await hold.moveBy(const Offset(0.0, -40.0));
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(toggle);
+    await tester.tap(segmentOf(dateSegment));
     await tester.pump();
     await hold.up();
     await tester.pumpAndSettle();
     expect(picks, isEmpty);
   });
 
-  testWidgets("DT10 where the toggle hides the time with the focus in the "
-      "time picker, the focus moves to the toggle", (tester) async {
+  testWidgets("DT10 where a switch leaves the focus in the view it hides, "
+      "the focus moves to the segment that names the shown view in the "
+      "shown view's control, whether a tap, a key or a day turned it; a "
+      "switch with the focus elsewhere moves no focus", (tester) async {
     final hours = FocusNode(debugLabel: "hours");
     addTearDown(hours.dispose);
+    final outside = FocusNode(debugLabel: "outside");
+    addTearDown(outside.dispose);
     await tester.pumpWidget(
       app(
-        CalendarDateTimePicker<String>(
-          day: wednesday,
-          minute: 600,
-          today: tuesday,
-          timeFocusNode: hours,
-          onChanged: (day, minute) {},
+        Column(
+          children: <Widget>[
+            Focus(focusNode: outside, child: const SizedBox(height: 10.0)),
+            CalendarDateTimePicker<String>(
+              day: wednesday,
+              minute: 600,
+              today: tuesday,
+              initialShowsTime: true,
+              initialView: const CalendarDayPickerView(folded: false),
+              timeFocusNode: hours,
+              onChanged: (day, minute) {},
+            ),
+          ],
         ),
       ),
     );
@@ -661,18 +1090,35 @@ void main() {
     await tester.pump();
     // Setup sanity: the Hour column has the focus.
     expect(hours.hasFocus, isTrue);
-    await tester.tap(toggle);
+    await tester.tap(segmentOf(dateSegment));
     await tester.pumpAndSettle();
-    final focused = FocusManager.instance.primaryFocus!.context!;
-    var underToggle = false;
-    focused.visitAncestorElements((element) {
-      underToggle = element.widget.key == dateTimePickerToggleKey;
-      return !underToggle;
-    });
-    expect(
-      underToggle || focused.widget.key == dateTimePickerToggleKey,
-      isTrue,
-    );
+    expect(focusedOn(dateSegment), isTrue);
+
+    // The Date segment has the focus; Tab moves it to the Time segment,
+    // whose Enter turns to the time view.
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    // Setup sanity: Tab reached the Time segment of the date view.
+    expect(focusedOn(timeSegment), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(viewOpacity(tester, timeView), 1.0);
+    expect(focusedOn(timeSegment), isTrue);
+
+    await tester.tap(segmentOf(dateSegment));
+    await tester.pumpAndSettle();
+    // A tap on a day of the month gives the month the focus, and turns to
+    // the time view.
+    await tester.tap(dayCell(thursday));
+    await tester.pumpAndSettle();
+    expect(viewOpacity(tester, timeView), 1.0);
+    expect(focusedOn(timeSegment), isTrue);
+
+    outside.requestFocus();
+    await tester.pump();
+    await tester.tap(segmentOf(dateSegment));
+    await tester.pumpAndSettle();
+    expect(outside.hasPrimaryFocus, isTrue);
   });
 
   testWidgets("DT11 the picker hands its day parameters to its day picker "
@@ -728,24 +1174,26 @@ void main() {
           timeFocusNode: hours,
           hapticFeedback: true,
           subject: "start",
+          initialShowsTime: true,
           onChanged: (day, minute) {},
         ),
       ),
     );
-    final dayPicker = tester.widget<CalendarDayPicker<String>>(
-      find.byType(CalendarDayPicker<String>),
+    final dayPickerWidget = tester.widget<CalendarDayPicker<String>>(dayPicker);
+    expect(dayPickerWidget.store, same(store));
+    expect(dayPickerWidget.today, wednesday);
+    expect(dayPickerWidget.firstDay, tuesday);
+    expect(dayPickerWidget.lastDay, DateTime(2026, 5, 1));
+    expect(dayPickerWidget.isEnabled == isDayEnabled, isTrue);
+    expect(dayPickerWidget.firstColumn, 6);
+    expect(dayPickerWidget.dayBadges, same(badges));
+    expect(dayPickerWidget.daysToEdges, isTrue);
+    expect(dayPickerWidget.browsesBeforeFirstDay, isFalse);
+    expect(
+      dayPickerWidget.initialView,
+      const CalendarDayPickerView(folded: false),
     );
-    expect(dayPicker.store, same(store));
-    expect(dayPicker.today, wednesday);
-    expect(dayPicker.firstDay, tuesday);
-    expect(dayPicker.lastDay, DateTime(2026, 5, 1));
-    expect(dayPicker.isEnabled == isDayEnabled, isTrue);
-    expect(dayPicker.firstColumn, 6);
-    expect(dayPicker.dayBadges, same(badges));
-    expect(dayPicker.daysToEdges, isTrue);
-    expect(dayPicker.browsesBeforeFirstDay, isFalse);
-    expect(dayPicker.initialView, const CalendarDayPickerView(folded: false));
-    expect(dayPicker.onViewChanged == onViewChanged, isTrue);
+    expect(dayPickerWidget.onViewChanged == onViewChanged, isTrue);
     final timePicker = tester.widget<CalendarTimePicker>(
       find.byType(CalendarTimePicker),
     );
@@ -775,9 +1223,9 @@ void main() {
         ),
       ),
     );
-    final scheme = Theme.of(tester.element(toggle)).colorScheme;
+    final scheme = Theme.of(tester.element(dayPicker)).colorScheme;
     final derived = CalendarThemeExtension.fromColorScheme(scheme).data;
-    expect(toggleFill(tester), derived.primaryTint);
+    expect(pillFill(tester), derived.primaryTint);
   });
 
   test("DT13 the constructor names the first value it does not take", () {
@@ -887,4 +1335,33 @@ void main() {
       expect(outside, isEmpty);
     });
   });
+}
+
+/// The default localizations with a Time label longer than the Date one.
+final class _LongTime extends DefaultCalendarLocalizations {
+  const _LongTime();
+
+  @override
+  String get dateTimePickerTimeLabel {
+    return "Time of day";
+  }
+}
+
+class _LongTimeDelegate extends LocalizationsDelegate<CalendarLocalizations> {
+  const _LongTimeDelegate();
+
+  @override
+  bool isSupported(Locale locale) {
+    return true;
+  }
+
+  @override
+  Future<CalendarLocalizations> load(Locale locale) {
+    return SynchronousFuture<CalendarLocalizations>(const _LongTime());
+  }
+
+  @override
+  bool shouldReload(_LongTimeDelegate old) {
+    return false;
+  }
 }
