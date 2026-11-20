@@ -26,6 +26,12 @@ import 'pinch_zoom.dart';
 /// below: the row axis's lane padding.
 const double monthStripHeight = 28.0;
 
+/// The size of the box holding each day's number, the selected day's on
+/// its pill and today's in its ring, at no text scaling; a larger text
+/// grows it, keeping the room around the numbers ([numberBoxIn]).
+const double _numberBoxWidth = 30.0;
+const double _numberBoxHeight = 22.0;
+
 /// The height of one chip lane: the row axis's lane extent while the days
 /// show chips.
 const double monthLaneExtent = 18.0;
@@ -114,11 +120,11 @@ class _MonthStyles {
       ),
       selectedPill = BoxDecoration(
         color: theme.primary,
-        borderRadius: BorderRadius.circular(11.0),
+        borderRadius: BorderRadius.circular(_numberBoxHeight / 2.0),
       ),
       ring = BoxDecoration(
         border: Border.all(color: theme.todayRing, width: theme.todayRingWidth),
-        borderRadius: BorderRadius.circular(11.0),
+        borderRadius: BorderRadius.circular(_numberBoxHeight / 2.0),
       ),
       more = BoxDecoration(
         color: theme.notice,
@@ -180,6 +186,17 @@ class _MonthStyles {
   final TextStyle todayNumber;
   final BoxDecoration selectedPill;
   final BoxDecoration ring;
+
+  /// [decoration], [selectedPill] or [ring], around a number box of
+  /// [box], its ends round.
+  static BoxDecoration around(BoxDecoration decoration, Size box) {
+    if (box.height == _numberBoxHeight) {
+      return decoration;
+    }
+    return decoration.copyWith(
+      borderRadius: BorderRadius.circular(box.height / 2.0),
+    );
+  }
 
   /// A day's "+N more".
   final BoxDecoration more;
@@ -2356,7 +2373,7 @@ class _MonthDayCell extends StatelessWidget {
                 SizedBox(
                   key: monthStripKey(day),
                   height: monthStripHeight,
-                  child: Center(child: _buildNumber(isToday, styles)),
+                  child: Center(child: _buildNumber(context, isToday, styles)),
                 ),
                 if (hides.earlier > 0)
                   Positioned(
@@ -2424,7 +2441,7 @@ class _MonthDayCell extends StatelessWidget {
     );
   }
 
-  Widget _buildNumber(bool isToday, _MonthStyles styles) {
+  Widget _buildNumber(BuildContext context, bool isToday, _MonthStyles styles) {
     final TextStyle style;
     if (isSelected) {
       style = styles.selectedNumber;
@@ -2435,17 +2452,29 @@ class _MonthDayCell extends StatelessWidget {
     } else {
       style = styles.mutedNumber;
     }
-    final number = Text("${day.day}", style: style);
+    final number = Text("${day.day}", maxLines: 1, style: style);
+    // Every day's number lies in a box of one size, so each scales down
+    // alike, rather than being cut off, in a number strip too small for it.
+    final box = numberBoxIn(context, <TextStyle>[
+      styles.number,
+      styles.selectedNumber,
+    ], const Size(_numberBoxWidth, _numberBoxHeight));
     if (!isSelected && !isToday) {
-      return number;
+      return fittedLabel(box, number);
     }
-    return Container(
-      width: 30.0,
-      height: 22.0,
-      alignment: Alignment.center,
-      decoration: isSelected ? styles.selectedPill : null,
-      foregroundDecoration: isToday ? styles.ring : null,
-      child: number,
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Container(
+        constraints: BoxConstraints(minWidth: box.width, minHeight: box.height),
+        alignment: Alignment.center,
+        decoration: isSelected
+            ? _MonthStyles.around(styles.selectedPill, box)
+            : null,
+        foregroundDecoration: isToday
+            ? _MonthStyles.around(styles.ring, box)
+            : null,
+        child: number,
+      ),
     );
   }
 }

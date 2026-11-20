@@ -22,12 +22,21 @@ import '../presentation/calendar_theme.dart';
 import 'answer_builder.dart';
 import 'create_details.dart';
 import 'create_press.dart';
+import 'day_cell.dart' show fittedLabel, labelSizeIn, numberBoxIn;
 import 'entry_split.dart';
 import 'move_request.dart';
 import 'pinch_zoom.dart';
 import 'timed_grid_layout.dart';
 
-const double _headerHeight = 40.0;
+/// The least height of the day header, which a text too tall for it grows
+/// ([_TimedGridState._measureHeader]).
+const double _leastHeaderHeight = 40.0;
+
+/// The size of the box holding a day header's number, which today's ring
+/// draws around, at no text scaling; a larger text grows it, keeping the
+/// room around the numbers ([numberBoxIn]).
+const double _numberBoxWidth = 30.0;
+const double _numberBoxHeight = 20.0;
 
 /// The height of the rows above and below the slots that count the items
 /// outside the hours.
@@ -99,7 +108,7 @@ class _GridStyles {
       headerToday = theme.dayHeaderNumberStyle.copyWith(color: theme.primary),
       headerRing = BoxDecoration(
         border: Border.all(color: theme.todayRing, width: theme.todayRingWidth),
-        borderRadius: BorderRadius.circular(10.0),
+        borderRadius: BorderRadius.circular(_numberBoxHeight / 2.0),
       ),
       hiddenPill = BoxDecoration(
         color: theme.primaryTint,
@@ -264,6 +273,16 @@ class _GridStyles {
   final TextStyle headerNumber;
   final TextStyle headerToday;
   final BoxDecoration headerRing;
+
+  /// [headerRing] around a number box of [box], its ends round.
+  BoxDecoration headerRingAround(Size box) {
+    if (box.height == _numberBoxHeight) {
+      return headerRing;
+    }
+    return headerRing.copyWith(
+      borderRadius: BorderRadius.circular(box.height / 2.0),
+    );
+  }
 
   /// The pill counting the items on no shown day.
   final BoxDecoration hiddenPill;
@@ -771,7 +790,9 @@ class TimedGrid<T> extends StatefulWidget {
 
   /// Whether row 0 is a frozen header naming each column's day, whose
   /// corner over the gutter holds the pill counting the items on no shown
-  /// day. Fixed for the grid's life.
+  /// day. Fixed for the grid's life. The header is 40 logical pixels tall,
+  /// or as tall as its names and numbers take at a larger text size, and a
+  /// day too narrow for either scales it down, every day's alike.
   final bool showsDayHeader;
 
   /// The first day of the range the grid shows.
@@ -958,6 +979,27 @@ typedef _HeaderState = ({
   DateTime selectedDay,
   DateTime today,
 });
+
+/// The boxes a day header's short name and number lie in, each day's
+/// alike: the widest short name in [_GridStyles.headerWeekday]
+/// ([labelSizeIn]), and the box of the numbers in
+/// [_GridStyles.headerNumber] ([numberBoxIn]), which today's ring draws
+/// around. Today's number differs from the rest only in colour.
+({Size name, Size number}) _headerBoxesIn(
+  BuildContext context,
+  _GridStyles styles,
+  CalendarLocalizations strings,
+) {
+  return (
+    name: labelSizeIn(context, styles.headerWeekday, <String>[
+      for (var day = DateTime.monday; day <= DateTime.sunday; day++)
+        strings.weekdayShortName(day),
+    ]),
+    number: numberBoxIn(context, <TextStyle>[
+      styles.headerNumber,
+    ], const Size(_numberBoxWidth, _numberBoxHeight)),
+  );
+}
 
 /// The gesture a grid runs, one at a time: none ([_Idle]), a pinch
 /// ([_Pinching]), a create range ([_Ranging]), or the board's drag of a
@@ -1568,6 +1610,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     today: widget.now.value.today,
   ));
 
+  /// The day header's height as the last build measured it
+  /// ([_measureHeader]), which [_rowsConfig] gives the rows it makes.
+  double _headerHeight = _leastHeaderHeight;
+
   /// The extents the axes were last given and the tracks they were given
   /// for. [_fitAxes] replaces an axis only when one of these changes.
   double _gutterWidth = _HourLabels.minGutter;
@@ -1577,6 +1623,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   late CalendarDayHours _rowHours = _tracks.hours;
   late int _rowSlotMinutes = _tracks.slotMinutes;
   double _rowRoom = _initialLabelRoom;
+  double _rowHeaderHeight = _leastHeaderHeight;
   late _Notices _rowNotices = _notices;
   late int _rowStripRows = _stripRows;
   late CalendarHourLabelFormat _rowFormat = widget.hourLabelFormat;
@@ -2264,7 +2311,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return _stripRows;
     }
     final fit =
-        ((size.height * _frozenStripShare - _headerExtent - _labelRoom) /
+        ((size.height * _frozenStripShare -
+                    _measuredHeaderExtent -
+                    _labelRoom) /
                 _allDayRowHeight)
             .floor();
     return math.min(_stripRows, math.max(collapsedStripRows + 1, fit));
@@ -2429,6 +2478,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _rowHours = _tracks.hours;
     _rowSlotMinutes = _tracks.slotMinutes;
     _rowRoom = _labelRoom;
+    _rowHeaderHeight = _headerHeight;
     _rowNotices = _notices;
     _rowStripRows = _stripRows;
     _rowFormat = widget.hourLabelFormat;
@@ -2440,9 +2490,31 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _board.rows = _rowsConfig();
   }
 
-  /// The day header's height, or 0 where the grid shows none.
+  /// The day header's height in the rows the board has, or 0 where the
+  /// grid shows none.
   double get _headerExtent {
+    return widget.showsDayHeader ? _rowHeaderHeight : 0.0;
+  }
+
+  /// The day header's height as the last build measured it, or 0 where the
+  /// grid shows none: the height of the rows [_fitAxes] fits.
+  double get _measuredHeaderExtent {
     return widget.showsDayHeader ? _headerHeight : 0.0;
+  }
+
+  /// Measures [_headerHeight] in [context]: a day's short name over its
+  /// number, each in its box ([_headerBoxesIn]), and never less than
+  /// [_leastHeaderHeight].
+  void _measureHeader(
+    BuildContext context,
+    _GridStyles styles,
+    CalendarLocalizations strings,
+  ) {
+    final boxes = _headerBoxesIn(context, styles, strings);
+    _headerHeight = math.max(
+      _leastHeaderHeight,
+      boxes.name.height + boxes.number.height,
+    );
   }
 
   /// The all-day strip's height.
@@ -2540,7 +2612,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       widget.minSlotHeight,
       _share(
         size.height -
-            _headerExtent -
+            _measuredHeaderExtent -
             (_stripRows > 0 ? _labelRoom : 0.0) -
             _stripExtent -
             _edgeAbove -
@@ -2560,6 +2632,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _tracks.hours != _rowHours ||
         _tracks.slotMinutes != _rowSlotMinutes ||
         _labelRoom != _rowRoom ||
+        _headerHeight != _rowHeaderHeight ||
         _notices != _rowNotices ||
         _stripRows != _rowStripRows ||
         _frozenStripRows != _rowFrozenStripRows ||
@@ -4326,7 +4399,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final int row;
     if (y < _leadingExtent) {
       var top = y;
-      if (widget.showsDayHeader && top < _headerHeight) {
+      if (widget.showsDayHeader && top < _rowHeaderHeight) {
         row = 0;
       } else if (_stripRows > 0 && top < _headerExtent + _stripRoom) {
         row = _stripStart - 1;
@@ -6136,6 +6209,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       widget.onZoom == null ? widget.minSlotHeight : minSlotHeightLow,
     );
     _labelRoom = _hourLabels.height / 2 + _HourLabels.gap;
+    if (widget.showsDayHeader) {
+      _measureHeader(context, styles, strings);
+    }
     final slotRange = range == null || range.strip || range.refused
         ? null
         : range;
@@ -6292,6 +6368,8 @@ class _DayHeaderCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final styles = _GridStyles.of(context);
+    final strings = CalendarLocalizations.of(context);
+    final boxes = _headerBoxesIn(context, styles, strings);
     return ValueListenableBuilder<_HeaderState>(
       valueListenable: header,
       builder: (context, value, child) {
@@ -6304,6 +6382,7 @@ class _DayHeaderCell extends StatelessWidget {
         final day = value.tracks.dateAt(column);
         final isToday = day == value.today;
         final isSelected = day == value.selectedDay;
+        final numberStyle = isToday ? styles.headerToday : styles.headerNumber;
         return GestureDetector(
           key: dayHeaderKey(day),
           onTap: () {
@@ -6311,24 +6390,38 @@ class _DayHeaderCell extends StatelessWidget {
           },
           child: ColoredBox(
             color: isSelected ? styles.theme.primaryTint : styles.theme.surface,
+            // The grid measures the header as tall as both boxes
+            // ([_TimedGridState._measureHeader]), from the same text
+            // style, scale and words as these; a day too narrow for a box
+            // scales it down, each day's alike.
             child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Text(
-                    CalendarLocalizations.of(
-                      context,
-                    ).weekdayShortName(day.weekday),
-                    style: styles.headerWeekday,
+                  fittedLabel(
+                    boxes.name,
+                    Text(
+                      strings.weekdayShortName(day.weekday),
+                      maxLines: 1,
+                      style: styles.headerWeekday,
+                    ),
                   ),
-                  Container(
-                    width: 30.0,
-                    height: 20.0,
-                    alignment: Alignment.center,
-                    foregroundDecoration: isToday ? styles.headerRing : null,
-                    child: Text(
-                      "${day.day}",
-                      style: isToday ? styles.headerToday : styles.headerNumber,
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Container(
+                      constraints: BoxConstraints(
+                        minWidth: boxes.number.width,
+                        minHeight: boxes.number.height,
+                      ),
+                      alignment: Alignment.center,
+                      foregroundDecoration: isToday
+                          ? styles.headerRingAround(boxes.number)
+                          : null,
+                      child: Text(
+                        "${day.day}",
+                        maxLines: 1,
+                        style: numberStyle,
+                      ),
                     ),
                   ),
                 ],

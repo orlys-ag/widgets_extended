@@ -2,6 +2,7 @@
 /// abbreviations of the weekdays over the grid.
 library;
 
+import 'dart:collection';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -139,34 +140,195 @@ class _DayMarkerListenerState<T> extends State<DayMarkerListener<T>> {
 /// The diameter of a [DayCell]'s circle.
 const double dayCircleSize = 32.0;
 
+/// The room a [DayCell]'s number keeps from either side of its circle
+/// beyond the width of today's ring ([CalendarThemeData.todayRingWidth]).
+const double _numberGap = 2.0;
+
+/// The numbers of the days of a month, which the boxes of the days'
+/// numbers are measured from ([labelSizeIn]).
+final List<String> dayNumbers = List<String>.unmodifiable(<String>[
+  for (var day = 1; day <= 31; day++) "$day",
+]);
+
+/// The size the widest of [texts] takes as a one-line [Text] of [style]
+/// lays it out in [context], as wide as the widest and as tall as the
+/// tallest: [style] merged over the [DefaultTextStyle], bold where the
+/// context asks for bold text, with the context's line height, letter and
+/// word spacing overrides, at the context's text height behaviour and
+/// locale, and at [scaler], or where it is null the context's text scale.
+/// Makes [context] depend on what it reads there. Keeps the sizes it measured
+/// last, so a build that asks again measures nothing, until the fonts
+/// change ([PaintingBinding.systemFonts]), as a font loaded at run time
+/// changes them.
+Size labelSizeIn(
+  BuildContext context,
+  TextStyle style,
+  List<String> texts, {
+  TextScaler? scaler,
+}) {
+  final defaults = DefaultTextStyle.of(context);
+  var effective = style.inherit ? defaults.style.merge(style) : style;
+  if (MediaQuery.boldTextOf(context)) {
+    effective = effective.merge(const TextStyle(fontWeight: FontWeight.bold));
+  }
+  final height = MediaQuery.maybeLineHeightScaleFactorOverrideOf(context);
+  final letterSpacing = MediaQuery.maybeLetterSpacingOverrideOf(context);
+  final wordSpacing = MediaQuery.maybeWordSpacingOverrideOf(context);
+  if (height != null || letterSpacing != null || wordSpacing != null) {
+    effective = effective.merge(
+      TextStyle(
+        height: height,
+        letterSpacing: letterSpacing,
+        wordSpacing: wordSpacing,
+      ),
+    );
+  }
+  final key = _LabelKey(
+    effective,
+    scaler ?? MediaQuery.textScalerOf(context),
+    defaults.textHeightBehavior ?? DefaultTextHeightBehavior.maybeOf(context),
+    Localizations.maybeLocaleOf(context),
+    texts,
+  );
+  if (!_labelSizesFollowFonts) {
+    _labelSizesFollowFonts = true;
+    PaintingBinding.instance.systemFonts.addListener(_labelSizes.clear);
+  }
+  final size = _labelSizes.remove(key) ?? key.measure();
+  _labelSizes[key] = size;
+  if (_labelSizes.length > _labelSizesKept) {
+    _labelSizes.remove(_labelSizes.keys.first);
+  }
+  return size;
+}
+
+/// The sizes [labelSizeIn] measured, the most recently asked for last.
+final LinkedHashMap<_LabelKey, Size> _labelSizes =
+    LinkedHashMap<_LabelKey, Size>();
+
+/// How many sizes [_labelSizes] keeps.
+const int _labelSizesKept = 32;
+
+/// Whether a change of the fonts empties [_labelSizes].
+bool _labelSizesFollowFonts = false;
+
+/// What [labelSizeIn] measures a size from.
+@immutable
+final class _LabelKey {
+  const _LabelKey(
+    this.style,
+    this.scaler,
+    this.behavior,
+    this.locale,
+    this.texts,
+  );
+
+  final TextStyle style;
+  final TextScaler scaler;
+  final TextHeightBehavior? behavior;
+  final Locale? locale;
+  final List<String> texts;
+
+  Size measure() {
+    final painter = TextPainter(
+      textDirection: TextDirection.ltr,
+      textScaler: scaler,
+      textHeightBehavior: behavior,
+      locale: locale,
+      maxLines: 1,
+    );
+    var width = 0.0;
+    var height = 0.0;
+    for (final text in texts) {
+      painter.text = TextSpan(text: text, style: style);
+      painter.layout();
+      width = math.max(width, painter.width);
+      height = math.max(height, painter.height);
+    }
+    painter.dispose();
+    return Size(width, height);
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is _LabelKey &&
+        other.style == style &&
+        other.scaler == scaler &&
+        other.behavior == behavior &&
+        other.locale == locale &&
+        listEquals(other.texts, texts);
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(style, scaler, behavior, locale, Object.hashAll(texts));
+  }
+}
+
+/// The box a day's number lies in where a ring or a pill can draw around
+/// it, each day's alike: [least] at no text scaling, and at a larger text
+/// the widest of [dayNumbers] in the widest of [styles] ([labelSizeIn]),
+/// with the room [least] leaves around it at no scaling on each axis.
+Size numberBoxIn(BuildContext context, List<TextStyle> styles, Size least) {
+  var width = least.width;
+  var height = least.height;
+  for (final style in styles) {
+    final scaled = labelSizeIn(context, style, dayNumbers);
+    final unscaled = labelSizeIn(
+      context,
+      style,
+      dayNumbers,
+      scaler: TextScaler.noScaling,
+    );
+    width = math.max(
+      width,
+      scaled.width + math.max(0.0, least.width - unscaled.width),
+    );
+    height = math.max(
+      height,
+      scaled.height + math.max(0.0, least.height - unscaled.height),
+    );
+  }
+  return Size(width, height);
+}
+
+/// [label], a one-line [Text], centred in a box at least [box] large, the
+/// size the widest label of its kind takes ([labelSizeIn]), and scaled
+/// down with that box where its parent cannot hold it, so every label of
+/// the kind scales alike and lies alike in its box.
+Widget fittedLabel(Size box, Widget label) {
+  return FittedBox(
+    fit: BoxFit.scaleDown,
+    child: ConstrainedBox(
+      constraints: BoxConstraints(minWidth: box.width, minHeight: box.height),
+      child: Center(child: label),
+    ),
+  );
+}
+
+/// The abbreviations of the seven weekdays in [strings], Monday first.
+List<String> weekdayAbbreviationsOf(CalendarLocalizations strings) {
+  return <String>[
+    for (var weekday = DateTime.monday; weekday <= DateTime.sunday; weekday++)
+      strings.weekdayAbbreviation(weekday),
+  ];
+}
+
 /// The space between a strip cell's label line and its circle.
 const double stripLabelGap = 2.0;
 
 /// The height of a cell of the week strip, a [DayCell] at a full collapse:
-/// a line of the weekday name's style, the
+/// the line of the tallest weekday abbreviation in
 /// [CalendarThemeData.stripWeekdayStyle] of the theme above [context], as
-/// Text lays it out in [context], at its text style and scale, then
-/// [stripLabelGap] and [dayCircleSize]. The line's height is set by the
-/// style's height, whatever the line reads. Makes [context] depend on the
-/// theme and the localizations.
+/// a [Text] lays it out in [context] ([labelSizeIn]), then
+/// [stripLabelGap] and [dayCircleSize]. Makes [context] depend on the
+/// theme, the localizations and what [labelSizeIn] reads.
 double stripCellHeight(BuildContext context) {
-  final defaultStyle = DefaultTextStyle.of(context);
-  final painter = TextPainter(
-    text: TextSpan(
-      text: CalendarLocalizations.of(
-        context,
-      ).weekdayAbbreviation(DateTime.monday),
-      style: defaultStyle.style.merge(_DayCellStyles.of(context).stripWeekday),
-    ),
-    textDirection: TextDirection.ltr,
-    textScaler: MediaQuery.textScalerOf(context),
-    textHeightBehavior:
-        defaultStyle.textHeightBehavior ??
-        DefaultTextHeightBehavior.maybeOf(context),
-    maxLines: 1,
-  )..layout();
-  final line = painter.height;
-  painter.dispose();
+  final line = labelSizeIn(
+    context,
+    _DayCellStyles.of(context).stripWeekday,
+    weekdayAbbreviationsOf(CalendarLocalizations.of(context)),
+  ).height;
   return line + stripLabelGap + dayCircleSize;
 }
 
@@ -410,6 +572,12 @@ class _DayCellElement extends StatelessElement {
 /// above it. The
 /// cell listens to [collapse] itself, so the transition rebuilds the cells
 /// and not the board.
+///
+/// The abbreviation and the number each keep to one line at any text
+/// size, each in a box as large as the widest of its kind
+/// ([labelSizeIn]), which scales down where the cell's width or the
+/// circle cannot hold it, so every day's scales alike; the number keeps
+/// the width of today's ring and [_numberGap] from the circle's sides.
 class DayCell extends StatelessWidget {
   const DayCell({
     super.key,
@@ -451,6 +619,17 @@ class DayCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final strings = CalendarLocalizations.of(context);
     final styles = _DayCellStyles.of(context);
+    final boxes = (
+      name: labelSizeIn(
+        context,
+        styles.stripWeekday,
+        weekdayAbbreviationsOf(strings),
+      ),
+      number: numberBoxIn(context, <TextStyle>[
+        styles.numberFrom,
+        styles.numberTo,
+      ], Size.zero),
+    );
     return Semantics(
       button: true,
       selected: isSelected,
@@ -462,7 +641,7 @@ class DayCell extends StatelessWidget {
       child: AnimatedBuilder(
         animation: collapse,
         builder: (context, child) {
-          return _buildAt(collapse.value, styles, strings);
+          return _buildAt(collapse.value, styles, strings, boxes);
         },
       ),
     );
@@ -486,10 +665,14 @@ class DayCell extends StatelessWidget {
     );
   }
 
+  /// The cell at [collapse]'s value [t]: its weekday's abbreviation, in a
+  /// box of [boxes]' name, over its number, in a box of [boxes]' number,
+  /// each box the widest of its kind ([labelSizeIn]).
   Widget _buildAt(
     double t,
     _DayCellStyles styles,
     CalendarLocalizations strings,
+    ({Size name, Size number}) boxes,
   ) {
     final disabled = enabled == false;
     final TextStyle numberStyle;
@@ -515,9 +698,15 @@ class DayCell extends StatelessWidget {
       width: dayCircleSize,
       height: dayCircleSize,
       alignment: Alignment.center,
+      padding: EdgeInsets.symmetric(
+        horizontal: styles.theme.todayRingWidth + _numberGap,
+      ),
       decoration: fill,
       foregroundDecoration: isToday ? styles.ring : null,
-      child: Text("${day.day}", style: numberStyle),
+      child: fittedLabel(
+        boxes.number,
+        Text("${day.day}", maxLines: 1, style: numberStyle),
+      ),
     );
     if (badges.isNotEmpty) {
       final count = math.min(badges.length, _maxDrawnBadges);
@@ -542,9 +731,13 @@ class DayCell extends StatelessWidget {
                 opacity: t,
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: stripLabelGap),
-                  child: Text(
-                    strings.weekdayAbbreviation(day.weekday),
-                    style: styles.stripWeekday,
+                  child: fittedLabel(
+                    boxes.name,
+                    Text(
+                      strings.weekdayAbbreviation(day.weekday),
+                      maxLines: 1,
+                      style: styles.stripWeekday,
+                    ),
                   ),
                 ),
               ),
@@ -565,7 +758,10 @@ const double weekdayHeaderHeight = 32.0;
 /// the week strip shows them, one per column: equal shares of the header's
 /// width, or with [columnWidth], columns that wide, scrolled across by
 /// [horizontal]'s offset as the grid under them is, and clipped to the
-/// header.
+/// header. Each keeps to one line at any text size, in a box as large as
+/// the widest ([labelSizeIn]), which scales down where its column or the
+/// header's [weekdayHeaderHeight] cannot hold it, so every column's scales
+/// alike.
 class WeekdayHeader extends StatelessWidget {
   const WeekdayHeader({
     super.key = const ValueKey<String>("weekday-header"),
@@ -607,12 +803,29 @@ class WeekdayHeader extends StatelessWidget {
     final width = columnWidth;
     final styles = _DayCellStyles.of(context);
     final strings = CalendarLocalizations.of(context);
+    final box = labelSizeIn(
+      context,
+      abbreviated ? styles.weekdayName : styles.weekdayLetter,
+      abbreviated
+          ? weekdayAbbreviationsOf(strings)
+          : <String>[
+              for (
+                var weekday = DateTime.monday;
+                weekday <= DateTime.sunday;
+                weekday++
+              )
+                strings.weekdayLetter(weekday),
+            ],
+    );
     final letters = <Widget>[
       for (final column in weekdays.columns)
         if (width == null)
-          Expanded(child: _buildLetter(column, styles, strings))
+          Expanded(child: _buildLetter(column, styles, strings, box))
         else
-          SizedBox(width: width, child: _buildLetter(column, styles, strings)),
+          SizedBox(
+            width: width,
+            child: _buildLetter(column, styles, strings, box),
+          ),
     ];
     final direction = columnDirection ?? Directionality.of(context);
     if (width == null) {
@@ -653,23 +866,28 @@ class WeekdayHeader extends StatelessWidget {
   }
 
   /// The name of the weekday of [column], a [CalendarDates.weekdayColumn],
-  /// Monday 0.
+  /// Monday 0, in a box of [box], the widest name's size.
   Widget _buildLetter(
     int column,
     _DayCellStyles styles,
     CalendarLocalizations strings,
+    Size box,
   ) {
     final weekday = column + 1;
+    final Text label;
     if (abbreviated) {
-      return Center(
-        child: Text(
-          strings.weekdayAbbreviation(weekday),
-          style: styles.weekdayName,
-        ),
+      label = Text(
+        strings.weekdayAbbreviation(weekday),
+        maxLines: 1,
+        style: styles.weekdayName,
+      );
+    } else {
+      label = Text(
+        strings.weekdayLetter(weekday),
+        maxLines: 1,
+        style: styles.weekdayLetter,
       );
     }
-    return Center(
-      child: Text(strings.weekdayLetter(weekday), style: styles.weekdayLetter),
-    );
+    return Center(child: fittedLabel(box, label));
   }
 }

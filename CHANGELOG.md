@@ -1148,6 +1148,20 @@ and Up and Down to the day a week before or after, into the next row and
 the next or previous month. A day the grid shows is selected and scrolled
 into view at once, as the board's own keys do, and a day of another month
 once that month shows.
+- Fix: at a large text size, or under the platform's line height override,
+the days' labels did not fit their fixed boxes. Week's day header, 40 px
+tall, cut off each day's number and overflowed. The weekday names in the
+week strip and in the folded day and date-time pickers wrapped and
+overflowed their days. The day numbers in their circles, Month's day
+numbers, and the weekday letters and names heading Month and the calendar
+card were cut off. Week's day header now grows to hold its names and
+numbers, and the week strip's days to hold their tallest weekday name,
+each as its text lays out at the text size and line height override.
+Each weekday name and day number keeps to one line and, where its day
+cannot hold it, scales down; every label of a kind in a row scales alike,
+so a row's names keep one size and line up, as do its numbers. Today's
+ring and the selected day's pill grow with the number, keep the room they
+leave around it, and stay round at each end.
 
 ## 0.0.35
 

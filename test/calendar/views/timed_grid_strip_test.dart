@@ -3745,6 +3745,47 @@ void main() {
     }
   });
 
+  testWidgets("TX39 at text scale 2, under Week's day header grown to hold "
+      "its text, a block dropped on Tuesday's strip cell writes Tuesday's "
+      "start to Wednesday's", (tester) async {
+    final shown = Shown.week(monday);
+    final store = storeOf(<CalendarEntry<String>>[
+      entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
+      allDayOf("other", tuesday),
+    ]);
+    final harness = Harness(store, shown);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = harness.size;
+    addTearDown(tester.view.reset);
+    addTearDown(harness.now.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) {
+          return MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(2.0)),
+            child: child!,
+          );
+        },
+        home: Material(child: harness.themed()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // Setup sanity: the header is taller than its least height by more
+    // than a strip row.
+    expect(
+      tester.getRect(find.byKey(dayHeaderKey(tuesday))).height,
+      greaterThan(40.0 + 22.0),
+    );
+    await dragTo(
+      tester,
+      tester.getCenter(blockFinder("meet", tuesday)),
+      stripRect(tester, shown, tuesday).center,
+    );
+    expectTimes(store, "meet", tuesday, wednesday);
+  });
+
   testWidgets("TX36 in Week, leaving edit mode while a block's move, its "
       "move onto a strip cell, or its end handle's resize into a later day "
       "runs ends it: the frame that leaves edit mode asks the policy "
