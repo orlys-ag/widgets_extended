@@ -5,7 +5,10 @@ library;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:widgets_extended/calendar/composition/calendar_date_time_picker.dart'
-    show dateTimePickerToggleKey;
+    show
+        dateTimePickerDateSegmentKey,
+        dateTimePickerTimeKey,
+        dateTimePickerTimeSegmentKey;
 import 'package:widgets_extended/calendar/views/time_picker.dart'
     show
         TimePickerRules,
@@ -140,8 +143,8 @@ int clockMinute(String time) {
 
 /// Opens the time picker of the row of the form's time labelled [label]
 /// where it is not open: a tap on the row, brought into view first, where
-/// its panel is closed, then a tap on its picker's Time toggle where its
-/// time is hidden; each settles.
+/// its panel is closed, then a tap on the Time segment of its picker's view
+/// control where the picker shows its day picker; each settles.
 Future<void> openTimePicker(WidgetTester tester, String label) async {
   if (timePickerFinder(label).evaluate().isNotEmpty) {
     return;
@@ -160,12 +163,12 @@ Future<void> openTimePicker(WidgetTester tester, String label) async {
     await tester.pumpAndSettle();
   }
   if (timePickerFinder(label).evaluate().isEmpty) {
-    final toggle = find.descendant(
+    final segment = find.descendant(
       of: panel,
-      matching: find.byKey(dateTimePickerToggleKey),
+      matching: find.byKey(dateTimePickerTimeSegmentKey),
     );
-    await revealForTap(tester, toggle);
-    await tester.tap(toggle);
+    await revealForTap(tester, segment);
+    await tester.tap(segment);
     await tester.pumpAndSettle();
   }
 }
@@ -423,16 +426,37 @@ Future<void> _revealDateField(WidgetTester tester, String label) {
   return revealForTap(tester, formDateFinder(label));
 }
 
-/// Opens the day picker of the form's day labelled [label] with a tap on
-/// its row where it is closed, brought into view first, and lets it
-/// settle.
+/// Whether the picker in the panel under the row of the day labelled
+/// [label] shows its time view, under which its day picker lies hidden.
+bool _showsTimeView(String label) {
+  return find
+      .descendant(
+        of: find.byKey(_datePanelKey(label)),
+        matching: find.byKey(dateTimePickerTimeKey),
+      )
+      .evaluate()
+      .isNotEmpty;
+}
+
+/// Opens the day picker of the form's day labelled [label] where it does
+/// not show: a tap on its row, brought into view first, where its panel is
+/// closed, or a tap on the Date segment of its picker's view control where
+/// the picker shows its time view; each settles.
 Future<void> openDayPicker(WidgetTester tester, String label) async {
-  if (dayPickerFinder(label).evaluate().isNotEmpty) {
-    return;
+  if (dayPickerFinder(label).evaluate().isEmpty) {
+    await _revealDateField(tester, label);
+    await tester.tap(formDateFinder(label));
+    await tester.pumpAndSettle();
   }
-  await _revealDateField(tester, label);
-  await tester.tap(formDateFinder(label));
-  await tester.pumpAndSettle();
+  if (_showsTimeView(label)) {
+    final segment = find.descendant(
+      of: find.byKey(_datePanelKey(label)),
+      matching: find.byKey(dateTimePickerDateSegmentKey),
+    );
+    await revealForTap(tester, segment);
+    await tester.tap(segment);
+    await tester.pumpAndSettle();
+  }
 }
 
 /// Closes the day picker of the form's day labelled [label] with a tap on

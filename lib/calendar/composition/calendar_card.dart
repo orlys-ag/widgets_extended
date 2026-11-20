@@ -130,6 +130,7 @@ class CalendarCard<T> extends StatefulWidget {
     required this.header,
     required this.buildPicker,
     required this.onSelectDay,
+    this.onTapDay,
     this.dayBadges,
     this.isDayEnabled,
     this.daysToEdges = false,
@@ -157,6 +158,10 @@ class CalendarCard<T> extends StatefulWidget {
   /// Reports a day tapped, or in the month reached by an arrow key; null
   /// for a card whose days take no tap.
   final ValueChanged<DateTime>? onSelectDay;
+
+  /// Reports a day tapped in either strip, right after [onSelectDay]
+  /// reports it; null reports nothing.
+  final ValueChanged<DateTime>? onTapDay;
 
   /// The kinds of entry the days' badges mark, in the month and in the
   /// week strip; null for one primary dot on a day with entries.
@@ -261,6 +266,7 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
       ),
       initialMiddleDay: controller.stripMiddleDay,
       onSelectDay: widget.onSelectDay,
+      onTapDay: widget.onTapDay,
       onBrowse: controller.browseStrip,
       dayBadges: widget.dayBadges,
       isDayEnabled: widget.isDayEnabled,
@@ -333,6 +339,7 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
       rowHeight: _rowHeight,
       collapse: controller.collapse,
       onSelectDay: widget.onSelectDay,
+      onTapDay: widget.onTapDay,
       onBrowse: controller.browseMonth,
       dayBadges: widget.dayBadges,
       isDayEnabled: widget.isDayEnabled,

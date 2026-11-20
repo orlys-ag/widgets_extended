@@ -137,12 +137,11 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// those before [CalendarScheduleCheck.firstStartDay], End's those outside
 /// [CalendarScheduleCheck.endDays]; the section reads them of each check
 /// once, as a picker first builds under it. For a timed schedule the
-/// picker's time picker, with its haptic feedback on, lies under the day
-/// picker, and its Time toggle shows and hides it. Each opening of a row
-/// shows its day picker on the view either picker last turned to
-/// ([CalendarDateTimePicker.onViewChanged]), folded into its week row at
-/// first, and its time shown or hidden as either picker's Time toggle last
-/// left it, shown at first.
+/// picker's view control turns it between its day picker and its time
+/// picker, whose haptic feedback is on, and a tap on a day turns it to its
+/// time picker. Each opening of a row shows its day picker, on the view
+/// either picker last turned to ([CalendarDateTimePicker.onViewChanged]),
+/// folded into its week row at first.
 ///
 /// A tap on a day moves the row's day to it, Start's moving the end by as
 /// many days, and keeps the row's time where the time picker offers it on
@@ -157,7 +156,8 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// own, over the [CalendarTheme]'s motion, or at once where the platform
 /// asks for no animations; it then scrolls into view, and again where its
 /// picker grows once it rests, as a day picker unfolds into its month or
-/// the time shows. A picker whose row is not the open one takes no pick.
+/// the picker turns to a taller view. A picker whose row is not the open
+/// one takes no pick.
 ///
 /// A time picker refuses a time only for a problem some other time of it
 /// avoids: of the check of the schedule with each of the picker's times on
@@ -181,9 +181,10 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// the options refuse spanning days ([CalendarScheduleOptions.spansDays])
 /// and the schedule ends on its start day. An open picker stays open as its
 /// row locks, taking no pick, until its row's tap closes it. The All day
-/// switch leaves an open row open, its picker hiding its time and Time
-/// toggle as the switch turns on and showing them as it turns off, and
-/// turned on takes the focus from the open picker. [errors] holds the
+/// switch leaves an open row open, its picker turning to its day picker
+/// and hiding its view control as the switch turns on, and turning back to
+/// the view it showed as it turns off, and turned on takes the focus from
+/// the open picker. [errors] holds the
 /// form's messages keyed `start` and `end`, which show under the Start and
 /// End rows and tint those rows with the soft error colour.
 class ScheduleSection extends StatefulWidget {
@@ -667,19 +668,13 @@ class ScheduleSectionState extends State<ScheduleSection> {
   _Row? _open;
 
   /// How many times each row has opened its picker, which keys the row's
-  /// picker, so that each opening builds a new one, on [_dayPickerView] and
-  /// [_showsTime].
+  /// picker, so that each opening builds a new one, on [_dayPickerView].
   int _startOpenings = 0;
   int _endOpenings = 0;
 
   /// The view either day picker last turned to, which the next one opens
   /// on; read only as a picker is made, so a change needs no build.
   CalendarDayPickerView _dayPickerView = const CalendarDayPickerView();
-
-  /// Whether either picker's Time toggle last left its time shown, as the
-  /// next one opens; read only as a picker is made, so a change needs no
-  /// build.
-  bool _showsTime = true;
 
   /// Each row's picker's times, kept across builds while they hold.
   final Map<_Row, _RowTimes> _times = <_Row, _RowTimes>{};
@@ -933,9 +928,10 @@ class ScheduleSectionState extends State<ScheduleSection> {
                 onChanged: startLocked
                     ? null
                     : (on) {
-                        // The open picker's time and Time toggle go away;
-                        // the focus a control of the picker held moves to
-                        // the switch, not to the scope's last focused node.
+                        // The open picker's time view and view control go
+                        // away; the focus a control of the picker held
+                        // moves to the switch, not to the scope's last
+                        // focused node.
                         final open = _open;
                         if (on && open != null && _panelNodeOf(open).hasFocus) {
                           _allDayNode.requestFocus();
@@ -975,10 +971,10 @@ class ScheduleSectionState extends State<ScheduleSection> {
   /// ringed, taking the days of [_dayRangeOf], End's browsing back no
   /// further than the first of them; and for a timed schedule its time
   /// picker on the row's time, offering the times of [_timesOf]. Keyed by
-  /// the row's openings, so each opening builds a new one, on the view
-  /// either picker last turned to, [_dayPickerView], and with its time
-  /// shown as [_showsTime] says. It takes no pick while its panel closes or
-  /// where the row takes no input.
+  /// the row's openings, so each opening builds a new one, on its day
+  /// picker, on the view either picker last turned to, [_dayPickerView].
+  /// It takes no pick while its panel closes or where the row takes no
+  /// input.
   Widget _picker(_Row row) {
     final schedule = _schedule;
     final start = row == _Row.start;
@@ -1017,10 +1013,6 @@ class ScheduleSectionState extends State<ScheduleSection> {
       nowPicksLater: true,
       hapticFeedback: true,
       subject: start ? scheduleStartKey : scheduleEndKey,
-      initialShowsTime: _showsTime,
-      onShowsTimeChanged: (shows) {
-        _showsTime = shows;
-      },
     );
   }
 
@@ -2669,7 +2661,8 @@ class _OverhangClipper extends CustomClipper<Rect> {
 /// panel shows nothing once closed.
 ///
 /// Once it has opened, and where its picker grows once it rests, as a day
-/// picker unfolds into its month or the time shows, it scrolls into view:
+/// picker unfolds into its month or the picker turns to a taller view, it
+/// scrolls into view:
 /// the row, whose [Focus] has [field] for its node, where the row lies
 /// before the visible part of the form, then the panel where it lies past
 /// it, the panel winning where both do not fit, in one scroll over the

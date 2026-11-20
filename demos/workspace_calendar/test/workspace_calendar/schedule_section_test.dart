@@ -21,7 +21,7 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/calendar/composition/calendar_card.dart'
     show CalendarCard, calendarPullTabKey;
 import 'package:widgets_extended/calendar/composition/calendar_date_time_picker.dart'
-    show dateTimePickerToggleKey;
+    show dateTimePickerTimeSegmentKey;
 import 'package:widgets_extended/calendar/views/day_cell.dart'
     show DayCell, dayCellKey;
 import 'package:widgets_extended/calendar/views/month_strip.dart'
@@ -578,12 +578,12 @@ double chevronTurn(WidgetTester tester, Finder row) {
       .storage[0];
 }
 
-/// The Time toggle of the picker in the panel under the row of the field
-/// labelled [label].
-Finder timeToggle([String label = "Start time"]) {
+/// The label of the Time segment of the view control of the picker in the
+/// panel under the row of the field labelled [label].
+Finder timeSegment([String label = "Start time"]) {
   return find.descendant(
     of: pickerPanel(label),
-    matching: find.byKey(dateTimePickerToggleKey),
+    matching: find.byKey(dateTimePickerTimeSegmentKey),
   );
 }
 
@@ -1198,8 +1198,7 @@ void main() {
     await openEdit(tester, store);
     expect(find.byType(CalendarTimePicker), findsNothing);
 
-    await tester.tap(timeFieldFinder("Start time"));
-    await tester.pumpAndSettle();
+    await openTimePicker(tester, "Start time");
     expect(
       find.descendant(
         of: pickerPanel(),
@@ -1221,6 +1220,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(timeFieldFinder("End time"));
     await tester.pumpAndSettle();
+    expect(panelPicker("End time"), findsOneWidget);
+    await openTimePicker(tester, "End time");
     expect(
       find.descendant(
         of: pickerPanel("End time"),
@@ -1251,7 +1252,7 @@ void main() {
     await pumpSection(tester, fixed);
     await tester.tap(timeFieldFinder("Start time"));
     await tester.pumpAndSettle();
-    expect(find.byType(CalendarTimePicker), findsNothing);
+    expect(find.byType(CalendarDateTimePicker<ItemPayload>), findsNothing);
   });
 
   testWidgets("TF2 the pickers offer the hours' times the check takes: the "
@@ -1423,9 +1424,10 @@ void main() {
   });
 
   testWidgets("TF5 the start's picker stays open across Next free time and "
-      "a day picked in its day picker, which keeps its time; the All day "
-      "switch hides its time, the picker staying open, and takes the focus "
-      "from its time picker", (tester) async {
+      "a day picked in its day picker, which keeps its time and turns the "
+      "picker to its time picker; the All day switch turns it to its day "
+      "picker, the picker staying open, and takes the focus from its time "
+      "picker", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task("item-2", "Standup", at(9, 30), at(10, 30)),
@@ -1440,6 +1442,9 @@ void main() {
     expect(formSchedule(tester), "Wed, Apr 22, 10:30\nWed, Apr 22, 11:30\n1h");
     expect(timePickerFinder("Start time"), findsOneWidget);
 
+    await openDayPicker(tester, "Start date");
+    // Setup sanity: the picker shows its day picker.
+    expect(timePickerFinder("Start time"), findsNothing);
     final thursday = find.descendant(
       of: dayPickerFinder("Start date"),
       matching: find.byKey(weekStripDayKey(DateTime(2026, 4, 23))),
@@ -1480,6 +1485,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(focusUnder(rowFinder("End")), isTrue);
 
+    await openTimePicker(tester, "End time");
     hourColumnNode(tester, "End time").requestFocus();
     await tester.pump();
     // Setup sanity: a control of End's picker has the focus.
@@ -1497,7 +1503,7 @@ void main() {
   testWidgets("TF9 a picker opened past the bottom of the view scrolls into "
       "it once its panel has opened", (tester) async {
     tester.view.devicePixelRatio = 1.0;
-    tester.view.physicalSize = const Size(390.0, 300.0);
+    tester.view.physicalSize = const Size(390.0, 250.0);
     addTearDown(tester.view.reset);
     await pumpSection(
       tester,
@@ -1513,9 +1519,9 @@ void main() {
     // Setup sanity: the picker opened past the view's bottom, so the view
     // scrolled to reveal it.
     expect(position.pixels, greaterThan(0.0));
-    final picker = tester.getRect(timePickerFinder("Start time"));
+    final picker = tester.getRect(panelPicker());
     expect(picker.top, greaterThanOrEqualTo(0.0));
-    expect(picker.bottom, lessThanOrEqualTo(300.0));
+    expect(picker.bottom, lessThanOrEqualTo(250.0));
   });
 
   testWidgets("TF11 an open picker stays open as its row locks and takes no "
@@ -1691,7 +1697,7 @@ void main() {
     Future<void> expectDropped(String end) async {
       expect(timeFieldShows("Start time", "09:00"), findsOneWidget);
       expect(timeFieldShows("End time", end), findsOneWidget);
-      expect(timePickerFinder("End time"), findsOneWidget);
+      expect(panelPicker("End time"), findsOneWidget);
       expect(timePickerFinder("Start time"), findsNothing);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
@@ -2986,17 +2992,11 @@ void main() {
       "and gone in the closing tap's own frame", (tester) async {
     disableAnimations(tester);
     tester.view.devicePixelRatio = 1.0;
-    tester.view.physicalSize = const Size(390.0, 300.0);
+    tester.view.physicalSize = const Size(390.0, 250.0);
     addTearDown(tester.view.reset);
-    final thursday = DateTime(2026, 4, 23);
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
-      // Today is Thursday, so the picker shows no Now: the panel's opening
-      // alone scrolls it into view.
-      now: () {
-        return CalendarNow(time: thursday, today: thursday);
-      },
       theme: motionTheme,
     );
     final position = tester
@@ -3009,9 +3009,9 @@ void main() {
     // The panel completed inside the tap's own frame, and the frame after
     // it scrolled the picker, opened past the view's bottom, into view.
     expect(position.pixels, greaterThan(0.0));
-    final picker = tester.getRect(timePickerFinder("Start time"));
+    final picker = tester.getRect(panelPicker());
     expect(picker.top, greaterThanOrEqualTo(0.0));
-    expect(picker.bottom, lessThanOrEqualTo(300.0));
+    expect(picker.bottom, lessThanOrEqualTo(250.0));
 
     // Revealing the picker scrolled its row out of the view.
     await tester.ensureVisible(timeFieldFinder("Start time"));
@@ -3020,7 +3020,7 @@ void main() {
     expect(panelHeight(tester), settledPanelHeight(tester));
     await tester.tap(timeFieldFinder("Start time"));
     await tester.pump();
-    expect(find.byType(CalendarTimePicker), findsNothing);
+    expect(panelPicker(), findsNothing);
     expect(panelHeight(tester), 0.0);
   });
 
@@ -3153,31 +3153,40 @@ void main() {
     );
   });
 
-  testWidgets("FP7 the section keeps the Time toggle: the next opening of "
-      "either row shows its picker's time as the last toggle left it, hidden "
-      "or shown", (tester) async {
+  testWidgets("FP7 each opening of either row shows its picker's day "
+      "picker, whatever view the last picker showed, and a tap on a day "
+      "turns it to the time picker", (tester) async {
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
     );
-    await openTimePicker(tester, "Start time");
-    await revealForTap(tester, timeToggle("Start time"));
-    await tester.tap(timeToggle("Start time"));
+    await tester.tap(timeFieldFinder("Start time"));
     await tester.pumpAndSettle();
-    // Setup sanity: the toggle hid Start's time.
+    // Setup sanity: Start's picker opened.
+    expect(panelPicker("Start time"), findsOneWidget);
     expect(timePickerFinder("Start time"), findsNothing);
+    await revealForTap(tester, timeSegment("Start time"));
+    await tester.tap(timeSegment("Start time"));
+    await tester.pumpAndSettle();
+    // Setup sanity: the control showed Start's time.
+    expect(timePickerFinder("Start time"), findsOneWidget);
 
-    await openDayPicker(tester, "End date");
+    await tester.tap(timeFieldFinder("End time"));
+    await tester.pumpAndSettle();
     // Setup sanity: End's picker opened.
     expect(panelPicker("End time"), findsOneWidget);
     expect(timePickerFinder("End time"), findsNothing);
-    await revealForTap(tester, timeToggle("End time"));
-    await tester.tap(timeToggle("End time"));
-    await tester.pumpAndSettle();
-    // Setup sanity: the toggle showed End's time.
-    expect(timePickerFinder("End time"), findsOneWidget);
 
-    await openDayPicker(tester, "Start date");
+    await tester.tap(timeFieldFinder("Start time"));
+    await tester.pumpAndSettle();
+    expect(timePickerFinder("Start time"), findsNothing);
+    final thursday = find.descendant(
+      of: pickerPanel("Start time"),
+      matching: find.byKey(weekStripDayKey(DateTime(2026, 4, 23))),
+    );
+    await revealForTap(tester, thursday);
+    await tester.tap(thursday);
+    await tester.pumpAndSettle();
     expect(timePickerFinder("Start time"), findsOneWidget);
   });
 
@@ -3186,17 +3195,11 @@ void main() {
     tester,
   ) async {
     tester.view.devicePixelRatio = 1.0;
-    tester.view.physicalSize = const Size(390.0, 300.0);
+    tester.view.physicalSize = const Size(390.0, 250.0);
     addTearDown(tester.view.reset);
-    final thursday = DateTime(2026, 4, 23);
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
-      // Today is Thursday, so the picker shows no Now: the panel's opening
-      // alone scrolls it into view.
-      now: () {
-        return CalendarNow(time: thursday, today: thursday);
-      },
       theme: motionTheme,
     );
     final position = tester
@@ -3221,8 +3224,8 @@ void main() {
     });
     // Most of the theme's 480 ms, frame by frame, lies between the two.
     expect(between.length, greaterThanOrEqualTo(20));
-    final picker = tester.getRect(timePickerFinder("Start time"));
-    expect(picker.bottom, lessThanOrEqualTo(300.0));
+    final picker = tester.getRect(panelPicker());
+    expect(picker.bottom, lessThanOrEqualTo(250.0));
   });
 
   testWidgets("FX3 the footer an open picker gains as its row's day becomes "
@@ -4826,6 +4829,24 @@ void main() {
     await tester.pumpAndSettle();
     // Setup sanity: the tap picked the 23rd.
     expect(formDateShows("Start date", "2026-04-23"), findsOneWidget);
+    // The tap turned the picker to its time picker; back on its days, the
+    // month takes the focus as a user tabs to it.
+    await openDayPicker(tester, "Start date");
+    tester
+        .widget<Focus>(
+          find
+              .descendant(
+                of: find.descendant(
+                  of: picker,
+                  matching: find.byType(MonthStrip<ItemPayload>),
+                ),
+                matching: find.byType(Focus),
+              )
+              .first,
+        )
+        .focusNode!
+        .requestFocus();
+    await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
     expect(formDateShows("Start date", "2026-04-24"), findsOneWidget);
@@ -4833,9 +4854,9 @@ void main() {
 
   testWidgets("IP8 an all-day item's Start row opens its picker on days "
       "alone, which keeps its state and the row's focus as All day turns "
-      "off, its time coming in under its day picker; All day turned on "
-      "hides that time and keeps the picker, taking the focus from its time "
-      "picker and leaving it on the row", (tester) async {
+      "off, its view control coming in; All day turned on with its time "
+      "shown turns it to its days and keeps the picker, taking the focus "
+      "from its time picker, and leaves the focus on the row", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Trip", wednesday, DateTime(2026, 4, 23), isAllDay: true),
     ]);
@@ -4865,6 +4886,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
     await tester.pumpAndSettle();
+    expect(timePickerFinder("Start time"), findsNothing);
+    await openTimePicker(tester, "Start time");
     expect(timePickerFinder("Start time"), findsOneWidget);
 
     hourColumnNode(tester, "Start time").requestFocus();
@@ -5029,6 +5052,8 @@ void main() {
     // Setup sanity: the tap picked Thursday.
     expect(formDateShows("Start date", "2026-04-23"), findsOneWidget);
     expect(debugScheduleDayRangeAsks, 2);
+    // The tap turned the picker to its time picker.
+    await openDayPicker(tester, "Start date");
     final reads = debugScheduleDayRangeAsks;
     final picked = asked.length;
     for (final (step, finder) in <(String, Finder)>[

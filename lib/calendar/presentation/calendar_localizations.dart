@@ -355,9 +355,16 @@ abstract base class CalendarLocalizations {
     return "Clear";
   }
 
-  /// The label of the date-time picker's toggle that shows and hides its
-  /// time picker, which a screen reader hears as the toggle's name:
-  /// "Time".
+  /// The label of the segment of the date-time picker's view control that
+  /// shows its day picker, which a screen reader hears as the segment's
+  /// name: "Date".
+  String get dateTimePickerDateLabel {
+    return "Date";
+  }
+
+  /// The label of the segment of the date-time picker's view control that
+  /// shows its time picker, which a screen reader hears as the segment's
+  /// name: "Time".
   String get dateTimePickerTimeLabel {
     return "Time";
   }
