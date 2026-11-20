@@ -573,6 +573,7 @@ class WeekdayHeader extends StatelessWidget {
     this.abbreviated = false,
     this.columnWidth,
     this.horizontal,
+    this.columnDirection,
   });
 
   final CalendarWeekdaySet weekdays;
@@ -586,8 +587,15 @@ class WeekdayHeader extends StatelessWidget {
   final double? columnWidth;
 
   /// The grid's horizontal scroll, which a header of [columnWidth] wide
-  /// columns follows.
+  /// columns follows: a growing offset moves the letters against the way
+  /// the columns run, as it moves the grid's days.
   final ScrollController? horizontal;
+
+  /// The way the columns run: null for the ambient [Directionality], as a
+  /// grid that follows it lays its days out. A header over a grid whose
+  /// columns run one way whatever that direction gives it here; the
+  /// letters keep the ambient direction as text.
+  final TextDirection? columnDirection;
 
   @override
   StatelessElement createElement() {
@@ -606,19 +614,25 @@ class WeekdayHeader extends StatelessWidget {
         else
           SizedBox(width: width, child: _buildLetter(column, styles, strings)),
     ];
+    final direction = columnDirection ?? Directionality.of(context);
     if (width == null) {
       return SizedBox(
         height: weekdayHeaderHeight,
-        child: Row(children: letters),
+        child: Row(textDirection: direction, children: letters),
       );
     }
     final scroll = horizontal;
-    final row = Row(mainAxisSize: MainAxisSize.min, children: letters);
+    final row = Row(
+      textDirection: direction,
+      mainAxisSize: MainAxisSize.min,
+      children: letters,
+    );
+    final leftToRight = direction == TextDirection.ltr;
     return SizedBox(
       height: weekdayHeaderHeight,
       child: ClipRect(
         child: OverflowBox(
-          alignment: AlignmentDirectional.centerStart,
+          alignment: leftToRight ? Alignment.centerLeft : Alignment.centerRight,
           maxWidth: double.infinity,
           child: scroll == null
               ? row
@@ -628,7 +642,7 @@ class WeekdayHeader extends StatelessWidget {
                   builder: (context, child) {
                     final offset = scroll.hasClients ? scroll.offset : 0.0;
                     return Transform.translate(
-                      offset: Offset(-offset, 0.0),
+                      offset: Offset(leftToRight ? -offset : offset, 0.0),
                       child: child,
                     );
                   },

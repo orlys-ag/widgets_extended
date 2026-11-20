@@ -11,6 +11,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -861,6 +862,12 @@ void main() {
       // Setup sanity: the low width shares the view, the high one does not.
       expect(scrolls, minDayWidth == minDayWidthHigh, reason: reason);
       final shown = expectLettersOverColumns(reason);
+      // The letters keep the ambient direction as text.
+      expect(
+        tester.renderObject<RenderParagraph>(letters.first).textDirection,
+        TextDirection.rtl,
+        reason: reason,
+      );
       // Setup sanity: the shared width builds every column.
       if (!scrolls) {
         expect(shown, 7, reason: reason);
@@ -897,19 +904,24 @@ void main() {
 
     final reported = <DateTime>[];
     var selected = june(1);
+    var shows = 0;
 
     /// Shows [day]'s month as its owner would, moving to the month of each
-    /// day a key reports, and focuses the board with a tap on [day].
+    /// day a key reports unless [takes] is false, and focuses the board
+    /// with a tap on [day].
     Future<void> show(
       DateTime day, {
       CalendarWeekdaySet weekdays = CalendarWeekdaySet.all,
       double minDayWidth = minDayWidthLow,
       TextDirection direction = TextDirection.ltr,
+      bool takes = true,
     }) async {
       selected = day;
       await tester.pumpWidget(
         MaterialApp(
           home: Directionality(
+            // A new board each time, scrolled to [day].
+            key: ValueKey<int>(shows++),
             textDirection: direction,
             child: StatefulBuilder(
               builder: (context, setState) {
@@ -921,9 +933,11 @@ void main() {
                   minDayWidth: minDayWidth,
                   onSelectDay: (day) {
                     reported.add(day);
-                    setState(() {
-                      selected = day;
-                    });
+                    if (takes) {
+                      setState(() {
+                        selected = day;
+                      });
+                    }
                   },
                   onOpenDay: (day) {},
                   onCreateOnDay: null,
@@ -935,6 +949,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
       await tester.tap(find.byKey(monthStripKey(day)));
       await tester.pumpAndSettle();
       // Setup sanity: the tap focuses the board.
@@ -994,6 +1010,32 @@ void main() {
     await press(LogicalKeyboardKey.home);
     expect(selected, june(8));
 
+    // An arrow and a key of the board's before a frame, either way round:
+    // each steps from the day the other selected.
+    await show(june(7));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.home);
+    await tester.pumpAndSettle();
+    expect(selected, june(8));
+    await show(june(3));
+    await tester.sendKeyEvent(LogicalKeyboardKey.home);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(selected, june(2));
+    await show(june(10));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.home);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(selected, june(9));
+    // A key of the board's before the frame that shows an arrow's day of
+    // another month does nothing: from June 3, Home would select June 1.
+    await show(june(3));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyEvent(LogicalKeyboardKey.home);
+    await tester.pumpAndSettle();
+    expect(reported, <DateTime>[DateTime(2026, 5, 27)]);
+
     // Days wider than the view: a day a key selects is scrolled into view.
     await show(june(1), minDayWidth: minDayWidthHigh);
     final view = tester.getRect(find.byType(MonthBoard<String>));
@@ -1011,6 +1053,20 @@ void main() {
       shown.left >= view.left - 0.5 && shown.right <= view.right + 0.5,
       isTrue,
       reason: "$shown in $view",
+    );
+
+    // An owner that takes no day: the keys still select and reveal on the
+    // board, each stepping from the day the one before selected.
+    await show(june(1), minDayWidth: minDayWidthHigh, takes: false);
+    for (var i = 0; i < 4; i++) {
+      await press(LogicalKeyboardKey.arrowRight);
+    }
+    expect(reported, <DateTime>[june(2), june(3), june(4), june(5)]);
+    final kept = tester.getRect(find.byKey(monthDayKey(june(5))));
+    expect(
+      kept.left >= view.left - 0.5 && kept.right <= view.right + 0.5,
+      isTrue,
+      reason: "$kept in $view",
     );
   });
 

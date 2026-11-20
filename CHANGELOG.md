@@ -1143,10 +1143,11 @@ columns under them do.
 grid's edges: no key left the first cell of a month that starts on the
 grid's first weekday, so Monday to Friday a month starting on a weekend
 had no key to the month before, and a key past a row's end did nothing.
-Left and Right now step to the shown day before or after, and Up and Down
-to the day a week before or after, into the next row and the next or
-previous month, as the week strip's keys do; the day is scrolled into
-view once selected.
+Left and Right now step to the shown day before or after on the screen,
+and Up and Down to the day a week before or after, into the next row and
+the next or previous month. A day the grid shows is selected and scrolled
+into view at once, as the board's own keys do, and a day of another month
+once that month shows.
 
 ## 0.0.35
 
