@@ -63,6 +63,7 @@ final class CalendarThemeData with Diagnosticable {
     this.disabledOpacity = _disabledOpacity,
     this.gripShadows = _gripShadows,
     this.liftedBlockShadows = _liftedBlockShadows,
+    this.allDayStripShadows = _allDayStripShadows,
     this.motionDuration = _motionDuration,
     this.motionCurve = _motionCurve,
     this.beforeHoursIcon = _beforeHoursIcon,
@@ -185,6 +186,7 @@ final class CalendarThemeData with Diagnosticable {
       disabledOpacity = _disabledOpacity,
       gripShadows = _gripShadows,
       liftedBlockShadows = _liftedBlockShadows,
+      allDayStripShadows = _allDayStripShadows,
       motionDuration = _motionDuration,
       motionCurve = _motionCurve,
       beforeHoursIcon = _beforeHoursIcon,
@@ -289,6 +291,13 @@ final class CalendarThemeData with Diagnosticable {
       offset: Offset(0.0, 1.0),
       blurRadius: 3.0,
       spreadRadius: -1.0,
+    ),
+  ];
+  static const List<BoxShadow> _allDayStripShadows = <BoxShadow>[
+    BoxShadow(
+      color: Color(0x33000000),
+      offset: Offset(0.0, 1.0),
+      blurRadius: 4.0,
     ),
   ];
   static const Duration _motionDuration = Duration(milliseconds: 300);
@@ -530,6 +539,13 @@ final class CalendarThemeData with Diagnosticable {
   /// so they fall from its painted edge.
   final List<BoxShadow> liftedBlockShadows;
 
+  /// The shadows Week's and Day's all-day strip casts from its bottom edge,
+  /// across the hour gutter and every day, onto the hours and the strip rows
+  /// scrolling under it, as a box whose bottom is that edge casts them;
+  /// their offsets and radii in logical pixels. Only what falls below the
+  /// edge paints, and none paints where the list is empty.
+  final List<BoxShadow> allDayStripShadows;
+
   /// How long each animation the views run takes; zero or more. Zero turns
   /// the views' motion off: every change shows at once, and the activity
   /// indicator stands still.
@@ -762,6 +778,7 @@ final class CalendarThemeData with Diagnosticable {
     double? disabledOpacity,
     List<BoxShadow>? gripShadows,
     List<BoxShadow>? liftedBlockShadows,
+    List<BoxShadow>? allDayStripShadows,
     Duration? motionDuration,
     Curve? motionCurve,
     IconData? beforeHoursIcon,
@@ -826,6 +843,7 @@ final class CalendarThemeData with Diagnosticable {
       disabledOpacity: disabledOpacity ?? this.disabledOpacity,
       gripShadows: gripShadows ?? this.gripShadows,
       liftedBlockShadows: liftedBlockShadows ?? this.liftedBlockShadows,
+      allDayStripShadows: allDayStripShadows ?? this.allDayStripShadows,
       motionDuration: motionDuration ?? this.motionDuration,
       motionCurve: motionCurve ?? this.motionCurve,
       beforeHoursIcon: beforeHoursIcon ?? this.beforeHoursIcon,
@@ -947,6 +965,11 @@ final class CalendarThemeData with Diagnosticable {
       liftedBlockShadows: BoxShadow.lerpList(
         a.liftedBlockShadows,
         b.liftedBlockShadows,
+        t,
+      )!,
+      allDayStripShadows: BoxShadow.lerpList(
+        a.allDayStripShadows,
+        b.allDayStripShadows,
         t,
       )!,
       motionDuration: duration.isNegative ? Duration.zero : duration,
@@ -1119,6 +1142,7 @@ final class CalendarThemeData with Diagnosticable {
         other.disabledOpacity == disabledOpacity &&
         listEquals(other.gripShadows, gripShadows) &&
         listEquals(other.liftedBlockShadows, liftedBlockShadows) &&
+        listEquals(other.allDayStripShadows, allDayStripShadows) &&
         other.motionDuration == motionDuration &&
         other.motionCurve == motionCurve &&
         other.beforeHoursIcon == beforeHoursIcon &&
@@ -1186,6 +1210,7 @@ final class CalendarThemeData with Diagnosticable {
       disabledOpacity,
       Object.hashAll(gripShadows),
       Object.hashAll(liftedBlockShadows),
+      Object.hashAll(allDayStripShadows),
       motionDuration,
       motionCurve,
       beforeHoursIcon,
@@ -1276,6 +1301,13 @@ final class CalendarThemeData with Diagnosticable {
           "liftedBlockShadows",
           liftedBlockShadows,
           defaultValue: _liftedBlockShadows,
+        ),
+      )
+      ..add(
+        IterableProperty<BoxShadow>(
+          "allDayStripShadows",
+          allDayStripShadows,
+          defaultValue: _allDayStripShadows,
         ),
       )
       ..add(

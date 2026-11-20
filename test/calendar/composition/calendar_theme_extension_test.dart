@@ -168,6 +168,7 @@ void main() {
         todayRing: theme.todayRing,
         gripShadows: theme.gripShadows,
         liftedBlockShadows: theme.liftedBlockShadows,
+        allDayStripShadows: theme.allDayStripShadows,
       ),
     );
     expect(theme.blockTitleStyle, builtIn.blockTitleStyle);
@@ -227,7 +228,7 @@ void main() {
       "lib/calendar/presentation/calendar_theme.dart",
       "CalendarThemeData copyWith({",
     );
-    expect(dataParameters, hasLength(62));
+    expect(dataParameters, hasLength(63));
     expect(extensionParameters, dataParameters);
 
     final other = CalendarThemeExtension(
@@ -259,6 +260,7 @@ void main() {
     ).data;
     expect(plain.gripShadows, builtIn.gripShadows);
     expect(plain.liftedBlockShadows, builtIn.liftedBlockShadows);
+    expect(plain.allDayStripShadows, builtIn.allDayStripShadows);
 
     const shadow = Color(0xFF102030);
     final tinted = CalendarThemeExtension.fromColorScheme(
@@ -279,6 +281,7 @@ void main() {
 
     expectTinted(tinted.gripShadows, builtIn.gripShadows);
     expectTinted(tinted.liftedBlockShadows, builtIn.liftedBlockShadows);
+    expectTinted(tinted.allDayStripShadows, builtIn.allDayStripShadows);
   });
 
   testWidgets("TE8 the theme a scheme gives is derived again for a scheme "

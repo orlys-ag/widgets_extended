@@ -320,14 +320,14 @@ than four, under the day header, with a rule along the last; its other
 rows scroll with the hours. Expanding it shows them under the kept rows,
 and collapsing it brings back the time at the hours' top before the
 expand.
-- In Week and Day, the all-day strip and the hours read as one grid. Each
+- In Week and Day, the all-day strip's day columns continue the hours'. Each
 day's strip cells take the fill of its column below, today's tint and the
 weekend's background, and the rule along each day's left edge, the first
 day's beside the gutter included, lies inside its column from the strip's
 top edge down, through the hours and the rows counting the entries outside
 them in one line. While the strip has rows, the room above the first
 slot that keeps the first hour label whole stays under the strip as its
-margin rather than scrolling with the hours, and the rule parting the strip
+margin rather than scrolling with the hours, and the rule parting the margin
 from the hours runs along its bottom edge: with the hours at their top that
 rule is the first slot's line, and the grid opens with the opening hour's
 line on it, its label whole beside the margin; it does so on the edge of a
@@ -1169,6 +1169,18 @@ hair past it in doubles (96 rows of 1636 / 96 px come to 1.8e-12 px past
 the axis's scrollable took drags with nothing to scroll. Where an axis's
 tracks pass the viewport by no more than `precisionErrorTolerance`, the
 board now gives it no scroll range.
+- Week's and Day's all-day strip stands apart from the hours. Its rows are
+24 px tall, with each bar and "+N more" chip 2 px inside its row's top and
+bottom, so the bars of neighbouring rows lie 4 px apart rather than 2 px,
+and a tap in a bar's row above or below the bar opens the bar. A rule runs
+along the strip's bottom edge across the hour gutter and every day, also
+where the room above the first hour lies under it, and the strip casts a
+shadow from that edge onto the hours and onto any of its own rows
+scrolling under it. The shadows are the new
+`CalendarThemeData.allDayStripShadows`, which
+`CalendarThemeExtension.fromColorScheme` gives in the scheme's `shadow`
+colour; an empty list casts none. A block lifted across the edge paints
+over the shadow.
 
 ## 0.0.35
 

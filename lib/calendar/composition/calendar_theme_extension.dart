@@ -142,6 +142,7 @@ final class CalendarThemeExtension
         todayRing: scheme.outline,
         gripShadows: inShadow(builtIn.gripShadows),
         liftedBlockShadows: inShadow(builtIn.liftedBlockShadows),
+        allDayStripShadows: inShadow(builtIn.allDayStripShadows),
       ),
     );
   }
@@ -174,6 +175,7 @@ final class CalendarThemeExtension
     double? disabledOpacity,
     List<BoxShadow>? gripShadows,
     List<BoxShadow>? liftedBlockShadows,
+    List<BoxShadow>? allDayStripShadows,
     Duration? motionDuration,
     Curve? motionCurve,
     IconData? beforeHoursIcon,
@@ -239,6 +241,7 @@ final class CalendarThemeExtension
         disabledOpacity: disabledOpacity,
         gripShadows: gripShadows,
         liftedBlockShadows: liftedBlockShadows,
+        allDayStripShadows: allDayStripShadows,
         motionDuration: motionDuration,
         motionCurve: motionCurve,
         beforeHoursIcon: beforeHoursIcon,
