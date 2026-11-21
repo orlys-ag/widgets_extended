@@ -10,7 +10,9 @@
 // T3 checks the documents against the script's single sources. The tables and
 // lists the documents carry are generated from the script's `describe` output
 // (`--write` rewrites them); each check passes on the repository and is shown,
-// on every run, to fail on a temporary copy carrying one deliberate mismatch.
+// on every run, to fail on a temporary copy carrying one deliberate mismatch,
+// and again on such a copy whose profile has no modules, as a project's
+// profile may have none.
 //
 // Usage: node .claude/workflows/feature-delivery.harness.mjs
 //        [--script <path>] [--only <prefix>] [--write]
@@ -1637,10 +1639,7 @@ const T3 = [
       }
       return problems
     },
-    root => {
-      const rule = Object.values(JSON.parse(read(root, PROFILE_REL)).modules)[0].guidance[0]
-      fs.appendFileSync(path.join(root, rule), '\nSee @../../AGENTS.md for the rules.\n')
-    }],
+    root => fs.writeFileSync(path.join(root, RULES_DIR, 'harness-import.md'), '---\npaths:\n  - "src/**"\n---\n\nSee @../../AGENTS.md for the rules.\n')],
 
   ['T3i', 'the repository guidance states no count beside the command that produces it', d => GUIDANCE,
     root => countsBesideCommands(root, guidanceFiles(root)),
@@ -1669,6 +1668,37 @@ function copyInto(tmp, rel) {
   fs.cpSync(src, dst, { recursive: true })
 }
 
+function checkSafely(check, root, describe) {
+  try {
+    return check(root, describe)
+  } catch (e) {
+    return [`threw: ${e.message}`]
+  }
+}
+
+// Copies the files a T3 check reads to a temporary root, rewrites the copy's
+// profile with `adjust` when given, applies the check's deliberate mismatch,
+// and returns a problem unless the check then fails.
+function falsify([, , files, check, mutate], describe, adjust) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fd-harness-'))
+  try {
+    for (const rel of new Set([...files(describe), ...workflowFiles(describe), PROFILE_REL])) {
+      if (fs.existsSync(path.join(ROOT, rel))) {
+        copyInto(tmp, rel)
+      }
+    }
+    if (adjust) {
+      fs.writeFileSync(path.join(tmp, PROFILE_REL), JSON.stringify(adjust(JSON.parse(read(tmp, PROFILE_REL))), null, 2))
+    }
+    mutate(tmp, describe)
+    return checkSafely(check, tmp, describe).length === 0 ? ['did not fail on a copy with one deliberate mismatch'] : []
+  } catch (e) {
+    return [`the falsification copy could not be built: ${e.message}`]
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+}
+
 // ---- main ------------------------------------------------------------------
 
 async function main() {
@@ -1691,31 +1721,13 @@ async function main() {
     record('T1a', 'the clean run spawns as many agents as the script describes', [`spawned ${cleanRunLabels.length}, described ${describe.cleanRun.length}`])
   }
 
-  for (const [id, name, files, check, mutate] of T3.filter(selected)) {
-    const safely = root => {
-      try {
-        return check(root, describe)
-      } catch (e) {
-        return [`threw: ${e.message}`]
-      }
-    }
-    const problems = safely(ROOT).map(p => `on the repository: ${p}`)
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fd-harness-'))
-    try {
-      for (const rel of new Set([...files(describe), ...workflowFiles(describe), PROFILE_REL])) {
-        if (fs.existsSync(path.join(ROOT, rel))) {
-          copyInto(tmp, rel)
-        }
-      }
-      mutate(tmp, describe)
-      if (safely(tmp).length === 0) {
-        problems.push('did not fail on a copy with one deliberate mismatch')
-      }
-    } catch (e) {
-      problems.push(`the falsification copy could not be built: ${e.message}`)
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true })
-    }
+  for (const entry of T3.filter(selected)) {
+    const [id, name, , check] = entry
+    const problems = [
+      ...checkSafely(check, ROOT, describe).map(p => `on the repository: ${p}`),
+      ...falsify(entry, describe, null),
+      ...falsify(entry, describe, p => ({ ...p, modules: {} })).map(p => `with a profile that has no modules: ${p}`),
+    ]
     record(id, name, problems)
   }
 
