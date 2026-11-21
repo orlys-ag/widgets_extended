@@ -50,6 +50,11 @@ checked. The delivery harness catches a number in the same sentence as a
 `AGENTS.md` stays self-contained, with no import directives: other agent tools
 read it directly, and not every tool expands them.
 
+`.claude/hooks/inject_response_style.py` sends the Response style section of
+`AGENTS.md` whole with every user message, so that section stays a short
+numbered list: the hook's self-test fails when it passes the hook's
+`MAX_CHARS`.
+
 `.claude/` is versioned except its agent worktrees and `settings.local.json`.
 
 Before finishing a change to these files or to `plans/check_citations.py`, run

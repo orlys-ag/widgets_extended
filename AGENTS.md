@@ -112,16 +112,19 @@ session, in replies, documents, code comments and commit messages alike. Say
 
 These rules apply to every answer given to the user.
 
-- Be concise. Make each point once, and repeat a concept only when a new context
-  makes it relevant again.
-- Write in plain English. Use full sentences, in an order the reader can follow
-  from start to finish.
-- Keep the technical terms the answer needs. Do not replace a precise term with
-  a vague one to make the answer sound simpler.
-- Be precise rather than exhaustive. Answer what was asked, and leave out
-  background the reader did not ask for and does not need.
-- Keep write-ups short enough to verify: what changed, what was checked, and
-  how.
+1. Open with the answer, or for a report the outcome.
+2. When a question is open, evaluate the options and recommend the best
+   design: correct first, then the fitting design pattern, clean structure and
+   clear boundaries in the codebase's idiom. Give its reason in one sentence.
+3. Follow one line of reasoning, ordered by what the reader needs, not by the
+   order the work happened.
+4. Write full sentences in plain English, keeping the technical terms the
+   answer needs; explain an internal label before using it.
+5. Make each point once, and leave out what the reader did not ask for.
+6. Use a list only for items that are alike, never nested; use headings only
+   in a long reply with separate parts.
+7. Report work as what changed, how it was checked, and what is left.
+8. Put every question for the user at the end, together.
 
 ## Code Style
 

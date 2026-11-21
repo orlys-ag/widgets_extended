@@ -262,10 +262,11 @@
     },
     {
       "name": "hooks",
-      "command": "python .claude/hooks/deny_forbidden_characters.py --self-test && python .claude/hooks/audit_shell_command.py --self-test && python .claude/hooks/verify_hooks_load.py",
+      "command": "python .claude/hooks/deny_forbidden_characters.py --self-test && python .claude/hooks/audit_shell_command.py --self-test && python .claude/hooks/inject_response_style.py --self-test && python .claude/hooks/verify_hooks_load.py",
       "pass": "each self-test prints self-test: 0 failed, and verify_hooks_load.py prints nothing",
       "when": {
         "paths": [
+          "^AGENTS\\.md$",
           "^\\.claude/hooks/",
           "^\\.claude/settings\\.json$"
         ]

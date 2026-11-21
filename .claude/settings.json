@@ -8,6 +8,7 @@
       "Bash(node .claude/workflows/feature-delivery.harness.mjs:*)",
       "Bash(python .claude/hooks/deny_forbidden_characters.py --self-test)",
       "Bash(python .claude/hooks/audit_shell_command.py --self-test)",
+      "Bash(python .claude/hooks/inject_response_style.py --self-test)",
       "Bash(python .claude/hooks/verify_hooks_load.py)",
       "Bash(git rev-parse:*)",
       "Bash(git status:*)",
@@ -55,6 +56,19 @@
             "command": "python \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/audit_shell_command.py\"",
             "timeout": 30,
             "statusMessage": "Auditing the command's writes and commit"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "python \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/inject_response_style.py\"",
+            "timeout": 10,
+            "statusMessage": "Adding the response style rules"
           }
         ]
       }
