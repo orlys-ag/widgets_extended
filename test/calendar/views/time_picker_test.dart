@@ -4,8 +4,6 @@
 /// cost of a frame of its motion.
 library;
 
-import 'dart:ui' show Tristate;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
@@ -25,7 +23,6 @@ import 'package:widgets_extended/calendar/views/time_picker.dart'
         timePickerMinuteColumnKey,
         timePickerMinutePillKey,
         timePickerMinuteRowKey,
-        timePickerNowKey,
         timePickerPmKey,
         TimePickerRules;
 import 'package:widgets_extended/widgets_extended.dart';
@@ -935,34 +932,15 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets("PK11 Now picks the current minute rounded down to the step, "
-      "disabled where that is refused; Clear reports null; with neither no "
-      "footer; each ends a running fling with its own one report", (
+  testWidgets("PK11 Clear reports null; without clearable the picker has no "
+      "footer; Clear ends a running fling with its own one report", (
     tester,
   ) async {
-    final semantics = tester.ensureSemantics();
     final calls = <int?>[];
-    var now = 853;
-    Widget picker({
-      int? value = 570,
-      bool Function(int minute)? isEnabled,
-      bool withNow = true,
-      bool clearable = false,
-      int min = 0,
-      CalendarHourLabelFormat format = CalendarHourLabelFormat.twentyFourHour,
-      CalendarThemeData? theme,
-    }) {
+    Widget picker({bool clearable = false, CalendarThemeData? theme}) {
       return host(
         CalendarTimePicker(
-          value: value,
-          min: min,
-          hourLabelFormat: format,
-          isEnabled: isEnabled,
-          now: withNow
-              ? () {
-                  return now;
-                }
-              : null,
+          value: 570,
           clearable: clearable,
           onChanged: calls.add,
         ),
@@ -970,32 +948,7 @@ void main() {
       );
     }
 
-    await tester.pumpWidget(picker());
-    await tester.tap(find.byKey(timePickerNowKey));
-    await tester.pumpAndSettle();
-    expect(calls, <int?>[840]);
-    expectOnPill(tester, 14, 0);
-
-    calls.clear();
-    await tester.pumpWidget(Container());
-    await tester.pumpWidget(
-      picker(
-        isEnabled: (minute) {
-          return minute != 840;
-        },
-      ),
-    );
-    expect(
-      semanticsOf(tester, find.byKey(timePickerNowKey)).flagsCollection.isEnabled,
-      Tristate.isFalse,
-    );
-    await tester.tap(find.byKey(timePickerNowKey));
-    await tester.pumpAndSettle();
-    expect(calls, isEmpty);
-
-    await tester.pumpWidget(Container());
-    await tester.pumpWidget(picker(withNow: false, clearable: true));
-    expect(find.byKey(timePickerNowKey), findsNothing);
+    await tester.pumpWidget(picker(clearable: true));
     await tester.tap(find.byKey(timePickerClearKey));
     await tester.pumpAndSettle();
     expect(calls, <int?>[null]);
@@ -1003,29 +956,8 @@ void main() {
     expect(find.byKey(timePickerMinutePillKey), findsNothing);
 
     await tester.pumpWidget(Container());
-    await tester.pumpWidget(picker(withNow: false));
+    await tester.pumpWidget(picker());
     expect(find.byKey(timePickerFooterKey), findsNothing);
-
-    // Now across the halves, onto an hour whose minute rows differ.
-    calls.clear();
-    await tester.pumpWidget(Container());
-    await tester.pumpWidget(
-      picker(value: 540, format: CalendarHourLabelFormat.twelveHour),
-    );
-    await tester.tap(find.byKey(timePickerNowKey));
-    await tester.pumpAndSettle();
-    expect(calls, <int?>[840]);
-    expect(onPill(tester, find.byKey(timePickerPmKey)), isTrue);
-    expectOnPill(tester, 14, 0);
-
-    calls.clear();
-    await tester.pumpWidget(Container());
-    await tester.pumpWidget(picker(value: 510, min: 495));
-    expect(rowNumbers(timePickerMinuteRowKey), <int>[15, 30, 45]);
-    await tester.tap(find.byKey(timePickerNowKey));
-    await tester.pumpAndSettle();
-    expect(calls, <int?>[840]);
-    expectOnPill(tester, 14, 0);
 
     final slow = CalendarThemeData(
       motionDuration: const Duration(seconds: 1),
@@ -1037,27 +969,17 @@ void main() {
     await tester.fling(hourColumn(), const Offset(0.0, -60.0), 800.0);
     await tester.pump(const Duration(milliseconds: 16));
     expect(calls, isEmpty);
-    await tester.tap(find.byKey(timePickerNowKey));
-    await tester.pumpAndSettle();
-    expect(calls, <int?>[840]);
-    expectOnPill(tester, 14, 0);
-
-    calls.clear();
-    await tester.fling(hourColumn(), const Offset(0.0, -60.0), 800.0);
-    await tester.pump(const Duration(milliseconds: 16));
-    expect(calls, isEmpty);
     await tester.tap(find.byKey(timePickerClearKey));
     await tester.pumpAndSettle();
     expect(calls, <int?>[null]);
     expect(find.byKey(timePickerHourPillKey), findsNothing);
     expect(find.byKey(timePickerMinutePillKey), findsNothing);
-    semantics.dispose();
   });
 
   testWidgets("PK12 with a null onChanged no tap, fling, key or semantics "
       "action reports, the focused Hour keeps the focus, and Tab passes "
-      "the picker by; with one, Tab visits Hour, Minute, AM/PM, Now "
-      "and Clear in that order", (tester) async {
+      "the picker by; with one, Tab visits Hour, Minute, AM/PM and Clear "
+      "in that order", (tester) async {
     final semantics = tester.ensureSemantics();
     final calls = <int?>[];
     final hour = FocusNode();
@@ -1082,9 +1004,6 @@ void main() {
                   hourLabelFormat: twelve
                       ? CalendarHourLabelFormat.twelveHour
                       : CalendarHourLabelFormat.twentyFourHour,
-                  now: () {
-                    return 853;
-                  },
                   clearable: true,
                   onChanged: onChanged,
                 ),
@@ -1130,7 +1049,7 @@ void main() {
     before.requestFocus();
     await tester.pump();
     final visited = <String>[];
-    for (var press = 0; press < 6; press++) {
+    for (var press = 0; press < 5; press++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
       final focused = FocusManager.instance.primaryFocus;
@@ -1142,22 +1061,13 @@ void main() {
         visited.add("Minute");
       } else if (focusedUnder(find.byKey(timePickerAmPmColumnKey))) {
         visited.add("AM/PM");
-      } else if (focusedUnder(find.byKey(timePickerNowKey))) {
-        visited.add("Now");
       } else if (focusedUnder(find.byKey(timePickerClearKey))) {
         visited.add("Clear");
       } else {
         visited.add("other");
       }
     }
-    expect(visited, <String>[
-      "Hour",
-      "Minute",
-      "AM/PM",
-      "Now",
-      "Clear",
-      "after",
-    ]);
+    expect(visited, <String>["Hour", "Minute", "AM/PM", "Clear", "after"]);
     semantics.dispose();
   });
 
@@ -1969,38 +1879,17 @@ void main() {
     expect(narrow, isNot(wide));
   });
 
-  testWidgets("PK35 Now and Clear end a finger's hold on a column: its lift "
-      "neither picks from where it lies nor taps its row, and a pointer "
-      "down after the pick taps as before", (tester) async {
+  testWidgets("PK35 Clear ends a finger's hold on a column: its lift neither "
+      "picks from where it lies nor taps its row, and a pointer down after "
+      "the pick taps as before", (tester) async {
     final calls = <int?>[];
     await tester.pumpWidget(
       host(
-        CalendarTimePicker(
-          value: 570,
-          now: () {
-            return 853;
-          },
-          clearable: true,
-          onChanged: calls.add,
-        ),
+        CalendarTimePicker(value: 570, clearable: true, onChanged: calls.add),
       ),
     );
-    final now = await tester.startGesture(
-      tester.getCenter(hourRow(9)),
-      pointer: 9,
-    );
-    await tester.pump(const Duration(milliseconds: 100));
-    await tester.tap(find.byKey(timePickerNowKey), pointer: 10);
-    await tester.pumpAndSettle();
-    expect(calls, <int?>[840]);
-    await now.up();
-    await tester.pumpAndSettle();
-    expect(calls, <int?>[840]);
-    expectOnPill(tester, 14, 0);
-
-    calls.clear();
     final clear = await tester.startGesture(
-      tester.getCenter(hourRow(14)),
+      tester.getCenter(hourRow(9)),
       pointer: 11,
     );
     await tester.pump(const Duration(milliseconds: 100));
@@ -2250,8 +2139,9 @@ void main() {
   });
 
   testWidgets("PK39 Left and Right move between the shown columns, A and P "
-      "on Hour pick the half, and Tab visits Hour, Minute, AM/PM, Now and "
-      "Clear", (tester) async {
+      "on Hour pick the half, and Tab visits Hour, Minute, AM/PM and Clear", (
+    tester,
+  ) async {
     final calls = <int?>[];
     final hour = FocusNode();
     final before = FocusNode();
@@ -2271,9 +2161,6 @@ void main() {
                   value: 570,
                   focusNode: hour,
                   hourLabelFormat: CalendarHourLabelFormat.twelveHour,
-                  now: () {
-                    return 853;
-                  },
                   clearable: true,
                   onChanged: calls.add,
                 ),
@@ -2307,7 +2194,7 @@ void main() {
     before.requestFocus();
     await tester.pump();
     final visited = <String>[];
-    for (var press = 0; press < 5; press++) {
+    for (var press = 0; press < 4; press++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
       if (hour.hasPrimaryFocus) {
@@ -2316,15 +2203,13 @@ void main() {
         visited.add("Minute");
       } else if (focusedUnder(amPmColumn())) {
         visited.add("AM/PM");
-      } else if (focusedUnder(find.byKey(timePickerNowKey))) {
-        visited.add("Now");
       } else if (focusedUnder(find.byKey(timePickerClearKey))) {
         visited.add("Clear");
       } else {
         visited.add("other");
       }
     }
-    expect(visited, <String>["Hour", "Minute", "AM/PM", "Now", "Clear"]);
+    expect(visited, <String>["Hour", "Minute", "AM/PM", "Clear"]);
   });
 
   testWidgets("PK40 a drag's pointer moves on the AM/PM column and the "
@@ -2466,10 +2351,8 @@ void main() {
   });
 
   testWidgets("PK42 with showMinutes false the picker picks whole hours on "
-      "its hourStep, Now included, its value's hour shown besides, and on "
-      "the 12-hour clock the AM/PM column stands right of Hour", (
-    tester,
-  ) async {
+      "its hourStep, its value's hour shown besides, and on the 12-hour "
+      "clock the AM/PM column stands right of Hour", (tester) async {
     final calls = <int?>[];
     Widget picker(
       int value, {
@@ -2481,9 +2364,6 @@ void main() {
           showMinutes: false,
           hourStep: 2,
           hourLabelFormat: format,
-          now: () {
-            return 993;
-          },
           onChanged: calls.add,
         ),
       );
@@ -2516,10 +2396,6 @@ void main() {
     await tester.tap(hourRow(14));
     await tester.pumpAndSettle();
     expect(calls, <int?>[840]);
-    // Now at 16:33 picks 16:00, the latest whole hour on the step.
-    await tester.tap(find.byKey(timePickerNowKey));
-    await tester.pumpAndSettle();
-    expect(calls, <int?>[840, 960]);
 
     await tester.pumpWidget(Container());
     await tester.pumpWidget(
@@ -2534,17 +2410,9 @@ void main() {
   });
 
   testWidgets("PK43 with showHours false the picker picks minutes of one "
-      "hour, its value's or min's, on the 24-hour clock, and Now only within "
-      "it", (tester) async {
-    final semantics = tester.ensureSemantics();
+      "hour, its value's or min's, on the 24-hour clock", (tester) async {
     final calls = <int?>[];
-    var now = 853;
-    Widget picker({
-      int? value = 570,
-      int min = 0,
-      int hourStep = 1,
-      bool withNow = false,
-    }) {
+    Widget picker({int? value = 570, int min = 0, int hourStep = 1}) {
       return host(
         CalendarTimePicker(
           value: value,
@@ -2553,22 +2421,9 @@ void main() {
           minuteStep: 15,
           hourStep: hourStep,
           min: min,
-          now: withNow
-              ? () {
-                  return now;
-                }
-              : null,
           onChanged: calls.add,
         ),
       );
-    }
-
-    bool nowEnabled() {
-      return semanticsOf(
-            tester,
-            find.byKey(timePickerNowKey),
-          ).flagsCollection.isEnabled ==
-          Tristate.isTrue;
     }
 
     await tester.pumpWidget(picker());
@@ -2586,30 +2441,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls, <int?>[795]);
 
-    calls.clear();
-    await tester.pumpWidget(Container());
-    await tester.pumpWidget(picker(withNow: true));
-    expect(nowEnabled(), isFalse);
-    await tester.tap(find.byKey(timePickerNowKey));
-    await tester.pumpAndSettle();
-    expect(calls, isEmpty);
-    now = 588;
-    await tester.pumpWidget(Container());
-    await tester.pumpWidget(picker(withNow: true));
-    expect(nowEnabled(), isTrue);
-    await tester.tap(find.byKey(timePickerNowKey));
-    await tester.pumpAndSettle();
-    expect(calls, <int?>[585]);
-
     // The value's hour, 09, lies off an hourStep of 2.
     calls.clear();
     await tester.pumpWidget(Container());
-    await tester.pumpWidget(picker(hourStep: 2, withNow: true));
+    await tester.pumpWidget(picker(hourStep: 2));
     // Setup sanity: the hour's rows are there to take a tap.
     expect(rowNumbers(timePickerMinuteRowKey), <int>[0, 15, 30, 45]);
     expect(tappableRows(tester, timePickerMinuteRowKey, 59), isEmpty);
-    expect(nowEnabled(), isFalse);
-    semantics.dispose();
   });
 
   testWidgets("PK44 hourStep lists the hours on its step from midnight, 24 "
@@ -2720,36 +2558,6 @@ void main() {
     expect(asked.toSet().length, asked.length, reason: "(iii) $asked");
   });
 
-  testWidgets("PK45 Now picks the latest time at or before now on both "
-      "steps", (tester) async {
-    final calls = <int?>[];
-    Widget picker(int hourStep) {
-      return host(
-        CalendarTimePicker(
-          value: 570,
-          hourStep: hourStep,
-          minuteStep: 15,
-          now: () {
-            return 853;
-          },
-          onChanged: calls.add,
-        ),
-      );
-    }
-
-    await tester.pumpWidget(picker(5));
-    await tester.tap(find.byKey(timePickerNowKey));
-    await tester.pumpAndSettle();
-    expect(calls, <int?>[645]);
-
-    calls.clear();
-    await tester.pumpWidget(Container());
-    await tester.pumpWidget(picker(1));
-    await tester.tap(find.byKey(timePickerNowKey));
-    await tester.pumpAndSettle();
-    expect(calls, <int?>[840]);
-  });
-
   testWidgets("PK46 a change of showHours keeps the focus on the column "
       "that had it, however it was reached, and a clock change ends a hold "
       "on Hour with no report", (tester) async {
@@ -2771,9 +2579,7 @@ void main() {
               focusNode: focusNode,
               showHours: showHours,
               hourLabelFormat: format,
-              now: () {
-                return 853;
-              },
+              clearable: true,
               onChanged: calls.add,
             ),
           ),
@@ -2810,17 +2616,17 @@ void main() {
     expect(hourColumn(), findsOneWidget);
     expect(focusedUnder(minuteColumn()), isTrue);
 
-    // Minute reached by Shift+Tab from Now, so the focus Minute's node had
+    // Minute reached by Shift+Tab from Clear, so the focus Minute's node had
     // before it lies outside the column.
     await tester.pumpWidget(Container());
     await tester.pumpWidget(picker());
-    Focus.of(tester.element(find.byKey(timePickerNowKey))).requestFocus();
+    Focus.of(tester.element(find.byKey(timePickerClearKey))).requestFocus();
     await tester.pump();
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pump();
-    // Setup sanity: Shift+Tab from Now reaches Minute.
+    // Setup sanity: Shift+Tab from Clear reaches Minute.
     expect(focusedUnder(minuteColumn()), isTrue);
     await tester.pumpWidget(picker(showHours: false));
     await tester.pump();
@@ -3107,8 +2913,10 @@ void main() {
 
   testWidgets("PK51 a fling clicks as it brings rows to the pill, at most "
       "once a row, and a mouse wheel once for the row it brings; a tap, a "
-      "key, a screen reader's increase, Now, a new value and a value that "
-      "waited for a drag move the columns without a click", (tester) async {
+      "key, a screen reader's increase, Clear, a new value and a value "
+      "that waited for a drag move the columns without a click", (
+    tester,
+  ) async {
     final semantics = tester.ensureSemantics();
     final clicks = recordClicks(tester);
     final calls = <int?>[];
@@ -3119,9 +2927,7 @@ void main() {
         CalendarTimePicker(
           value: value,
           hapticFeedback: true,
-          now: () {
-            return 14 * 60 + 5;
-          },
+          clearable: true,
           focusNode: hour,
           onChanged: calls.add,
         ),
@@ -3169,9 +2975,9 @@ void main() {
     performAction(tester, hourColumn(), SemanticsAction.increase);
     await tester.pumpAndSettle();
     expect(calls, <int?>[690, 750, 810]);
-    await tester.tap(find.byKey(timePickerNowKey));
+    await tester.tap(find.byKey(timePickerClearKey));
     await tester.pumpAndSettle();
-    expect(calls, <int?>[690, 750, 810, 840]);
+    expect(calls, <int?>[690, 750, 810, null]);
     await tester.pumpWidget(picker(570));
     await tester.pumpAndSettle();
     expect(onPill(tester, hourRow(9)), isTrue);
@@ -3338,82 +3144,5 @@ void main() {
     expect(calls, isEmpty);
     expectOnPill(tester, 7, 30);
     expect(tester.element(hourColumn()), same(column));
-  });
-
-  testWidgets("PK55 with nowPicksLater Now picks the first time after the "
-      "latest at or before now that the picker offers, where that one is not "
-      "offered, and draws disabled only where none is", (tester) async {
-    final semantics = tester.ensureSemantics();
-    final calls = <int?>[];
-    var now = 9 * 60 + 7;
-    Widget picker({
-      bool later = true,
-      bool Function(int minute)? isEnabled,
-    }) {
-      return host(
-        CalendarTimePicker(
-          value: 600,
-          minuteStep: 15,
-          min: 8 * 60,
-          max: 18 * 60,
-          isEnabled:
-              isEnabled ??
-              (minute) {
-                return minute != 9 * 60;
-              },
-          now: () {
-            return now;
-          },
-          nowPicksLater: later,
-          onChanged: calls.add,
-        ),
-      );
-    }
-
-    Future<void> showAnew(Widget widget) async {
-      await tester.pumpWidget(Container());
-      await tester.pumpWidget(widget);
-    }
-
-    Tristate nowEnabled() {
-      return semanticsOf(
-        tester,
-        find.byKey(timePickerNowKey),
-      ).flagsCollection.isEnabled;
-    }
-
-    Future<void> tapNow() async {
-      await tester.tap(find.byKey(timePickerNowKey));
-      await tester.pumpAndSettle();
-    }
-
-    await tester.pumpWidget(picker());
-    await tapNow();
-    expect(calls, <int?>[9 * 60 + 15]);
-
-    calls.clear();
-    now = 7 * 60 + 30;
-    await showAnew(picker());
-    await tapNow();
-    expect(calls, <int?>[8 * 60]);
-
-    calls.clear();
-    now = 9 * 60 + 7;
-    await showAnew(
-      picker(
-        isEnabled: (minute) {
-          return minute < 9 * 60;
-        },
-      ),
-    );
-    expect(nowEnabled(), Tristate.isFalse);
-    await tapNow();
-    expect(calls, isEmpty);
-
-    await showAnew(picker(later: false));
-    expect(nowEnabled(), Tristate.isFalse);
-    await tapNow();
-    expect(calls, isEmpty);
-    semantics.dispose();
   });
 }

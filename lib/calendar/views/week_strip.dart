@@ -58,7 +58,6 @@ class WeekStrip<T> extends StatefulWidget {
     required this.weekdays,
     required this.onSelectDay,
     required this.onBrowse,
-    this.onTapDay,
     this.recalls = 0,
     this.recallDay,
     this.initialDay,
@@ -80,10 +79,6 @@ class WeekStrip<T> extends StatefulWidget {
 
   /// Reports a day tapped; null for a strip whose days take no tap.
   final ValueChanged<DateTime>? onSelectDay;
-
-  /// Reports a day tapped, right after [onSelectDay] reports it; null
-  /// reports nothing.
-  final ValueChanged<DateTime>? onTapDay;
 
   /// Reports the day that has come to the middle of the strip, which for an
   /// odd count of days is in the month most of the days it shows are in.
@@ -490,7 +485,6 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
           ? null
           : () {
               widget.onSelectDay?.call(day);
-              widget.onTapDay?.call(day);
             },
       child: DayMarkerListener<T>(
         store: widget.store,

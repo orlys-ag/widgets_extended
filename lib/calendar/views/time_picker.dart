@@ -1,7 +1,7 @@
 /// The time picker: up to three columns, an Hour column, a Minute column
 /// and on the 12-hour clock an AM/PM column, which scroll and snap their
-/// selected rows to a pill across each column's middle, and optional Now and
-/// Clear actions.
+/// selected rows to a pill across each column's middle, and an optional
+/// Clear action.
 library;
 
 import 'dart:async';
@@ -57,13 +57,10 @@ const ValueKey<String> timePickerAmPmPillKey = ValueKey<String>(
   "time-picker-am-pm-pill",
 );
 
-/// The key of a [CalendarTimePicker]'s footer, which holds Now and Clear.
+/// The key of a [CalendarTimePicker]'s footer, which holds Clear.
 const ValueKey<String> timePickerFooterKey = ValueKey<String>(
   "time-picker-footer",
 );
-
-/// The key of a [CalendarTimePicker]'s Now action.
-const ValueKey<String> timePickerNowKey = ValueKey<String>("time-picker-now");
 
 /// The key of a [CalendarTimePicker]'s Clear action.
 const ValueKey<String> timePickerClearKey = ValueKey<String>(
@@ -129,7 +126,7 @@ const double _placeTolerance = 1e-6;
 /// column where [showHours], a Minute column where [showMinutes], and on the
 /// 12-hour clock, where the Hour column shows, an AM/PM column right of
 /// them. Each scrolls and snaps its selected row to a pill across its
-/// middle. A footer of Now and Clear shows where either is given.
+/// middle. A footer of Clear shows where [clearable].
 ///
 /// Under a bounded width the shown columns share it equally. Under an
 /// unbounded width, and to a parent that asks its intrinsic sizes, each is
@@ -158,8 +155,8 @@ const double _placeTolerance = 1e-6;
 /// an AM or PM row with none. [isEnabled] is asked only of a time on both
 /// steps from [min] to [max], each such time at most once until the picker
 /// is given new parameters or its dependencies change, and never per frame
-/// of a motion: only as the picker is built anew, and as a pick, Now or
-/// Clear settles. The value always shows, selected, off either step, out
+/// of a motion: only as the picker is built anew, and as a pick or Clear
+/// settles. The value always shows, selected, off either step, out
 /// of range or refused included. Changing the hour or the half keeps the
 /// minute where the new hour accepts it, and otherwise takes the accepted
 /// minute of that hour nearest it, the earlier on a tie.
@@ -184,18 +181,11 @@ const double _placeTolerance = 1e-6;
 /// it, or a mouse wheel brings a row onto its pill: one for each pointer
 /// move or frame that brings one, however many rows it passed, and none
 /// for the row it last clicked for or rested on until another has reached
-/// the pill. A tap, a key, a screen reader's action, Now, Clear and a new
+/// the pill. A tap, a key, a screen reader's action, Clear and a new
 /// [value] move the columns without a click.
 ///
-/// [now] gives the current minute after midnight on the host's clock; with
-/// it, the footer's Now picks the latest time at or before that minute on
-/// both steps, and draws disabled where the picker does not offer that
-/// time: out of range, refused, or with the Hour column hidden in another
-/// hour. With [nowPicksLater], where the picker does not offer that time,
-/// Now picks the first time after it, by [minuteStep] up to [max], that the
-/// picker offers, and draws disabled only where it offers none. With
-/// [clearable], the footer's Clear reports null. With neither [now] nor
-/// [clearable], the picker has no footer.
+/// With [clearable], the footer's Clear reports null; without it, the
+/// picker has no footer.
 ///
 /// The picker draws no box of its own: its columns, their pills and its
 /// footer lie on whatever surface is behind it, inside its padding. Its
@@ -226,8 +216,6 @@ class CalendarTimePicker extends StatefulWidget {
     this.min = 0,
     this.max = CalendarDates.minutesPerDay - 1,
     this.isEnabled,
-    this.now,
-    this.nowPicksLater = false,
     this.clearable = false,
     this.showHours = true,
     this.showMinutes = true,
@@ -264,17 +252,6 @@ class CalendarTimePicker extends StatefulWidget {
 
   /// Whether a time may be picked; null accepts every time.
   final bool Function(int minute)? isEnabled;
-
-  /// The current minute after midnight on the host's clock: Now picks the
-  /// latest time at or before it on both steps, where the picker offers
-  /// that time, and otherwise, under [nowPicksLater], the first time after
-  /// it that the picker offers. Null shows no Now.
-  final ValueGetter<int>? now;
-
-  /// Whether Now, where the picker does not offer the latest time at or
-  /// before [now], picks the first time after it, by [minuteStep] up to
-  /// [max], that the picker offers; false leaves Now disabled there.
-  final bool nowPicksLater;
 
   /// Whether the footer shows Clear, which reports null.
   final bool clearable;
@@ -385,7 +362,6 @@ final class TimePickerRules {
           twelveHour &&
           picker.max == day &&
           (picker.min > 0 || picker.value == day),
-      nowPicksLater: picker.nowPicksLater,
       isEnabled: isEnabled,
       answers: isEnabled == null
           ? const <bool?>[]
@@ -400,7 +376,6 @@ final class TimePickerRules {
     required this.hourStep,
     required this.twelveHour,
     required this.onlyHour,
-    required this.nowPicksLater,
     required bool midnightEnds,
     required bool Function(int minute)? isEnabled,
     required List<bool?> answers,
@@ -434,11 +409,6 @@ final class TimePickerRules {
   /// on the grid: the hour of the picker's value, or of [min] where the
   /// value is null, 24 for 1440. Null where the Hour column shows.
   final int? onlyHour;
-
-  /// Whether [nowTime], where the latest time at or before the minute is
-  /// not offered, takes the first later one that is
-  /// ([CalendarTimePicker.nowPicksLater]).
-  final bool nowPicksLater;
 
   /// Whether 12 AM 00 is 1440 ([compose]).
   final bool _midnightEnds;
@@ -567,36 +537,6 @@ final class TimePickerRules {
   Iterable<int> offeredTimes() {
     return gridTimes().where(offers);
   }
-
-  /// The time Now picks at the minute after midnight [minute]: the latest
-  /// time at or before it on both steps of the grid, whatever [onlyHour],
-  /// where the picker [offers] it; where it does not, under
-  /// [nowPicksLater], the first time after it, by [minuteStep] up to [max],
-  /// that the picker offers. Null where there is no such time, or where
-  /// [minute] lies outside 0 to 1439.
-  int? nowTime(int minute) {
-    if (minute < 0 || minute >= CalendarDates.minutesPerDay) {
-      return null;
-    }
-    var time = minute - minute % minuteStep;
-    // Minute 0 of hour 0 lies on both steps, so the scan ends within
-    // `60 * hourStep / minuteStep` steps.
-    while (!_onSteps(time)) {
-      time -= minuteStep;
-    }
-    if (offers(time)) {
-      return time;
-    }
-    if (!nowPicksLater) {
-      return null;
-    }
-    for (var later = time + minuteStep; later <= max; later += minuteStep) {
-      if (offers(later)) {
-        return later;
-      }
-    }
-    return null;
-  }
 }
 
 /// One row of a column: an hour of the day (24 for the hour that holds
@@ -707,7 +647,6 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
 
   bool _amEnabled = false;
   bool _pmEnabled = false;
-  bool _nowEnabled = false;
 
   double _rowExtent = _leastRowExtent;
 
@@ -1025,8 +964,7 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
   }
 
   /// Makes the rules of the widget, and from them which halves of the day
-  /// have a time the picker offers, on the 12-hour clock, and whether
-  /// Now's time is offered.
+  /// have a time the picker offers, on the 12-hour clock.
   void _resetRules() {
     final rules = TimePickerRules.of(widget);
     _rules = rules;
@@ -1046,7 +984,6 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     }
     _amEnabled = am;
     _pmEnabled = pm;
-    _nowEnabled = _nowTime() != null;
   }
 
   /// Brings the picker to its widget: a new value, or with none the rows
@@ -1549,42 +1486,19 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     return widget.value;
   }
 
-  /// Shows and reports [time], from Now or Clear: every hold and user
-  /// motion ends without a report.
-  void _pickTime(int? time) {
-    final before = _time;
-    _endHolds();
-    setState(() {
-      _applyTime(time, jump: false);
-    });
-    if (time != before) {
-      widget.onChanged?.call(time);
-    }
-  }
-
-  /// Now's time ([TimePickerRules.nowTime]), or null with no
-  /// [CalendarTimePicker.now].
-  int? _nowTime() {
-    final now = widget.now;
-    if (now == null) {
-      return null;
-    }
-    return _rules.nowTime(now());
-  }
-
-  void _pickNow() {
+  /// Clears the value, from Clear, and reports null where it held a time:
+  /// every hold and user motion ends without a report.
+  void _pickClear() {
     if (!_takesInput) {
       return;
     }
-    final time = _nowTime();
-    if (time != null) {
-      _pickTime(time);
-    }
-  }
-
-  void _pickClear() {
-    if (_takesInput) {
-      _pickTime(null);
+    final before = _time;
+    _endHolds();
+    setState(() {
+      _applyTime(null, jump: false);
+    });
+    if (before != null) {
+      widget.onChanged?.call(null);
     }
   }
 
@@ -2294,7 +2208,6 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
     final headerStyle = theme.timePickerHeaderStyle.copyWith(
       color: theme.textSecondary,
     );
-    final hasFooter = widget.now != null || widget.clearable;
     return FocusTraversalGroup(
       policy: OrderedTraversalPolicy(),
       child: Padding(
@@ -2326,31 +2239,21 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
                 ),
               ),
             ),
-            if (hasFooter)
+            if (widget.clearable)
               Align(
                 alignment: AlignmentDirectional.centerEnd,
                 child: Row(
                   key: timePickerFooterKey,
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    if (widget.now != null)
-                      _action(
-                        theme: theme,
-                        key: timePickerNowKey,
-                        label: strings.timePickerNowLabel,
-                        order: 4.0,
-                        enabled: _takesInput && _nowEnabled,
-                        onTap: _pickNow,
-                      ),
-                    if (widget.clearable)
-                      _action(
-                        theme: theme,
-                        key: timePickerClearKey,
-                        label: strings.timePickerClearLabel,
-                        order: 5.0,
-                        enabled: _takesInput,
-                        onTap: _pickClear,
-                      ),
+                    _action(
+                      theme: theme,
+                      key: timePickerClearKey,
+                      label: strings.timePickerClearLabel,
+                      order: 4.0,
+                      enabled: _takesInput,
+                      onTap: _pickClear,
+                    ),
                   ],
                 ),
               ),

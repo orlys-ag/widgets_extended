@@ -2,14 +2,13 @@
 /// opens on and the view control at the end of its header, the control's
 /// look and what a screen reader hears of it, a switch to the time view and
 /// back over the theme's motion, the control's place in both views, the
-/// view it opens on, a tap on a day that turns to the time view and an
-/// arrow key that does not, the state the date view keeps, what a tap on a
-/// day and a pick of a time report, a picked time's day as a day start on
-/// the store's clock, the time a tap on a day keeps or moves to, the times
-/// the clock of the store's zone skips, Now on today alone, a minute that
-/// turns null, a column held as the view switches, the focus a switch
-/// moves, the parameters it hands its pickers, the theme it draws in, the
-/// values its constructor refuses and its days at large text.
+/// view it opens on, a tap on a day that keeps the date view, the state the
+/// date view keeps, what a tap on a day and a pick of a time report, a
+/// picked time's day as a day start on the store's clock, the time a tap on
+/// a day keeps or moves to, the times the clock of the store's zone skips,
+/// a minute that turns null, a column held as the view switches, the focus
+/// a switch moves, the parameters it hands its pickers, the theme it draws
+/// in, the values its constructor refuses and its days at large text.
 library;
 
 import 'package:flutter/foundation.dart';
@@ -24,10 +23,8 @@ import 'package:widgets_extended/calendar/composition/calendar_date_time_picker.
         dateTimePickerTimeKey,
         dateTimePickerTimeSegmentKey;
 import 'package:widgets_extended/calendar/views/day_cell.dart' show DayCell;
-import 'package:widgets_extended/calendar/views/month_strip.dart'
-    show MonthStrip;
 import 'package:widgets_extended/calendar/views/time_picker.dart'
-    show timePickerHourColumnKey, timePickerHourRowKey, timePickerNowKey;
+    show timePickerHourColumnKey, timePickerHourRowKey;
 import 'package:widgets_extended/widgets_extended.dart';
 
 import '../../scheduling/zones.dart';
@@ -404,28 +401,21 @@ void main() {
     expect(viewOpacity(tester, dayPicker), 0.0);
   });
 
-  testWidgets("DT18 a tap on a day reports it and turns to the time view, "
-      "and so does a tap on the value's day and a screen reader's "
-      "activation of a day, each reporting true; a day an arrow key reaches "
-      "in the month turns nothing, nor does a tap with a null minute", (
-    tester,
-  ) async {
+  testWidgets("DT18 a tap on a day reports it and keeps the date view, "
+      "reporting no switch, and so do a tap on the value's day and a screen "
+      "reader's activation of a day", (tester) async {
     final semantics = tester.ensureSemantics();
     final shows = <bool>[];
     final picks = <(DateTime, int?)>[];
     var built = 0;
-    Widget picker({
-      int? minute = 600,
-      CalendarDayPickerView view = const CalendarDayPickerView(),
-    }) {
+    Widget picker() {
       built++;
       return app(
         CalendarDateTimePicker<String>(
           key: ValueKey<int>(built),
           day: wednesday,
-          minute: minute,
+          minute: 600,
           today: tuesday,
-          initialView: view,
           onChanged: (day, minute) {
             picks.add((day, minute));
           },
@@ -434,26 +424,24 @@ void main() {
       );
     }
 
-    Future<void> expectTurned(String step) async {
+    Future<void> expectKept(String step) async {
       await tester.pumpAndSettle();
-      expect(shows, <bool>[true], reason: step);
-      expect(viewOpacity(tester, timeView), 1.0, reason: step);
-      expect(dayTarget(thursday).hitTestable(), findsNothing, reason: step);
+      expect(shows, isEmpty, reason: step);
+      expect(timeView, findsNothing, reason: step);
+      expect(dayTarget(thursday).hitTestable(), findsOne, reason: step);
     }
 
     await tester.pumpWidget(picker());
     await tester.tap(dayCell(thursday));
     expect(picks, <(DateTime, int?)>[(thursday, 600)]);
-    await expectTurned("a tap");
+    await expectKept("a tap");
 
-    shows.clear();
     picks.clear();
     await tester.pumpWidget(picker());
     await tester.tap(dayCell(wednesday));
     expect(picks, isEmpty);
-    await expectTurned("the value's day");
+    await expectKept("the value's day");
 
-    shows.clear();
     await tester.pumpWidget(picker());
     tester.semantics.tap(
       find.semantics.byLabel(
@@ -464,39 +452,7 @@ void main() {
       ),
     );
     expect(picks, <(DateTime, int?)>[(thursday, 600)]);
-    await expectTurned("a screen reader");
-
-    shows.clear();
-    picks.clear();
-    await tester.pumpWidget(
-      picker(view: const CalendarDayPickerView(folded: false)),
-    );
-    await tester.pumpAndSettle();
-    tester
-        .widget<Focus>(
-          find
-              .descendant(
-                of: find.byType(MonthStrip<String>),
-                matching: find.byType(Focus),
-              )
-              .first,
-        )
-        .focusNode!
-        .requestFocus();
-    await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pumpAndSettle();
-    expect(picks, <(DateTime, int?)>[(thursday, 600)]);
-    expect(shows, isEmpty);
-    expect(timeView, findsNothing);
-
-    picks.clear();
-    await tester.pumpWidget(picker(minute: null));
-    await tester.tap(dayCell(thursday));
-    await tester.pumpAndSettle();
-    expect(picks, <(DateTime, int?)>[(thursday, null)]);
-    expect(shows, isEmpty);
-    expect(timeView, findsNothing);
+    await expectKept("a screen reader");
     semantics.dispose();
   });
 
@@ -755,6 +711,7 @@ void main() {
     expect(picks.single.$2, 60);
 
     await tester.pumpWidget(picker(sunday, 60));
+    await tester.tap(segmentOf(timeSegment));
     await tester.pumpAndSettle();
     expect(rowTakesTap(tester, timePickerHourRowKey(0)), isFalse);
     expect(rowTakesTap(tester, timePickerHourRowKey(1)), isTrue);
@@ -1005,30 +962,6 @@ void main() {
     expect(asks, contains((CalendarDates.dayNumber(thursday), 600)));
   });
 
-  testWidgets("DT8 the time picker shows Now on today's day alone", (
-    tester,
-  ) async {
-    Widget picker(DateTime day) {
-      return app(
-        CalendarDateTimePicker<String>(
-          day: day,
-          minute: 600,
-          today: wednesday,
-          initialShowsTime: true,
-          now: () {
-            return 615;
-          },
-          onChanged: (day, minute) {},
-        ),
-      );
-    }
-
-    await tester.pumpWidget(picker(wednesday));
-    expect(find.byKey(timePickerNowKey), findsOne);
-    await tester.pumpWidget(picker(thursday));
-    expect(find.byKey(timePickerNowKey), findsNothing);
-  });
-
   testWidgets("DT9 a column held as the view turns to the date view picks "
       "nothing", (tester) async {
     final picks = <(DateTime, int?)>[];
@@ -1062,8 +995,8 @@ void main() {
 
   testWidgets("DT10 where a switch leaves the focus in the view it hides, "
       "the focus moves to the segment that names the shown view in the "
-      "shown view's control, whether a tap, a key or a day turned it; a "
-      "switch with the focus elsewhere moves no focus", (tester) async {
+      "shown view's control, whether a tap or a key turned it; a switch "
+      "with the focus elsewhere moves no focus", (tester) async {
     final hours = FocusNode(debugLabel: "hours");
     addTearDown(hours.dispose);
     final outside = FocusNode(debugLabel: "outside");
@@ -1105,15 +1038,6 @@ void main() {
     expect(viewOpacity(tester, timeView), 1.0);
     expect(focusedOn(timeSegment), isTrue);
 
-    await tester.tap(segmentOf(dateSegment));
-    await tester.pumpAndSettle();
-    // A tap on a day of the month gives the month the focus, and turns to
-    // the time view.
-    await tester.tap(dayCell(thursday));
-    await tester.pumpAndSettle();
-    expect(viewOpacity(tester, timeView), 1.0);
-    expect(focusedOn(timeSegment), isTrue);
-
     outside.requestFocus();
     await tester.pump();
     await tester.tap(segmentOf(dateSegment));
@@ -1144,9 +1068,6 @@ void main() {
     }
 
     void onViewChanged(CalendarDayPickerView view) {}
-    int now() {
-      return 0;
-    }
 
     await tester.pumpWidget(
       app(
@@ -1169,8 +1090,6 @@ void main() {
           timeBoundsOf: (day) {
             return (min: CalendarDates.dayNumber(day) % 100, max: 1200);
           },
-          now: now,
-          nowPicksLater: true,
           timeFocusNode: hours,
           hapticFeedback: true,
           subject: "start",
@@ -1201,8 +1120,6 @@ void main() {
     expect(timePicker.minuteStep, 30);
     expect(timePicker.min, CalendarDates.dayNumber(wednesday) % 100);
     expect(timePicker.max, 1200);
-    expect(timePicker.now == now, isTrue);
-    expect(timePicker.nowPicksLater, isTrue);
     expect(timePicker.focusNode, same(hours));
     expect(timePicker.hapticFeedback, isTrue);
     expect(timePicker.subject, "start");

@@ -345,11 +345,6 @@ abstract base class CalendarLocalizations {
     return "PM";
   }
 
-  /// The time picker's action that picks the current time: "Now".
-  String get timePickerNowLabel {
-    return "Now";
-  }
-
   /// The time picker's action that picks no time: "Clear".
   String get timePickerClearLabel {
     return "Clear";

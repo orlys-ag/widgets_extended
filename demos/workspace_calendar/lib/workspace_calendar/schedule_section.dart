@@ -138,10 +138,12 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// [CalendarScheduleCheck.endDays]; the section reads them of each check
 /// once, as a picker first builds under it. For a timed schedule the
 /// picker's view control turns it between its day picker and its time
-/// picker, whose haptic feedback is on, and a tap on a day turns it to its
-/// time picker. Each opening of a row shows its day picker, on the view
-/// either picker last turned to ([CalendarDateTimePicker.onViewChanged]),
-/// folded into its week row at first.
+/// picker, whose haptic feedback is on. Each opening of a row shows the
+/// picker either row's control last turned to
+/// ([CalendarDateTimePicker.onShowsTimeChanged]), its day picker at first,
+/// and the day picker on the view either picker last turned to
+/// ([CalendarDateTimePicker.onViewChanged]), folded into its week row at
+/// first.
 ///
 /// A tap on a day moves the row's day to it, Start's moving the end by as
 /// many days, and keeps the row's time where the time picker offers it on
@@ -166,9 +168,7 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// or every time where none is, and refuses a time whose check names a
 /// problem that not every witness's check names. The start's picker offers
 /// the hours' starts, the end's its ends, on the start day only those after
-/// the start. A time picker's Now shows only on a row whose day is [now]'s
-/// today, and where the time at or before now is refused picks the first
-/// later time the picker offers.
+/// the start.
 ///
 /// The section pads its controls by nothing. Its rows reach its sides; at
 /// its top lies the All day row, the switch's touch target whole, or with
@@ -183,8 +183,10 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// row locks, taking no pick, until its row's tap closes it. The All day
 /// switch leaves an open row open, its picker turning to its day picker
 /// and hiding its view control as the switch turns on, and turning back to
-/// the view it showed as it turns off, and turned on takes the focus from
-/// the open picker. [errors] holds the
+/// the picker it showed as it turns off, and turned on takes the focus from
+/// the open picker; a row opened while the switch is on shows its day
+/// picker alone, and as the switch turns off, the picker either row's
+/// control last turned to. [errors] holds the
 /// form's messages keyed `start` and `end`, which show under the Start and
 /// End rows and tint those rows with the soft error colour.
 class ScheduleSection extends StatefulWidget {
@@ -214,9 +216,7 @@ class ScheduleSection extends StatefulWidget {
   /// The clock the time fields and the pickers write times on.
   final CalendarHourLabelFormat hourLabelFormat;
 
-  /// The current time, whose minute on the clock of [store]'s zone the
-  /// pickers' Now picks; Now shows only on a row whose day is its
-  /// [CalendarNow.today].
+  /// The current time, whose [CalendarNow.today] the day pickers ring.
   final ValueGetter<CalendarNow> now;
 
   final ValueChanged<CalendarSchedule> onChanged;
@@ -668,9 +668,15 @@ class ScheduleSectionState extends State<ScheduleSection> {
   _Row? _open;
 
   /// How many times each row has opened its picker, which keys the row's
-  /// picker, so that each opening builds a new one, on [_dayPickerView].
+  /// picker, so that each opening builds a new one, on [_showsTime] and
+  /// [_dayPickerView].
   int _startOpenings = 0;
   int _endOpenings = 0;
+
+  /// Whether either picker's view control last turned it to its time
+  /// picker, which the next one opens on; read only as a picker is made, so
+  /// a change needs no build.
+  bool _showsTime = false;
 
   /// The view either day picker last turned to, which the next one opens
   /// on; read only as a picker is made, so a change needs no build.
@@ -853,13 +859,6 @@ class ScheduleSectionState extends State<ScheduleSection> {
     );
   }
 
-  /// The current minute after midnight on the zone's clock.
-  int _nowMinute() {
-    return CalendarDates.minuteOfDay(
-      CalendarDates.inZone(widget.now().time, zone: widget.store.zone),
-    );
-  }
-
   /// The times of [row]'s picker: the kept ones where they hold for the
   /// section's check, hours and slot, and new ones otherwise.
   _RowTimes _timesOf(_Row row) {
@@ -971,10 +970,10 @@ class ScheduleSectionState extends State<ScheduleSection> {
   /// ringed, taking the days of [_dayRangeOf], End's browsing back no
   /// further than the first of them; and for a timed schedule its time
   /// picker on the row's time, offering the times of [_timesOf]. Keyed by
-  /// the row's openings, so each opening builds a new one, on its day
-  /// picker, on the view either picker last turned to, [_dayPickerView].
-  /// It takes no pick while its panel closes or where the row takes no
-  /// input.
+  /// the row's openings, so each opening builds a new one, on the picker
+  /// either row's control last turned to, [_showsTime], and its day picker
+  /// on the view either picker last turned to, [_dayPickerView]. It takes
+  /// no pick while its panel closes or where the row takes no input.
   Widget _picker(_Row row) {
     final schedule = _schedule;
     final start = row == _Row.start;
@@ -1009,10 +1008,12 @@ class ScheduleSectionState extends State<ScheduleSection> {
       minuteStep: widget.slotMinutes,
       timeBoundsOf: times.boundsOn,
       isTimeEnabled: times.offers,
-      now: _nowMinute,
-      nowPicksLater: true,
       hapticFeedback: true,
       subject: start ? scheduleStartKey : scheduleEndKey,
+      initialShowsTime: _showsTime,
+      onShowsTimeChanged: (shows) {
+        _showsTime = shows;
+      },
     );
   }
 

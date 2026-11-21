@@ -515,7 +515,7 @@ void main() {
     );
   });
 
-  test("LC4 the time picker's headers, halves, actions and row numbers", () {
+  test("LC4 the time picker's headers, halves, Clear and row numbers", () {
     const twentyFour = CalendarHourLabelFormat.twentyFourHour;
     const twelve = CalendarHourLabelFormat.twelveHour;
     expect(english.timePickerHourLabel, "Hour");
@@ -523,7 +523,6 @@ void main() {
     expect(english.timePickerAmPmLabel, "AM/PM");
     expect(english.timePickerAmLabel, "AM");
     expect(english.timePickerPmLabel, "PM");
-    expect(english.timePickerNowLabel, "Now");
     expect(english.timePickerClearLabel, "Clear");
     expect(english.timePickerHour(9, twentyFour), "09");
     expect(english.timePickerHour(0, twentyFour), "00");

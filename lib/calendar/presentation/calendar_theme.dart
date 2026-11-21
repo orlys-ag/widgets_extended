@@ -25,9 +25,9 @@ import 'package:flutter/widgets.dart';
 /// box with, the opacity they draw a pending entry at, and the Retry of a
 /// failed read. [disabledOpacity], [timePickerRowStyle] and
 /// [timePickerHeaderStyle] are read by the time picker,
-/// `CalendarTimePicker`, which draws its Now and Clear in
-/// [actionLabelStyle]; [disabledOpacity] also by the day picker,
-/// `CalendarDayPicker`, for the number of a day it refuses.
+/// `CalendarTimePicker`, which draws its Clear in [actionLabelStyle];
+/// [disabledOpacity] also by the day picker, `CalendarDayPicker`, for the
+/// number of a day it refuses.
 ///
 /// [CalendarTheme] hands a theme down the tree, and [CalendarTheme.of]
 /// reads it.
@@ -522,8 +522,8 @@ final class CalendarThemeData with Diagnosticable {
 
   /// The opacity of what the time picker and the day picker draw
   /// disabled, from 0 to 1: the [text] of a time picker's row, in any of
-  /// its columns, no time of which may be picked, and Now or Clear while
-  /// they take no tap; and the number of a day `CalendarDayPicker` refuses:
+  /// its columns, no time of which may be picked, and Clear while it
+  /// takes no tap; and the number of a day `CalendarDayPicker` refuses:
   /// one before its `firstDay` or after its `lastDay`, or one its
   /// `isEnabled` refuses.
   final double disabledOpacity;
@@ -700,8 +700,8 @@ final class CalendarThemeData with Diagnosticable {
   /// month.
   final TextStyle monthNameMarkedStyle;
 
-  /// The Retry of the default failure builder, and the time picker's Now
-  /// and Clear. Its colour is not used: it draws in [primary].
+  /// The Retry of the default failure builder, and the time picker's
+  /// Clear. Its colour is not used: it draws in [primary].
   final TextStyle actionLabelStyle;
 
   /// The rows of the time picker's columns, the height of "00" in it
