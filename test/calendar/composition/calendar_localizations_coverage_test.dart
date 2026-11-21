@@ -386,11 +386,6 @@ final class _Marked extends DefaultCalendarLocalizations {
   }
 
   @override
-  String get timePickerNowLabel {
-    return bracketed(super.timePickerNowLabel);
-  }
-
-  @override
   String get timePickerClearLabel {
     return bracketed(super.timePickerClearLabel);
   }
@@ -916,7 +911,7 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets("LZ6 the time picker's headers, rows, halves, actions and "
+  testWidgets("LZ6 the time picker's headers, rows, halves, Clear and "
       "columns' values switch to the localizations above it", (tester) async {
     useView(tester, 800.0, 1200.0);
     final semantics = tester.ensureSemantics();
@@ -928,9 +923,6 @@ void main() {
               width: 320.0,
               child: CalendarTimePicker(
                 value: 570,
-                now: () {
-                  return 853;
-                },
                 clearable: true,
                 onChanged: (value) {},
               ),
@@ -958,7 +950,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(timePickerAmPmColumnKey), findsOneWidget);
     expect(find.text("[AM/PM]"), findsOneWidget);
-    expect(find.byKey(timePickerNowKey), findsOneWidget);
     expect(find.byKey(timePickerClearKey), findsOneWidget);
     expectMarked(tester, "the time pickers", from: first);
     // A row label or a column's value the picker wrote itself would be a

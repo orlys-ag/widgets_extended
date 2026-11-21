@@ -63,15 +63,12 @@ const ValueKey<String> dateTimePickerTimeKey = ValueKey<String>(
 /// Where the time a tap on a day would keep is not one of those on the new
 /// day, the tap reports the offered time of that day nearest it on the
 /// [minuteStep], the later of two as near, or the time unchanged where the
-/// day offers none. The time picker's Now shows only on [today]'s day.
+/// day offers none.
 ///
 /// The picker opens on its time view where [initialShowsTime] says, and on
 /// its date view otherwise; a later build's has no effect. A tap on the
-/// control's other segment switches the view, and so does a tap on a day,
-/// or a screen reader's activation of one, which turns the date view to the
-/// time view after [onChanged] reports the day, as
-/// [CalendarDayPicker.onDayTap] reports it, the value's day included; a day
-/// an arrow key reaches switches nothing. Each switch reports through
+/// control's other segment switches the view, and nothing else does: a day
+/// picked keeps the date view. Each switch reports through
 /// [onShowsTimeChanged] whether it turned to the time view, and changes
 /// nothing of the value.
 ///
@@ -136,8 +133,6 @@ class CalendarDateTimePicker<T> extends StatefulWidget {
     this.minuteStep = CalendarDates.defaultSlotMinutes,
     this.timeBoundsOf,
     this.isTimeEnabled,
-    this.now,
-    this.nowPicksLater = false,
     this.timeFocusNode,
     this.hapticFeedback = false,
     this.subject,
@@ -185,10 +180,9 @@ class CalendarDateTimePicker<T> extends StatefulWidget {
   /// clock.
   final CalendarStore<T>? store;
 
-  /// The day the day picker rings as today, against which the time view's
-  /// header names [day], and on which the time picker shows Now; null for
-  /// the date the device's clock reads on [store]'s zone as the picker
-  /// builds.
+  /// The day the day picker rings as today, and against which the time
+  /// view's header names [day]; null for the date the device's clock reads
+  /// on [store]'s zone as the picker builds.
   final DateTime? today;
 
   /// The first day the picker takes, as [CalendarDayPicker.firstDay].
@@ -243,15 +237,6 @@ class CalendarDateTimePicker<T> extends StatefulWidget {
   /// while [minute] is not null; and of the times of the day a tap picks
   /// where the time it keeps is not offered there.
   final bool Function(DateTime day, int minute)? isTimeEnabled;
-
-  /// The current minute after midnight on the clock of [store]'s zone,
-  /// which the time picker's Now picks, as [CalendarTimePicker.now], on
-  /// [today]'s day alone; null shows no Now.
-  final ValueGetter<int>? now;
-
-  /// Whether Now picks the first later time the time picker offers, as
-  /// [CalendarTimePicker.nowPicksLater].
-  final bool nowPicksLater;
 
   /// The focus node of the time picker's first shown column, as
   /// [CalendarTimePicker.focusNode].
@@ -481,7 +466,7 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
   }
 
   /// Turns to the time view where [time], and to the date view otherwise,
-  /// from a tap on the control or on a day, and reports the turn.
+  /// from the control, and reports the turn.
   void _select(bool time) {
     if (time == _showsTime || widget.minute == null) {
       return;
@@ -503,11 +488,6 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
     });
     _showView();
     widget.onShowsTimeChanged?.call(time);
-  }
-
-  /// A tap on [day] in the day picker, after [_pickDay] reported it.
-  void _tapDay(DateTime day) {
-    _select(true);
   }
 
   /// The first and last time [day] offers.
@@ -612,13 +592,6 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
         minute,
       );
     }
-  }
-
-  /// Whether [CalendarDateTimePicker.day] is today, on the clock of the
-  /// store's zone.
-  bool get _onToday {
-    return CalendarDates.dayNumber(_today) ==
-        CalendarDates.dayNumber(widget.day);
   }
 
   /// The view control in the header of the time view where [inTimeView],
@@ -762,8 +735,6 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
               min: bounds.min,
               max: bounds.max,
               isEnabled: offers,
-              now: _onToday ? widget.now : null,
-              nowPicksLater: widget.nowPicksLater,
               focusNode: widget.timeFocusNode,
               hapticFeedback: widget.hapticFeedback,
               subject: widget.subject,
@@ -808,7 +779,6 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
               inTimeView: false,
               maxWidth: controlWidth,
             ),
-      onDayTap: widget.minute == null ? null : _tapDay,
     );
     return _ViewSwitch(
       progress: _viewCurve,

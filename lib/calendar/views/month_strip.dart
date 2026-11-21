@@ -118,7 +118,6 @@ class MonthStrip<T> extends StatefulWidget {
     required this.collapse,
     required this.onSelectDay,
     required this.onBrowse,
-    this.onTapDay,
     this.snap = MonthStripSnap.nearest,
     this.dayBadges,
     this.isDayEnabled,
@@ -148,11 +147,6 @@ class MonthStrip<T> extends StatefulWidget {
   /// Reports a day tapped or reached by an arrow key; null for a strip
   /// whose days take no tap and which takes no key.
   final ValueChanged<DateTime>? onSelectDay;
-
-  /// Reports a day tapped, right after [onSelectDay] reports it; a day an
-  /// arrow key reaches is reported through [onSelectDay] alone. Null
-  /// reports nothing.
-  final ValueChanged<DateTime>? onTapDay;
 
   /// Reports the first day of the month that a scroll has brought to the
   /// middle of the strip.
@@ -668,7 +662,6 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
           : () {
               _focus.requestFocus();
               widget.onSelectDay?.call(day);
-              widget.onTapDay?.call(day);
             },
       child: DayMarkerListener<T>(
         store: widget.store,

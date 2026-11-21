@@ -27,9 +27,8 @@ import 'calendar_theme_extension.dart';
 /// unfolded and a year in the month picker. A fold, an unfold, and the month
 /// picker's opening and closing report the view they turn to through
 /// [onViewChanged]. A tap on a day reports it through [onChanged] as the
-/// start of its date on the clock of [store]'s zone, and then through
-/// [onDayTap]; the picker selects nothing itself and shows a new [value]
-/// once given. Its strips scroll as
+/// start of its date on the clock of [store]'s zone; the picker selects
+/// nothing itself and shows a new [value] once given. Its strips scroll as
 /// Agenda's: a swipe of the week row comes to rest on the whole day nearest
 /// to where a fling would carry it, a swipe of the month on the nearest
 /// whole month, and neither selects anything. By default the chevrons and a
@@ -80,7 +79,6 @@ class CalendarDayPicker<T> extends StatefulWidget {
     this.initialView = const CalendarDayPickerView(),
     this.onViewChanged,
     this.headerTrailing,
-    this.onDayTap,
   }) {
     if (firstColumn < 0 || firstColumn >= DateTime.daysPerWeek) {
       throw ArgumentError.value(
@@ -97,15 +95,6 @@ class CalendarDayPicker<T> extends StatefulWidget {
   /// Reports a day picked, as the start of its date on the clock of
   /// [store]'s zone; null makes the picker take no pick.
   final ValueChanged<DateTime>? onChanged;
-
-  /// Reports a day the user tapped, or a screen reader activated, in the
-  /// week row or the month, as the start of its date on the clock of
-  /// [store]'s zone, right after [onChanged] reports it, and also where it
-  /// is [value]'s day, which [onChanged] does not report. A day an arrow
-  /// key reaches is reported through [onChanged] alone. Only a day the
-  /// picker takes reports, so nothing does with a null [onChanged]; null
-  /// reports nothing.
-  final ValueChanged<DateTime>? onDayTap;
 
   /// The store whose entries badge the days; null for no badges.
   final CalendarStore<T>? store;
@@ -471,16 +460,9 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
     change();
   }
 
-  /// A tap on [day] in either strip, or an arrow key's step to it in the
-  /// month.
+  /// A tap on [day] in either strip.
   void _selectDay(DateTime day) {
     selectCardDay(day);
-  }
-
-  /// A tap on [day] in either strip, after [_selectDay]; the strips take
-  /// no tap on a day the picker refuses.
-  void _tapDay(DateTime day) {
-    widget.onDayTap?.call(cardDayIn(day));
   }
 
   /// Whether the picker takes [day], a plain day: not before the first day
@@ -574,7 +556,6 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
         ),
         buildPicker: _buildMonthPicker,
         onSelectDay: widget.onChanged == null ? null : _selectDay,
-        onTapDay: widget.onChanged == null ? null : _tapDay,
         dayBadges: widget.dayBadges,
         isDayEnabled: asks ? _isDayEnabled : null,
         daysToEdges: widget.daysToEdges,

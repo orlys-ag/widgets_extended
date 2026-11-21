@@ -21,7 +21,7 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/calendar/composition/calendar_card.dart'
     show CalendarCard, calendarPullTabKey;
 import 'package:widgets_extended/calendar/composition/calendar_date_time_picker.dart'
-    show dateTimePickerTimeSegmentKey;
+    show dateTimePickerDateSegmentKey, dateTimePickerTimeSegmentKey;
 import 'package:widgets_extended/calendar/views/day_cell.dart'
     show DayCell, dayCellKey;
 import 'package:widgets_extended/calendar/views/month_strip.dart'
@@ -30,8 +30,8 @@ import 'package:widgets_extended/calendar/views/time_picker.dart'
     show
         timePickerHourColumnKey,
         timePickerHourRowKey,
-        timePickerMinuteRowKey,
-        timePickerNowKey;
+        timePickerFooterKey,
+        timePickerMinuteRowKey;
 import 'package:widgets_extended/calendar/views/week_strip.dart'
     show WeekStrip, weekStripDayKey;
 import 'package:widgets_extended/widgets_extended.dart';
@@ -183,9 +183,10 @@ CalendarScheduleCheck<ItemPayload> checkOf(
 /// "Schedule", and over its [ScheduleOverlapNotice], which shows while the
 /// check names overlaps, in the form's order, without the form, in the
 /// calendar's whole day of 15-minute slots on the 24-hour clock, on
-/// [zone]'s clock, the section's store an empty one on it, the pickers'
-/// Now reading [now] or else Wednesday's start, the edits of the section and the notice going to [onChanged] or
-/// else nowhere, and locked where [locked]. Where [follows], each edit also
+/// [zone]'s clock, the section's store an empty one on it, its clock [now]
+/// or else Wednesday's start, the edits of the section and the notice going
+/// to [onChanged] or else nowhere, and locked where [locked]. Where
+/// [follows], each edit also
 /// makes their check that of the edited schedule
 /// ([CalendarScheduleCheck.withSchedule]) before it goes to [onChanged], so
 /// the next frame builds the parts of the edit, as the form's does;
@@ -1384,50 +1385,10 @@ void main() {
     expect(timeEnabled(tester, "End time", "24:00"), isTrue);
   });
 
-  testWidgets("TF4 the form's Now picks the minute the form's now reads on "
-      "the store's clock, rounded down to the slot", (tester) async {
-    final kolkata = tz.getLocation("Asia/Kolkata");
-    final store = MemoryCalendarStore<ItemPayload>(
-      zone: kolkata,
-      entries: <CalendarItem>[
-        task(
-          "item-1",
-          "Write",
-          tz.TZDateTime(kolkata, 2026, 4, 22, 11),
-          tz.TZDateTime(kolkata, 2026, 4, 22, 12),
-        ),
-      ],
-    );
-    addTearDown(store.dispose);
-    await openWith(tester, (context) {
-      showEditForm(
-        context,
-        store: store,
-        id: "item-1",
-        policy: const UnrestrictedEditPolicy<ItemPayload>(),
-        now: () {
-          // 09:13 in Kolkata.
-          return CalendarNow(
-            time: DateTime.utc(2026, 4, 22, 3, 43),
-            today: wednesday,
-          );
-        },
-        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
-      );
-    });
-    expect(formSchedule(tester), "Wed, Apr 22, 11:00\nWed, Apr 22, 12:00\n1h");
-    await openTimePicker(tester, "Start time");
-    await tester.tap(inPicker("Start time", find.byKey(timePickerNowKey)));
-    await tester.pumpAndSettle();
-    // The nearest slot would be 09:15.
-    expect(formSchedule(tester), "Wed, Apr 22, 09:00\nWed, Apr 22, 10:00\n1h");
-  });
-
   testWidgets("TF5 the start's picker stays open across Next free time and "
-      "a day picked in its day picker, which keeps its time and turns the "
-      "picker to its time picker; the All day switch turns it to its day "
-      "picker, the picker staying open, and takes the focus from its time "
-      "picker", (tester) async {
+      "a day picked in its day picker, which keeps its time and the day "
+      "picker; the All day switch turns it to its day picker, the picker "
+      "staying open, and takes the focus from its time picker", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task("item-2", "Standup", at(9, 30), at(10, 30)),
@@ -1453,8 +1414,10 @@ void main() {
     await tester.tap(thursday);
     await tester.pumpAndSettle();
     expect(formSchedule(tester), "Thu, Apr 23, 10:30\nThu, Apr 23, 11:30\n1h");
-    expect(timePickerFinder("Start time"), findsOneWidget);
+    expect(timePickerFinder("Start time"), findsNothing);
+    expect(thursday.hitTestable(), findsOneWidget);
 
+    await openTimePicker(tester, "Start time");
     hourColumnNode(tester, "Start time").requestFocus();
     await tester.pump();
     await tester.ensureVisible(allDaySwitch());
@@ -2285,76 +2248,14 @@ void main() {
     expect(timeEnabled(tester, "End time", "12:30"), isFalse);
   });
 
-  testWidgets("FN1 Now picks the first start offered after now where the "
-      "time before it is refused: under the lock of earlier today, with "
-      "today pinned to another day than now's time, and before the hours; "
-      "and as the clock's minute turns with the picker open, the picker "
-      "refuses a start the lock has passed, and Now picks one Save "
-      "takes", (tester) async {
-    Future<void> openAt(
-      CalendarStore<ItemPayload> store,
-      CalendarEditPolicy<ItemPayload> policy,
-      CalendarNow now,
-    ) {
-      return openWith(tester, (context) {
-        showEditForm(
-          context,
-          store: store,
-          id: "item-1",
-          policy: policy,
-          now: () {
-            return now;
-          },
-          hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
-        );
-      });
-    }
-
-    Future<void> tapNow() async {
-      await openTimePicker(tester, "Start time");
-      final now = inPicker("Start time", find.byKey(timePickerNowKey));
-      await revealForTap(tester, now);
-      await tester.tap(now);
-      await tester.pumpAndSettle();
-    }
-
+  testWidgets("FN1 as the clock's minute turns with the start's picker open, "
+      "the picker refuses a start the lock has passed, and a later start it "
+      "offers is one Save takes", (tester) async {
     const lock = HistoryLockPolicy<ItemPayload>(lockEarlierToday: true);
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(10), at(11)),
     ]);
     addTearDown(store.dispose);
-    await openAt(store, lock, CalendarNow(time: at(9, 7), today: wednesday));
-    await tapNow();
-    expect(timeFieldShows("Start time", "09:15"), findsOneWidget);
-    await tester.tap(formButton("Cancel"));
-    await tester.pumpAndSettle();
-
-    // The app pins today, so the clock's date can differ from it.
-    await openAt(
-      store,
-      lock,
-      CalendarNow(time: DateTime(2026, 4, 23, 9, 7), today: wednesday),
-    );
-    await tapNow();
-    expect(timeFieldShows("Start time", "09:15"), findsOneWidget);
-    await tester.tap(formButton("Cancel"));
-    await tester.pumpAndSettle();
-
-    final office = MemoryCalendarStore<ItemPayload>(
-      hours: CalendarDayHours(8 * 60, 18 * 60),
-      entries: <CalendarItem>[task("item-1", "Write", at(10), at(11))],
-    );
-    addTearDown(office.dispose);
-    await openAt(
-      office,
-      const UnrestrictedEditPolicy<ItemPayload>(),
-      CalendarNow(time: at(7, 30), today: wednesday),
-    );
-    await tapNow();
-    expect(timeFieldShows("Start time", "08:00"), findsOneWidget);
-    await tester.tap(formButton("Cancel"));
-    await tester.pumpAndSettle();
-
     var clock = at(9, 7);
     await openWith(tester, (context) {
       showEditForm(
@@ -2374,37 +2275,26 @@ void main() {
     clock = at(9, 16);
     await tester.pump(const Duration(minutes: 1));
     expect(timeEnabled(tester, "Start time", "09:15"), isFalse);
-    await tapNow();
+    await pickTime(tester, "Start time", "09:30");
     expect(timeFieldShows("Start time", "09:30"), findsOneWidget);
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
     expect(store.storedEntry("item-1")!.start, at(9, 30));
   });
 
-  testWidgets("FD1 Now shows only in the picker of a row whose day is today", (
-    tester,
-  ) async {
+  testWidgets("FD1 a time picker has no footer, on a row whose day is today "
+      "too", (tester) async {
     final store = storeOf(<CalendarItem>[
-      task(
-        "item-1",
-        "Write",
-        DateTime(2026, 4, 23, 9),
-        DateTime(2026, 4, 23, 10),
-      ),
       task("item-2", "Trip", DateTime(2026, 4, 21, 22), at(2)),
     ]);
     addTearDown(store.dispose);
-    await openEdit(tester, store);
-    await openTimePicker(tester, "Start time");
-    expect(inPicker("Start time", find.byKey(timePickerNowKey)), findsNothing);
-    await tester.tap(formButton("Cancel"));
-    await tester.pumpAndSettle();
-
     await openEdit(tester, store, id: "item-2");
     await openTimePicker(tester, "End time");
-    expect(inPicker("End time", find.byKey(timePickerNowKey)), findsOneWidget);
-    await openTimePicker(tester, "Start time");
-    expect(inPicker("Start time", find.byKey(timePickerNowKey)), findsNothing);
+    // Setup sanity: End's time picker shows, its row's day today.
+    expect(inPicker("End time", find.byKey(timePickerHourColumnKey)), findsOne);
+    expect(formDateShows("End date", "2026-04-22"), findsOneWidget);
+    expect(inPicker("End time", find.byKey(timePickerFooterKey)), findsNothing);
+    expect(inPicker("End time", find.text("Now")), findsNothing);
   });
 
   testWidgets("FB3 a picker refuses no time for a problem every checked time "
@@ -3105,7 +2995,7 @@ void main() {
     reads = 0;
     await openTimePicker(tester, "Start time");
     // Setup sanity: a build of the section with the panel open reads the
-    // clock, for the picker's Now.
+    // clock, for the day picker's today.
     expect(reads, greaterThan(0));
 
     await closeTimePicker(tester, "Start time");
@@ -3153,12 +3043,14 @@ void main() {
     );
   });
 
-  testWidgets("FP7 each opening of either row shows its picker's day "
-      "picker, whatever view the last picker showed, and a tap on a day "
-      "turns it to the time picker", (tester) async {
+  testWidgets("FP7 each opening of either row shows the view either picker "
+      "last turned to, its day picker at first, and a tap on a day keeps "
+      "the day picker", (tester) async {
+    final changes = <CalendarSchedule>[];
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
+      onChanged: changes.add,
     );
     await tester.tap(timeFieldFinder("Start time"));
     await tester.pumpAndSettle();
@@ -3175,10 +3067,21 @@ void main() {
     await tester.pumpAndSettle();
     // Setup sanity: End's picker opened.
     expect(panelPicker("End time"), findsOneWidget);
+    // It opens on the time view Start's picker turned to.
+    expect(timePickerFinder("End time"), findsOneWidget);
+    final endDate = find.descendant(
+      of: pickerPanel("End time"),
+      matching: find.byKey(dateTimePickerDateSegmentKey),
+    );
+    await revealForTap(tester, endDate);
+    await tester.tap(endDate);
+    await tester.pumpAndSettle();
+    // Setup sanity: the control showed End's days.
     expect(timePickerFinder("End time"), findsNothing);
 
     await tester.tap(timeFieldFinder("Start time"));
     await tester.pumpAndSettle();
+    expect(panelPicker("Start time"), findsOneWidget);
     expect(timePickerFinder("Start time"), findsNothing);
     final thursday = find.descendant(
       of: pickerPanel("Start time"),
@@ -3187,7 +3090,10 @@ void main() {
     await revealForTap(tester, thursday);
     await tester.tap(thursday);
     await tester.pumpAndSettle();
-    expect(timePickerFinder("Start time"), findsOneWidget);
+    // Setup sanity: the tap picked Thursday.
+    expect(changes.last.startDay, DateTime(2026, 4, 23));
+    expect(timePickerFinder("Start time"), findsNothing);
+    expect(thursday.hitTestable(), findsOneWidget);
   });
 
   testWidgets("FP8 a panel opened past the view's bottom scrolls into view "
@@ -3228,38 +3134,39 @@ void main() {
     expect(picker.bottom, lessThanOrEqualTo(250.0));
   });
 
-  testWidgets("FX3 the footer an open picker gains as its row's day becomes "
-      "today grows its panel at once and scrolls into view", (tester) async {
-    tester.view.devicePixelRatio = 1.0;
-    tester.view.physicalSize = const Size(390.0, 300.0);
-    addTearDown(tester.view.reset);
-    await pumpSection(
-      tester,
-      checkOf(
-        CalendarSchedule.of(DateTime(2026, 4, 21, 22), at(2), isAllDay: false),
-      ),
-      theme: motionTheme,
-    );
+  testWidgets("FP9 a row opened while All day is on shows its day picker "
+      "alone, and as All day turns off, the picker either row's control "
+      "last turned to", (tester) async {
+    final store = storeOf(<CalendarItem>[
+      task("item-1", "Write", at(9), at(10)),
+    ]);
+    addTearDown(store.dispose);
+    await openEdit(tester, store);
     await openTimePicker(tester, "Start time");
-    expect(inPicker("Start time", find.byKey(timePickerNowKey)), findsNothing);
-    final height = panelHeight(tester);
-    final picker = tester.state(timePickerFinder("Start time"));
-
-    // The start moves onto Wednesday, today.
-    await pumpSection(
-      tester,
-      checkOf(CalendarSchedule.of(at(1), at(2), isAllDay: false)),
-      theme: motionTheme,
-    );
-    expect(panelHeight(tester), greaterThan(height));
-    // Setup sanity: the panel kept its picker.
-    expect(tester.state(timePickerFinder("Start time")), same(picker));
+    await tester.ensureVisible(allDaySwitch());
     await tester.pumpAndSettle();
-    final now = tester.getRect(
-      inPicker("Start time", find.byKey(timePickerNowKey)),
-    );
-    expect(now.top, greaterThanOrEqualTo(0.0));
-    expect(now.bottom, lessThanOrEqualTo(300.0));
+    await tester.tap(allDaySwitch());
+    await tester.pumpAndSettle();
+    // Setup sanity: the item turned all-day.
+    expect(formAllDayOn(), isTrue);
+
+    await revealForTap(tester, rowFinder("Start"));
+    await tester.tap(rowFinder("Start"));
+    await tester.pumpAndSettle();
+    // Setup sanity: the row's picker closed.
+    expect(dayPickerFinder("Start date"), findsNothing);
+    await tester.tap(rowFinder("Start"));
+    await tester.pumpAndSettle();
+    expect(dayPickerFinder("Start date"), findsOneWidget);
+    expect(find.byType(CalendarTimePicker), findsNothing);
+
+    await tester.ensureVisible(allDaySwitch());
+    await tester.pumpAndSettle();
+    await tester.tap(allDaySwitch());
+    await tester.pumpAndSettle();
+    // Setup sanity: the item turned timed.
+    expect(formAllDayOn(), isFalse);
+    expect(timePickerFinder("Start time"), findsOneWidget);
   });
 
   testWidgets("FS1 the sheet's heading writes the schedule's length in a "
@@ -4829,9 +4736,7 @@ void main() {
     await tester.pumpAndSettle();
     // Setup sanity: the tap picked the 23rd.
     expect(formDateShows("Start date", "2026-04-23"), findsOneWidget);
-    // The tap turned the picker to its time picker; back on its days, the
-    // month takes the focus as a user tabs to it.
-    await openDayPicker(tester, "Start date");
+    // The month takes the focus as a user tabs to it.
     tester
         .widget<Focus>(
           find
@@ -5052,8 +4957,6 @@ void main() {
     // Setup sanity: the tap picked Thursday.
     expect(formDateShows("Start date", "2026-04-23"), findsOneWidget);
     expect(debugScheduleDayRangeAsks, 2);
-    // The tap turned the picker to its time picker.
-    await openDayPicker(tester, "Start date");
     final reads = debugScheduleDayRangeAsks;
     final picked = asked.length;
     for (final (step, finder) in <(String, Finder)>[

@@ -604,10 +604,10 @@ class _ItemFormState extends State<_ItemForm> {
 
   /// Checks the schedule again as a minute starts, since the check's
   /// answers move with the minute now
-  /// ([CalendarEarliestStart.firstWallMinute]), so the summary, the pickers,
-  /// their Now and the start's and the end's messages answer as Save's own
-  /// check does; but not while a send is in flight, which [_storeChanged]
-  /// skips too.
+  /// ([CalendarEarliestStart.firstWallMinute]), so the summary, the pickers
+  /// and the start's and the end's messages answer as Save's own check
+  /// does; but not while a send is in flight, which [_storeChanged] skips
+  /// too.
   void _minuteTurned() {
     if (!_saving) {
       setState(_recheck);

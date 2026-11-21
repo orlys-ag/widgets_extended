@@ -109,10 +109,8 @@ its words from seven `CalendarLocalizations` members with English defaults:
 - Added `CalendarTimePicker`, an inline time panel: an Hour column, a
 Minute column and on the 12-hour clock (`hourLabelFormat`) an AM/PM column,
 five rows tall, each scrolling and snapping its selected row onto a pill
-behind its centre row, and a footer of Now (`now`, the current minute on
-the host's clock: Now picks the latest time at or before it on both steps,
-where that time is offered) and Clear (`clearable`, which reports null)
-where either is given. Its `value` is a minute after midnight on the
+behind its centre row, and with `clearable` a footer of Clear, which
+reports null. Its `value` is a minute after midnight on the
 host's clock, 0 to 1440, where 1440 is the 24:00 that ends a day, or null
 for no time. Only the times from `min` to `max` whose hour is a multiple of
 `hourStep` (1 to 23, counted from midnight) and whose minute is a multiple
@@ -129,8 +127,8 @@ column takes the gestures and keys of the other columns, so Space and Enter
 do not switch its half. With a null `onChanged` it takes no input. With
 `hapticFeedback`, off by default, on iOS and Android a column plays a
 selection click (`HapticFeedback.selectionClick`) as a drag, its landing or
-a mouse wheel brings a row onto its pill; a tap, a key, Now, Clear and a
-new `value` play none. It lays
+a mouse wheel brings a row onto its pill; a tap, a key, Clear and a new
+`value` play none. It lays
 out under a parent that asks its intrinsic sizes, such as a dialog, its
 columns sharing a bounded width equally and otherwise 72 logical pixels wide
 each, or as wide as the AM/PM column's rows where they are wider. It draws
@@ -143,11 +141,10 @@ not divide 60, an `hourStep` outside 1 to 23, a `min` or `max` outside 0 to
 1440, a `max` below `min`, a `value` outside 0 to 1440, or a false
 `showMinutes` while `showHours` is false. `CalendarThemeData` gains
 `disabledOpacity` (0.38 built in), `timePickerRowStyle` and
-`timePickerHeaderStyle`, and `CalendarLocalizations` gains nine members with
-English defaults: `timePickerHourLabel`, `timePickerMinuteLabel`,
+`timePickerHeaderStyle`, and `CalendarLocalizations` gains eight members
+with English defaults: `timePickerHourLabel`, `timePickerMinuteLabel`,
 `timePickerAmPmLabel`, `timePickerAmLabel`, `timePickerPmLabel`,
-`timePickerNowLabel`, `timePickerClearLabel`, `timePickerHour` and
-`timePickerMinute`.
+`timePickerClearLabel`, `timePickerHour` and `timePickerMinute`.
 - Added `CalendarController.createOn`, which reports a create on a day
 through `CalendarView.onCreateRange`, as Month's long press does, in any
 view and out of edit mode too: one slot, at the first free slot from the
@@ -901,9 +898,7 @@ options.
 - Added `CalendarTimePicker.subject`, what the picker edits: a new subject
 ends every hold, user motion and typed digit without a report and moves
 the columns to the value over the theme's motion, so one picker can serve
-several fields; and `CalendarTimePicker.nowPicksLater`, under which Now,
-where the latest time at or before now is not offered, picks the first
-later time the picker offers.
+several fields.
 - Removed `CalendarScheduleOptions.lengthChoices` and
 `CalendarScheduleOptions.defaultLengthChoices`, with the constructor's
 `lengthChoices` parameter: the options hold `allowsAllDay` and `spansDays`
@@ -947,11 +942,7 @@ the theme's `surface`, so it lies on a surface of that colour. A host that
 wants the box draws it around the picker.
 - Added `CalendarDayPicker.headerTrailing`, a widget at the end of the day
 picker's header row, after its chevrons, centred on the row, folded,
-unfolded and over the month picker; and `CalendarDayPicker.onDayTap`,
-which reports a day the user tapped, or a screen reader activated, right
-after `onChanged` reports it, and also the value's day, which `onChanged`
-does not report. A day an arrow key reaches in the month is reported
-through `onChanged` alone.
+unfolded and over the month picker.
 - Added `CalendarDateTimePicker`, an inline picker of a day and a time of
 it, whose two views take turns: its date view, a `CalendarDayPicker`, and
 its time view, a header naming the day over a `CalendarTimePicker`, on a
@@ -964,9 +955,9 @@ screen reader hears the segments as buttons in a mutually exclusive group.
 The control takes at most half its header row, scaling down where its
 labels would take more.
 The picker opens on its date view, or on its time view where
-`initialShowsTime` says, and a tap on a day turns it to its time view
-after reporting the day, as a tap on a segment turns it; each turn reports
-through `onShowsTimeChanged`. Over the theme's motion the picker's height
+`initialShowsTime` says, and turns only as a segment is tapped, a day
+picked keeping the date view; each turn reports through
+`onShowsTimeChanged`. Over the theme's motion the picker's height
 moves between the views' heights, the view turned to lying at full
 opacity under the one left, which fades out, as the pill slides to the new
 segment; the date view keeps its state, its fold and browse included,
@@ -975,9 +966,8 @@ with the time, or, where the new day does not offer that time, with the
 offered time of the day nearest it on `minuteStep`; a pick of a time
 reports it with the day. The time picker offers the times `timeBoundsOf`
 and `isTimeEnabled` give for the day that the clock of the store's zone
-reads, and shows Now on `today` alone; `isTimeEnabled` is asked of each
-time of the day at most once while the day, the predicate and the zone
-stay. With a null `minute` it picks a day alone, showing its date view with
+reads; `isTimeEnabled` is asked of each time of the day at most once while
+the day, the predicate and the zone stay. With a null `minute` it picks a day alone, showing its date view with
 no control; a `minute` that turns null turns it to its date view, the time
 view keeping the times it offered, asking `timeBoundsOf` and
 `isTimeEnabled` nothing more. Added
