@@ -376,7 +376,7 @@ The extractor reads the plan's Landing Order, Decisions and Testing Plan, and
 returns:
 
 - every decision the plan's Decisions section anchors;
-- the repros, by test name;
+- the repros, each with an id (R1, R2 and so on) and its test name;
 - the steps, numbered from 1, each with its title, its anchor, its decisions,
   its files, its signal, and its group when the plan marks it NOT
   INDEPENDENTLY VERIFIABLE;
@@ -429,8 +429,8 @@ The builder works on the build branch:
 2. It runs the plan checks' `verify` commands. A failure on a line the branch's
    own commits changed is the plan being applied; any other whose claim no
    longer holds is a blocking finding.
-3. Step 0: it commits the repros and records each one failing on the base
-   commit. A repro that passes there is a blocking finding.
+3. Step 0: it commits the repros and reports each one failing on the base
+   commit by its id. A repro that passes there is a blocking finding.
 4. For each step, it makes the change, runs the step's signal, runs every gate
    of `step` scope whose `when` matches the files the step changed (the script
    lists those of its declared files), and commits the step's files, staging by

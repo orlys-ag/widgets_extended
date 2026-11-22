@@ -733,9 +733,12 @@ const REVISE_SCHEMA = obj({
   scope_questions: arr(SCOPE_ITEM),
 })
 const PROBE_SCHEMA = obj({ stopped: bool, precondition: str, branch: str, premises: arr(obj({ id: str, outcome: { type: 'string', enum: Object.keys(PREMISE_OUTCOMES) }, observed: str })) })
+// A repro is known by its id, R1, R2 and so on, which the extraction gives it
+// and the builder reports it by; its text is for reading only.
+const REPRO_ID = { type: 'string', pattern: '^R[0-9]+$' }
 const STEPS_SCHEMA = obj({
   decisions: DECISION_LIST,
-  repros: arr(str),
+  repros: arr(obj({ id: REPRO_ID, test: str })),
   steps: arr(obj({ n: int, title: str, anchor: str, decisions: DECISION_LIST, files: arr(str), signal: str, group: str })),
   pins: arr(obj({ decision: { type: 'string', pattern: '^d[0-9]+$' }, codeSite: str, test: str })),
   criteria: arr(obj({ number: int, steps: arr(int) })),
@@ -748,7 +751,7 @@ const BUILD_SCHEMA = obj({
   branch: str,
   approval_recorded: bool,
   plan_checks: arr(obj({ name: str, passed: bool, note: str })),
-  repros: arr(obj({ test: str, failed_on_base: bool })),
+  repros: arr(obj({ id: REPRO_ID, failed_on_base: bool })),
   steps: arr(obj({
     n: int,
     status: { type: 'string', enum: ['built', 'kept'] },
@@ -826,6 +829,21 @@ let steps = S.steps ?? null
 // reporting them again blind.
 let stepGaps = (S.stepGaps ?? []).map(g => ({ ...g }))
 const build = { ...emptyBuild(), ...(S.build ?? {}) }
+// A run record written before repros had ids holds each repro as its text,
+// and each one recorded failing as the builder's text for it. Each repro takes
+// the R<n> its text opens with when every text opens with a distinct one, and
+// otherwise its position. A recorded text keeps its repro only when it holds
+// that repro's whole text as a whole word, the check those records were made
+// under; a repro no recorded text holds is run on the base commit again.
+if (steps && steps.repros.some(r => typeof r === 'string')) {
+  const texts = steps.repros.map(r => String(r))
+  const labels = texts.map(t => t.match(/^(R[0-9]+):\s*/))
+  const labelled = labels.every(Boolean) && new Set(labels.map(m => m[1])).size === labels.length
+  const repros = texts.map((t, i) => (labelled ? { id: labels[i][1], test: t.slice(labels[i][0].length) } : { id: `R${i + 1}`, test: t }))
+  const holds = (reported, text) => new RegExp('(^|[^A-Za-z0-9_])' + text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^A-Za-z0-9_])').test(String(reported))
+  build.repros = repros.filter((r, i) => build.repros.some(x => holds(x, texts[i]))).map(r => r.id)
+  steps = { ...steps, repros }
+}
 const metrics = { ...emptyMetrics(), ...(S.metrics ?? {}) }
 metrics.launches += 1
 // What this launch has spent of its budget.
@@ -891,10 +909,6 @@ function failed(at, reason) {
 
 const isFailing = f => FAILING_SEVERITIES.includes(f.severity) && FAILING_KINDS.includes(f.kind)
 const unique = list => [...new Set(list)]
-// Whether a builder's report of a repro, `reported`, names the repro `name`
-// as a whole word: a report that adds the test's file or where it ran names
-// it, and one of a longer name does not.
-const namesRepro = (reported, name) => new RegExp('(^|[^A-Za-z0-9_])' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^A-Za-z0-9_])').test(reported)
 const uniqueLenses = list => list.filter((l, i) => l && list.findIndex(x => x?.key === l.key) === i)
 // The prompts number the acceptance criteria from 1, and the extractor and the
 // reviewer name each by its number: the entries each criterion has, and the
@@ -1443,7 +1457,7 @@ function stepsPrompt(problems, reported) {
     reported.length > 0 ? `The previous extraction reported these gaps. Re-read the plan at each gap's location, and report it again when the plan still does not state it:\n${reported.map(g => `- ${g.location}: ${g.title} (${g.why})`).join('\n')}` : ``,
     `Report via StructuredOutput:`,
     `- decisions: every d<N> anchor of the plan's Decisions section.`,
-    `- repros: the tests the Testing Plan names as repros failing on the base commit, by name.`,
+    `- repros: the tests the Testing Plan names as repros failing on the base commit: id (R1, R2 and so on in the plan's order, or the plan's own R<n> where it numbers them) and test (its name and file as the plan gives them).`,
     `- steps: one per Landing Order step, numbered as the plan numbers them from 1: n, title, anchor (the plan anchor that defines the step), decisions (the d<N> it implements), files (the paths it creates or changes), signal (the named test or exact command that passes when it lands), group ('' or a label shared by the steps the plan marks as not independently verifiable together).`,
     `- pins: one per decision: decision, codeSite (where its rule lands), test (the named test that pins it, or the check the plan names when it lands only in documents).`,
     `- criteria: one per acceptance criterion: number (its number above) and steps (the step numbers whose signals check it, 0 for a repro).`,
@@ -1460,6 +1474,10 @@ function stepsPrompt(problems, reported) {
 // (a resumed run that a killed one overtook) is caught here.
 function stepProblems(r) {
   const problems = []
+  const reproIds = r.repros.map(x => x.id)
+  for (const id of unique(reproIds.filter((x, i) => reproIds.indexOf(x) !== i))) {
+    problems.push(`repro id ${id} is given to more than one repro`)
+  }
   const anchored = unique(r.decisions).sort()
   if (anchored.join() !== [...decisions].sort().join()) {
     problems.push(`the plan's Decisions section anchors ${anchored.join(', ') || 'no decision'}, but the run recorded ${[...decisions].sort().join(', ') || 'none'}`)
@@ -1559,7 +1577,7 @@ function buildPrompt(problems) {
   // What earlier dispatches settled is listed as done, so a builder that takes
   // over runs no repro, mutation or carried finding a second time.
   const split = (list, done) => [list.filter(x => !done(x)), list.filter(done)]
-  const [reprosLeft, reprosDone] = split(steps.repros, t => build.repros.some(x => namesRepro(x, t)))
+  const [reprosLeft, reprosDone] = split(steps.repros, t => build.repros.includes(t.id))
   const [pinsLeft, pinsDone] = split(steps.pins, p => mutationProblem(p) === null)
   const [carriedLeft, carriedDone] = split(steps.carried, c => build.addressed.includes(c.id))
   // The extractor places each carried finding; its text lives only in the run
@@ -1591,8 +1609,8 @@ function buildPrompt(problems) {
     JSON.stringify(steps.list.map(s => ({ ...s, gates: requiredGates('step', s.files).map(g => g.name) })), null, 2),
     `Each step's gates are the step-scope gates its declared files trigger. Final gates the declared files trigger: ${requiredGates('final', unique(steps.list.flatMap(s => s.files))).map(g => g.name).join(', ') || 'none'}. A file you change outside a step's declared list may trigger more: the conditions below decide.`,
     steps.repros.length === 0 ? `The plan names no repro, so there is no step 0.` : ``,
-    reprosLeft.length > 0 ? `Step 0, the repros: ${reprosLeft.join(', ')}. Commit them first, and run each on the base commit's code: each must fail. A repro that passes there is a blocking finding.` : ``,
-    reprosDone.length > 0 ? `Repros an earlier dispatch committed and recorded failing on the base commit, which you do not run again: ${reprosDone.join(', ')}.` : ``,
+    reprosLeft.length > 0 ? `Step 0, the repros, each with its id: ${reprosLeft.map(t => `${t.id} (${t.test})`).join('; ')}. Commit them first, and run each on the base commit's code: each must fail. A repro that passes there is a blocking finding.` : ``,
+    reprosDone.length > 0 ? `Repros an earlier dispatch committed and recorded failing on the base commit, which you do not run again: ${reprosDone.map(t => t.id).join(', ')}.` : ``,
     pinsLeft.length > 0 ? `Pins, one mutation each after the last step:\n${JSON.stringify(pinsLeft, null, 2)}` : ``,
     pinsDone.length > 0 ? `Pins an earlier dispatch mutated, which you do not mutate again: ${pinsDone.map(p => `${p.decision} (${p.test})`).join(', ')}.` : ``,
     carriedLeft.length > 0 ? `Carried findings. Address each in the step it lands in, by a test shown to fail first, a mutation, or the check method section 5 names; one marked obsolete: confirm its reason against the plan and the code, and report it addressed with that reason as its evidence; if the reason does not hold, address it in the step whose files it concerns:\n${JSON.stringify(carriedText, null, 2)}` : ``,
@@ -1614,7 +1632,7 @@ function buildPrompt(problems) {
     `3. After the last step, one mutation per pin listed to mutate: record the code site file's SHA-256, break the rule there, run the pin's test and observe it fail, restore the file, record the SHA-256 again. A test that stays green is a blocking finding: the rule is unpinned.`,
     `4. Then run every final-scope gate whose condition matches the files changed since the base commit.`,
     `A failure that shows the plan wrong stops you: report it in blocking_findings, with your last committed step in last_step. A minor slip you fix within its step and list in discoveries.`,
-    `Report via StructuredOutput: stopped (true only if that check stopped you); precondition (what that check found); branch; approval_recorded; plan_checks (each plan check by name, with passed and a note); repros (each repro you ran on the base commit: test, its name exactly as step 0 gives it, and failed_on_base); steps (EVERY step of the list: n, status built or kept, signal_passed, gates you ran with name and passed, changed_files, commit); carried (each carried finding listed to address: id, addressed, and evidence, the test or check that shows it, or the confirmed reason it is obsolete); mutations (each mutation you made: decision, test, test_failed, sha_before, sha_after); final_gates; changed_files (git diff --name-only ${baseRef}..${buildBranch}); complete (true only after the final gates); last_step; blocking_findings; discoveries.`,
+    `Report via StructuredOutput: stopped (true only if that check stopped you); precondition (what that check found); branch; approval_recorded; plan_checks (each plan check by name, with passed and a note); repros (each repro you ran on the base commit: id, the R<n> step 0 gives it, and failed_on_base); steps (EVERY step of the list: n, status built or kept, signal_passed, gates you ran with name and passed, changed_files, commit); carried (each carried finding listed to address: id, addressed, and evidence, the test or check that shows it, or the confirmed reason it is obsolete); mutations (each mutation you made: decision, test, test_failed, sha_before, sha_after); final_gates; changed_files (git diff --name-only ${baseRef}..${buildBranch}); complete (true only after the final gates); last_step; blocking_findings; discoveries.`,
   ].filter(Boolean).join('\n')
 }
 
@@ -1634,7 +1652,7 @@ function mergeBuild(r) {
     }
   }
   build.addressed = unique([...build.addressed, ...r.carried.filter(c => c.addressed && nonEmpty(c.evidence)).map(c => c.id)])
-  build.repros = unique([...build.repros, ...r.repros.filter(x => x.failed_on_base).map(x => x.test)])
+  build.repros = unique([...build.repros, ...r.repros.filter(x => x.failed_on_base && steps.repros.some(t => t.id === x.id)).map(x => x.id)])
   for (const m of r.mutations) {
     build.mutations[m.decision] = m
   }
@@ -1653,9 +1671,12 @@ function mergeBuild(r) {
 // commit, that earlier dispatches verified.
 function buildProblems(r, verifiedBefore) {
   const problems = []
+  for (const x of r.repros.filter(x => !steps.repros.some(t => t.id === x.id))) {
+    problems.push(`repro ${x.id} is not a repro of the steps`)
+  }
   for (const t of steps.repros) {
-    if (!build.repros.some(x => namesRepro(x, t))) {
-      problems.push(`repro ${t} is not recorded failing on the base commit`)
+    if (!build.repros.includes(t.id)) {
+      problems.push(`repro ${t.id} (${t.test}) is not recorded failing on the base commit`)
     }
   }
   for (const s of steps.list) {
