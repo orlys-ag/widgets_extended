@@ -206,7 +206,7 @@ function extraction(prompt, ctx) {
   const carried = idsIn(between(prompt, 'Carried implementation findings, to place:', 'Read the plan'))
   return {
     decisions,
-    repros: ['test_repro'],
+    repros: [{ id: 'R1', test: 'test_repro' }],
     steps: [
       { n: 1, title: 'Core', anchor: 'landing-order', decisions: decisions.slice(0, 1), files: ['src/core/widget.ts'], signal: 'test_core', group: '' },
       { n: 2, title: 'IO', anchor: 'landing-order', decisions: decisions.slice(1), files: ['src/io/reader.ts'], signal: 'test_io', group: '' },
@@ -228,7 +228,7 @@ function buildResult(ctx, over = {}) {
     branch: SLUG,
     approval_recorded: true,
     plan_checks: (profile.planChecks ?? []).map(c => ({ name: c.name, passed: true, note: '' })),
-    repros: steps.repros.map(test => ({ test, failed_on_base: true })),
+    repros: steps.repros.map(r => ({ id: r.id, failed_on_base: true })),
     carried: (steps.carried ?? []).map(c => ({ id: c.id, addressed: true, evidence: c.step === -1 ? c.obsolete : 'test_carried' })),
     steps: steps.steps.map(s => ({ n: s.n, status: 'built', signal_passed: true, gates: stepGates, changed_files: s.files, commit: `c${s.n}` })),
     mutations: steps.pins.map(p => ({ decision: p.decision, test: p.test, test_failed: true, sha_before: 'aa', sha_after: 'aa' })),
@@ -639,7 +639,7 @@ const T1 = [
       ['a final gate its files trigger', b => ({ ...b, changed_files: [...b.changed_files, 'docs/guide.md'], final_gates: b.final_gates.filter(g => g.name !== 'docs') }), /final gate docs/],
       ['a mutation', b => ({ ...b, mutations: b.mutations.slice(1) }), /d1 has no mutation/],
       ['a restore', b => ({ ...b, mutations: b.mutations.map(m => ({ ...m, sha_after: 'bb' })) }), /not restored/],
-      ['a repro', b => ({ ...b, repros: b.repros.map(x => ({ ...x, failed_on_base: false })) }), /repro test_repro/],
+      ['a repro', b => ({ ...b, repros: b.repros.map(x => ({ ...x, failed_on_base: false })) }), /repro R1 \(test_repro\) is not recorded/],
       ['the Approval record', b => ({ ...b, approval_recorded: false }), /Approval record/],
       ['a step', b => ({ ...b, steps: b.steps.slice(0, 1) }), /step 2 is not reported/],
       ['a stop that settles nothing', b => ({ ...b, complete: false, steps: [], mutations: [] }), /stopped before the final gates/],
@@ -652,18 +652,40 @@ const T1 = [
     expect(twice.result?.status === 'failed' && twice.result?.phase === 'build' && /io-tests/.test(twice.result?.reason ?? ''), `twice: ${twice.result?.status}, ${twice.result?.reason}`)
   }],
 
-  ['T1ka', 'a repro reported under its name with its file or where it ran is recorded, and one under a longer name is not', async ({ expect }) => {
-    const named = suffix => (n, p, ctx) => {
+  ['T1ka', 'a repro is recorded by its id whatever its text holds, a report of an id no repro has and a repeated id are problems, and a run record naming repros by text is upgraded', async ({ expect }) => {
+    // The extraction's text may open with the plan's label and end with a
+    // note; the builder reports the id alone.
+    const labelled = { id: 'R1', test: 'R1: tests/repro.test.ts "test_repro" (fails on the base commit: the function does not exist)' }
+    const byId = await run({ respond: respondWith({ steps: (n, p, ctx) => ({ ...extraction(p, ctx), repros: [labelled] }) }) })
+    expect(byId.result?.status === 'accepted' && !byId.labels.includes('build-2'), `a repro reported by its id: ${byId.result?.status}, ${byId.result?.reason}, labels ${byId.labels.join(' ')}`)
+    expect((byId.prompt('build') ?? '').includes(`R1 (${labelled.test})`), 'step 0 does not give the repro its id beside its text')
+    const unknown = await run({ respond: respondWith({ build: (n, p, ctx) => { const b = buildResult(ctx); return { ...b, repros: [...b.repros, { id: 'R9', failed_on_base: true }] } } }) })
+    expect(/repro R9 is not a repro of the steps/.test(unknown.prompt('build-2') ?? ''), 'a report of an id no repro has was accepted')
+    const repeated = await run({ respond: respondWith({ steps: (n, p, ctx) => ({ ...extraction(p, ctx), repros: [{ id: 'R1', test: 'a' }, { id: 'R1', test: 'b' }] }) }) })
+    expect(/repro id R1 is given to more than one repro/.test(repeated.prompt('steps-2') ?? ''), 'two repros with one id were accepted')
+    // A record written before repros had ids holds each repro as its text, and
+    // each recorded one as the builder's text for it.
+    const gateless = (label, n, p, ctx) => {
+      if (!/^build/.test(label)) {
+        return undefined
+      }
       const b = buildResult(ctx)
-      return { ...b, repros: b.repros.map(x => ({ ...x, test: `${x.test}${suffix}` })) }
+      return { ...b, steps: b.steps.map(s => s.n === 2 ? { ...s, gates: [{ name: 'build', passed: true }] } : s) }
     }
-    const decorated = await run({ respond: respondWith({ build: named(' (tests/repro.test.ts), run on the base commit') }) })
-    expect(decorated.result?.status === 'accepted' && !decorated.labels.includes('build-2'), `a repro named with its file: ${decorated.result?.status}, ${decorated.result?.reason}, labels ${decorated.labels.join(' ')}`)
-    const longer = await run({ respond: respondWith({ build: named('_extra') }) })
-    expect(/repro test_repro is not recorded/.test(longer.prompt('build-2') ?? ''), 'a repro reported under a longer name was recorded')
-    const handover = await run({ respond: respondWith({ build: (n, p, ctx) => ({ ...named(' (tests/repro.test.ts)')(n, p, ctx), complete: false, final_gates: [] }) }) })
-    const b2 = handover.prompt('build-2') ?? ''
-    expect(/which you do not run again: test_repro\./.test(b2) && !/Commit them first/.test(b2), 'a builder after a handover is sent to run a repro recorded with its file again')
+    const stopped = await run({ respond: gateless })
+    expect(stopped.result?.status === 'failed' && stopped.result?.state?.phase === 'build', `the run to resume: ${stopped.result?.status}`)
+    const legacy = recorded => {
+      const st = JSON.parse(JSON.stringify(stopped.result.state))
+      st.steps.repros = ['R1: test_repro (fails on the base commit)']
+      st.build.repros = recorded
+      return st
+    }
+    const builder = (n, p, ctx) => buildResult({ ...ctx, steps: { ...ctx.steps, repros: [{ id: 'R1' }] } })
+    const whole = await run({ args: baseArgs({ resume: legacy(['R1: test_repro (fails on the base commit), run on the base commit']) }), respond: respondWith({ build: builder }) })
+    expect(/which you do not run again: R1\./.test(whole.prompt('build') ?? '') && whole.result?.status === 'accepted', `a legacy record holding the repro's whole text: ${whole.result?.status}, ${whole.result?.reason}`)
+    const part = await run({ args: baseArgs({ resume: legacy(['test_repro']) }), respond: respondWith({ build: builder }) })
+    expect((part.prompt('build') ?? '').includes('Step 0, the repros, each with its id: R1 (test_repro (fails on the base commit)).') && part.result?.status === 'accepted',
+      `a legacy record holding part of the repro's text: ${part.result?.status}, ${part.result?.reason}`)
   }],
 
   ['T1l', 'a stop on a precondition ends the run at the build, a described check without a stop does not, and the resumed run continues it', async ({ expect }) => {
@@ -1207,7 +1229,7 @@ const T2 = [
     const pinsToo = (k, p, ctx) => ({ ...buildResult(ctx), complete: false, final_gates: [] })
     const r = await run({ respond: respondWith({ ...raised, build: stepsOnly, 'build-2': pinsToo }) })
     const [b2, b3] = [r.prompt('build-2'), r.prompt('build-3')]
-    expect(!/Commit them first/.test(b2) && /which you do not run again: test_repro\./.test(b2), 'a builder after a handover is sent to run step 0 again')
+    expect(!/Commit them first/.test(b2) && /which you do not run again: R1\./.test(b2), 'a builder after a handover is sent to run step 0 again')
     expect(!b2.includes('No test reads the file back.') && /which you do not address again: runtime-r1-1\./.test(b2), 'a builder after a handover is sent to address a carried finding again')
     expect(/Pins, one mutation each/.test(b2) && !/Pins, one mutation each/.test(b3) && /which you do not mutate again: d1 \(test_d1\), d2 \(test_d2\)\./.test(b3),
       'a builder after a handover is sent to mutate a pin again, or not sent to mutate one still owed')
