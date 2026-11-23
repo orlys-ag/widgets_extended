@@ -120,6 +120,47 @@ Set<String> schedulingNames() {
   };
 }
 
+/// The names after `this.` or `super.` in the parameters of the
+/// constructor of the file at [path] whose declaration starts at the
+/// first occurrence of [declaration], up to the `})` that closes them.
+Set<String> constructorParameters(String path, String declaration) {
+  final source = File(path).readAsStringSync();
+  final start = source.indexOf(declaration);
+  expect(start, isNot(-1), reason: declaration);
+  final parameters = source.substring(start, source.indexOf("})", start));
+  return <String>{
+    for (final match in RegExp(
+      r"\b(?:this|super)\.(\w+)",
+    ).allMatches(parameters))
+      match.group(1)!,
+  };
+}
+
+/// The names in backticks of the README's paragraph on [name], the one
+/// whose first line starts with [name] in backticks and " is ": each a
+/// lone identifier starting lower case, less one right after another
+/// name's "'s ", which names a member of that.
+Set<String> readmeNamesOf(String readme, String name) {
+  final lines = readme.split("\n");
+  final first = lines.indexWhere((line) {
+    return line.startsWith("`$name` is ");
+  });
+  expect(first, isNot(-1), reason: "no README paragraph on $name");
+  final paragraph = lines
+      .skip(first)
+      .takeWhile((line) {
+        return line.trim().isNotEmpty;
+      })
+      .join(" ");
+  final identifier = RegExp(r"^[a-z][A-Za-z0-9]*$");
+  return <String>{
+    for (final match in RegExp(r"`([^`]+)`").allMatches(paragraph))
+      if (identifier.hasMatch(match.group(1)!) &&
+          !paragraph.substring(0, match.start).endsWith("`'s "))
+        match.group(1)!,
+  };
+}
+
 void main() {
   test("B1 the barrel shows the module's public names", () {
     // Compile-time only: a name the barrel stops showing stops this file
@@ -582,10 +623,7 @@ void main() {
         path: "lib/calendar/composition/calendar_controller.dart",
         name: "CalendarController",
       ),
-      (
-        path: "lib/calendar/views/time_picker.dart",
-        name: "CalendarTimePicker",
-      ),
+      (path: "lib/calendar/views/time_picker.dart", name: "CalendarTimePicker"),
       (
         path: "lib/calendar/composition/calendar_day_picker.dart",
         name: "CalendarDayPicker",
@@ -657,5 +695,36 @@ void main() {
       }
     }
     expect(collected, isEmpty);
+  });
+
+  test("RD1 the README's paragraph on each inline picker the barrel shows "
+      "names, of its own, only parameters its constructor takes", () {
+    // A checkout may hold the README with CRLF line ends.
+    final readme = File(
+      "README.md",
+    ).readAsStringSync().replaceAll("\r\n", "\n");
+    for (final (name, path) in <(String, String)>[
+      (
+        "CalendarZonePanel",
+        "lib/calendar/composition/calendar_zone_panel.dart",
+      ),
+      ("CalendarTimePicker", "lib/calendar/views/time_picker.dart"),
+      (
+        "CalendarDayPicker",
+        "lib/calendar/composition/calendar_day_picker.dart",
+      ),
+      (
+        "CalendarDateTimePicker",
+        "lib/calendar/composition/calendar_date_time_picker.dart",
+      ),
+    ]) {
+      final parameters = constructorParameters(path, "$name({");
+      // Setup sanity: the constructor's parameters and the paragraph's
+      // names are read.
+      expect(parameters, contains("key"), reason: name);
+      final named = readmeNamesOf(readme, name);
+      expect(named, contains("onChanged"), reason: name);
+      expect(named.difference(parameters), isEmpty, reason: name);
+    }
   });
 }

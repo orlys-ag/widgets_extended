@@ -533,7 +533,7 @@ final app = MaterialApp(
 `CalendarTimePicker` is an inline panel from which a user picks a time of
 day: an Hour column, a Minute column and on the 12-hour clock an AM/PM
 column, each scrolling and snapping its selected row onto a pill behind its
-centre row, and Now and Clear where you give `now` or set `clearable`. The
+centre row, and a Clear, which reports null, where you set `clearable`. The
 AM/PM column takes the gestures and keys the other columns take, so Space
 and Enter do not switch its half. Set `showMinutes` to false to pick whole
 hours, or `showHours` to false to pick minutes within the value's hour, or
@@ -544,8 +544,7 @@ time. It offers only the times from `min` to `max` whose hour is a multiple
 of its `hourStep` (1 to 23, counted from midnight) and whose minute is a
 multiple of its `minuteStep`, and 24:00 whatever the `hourStep`; it draws
 the ones your `isEnabled` refuses disabled, always shows its value, and
-reports a pick through `onChanged` once its columns come to rest. Now picks
-the latest time at or before `now` on both steps, where it is offered. It opens
+reports a pick through `onChanged` once its columns come to rest. It opens
 no route: put it where your form shows it, a parent that asks its intrinsic
 sizes, such as a dialog, included. Its columns share a bounded width
 equally, and are otherwise 72 logical pixels wide each, or as wide as the
@@ -584,6 +583,24 @@ with the month picker closed, and reports the view each fold, unfold, and
 opening or closing of the month picker turns it to through
 `onViewChanged`, as a `CalendarDayPickerView`; keep the last one to open
 your next picker on the view the user left.
+
+`CalendarDateTimePicker` is an inline picker of a day and a time of it: a
+`CalendarDayPicker`, its date view, and a `CalendarTimePicker` under a row
+naming `day`, its time view, which take turns. A control of two segments,
+Date and Time, at the end of each view's header switches between them, and
+nothing else does: a day picked keeps the date view. Its value is `day` and
+`minute`, a minute after midnight on the clock of `store`'s zone, or of the
+device without a store; a tap on a day reports that day with the minute
+through `onChanged`, and a pick of a time reports it with `day`, so take the
+two together. With a null `minute` it picks a day alone, showing the date
+view with no control. Its time view offers the times of `day` from the first
+to the last `timeBoundsOf` gives, those `isTimeEnabled` accepts, and of those
+the ones the clock reads that day, so a time the clock skips draws disabled.
+It opens on the time view where `initialShowsTime` says, reports each switch
+through `onShowsTimeChanged`, and takes the day picker's own parameters, such
+as `firstDay`, `isDayEnabled` and `dayBadges`, for its date view. It opens no
+route, and draws in the theme a `CalendarView` would resolve there, with its
+words from `CalendarLocalizations`.
 
 **Editing.** With `editable: true`, Week's and Day's blocks move and
 resize, and a create gesture reports a `CalendarCreateDetails` through
