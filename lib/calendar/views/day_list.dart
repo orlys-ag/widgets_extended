@@ -23,6 +23,7 @@ import '../presentation/calendar_localizations.dart';
 import '../presentation/calendar_theme.dart';
 import 'answer_builder.dart';
 import 'create_details.dart';
+import 'day_cell.dart' show labelSizeIn;
 
 /// The style the day list animates its rows with under [theme]: every
 /// family over its [CalendarThemeData.motionDuration] on its
@@ -175,8 +176,10 @@ class _ListStyles {
 /// The room between the list's sides and its rows' content.
 const double dayListGutter = 16.0;
 
-/// The width of the column of times left of the cards and the dashed
-/// lines, whose times end [dayListTimeGap] short of them.
+/// The least width of the column of times left of the cards and the
+/// dashed lines, whose times end [dayListTimeGap] short of them. The column
+/// is as wide as the widest time it shows at the text size, and at most half
+/// of a row's content where that is wider, within which a time scales down.
 const double dayListTimeWidth = 64.0;
 
 /// The room between the end of the times, which the time column aligns
@@ -962,6 +965,9 @@ class _DayListState<T> extends State<DayList<T>> {
   /// The text the rows read, as [_styles] their look.
   late CalendarLocalizations _strings;
 
+  /// The box the widest label of the time column takes ([_measureTimes]).
+  Size _timeLabel = Size.zero;
+
   /// The [CalendarDates.dayNumber]s of the first and the last day the list
   /// holds.
   late int _first;
@@ -1126,6 +1132,7 @@ class _DayListState<T> extends State<DayList<T>> {
     super.didChangeDependencies();
     _styles = _ListStyles.of(context);
     _strings = CalendarLocalizations.of(context);
+    _measureTimes();
     _treeMadeFor = null;
   }
 
@@ -1135,7 +1142,61 @@ class _DayListState<T> extends State<DayList<T>> {
     super.reassemble();
     _styles = _ListStyles.of(context);
     _strings = CalendarLocalizations.of(context);
+    _measureTimes();
     _treeMadeFor = null;
+  }
+
+  /// The minutes past each hour [_measureTimes] measures, which put each
+  /// digit in each place of a minute: 0 to 5 first, 0 to 9 second.
+  static const List<int> _measuredMinutes = <int>[
+    0,
+    11,
+    22,
+    33,
+    44,
+    55,
+    6,
+    17,
+    28,
+    39,
+  ];
+
+  /// Measures [_timeLabel] ([labelSizeIn]) in the time style: each hour of
+  /// the day at [_measuredMinutes] on [DayList.format]'s clock, and the
+  /// all-day label, the labels the time column shows whole. Makes the
+  /// list depend on the text size and the fonts, and the locale, which
+  /// [didChangeDependencies] then measures again.
+  void _measureTimes() {
+    final strings = _strings;
+    final format = widget.format;
+    _timeLabel = labelSizeIn(context, _styles.time, <String>[
+      for (var hour = 0; hour < 24; hour++)
+        for (final minute in _measuredMinutes)
+          strings.formatTime(hour * 60 + minute, format),
+      strings.allDay,
+    ]);
+  }
+
+  /// The width of the time column in a list [listWidth] wide: the widest
+  /// label ([_timeLabel]) and [dayListTimeGap] after it, at least
+  /// [dayListTimeWidth], and at most half of a row's content where that is
+  /// wider than [dayListTimeWidth], within which a label scales down.
+  double _timeColumnWidthIn(double listWidth) {
+    final wanted = math.max(
+      dayListTimeWidth,
+      _timeLabel.width.ceilToDouble() + dayListTimeGap,
+    );
+    if (!listWidth.isFinite) {
+      return wanted;
+    }
+    final half = (listWidth - 2.0 * dayListGutter) / 2.0;
+    return math.max(dayListTimeWidth, math.min(wanted, half));
+  }
+
+  /// The height of a gap row: [_lineRowExtent], or the height of the time
+  /// it shows where that is taller.
+  double get _gapRowExtent {
+    return math.max(_lineRowExtent, _timeLabel.height.ceilToDouble());
   }
 
   @override
@@ -1167,6 +1228,9 @@ class _DayListState<T> extends State<DayList<T>> {
     }
     if (widget.editPolicy != oldWidget.editPolicy) {
       _policyChanged = true;
+    }
+    if (widget.format != oldWidget.format) {
+      _measureTimes();
     }
     if (widget.weekdays != oldWidget.weekdays) {
       _rebuildOn(widget.selectedDay);
@@ -1536,6 +1600,8 @@ class _DayListState<T> extends State<DayList<T>> {
         return 5.0 + 16.0 + 5.0 + padding;
       case DayListFailed():
         return _failedRowExtent + padding;
+      case DayListGap():
+        return _gapRowExtent + padding;
       default:
         return _lineRowExtent + padding;
     }
@@ -1727,7 +1793,17 @@ class _DayListState<T> extends State<DayList<T>> {
         slivers: <Widget>[tree],
       ),
     );
-    return Opacity(opacity: _landing ? 0.0 : 1.0, child: list);
+    return Opacity(
+      opacity: _landing ? 0.0 : 1.0,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return _TimeColumn(
+            width: _timeColumnWidthIn(constraints.maxWidth),
+            child: list,
+          );
+        },
+      ),
+    );
   }
 
   /// Whether [_treeWidget] still stands: whether nothing its rows read,
@@ -2153,25 +2229,15 @@ class _DayListState<T> extends State<DayList<T>> {
     final styles = _styles;
     return Row(
       children: <Widget>[
-        Container(
+        _TimeCell(
           key: dayListTimeKey(entry.id),
-          width: dayListTimeWidth,
-          padding: const EdgeInsets.only(right: dayListTimeGap),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: <Widget>[
-              if (row.first && row.last || allDay)
-                Text(
-                  time,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: styles.time,
-                )
-              else
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(time, maxLines: 1, style: styles.time),
-                ),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(time, maxLines: 1, style: styles.time),
+              ),
               if (!allDay) ...<Widget>[
                 const SizedBox(height: 6.0),
                 FittedBox(
@@ -2318,7 +2384,7 @@ class _DayListState<T> extends State<DayList<T>> {
       builder: (rowContext) {
         return SizedBox(
           key: key,
-          height: _lineRowExtent,
+          height: _gapRowExtent,
           child: AnswerBuilder<bool>(
             listenables: <Listenable>[_createMark],
             answer: () {
@@ -2332,15 +2398,11 @@ class _DayListState<T> extends State<DayList<T>> {
             },
             child: Row(
               children: <Widget>[
-                Container(
-                  width: dayListTimeWidth,
-                  padding: const EdgeInsets.only(right: dayListTimeGap),
+                _TimeCell(
                   alignment: Alignment.centerRight,
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: _styles.gapTime,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(label, maxLines: 1, style: _styles.gapTime),
                   ),
                 ),
                 _styles.dashedLine,
@@ -2854,6 +2916,45 @@ class _NowLayout extends SingleChildLayoutDelegate {
         oldDelegate.fraction != fraction ||
         oldDelegate.top != top ||
         oldDelegate.bottom != bottom;
+  }
+}
+
+/// The width of the list's time column, which the list gives its rows from
+/// its own width ([_DayListState._timeColumnWidthIn]).
+class _TimeColumn extends InheritedWidget {
+  const _TimeColumn({required this.width, required super.child});
+
+  final double width;
+
+  /// The width of the time column above [context], which [context] then
+  /// depends on; [dayListTimeWidth] where there is none.
+  static double widthOf(BuildContext context) {
+    final column = context.dependOnInheritedWidgetOfExactType<_TimeColumn>();
+    return column?.width ?? dayListTimeWidth;
+  }
+
+  @override
+  bool updateShouldNotify(_TimeColumn oldWidget) {
+    return width != oldWidget.width;
+  }
+}
+
+/// A row's cell of the time column: [child], at [alignment], as wide as the
+/// column ([_TimeColumn]) less [dayListTimeGap] at its end.
+class _TimeCell extends StatelessWidget {
+  const _TimeCell({super.key, this.alignment, required this.child});
+
+  final AlignmentGeometry? alignment;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: _TimeColumn.widthOf(context),
+      padding: const EdgeInsets.only(right: dayListTimeGap),
+      alignment: alignment,
+      child: child,
+    );
   }
 }
 

@@ -1192,6 +1192,13 @@ since passed a time after which the edit policy refused that range or that
 edge, as `lockPast` does at midnight. Its release now asks the policy
 again, as a release over another day's cell does, and requests nothing
 where it refuses.
+- Fix: Agenda's time column was 64 px wide at any text size, so an item's
+start lost its end, in Roboto on the 12-hour clock from a text scale of
+1.3, and a gap row, 24 px tall, cut its time to that height from a text
+scale of 2. The column is now as wide as the widest time it shows, and the
+all-day label, at the text size, and at most half of a row's content, in
+which a time scales down rather than losing its end; a gap row is as tall
+as its time.
 
 ## 0.0.35
 
