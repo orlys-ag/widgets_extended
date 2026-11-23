@@ -1186,6 +1186,12 @@ scrolling under it. The shadows are the new
 `CalendarThemeExtension.fromColorScheme` gives in the scheme's `shadow`
 colour; an empty list casts none. A block lifted across the edge paints
 over the shadow.
+- Fix: in Week and Day, a bar's day-edge resize held at the day limit
+requested the range it was held at when let go, though the clock had
+since passed a time after which the edit policy refused that range or that
+edge, as `lockPast` does at midnight. Its release now asks the policy
+again, as a release over another day's cell does, and requests nothing
+where it refuses.
 
 ## 0.0.35
 
