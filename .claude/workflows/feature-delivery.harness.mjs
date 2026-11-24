@@ -218,6 +218,10 @@ function extraction(prompt, ctx) {
   }
 }
 
+// A step's commit as a builder reports it, a full ID: the step's number padded
+// with c.
+const commitOf = n => String(n).padStart(40, 'c')
+
 function buildResult(ctx, over = {}) {
   const steps = ctx.steps ?? { repros: [], steps: [], pins: [] }
   const profile = ctx.profile
@@ -230,7 +234,7 @@ function buildResult(ctx, over = {}) {
     plan_checks: (profile.planChecks ?? []).map(c => ({ name: c.name, passed: true, note: '' })),
     repros: steps.repros.map(r => ({ id: r.id, failed_on_base: true })),
     carried: (steps.carried ?? []).map(c => ({ id: c.id, addressed: true, evidence: c.step === -1 ? c.obsolete : 'test_carried' })),
-    steps: steps.steps.map(s => ({ n: s.n, status: 'built', signal_passed: true, gates: stepGates, changed_files: s.files, commit: `c${s.n}` })),
+    steps: steps.steps.map(s => ({ n: s.n, status: 'built', signal_passed: true, gates: stepGates, changed_files: s.files, commit: commitOf(s.n) })),
     mutations: steps.pins.map(p => ({ decision: p.decision, test: p.test, test_failed: true, sha_before: 'aa', sha_after: 'aa' })),
     final_gates: profile.gates.filter(g => g.scope === 'final').map(g => ({ name: g.name, passed: true })),
     changed_files: [...new Set(steps.steps.flatMap(s => s.files))],
@@ -606,7 +610,7 @@ const T1 = [
   }],
 
   ['T1j', 'a blocking build finding revises the plan in the run, and the builder reworks the steps it changed', async ({ expect }) => {
-    const firstBuild = (n, p, ctx) => buildResult(ctx, { complete: false, last_step: 1, steps: [{ n: 1, status: 'built', signal_passed: true, gates: [{ name: 'build', passed: true }], changed_files: ['src/core/widget.ts'], commit: 'c1' }], blocking_findings: [BASE_ITEM] })
+    const firstBuild = (n, p, ctx) => buildResult(ctx, { complete: false, last_step: 1, steps: [{ n: 1, status: 'built', signal_passed: true, gates: [{ name: 'build', passed: true }], changed_files: ['src/core/widget.ts'], commit: commitOf(1) }], blocking_findings: [BASE_ITEM] })
     const r = await run({
       respond: respondWith({
         build: firstBuild,
@@ -616,7 +620,7 @@ const T1 = [
     const after = r.labels.slice(r.labels.indexOf('build'))
     expect(after.join(' ') === 'build plan:revise-1 critic:consistency:r2 critic:surface:r2 critic:runtime:r2 critic:evidence:r2 steps-2 build-2 accept', `after the blocking finding: ${after.join(' ')}`)
     expect(/committed steps through 1 on harness-run/.test(r.prompt('plan:revise-1')), 'the revision is not told what the builder committed')
-    expect(/a decision each carries changed \(d1\)[^\n]*\n- Core \(c1\), carrying d1/.test(r.prompt('build-2')), 'the builder is not told what to rework')
+    expect(new RegExp(`a decision each carries changed \\(d1\\)[^\\n]*\\n- Core \\(${commitOf(1)}\\), carrying d1`).test(r.prompt('build-2')), 'the builder is not told what to rework')
     expect(r.result?.status === 'accepted' && r.result?.state?.build?.rework === null, `status ${r.result?.status}, rework ${JSON.stringify(r.result?.state?.build?.rework)}`)
 
     const again = await run({ respond: respondWith({ build: firstBuild, 'build-2': (n, p, ctx) => buildResult(ctx, { complete: false, blocking_findings: [{ ...BASE_ITEM, id: 'b2' }] }) }) })
@@ -961,9 +965,9 @@ const T2 = [
 
   ['T2d', 'a kept step must be one verified earlier, and rework names steps by title and commit', async ({ expect }) => {
     const allKept = await run({ respond: respondWith({ build: (n, p, ctx) => { const b = buildResult(ctx); return { ...b, steps: b.steps.map(s => ({ ...s, status: 'kept', signal_passed: false, gates: [] })) } } }) })
-    expect(allKept.labels.includes('build-2') && /step 1 is reported kept, but commit c1 was not verified/.test(allKept.prompt('build-2')), 'a step never verified was accepted as kept')
+    expect(allKept.labels.includes('build-2') && allKept.prompt('build-2').includes(`step 1 is reported kept, but commit ${commitOf(1)} was not verified`), 'a step never verified was accepted as kept')
 
-    const built = s => ({ n: s.n, status: 'built', signal_passed: true, gates: [{ name: 'build', passed: true }, { name: 'io-tests', passed: true }], changed_files: s.files, commit: `c${s.n}` })
+    const built = s => ({ n: s.n, status: 'built', signal_passed: true, gates: [{ name: 'build', passed: true }, { name: 'io-tests', passed: true }], changed_files: s.files, commit: commitOf(s.n) })
     const firstBuild = (n, p, ctx) => ({ ...buildResult(ctx), complete: false, steps: ctx.steps.steps.map(built), blocking_findings: [BASE_ITEM] })
     const renumbered = (n, p, ctx) => {
       const e = extraction(p, ctx)
@@ -976,12 +980,12 @@ const T2 = [
     }
     const r = await run({ respond: respondWith(base) })
     const b2 = r.prompt('build-2')
-    expect(/- Core \(c1\), carrying d1/.test(b2) && /- IO \(c2\), carrying d2/.test(b2), 'the builder is not told the verified and the reworked steps by title and commit')
+    expect(b2.includes(`- Core (${commitOf(1)}), carrying d1`) && b2.includes(`- IO (${commitOf(2)}), carrying d2`), 'the builder is not told the verified and the reworked steps by title and commit')
     expect(!/Committed steps that carry them: 2/.test(b2), 'the builder is told to rework a step by a number the revision changed')
     expect(r.result?.status === 'accepted', `status ${r.result?.status}`)
-    const stale = await run({ respond: respondWith({ ...base, 'build-2': (n, p, ctx) => { const b = buildResult(ctx); return { ...b, steps: b.steps.map(s => s.n === 3 ? { ...s, status: 'kept', commit: 'c2' } : s) } } }) })
-    expect(/step 3 is reported kept, but commit c2 was not verified/.test(stale.prompt('build-3')), 'a reworked step was accepted as kept')
-    const keptOk = await run({ respond: respondWith({ ...base, 'build-2': (n, p, ctx) => { const b = buildResult(ctx); return { ...b, steps: b.steps.map(s => s.n === 1 ? { ...s, status: 'kept', commit: 'c1', gates: [] } : s) } } }) })
+    const stale = await run({ respond: respondWith({ ...base, 'build-2': (n, p, ctx) => { const b = buildResult(ctx); return { ...b, steps: b.steps.map(s => s.n === 3 ? { ...s, status: 'kept', commit: commitOf(2) } : s) } } }) })
+    expect(stale.prompt('build-3').includes(`step 3 is reported kept, but commit ${commitOf(2)} was not verified`), 'a reworked step was accepted as kept')
+    const keptOk = await run({ respond: respondWith({ ...base, 'build-2': (n, p, ctx) => { const b = buildResult(ctx); return { ...b, steps: b.steps.map(s => s.n === 1 ? { ...s, status: 'kept', commit: commitOf(1), gates: [] } : s) } } }) })
     expect(!keptOk.labels.includes('build-3') && keptOk.result?.status === 'accepted', 'a verified step was not allowed to be kept')
   }],
 
@@ -1216,10 +1220,10 @@ const T2 = [
   ['T2zb', 'a kept step must be the one an earlier dispatch verified under that commit, not any verified commit', async ({ expect }) => {
     const firstStep = (k, p, ctx) => { const b = buildResult(ctx); return { ...b, complete: false, last_step: 1, steps: b.steps.slice(0, 1), mutations: [], final_gates: [] } }
     const keep = (n, commit, over = {}) => (k, p, ctx) => { const b = buildResult(ctx); return { ...b, steps: b.steps.map(s => s.n === n ? { ...s, status: 'kept', commit, ...over } : s) } }
-    const borrowed = await run({ respond: respondWith({ build: firstStep, 'build-2': keep(2, 'c1') }) })
-    expect(/step 2 is reported kept, but commit c1 was not verified as this step/.test(borrowed.prompt('build-3')), `a step was kept on another step's verified commit: ${borrowed.labels.filter(l => /^build/.test(l)).join(' ')}`)
+    const borrowed = await run({ respond: respondWith({ build: firstStep, 'build-2': keep(2, commitOf(1)) }) })
+    expect(borrowed.prompt('build-3').includes(`step 2 is reported kept, but commit ${commitOf(1)} was not verified as this step`), `a step was kept on another step's verified commit: ${borrowed.labels.filter(l => /^build/.test(l)).join(' ')}`)
     expect(borrowed.result?.status === 'accepted', `status ${borrowed.result?.status}`)
-    const own = await run({ respond: respondWith({ build: firstStep, 'build-2': keep(1, 'c1', { gates: [] }) }) })
+    const own = await run({ respond: respondWith({ build: firstStep, 'build-2': keep(1, commitOf(1), { gates: [] }) }) })
     expect(!own.labels.includes('build-3') && own.result?.status === 'accepted', 'a step kept on its own verified commit was refused')
   }],
 
@@ -1235,7 +1239,7 @@ const T2 = [
       'a builder after a handover is sent to mutate a pin again, or not sent to mutate one still owed')
     expect(r.result?.status === 'accepted', `status ${r.result?.status}`)
 
-    const firstBuild = (k, p, ctx) => buildResult(ctx, { complete: false, last_step: 1, steps: [{ n: 1, status: 'built', signal_passed: true, gates: [{ name: 'build', passed: true }], changed_files: ['src/core/widget.ts'], commit: 'c1' }], mutations: [], final_gates: [], blocking_findings: [BASE_ITEM] })
+    const firstBuild = (k, p, ctx) => buildResult(ctx, { complete: false, last_step: 1, steps: [{ n: 1, status: 'built', signal_passed: true, gates: [{ name: 'build', passed: true }], changed_files: ['src/core/widget.ts'], commit: commitOf(1) }], mutations: [], final_gates: [], blocking_findings: [BASE_ITEM] })
     const reworked = await run({
       respond: respondWith({
         ...raised,
@@ -1308,6 +1312,22 @@ const T2 = [
     const complete = await run({ respond: respondWith({ build: allButFinal, 'build-2': (k, p, ctx) => buildResult(ctx, { stopped: true, precondition: note }) }) })
     expect(builds(complete) === 'build build-2' && complete.result?.status === 'accepted', `a final-gates report that set stopped and settled nothing new: ${builds(complete)}, ${complete.result?.status}, ${complete.result?.reason}`)
     expect(/stopped false/.test(read(ROOT, agentFile('delivery-builder')).replace(/\s+/g, ' ')), 'the builder file, which compaction keeps, does not say which stops report stopped false')
+  }],
+
+  ['T2zi', 'a step\'s commit is its full ID: a shorter name breaks the build report, and a step verified under one is verified again on resume', async ({ expect }) => {
+    const short = await run({ respond: respondWith({ build: (k, p, ctx) => { const b = buildResult(ctx); return { ...b, steps: b.steps.map(s => ({ ...s, commit: s.commit.slice(-7) })) } } }) })
+    expect(short.schemaErrors.some(e => e.label === 'build' && e.errors.some(x => /\$\.steps\[0\]\.commit: "cccccc1" does not match/.test(x))), `a short commit ID: ${JSON.stringify(short.schemaErrors)}`)
+    expect(/full 40-character ID, as git rev-parse prints it/.test(short.prompt('build')), 'the builder is not told to report each commit by its full ID')
+    const firstStep = (k, p, ctx) => { const b = buildResult(ctx); return { ...b, complete: false, last_step: 1, steps: b.steps.slice(0, 1), mutations: [], final_gates: [] } }
+    const stopped = await run({ respond: respondWith({ build: firstStep, 'build-2': () => null }) })
+    const st = stopped.result?.state
+    expect(stopped.result?.status === 'failed' && st?.build?.verified?.length === 1, `the run to resume: ${stopped.result?.status}, ${JSON.stringify(st?.build?.verified)}`)
+    const abbreviated = { ...st, build: { ...st.build, verified: st.build.verified.map(v => ({ ...v, commit: v.commit.slice(-7) })) } }
+    const kept = (k, p, ctx) => { const b = buildResult(ctx); return { ...b, steps: b.steps.map(s => s.n === 1 ? { ...s, status: 'kept', gates: [] } : s) } }
+    const resumed = await run({ args: baseArgs({ resume: abbreviated }), respond: respondWith({ build: kept }) })
+    expect(!/Steps verified in earlier dispatches/.test(resumed.prompt('build')), 'a step verified under a short commit ID is offered to be kept')
+    const full = await run({ args: baseArgs({ resume: st }), respond: respondWith({ build: kept }) })
+    expect(full.prompt('build').includes(`- Core (${commitOf(1)}), carrying d1`) && full.result?.status === 'accepted', `a step verified under its full commit ID: ${full.result?.status}, ${full.result?.reason}`)
   }],
 ]
 
