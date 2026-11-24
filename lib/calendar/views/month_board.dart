@@ -32,13 +32,25 @@ const double monthStripHeight = 28.0;
 const double _numberBoxWidth = 30.0;
 const double _numberBoxHeight = 22.0;
 
-/// The height of one chip lane: the row axis's lane extent while the days
-/// show chips.
+/// The height of one chip lane at no text scaling: the row axis's lane
+/// extent while the days show chips. A larger text grows it, keeping the
+/// room around a chip's line ([_MonthBoardState._measureLanes]).
 const double monthLaneExtent = 18.0;
 
-/// The height of one card lane: the row axis's lane extent while the days
-/// show cards ([monthShowsCards]).
+/// The height of one card lane at no text scaling: the row axis's lane
+/// extent while the days show cards ([monthShowsCards]). A larger text
+/// grows it, keeping the room around a card's two lines
+/// ([_MonthBoardState._measureLanes]).
 const double monthCardExtent = 36.0;
+
+/// The text one line of a style is measured with, the space
+/// [TextPainter.preferredLineHeight] lays out, whose height is any line's
+/// in the style's font.
+const List<String> _lineSample = <String>[" "];
+
+/// The room a bar keeps inside its lane on each side, which
+/// [_MonthChipBox] insets it by.
+const double _barInset = 1.0;
 
 /// The height of a day's banner counting its items wholly before the
 /// calendar's hours, under its number strip, and of the one counting those
@@ -49,24 +61,36 @@ const double monthHoursBannerExtent = 18.0;
 const double monthCardMinWidth = 100.0;
 
 /// The least height a week must rest at for its days to show their items
-/// as cards: the number strip and three card lanes.
+/// as cards at no text scaling: the number strip and three card lanes.
 const double monthCardMinHeight = monthStripHeight + 3 * monthCardExtent;
 
 /// Whether days [width] wide, in weeks resting at [extent], show their
-/// items as cards, one [monthCardExtent] lane tall, which the chip builder
-/// draws in its card form, rather than as chips one [monthLaneExtent] lane
-/// tall: when both reach [monthCardMinWidth] and [monthCardMinHeight].
-bool monthShowsCards(double width, double extent) {
-  return width >= monthCardMinWidth && extent >= monthCardMinHeight;
+/// items as cards, one [cardExtent] lane tall, which the chip builder
+/// draws in its card form, rather than as chips one chip lane tall: when
+/// the days reach [monthCardMinWidth] and the weeks the number strip and
+/// three card lanes, [monthCardMinHeight] at no text scaling.
+bool monthShowsCards(
+  double width,
+  double extent, {
+  double cardExtent = monthCardExtent,
+}) {
+  return width >= monthCardMinWidth &&
+      extent >= monthStripHeight + 3 * cardExtent;
 }
 
 /// The height a week of the month board rests at: [height] shared by
 /// [weekCount] weeks and times [scale], floored to a multiple of 1/64 so
 /// at a [scale] of 1 the weeks never add up past [height], and never less
-/// than the strip and one lane. A non-finite [height] gives that least.
-double fittedWeekExtent(double height, int weekCount, {double scale = 1.0}) {
+/// than the strip and one lane [laneExtent] tall. A non-finite [height]
+/// gives that least.
+double fittedWeekExtent(
+  double height,
+  int weekCount, {
+  double scale = 1.0,
+  double laneExtent = monthLaneExtent,
+}) {
   assert(scale >= 1.0);
-  const least = monthStripHeight + monthLaneExtent;
+  final least = monthStripHeight + laneExtent;
   if (!height.isFinite || weekCount <= 0) {
     return least;
   }
@@ -681,11 +705,19 @@ enum CalendarMonthLayout {
 /// pill, in the [CalendarTheme] above the board. Each item shows as one bar per
 /// calendar week it covers, whose content is what [chipBuilder] draws, told
 /// whether the item continues into the week before or after: a chip one lane
-/// tall, or, in days large enough ([monthShowsCards]), a card two chips tall,
-/// the builder told it draws a card. A pending item's bar takes no tap, and the
-/// board names each bar to a screen reader, its kind as [entryKindOf] answers
-/// it. Lines part the weeks and the days, and each day of another month lies on
-/// the background colour.
+/// tall, or, in days large enough ([monthShowsCards]), a card one card lane
+/// tall, the builder told it draws a card. A chip lane is 18 px and a card
+/// lane 36, or where the theme's lines need more at the text scale, a line
+/// of its [CalendarThemeData.chipTitleStyle] or
+/// [CalendarThemeData.monthMoreStyle] in a chip lane and one of its
+/// [CalendarThemeData.monthCardTitleStyle] over one of its
+/// [CalendarThemeData.monthCardTimeStyle] in a card lane, as much taller as
+/// holds them whole with the room the lane leaves around them at no
+/// scaling, so a week at its resting height holds fewer lanes at a larger
+/// text. A pending item's bar takes no tap, and the board names each bar to
+/// a screen reader, its kind as [entryKindOf] answers it. Lines part the
+/// weeks and the days, and each day of another month lies on the background
+/// colour.
 ///
 /// A tap on a chip reports [onOpenEntry], a tap anywhere else on a day
 /// [onOpenDay], and a long press on a day outside its chips
@@ -1024,14 +1056,21 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   ];
 
   /// The grid, the layout, the hours, the week extent, the room above the
-  /// lanes and the column width the axes were last given; null and zero
-  /// before the first layout.
+  /// lanes, the lane extent and the column width the axes were last given;
+  /// null and zero before the first layout.
   CalendarMonthGrid? _fittedGrid;
   CalendarMonthLayout? _fittedLayout;
   CalendarDayHours? _fittedHours;
   double _fitted = 0.0;
   double _fittedPadding = 0.0;
+  double _fittedLaneExtent = 0.0;
   double _columnWidth = 0.0;
+
+  /// The heights of a chip lane and of a card lane as the last build
+  /// measured them ([_measureLanes]), which the next layout gives the axes
+  /// and the bars.
+  double _chipLane = monthLaneExtent;
+  double _cardLane = monthCardExtent;
 
   /// Whether the last sync found a day of the grid counting an item before
   /// the hours, and one counting an item after them, which decide the
@@ -1649,12 +1688,13 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       size.height,
       grid.weekCount,
       scale: widget.weekScale,
+      laneExtent: _chipLane,
     );
     final width = size.width.isFinite && size.width > 0.0
         ? math.max(widget.minDayWidth, size.width / grid.columnCount)
         : _columnWidth;
-    final cards = monthShowsCards(width, fitted);
-    final laneExtent = cards ? monthCardExtent : monthLaneExtent;
+    final cards = monthShowsCards(width, fitted, cardExtent: _cardLane);
+    final laneExtent = cards ? _cardLane : _chipLane;
     final ready = _daysReady;
     if (_syncPending) {
       final split = _splitOf(grid, hours, ready);
@@ -1680,12 +1720,19 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
         hours != _fittedHours ||
         fitted != _fitted ||
         padding != _fittedPadding ||
+        laneExtent != _fittedLaneExtent ||
         cards != _cards;
     final columnsChanged =
         width > 0.0 &&
         (width != _columnWidth ||
             _board.columns.axis.trackCount != grid.columnCount);
-    final sync = _syncPending || lanes != _syncedLanes || cards != _cards;
+    // New lanes place the bars again, and tell each day where its banners
+    // lie, under either layout.
+    final sync =
+        _syncPending ||
+        lanes != _syncedLanes ||
+        cards != _cards ||
+        laneExtent != _fittedLaneExtent;
     if (!rowsChanged && !columnsChanged && !sync) {
       return;
     }
@@ -1743,11 +1790,26 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     _fittedHours = hours;
     _fitted = fitted;
     _fittedPadding = padding;
+    final relaned = laneExtent != _fittedLaneExtent;
+    _fittedLaneExtent = laneExtent;
     if (cards != _cards) {
       // The build that follows hands the board the other builder, which
       // asks for every bar again.
       _chips.clear();
       _cards = cards;
+    } else if (relaned) {
+      // A bar is as tall as its lane: a new builder of the same kind has
+      // the board ask for every bar again, built at the new height.
+      _chips.clear();
+      if (cards) {
+        _cardBuilder = (context, view) {
+          return _buildCard(context, view);
+        };
+      } else {
+        _chipBuilder = (context, view) {
+          return _buildChip(context, view);
+        };
+      }
     }
     if (columnsChanged) {
       _columnWidth = width;
@@ -2067,6 +2129,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
         key: monthChipKey(chip.key),
         chip: chip,
         card: card,
+        extent: card ? _cardLane : _chipLane,
         builder: _barBuilder,
         kindOf: widget.entryKindOf,
         format: widget.hourLabelFormat,
@@ -2117,8 +2180,67 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     );
   }
 
+  /// Measures [_chipLane] and [_cardLane] in [context]: a chip's lane
+  /// [monthLaneExtent] tall at no text scaling, and at a larger text a
+  /// line of a chip's title in the default chip's style and of the "+N
+  /// more" banner's, with the room the chip leaves around that line at no
+  /// scaling, as [numberBoxIn] keeps the room around a number; and a
+  /// card's lane [monthCardExtent] tall at no text scaling, and at a
+  /// larger text a line of a card's title over one of its times, with the
+  /// room the card leaves around them at none. Each holds its bar inside
+  /// [_barInset]. The default chip's line is the theme's
+  /// [CalendarThemeData.chipTitleStyle], and a card's are its
+  /// [CalendarThemeData.monthCardTitleStyle] and
+  /// [CalendarThemeData.monthCardTimeStyle], which a
+  /// [MonthBoard.chipBuilder] draws in too where its bars are to fit.
+  void _measureLanes(BuildContext context) {
+    final styles = _styles;
+    final theme = styles.theme;
+    const inset = 2 * _barInset;
+    _chipLane =
+        inset +
+        math.max(
+          _linesBoxIn(context, <TextStyle>[
+            theme.chipTitleStyle,
+          ], monthLaneExtent - inset),
+          _linesBoxIn(context, <TextStyle>[
+            styles.moreLabel,
+          ], monthLaneExtent - inset),
+        );
+    _cardLane =
+        inset +
+        _linesBoxIn(context, <TextStyle>[
+          theme.monthCardTitleStyle,
+          theme.monthCardTimeStyle,
+        ], monthCardExtent - inset);
+  }
+
+  /// The height of a box holding a line of each of [styles], one over the
+  /// next, in [context] ([labelSizeIn]): [least] at no text scaling where
+  /// the lines fit it, and otherwise the lines' height with the room
+  /// [least] leaves around them at no scaling.
+  static double _linesBoxIn(
+    BuildContext context,
+    List<TextStyle> styles,
+    double least,
+  ) {
+    var scaled = 0.0;
+    var unscaled = 0.0;
+    for (final style in styles) {
+      scaled += labelSizeIn(context, style, _lineSample).height;
+      unscaled += labelSizeIn(
+        context,
+        style,
+        _lineSample,
+        scaler: TextScaler.noScaling,
+      ).height;
+    }
+    return math.max(least, scaled + math.max(0.0, least - unscaled));
+  }
+
   @override
   Widget build(BuildContext context) {
+    _measureLanes(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = constraints.biggest;
@@ -2479,18 +2601,19 @@ class _MonthDayCell extends StatelessWidget {
   }
 }
 
-/// One item's bar in one week: a lane-tall box over its lane band's top,
-/// holding, inside a 1 px inset and at its lane's height while the board
-/// grows or shrinks the band, what [builder] draws for the chip: a chip one
-/// [monthLaneExtent] lane tall, or a [card] one [monthCardExtent] lane
-/// tall. The box is one semantics node of the chip's label, the kind
-/// [kindOf] answers and its times in [format], and its tap, and takes a
-/// tap anywhere in it, which does nothing while the chip is pending.
+/// One item's bar in one week: a box [extent] tall, its lane's height,
+/// over its lane band's top, holding, inside [_barInset] and at that height
+/// while the board grows or shrinks the band, what [builder] draws for the
+/// chip: a chip one chip lane tall, or a [card] one card lane tall. The box
+/// is one semantics node of the chip's label, the kind [kindOf] answers and
+/// its times in [format], and its tap, and takes a tap anywhere in it, which
+/// does nothing while the chip is pending.
 class _MonthChipBox<T> extends StatelessWidget {
   const _MonthChipBox({
     super.key,
     required this.chip,
     required this.card,
+    required this.extent,
     required this.builder,
     required this.kindOf,
     required this.format,
@@ -2499,6 +2622,9 @@ class _MonthChipBox<T> extends StatelessWidget {
 
   final MonthChip<T> chip;
   final bool card;
+
+  /// The height of the bar's lane.
+  final double extent;
   final CalendarChipBuilder<T> builder;
   final String? Function(CalendarEntry<T> entry)? kindOf;
   final CalendarHourLabelFormat format;
@@ -2508,7 +2634,6 @@ class _MonthChipBox<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final entry = chip.entry;
     final pending = entry.pending;
-    final extent = card ? monthCardExtent : monthLaneExtent;
     void open() {
       onOpen(entry.id);
     }
@@ -2536,14 +2661,14 @@ class _MonthChipBox<T> extends StatelessWidget {
           // day under the chip nor the board's own tap gets it.
           onTap: pending ? () {} : open,
           child: Padding(
-            padding: const EdgeInsets.all(1.0),
+            padding: const EdgeInsets.all(_barInset),
             // The bar keeps its height while the board grows or shrinks
             // the chip's band, and is clipped to it.
             child: ClipRect(
               child: OverflowBox(
                 alignment: Alignment.topLeft,
-                minHeight: extent - 2.0,
-                maxHeight: extent - 2.0,
+                minHeight: extent - 2 * _barInset,
+                maxHeight: extent - 2 * _barInset,
                 child: _ChipContent<T>(
                   entry: entry,
                   details: CalendarChipDetails(

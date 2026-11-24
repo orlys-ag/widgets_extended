@@ -4187,10 +4187,11 @@ void main() {
     );
     await tester.pumpAndSettle();
     // Setup sanity: the header is taller than its least height by more
-    // than a strip row.
+    // than half a strip row, so a read of the strip under the least height
+    // would put the strip cell's centre in another row.
     expect(
       tester.getRect(find.byKey(dayHeaderKey(tuesday))).height,
-      greaterThan(40.0 + stripRect(tester, shown, tuesday).height),
+      greaterThan(40.0 + stripRect(tester, shown, tuesday).height / 2),
     );
     await dragTo(
       tester,
@@ -10680,6 +10681,300 @@ void main() {
       });
     },
   );
+
+  testWidgets("TX43 in Week under maxDayCount 4, a bar's start edge held at "
+      "the limit and let go in the call in which the store moves that start "
+      "to another shown day, which moves the bar and ends the board's drag, "
+      "requests nothing and keeps the store's start", (tester) async {
+    final shown = Shown.week(monday);
+    final bar = allDayOf("b", saturday, days: 3);
+    final store = storeOf(<CalendarEntry<String>>[bar]);
+    await Harness(store, shown, maxDayCount: 4).pump(tester);
+    await selectBar(tester, "b");
+    final cell = stripRect(tester, shown, wednesday);
+    final gesture = await holdEdge(
+      tester,
+      "b",
+      AxisDirection.left,
+      Offset(cell.left + 4.0, tester.getCenter(barFinder("b")).dy),
+    );
+    await tester.pump();
+    // Setup sanity: the limit holds the start at Friday.
+    expect(
+      markedOf(tester, <DateTime>[thursday, friday, saturday, sunday]),
+      <DateTime>[friday, saturday, sunday],
+    );
+    final changed = bar.copyWith(start: thursday);
+    unawaited(store.update(changed));
+    // Setup sanity: before the release the store holds the new start and
+    // the board no longer drags the bar.
+    expectTimes(store, "b", changed.start, changed.end);
+    expect(
+      boardOf(tester).controller.isDragging(const GridKey.bar("b")),
+      isFalse,
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(store.moves, isEmpty);
+    expectTimes(store, "b", changed.start, changed.end);
+  });
+
+  testWidgets("TX44 in Week a block's move let go over Wednesday's strip "
+      "cell in the call in which the store moves its entry to Thursday, "
+      "which moves the block and ends the board's drag, requests nothing "
+      "and keeps the store's times", (tester) async {
+    final shown = Shown.week(monday);
+    final meet = entryOf("a", at(tuesday, 10), at(tuesday, 11));
+    final store = storeOf(<CalendarEntry<String>>[
+      meet,
+      allDayOf("other", friday),
+    ]);
+    await Harness(store, shown).pump(tester);
+    final gesture = await liftTo(
+      tester,
+      tester.getCenter(blockFinder("a", tuesday)),
+      stripRect(tester, shown, wednesday).center,
+    );
+    // Setup sanity: the crossing names Wednesday all day.
+    expect(markedOf(tester, <DateTime>[wednesday]), <DateTime>[wednesday]);
+    final changed = meet.copyWith(
+      start: at(thursday, 10),
+      end: at(thursday, 11),
+    );
+    unawaited(store.update(changed));
+    // Setup sanity: before the release the store holds the new times and
+    // the board no longer drags the block.
+    expectTimes(store, "a", changed.start, changed.end);
+    expect(
+      boardOf(tester).controller.isDragging(const GridKey.piece("a", 0)),
+      isFalse,
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(store.moves, isEmpty);
+    expectTimes(store, "a", changed.start, changed.end);
+  });
+
+  testWidgets("TX45 at text scale 2, where the strip's rows grow to hold "
+      "their text, a block dropped on Tuesday's third strip row writes "
+      "Tuesday's start to Wednesday's", (tester) async {
+    final shown = Shown.week(monday);
+    final store = storeOf(<CalendarEntry<String>>[
+      entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
+      for (var i = 0; i < 3; i++) allDayOf("o$i", tuesday),
+    ]);
+    final harness = Harness(store, shown);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = harness.size;
+    addTearDown(tester.view.reset);
+    addTearDown(harness.now.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) {
+          return MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(2.0)),
+            child: child!,
+          );
+        },
+        home: Material(child: harness.themed()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final row = stripRect(tester, shown, tuesday, 2);
+    // Setup sanity: three strip rows, each tall enough that a read of the
+    // strip in 24 px rows would put the third's centre past the strip.
+    expect(shown.firstSlotRow - shown.stripStart - 1, 3);
+    expect(row.height * 2.5, greaterThan(3 * 24.0));
+    await dragTo(
+      tester,
+      tester.getCenter(blockFinder("meet", tuesday)),
+      row.center,
+    );
+    expectTimes(store, "meet", tuesday, wednesday);
+  });
+
+  testWidgets("TS49 a second finger's tap on a +N more chip while a block's "
+      "move runs leaves the strip collapsed, each of the day's bars shown or "
+      "counted and no Less pill, until the move lands, and then shows every "
+      "row", (tester) async {
+    final shown = Shown.week(monday);
+    final store = storeOf(<CalendarEntry<String>>[
+      for (var i = 0; i < 6; i++) allDayOf("bar$i", monday),
+      entryOf("a", at(tuesday, 10), at(tuesday, 11)),
+    ]);
+    await Harness(store, shown).pump(tester);
+    // Setup sanity: collapsed, three of Monday's bars shown and three
+    // counted.
+    expect((barsOver(tester, shown, monday), moreOf(tester, monday)), (3, 3));
+    final block = tester.getRect(blockFinder("a", tuesday));
+    final hour =
+        slotRect(tester, shown, tuesday, 11 * 60).top -
+        slotRect(tester, shown, tuesday, 10 * 60).top;
+    final gesture = await liftTo(
+      tester,
+      block.center,
+      block.center + Offset(0.0, hour),
+    );
+    final second = await tester.startGesture(
+      tester.getCenter(find.byKey(allDayMoreKey(monday))),
+    );
+    await second.up();
+    await tester.pump();
+    // Setup sanity: the move still runs.
+    expect(find.byKey(liftedBlockKey), findsOne);
+    expect((barsOver(tester, shown, monday), moreOf(tester, monday)), (3, 3));
+    expect(find.byKey(allDayLessKey), findsNothing);
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(
+      <(DateTime, DateTime)>[
+        for (final moved in store.moves) (moved.start, moved.end),
+      ],
+      <(DateTime, DateTime)>[(at(tuesday, 11), at(tuesday, 12))],
+    );
+    expect((barsOver(tester, shown, monday), moreOf(tester, monday)), (6, 0));
+    expect(find.byKey(allDayLessKey), findsOne);
+  });
+
+  testWidgets("TS50 a second finger's tap on the Less pill while a block's "
+      "move runs leaves the strip expanded, every bar shown and the pill "
+      "with it, until the move lands, and then collapses it", (tester) async {
+    final shown = Shown.week(monday);
+    final store = storeOf(<CalendarEntry<String>>[
+      for (var i = 0; i < 6; i++) allDayOf("bar$i", monday),
+      entryOf("a", at(tuesday, 10), at(tuesday, 11)),
+    ]);
+    await Harness(store, shown).pump(tester);
+    await tester.tap(find.byKey(allDayMoreKey(monday)));
+    await tester.pumpAndSettle();
+    // Setup sanity: expanded, every bar of Monday shown.
+    expect((barsOver(tester, shown, monday), moreOf(tester, monday)), (6, 0));
+    final block = tester.getRect(blockFinder("a", tuesday));
+    final hour =
+        slotRect(tester, shown, tuesday, 11 * 60).top -
+        slotRect(tester, shown, tuesday, 10 * 60).top;
+    final gesture = await liftTo(
+      tester,
+      block.center,
+      block.center + Offset(0.0, hour),
+    );
+    final second = await tester.startGesture(
+      tester.getCenter(find.byKey(allDayLessKey)),
+    );
+    await second.up();
+    await tester.pump();
+    // Setup sanity: the move still runs.
+    expect(find.byKey(liftedBlockKey), findsOne);
+    expect((barsOver(tester, shown, monday), moreOf(tester, monday)), (6, 0));
+    expect(find.byKey(allDayLessKey), findsOne);
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(
+      <(DateTime, DateTime)>[
+        for (final moved in store.moves) (moved.start, moved.end),
+      ],
+      <(DateTime, DateTime)>[(at(tuesday, 11), at(tuesday, 12))],
+    );
+    expect((barsOver(tester, shown, monday), moreOf(tester, monday)), (3, 3));
+    expect(find.byKey(allDayLessKey), findsNothing);
+  });
+
+  testWidgets("TS51 under right to left, the day columns still left to "
+      "right, the count in the row of the entries before the hours, the "
+      "strip's +N more chip and a bar's title each lie against their day "
+      "cell's right, the reading start, and under left to right against its "
+      "left", (tester) async {
+    final hours = CalendarDayHours(8 * 60, 18 * 60);
+    for (final direction in TextDirection.values) {
+      final shown = Shown.week(monday, hours: hours);
+      final store = storeOf(<CalendarEntry<String>>[
+        for (var i = 0; i < 6; i++) allDayOf("bar$i", monday),
+        entryOf("early", at(monday, 6), at(monday, 7)),
+      ], hours: hours);
+      final harness = Harness(store, shown, minDayWidth: minDayWidthHigh);
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = harness.size;
+      addTearDown(tester.view.reset);
+      addTearDown(harness.now.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Directionality(textDirection: direction, child: harness.grid()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final notice = find.byKey(hiddenAboveKey(monday));
+      final chip = find.byKey(allDayMoreKey(monday));
+      // Setup sanity: both show, and Monday's column lies left of
+      // Tuesday's.
+      expect(notice, findsOne, reason: direction.name);
+      expect(chip, findsOne, reason: direction.name);
+      expect(
+        tester.getRect(find.byKey(dayHeaderKey(monday))).left,
+        lessThan(tester.getRect(find.byKey(dayHeaderKey(tuesday))).left),
+        reason: direction.name,
+      );
+      final lean = direction == TextDirection.rtl ? 1 : -1;
+      final texts = <String, (Rect, Rect)>{
+        "notice": (
+          tester.getRect(
+            find.descendant(of: notice, matching: find.byType(Text)),
+          ),
+          tester.getRect(notice),
+        ),
+        "chip": (
+          tester.getRect(
+            find.descendant(of: chip, matching: find.byType(Text)),
+          ),
+          stripRect(tester, shown, monday, collapsedStripRows),
+        ),
+        "title": (
+          tester.getRect(
+            find.descendant(of: barFinder("bar0"), matching: find.text("bar0")),
+          ),
+          stripRect(tester, shown, monday),
+        ),
+      };
+      for (final MapEntry(key: name, value: (text, cell)) in texts.entries) {
+        expect(
+          (text.center.dx - cell.center.dx).sign,
+          lean,
+          reason: "${direction.name} $name: $text in $cell",
+        );
+      }
+      await tester.pumpWidget(const SizedBox());
+    }
+  });
+}
+
+/// How many bars the grid built lie over [day]'s strip column.
+int barsOver(WidgetTester tester, Shown shown, DateTime day) {
+  final column = stripRect(tester, shown, day);
+  var count = 0;
+  for (final element in allBars().evaluate()) {
+    final box = element.renderObject;
+    if (box is! RenderBox || !box.hasSize || !box.attached) {
+      continue;
+    }
+    final rect = box.localToGlobal(Offset.zero) & box.size;
+    if (rect.left < column.right - 1.0 && rect.right > column.left + 1.0) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/// The count the "+N more" chip of [day] shows, or 0 where none shows.
+int moreOf(WidgetTester tester, DateTime day) {
+  final chip = find.byKey(allDayMoreKey(day));
+  if (chip.evaluate().isEmpty) {
+    return 0;
+  }
+  final text = tester
+      .widget<Text>(find.descendant(of: chip, matching: find.byType(Text)))
+      .data!;
+  return int.parse(RegExp(r"\d+").firstMatch(text)!.group(0)!);
 }
 
 /// Lifts [block] at its centre, moves it so its top lies 2 px below

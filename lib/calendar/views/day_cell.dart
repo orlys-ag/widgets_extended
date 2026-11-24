@@ -263,12 +263,15 @@ final class _LabelKey {
   }
 
   /// Equal where the styles lay text out alike ([TextStyle.compareTo]),
-  /// whatever paints it.
+  /// whatever paints it, and the scalers scale alike: equal either way
+  /// round, since a [SystemTextScaler] at a factor of 1 equals
+  /// [TextScaler.noScaling] while [TextScaler.noScaling] equals no
+  /// [SystemTextScaler], and both hash as their factor.
   @override
   bool operator ==(Object other) {
     return other is _LabelKey &&
         other.style.compareTo(style) != RenderComparison.layout &&
-        other.scaler == scaler &&
+        (other.scaler == scaler || scaler == other.scaler) &&
         other.behavior == behavior &&
         other.locale == locale &&
         listEquals(other.texts, texts);

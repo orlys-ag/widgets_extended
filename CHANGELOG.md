@@ -1189,7 +1189,7 @@ over the shadow.
 - Fix: in Week and Day, a bar's day-edge resize held at the day limit
 requested the range it was held at when let go, though the clock had
 since passed a time after which the edit policy refused that range or that
-edge, as `lockPast` does at midnight. Its release now asks the policy
+edge, as `HistoryLockPolicy` does at midnight. Its release now asks the policy
 again, as a release over another day's cell does, and requests nothing
 where it refuses; at the new minute the strip's marks and the landing label
 drop the range it refuses. Let go in the frame in which
@@ -1293,6 +1293,41 @@ source announces nothing more, which a `CachingCalendarStore` takes as
 silence, keeping what it holds; and `CachingCalendarStore.loadError`
 documents the `ArgumentError` of a read answering a time the store's zone
 cannot represent.
+- Fix: in Week and Day, the all-day strip's rows were 24 px tall at any text
+size, so from a text scale of 1.5 in Roboto a bar's title lost the bottom of
+its line, the Less pill cut its word and the "+N more" chip scaled its text
+down. A row is now as tall as a line of the theme's `chipTitleStyle`,
+`monthMoreStyle` and `badgeStyle` needs at the text scale, with the room it
+leaves around that line at no scaling, and still 24 px at none; a theme or
+text scale given while the grid is up lays the rows out again. Month's lanes
+grow the same way, where from a text scale of 1.3 a chip cut its title and a
+card's times overflowed it: a chip lane, 18 px at no scaling, holds a line
+of `chipTitleStyle` and `monthMoreStyle`, and a card lane, 36 px, a line of
+`monthCardTitleStyle` over one of `monthCardTimeStyle`, so under `fitScreen`
+a week holds fewer lanes at a larger text.
+- Fix: in Week and Day, a drag let go in the call in which a store change
+moved the dragged item, which ends the board's drag, still requested its
+landing: a bar's day-edge resize held at the day limit requested the range
+it was held at, and a block's move let go over a strip cell requested that
+day as all-day. It now requests nothing.
+- Fix: in Week and Day, a tap on a "+N more" chip with a second finger while
+a block's move or resize ran showed four rows of bars and no count, leaving
+a day's other bars neither shown nor counted, and the Less pill on a strip
+still collapsed; a tap on the Less pill showed three bars and a count, and
+no pill, in a strip still holding every row. The strip now shows and counts
+its bars as the rows it keeps hold them, and the tap takes effect when the
+drag requests its landing or ends.
+- Fix: under a right-to-left `Directionality`, the "+N more" chip of Week's
+and Day's all-day strip and the default bar's title, in Month too, lay
+against the left while the rows counting entries outside the hours put their
+count at the right. All three now lie against the start in the reading
+direction, the title beside the bar's colour band; the day columns still
+run left to right.
+- Fix: the views measured a label again on each rebuild at the device's own
+text scale of 1, as a day cell's number box does and the all-day strip's
+rows and Month's lanes now do: their size cache took the device's scaler
+and an unscaled one, which lay text out alike, as two keys that evicted
+each other. It now takes them as one.
 
 ## 0.0.35
 
