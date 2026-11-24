@@ -690,14 +690,17 @@ final class CalendarThemeData with Diagnosticable {
   /// [text].
   final TextStyle weekdayLetterStyle;
 
-  /// A month's name in the month picker. Its colour is not used: it draws in
-  /// [text].
+  /// A month's name in the month picker, but for the selected and the
+  /// current month's ([monthNameMarkedStyle]). The picker draws every name
+  /// at one text scale: the context's, or a smaller one where the widest
+  /// name in this style or in [monthNameMarkedStyle] would not fit its cell
+  /// at it. Its colour is not used: it draws in [text].
   final TextStyle monthNameStyle;
 
-  /// The selected and the current month's name in the month picker, and
-  /// the style the picker measures names in. Its colour is not used: it
-  /// draws in [onPrimary] when selected, and in [primary] for the current
-  /// month.
+  /// The selected and the current month's name in the month picker, which
+  /// the picker measures beside [monthNameStyle] to scale every name alike.
+  /// Its colour is not used: it draws in [onPrimary] when selected, and in
+  /// [primary] for the current month.
   final TextStyle monthNameMarkedStyle;
 
   /// The Retry of the default failure builder, and the time picker's

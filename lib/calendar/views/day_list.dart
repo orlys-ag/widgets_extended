@@ -89,18 +89,7 @@ class _ListStyles {
         color: theme.primaryTint,
         border: Border.all(color: theme.primary, width: 2.0),
       ),
-      nowLine = Expanded(
-        child: SizedBox(
-          height: 2.0 * _NowLinePainter.dotRadius,
-          child: CustomPaint(
-            painter: _NowLinePainter(
-              Paint()
-                ..color = theme.error
-                ..strokeWidth = 2.0,
-            ),
-          ),
-        ),
-      );
+      _nowLines = _nowLinesOf(theme.error);
 
   /// The styles of [theme]: those made for it before, or for a theme `==`
   /// to it last, so an equal theme makes none.
@@ -166,7 +155,32 @@ class _ListStyles {
   /// The marker of the current time.
   final BoxDecoration nowPill;
   final TextStyle nowLabel;
-  final Widget nowLine;
+
+  /// The lines of [nowLineIn], by [TextDirection.index].
+  final List<Widget> _nowLines;
+
+  /// The line of the marker of the current time, with its dot at its start,
+  /// for a row running in [direction].
+  Widget nowLineIn(TextDirection direction) {
+    return _nowLines[direction.index];
+  }
+
+  /// The lines of [nowLineIn] for each [TextDirection], in one paint of
+  /// [colour].
+  static List<Widget> _nowLinesOf(Color colour) {
+    final paint = Paint()
+      ..color = colour
+      ..strokeWidth = 2.0;
+    return <Widget>[
+      for (final direction in TextDirection.values)
+        Expanded(
+          child: SizedBox(
+            height: 2.0 * _NowLinePainter.dotRadius,
+            child: CustomPaint(painter: _NowLinePainter(paint, direction)),
+          ),
+        ),
+    ];
+  }
 
   /// A gap row whose create is open, drawn as the timed grid draws a
   /// strip cell it marks.
@@ -176,14 +190,15 @@ class _ListStyles {
 /// The room between the list's sides and its rows' content.
 const double dayListGutter = 16.0;
 
-/// The least width of the column of times left of the cards and the
-/// dashed lines, whose times end [dayListTimeGap] short of them. The column
-/// is as wide as the widest time it shows at the text size, and at most half
-/// of a row's content where that is wider, within which a time scales down.
+/// The least width of the column of times before the cards and the dashed
+/// lines, at a row's start in the ambient [Directionality], whose times end
+/// [dayListTimeGap] short of them. The column is as wide as the widest time
+/// it shows at the text size, and at most half of a row's content where
+/// that is wider, within which a time scales down.
 const double dayListTimeWidth = 64.0;
 
-/// The room between the end of the times, which the time column aligns
-/// right, and the cards or the dashed lines.
+/// The room between the end of the times, which the time column aligns to
+/// its end, the side the cards lie on, and the cards or the dashed lines.
 const double dayListTimeGap = 8.0;
 
 /// The width and height of the square a gap row gives its add button.
@@ -770,8 +785,9 @@ List<DayListRow> dayListRowsOf<T>(
 /// [selectedDay] to as many after, on a [SyncedSliverTree] whose roots are
 /// the days' headers, which stick at the list's top and count all the
 /// day's items, each over one block ([DayListBody]) holding the day's rows
-/// ([dayListRowsOf]): each card, which [cardBuilder] draws, right of its
-/// start time over a chip of its length, both aligned right; for the items
+/// ([dayListRowsOf]): each card, which [cardBuilder] draws, after its
+/// start time over a chip of its length, both aligned to the time column's
+/// end, [dayListTimeGap] short of the card; for the items
 /// wholly before [hours], a soft yellow banner above the cards that counts
 /// them with an arrow pointing up, and for those wholly after, one below
 /// the cards pointing down; and a dashed row for each gap in [hours] that
@@ -796,11 +812,14 @@ List<DayListRow> dayListRowsOf<T>(
 /// so the block grows or shrinks smoothly; a block above the list's top
 /// that changes height moves nothing the list shows.
 ///
+/// A row runs in the ambient [Directionality]: its time column at its start
+/// and its card or dashed line after it, so under right to left the times
+/// lie at the list's right and the cards to their left.
+///
 /// While [now] lies inside [hours], the block of its day marks it over its
-/// rows, which keep their places: a red line from the cards to the list's
-/// right edge, with a dot
-/// at its start and the time at the end of a red pill across the time
-/// column, from 8 px in from the list's left edge. It crosses
+/// rows, which keep their places: the time in a red pill as wide as it,
+/// from 8 px in from the list's start edge, and a red line from the pill's
+/// end to the list's end edge, with a dot at its start. It crosses
 /// an item that started by [now] and has not ended at the share of the
 /// card, between its strips, [calendarCardStripExtent] tall, that share of
 /// the item has run, and otherwise lies in the gap
@@ -879,7 +898,9 @@ class DayList<T> extends StatefulWidget {
   /// rows read it as they build.
   final CalendarEditPolicy<T>? editPolicy;
 
-  /// The day the list brings to its top; a shown day.
+  /// The day the list brings to its top; a shown day, which the list reads
+  /// by its date on the store's clock ([CalendarStore.zone]), so a plain
+  /// day and the store's day of the same date select the same day.
   final DateTime selectedDay;
 
   /// The current time, whose day's block marks it, and the day the
@@ -1044,8 +1065,9 @@ class _DayListState<T> extends State<DayList<T>> {
   /// Whether a frame will read the weeks of the days the list holds built.
   bool _prefetchScheduled = false;
 
-  /// The day at the list's top as last reported or revealed.
-  late DateTime _topDay = widget.selectedDay;
+  /// The day at the list's top as last reported or revealed, a day of the
+  /// rows ([_listDayOf]).
+  late DateTime _topDay;
 
   /// Whether the scroll under way began with a drag, a fling after it
   /// included: only such a scroll reports top days. A reveal clears it,
@@ -1147,7 +1169,7 @@ class _DayListState<T> extends State<DayList<T>> {
       _slotMinutesMessage(widget.slotMinutes),
     );
     _zone = widget.store.zone;
-    _centreOn(widget.selectedDay);
+    _centreOn(_listDayOf(widget.selectedDay));
     _scroll = ScrollController(initialScrollOffset: _offsetOf(_topDay));
     PaintingBinding.instance.systemFonts.addListener(_handleFonts);
     widget.store.addListener(_handleStore);
@@ -1288,11 +1310,12 @@ class _DayListState<T> extends State<DayList<T>> {
       _measureTimes();
     }
     if (widget.weekdays != oldWidget.weekdays) {
-      _rebuildOn(widget.selectedDay);
+      _rebuildOn(_listDayOf(widget.selectedDay));
       return;
     }
-    final day = widget.selectedDay;
-    if (day != oldWidget.selectedDay && day != _topDay) {
+    final number = CalendarDates.dayNumber(widget.selectedDay);
+    if (number != CalendarDates.dayNumber(oldWidget.selectedDay) &&
+        number != CalendarDates.dayNumber(_topDay)) {
       // A top day check scheduled before this build, as the tick of a
       // fling under way in this frame schedules one, runs before the
       // reveal's callback below, and would report the day the scroll
@@ -1301,8 +1324,8 @@ class _DayListState<T> extends State<DayList<T>> {
       // After the frame, once the tree has laid out what this build gives
       // it.
       SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (mounted && widget.selectedDay == day) {
-          _reveal(day);
+        if (mounted && CalendarDates.dayNumber(widget.selectedDay) == number) {
+          _reveal(_listDayOf(widget.selectedDay));
         }
       });
     }
@@ -1363,10 +1386,7 @@ class _DayListState<T> extends State<DayList<T>> {
   void _takeZone() {
     _zone = widget.store.zone;
     _rows = _rowsOf();
-    _topDay = CalendarDates.dateOfDayNumber(
-      CalendarDates.dayNumber(_topDay),
-      zone: _zone,
-    );
+    _topDay = _listDayOf(_topDay);
     final now = widget.now.value;
     _nowDay = CalendarDates.dateOnly(now.time);
     _today = now.today;
@@ -1400,7 +1420,19 @@ class _DayListState<T> extends State<DayList<T>> {
     return null;
   }
 
-  /// Holds the days around [day] and makes their rows.
+  /// The day of the rows that [day]'s date names: that date's start on the
+  /// clock of [_zone], on which the rows' days start ([_rowsOf]), so a day
+  /// on another clock, as a plain day over a zoned store is, names its
+  /// date's row.
+  DateTime _listDayOf(DateTime day) {
+    return CalendarDates.dateOfDayNumber(
+      CalendarDates.dayNumber(day),
+      zone: _zone,
+    );
+  }
+
+  /// Holds the days around [day], a day of the rows ([_listDayOf]), and
+  /// makes their rows.
   void _centreOn(DateTime day) {
     final number = CalendarDates.dayNumber(day);
     _first = number - dayListWindowDays;
@@ -2465,7 +2497,7 @@ class _DayListState<T> extends State<DayList<T>> {
             child: Row(
               children: <Widget>[
                 _TimeCell(
-                  alignment: Alignment.centerRight,
+                  alignment: AlignmentDirectional.centerEnd,
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(label, maxLines: 1, style: _styles.gapTime),
@@ -3006,7 +3038,8 @@ class _TimeColumn extends InheritedWidget {
 }
 
 /// A row's cell of the time column: [child], at [alignment], as wide as the
-/// column ([_TimeColumn]) less [dayListTimeGap] at its end.
+/// column ([_TimeColumn]) less [dayListTimeGap] at its end, the side the
+/// cards lie on in the ambient [Directionality].
 class _TimeCell extends StatelessWidget {
   const _TimeCell({super.key, this.alignment, required this.child});
 
@@ -3017,17 +3050,17 @@ class _TimeCell extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: _TimeColumn.widthOf(context),
-      padding: const EdgeInsets.only(right: dayListTimeGap),
+      padding: const EdgeInsetsDirectional.only(end: dayListTimeGap),
       alignment: alignment,
       child: child,
     );
   }
 }
 
-/// The current time, [label], at the end of a pill across the time
-/// column, and a line from the cards to the row's right edge with a dot at
-/// its start, in the theme's error colour, as the timed grid marks the
-/// current time.
+/// The current time, [label], in a pill as wide as it, 8 px in from the
+/// row's start edge, and a line from the pill's end to the row's end edge
+/// with a dot at its start, in the theme's error colour. The row runs in
+/// the ambient [Directionality], as the list's rows do.
 class _NowLine extends StatelessWidget {
   const _NowLine({required this.label});
 
@@ -3039,53 +3072,53 @@ class _NowLine extends StatelessWidget {
     return Row(
       key: dayListNowKey,
       children: <Widget>[
-        SizedBox(
-          // width: dayListGutter + dayListTimeWidth,
-          child: Padding(
-            padding: const EdgeInsets.only(left: 8.0),
-            child: DecoratedBox(
-              decoration: styles.nowPill,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 6.0,
-                  vertical: 2.0,
-                ),
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  softWrap: false,
-                  textAlign: TextAlign.center,
-                  style: styles.nowLabel,
-                ),
+        Padding(
+          padding: const EdgeInsetsDirectional.only(start: 8.0),
+          child: DecoratedBox(
+            decoration: styles.nowPill,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6.0,
+                vertical: 2.0,
+              ),
+              child: Text(
+                label,
+                maxLines: 1,
+                softWrap: false,
+                textAlign: TextAlign.center,
+                style: styles.nowLabel,
               ),
             ),
           ),
         ),
-        styles.nowLine,
+        styles.nowLineIn(Directionality.of(context)),
       ],
     );
   }
 }
 
 /// A line across the middle of its box in [_paint], with a dot at its
-/// start.
+/// start edge in [_direction].
 class _NowLinePainter extends CustomPainter {
-  const _NowLinePainter(this._paint);
+  const _NowLinePainter(this._paint, this._direction);
 
   static const double dotRadius = 4.0;
 
   final Paint _paint;
+  final TextDirection _direction;
 
   @override
   void paint(Canvas canvas, Size size) {
     final y = size.height / 2.0;
+    final start = _direction == TextDirection.ltr ? 0.0 : size.width;
     canvas.drawLine(Offset(0.0, y), Offset(size.width, y), _paint);
-    canvas.drawCircle(Offset(0.0, y), dotRadius, _paint);
+    canvas.drawCircle(Offset(start, y), dotRadius, _paint);
   }
 
   @override
   bool shouldRepaint(_NowLinePainter oldDelegate) {
-    return !identical(oldDelegate._paint, _paint);
+    return !identical(oldDelegate._paint, _paint) ||
+        oldDelegate._direction != _direction;
   }
 }
 

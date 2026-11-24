@@ -6,6 +6,7 @@ library;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -684,7 +685,11 @@ enum CalendarMonthLayout {
 /// which stays empty, each resting at [weekScale] times its share: past 1,
 /// the board scrolls down, its last week ending above the padding. The board
 /// opens scrolled to show the selected day, and does again for a new
-/// month, a new [minDayWidth] and a new [weekScale].
+/// month, a new [minDayWidth] and a new [weekScale]. A new [selectedDay]
+/// of the same month scrolls the least that shows its day whole, after the
+/// frame that selects it, and again once the days are ready where they are
+/// not: a board that shows the day whole does not move, and none moves
+/// while two fingers hold the board or a drag or its fling scrolls it.
 ///
 /// Under [CalendarMonthLayout.showAll] the weeks grow past their resting
 /// height to hold their chips, and the board then scrolls; under
@@ -1099,9 +1104,10 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   bool _rangeRead = false;
 
   /// Whether a layout still owes a reveal of the selected day: set at the
-  /// start, by a new grid and by a new [MonthBoard.minDayWidth] or
-  /// [MonthBoard.weekScale], cleared by the first layout after it that
-  /// finds the days ready.
+  /// start, by a new grid, by a new [MonthBoard.minDayWidth] or
+  /// [MonthBoard.weekScale], and by a new selected day while the days are
+  /// not ready ([_revealNewSelection]), cleared by the first layout after it
+  /// that finds the days ready.
   bool _revealPending = true;
 
   /// Whether a frame will put the styles' animation back.
@@ -1276,6 +1282,12 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       // Reaches the cells through the board's post-frame relay, since this
       // runs in the build.
       _writeSelection();
+    }
+    // A new grid owes its reveal already.
+    if (!gridChanged &&
+        CalendarDates.dayNumber(widget.selectedDay) !=
+            CalendarDates.dayNumber(oldWidget.selectedDay)) {
+      _revealNewSelection();
     }
   }
 
@@ -1814,8 +1826,9 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     if (columnsChanged) {
       _columnWidth = width;
     }
-    // Owed by a new grid, which syncs, or a new least day width, which may
-    // only refit the columns.
+    // Owed by a new grid, which syncs, by a new least day width, which may
+    // only refit the columns, or by a new selected day given while the days
+    // were not ready.
     if (_revealPending) {
       SchedulerBinding.instance.addPostFrameCallback((_) {
         _revealSelected(grid, again: true);
@@ -2047,13 +2060,19 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   }
 
   /// Scrolls the least that shows the selected day, while [scheduledFor]
-  /// is still the grid. The first reveal of a new grid can read a week at
-  /// its estimate, and the layout it causes measures that week, so a
-  /// reveal that moved asks once more after it.
-  void _revealSelected(CalendarMonthGrid scheduledFor, {required bool again}) {
+  /// is still the grid, and where [yields], while the user does not hold or
+  /// scroll the board ([_userScrolls]). The first reveal of a new grid can
+  /// read a week at its estimate, and the layout it causes measures that
+  /// week, so a reveal that moved asks once more after it.
+  void _revealSelected(
+    CalendarMonthGrid scheduledFor, {
+    required bool again,
+    bool yields = false,
+  }) {
     if (!mounted ||
         !_sameGrid(widget.grid, scheduledFor) ||
-        !_scroll.hasClients) {
+        !_scroll.hasClients ||
+        (yields && _userScrolls)) {
       return;
     }
     final before = _scroll.position.pixels;
@@ -2061,9 +2080,38 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     _board.revealCell(cell.row, cell.col);
     if (again && _scroll.position.pixels != before) {
       SchedulerBinding.instance.addPostFrameCallback((_) {
-        _revealSelected(scheduledFor, again: false);
+        _revealSelected(scheduledFor, again: false, yields: yields);
       });
     }
+  }
+
+  /// Reveals a new selected day of the same grid after the frame that
+  /// selects it ([_revealSelected]), yielding to the user, and where the
+  /// days are not ready, owes the layout that finds them ready a reveal
+  /// too ([_revealPending]), as their weeks may grow then; the cover over
+  /// the board takes every press until then.
+  void _revealNewSelection() {
+    if (!_daysReady) {
+      _revealPending = true;
+    }
+    final grid = widget.grid;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _revealSelected(grid, again: true, yields: true);
+    });
+  }
+
+  /// Whether the user holds or scrolls the board: two fingers are down
+  /// ([PinchTracker.holding]), or a drag, or the fling after it, scrolls
+  /// either axis ([ScrollPosition.userScrollDirection]).
+  bool get _userScrolls {
+    return _pinch.holding.value ||
+        _scrolledByUser(_scroll) ||
+        _scrolledByUser(_horizontal);
+  }
+
+  static bool _scrolledByUser(ScrollController controller) {
+    return controller.hasClients &&
+        controller.position.userScrollDirection != ScrollDirection.idle;
   }
 
   Widget? _buildDay(

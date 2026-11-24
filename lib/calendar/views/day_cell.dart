@@ -590,9 +590,11 @@ class _DayCellElement extends StatelessElement {
 /// items, in the [CalendarTheme] above it: up to four dots along the
 /// circle's rim, 30 degrees apart, about a lone dot's place at its top
 /// right corner, smaller where there are three or more. A screen reader
-/// hears every badge's kind. Where [enabled] is false the number draws at
-/// the theme's [CalendarThemeData.disabledOpacity] unless the day is
-/// selected, and a screen reader hears the day disabled.
+/// hears the day with every badge's kind
+/// ([CalendarLocalizations.dayWithBadges]), and then, on today's cell,
+/// [CalendarLocalizations.today]. Where [enabled] is false the number
+/// draws at the theme's [CalendarThemeData.disabledOpacity] unless the day
+/// is selected, and a screen reader hears the day disabled.
 ///
 /// [collapse] runs from 0, the month grid, to 1, the week strip. At 0 a
 /// day outside the shown month is muted on no circle and the weekday name
@@ -663,9 +665,12 @@ class DayCell extends StatelessWidget {
       button: true,
       selected: isSelected,
       enabled: enabled,
-      label: strings.dayWithBadges(day, <String?>[
-        for (final kind in badges) kind?.label,
-      ]),
+      label: <String>[
+        strings.dayWithBadges(day, <String?>[
+          for (final kind in badges) kind?.label,
+        ]),
+        if (isToday) strings.today,
+      ].join(", "),
       excludeSemantics: true,
       child: AnimatedBuilder(
         animation: collapse,

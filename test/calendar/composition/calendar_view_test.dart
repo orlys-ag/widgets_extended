@@ -4100,4 +4100,50 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+
+  testWidgets("CV68 in Month at a week scale of 3, the header's Today "
+      "selects today and scrolls the board to show it", (tester) async {
+    tester.view.physicalSize = const Size(390.0, 844.0);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final controller = CalendarController(
+      view: CalendarViewKind.month,
+      selectedDay: DateTime(2026, 4, 28),
+    );
+    addTearDown(controller.dispose);
+    controller.setZoom(monthWeekScale: 3.0);
+    final first = DateTime(2026, 4, 1);
+    await tester.pumpWidget(
+      app(
+        CalendarView<String>(
+          store: store,
+          controller: controller,
+          monthLayout: CalendarMonthLayout.showAll,
+          clock: () {
+            return DateTime(2026, 4, 1, 9);
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    bool shows(DateTime day) {
+      final cell = find.byKey(monthDayKey(day));
+      if (cell.evaluate().isEmpty) {
+        return false;
+      }
+      final rect = tester.getRect(cell);
+      final area = tester.getRect(find.byType(MonthBoard<String>));
+      return rect.top >= area.top + weekdayHeaderHeight - 0.5 &&
+          rect.bottom <= area.bottom + 0.5;
+    }
+
+    // Setup sanity: Month shows April 28 selected, and April 1 out of view.
+    expect(controller.selectedDay, DateTime(2026, 4, 28));
+    expect(shows(DateTime(2026, 4, 28)), isTrue);
+    expect(shows(first), isFalse);
+    await tester.tap(find.byKey(calendarTodayButtonKey));
+    await tester.pumpAndSettle();
+    expect(controller.selectedDay, first);
+    expect(shows(first), isTrue);
+  });
 }

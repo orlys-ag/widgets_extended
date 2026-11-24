@@ -26,6 +26,8 @@ import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
+import 'package:widgets_extended/calendar/views/day_cell.dart'
+    show weekdayHeaderHeight;
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart'
     show minDayWidthHigh, minDayWidthLow;
@@ -1193,4 +1195,272 @@ void main() {
       dayOfNumberIn(CalendarDates.dayNumber(grid.lastDay), behind),
     );
   });
+
+  group("a new selected day of the shown month", () {
+    late ValueNotifier<CalendarNow> now;
+
+    setUp(() {
+      now = ValueNotifier<CalendarNow>(
+        CalendarNow(time: DateTime(2026, 4, 1, 9), today: april(1)),
+      );
+    });
+
+    tearDown(() {
+      now.dispose();
+    });
+
+    /// A board of [grid] over [store] at [weekScale], 400 by 600 px, with
+    /// [selected] selected.
+    Widget boardOf(
+      WidgetTester tester,
+      CalendarStore<String> store,
+      DateTime selected, {
+      double weekScale = 3.0,
+    }) {
+      tester.view.physicalSize = const Size(400.0, 600.0);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      return MaterialApp(
+        home: MonthBoard<String>(
+          store: store,
+          grid: grid,
+          weekScale: weekScale,
+          selectedDay: selected,
+          now: now,
+          onSelectDay: (day) {},
+          onOpenDay: (day) {},
+          onCreateOnDay: null,
+          onOpenEntry: (id) {},
+        ),
+      );
+    }
+
+    /// The rect of [day]'s cell.
+    Rect cellRect(WidgetTester tester, DateTime day) {
+      return tester.getRect(find.byKey(monthDayKey(day)));
+    }
+
+    /// The board's vertical scroll offset.
+    double scrolledOf(WidgetTester tester) {
+      return tester
+          .stateList<ScrollableState>(
+            // The board's two dimensions are subtypes of Scrollable.
+            find.descendant(
+              of: find.byType(MonthBoard<String>),
+              matching: find.byWidgetPredicate((widget) {
+                return widget is Scrollable;
+              }),
+            ),
+          )
+          .singleWhere((scrollable) {
+            return scrollable.position.axis == Axis.vertical;
+          })
+          .position
+          .pixels;
+    }
+
+    /// Whether the board shows [day]'s cell whole, under the letters.
+    bool shows(WidgetTester tester, DateTime day) {
+      final cell = find.byKey(monthDayKey(day));
+      if (cell.evaluate().isEmpty) {
+        return false;
+      }
+      final rect = tester.getRect(cell);
+      final area = tester.getRect(find.byType(MonthBoard<String>));
+      return rect.top >= area.top + weekdayHeaderHeight - 0.5 &&
+          rect.bottom <= area.bottom + 0.5;
+    }
+
+    testWidgets("MB7 out of view scrolls the least that shows it whole, and "
+        "one the board shows whole moves nothing", (tester) async {
+      // At a week scale of 2 the board shows two weeks whole.
+      final store = MemoryCalendarStore<String>();
+      addTearDown(store.dispose);
+      await tester.pumpWidget(
+        boardOf(tester, store, april(28), weekScale: 2.0),
+      );
+      await tester.pumpAndSettle();
+      // Setup sanity: the board opened on April 28's week, the last, and
+      // April 1's lies out of view.
+      expect(shows(tester, april(28)), isTrue);
+      expect(shows(tester, april(1)), isFalse);
+
+      await tester.pumpWidget(boardOf(tester, store, april(1), weekScale: 2.0));
+      await tester.pumpAndSettle();
+      expect(shows(tester, april(1)), isTrue);
+
+      // April 8's week lies whole in view, under April 1's.
+      final shown = cellRect(tester, april(8));
+      // Setup sanity: a scroll that brought April 8's week to the top
+      // would move it.
+      expect(shown.top, greaterThan(weekdayHeaderHeight + 1.0));
+      await tester.pumpWidget(boardOf(tester, store, april(8), weekScale: 2.0));
+      await tester.pumpAndSettle();
+      expect(cellRect(tester, april(8)), shown);
+
+      // April 15's week lies partly below the view: the least scroll ends
+      // it at the board's bottom.
+      await tester.pumpWidget(
+        boardOf(tester, store, april(15), weekScale: 2.0),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        cellRect(tester, april(15)).bottom,
+        moreOrLessEquals(
+          tester.getRect(find.byType(MonthBoard<String>)).bottom,
+        ),
+      );
+    });
+
+    testWidgets("MB8 does not move the board while a drag scrolls it, which "
+        "follows the finger after, nor while two fingers hold it", (
+      tester,
+    ) async {
+      final store = MemoryCalendarStore<String>();
+      addTearDown(store.dispose);
+      await tester.pumpWidget(boardOf(tester, store, april(1)));
+      await tester.pumpAndSettle();
+      final drag = await tester.startGesture(
+        tester.getCenter(find.byKey(monthDayKey(april(8)))),
+      );
+      await drag.moveBy(const Offset(0.0, -30.0));
+      await drag.moveBy(const Offset(0.0, -30.0));
+      await tester.pump();
+      final dragged = scrolledOf(tester);
+      // Setup sanity: the drag scrolled the board, and April 28 lies out
+      // of view.
+      expect(dragged, greaterThan(10.0));
+      expect(shows(tester, april(28)), isFalse);
+      await tester.pumpWidget(boardOf(tester, store, april(28)));
+      await tester.pump();
+      await drag.moveBy(const Offset(0.0, -20.0));
+      await tester.pump();
+      expect(scrolledOf(tester), moreOrLessEquals(dragged + 20.0));
+      await drag.up();
+      await tester.pumpAndSettle();
+
+      // A board taken out of the tree and opened again on April 1.
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(boardOf(tester, store, april(1)));
+      await tester.pumpAndSettle();
+      final opened = scrolledOf(tester);
+      final centre = tester.getCenter(find.byKey(monthDayKey(april(8))));
+      final first = await tester.startGesture(centre - const Offset(30.0, 0.0));
+      final second = await tester.startGesture(
+        centre + const Offset(30.0, 0.0),
+      );
+      await tester.pump();
+      await tester.pumpWidget(boardOf(tester, store, april(28)));
+      await tester.pump();
+      await first.up();
+      await second.up();
+      await tester.pumpAndSettle();
+      expect(scrolledOf(tester), opened);
+    });
+
+    testWidgets("MB9 given while its days are read scrolls to it again once "
+        "they are, the weeks above it grown", (tester) async {
+      final memory = MemoryCalendarStore<String>();
+      addTearDown(memory.dispose);
+      await tester.pumpWidget(
+        boardOf(tester, memory, april(1), weekScale: 1.0),
+      );
+      await tester.pumpAndSettle();
+      final source = HeldSource();
+      final caching = CachingCalendarStore<String>(dataSource: source);
+      addTearDown(caching.dispose);
+      caching.show(grid.firstDay, grid.lastDay);
+      await tester.pumpWidget(
+        boardOf(tester, caching, april(28), weekScale: 1.0),
+      );
+      await tester.pump();
+      // Setup sanity: the days are being read.
+      expect(caching.status, CalendarLoadStatus.loading);
+      // Eight items on each day of the first four weeks grow them past the
+      // board's height.
+      source.answerAll(<CalendarEntry<String>>[
+        for (var day = 0; day < 4 * DateTime.daysPerWeek; day++)
+          for (var hour = 8; hour < 16; hour++)
+            CalendarEntry<String>(
+              id: "e$day-$hour",
+              start: CalendarDates.addDays(
+                grid.firstDay,
+                day,
+              ).add(Duration(hours: hour)),
+              end: CalendarDates.addDays(
+                grid.firstDay,
+                day,
+              ).add(Duration(hours: hour + 1)),
+              title: "e$day-$hour",
+              color: const Color(0xFF336699),
+              payload: "e$day-$hour",
+            ),
+      ]);
+      await tester.pumpAndSettle();
+      expect(caching.status, CalendarLoadStatus.ready);
+      expect(
+        cellRect(tester, april(6)).top -
+            cellRect(tester, DateTime(2026, 3, 30)).top,
+        greaterThan(150.0),
+      );
+      expect(shows(tester, april(28)), isTrue);
+    });
+  });
+}
+
+/// A data source whose reads wait until [answerAll] answers them.
+class HeldSource implements CalendarDataSource<String> {
+  final List<
+    ({
+      DateTime first,
+      DateTime last,
+      Completer<List<CalendarEntry<String>>> answer,
+    })
+  >
+  _held =
+      <
+        ({
+          DateTime first,
+          DateTime last,
+          Completer<List<CalendarEntry<String>>> answer,
+        })
+      >[];
+
+  /// Answers every read held with those of [entries] that cover its days.
+  void answerAll(List<CalendarEntry<String>> entries) {
+    final held = List.of(_held);
+    _held.clear();
+    for (final read in held) {
+      final from = CalendarDates.dayNumber(read.first);
+      final to = CalendarDates.dayNumber(read.last);
+      read.answer.complete(<CalendarEntry<String>>[
+        for (final entry in entries)
+          if (CalendarDates.dayNumber(entry.start) <= to &&
+              CalendarDates.lastDayNumberOf(entry.start, entry.end) >= from)
+            entry,
+      ]);
+    }
+  }
+
+  @override
+  Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    final answer = Completer<List<CalendarEntry<String>>>();
+    _held.add((first: first, last: last, answer: answer));
+    return answer.future;
+  }
+
+  @override
+  Future<CalendarEntry<String>> create(CalendarEntry<String> draft) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<CalendarEntry<String>> replace(CalendarEntry<String> entry) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<void> delete(String id) {
+    throw UnimplementedError();
+  }
 }

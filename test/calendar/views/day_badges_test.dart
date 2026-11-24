@@ -421,7 +421,8 @@ void main() {
       ),
     );
     expect(find.byKey(dayBadgeKey(april(21), 1)), findsNothing);
-    expect(labelOf(april(21)), "Tuesday, April 21, has items");
+    // April 21 is the strip's today.
+    expect(labelOf(april(21)), "Tuesday, April 21, has items, today");
     expect(find.byKey(dayBadgeKey(april(25))), findsNothing);
     expect(labelOf(april(25)), "Saturday, April 25");
 
@@ -496,5 +497,76 @@ void main() {
         <CalendarBadgeKind?>[deadline],
       ],
     );
+  });
+
+  testWidgets("DB9 a screen reader hears today's day of the week strip and "
+      "of the month strip as today, after its kinds, and no other day so", (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final store = MemoryCalendarStore<String>(entries: weekEntries());
+    addTearDown(store.dispose);
+    Widget under(Widget strip) {
+      return MaterialApp(
+        home: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(width: 350.0, child: strip),
+        ),
+      );
+    }
+
+    String labelOf(Finder cell) {
+      return tester.getSemantics(cell).label;
+    }
+
+    await tester.pumpWidget(
+      under(
+        WeekStrip<String>(
+          store: store,
+          selectedDay: april(21),
+          today: april(23),
+          weekdays: CalendarWeekdaySet.all,
+          onSelectDay: (day) {},
+          onBrowse: (day) {},
+          dayBadges: badges,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(
+      labelOf(find.byKey(weekStripDayKey(april(23)))),
+      "Thursday, April 23, has Task, Meeting, today",
+    );
+    expect(
+      labelOf(find.byKey(weekStripDayKey(april(21)))),
+      "Tuesday, April 21, has items",
+    );
+
+    await tester.pumpWidget(
+      under(
+        MonthStrip<String>(
+          store: store,
+          month: DateTime(2026, 4),
+          selectedDay: april(21),
+          today: april(23),
+          weekdays: CalendarWeekdaySet.all,
+          rowHeight: 48.0,
+          collapse: kAlwaysDismissedAnimation,
+          onSelectDay: (day) {},
+          onBrowse: (day) {},
+          dayBadges: badges,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(
+      labelOf(find.byKey(dayCellKey(april(23)))),
+      "Thursday, April 23, has Task, Meeting, today",
+    );
+    expect(
+      labelOf(find.byKey(dayCellKey(april(21)))),
+      "Tuesday, April 21, has items",
+    );
+    semantics.dispose();
   });
 }

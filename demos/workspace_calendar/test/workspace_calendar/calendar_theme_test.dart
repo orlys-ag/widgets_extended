@@ -1535,7 +1535,8 @@ void main() {
     await tester.pumpAndSettle();
 
     // B from the frame that installs it, and the picker's names scaled by
-    // a measure of B's marked month name, the widest fitting its pill.
+    // a measure of B's month names in both styles, the widest fitting its
+    // pill.
     await installTheme(tester, api, sentinelB);
     expectOnly(
       drawnUnder(tester, pickerRoots),
@@ -1552,23 +1553,25 @@ void main() {
         MonthCell.pillMargin.horizontal -
         MonthCell.pillPadding.horizontal;
     var widest = 0.0;
-    for (var month = 1; month <= DateTime.monthsPerYear; month++) {
-      final name = english.monthName(month);
-      final painter = TextPainter(
-        text: TextSpan(
-          text: name,
-          style: DefaultTextStyle.of(
-            picker,
-          ).style.merge(sentinelB.monthNameMarkedStyle),
-        ),
-        textDirection: TextDirection.ltr,
-        textScaler: scaler,
-        maxLines: 1,
-      )..layout();
-      if (painter.width > widest) {
-        widest = painter.width;
+    for (final style in <TextStyle>[
+      sentinelB.monthNameStyle,
+      sentinelB.monthNameMarkedStyle,
+    ]) {
+      for (var month = 1; month <= DateTime.monthsPerYear; month++) {
+        final painter = TextPainter(
+          text: TextSpan(
+            text: english.monthName(month),
+            style: DefaultTextStyle.of(picker).style.merge(style),
+          ),
+          textDirection: TextDirection.ltr,
+          textScaler: scaler,
+          maxLines: 1,
+        )..layout();
+        if (painter.width > widest) {
+          widest = painter.width;
+        }
+        painter.dispose();
       }
-      painter.dispose();
     }
     expect(widest, lessThanOrEqualTo(room));
     expect(widest, greaterThan(room - 1.0));
