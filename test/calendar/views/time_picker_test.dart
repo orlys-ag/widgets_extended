@@ -932,6 +932,40 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets("PK56 with a null value each column offers a screen reader a "
+      "decrease as it offers an increase, either of which picks the row the "
+      "column rests on, as Up and Down do", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final calls = <int?>[];
+    for (final column in <Finder>[hourColumn(), minuteColumn()]) {
+      for (final action in <SemanticsAction>[
+        SemanticsAction.increase,
+        SemanticsAction.decrease,
+      ]) {
+        final step = "$column $action";
+        calls.clear();
+        await tester.pumpWidget(
+          host(
+            CalendarTimePicker(
+              key: ValueKey<String>(step),
+              value: null,
+              min: 9 * 60,
+              onChanged: calls.add,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final data = semanticsOf(tester, column);
+        expect(data.hasAction(SemanticsAction.increase), isTrue, reason: step);
+        expect(data.hasAction(SemanticsAction.decrease), isTrue, reason: step);
+        performAction(tester, column, action);
+        await tester.pumpAndSettle();
+        expect(calls, <int?>[9 * 60], reason: step);
+      }
+    }
+    semantics.dispose();
+  });
+
   testWidgets("PK11 Clear reports null; without clearable the picker has no "
       "footer; Clear ends a running fling with its own one report", (
     tester,

@@ -31,8 +31,9 @@ abstract interface class CalendarCardHost {
   DateTime cardDayIn(DateTime day);
 
   /// Selects [day] as one event of the host and answers true, or answers
-  /// false where the host refuses it. The controller never calls it inside
-  /// [runCardEvent].
+  /// false where the host refuses it; a [day] on the date of
+  /// [cardSelectedDay] changes nothing and reports nothing. The controller
+  /// never calls it inside [runCardEvent].
   bool selectCardDay(DateTime day);
 
   /// Runs [change] as one event of the host.

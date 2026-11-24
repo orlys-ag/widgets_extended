@@ -1887,11 +1887,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     if (hoursError != null) {
       throw hoursError;
     }
+    _takeRules();
     final paddingError = _bottomPaddingError;
     if (paddingError != null) {
       throw paddingError;
     }
-    _takeRules();
     final header = _buildHeader();
     final Widget view;
     switch (_view) {

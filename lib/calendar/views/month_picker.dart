@@ -4,6 +4,7 @@ library;
 
 import 'dart:math' as math;
 
+import 'package:flutter/rendering.dart' show RenderProxyBox;
 import 'package:flutter/widgets.dart';
 
 import '../presentation/calendar_localizations.dart';
@@ -112,8 +113,12 @@ class _PickerStyles {
 /// ringed as today's number is. Every name reads at the text size, or
 /// where the widest, in the theme's [CalendarThemeData.monthNameStyle] or
 /// its [CalendarThemeData.monthNameMarkedStyle], would not fit its pill at
-/// it, at the one smaller size that fits it. The picker is as tall as its
-/// rows of cells. A tap on a
+/// it, at the one smaller size that fits it. Every row is as tall as a cell
+/// whose name is the tallest in either style at that size
+/// ([MonthCell.heightFor]), whichever months are marked, its cells
+/// stretched to it, and the picker is as tall as its rows: a height it
+/// answers as its intrinsic height at any width asked, at the size the
+/// names take at that width, its intrinsic width being 0. A tap on a
 /// month reports [onSelectMonth]. A month before [firstMonth] draws
 /// disabled and takes no tap.
 ///
@@ -166,6 +171,9 @@ class _MonthPickerState extends State<MonthPicker>
   /// Below this, a fraction of a year is taken for float error in
   /// [_position].
   static const double _epsilon = 1e-6;
+
+  /// How many rows of [monthPickerColumns] a year's months take.
+  static const int _rowCount = DateTime.monthsPerYear ~/ monthPickerColumns;
 
   /// The year over the picker, fractional while it slides: at 2026.25 the
   /// picker shows the last three quarters of 2026's months at its left and
@@ -296,11 +304,7 @@ class _MonthPickerState extends State<MonthPicker>
           MonthCell.pillMargin.horizontal -
           MonthCell.pillPadding.horizontal,
     );
-    final strings = CalendarLocalizations.of(context);
-    final names = <String>[
-      for (var month = 1; month <= DateTime.monthsPerYear; month++)
-        strings.monthName(month),
-    ];
+    final names = _monthNames(context);
     final defaults = DefaultTextStyle.of(context).style;
     final styles = <TextStyle>[_styles.name, _styles.selectedName];
     // A name's width does not quite follow its font size, so a smaller
@@ -325,6 +329,43 @@ class _MonthPickerState extends State<MonthPicker>
     return scaler;
   }
 
+  /// The names of the months in [context]'s localizations, January first.
+  static List<String> _monthNames(BuildContext context) {
+    final strings = CalendarLocalizations.of(context);
+    return <String>[
+      for (var month = 1; month <= DateTime.monthsPerYear; month++)
+        strings.monthName(month),
+    ];
+  }
+
+  /// The height of each row of cells whose names [scaler] scales: a
+  /// [MonthCell]'s ([MonthCell.heightFor]) whose name is as tall as the
+  /// tallest, in either style a cell draws a name in, as its [Text] lays it
+  /// out ([labelSizeIn]), so every row is as tall whichever months are
+  /// marked.
+  double _rowHeight(BuildContext context, TextScaler scaler) {
+    final names = _monthNames(context);
+    var tallest = 0.0;
+    for (final style in <TextStyle>[_styles.name, _styles.selectedName]) {
+      tallest = math.max(
+        tallest,
+        labelSizeIn(context, style, names, scaler: scaler).height,
+      );
+    }
+    return MonthCell.heightFor(tallest);
+  }
+
+  /// The height the picker lays out at [width] wide: its rows', each as
+  /// tall as [_rowHeight] gives at the scaler [_nameScaler] gives that
+  /// width's cells, as [build] lays them out. Read in the state's own
+  /// context, which so depends on what it reads, so a new text scale or
+  /// new localizations build the picker again, which lays out again
+  /// whatever asked ([_RenderHeightBy.heightAt]).
+  double _heightAt(double width) {
+    final scaler = _nameScaler(context, width / monthPickerColumns);
+    return _rowHeight(context, scaler) * _rowCount;
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -333,51 +374,65 @@ class _MonthPickerState extends State<MonthPicker>
       onHorizontalDragEnd: _endDrag,
       // The years beside the one over the picker paint outside it.
       child: ClipRect(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final scaler = _nameScaler(
-              context,
-              constraints.maxWidth / monthPickerColumns,
-            );
-            return AnimatedBuilder(
-              animation: _position,
-              builder: (context, child) {
-                final position = _position.value;
-                final first = (position + _epsilon).floor();
-                return Stack(
-                  children: <Widget>[
-                    _buildYearAt(first, position, scaler),
-                    if (position - first > _epsilon)
-                      _buildYearAt(first + 1, position, scaler),
-                  ],
-                );
-              },
-            );
-          },
+        child: _HeightBy(
+          heightAt: _heightAt,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final scaler = _nameScaler(
+                context,
+                constraints.maxWidth / monthPickerColumns,
+              );
+              final rowHeight = _rowHeight(context, scaler);
+              return AnimatedBuilder(
+                animation: _position,
+                builder: (context, child) {
+                  final position = _position.value;
+                  final first = (position + _epsilon).floor();
+                  return Stack(
+                    children: <Widget>[
+                      _buildYearAt(first, position, scaler, rowHeight),
+                      if (position - first > _epsilon)
+                        _buildYearAt(first + 1, position, scaler, rowHeight),
+                    ],
+                  );
+                },
+              );
+            },
+          ),
         ),
       ),
     );
   }
 
   /// [year]'s months, a picker's width to the right for each year it lies
-  /// past [position], their names scaled by [scaler].
-  Widget _buildYearAt(int year, double position, TextScaler scaler) {
+  /// past [position], their names scaled by [scaler], in rows [rowHeight]
+  /// tall.
+  Widget _buildYearAt(
+    int year,
+    double position,
+    TextScaler scaler,
+    double rowHeight,
+  ) {
     return FractionalTranslation(
       key: ValueKey<int>(year),
       translation: Offset(year - position, 0.0),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          for (var row = 0; row < 12; row += monthPickerColumns)
-            Row(
-              children: <Widget>[
-                for (
-                  var month = row + 1;
-                  month <= row + monthPickerColumns;
-                  month++
-                )
-                  Expanded(child: _buildMonth(DateTime(year, month), scaler)),
-              ],
+          for (var row = 0; row < _rowCount; row++)
+            SizedBox(
+              height: rowHeight,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  for (
+                    var month = row * monthPickerColumns + 1;
+                    month <= (row + 1) * monthPickerColumns;
+                    month++
+                  )
+                    Expanded(child: _buildMonth(DateTime(year, month), scaler)),
+                ],
+              ),
             ),
         ],
       ),
@@ -407,8 +462,9 @@ class _MonthPickerState extends State<MonthPicker>
 }
 
 /// One month of the [MonthPicker]: its full name, scaled by [nameScaler],
-/// on a pill across the cell, at least as tall as a [DayCell]'s circle and
-/// otherwise as tall as the name, filled with the primary colour when
+/// on a pill across the cell, as tall as the cell is given less
+/// [pillMargin], and at least as tall as a [DayCell]'s circle and as the
+/// name ([heightFor]), filled with the primary colour when
 /// [isSelected] and ringed as today's number is when [isCurrent], in the
 /// [CalendarTheme] above it. A screen reader hears the cell as a button
 /// named by the month and the year. Where [enabled] is false the name
@@ -447,6 +503,14 @@ class MonthCell extends StatelessWidget {
   /// The space between the pill's ends and the name.
   static const EdgeInsets pillPadding = EdgeInsets.symmetric(horizontal: 4.0);
 
+  /// The height of a cell whose name is [nameHeight] tall, where its height
+  /// is not bounded: its pill's, at least a [DayCell]'s circle, as its
+  /// [Container] gives it, within [pillMargin].
+  static double heightFor(double nameHeight) {
+    return pillMargin.vertical +
+        math.max(dayCircleSize, pillPadding.vertical + nameHeight);
+  }
+
   @override
   Widget build(BuildContext context) {
     final styles = _PickerStyles.of(context);
@@ -482,5 +546,62 @@ class MonthCell extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// [child], which builds under a [LayoutBuilder] and so answers no
+/// intrinsic size, answering for its intrinsic heights what [heightAt]
+/// gives for the width asked at, and 0 for its intrinsic widths, without
+/// asking [child].
+class _HeightBy extends SingleChildRenderObjectWidget {
+  const _HeightBy({required this.heightAt, required Widget super.child});
+
+  final double Function(double width) heightAt;
+
+  @override
+  _RenderHeightBy createRenderObject(BuildContext context) {
+    return _RenderHeightBy(heightAt);
+  }
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderHeightBy renderObject) {
+    renderObject.heightAt = heightAt;
+  }
+}
+
+class _RenderHeightBy extends RenderProxyBox {
+  _RenderHeightBy(this._heightAt);
+
+  double Function(double width) _heightAt;
+
+  /// Takes [value] and lays the box out again, whatever it is: what the box
+  /// answers reads the state that builds it, which the build may have
+  /// changed, and laying out again makes an ancestor that asked the box's
+  /// intrinsic height ask again ([RenderBox.markNeedsLayout]); the
+  /// [LayoutBuilder] under it, which the same build lays out again, makes
+  /// none ask where tight constraints make it a relayout boundary.
+  set heightAt(double Function(double width) value) {
+    _heightAt = value;
+    markNeedsLayout();
+  }
+
+  @override
+  double computeMinIntrinsicHeight(double width) {
+    return _heightAt(width);
+  }
+
+  @override
+  double computeMaxIntrinsicHeight(double width) {
+    return _heightAt(width);
+  }
+
+  @override
+  double computeMinIntrinsicWidth(double height) {
+    return 0.0;
+  }
+
+  @override
+  double computeMaxIntrinsicWidth(double height) {
+    return 0.0;
   }
 }

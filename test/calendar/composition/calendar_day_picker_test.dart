@@ -4,7 +4,8 @@
 /// predicate refuse, when it asks the predicate, what a store given in a
 /// later build reads, where its days and its previous chevron lie with
 /// daysToEdges, the weeks, months and years it browses back to with
-/// browsesBeforeFirstDay false, and the view it opens on and reports.
+/// browsesBeforeFirstDay false, the view it opens on and reports, and the
+/// height it lays out at under an IntrinsicHeight.
 library;
 
 import 'dart:async';
@@ -12,6 +13,8 @@ import 'dart:ui' show Tristate;
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:widgets_extended/calendar/composition/calendar_header.dart'
+    show CalendarHeaderRow;
 import 'package:widgets_extended/widgets_extended.dart';
 
 /// The day cell of [day], as a screen reader names a day with no badge.
@@ -1148,7 +1151,7 @@ void main() {
         find
             .descendant(
               of: find.byType(CalendarDayPicker<String>),
-              matching: find.byType(Row),
+              matching: find.byType(CalendarHeaderRow),
             )
             .first,
       );
@@ -1156,6 +1159,212 @@ void main() {
       expect(box.right, header.right, reason: step);
       expect(box.center.dy, header.center.dy, reason: step);
     }
+  });
+
+  testWidgets("DP18 under an IntrinsicHeight the picker folded into its week "
+      "row lays out with no error at the height it takes without one, with "
+      "daysToEdges too", (tester) async {
+    for (final edges in <bool>[false, true]) {
+      final step = edges ? "daysToEdges" : "padded";
+      Widget picker() {
+        return CalendarDayPicker<String>(
+          key: ValueKey<bool>(edges),
+          value: DateTime(2026, 4, 22),
+          today: tuesday,
+          daysToEdges: edges,
+          onChanged: (day) {},
+        );
+      }
+
+      await tester.pumpWidget(app(picker()));
+      await tester.pumpAndSettle();
+      final height = tester.getSize(find.byType(CalendarDayPicker<String>));
+      await tester.pumpWidget(app(IntrinsicHeight(child: picker())));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: step);
+      expect(
+        tester.getSize(find.byType(CalendarDayPicker<String>)),
+        height,
+        reason: step,
+      );
+    }
+  });
+
+  testWidgets("DP20 under an IntrinsicHeight the picker lays out with no "
+      "error at the height it takes without one: unfolded, as a swipe slides "
+      "the month and once it rests on a taller month, as the month picker "
+      "comes in, open, and as it slides a year, and as the month folds, with "
+      "daysToEdges too", (tester) async {
+    final semantics = tester.ensureSemantics();
+    for (final edges in <bool>[false, true]) {
+      /// The steps, each with the picker's height and the error it reported,
+      /// under an IntrinsicHeight where [intrinsic].
+      Future<List<(String, double, Object?)>> run(bool intrinsic) async {
+        final steps = <(String, double, Object?)>[];
+        void record(String step) {
+          steps.add((
+            step,
+            tester.getSize(find.byType(CalendarDayPicker<String>)).height,
+            tester.takeException(),
+          ));
+        }
+
+        final picker = CalendarDayPicker<String>(
+          key: ValueKey<(bool, bool)>((edges, intrinsic)),
+          value: DateTime(2026, 4, 22),
+          today: tuesday,
+          daysToEdges: edges,
+          initialView: const CalendarDayPickerView(folded: false),
+          onChanged: (day) {},
+        );
+        await tester.pumpWidget(
+          app(intrinsic ? IntrinsicHeight(child: picker) : picker),
+        );
+        await tester.pumpAndSettle();
+        record("unfolded");
+        // A drag right brings in March, whose grid takes a week more than
+        // April's, past the middle, so the release rests on it; the first
+        // move goes to the touch slop.
+        final swipe = await tester.startGesture(
+          tester.getCenter(dayCell(DateTime(2026, 4, 15))),
+        );
+        for (var move = 0; move < 7; move++) {
+          await swipe.moveBy(const Offset(50.0, 0.0));
+          await tester.pump();
+        }
+        record("mid-swipe");
+        await swipe.up();
+        await tester.pumpAndSettle();
+        record("swiped");
+        // Each motion starts in the frame after the tap's.
+        await tester.tap(find.byTooltip("Pick a month"));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 150));
+        record("month picker coming in");
+        await tester.pumpAndSettle();
+        record("month picker");
+        await tester.tap(find.byTooltip("Next year"));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 150));
+        if (!intrinsic) {
+          // Setup sanity: both years show.
+          expect(find.text("January"), findsNWidgets(2), reason: "$edges");
+        }
+        record("year sliding");
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip("Close the months"));
+        await tester.pumpAndSettle();
+        record("month");
+        await tester.tap(find.bySemanticsLabel("Show the week"));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 150));
+        record("mid-fold");
+        await tester.pumpAndSettle();
+        record("folded");
+        return steps;
+      }
+
+      final plain = await run(false);
+      final measured = await run(true);
+      double heightAt(String step) {
+        return plain.firstWhere((entry) {
+          return entry.$1 == step;
+        }).$2;
+      }
+
+      // Setup sanity: each step the picker moves through lies between the
+      // heights it moves from and to.
+      final unfolded = heightAt("unfolded");
+      final swiped = heightAt("swiped");
+      final opened = heightAt("month picker");
+      expect(swiped, greaterThan(unfolded), reason: "$edges");
+      expect(heightAt("mid-swipe"), greaterThan(unfolded), reason: "$edges");
+      expect(heightAt("mid-swipe"), lessThan(swiped), reason: "$edges");
+      expect(opened, lessThan(swiped), reason: "$edges");
+      expect(
+        heightAt("month picker coming in"),
+        allOf(greaterThan(opened), lessThan(swiped)),
+        reason: "$edges",
+      );
+      expect(
+        heightAt("mid-fold"),
+        allOf(greaterThan(heightAt("folded")), lessThan(heightAt("month"))),
+        reason: "$edges",
+      );
+      for (final (step, _, error) in plain) {
+        expect(error, isNull, reason: "$edges, $step");
+      }
+
+      for (var index = 0; index < plain.length; index++) {
+        final (step, height, error) = measured[index];
+        expect(error, isNull, reason: "$edges, $step");
+        expect(
+          height,
+          moreOrLessEquals(plain[index].$2),
+          reason: "$edges, $step",
+        );
+      }
+    }
+    semantics.dispose();
+  });
+
+  testWidgets("DP19 a tap on the selected day reports it, in the week row and "
+      "in the month, as a tap on another day does; with headerSelects a pick "
+      "of the selected day's own month reports nothing and keeps the month "
+      "picker open", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final wednesday = DateTime(2026, 4, 22);
+    final reported = <DateTime>[];
+    for (final (step, view) in <(String, CalendarDayPickerView)>[
+      ("week row", const CalendarDayPickerView()),
+      ("month", const CalendarDayPickerView(folded: false)),
+    ]) {
+      await tester.pumpWidget(
+        app(
+          CalendarDayPicker<String>(
+            key: ValueKey<String>(step),
+            value: wednesday,
+            today: tuesday,
+            initialView: view,
+            onChanged: reported.add,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // Setup sanity: a tap on another day reports it.
+      await tester.tap(dayCell(DateTime(2026, 4, 23)));
+      await tester.pump();
+      expect(reported, <DateTime>[DateTime(2026, 4, 23)], reason: step);
+      reported.clear();
+      await tester.tap(dayCell(wednesday));
+      await tester.pump();
+      expect(reported, <DateTime>[wednesday], reason: step);
+      reported.clear();
+    }
+
+    await tester.pumpWidget(
+      app(
+        CalendarDayPicker<String>(
+          key: const ValueKey<String>("header selects"),
+          value: wednesday,
+          today: tuesday,
+          headerSelects: true,
+          onChanged: reported.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("Pick a month"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text("April"));
+    await tester.pumpAndSettle();
+    expect(reported, isEmpty);
+    expect(find.text("April"), findsOneWidget);
+    // Setup sanity: a pick of another month reports its day.
+    await tester.tap(find.text("May"));
+    await tester.pumpAndSettle();
+    expect(reported, <DateTime>[DateTime(2026, 5, 22)]);
+    semantics.dispose();
   });
 
   testWidgets("DP17 a screen reader hears the picker's today as today, "
@@ -1195,6 +1404,68 @@ void main() {
       );
     }
     semantics.dispose();
+  });
+
+  testWidgets("DP21 an Expanded or a Flexible headerTrailing shares the "
+      "header's row with the chevrons and the title by its flex, as in a Row "
+      "of the two, in either reading direction", (tester) async {
+    const trailingKey = ValueKey<String>("trailing");
+    for (final direction in TextDirection.values) {
+      for (final expanded in <bool>[true, false]) {
+        final step = "${direction.name} ${expanded ? "Expanded" : "Flexible"}";
+        await tester.pumpWidget(
+          app(
+            Directionality(
+              textDirection: direction,
+              child: CalendarDayPicker<String>(
+                key: ValueKey<String>(step),
+                value: DateTime(2026, 4, 22),
+                today: tuesday,
+                onChanged: (day) {},
+                headerTrailing: expanded
+                    ? const Expanded(
+                        child: SizedBox(key: trailingKey, height: 20.0),
+                      )
+                    : const Flexible(
+                        child: SizedBox(
+                          key: trailingKey,
+                          width: 40.0,
+                          height: 20.0,
+                        ),
+                      ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: step);
+        final header = find
+            .descendant(
+              of: find.byType(CalendarDayPicker<String>),
+              matching: find.byType(CalendarHeaderRow),
+            )
+            .first;
+        final row = tester.getRect(header);
+        final lead = tester.getRect(
+          find.descendant(of: header, matching: find.byType(Row)).first,
+        );
+        final trailing = tester.getRect(find.byKey(trailingKey));
+        final half = row.width / 2.0;
+        expect(lead.width, moreOrLessEquals(half), reason: step);
+        expect(
+          trailing.width,
+          moreOrLessEquals(expanded ? half : 40.0),
+          reason: step,
+        );
+        if (direction == TextDirection.ltr) {
+          expect(lead.left, moreOrLessEquals(row.left), reason: step);
+          expect(trailing.left, moreOrLessEquals(lead.right), reason: step);
+        } else {
+          expect(lead.right, moreOrLessEquals(row.right), reason: step);
+          expect(trailing.right, moreOrLessEquals(lead.left), reason: step);
+        }
+      }
+    }
   });
 }
 

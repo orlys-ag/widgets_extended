@@ -95,6 +95,10 @@ DateTime monthFoldDay(
 /// shows it. Once [collapse] leaves 0 the strip comes to rest on the
 /// nearest whole month at once and takes no pointers.
 ///
+/// The strip answers the height it lays out at, at any width, as its
+/// intrinsic height, and lays out again whatever asked it as that height
+/// moves.
+///
 /// With [browseFrom], the strip slides back no further than that day's
 /// month, and folds into that day's week where the week it would fold into
 /// starts before it.
@@ -523,97 +527,111 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
     }
   }
 
+  /// How many months the strip has scrolled from index 0, fractional while
+  /// it slides: its pixels over the width of a month as the last layout
+  /// gave it, a ratio a new width keeps ([_keepMonth]), so it holds at any
+  /// width; 0 before the first layout.
+  double get _position {
+    final extent = _extent;
+    if (!_scroll.hasClients || extent == null || extent <= 0.0) {
+      return 0.0;
+    }
+    return _scroll.position.pixels / extent;
+  }
+
   @override
   Widget build(BuildContext context) {
     final rowHeight = widget.rowHeight;
     final fullHeight = MonthStrip.maxWeeks * rowHeight;
+    final months = LayoutBuilder(
+      builder: (context, constraints) {
+        final extent = constraints.maxWidth;
+        _keepMonth(extent);
+        return NotificationListener<ScrollNotification>(
+          onNotification: _handleScroll,
+          child: CustomScrollView(
+            scrollDirection: Axis.horizontal,
+            controller: _scroll,
+            physics: _physics,
+            // Only the months the strip shows are built, so a month's
+            // days, and their keys, are in the tree once at rest.
+            scrollCacheExtent: const ScrollCacheExtent.pixels(0.0),
+            scrollBehavior: ScrollConfiguration.of(
+              context,
+            ).copyWith(scrollbars: false),
+            center: _forwardKey,
+            slivers: <Widget>[
+              SliverFixedExtentList(
+                itemExtent: extent,
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  return _buildMonth(_monthAt(-1 - index));
+                }, childCount: _limit == null ? null : -_limit),
+              ),
+              SliverFixedExtentList(
+                key: _forwardKey,
+                itemExtent: extent,
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  return _buildMonth(_monthAt(index));
+                }),
+              ),
+            ],
+          ),
+        );
+      },
+    );
     return Focus(
       focusNode: _focus,
       onKeyEvent: _handleKey,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final extent = constraints.maxWidth;
-          _keepMonth(extent);
-          final view = NotificationListener<ScrollNotification>(
-            onNotification: _handleScroll,
-            child: CustomScrollView(
-              scrollDirection: Axis.horizontal,
-              controller: _scroll,
-              physics: _physics,
-              // Only the months the strip shows are built, so a month's
-              // days, and their keys, are in the tree once at rest.
-              scrollCacheExtent: const ScrollCacheExtent.pixels(0.0),
-              scrollBehavior: ScrollConfiguration.of(
-                context,
-              ).copyWith(scrollbars: false),
-              center: _forwardKey,
-              slivers: <Widget>[
-                SliverFixedExtentList(
-                  itemExtent: extent,
-                  delegate: SliverChildBuilderDelegate((context, index) {
-                    return _buildMonth(_monthAt(-1 - index));
-                  }, childCount: _limit == null ? null : -_limit),
+      // The strip's height, which holds at any width ([_position]), is set
+      // above the LayoutBuilder, which answers no intrinsic size: a SizedBox
+      // of a given height answers it as its intrinsic height without asking
+      // its child ([RenderConstrainedBox]), and a new one lays out again
+      // whatever asked it.
+      child: AnimatedBuilder(
+        animation: Listenable.merge(<Listenable>[_scroll, widget.collapse]),
+        child: months,
+        builder: (context, child) {
+          final t = widget.collapse.value;
+          final position = _position;
+          final index = (position + _epsilon).floor();
+          final fraction = (position - index).clamp(0.0, 1.0);
+          final open = lerpDouble(
+            _heightAt(index),
+            _heightAt(index + 1),
+            fraction,
+          )!;
+          final resting = _monthAt(position.round());
+          final foldDay = _foldDay;
+          final foldRow = t > 0.0
+              ? _gridOf(resting)
+                    .cellOf(
+                      foldDay != null &&
+                              foldDay.year == resting.year &&
+                              foldDay.month == resting.month
+                          ? foldDay
+                          : monthFoldDay(
+                              resting,
+                              selectedDay: _selectedDay,
+                              today: _today,
+                              weekdays: widget.weekdays,
+                              firstDay: _browseFrom,
+                            ),
+                    )
+                    .row
+              : 0;
+          return SizedBox(
+            height: lerpDouble(open, rowHeight, t),
+            child: ClipRect(
+              child: OverflowBox(
+                alignment: Alignment.topCenter,
+                minHeight: fullHeight,
+                maxHeight: fullHeight,
+                child: Transform.translate(
+                  offset: Offset(0.0, -t * foldRow * rowHeight),
+                  child: IgnorePointer(ignoring: t > 0.0, child: child),
                 ),
-                SliverFixedExtentList(
-                  key: _forwardKey,
-                  itemExtent: extent,
-                  delegate: SliverChildBuilderDelegate((context, index) {
-                    return _buildMonth(_monthAt(index));
-                  }),
-                ),
-              ],
+              ),
             ),
-          );
-          return AnimatedBuilder(
-            animation: Listenable.merge(<Listenable>[_scroll, widget.collapse]),
-            child: view,
-            builder: (context, child) {
-              final t = widget.collapse.value;
-              var position = 0.0;
-              if (_scroll.hasClients && extent > 0.0) {
-                position = _scroll.position.pixels / extent;
-              }
-              final index = (position + _epsilon).floor();
-              final fraction = (position - index).clamp(0.0, 1.0);
-              final open = lerpDouble(
-                _heightAt(index),
-                _heightAt(index + 1),
-                fraction,
-              )!;
-              final resting = _monthAt(position.round());
-              final foldDay = _foldDay;
-              final foldRow = t > 0.0
-                  ? _gridOf(resting)
-                        .cellOf(
-                          foldDay != null &&
-                                  foldDay.year == resting.year &&
-                                  foldDay.month == resting.month
-                              ? foldDay
-                              : monthFoldDay(
-                                  resting,
-                                  selectedDay: _selectedDay,
-                                  today: _today,
-                                  weekdays: widget.weekdays,
-                                  firstDay: _browseFrom,
-                                ),
-                        )
-                        .row
-                  : 0;
-              return SizedBox(
-                height: lerpDouble(open, rowHeight, t),
-                child: ClipRect(
-                  child: OverflowBox(
-                    alignment: Alignment.topCenter,
-                    minHeight: fullHeight,
-                    maxHeight: fullHeight,
-                    child: Transform.translate(
-                      offset: Offset(0.0, -t * foldRow * rowHeight),
-                      child: IgnorePointer(ignoring: t > 0.0, child: child),
-                    ),
-                  ),
-                ),
-              );
-            },
           );
         },
       ),

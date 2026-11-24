@@ -1,6 +1,6 @@
 /// The month picker on its own: the text scale its names draw at where the
-/// theme's two name styles differ, and what a new selected month measures
-/// again.
+/// theme's two name styles differ, what a new selected month measures
+/// again, the height of its rows, and the intrinsic height it answers.
 library;
 
 import 'package:flutter/rendering.dart' show RenderParagraph;
@@ -114,5 +114,120 @@ void main() {
     final september = tester.widget<Text>(nameOf(DateTime(2026, 9)));
     expect(september.style?.fontSize, 15.0);
     expect(debugLabelSizeMeasures, before);
+  });
+
+  testWidgets("MP3 every row of a picker is as tall as a cell whose name is "
+      "the tallest in either style, whichever months are marked, and the "
+      "picker answers the height it lays out at as its intrinsic height, at "
+      "its width and at one that scales its names otherwise, at rest and as "
+      "it slides a year", (tester) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    RenderBox picker() {
+      return tester.renderObject<RenderBox>(find.byType(MonthPicker));
+    }
+
+    double cellHeight(DateTime month) {
+      return tester.getSize(find.byKey(monthPickerMonthKey(month))).height;
+    }
+
+    await pumpPicker(tester, name: 15.0, marked: 30.0, width: 2400.0);
+    final wide = picker().size.height;
+    await pumpPicker(tester, name: 15.0, marked: 30.0, width: 1200.0);
+    final box = picker();
+    final marked = tester.getSize(nameOf(DateTime(2026, 4))).height;
+    // Setup sanity: April's marked name is taller than an unmarked one and
+    // than a day's circle, and the wider picker's names scale otherwise.
+    expect(
+      marked,
+      greaterThan(tester.getSize(nameOf(DateTime(2026, 1))).height),
+    );
+    expect(marked, greaterThan(dayCircleSize));
+    expect(wide, isNot(moreOrLessEquals(box.size.height)));
+
+    final row = MonthCell.pillMargin.vertical + marked;
+    for (final month in months) {
+      expect(cellHeight(month), moreOrLessEquals(row), reason: "${month.month}");
+    }
+    expect(box.size.height, moreOrLessEquals(4 * row));
+    for (final (width, height) in <(double, double)>[
+      (1200.0, box.size.height),
+      (2400.0, wide),
+    ]) {
+      expect(
+        box.getMinIntrinsicHeight(width),
+        moreOrLessEquals(height),
+        reason: "at $width",
+      );
+      expect(
+        box.getMaxIntrinsicHeight(width),
+        moreOrLessEquals(height),
+        reason: "at $width",
+      );
+    }
+
+    // The first move goes to the touch slop.
+    final drag = await tester.startGesture(
+      tester.getCenter(find.byType(MonthPicker)),
+    );
+    for (var move = 0; move < 3; move++) {
+      await drag.moveBy(const Offset(-100.0, 0.0));
+      await tester.pump();
+    }
+    // Setup sanity: 2027's months, none of them marked, come in.
+    expect(find.text("January"), findsNWidgets(2));
+    expect(
+      box.getMaxIntrinsicHeight(1200.0),
+      moreOrLessEquals(box.size.height),
+    );
+    await drag.up();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets("MP4 under an IntrinsicHeight of a fixed width a picker lays "
+      "out at the height it takes without one, and does again once a new "
+      "text size gives its rows another height", (tester) async {
+    tester.view.physicalSize = const Size(1200.0, 600.0);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    Widget app({required bool intrinsic}) {
+      final picker = MonthPicker(
+        year: 2026,
+        selectedMonth: DateTime(2026, 4),
+        currentMonth: DateTime(2026, 4),
+        onSelectMonth: (month) {},
+        onBrowse: (year) {},
+      );
+      return MaterialApp(
+        home: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 1200.0,
+            child: intrinsic ? IntrinsicHeight(child: picker) : picker,
+          ),
+        ),
+      );
+    }
+
+    // From a larger text size to a smaller, so an answer kept from the
+    // larger shows as a picker too tall rather than as an overflow.
+    final heights = <bool, List<double>>{};
+    for (final intrinsic in <bool>[false, true]) {
+      final steps = heights[intrinsic] = <double>[];
+      tester.platformDispatcher.textScaleFactorTestValue = 3.0;
+      await tester.pumpWidget(app(intrinsic: intrinsic));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: "$intrinsic");
+      steps.add(tester.getSize(find.byType(MonthPicker)).height);
+      tester.platformDispatcher.textScaleFactorTestValue = 1.0;
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: "$intrinsic");
+      steps.add(tester.getSize(find.byType(MonthPicker)).height);
+    }
+    // Setup sanity: the larger text makes the rows taller.
+    expect(heights[false]![0], greaterThan(heights[false]![1]));
+    expect(heights[true]![0], moreOrLessEquals(heights[false]![0]));
+    expect(heights[true]![1], moreOrLessEquals(heights[false]![1]));
   });
 }

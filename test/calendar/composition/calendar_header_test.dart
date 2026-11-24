@@ -896,4 +896,118 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     }
   });
+
+  testWidgets("HD16 a header row lays its lead and its trailing widget out, "
+      "and answers its dry layout and intrinsic sizes, as a Row of an "
+      "Expanded lead, the gap and the trailing widget does, a Flexible or an "
+      "Expanded trailing widget sharing the row by its flex", (tester) async {
+    const gap = 4.0;
+    const leadKey = ValueKey<String>("lead");
+    const trailingKey = ValueKey<String>("trailing");
+    const lead = Text("Lead words that wrap", key: leadKey);
+    const short = Text("Trailing", key: trailingKey);
+    const long = Text("Trailing words that wrap", key: trailingKey);
+    final trailings = <String, Widget>{
+      "at its own width": short,
+      "Flexible": const Flexible(child: short),
+      "Flexible of flex 2 that wraps": const Flexible(flex: 2, child: long),
+      "Expanded": const Expanded(child: short),
+      "Expanded of flex 3": const Expanded(flex: 3, child: short),
+    };
+    for (final direction in TextDirection.values) {
+      for (final MapEntry(key: name, value: trailing) in trailings.entries) {
+        final step = "${direction.name}, $name";
+        final rows = <String, Widget>{
+          "header row": CalendarHeaderRow(
+            gap: gap,
+            lead: lead,
+            trailing: trailing,
+          ),
+          "Row": Row(
+            children: <Widget>[
+              const Expanded(child: lead),
+              const SizedBox(width: gap),
+              trailing,
+            ],
+          ),
+        };
+        final measures = <String, List<Object>>{};
+        for (final MapEntry(key: kind, value: row) in rows.entries) {
+          await tester.pumpWidget(
+            Directionality(
+              textDirection: direction,
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(width: 300.0, child: row),
+              ),
+            ),
+          );
+          expect(tester.takeException(), isNull, reason: "$step, $kind");
+          final box = tester.renderObject<RenderBox>(find.byWidget(row));
+          final origin = box.localToGlobal(Offset.zero);
+          measures[kind] = <Object>[
+            tester.getRect(find.byKey(leadKey)).shift(-origin),
+            tester.getRect(find.byKey(trailingKey)).shift(-origin),
+            Offset.zero &
+                box.getDryLayout(const BoxConstraints(maxWidth: 300.0)),
+            box.getMinIntrinsicWidth(double.infinity),
+            box.getMaxIntrinsicWidth(double.infinity),
+            for (final width in <double>[300.0, 120.0]) ...<double>[
+              box.getMinIntrinsicHeight(width),
+              box.getMaxIntrinsicHeight(width),
+            ],
+          ];
+        }
+        final header = measures["header row"]!;
+        final row = measures["Row"]!;
+        final what = <String>[
+          "lead",
+          "trailing widget",
+          "dry layout",
+          "min intrinsic width",
+          "max intrinsic width",
+          "min intrinsic height at 300",
+          "max intrinsic height at 300",
+          "min intrinsic height at 120",
+          "max intrinsic height at 120",
+        ];
+        for (var i = 0; i < what.length; i++) {
+          final expected = row[i];
+          final matcher = switch (expected) {
+            final Rect rect => rectMoreOrLessEquals(rect),
+            final double value => moreOrLessEquals(value),
+            _ => equals(expected),
+          };
+          expect(header[i], matcher, reason: "$step: ${what[i]}");
+        }
+      }
+    }
+    // Setup: the Flexible leaves room after its text, so where it lies
+    // tells the Row's placing from one at the row's end, and the wrapping
+    // one is taller at 120 than at 300.
+    await tester.pumpWidget(
+      const Directionality(
+        textDirection: TextDirection.ltr,
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 300.0,
+            child: Row(
+              children: <Widget>[
+                Expanded(child: lead),
+                SizedBox(width: gap),
+                Flexible(child: short),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(tester.getRect(find.byKey(trailingKey)).right, lessThan(300.0));
+    final wraps = tester.renderObject<RenderBox>(find.byType(Row));
+    expect(
+      wraps.getMinIntrinsicHeight(120.0),
+      greaterThan(wraps.getMinIntrinsicHeight(300.0)),
+    );
+  });
 }

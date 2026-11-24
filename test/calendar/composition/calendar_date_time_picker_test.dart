@@ -22,6 +22,8 @@ import 'package:widgets_extended/calendar/composition/calendar_date_time_picker.
         dateTimePickerDateSegmentKey,
         dateTimePickerTimeKey,
         dateTimePickerTimeSegmentKey;
+import 'package:widgets_extended/calendar/composition/calendar_header.dart'
+    show CalendarHeaderRow;
 import 'package:widgets_extended/calendar/views/day_cell.dart' show DayCell;
 import 'package:widgets_extended/calendar/views/time_picker.dart'
     show timePickerHourColumnKey, timePickerHourRowKey;
@@ -81,6 +83,13 @@ final Finder timeSegment = find.byKey(dateTimePickerTimeSegmentKey);
 final Finder timeView = find.byKey(dateTimePickerTimeKey);
 
 final Finder dayPicker = find.byType(CalendarDayPicker<String>);
+
+/// The header row of the view [view] finds.
+Finder headerRowOf(Finder view) {
+  return find
+      .descendant(of: view, matching: find.byType(CalendarHeaderRow))
+      .first;
+}
 
 /// The tap target of the segment whose label [label] finds.
 Finder segmentOf(Finder label) {
@@ -198,9 +207,7 @@ void main() {
     );
     expect(find.byType(CalendarTimePicker), findsNothing);
     expect(timeView, findsNothing);
-    final header = tester.getRect(
-      find.descendant(of: dayPicker, matching: find.byType(Row)).first,
-    );
+    final header = tester.getRect(headerRowOf(dayPicker));
     final track = tester.getRect(control());
     expect(track.right, header.right);
     expect(track.center.dy, moreOrLessEquals(header.center.dy));
@@ -439,9 +446,10 @@ void main() {
     picks.clear();
     await tester.pumpWidget(picker());
     await tester.tap(dayCell(wednesday));
-    expect(picks, isEmpty);
+    expect(picks, <(DateTime, int?)>[(wednesday, 600)]);
     await expectKept("the value's day");
 
+    picks.clear();
     await tester.pumpWidget(picker());
     tester.semantics.tap(
       find.semantics.byLabel(
@@ -493,14 +501,10 @@ void main() {
 
           await tester.pumpWidget(picker(false));
           final inDate = tester.getRect(control());
-          final dateHeader = tester.getRect(
-            find.descendant(of: dayPicker, matching: find.byType(Row)).first,
-          );
+          final dateHeader = tester.getRect(headerRowOf(dayPicker));
           await tester.pumpWidget(picker(true));
           final inTime = tester.getRect(control());
-          final timeHeader = tester.getRect(
-            find.descendant(of: timeView, matching: find.byType(Row)).first,
-          );
+          final timeHeader = tester.getRect(headerRowOf(timeView));
           debugDefaultTargetPlatformOverride = null;
           expect(inTime, inDate, reason: step);
           expect(timeHeader, dateHeader, reason: step);
@@ -594,9 +598,7 @@ void main() {
       tester.getRect(segmentOf(timeSegment)).width,
       moreOrLessEquals(track.width / 2.0),
     );
-    final header = tester.getRect(
-      find.descendant(of: dayPicker, matching: find.byType(Row)).first,
-    );
+    final header = tester.getRect(headerRowOf(dayPicker));
     // Setup sanity: the labels, unscaled, take more than half the row.
     expect(tester.getSize(control()).width, greaterThan(header.width / 2.0));
     expect(track.width, moreOrLessEquals(header.width / 2.0));
@@ -605,6 +607,135 @@ void main() {
     await tester.tap(segmentOf(timeSegment));
     await tester.pumpAndSettle();
     expect(tester.getRect(control()), track);
+  });
+
+  testWidgets("DT22 as an AlertDialog's content, which the dialog lays out "
+      "under an IntrinsicWidth, the picker lays out in both views with no "
+      "error, its control unscaled, and answers the height it lays out at "
+      "as its intrinsic height", (tester) async {
+    for (final showsTime in <bool>[false, true]) {
+      final step = showsTime ? "time view" : "date view";
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(splashFactory: NoSplash.splashFactory),
+          home: Scaffold(
+            body: AlertDialog(
+              content: CalendarDateTimePicker<String>(
+                key: ValueKey<bool>(showsTime),
+                day: wednesday,
+                minute: 600,
+                today: tuesday,
+                initialShowsTime: showsTime,
+                onChanged: (day, minute) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: step);
+      // Setup sanity: the view asked for shows.
+      expect(timeView, showsTime ? findsOne : findsNothing, reason: step);
+      expect(
+        tester.getRect(dateSegment).width,
+        moreOrLessEquals(tester.getSize(dateSegment).width),
+        reason: step,
+      );
+      final box = tester.renderObject<RenderBox>(
+        find.byType(CalendarDateTimePicker<String>),
+      );
+      expect(
+        box.getMinIntrinsicHeight(box.size.width),
+        moreOrLessEquals(box.size.height),
+        reason: step,
+      );
+      expect(
+        box.getMaxIntrinsicHeight(box.size.width),
+        moreOrLessEquals(box.size.height),
+        reason: step,
+      );
+    }
+  });
+
+  testWidgets("DT23 under an unbounded width the picker lays out with no "
+      "error at its intrinsic width, at which each view's header row shows "
+      "its title and the control unscaled, whether the title or the "
+      "control's half of the row sets the row's width", (tester) async {
+    for (final long in <bool>[false, true]) {
+      final labels = long ? "long labels" : "short labels";
+      final picker = CalendarDateTimePicker<String>(
+        key: ValueKey<bool>(long),
+        day: wednesday,
+        minute: 600,
+        today: tuesday,
+        onChanged: (day, minute) {},
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(splashFactory: NoSplash.splashFactory),
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  if (long)
+                    Builder(
+                      builder: (context) {
+                        return Localizations.override(
+                          context: context,
+                          delegates: const <LocalizationsDelegate<Object?>>[
+                            _LongTimeDelegate(),
+                          ],
+                          child: picker,
+                        );
+                      },
+                    )
+                  else
+                    picker,
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: labels);
+      final box = tester.renderObject<RenderBox>(
+        find.byType(CalendarDateTimePicker<String>),
+      );
+      for (final (view, title) in <(Finder, Finder)>[
+        (dayPicker, find.text("Apr 2026")),
+        (timeView, find.text("Tomorrow, April 22")),
+      ]) {
+        final step = "$labels, ${view == timeView ? "time" : "date"} view";
+        if (view == timeView) {
+          await tester.tap(segmentOf(timeSegment));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull, reason: step);
+        }
+        expect(
+          box.size.width,
+          moreOrLessEquals(box.getMaxIntrinsicWidth(double.infinity)),
+          reason: step,
+        );
+        for (final label in <Finder>[dateSegment, timeSegment, title]) {
+          expect(
+            tester.getRect(label).width,
+            moreOrLessEquals(tester.getSize(label).width),
+            reason: "$step: $label",
+          );
+        }
+        // Setup sanity: the control's half of the row sets the row's width
+        // with the long labels, and the title with the short ones.
+        final half = tester.getRect(headerRowOf(view)).width / 2.0;
+        expect(
+          tester.getRect(control()).width,
+          long ? moreOrLessEquals(half) : lessThan(half - 1.0),
+          reason: step,
+        );
+      }
+    }
   });
 
   testWidgets("DT4 a tap on a day reports it with the time where the day "

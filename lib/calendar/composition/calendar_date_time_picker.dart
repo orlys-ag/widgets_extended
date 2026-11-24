@@ -3,7 +3,6 @@
 /// between them.
 library;
 
-import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
 import 'package:material_ui/material_ui.dart';
@@ -82,6 +81,13 @@ const ValueKey<String> dateTimePickerTimeKey = ValueKey<String>(
 /// The control takes at most half its header row's width, scaling down as
 /// a whole where its labels would take more, so the day picker's chevrons
 /// and title keep the rest at any text size.
+///
+/// Under a bounded width the picker takes all of it. Under an unbounded
+/// width, and to a parent that asks its intrinsic width, such as an
+/// `AlertDialog`, it is as wide as the views it shows need for their header
+/// rows to show unscaled, the control within half its row, and the time
+/// view also for its time picker; the day picker's days take whatever width
+/// they are given and add nothing to it.
 ///
 /// As the view switches, the picker's height moves from the height of the
 /// view it leaves to that of the view it turns to over the theme's
@@ -596,26 +602,25 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
 
   /// The view control in the header of the time view where [inTimeView],
   /// and of the date view otherwise, fading with [_controlFade], at most
-  /// [maxWidth] wide, scaled down to it where its labels take more; its
-  /// segments carry their keys in the shown view's header alone.
+  /// half its header row wide, scaled down to it where its labels take
+  /// more; its segments carry their keys in the shown view's header alone.
   Widget _controlIn(
     CalendarThemeData theme,
     CalendarLocalizations strings, {
     required bool inTimeView,
-    required double maxWidth,
   }) {
     final gone = widget.minute == null;
     final nodes = inTimeView ? _timeViewSegments : _dateViewSegments;
-    return FadeTransition(
-      opacity: _controlFade,
-      child: ExcludeFocus(
-        excluding: gone,
-        child: IgnorePointer(
-          ignoring: gone,
-          child: ExcludeSemantics(
-            excluding: gone,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: maxWidth),
+    return CalendarHeaderTrailingShare(
+      share: 0.5,
+      child: FadeTransition(
+        opacity: _controlFade,
+        child: ExcludeFocus(
+          excluding: gone,
+          child: IgnorePointer(
+            ignoring: gone,
+            child: ExcludeSemantics(
+              excluding: gone,
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: _ViewControl(
@@ -666,14 +671,9 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
   }
 
   /// The time view: on a card as the day picker's, a header row naming the
-  /// day, at least as tall as the day picker's chevrons, with the control,
-  /// at most [controlWidth] wide, at its end, over the time picker of the
-  /// shown minute.
-  Widget _timeView(
-    CalendarThemeData theme,
-    CalendarLocalizations strings,
-    double controlWidth,
-  ) {
+  /// day, at least as tall as the day picker's chevrons, with the control
+  /// at its end, over the time picker of the shown minute.
+  Widget _timeView(CalendarThemeData theme, CalendarLocalizations strings) {
     final minute = _shownMinute!;
     final live = widget.minute != null;
     final bounds = live ? _boundsOn(widget.day) : _shownBounds!;
@@ -699,31 +699,22 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
               constraints: BoxConstraints(
                 minHeight: CalendarHeader.chevronExtentOf(context),
               ),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          strings.dayTitle(widget.day, _today),
-                          maxLines: 1,
-                          style: CalendarHeader.titleStyleOf(theme),
-                        ),
-                      ),
+              child: CalendarHeaderRow(
+                gap: 4.0,
+                lead: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      strings.dayTitle(widget.day, _today),
+                      maxLines: 1,
+                      style: CalendarHeader.titleStyleOf(theme),
                     ),
                   ),
-                  if (!_control.isDismissed) ...<Widget>[
-                    const SizedBox(width: 4.0),
-                    _controlIn(
-                      theme,
-                      strings,
-                      inTimeView: true,
-                      maxWidth: controlWidth,
-                    ),
-                  ],
-                ],
+                ),
+                trailing: _control.isDismissed
+                    ? null
+                    : _controlIn(theme, strings, inTimeView: true),
               ),
             ),
             const SizedBox(height: 4.0),
@@ -745,18 +736,10 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
     );
   }
 
-  /// The views, in [width]: the date view, and the time view while it shows
-  /// or fades out, under the switch between them.
-  Widget _views(
-    CalendarThemeData theme,
-    CalendarLocalizations strings,
-    double width,
-  ) {
+  /// The views: the date view, and the time view while it shows or fades
+  /// out, under the switch between them.
+  Widget _views(CalendarThemeData theme, CalendarLocalizations strings) {
     final timeShown = _timeShown;
-    // Half the header row, which the day picker's card pads as the time
-    // view does.
-    final controlWidth =
-        math.max(0.0, width - (widget.daysToEdges ? 0.0 : 16.0)) / 2.0;
     final dateView = CalendarDayPicker<T>(
       value: widget.day,
       onChanged: widget.onChanged == null ? null : _pickDay,
@@ -773,12 +756,7 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
       onViewChanged: widget.onViewChanged,
       headerTrailing: _control.isDismissed
           ? null
-          : _controlIn(
-              theme,
-              strings,
-              inTimeView: false,
-              maxWidth: controlWidth,
-            ),
+          : _controlIn(theme, strings, inTimeView: false),
     );
     return _ViewSwitch(
       progress: _viewCurve,
@@ -793,7 +771,7 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
       time: _view.isDismissed
           ? null
           : _viewSlot(
-              view: _timeView(theme, strings, controlWidth),
+              view: _timeView(theme, strings),
               area: _timeArea,
               active: timeShown,
               painted: true,
@@ -808,11 +786,7 @@ class _CalendarDateTimePickerState<T> extends State<CalendarDateTimePicker<T>>
     final strings = CalendarLocalizations.of(context);
     Widget content = KeyedSubtree(
       key: _contentKey,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          return _views(theme, strings, constraints.maxWidth);
-        },
-      ),
+      child: _views(theme, strings),
     );
     final inserted = _themes.inserted;
     if (inserted != null) {
@@ -952,9 +926,12 @@ class _ViewControl extends StatelessWidget {
 enum _View { date, time }
 
 /// Lays out [date] and, where given, [time], each as wide as the switch and
-/// as tall as it takes, from the switch's top; the switch is as tall as
-/// [date] at a [progress] of 0, as [time] at 1, and between the two heights
-/// in between, clipping what lies below it. It paints [time] over [date]
+/// as tall as it takes, from the switch's top; the switch is as wide as its
+/// constraints let it be, or under an unbounded width as the wider view's
+/// intrinsic width, and as tall as [date] at a [progress] of 0, as [time]
+/// at 1, and between the two heights in between, clipping what lies below
+/// it. Its intrinsic width is the wider view's, and its intrinsic height
+/// lies between the views' as its height does. It paints [time] over [date]
 /// where [timeOnTop] and [date] over [time] otherwise, and a hit reaches
 /// the one on top first.
 class _ViewSwitch
@@ -1076,31 +1053,40 @@ class _RenderViewSwitch extends RenderBox
     return lerpDouble(date, time, _progress.value)!;
   }
 
-  static BoxConstraints _childConstraints(BoxConstraints constraints) {
-    return BoxConstraints.tightFor(width: constraints.maxWidth);
+  /// The width the switch lays its views out at under [constraints]: their
+  /// maximum, or under an unbounded width the widest view's intrinsic
+  /// width, within their minimum.
+  double _widthUnder(BoxConstraints constraints) {
+    if (constraints.hasBoundedWidth) {
+      return constraints.maxWidth;
+    }
+    return constraints.constrainWidth(
+      _widest((child) {
+        return child.getMaxIntrinsicWidth(double.infinity);
+      }),
+    );
   }
 
   @override
   void performLayout() {
-    final inner = _childConstraints(constraints);
+    final width = _widthUnder(constraints);
+    final inner = BoxConstraints.tightFor(width: width);
     final date = _date;
     final time = _time;
     date?.layout(inner, parentUsesSize: true);
     time?.layout(inner, parentUsesSize: true);
     size = constraints.constrain(
-      Size(
-        constraints.maxWidth,
-        _heightBetween(date?.size.height ?? 0.0, time?.size.height),
-      ),
+      Size(width, _heightBetween(date?.size.height ?? 0.0, time?.size.height)),
     );
   }
 
   @override
   Size computeDryLayout(BoxConstraints constraints) {
-    final inner = _childConstraints(constraints);
+    final width = _widthUnder(constraints);
+    final inner = BoxConstraints.tightFor(width: width);
     return constraints.constrain(
       Size(
-        constraints.maxWidth,
+        width,
         _heightBetween(
           _date?.getDryLayout(inner).height ?? 0.0,
           _time?.getDryLayout(inner).height,
@@ -1134,20 +1120,33 @@ class _RenderViewSwitch extends RenderBox
     });
   }
 
+  /// The switch's intrinsic height from its views' [extent], asking none of
+  /// a view the switch's height gives no weight at its progress.
+  double _intrinsicHeight(double Function(RenderBox child) extent) {
+    final date = _date;
+    final time = _time;
+    final at = _progress.value;
+    final dateHeight = date == null || (time != null && at == 1.0)
+        ? 0.0
+        : extent(date);
+    if (time == null) {
+      return dateHeight;
+    }
+    return _heightBetween(dateHeight, at == 0.0 ? 0.0 : extent(time));
+  }
+
   @override
   double computeMinIntrinsicHeight(double width) {
-    return _heightBetween(
-      _date?.getMinIntrinsicHeight(width) ?? 0.0,
-      _time?.getMinIntrinsicHeight(width),
-    );
+    return _intrinsicHeight((child) {
+      return child.getMinIntrinsicHeight(width);
+    });
   }
 
   @override
   double computeMaxIntrinsicHeight(double width) {
-    return _heightBetween(
-      _date?.getMaxIntrinsicHeight(width) ?? 0.0,
-      _time?.getMaxIntrinsicHeight(width),
-    );
+    return _intrinsicHeight((child) {
+      return child.getMaxIntrinsicHeight(width);
+    });
   }
 
   /// Whether a child lies taller than the switch, below its bottom.
