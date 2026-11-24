@@ -119,11 +119,11 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// The section of [check]'s schedule: an All day switch, where the kind
 /// takes all-day or the schedule is all-day, which turned off restores the
 /// times the schedule keeps; then a Start row above an End row. Each row is
-/// a button ([_RowButton]) that shows its label, "Start" or "End", then its
-/// day with its weekday and, for a timed schedule, its time, and a chevron
-/// at its end. A row's tap opens a panel under it holding the row's
-/// [CalendarDateTimePicker], one of the two open at a time, the row drawn
-/// open while it is and keeping the focus.
+/// its label, "Start" or "End", above a field ([_RowButton]) that shows a
+/// clock icon, then the row's day with its weekday and, for a timed
+/// schedule, its time. A field's tap opens a panel under the row holding the
+/// row's [CalendarDateTimePicker], one of the two open at a time, the field
+/// outlined in the primary colour while it is and keeping the focus.
 ///
 /// The picker's day picker lies on the week or month of the row's day,
 /// that day selected and the [CalendarNow.today] of [now] ringed, its weeks
@@ -188,7 +188,8 @@ const ValueKey<String> scheduleEndPanelKey = ValueKey<String>(
 /// picker alone, and as the switch turns off, the picker either row's
 /// control last turned to. [errors] holds the
 /// form's messages keyed `start` and `end`, which show under the Start and
-/// End rows and tint those rows with the soft error colour.
+/// End fields, outline those fields in the error colour and colour their
+/// labels with it.
 class ScheduleSection extends StatefulWidget {
   const ScheduleSection({
     super.key,
@@ -250,27 +251,28 @@ enum _Row { start, end }
 /// The All day switch's size, as a share of a [Switch]'s.
 const double _allDaySwitchScale = 0.75;
 
-/// A Start or End row of the section: a button whose tap, [onTap], opens
-/// or closes the row's picker. It shows [label] in a column [_labelWidth]
-/// wide in a 13-pixel medium weight, then [day] and, where not null, [time]
-/// 12 pixels after it under [timeKey], in a 15-pixel bold weight, and at
-/// its end a chevron that points down, turning to point up as the row
-/// opens. A box [_height] high with corners rounded by 12 and no outline
-/// holds them, filled with the page's grey, its label and chevron in the
-/// muted colour, or where [error] filled with the soft error tint, its
-/// label and chevron in the error colour; while [open] it is filled with
-/// the primary tint, and all it shows is drawn in the primary colour. It
-/// moves from the one look to the other over the [CalendarTheme]'s motion,
-/// the chevron turning with it, or at once where the platform asks for no
-/// animations. A row with no
-/// [onTap], which takes no input, shows its day and time in the muted
-/// colour with no box around them and no chevron, as text rather than a
-/// button, unless [error] tints it. The day and the time keep to one line,
-/// and shrink together to fit a box too narrow for them, as a 12-hour time
-/// in a narrow form or under a large text scale, rather than lose their
-/// end; so does the label in its column. A screen reader hears the label,
-/// the day and the time as one button, expanded while [open]. A tap
-/// anywhere on the box reaches [onTap], and [focusNode] is its [InkWell]'s.
+/// A Start or End row of the section: [label] above a field whose tap,
+/// [onTap], opens or closes the row's picker. The label lies 4 pixels in
+/// from the field's start and 2 above it, in the theme's small label style
+/// in a bold weight, in [HarborColors.fieldLabel], or where [error] in the
+/// error colour. The field shows a 20-pixel clock icon, then 10 pixels
+/// after it [day] and, where not null, [time] 12 pixels after the day under
+/// [timeKey], in the theme's medium body style, all in
+/// [HarborColors.fieldText]. A [HarborColors.surface] box with corners
+/// rounded by 8 and a 1-pixel border holds them, 8 pixels in at its sides
+/// and 6 at its top and bottom inside the border, its content at least
+/// [_contentHeight] high. Its border is [HarborColors.fieldOutline], or
+/// where [error] the error colour, and while [open] the primary colour, to
+/// which it moves over the [CalendarTheme]'s motion, or at once where the
+/// platform asks for no animations. A row with no [onTap], which takes no
+/// input, shows its icon, day and time in [HarborColors.fieldTextDisabled]
+/// with no fill, and no border unless [error] outlines it, 2 pixels in at
+/// its top and bottom, as text rather than a field. The day and the time
+/// keep to one line, and shrink together to fit a field too narrow for
+/// them, as a 12-hour time in a narrow form or under a large text scale,
+/// rather than lose their end. A screen reader hears the label, the day and
+/// the time as one button, expanded while [open]. A tap anywhere on the
+/// field reaches [onTap], and [focusNode] is its [InkWell]'s.
 class _RowButton extends StatelessWidget {
   const _RowButton({
     required this.label,
@@ -292,55 +294,74 @@ class _RowButton extends StatelessWidget {
   final FocusNode focusNode;
   final VoidCallback? onTap;
 
-  static const BorderRadius _corners = BorderRadius.all(Radius.circular(12.0));
+  static const BorderRadius _corners = BorderRadius.all(Radius.circular(8.0));
 
-  static const double _height = 48.0;
+  /// The least height of the field's content: its icon and its text.
+  static const double _contentHeight = 28.0;
 
-  static const double _labelWidth = 48.0;
+  /// The width of the field's border, which the content lies inside.
+  static const double _borderWidth = 1.0;
 
   @override
   Widget build(BuildContext context) {
     final theme = CalendarTheme.of(context);
+    final textTheme = Theme.of(context).textTheme;
     final takesInput = onTap != null;
+    final outlined = takesInput || error;
+    final restEdge = error ? HarborColors.error : HarborColors.fieldOutline;
+    final ink = takesInput
+        ? HarborColors.fieldText
+        : HarborColors.fieldTextDisabled;
+    final valueStyle = (textTheme.bodyMedium ?? const TextStyle()).copyWith(
+      color: ink,
+    );
+    final edge = outlined ? _borderWidth : 0.0;
     final time = this.time;
     return Semantics(
       container: true,
       button: true,
       enabled: takesInput,
       expanded: takesInput ? open : null,
-      child: TweenAnimationBuilder<double>(
-        tween: Tween<double>(end: open ? 1.0 : 0.0),
-        duration: MediaQuery.disableAnimationsOf(context)
-            ? Duration.zero
-            : theme.motionDuration,
-        curve: theme.motionCurve,
-        builder: (context, opening, child) {
-          Color between(Color shut, Color opened) {
-            return Color.lerp(shut, opened, opening)!;
-          }
-
-          final shut = error
-              ? HarborColors.errorNotice
-              : takesInput
-              ? HarborColors.background
-              : Colors.transparent;
-          final fill = takesInput
-              ? between(shut, HarborColors.primaryTint)
-              : shut;
-          final ink = takesInput
-              ? between(HarborColors.text, HarborColors.primary)
-              : HarborColors.textMuted;
-          final shutMark = error ? HarborColors.error : HarborColors.textMuted;
-          final mark = takesInput
-              ? between(shutMark, HarborColors.primary)
-              : shutMark;
-          final valueStyle = TextStyle(
-            color: ink,
-            fontSize: 15.0,
-            fontWeight: FontWeight.w600,
-          );
-          return DecoratedBox(
-            decoration: BoxDecoration(color: fill, borderRadius: _corners),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsetsDirectional.only(start: 4.0, bottom: 2.0),
+            child: Text(
+              label,
+              style: (textTheme.labelSmall ?? const TextStyle()).copyWith(
+                color: error ? HarborColors.error : HarborColors.fieldLabel,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(end: open ? 1.0 : 0.0),
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : theme.motionDuration,
+            curve: theme.motionCurve,
+            builder: (context, opening, child) {
+              return DecoratedBox(
+                decoration: BoxDecoration(
+                  color: takesInput ? HarborColors.surface : null,
+                  borderRadius: _corners,
+                  border: outlined
+                      ? Border.all(
+                          color: takesInput
+                              ? Color.lerp(
+                                  restEdge,
+                                  HarborColors.primary,
+                                  opening,
+                                )!
+                              : restEdge,
+                          width: _borderWidth,
+                        )
+                      : null,
+                ),
+                child: child,
+              );
+            },
             child: Material(
               type: MaterialType.transparency,
               child: InkWell(
@@ -349,28 +370,19 @@ class _RowButton extends StatelessWidget {
                 customBorder: const RoundedRectangleBorder(
                   borderRadius: _corners,
                 ),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: _height),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 8.0 + edge,
+                    vertical: (takesInput ? 6.0 : 2.0) + edge,
+                  ),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minHeight: _contentHeight,
+                    ),
                     child: Row(
                       children: <Widget>[
-                        SizedBox(
-                          width: _labelWidth,
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: AlignmentDirectional.centerStart,
-                            child: Text(
-                              label,
-                              maxLines: 1,
-                              style: TextStyle(
-                                color: mark,
-                                fontSize: 13.0,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ),
+                        Icon(Icons.access_time_rounded, size: 20.0, color: ink),
+                        const SizedBox(width: 10.0),
                         Expanded(
                           child: FittedBox(
                             fit: BoxFit.scaleDown,
@@ -394,25 +406,14 @@ class _RowButton extends StatelessWidget {
                             ),
                           ),
                         ),
-                        if (takesInput) ...<Widget>[
-                          const SizedBox(width: 8.0),
-                          Transform.rotate(
-                            angle: math.pi * opening,
-                            child: Icon(
-                              Icons.expand_more,
-                              size: 20.0,
-                              color: mark,
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ),
                 ),
               ),
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
@@ -824,10 +825,10 @@ class ScheduleSectionState extends State<ScheduleSection> {
     _nodeOf(row).requestFocus();
   }
 
-  /// The button of [row], showing the row's day with its weekday
-  /// ([MaterialLocalizations.formatMediumDate]) and, for a timed schedule,
-  /// its time, tinted with the soft error colour where [error]; its tap
-  /// opens or closes the row's picker.
+  /// The label and field of [row], the field showing the row's day with its
+  /// weekday ([MaterialLocalizations.formatMediumDate]) and, for a timed
+  /// schedule, its time, both outlined and labelled in the error colour
+  /// where [error]; the field's tap opens or closes the row's picker.
   Widget _rowButton(_Row row, {required bool error}) {
     final schedule = _schedule;
     final start = row == _Row.start;
@@ -1018,8 +1019,8 @@ class ScheduleSectionState extends State<ScheduleSection> {
   }
 
   /// The Start or End row of [row], above the panel that holds its picker:
-  /// [error] shows under the row's button and tints it with the soft error
-  /// colour. The button and the panel keep their places in the tree
+  /// [error] shows under the row's field and outlines it and colours its
+  /// label in the error colour. The button and the panel keep their places in the tree
   /// whichever way All day turns, and with them the panel's state and the
   /// button's focus: a [Focus] that leaves the tree drops its focus. So
   /// does each row as the All day switch above it comes or goes: a row's
