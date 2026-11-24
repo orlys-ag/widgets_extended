@@ -147,6 +147,27 @@ final class _EndsByNoon extends CalendarEditPolicy<String> {
   }
 }
 
+/// Takes a new start on a zoned day from [hour]:00 on the day's clock,
+/// given as that instant on UTC's clock, a `TZDateTime` of package
+/// timezone's `UTC`, as `TZDateTime.toUtc` gives.
+final class _EarliestInUtc extends CalendarEditPolicy<String> {
+  const _EarliestInUtc(this.hour);
+
+  final int hour;
+
+  @override
+  DateTime? earliestStartOn(DateTime day, CalendarNow now) {
+    final zoned = day as tz.TZDateTime;
+    return tz.TZDateTime(
+      zoned.location,
+      zoned.year,
+      zoned.month,
+      zoned.day,
+      hour,
+    ).toUtc();
+  }
+}
+
 /// Answers as [inner] does, recording the day of each earliest start and
 /// the end of each change it is asked.
 final class _Counting extends CalendarEditPolicy<String> {
@@ -1310,5 +1331,40 @@ void main() {
     final free = check.nextFree;
     expect(free, timed(tuesday, 9 * 60, 10 * 60));
     expect(check.withSchedule(free!).problems, isEmpty);
+  });
+
+  test("SC30 an earliest start the policy gives on another clock is read on "
+      "the schedule's: the first start minute and the next free range agree "
+      "with the problems", () {
+    ensureZones();
+    final newYork = tz.getLocation("America/New_York");
+    final now = CalendarNow(
+      time: tz.TZDateTime(newYork, 2026, 4, 20, 12),
+      today: tz.TZDateTime(newYork, 2026, 4, 20),
+    );
+    // 09:00 EDT is 13:00 on UTC's clock, and 21:00 EDT 01:00 of the next
+    // day.
+    for (final earliest in <int>[9, 21]) {
+      CalendarScheduleCheck<String> checkAt(int hour) {
+        return CalendarScheduleCheck<String>(
+          schedule: CalendarSchedule.of(
+            tz.TZDateTime(newYork, 2026, 4, 21, hour),
+            tz.TZDateTime(newYork, 2026, 4, 21, hour + 1),
+            isAllDay: false,
+          ),
+          rules: rulesOf(_EarliestInUtc(earliest)),
+          now: now,
+        );
+      }
+
+      final reason = "from $earliest:00 EDT";
+      expect(checkAt(earliest - 1).problems, <CalendarScheduleProblem>[
+        const CalendarScheduleBeforeEarliest(),
+      ], reason: reason);
+      final check = checkAt(earliest + 1);
+      expect(check.problems, isEmpty, reason: reason);
+      expect(check.firstStartMinute, earliest * 60, reason: reason);
+      expect(check.nextFree, check.schedule, reason: reason);
+    }
   });
 }

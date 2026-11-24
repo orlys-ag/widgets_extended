@@ -4,8 +4,11 @@
 /// start and end, a gap shorter than a slot offering no add button, the
 /// slot an add button creates, on a day whose clock repeats a stretch,
 /// the gap rows, their adds and the marker of the current time in the order
-/// of their instants, and on a zoned day whose clock skips its midnight,
-/// the part of an entry carried from the day before.
+/// of their instants, on a zoned day whose clock skips its midnight, the
+/// part of an entry carried from the day before, and on the two days a
+/// zone's clock going back across midnight repeats parts of, the gap rows
+/// in the order of their instants and the add of the second pass's last
+/// slot.
 library;
 
 import 'package:material_ui/material_ui.dart';
@@ -800,6 +803,96 @@ void main() {
       });
       expect(rowsOf(store, day, hours: CalendarDayHours(0, 30)), <Object>[
         ("after", 1),
+      ]);
+    });
+  });
+
+  group("on a store zoned to St. John's, whose clock goes back from 00:01 "
+      "NDT on 2010-11-07, 02:31Z, to 23:01 NST of Nov 6, and reads Nov 7's "
+      "00:00 again at 03:30Z", () {
+    setUpAll(ensureZones);
+
+    /// The instant [hour]:[minute] UTC on 2010-11-07 on St. John's clock.
+    tz.TZDateTime inStJohns(int hour, int minute) {
+      return tz.TZDateTime.from(
+        DateTime.utc(2010, 11, 7, hour, minute),
+        tz.getLocation("America/St_Johns"),
+      );
+    }
+
+    /// Nov 6's start on St. John's clock, and a store on that clock
+    /// holding [entries].
+    (DateTime, MemoryCalendarStore<String>) stJohnsDay(
+      List<CalendarEntry<String>> entries,
+    ) {
+      final stJohns = tz.getLocation("America/St_Johns");
+      final store = MemoryCalendarStore<String>(
+        entries: entries,
+        zone: stJohns,
+      );
+      addTearDown(store.dispose);
+      return (
+        CalendarDates.dateOfDayNumber(
+          CalendarDates.dayNumber(DateTime.utc(2010, 11, 6)),
+          zone: stJohns,
+        ),
+        store,
+      );
+    }
+
+    test("AG21 each day lists its gaps in the order of their instants: Nov "
+        "6 to the end of its second pass, after Nov 7 has started, and Nov 7 "
+        "from its first pass, before the clock reads Nov 6 again, to its "
+        "second", () {
+      final (nov6, store) = stJohnsDay(<CalendarEntry<String>>[
+        // 22:00 to 23:30 NDT.
+        entryOf("first", inStJohns(0, 30), inStJohns(2, 0)),
+        // 23:15 to 23:45 NST, in Nov 6's second pass.
+        entryOf("second", inStJohns(2, 45), inStJohns(3, 15)),
+        // 23:50 NST to 00:15 NST of Nov 7.
+        entryOf("across", inStJohns(3, 20), inStJohns(3, 45)),
+        // 00:30 to 01:00 NST of Nov 7.
+        entryOf("late", inStJohns(4, 0), inStJohns(4, 30)),
+      ]);
+      expect(rowsOf(store, nov6, editable: true), <Object>[
+        (0, 1320),
+        ("first", 1320, 1410, false),
+        (1410, 1395),
+        ("second", 1395, 1425, false),
+        (1425, 1430),
+        ("across", 1430, 1440, false),
+      ]);
+      expect(
+        rowsOf(store, CalendarDates.addDays(nov6, 1), editable: true),
+        <Object>[
+          (0, 1),
+          ("across", 0, 15, false),
+          (15, 30),
+          ("late", 30, 60, false),
+          (60, 1440),
+        ],
+      );
+    });
+
+    testWidgets("AG22 the add of the gap that ends Nov 6's second pass takes "
+        "its last slot, 23:45 to 24:00 NST", (tester) async {
+      final (nov6, store) = stJohnsDay(<CalendarEntry<String>>[
+        entryOf("second", inStJohns(2, 45), inStJohns(3, 15)),
+      ]);
+      final creates = <CalendarCreateRange>[];
+      await pumpList(
+        tester,
+        store,
+        nov6,
+        time: inStJohns(0, 0).subtract(const Duration(days: 5)),
+        creates: creates,
+      );
+      final add = addUnder(dayListGapKey(nov6, 1425, later: true));
+      expect(add, findsOneWidget);
+      await tester.tap(add);
+      await tester.pumpAndSettle();
+      expect(creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: inStJohns(3, 15), end: inStJohns(3, 30)),
       ]);
     });
   });

@@ -119,6 +119,31 @@ final class _Pairing extends CalendarEditPolicy<String> {
   }
 }
 
+/// A policy whose earliest start on a zoned day is [hour]:00 on the day's
+/// clock, given as that instant on another clock: a `TZDateTime` of
+/// [clock], or of package timezone's `UTC` where it is null, as
+/// `TZDateTime.toUtc` gives.
+final class _EarliestElsewhere extends CalendarEditPolicy<String> {
+  const _EarliestElsewhere(this.hour, [this.clock]);
+
+  final int hour;
+  final tz.Location? clock;
+
+  @override
+  DateTime? earliestStartOn(DateTime day, CalendarNow now) {
+    final zoned = day as tz.TZDateTime;
+    final instant = tz.TZDateTime(
+      zoned.location,
+      zoned.year,
+      zoned.month,
+      zoned.day,
+      hour,
+    );
+    final clock = this.clock;
+    return clock == null ? instant.toUtc() : tz.TZDateTime.from(instant, clock);
+  }
+}
+
 /// Unrestricted rules in [hours] and slots of [slotMinutes].
 CalendarEditRules<String> rulesOf({
   CalendarDayHours hours = CalendarDayHours.allDay,
@@ -1065,30 +1090,22 @@ void main() {
       final plainDay = DateTime(2025, 11, 2);
       final afterStart = tz.TZDateTime(havana, 2025, 11, 2, 9, 10);
       final notAfterStart = tz.TZDateTime(havana, 2025, 11, 1, 23);
-      for (final day in <DateTime>[zonedDay, plainDay]) {
-        final late = CalendarEarliestStart(day, afterStart);
-        // The plain day reads as the zone's day start of its date.
-        expect(late.day, isA<tz.TZDateTime>());
-        expect(
-          late.day.millisecondsSinceEpoch,
-          zonedDay.millisecondsSinceEpoch,
-        );
-        expect(late.closesDay, isFalse);
-        expect(late.admitsDayStart, isFalse);
-        expect(late.firstWallMinute, number * perDay + 550);
-        final lateSlot = rules.firstSlot(late)!;
-        expectAtWall(lateSlot.start, havana, number * perDay + 570);
-        expectAtWall(lateSlot.end, havana, number * perDay + 600);
+      final late = CalendarEarliestStart(zonedDay, afterStart);
+      expect(late.closesDay, isFalse);
+      expect(late.admitsDayStart, isFalse);
+      expect(late.firstWallMinute, number * perDay + 550);
+      final lateSlot = rules.firstSlot(late)!;
+      expectAtWall(lateSlot.start, havana, number * perDay + 570);
+      expectAtWall(lateSlot.end, havana, number * perDay + 600);
 
-        final early = CalendarEarliestStart(day, notAfterStart);
-        expect(early.occurrence, isNull);
-        expect(early.closesDay, isFalse);
-        expect(early.admitsDayStart, isTrue);
-        expect(early.firstWallMinute, number * perDay);
-        final earlySlot = rules.firstSlot(early)!;
-        expectAtWall(earlySlot.start, havana, number * perDay + 480);
-        expectAtWall(earlySlot.end, havana, number * perDay + 510);
-      }
+      final early = CalendarEarliestStart(zonedDay, notAfterStart);
+      expect(early.occurrence, isNull);
+      expect(early.closesDay, isFalse);
+      expect(early.admitsDayStart, isTrue);
+      expect(early.firstWallMinute, number * perDay);
+      final earlySlot = rules.firstSlot(early)!;
+      expectAtWall(earlySlot.start, havana, number * perDay + 480);
+      expectAtWall(earlySlot.end, havana, number * perDay + 510);
 
       // A zoned day with a plain earliest holds the earliest in the day's
       // zone.
@@ -1498,6 +1515,114 @@ void main() {
         ),
         DateTime.utc(2026, 11, 1, 7, 30),
         DateTime.utc(2026, 11, 1, 7, 45),
+      );
+    });
+
+    test("EZ13 an earliest start given on another clock than its day's is "
+        "read as its instant on the day's clock, the day kept", () {
+      final newYork = tz.getLocation("America/New_York");
+      final number = CalendarDates.dayNumber(DateTime.utc(2026, 4, 21));
+      final day = dayOfNumberIn(number, newYork);
+      const perDay = CalendarDates.minutesPerDay;
+      final now = CalendarNow(
+        time: tz.TZDateTime(newYork, 2026, 4, 20, 12),
+        today: tz.TZDateTime(newYork, 2026, 4, 20),
+      );
+      // 09:00 EDT reads 13:00 on UTC's clock and 22:00 on Tokyo's; 21:00 EDT
+      // reads 01:00 and 10:00 of the next day.
+      for (final clock in <tz.Location?>[null, tz.getLocation("Asia/Tokyo")]) {
+        for (final hour in <int>[9, 21]) {
+          final reason = "${clock?.name ?? "UTC"}, $hour:00 EDT";
+          final rules = CalendarEditRules<String>(
+            policy: _EarliestElsewhere(hour, clock),
+            hours: CalendarDayHours.allDay,
+            slotMinutes: 15,
+          );
+          final start = rules.earliestStartOn(day, now);
+          final wall = number * perDay + hour * 60;
+          expect(start.earliest, isA<tz.TZDateTime>(), reason: reason);
+          expect(
+            (start.earliest! as tz.TZDateTime).location,
+            newYork,
+            reason: reason,
+          );
+          expect(start.closesDay, isFalse, reason: reason);
+          expect(start.firstWallMinute, wall, reason: reason);
+          final slot = rules.firstSlot(start);
+          expect(slot, isNotNull, reason: reason);
+          expect(CalendarDates.wallMinuteOf(slot!.start), wall, reason: reason);
+        }
+      }
+
+      // A plain day is on the device's clock, which a zoned earliest start
+      // given beside it is read on, as a local time.
+      final plainDay = DateTime(2026, 4, 21);
+      final noon = DateTime(2026, 4, 21, 12);
+      final far = CalendarEarliestStart(
+        plainDay,
+        tz.TZDateTime.from(noon, zoneFarFromDevice(noon)),
+      );
+      expect(far.day, same(plainDay));
+      expect(far.earliest, isNot(isA<tz.TZDateTime>()));
+      expect(far.earliest, noon);
+      expect(far.firstWallMinute, number * perDay + 12 * 60);
+    });
+
+    test("EZ14 through the second pass, each day a clock going back across "
+        "midnight repeats a part of offers that part's free second pass "
+        "where its first is taken", () {
+      // St. John's goes back from 00:01 NDT on 2010-11-07, 02:31Z, to 23:01
+      // NST of Nov 6, and reads Nov 7's 00:00 again at 03:30Z.
+      final stJohns = tz.getLocation("America/St_Johns");
+      tz.TZDateTime inStJohns(int hour, int minute) {
+        return tz.TZDateTime.from(
+          DateTime.utc(2010, 11, 7, hour, minute),
+          stJohns,
+        );
+      }
+
+      CalendarEditRules<String> rulesIn(int start, int end) {
+        return rulesOf(hours: CalendarDayHours(start, end));
+      }
+
+      final nov6 = dayOfNumberIn(
+        CalendarDates.dayNumber(DateTime.utc(2010, 11, 6)),
+        stJohns,
+      );
+      // 23:00 NDT to the instant the clock goes back.
+      final lateFirstPass = entryOf("late", inStJohns(1, 30), inStJohns(2, 31));
+      expect(
+        rulesIn(23 * 60, 24 * 60).firstSlot(
+          CalendarEarliestStart(nov6, nov6),
+          clearOf: <CalendarEntry<String>>[lateFirstPass],
+          throughSecondPass: true,
+        ),
+        slot(inStJohns(2, 45), inStJohns(3, 0)),
+      );
+      // The second pass's last slot ends where that pass reaches 24:00, the
+      // second reading of Nov 7's 00:00.
+      expect(
+        rulesIn(23 * 60 + 45, 24 * 60).firstSlot(
+          CalendarEarliestStart(nov6, nov6),
+          clearOf: <CalendarEntry<String>>[lateFirstPass],
+          throughSecondPass: true,
+        ),
+        slot(inStJohns(3, 15), inStJohns(3, 30)),
+      );
+      final nov7 = CalendarDates.addDays(nov6, 1);
+      // 00:00 to 00:01 NDT, Nov 7's first pass.
+      final earlyFirstPass = entryOf(
+        "early",
+        inStJohns(2, 30),
+        inStJohns(2, 31),
+      );
+      expect(
+        rulesIn(0, 60).firstSlot(
+          CalendarEarliestStart(nov7, nov7),
+          clearOf: <CalendarEntry<String>>[earlyFirstPass],
+          throughSecondPass: true,
+        ),
+        slot(inStJohns(3, 30), inStJohns(3, 45)),
       );
     });
   });

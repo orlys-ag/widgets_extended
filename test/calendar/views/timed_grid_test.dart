@@ -6,7 +6,7 @@
 /// block drawn again for a new payload, the theme's shadows, when its days
 /// are ready on the range its owner asks, its selection as the store
 /// moves off that range, the ids a move request takes, and its days,
-/// ranges and held moves on a zoned store's clock.
+/// ranges, held moves and slot holds on a zoned store's clock.
 library;
 
 import 'dart:async';
@@ -1923,5 +1923,89 @@ void main() {
     expect(inColumn(c, 6), isTrue);
     expect(b.top, moreOrLessEquals(slotRectOf(tester, 600).top, epsilon: 0.5));
     expect(c.top, moreOrLessEquals(slotRectOf(tester, 600).top, epsilon: 0.5));
+  });
+
+  testWidgets("GZ5 where overlaps are forbidden, on a zoned day whose clock "
+      "goes back across midnight to its 23:01, a hold on a slot of the "
+      "stretch it reads twice creates nothing where an entry drawn on "
+      "another row holds the slot's first pass", (tester) async {
+    ensureZones();
+    // St. John's clock goes back from 00:01 NDT on 2010-11-07, 02:31Z, to
+    // 23:01 NST of Nov 6, so Nov 6 reads 23:01 to 24:00 twice.
+    final stJohns = tz.getLocation("America/St_Johns");
+    tz.TZDateTime inStJohns(int hour, int minute) {
+      return tz.TZDateTime.from(
+        DateTime.utc(2010, 11, 7, hour, minute),
+        stJohns,
+      );
+    }
+
+    // From 23:00 NDT to 23:01 NST: its block lies on the 23:00 row, its
+    // wall minutes, while it holds the whole first pass.
+    final store = memoryStoreIn<String>(
+      stJohns,
+      entries: <CalendarEntry<String>>[
+        CalendarEntry<String>(
+          id: "first",
+          start: inStJohns(1, 30),
+          end: inStJohns(2, 31),
+          title: "first",
+          color: const Color(0xFF336699),
+          payload: "first",
+        ),
+      ],
+    );
+    addTearDown(store.dispose);
+    final nov6 = dayOfNumberIn(
+      CalendarDates.dayNumber(DateTime(2010, 11, 6)),
+      stJohns,
+    );
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(
+        time: tz.TZDateTime(stJohns, 2010, 11, 1, 9),
+        today: dayOfNumberIn(
+          CalendarDates.dayNumber(DateTime(2010, 11, 1)),
+          stJohns,
+        ),
+      ),
+    );
+    addTearDown(now.dispose);
+    final creates = <CalendarCreateRange>[];
+    await pumpBoxed(
+      tester,
+      const Size(800.0, 2000.0),
+      TimedGrid<String>(
+        store: store,
+        firstDay: nov6,
+        dayCount: 1,
+        selectedDay: nov6,
+        now: now,
+        onSelectDay: (day) {},
+        onOpenEntry: (id) {},
+        onCreate: (details) async {
+          creates.add(details.range);
+        },
+        editPolicy: const NoOverlapsPolicy<String>(),
+        editable: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+    Future<void> holdAt(int minute) async {
+      final gesture = await tester.startGesture(
+        slotRectOf(tester, minute, column: 1).center,
+      );
+      await tester.pump(kLongPressTimeout);
+      await gesture.up();
+      await tester.pumpAndSettle();
+    }
+
+    // The 23:30 slot's first pass, 02:00Z to 02:15Z, lies in "first".
+    await holdAt(23 * 60 + 30);
+    expect(creates, isEmpty);
+    // Setup sanity: a hold on a free slot of the day creates.
+    await holdAt(22 * 60 + 30);
+    expect(creates, <CalendarCreateRange>[
+      CalendarCreateRange(start: inStJohns(1, 0), end: inStJohns(1, 15)),
+    ]);
   });
 }

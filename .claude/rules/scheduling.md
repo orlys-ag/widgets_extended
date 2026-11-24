@@ -42,7 +42,8 @@ Normative for `lib/scheduling/`, the scheduling module: the experimental schedul
   class, which can never gain a value or a subtype. A new ability of a data
   source is a new interface. Package timezone's `Location` is the one foreign
   type on the public surface: a store's zone, the `zone` parameter of each
-  `CalendarDates` helper that takes one, and the zones
+  `CalendarDates` helper and `CalendarSchedule` method that takes one, and
+  the zones
   `CalendarDates.loadedZones` lists. The barrel shows it, from
   `dates/calendar_dates.dart`, and nothing else of package timezone, so a
   host names a zone without importing `package:timezone`, and still loads

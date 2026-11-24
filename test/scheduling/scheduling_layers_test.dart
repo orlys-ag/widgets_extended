@@ -734,7 +734,6 @@ void main() {
       "addMonths": "if (date is TZDateTime) {",
       "isDayStart": "if (time is TZDateTime) {",
       "rangeEndAtWallMinute": "if (start is TZDateTime) {",
-      "repeatedStretchOf": "if (day is TZDateTime) {",
       "isLaterOccurrence": "if (time is TZDateTime) {",
       "firstWallMinuteNotBefore": "if (time is TZDateTime) {",
       "lastWallMinuteNotAfter": "if (time is TZDateTime) {",
@@ -756,10 +755,6 @@ void main() {
           "wallMinuteOf(moved) <= wallMinuteOf(start) && moved.timeZoneOffset "
           "< moved.subtract(const Duration(minutes: 1)).timeZoneOffset) { "
           "return moved; } return endAtWallMinute(wall, from: from);",
-      "repeatedStretchOf":
-          "final date = dateOnly(day); final change = date.timeZoneOffset - "
-          "addDays(date, 1).timeZoneOffset; return change > Duration.zero ? "
-          "change : Duration.zero;",
       "isLaterOccurrence":
           "if (time.isUtc) { return false; } final minute = time.subtract( "
           "Duration( seconds: time.second, "
@@ -788,14 +783,16 @@ void main() {
           "&& time.day == date.day && time.hour == hour && time.minute == "
           "ofHour; } final time = minute == 0 ? date : DateTime(date.year, "
           "date.month, date.day, hour, ofHour); if (!reads(time)) { return "
-          "end && minute == 0 ? date : null; } final change = "
-          "repeatedStretchOf(date); if (change == Duration.zero) { return "
-          "time; } DateTime? earliest; DateTime? latest; for (final candidate "
+          "end && minute == 0 ? date : null; } final fall = "
+          "_deviceFallAround(day); if (fall == 0) { return time; } final "
+          "change = Duration(milliseconds: fall); DateTime? earliest; "
+          "DateTime? latest; for (final candidate "
           "in <DateTime>[ time.subtract(change), time, time.add(change), ]) { "
           "if (reads(candidate)) { earliest ??= candidate; latest = "
           "candidate; } } final fromHere = from?.toLocal(); if (fromHere != "
-          "null && dayNumber(fromHere) == day && isLaterOccurrence(fromHere)) "
-          "{ return latest; } return earliest;",
+          "null) { final fromDay = dayNumber(fromHere); if ((fromDay == day "
+          "|| end && minute == 0 && fromDay == day - 1) && "
+          "isLaterOccurrence(fromHere)) { return latest; } } return earliest;",
     };
     final statics = staticsOf(
       classBody(
