@@ -4202,9 +4202,9 @@ void main() {
 
   testWidgets("TX40 in Week under maxDayCount 2, Wednesday's bar's start "
       "edge held at the limit over Monday at Tuesday 23:59 and let go "
-      "requests Tuesday to Thursday, and let go after the clock reaches "
-      "Wednesday requests nothing where the policy then refuses that "
-      "range or that edge", (tester) async {
+      "requests Tuesday to Thursday, and once the clock reaches Wednesday "
+      "shows no landing and let go requests nothing where the policy then "
+      "refuses that range or that edge", (tester) async {
     final shown = Shown.week(monday);
     for (final (name, lockPast, editPolicy, clockMoves, requested)
         in <
@@ -4277,6 +4277,13 @@ void main() {
           today: wednesday,
         );
         await tester.pump();
+        // The hold the policy now refuses shows no landing.
+        expect(
+          markedOf(tester, <DateTime>[monday, tuesday, wednesday]),
+          isEmpty,
+          reason: name,
+        );
+        expect(landingText(tester), isNull, reason: name);
       }
       await gesture.up();
       await tester.pumpAndSettle();

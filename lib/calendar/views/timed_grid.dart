@@ -4326,8 +4326,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// or where the policy's answer throws ([_reportPolicyThrow]). The drop
   /// gate held the range under the clock of the pointer's last move, and
   /// a new minute since asks it nothing for a bar ([_keepsGateAnswers]),
-  /// so the release asks again, as a crossing's release reads its landing
-  /// under the clock it is let go at. A store change that keeps the bar's
+  /// so [_handleNow] asks this, dropping a hold it refuses with the
+  /// strip's marks and the landing label that show it, and the release
+  /// asks again, as a crossing's release reads its landing under the clock
+  /// it is let go at. A store change that keeps the bar's
   /// span keeps the drag, and clears the hold only at the next frame's
   /// resolve, so a release in the frame of a change that moves the other
   /// edge would write that edge back.
@@ -4777,9 +4779,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// time moves, shows or goes, or today moves, or when it gives the board
   /// new drag configs; takes the new value as [_calendarNow], writing
   /// [_limits] in edit mode, refilling a create range's limits
-  /// ([_refillRange]) and, where the board keeps the gate's answers through
-  /// the drag ([_keepsGateAnswers]), making the configs again
-  /// ([_askDragAgain]); and hands a new today to the header cells. A notify
+  /// ([_refillRange]), dropping a bar's held range that the policy no
+  /// longer admits ([_heldBarAdmitted]) and, where the board keeps the
+  /// gate's answers through the drag ([_keepsGateAnswers]), making the
+  /// configs again ([_askDragAgain]); and hands a new today to the header
+  /// cells. A notify
   /// that comes with a new zone of the store, ahead of the store's own,
   /// takes the zone ([_takeZone]), which takes the new value, and leaves
   /// the rest to the store notify.
@@ -4812,6 +4816,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _limits.value = _limitsOf();
     }
     _refillRange();
+    final drag = _drag;
+    if (drag != null &&
+        drag.heldBar != null &&
+        _heldBarAdmitted(drag) == null) {
+      _holdBar(null);
+    }
     if (_keepsGateAnswers && _askDragAgain()) {
       setState(() {});
     }
