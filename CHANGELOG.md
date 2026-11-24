@@ -1191,7 +1191,8 @@ requested the range it was held at when let go, though the clock had
 since passed a time after which the edit policy refused that range or that
 edge, as `lockPast` does at midnight. Its release now asks the policy
 again, as a release over another day's cell does, and requests nothing
-where it refuses.
+where it refuses. Let go in the frame in which the store moved the bar's
+other edge, it requested that edge back; it now requests nothing.
 - Fix: Agenda's time column was 64 px wide at any text size, so at larger
 sizes an item's start lost its end, as "10:45 AM" did in Roboto at a text
 scale of 1.3, and a gap row, 24 px tall, cut its time to that height, as at

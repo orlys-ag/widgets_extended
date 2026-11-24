@@ -3485,7 +3485,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// day-edge resize of the bar ([_barResizeOf]) past
   /// [CalendarEditRules.dayLimit]'s days is refused, and holds the drag's
   /// [_Dragging.heldBar] at the range the limit admits, which the release
-  /// writes, unless that range moves the dragged edge against the drag
+  /// writes where it is still admitted then ([_heldBarAdmitted]), unless
+  /// that range moves the dragged edge against the drag
   /// ([_holdsAgainstDrag]); every other span of that resize clears it.
   bool _canDropBar(GridKey key, BoardSpan span) {
     if (span.rowStart < _stripStart ||
@@ -4318,15 +4319,18 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// The range [drag]'s day-edge resize of a bar is held at
-  /// ([_Dragging.heldBar]) where [_policy] still lets the dragged edge
-  /// resize and [_rules] still admit the range at [_calendarNow]; null
-  /// where it holds none, where either refuses, or where the policy's
-  /// answer throws ([_reportPolicyThrow]). The drop gate held the range
-  /// under the clock of the pointer's last move, and a new minute since
-  /// asks it nothing for a bar ([_keepsGateAnswers]), so the release asks
-  /// again, as a crossing's release reads its landing under the clock it
-  /// is let go at. The entry's days and the day limit cannot have changed
-  /// meanwhile: a change of either cancels the drag.
+  /// ([_Dragging.heldBar]) where the entry's edge the drag does not move
+  /// is still the held range's, [_policy] still lets the dragged edge
+  /// resize, and [_rules] still admit the range at [_calendarNow]; null
+  /// where it holds none, where the other edge moved or either refuses,
+  /// or where the policy's answer throws ([_reportPolicyThrow]). The drop
+  /// gate held the range under the clock of the pointer's last move, and
+  /// a new minute since asks it nothing for a bar ([_keepsGateAnswers]),
+  /// so the release asks again, as a crossing's release reads its landing
+  /// under the clock it is let go at. A store change that keeps the bar's
+  /// span keeps the drag, and clears the hold only at the next frame's
+  /// resolve, so a release in the frame of a change that moves the other
+  /// edge would write that edge back.
   ({DateTime start, DateTime end})? _heldBarAdmitted(_Dragging drag) {
     final held = drag.heldBar;
     final shape = _board.itemOf(drag.key);
@@ -4334,12 +4338,16 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       return null;
     }
     final entry = shape.shown.entry;
+    final atStart = drag.kind == BoardDragKind.resizeColStart;
+    if (atStart
+        ? !held.end.isAtSameMomentAs(entry.end)
+        : !held.start.isAtSameMomentAs(entry.start)) {
+      return null;
+    }
     final now = _calendarNow;
     try {
       final edges = _policy.resizableEdges(entry, now);
-      final edgeResizes = drag.kind == BoardDragKind.resizeColStart
-          ? edges.hasStart
-          : edges.hasEnd;
+      final edgeResizes = atStart ? edges.hasStart : edges.hasEnd;
       if (!edgeResizes ||
           !_rules.admitsTimes(
             entry,

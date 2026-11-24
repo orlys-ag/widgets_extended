@@ -4293,6 +4293,80 @@ void main() {
     }
   });
 
+  testWidgets("TX41 in Week under maxDayCount 4, a bar's start edge, or "
+      "its end edge, held at the limit and let go in the frame in which the "
+      "store moves the bar's other edge outside the week requests nothing, "
+      "leaving the new edge", (tester) async {
+    final shown = Shown.week(monday);
+    final sundayBefore = CalendarDates.addDays(monday, -1);
+    for (final (name, bar, side, over, marked, moved)
+        in <
+          (
+            String,
+            CalendarEntry<String>,
+            AxisDirection,
+            DateTime,
+            List<DateTime>,
+            CalendarEntry<String> Function(CalendarEntry<String> bar),
+          )
+        >[
+          (
+            "the start edge, the end moved later",
+            allDayOf("b", saturday, days: 3),
+            AxisDirection.left,
+            wednesday,
+            <DateTime>[friday, saturday, sunday],
+            (bar) => bar.copyWith(end: CalendarDates.addDays(bar.end, 1)),
+          ),
+          (
+            "the end edge, the start moved earlier",
+            allDayOf("b", sundayBefore, days: 2),
+            AxisDirection.right,
+            friday,
+            <DateTime>[monday, tuesday, wednesday],
+            (bar) => bar.copyWith(start: CalendarDates.addDays(bar.start, -1)),
+          ),
+        ]) {
+      final store = storeOf(<CalendarEntry<String>>[bar]);
+      final harness = Harness(store, shown, maxDayCount: 4);
+      await harness.pump(tester);
+      await selectBar(tester, "b");
+      final cell = stripRect(tester, shown, over);
+      final gesture = await holdEdge(
+        tester,
+        "b",
+        side,
+        Offset(
+          side == AxisDirection.left ? cell.left + 4.0 : cell.right - 4.0,
+          tester.getCenter(barFinder("b")).dy,
+        ),
+      );
+      await tester.pump();
+      // Setup sanity: the limit holds the dragged edge short of [over].
+      expect(
+        markedOf(tester, <DateTime>[
+          monday,
+          tuesday,
+          wednesday,
+          thursday,
+          friday,
+          saturday,
+          sunday,
+        ]),
+        marked,
+        reason: name,
+      );
+      final changed = moved(bar);
+      unawaited(store.update(changed));
+      // Setup sanity: the store holds the moved edge before the release.
+      expectTimes(store, "b", changed.start, changed.end, reason: name);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(store.moves, isEmpty, reason: name);
+      expectTimes(store, "b", changed.start, changed.end, reason: name);
+    }
+  });
+
   testWidgets("TX36 in Week, leaving edit mode while a block's move, its "
       "move onto a strip cell, or its end handle's resize into a later day "
       "runs ends it: the frame that leaves edit mode asks the policy "

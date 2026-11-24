@@ -591,14 +591,16 @@ Date and Time, at the end of each view's header switches between them, and
 nothing else does: a day picked keeps the date view. Its value is `day` and
 `minute`, a minute after midnight on the clock of `store`'s zone, or of the
 device without a store; a tap on a day reports that day with the minute
-through `onChanged`, and a pick of a time reports it with `day`, so take the
-two together. With a null `minute` it picks a day alone, showing the date
-view with no control. Its time view offers the times of `day` from the first
+through `onChanged`, or with the time of that day nearest it on
+`minuteStep` where the day does not offer the minute, and a pick of a time
+reports it with `day`, so take the two together. With a null `minute` it
+picks a day alone, showing the date view with no control. Its time view offers the times of `day` from the first
 to the last `timeBoundsOf` gives, those `isTimeEnabled` accepts, and of those
 the ones the clock reads that day, so a time the clock skips draws disabled.
 It opens on the time view where `initialShowsTime` says, reports each switch
-through `onShowsTimeChanged`, and takes the day picker's own parameters, such
-as `firstDay`, `isDayEnabled` and `dayBadges`, for its date view. It opens no
+through `onShowsTimeChanged`, and takes the day picker's parameters for its
+date view, such as `firstDay` and `dayBadges`, with `isDayEnabled` for
+`CalendarDayPicker`'s `isEnabled`. It opens no
 route, and draws in the theme a `CalendarView` would resolve there, with its
 words from `CalendarLocalizations`.
 
