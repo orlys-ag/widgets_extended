@@ -196,7 +196,13 @@ class CalendarHeader extends StatelessWidget {
 
   /// What lies at the row's end, after the edit mode toggle and the view
   /// button, 4 logical pixels after whichever of them shows, and centred on
-  /// the row; null for nothing.
+  /// the row, at its own width, at most the rest of the row's, or, as a
+  /// [Flexible] or an [Expanded], at its flex's part of the row beside
+  /// the rest, whose flex is 1, as in a [Row], and within the share
+  /// of the row a [CalendarHeaderTrailingShare] at its top gives; null for
+  /// nothing. The row is a [CalendarHeaderRow] whether given one or not,
+  /// so one coming or going keeps the rest of the row's state, its focus
+  /// included.
   final Widget? trailing;
 
   /// The diameter of the header's round buttons, the chevrons included.
@@ -352,7 +358,7 @@ class CalendarHeader extends StatelessWidget {
     final onEditableChanged = details.onEditableChanged;
     final picksView = details.views.length > 1;
     final trailing = this.trailing;
-    final row = Row(
+    final buttons = Row(
       children: <Widget>[
         Expanded(
           child: Row(
@@ -478,12 +484,12 @@ class CalendarHeader extends StatelessWidget {
               ),
             ),
           ),
-        if (trailing != null) ...<Widget>[
-          if (onEditableChanged != null || picksView)
-            const SizedBox(width: 4.0),
-          trailing,
-        ],
       ],
+    );
+    final row = CalendarHeaderRow(
+      gap: onEditableChanged != null || picksView ? 4.0 : 0.0,
+      lead: buttons,
+      trailing: trailing,
     );
     // The chevrons, the title's ink and the menu need a Material above
     // them. One put in keeps the ambient text style, which _titleWidth
@@ -497,6 +503,332 @@ class CalendarHeader extends StatelessWidget {
       textStyle: DefaultTextStyle.of(context).style,
       child: row,
     );
+  }
+}
+
+/// [lead] and, where given, [trailing] in one row, laid out as a [Row] of
+/// an [Expanded] [lead], [gap] logical pixels and [trailing] lays them out:
+/// [trailing] at its own width, at most the row's width less [gap], or,
+/// where it is a [Flexible] or an [Expanded] and the width is bounded, at
+/// its flex's part of the row less [gap], [lead]'s flex being 1; and at
+/// most [CalendarHeaderTrailingShare.share] of the row's width where one
+/// lies at its top. [lead] takes the rest of a bounded width, or its flex's
+/// part where [trailing] is flexible, and lies at its own width under an
+/// unbounded one, as does a flexible [trailing]. [lead] lies at the row's
+/// start and [trailing] [gap] after it, each centred on the row, which is
+/// as tall as the taller. Without [trailing], [lead] takes the whole row
+/// and [gap] counts for nothing.
+///
+/// Its intrinsic width is the one at which both lie at their own intrinsic
+/// widths, as such a [Row] answers it, [trailing] within its share; its
+/// intrinsic height, the taller of the two at the widths a row that wide
+/// gives them.
+class CalendarHeaderRow extends MultiChildRenderObjectWidget {
+  CalendarHeaderRow({
+    super.key,
+    required Widget lead,
+    Widget? trailing,
+    this.gap = 0.0,
+  }) : super(children: <Widget>[lead, ?trailing]);
+
+  /// The space between the lead and the trailing widget, in logical pixels.
+  final double gap;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) {
+    return _RenderHeaderRow(
+      gap: gap,
+      textDirection: Directionality.of(context),
+    );
+  }
+
+  @override
+  void updateRenderObject(BuildContext context, RenderObject renderObject) {
+    (renderObject as _RenderHeaderRow)
+      ..gap = gap
+      ..textDirection = Directionality.of(context);
+  }
+}
+
+/// The parent data of a [CalendarHeaderRow]'s children, whose flex and fit
+/// a [Flexible] or an [Expanded] trailing widget sets as under a [Row].
+class CalendarHeaderRowParentData extends FlexParentData {
+  /// The most of the row's width the trailing widget takes, over 0 and at
+  /// most 1; null for no limit but the row's.
+  double? share;
+}
+
+/// Limits [child], the trailing widget of a [CalendarHeaderRow], to [share]
+/// of the row's width, over 0 and at most 1. It lies directly under the
+/// row, as a [Flexible] lies under a [Flex].
+class CalendarHeaderTrailingShare
+    extends ParentDataWidget<CalendarHeaderRowParentData> {
+  const CalendarHeaderTrailingShare({
+    super.key,
+    required this.share,
+    required super.child,
+  }) : assert(share > 0.0 && share <= 1.0);
+
+  final double share;
+
+  @override
+  void applyParentData(RenderObject renderObject) {
+    final parentData = renderObject.parentData! as CalendarHeaderRowParentData;
+    if (parentData.share != share) {
+      parentData.share = share;
+      renderObject.parent?.markNeedsLayout();
+    }
+  }
+
+  @override
+  Type get debugTypicalAncestorWidgetClass {
+    return CalendarHeaderRow;
+  }
+}
+
+class _RenderHeaderRow extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, CalendarHeaderRowParentData>,
+        RenderBoxContainerDefaultsMixin<
+          RenderBox,
+          CalendarHeaderRowParentData
+        > {
+  _RenderHeaderRow({required double gap, required TextDirection textDirection})
+    : _gap = gap,
+      _textDirection = textDirection;
+
+  double _gap;
+
+  set gap(double value) {
+    if (value == _gap) {
+      return;
+    }
+    _gap = value;
+    markNeedsLayout();
+  }
+
+  TextDirection _textDirection;
+
+  set textDirection(TextDirection value) {
+    if (value == _textDirection) {
+      return;
+    }
+    _textDirection = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! CalendarHeaderRowParentData) {
+      child.parentData = CalendarHeaderRowParentData();
+    }
+  }
+
+  RenderBox get _lead {
+    return firstChild!;
+  }
+
+  RenderBox? get _trailing {
+    return childCount > 1 ? lastChild : null;
+  }
+
+  static CalendarHeaderRowParentData _dataOf(RenderBox child) {
+    return child.parentData! as CalendarHeaderRowParentData;
+  }
+
+  /// The flex of [trailing]: 0 where it lies at its own width.
+  static int _flexOf(RenderBox trailing) {
+    return _dataOf(trailing).flex ?? 0;
+  }
+
+  /// The width a [Row] gives each unit of flex in a row [width] wide, the
+  /// lead's flex being 1, where [trailing] is flexible and [width] bounded;
+  /// null otherwise, as [trailing] then lies at its own width.
+  double? _spacePerFlex(RenderBox trailing, double width) {
+    final flex = _flexOf(trailing);
+    if (flex <= 0 || !width.isFinite) {
+      return null;
+    }
+    return math.max(0.0, width - _gap) / (flex + 1);
+  }
+
+  /// The most of a row [width] wide that [trailing] takes.
+  double _roomOf(RenderBox trailing, double width) {
+    final share = _dataOf(trailing).share;
+    final perFlex = _spacePerFlex(trailing, width);
+    final room = perFlex == null
+        ? math.max(0.0, width - _gap)
+        : perFlex * _flexOf(trailing);
+    return share == null ? room : math.min(room, width * share);
+  }
+
+  /// The width of a row whose lead is [lead] wide and whose [trailing],
+  /// [width] wide, lies within its room: a flexible one's flex fraction
+  /// against the lead's, as a [Row] answers it.
+  double _widthHolding(double lead, RenderBox trailing, double width) {
+    final share = _dataOf(trailing).share;
+    final flex = _flexOf(trailing);
+    final whole = flex > 0
+        ? math.max(lead, width / flex) * (flex + 1) + _gap
+        : lead + _gap + width;
+    return share == null ? whole : math.max(whole, width / share);
+  }
+
+  double _intrinsicWidth(double Function(RenderBox child) extent) {
+    final lead = extent(_lead);
+    final trailing = _trailing;
+    if (trailing == null) {
+      return lead;
+    }
+    return _widthHolding(lead, trailing, extent(trailing));
+  }
+
+  @override
+  double computeMinIntrinsicWidth(double height) {
+    return _intrinsicWidth((child) {
+      return child.getMinIntrinsicWidth(height);
+    });
+  }
+
+  @override
+  double computeMaxIntrinsicWidth(double height) {
+    return _intrinsicWidth((child) {
+      return child.getMaxIntrinsicWidth(height);
+    });
+  }
+
+  /// The taller child's [extent] at the widths a row [width] wide gives
+  /// them, the trailing widget at its intrinsic width within its room.
+  double _intrinsicHeight(
+    double width,
+    double Function(RenderBox child, double width) extent,
+  ) {
+    final trailing = _trailing;
+    if (trailing == null) {
+      return extent(_lead, width);
+    }
+    final perFlex = _spacePerFlex(trailing, width);
+    final room = _roomOf(trailing, width);
+    final trailingWidth = perFlex == null
+        ? math.min(trailing.getMaxIntrinsicWidth(double.infinity), room)
+        : room;
+    final double leadWidth;
+    if (!width.isFinite) {
+      leadWidth = double.infinity;
+    } else if (perFlex != null) {
+      leadWidth = perFlex;
+    } else {
+      leadWidth = math.max(0.0, width - _gap - trailingWidth);
+    }
+    return math.max(extent(_lead, leadWidth), extent(trailing, trailingWidth));
+  }
+
+  @override
+  double computeMinIntrinsicHeight(double width) {
+    return _intrinsicHeight(width, (child, width) {
+      return child.getMinIntrinsicHeight(width);
+    });
+  }
+
+  @override
+  double computeMaxIntrinsicHeight(double width) {
+    return _intrinsicHeight(width, (child, width) {
+      return child.getMaxIntrinsicHeight(width);
+    });
+  }
+
+  /// Sizes the children through [sizeOf] under [constraints], the trailing
+  /// widget first, and gives the row's size with each child's.
+  ({Size size, Size lead, Size? trailing}) _measure(
+    BoxConstraints constraints,
+    Size Function(RenderBox child, BoxConstraints constraints) sizeOf,
+  ) {
+    final width = constraints.maxWidth;
+    final trailing = _trailing;
+    Size? trailingSize;
+    double? perFlex;
+    var taken = 0.0;
+    if (trailing != null) {
+      perFlex = _spacePerFlex(trailing, width);
+      final room = _roomOf(trailing, width);
+      final tight =
+          perFlex != null &&
+          (_dataOf(trailing).fit ?? FlexFit.tight) == FlexFit.tight;
+      trailingSize = sizeOf(
+        trailing,
+        BoxConstraints(
+          minWidth: tight ? room : 0.0,
+          maxWidth: room,
+          maxHeight: constraints.maxHeight,
+        ),
+      );
+      taken = _gap + trailingSize.width;
+    }
+    final BoxConstraints leadConstraints;
+    if (width.isFinite) {
+      final rest = perFlex ?? math.max(0.0, width - taken);
+      leadConstraints = BoxConstraints(
+        minWidth: rest,
+        maxWidth: rest,
+        maxHeight: constraints.maxHeight,
+      );
+    } else {
+      leadConstraints = BoxConstraints(maxHeight: constraints.maxHeight);
+    }
+    final leadSize = sizeOf(_lead, leadConstraints);
+    final size = constraints.constrain(
+      Size(
+        width.isFinite ? width : leadSize.width + taken,
+        math.max(leadSize.height, trailingSize?.height ?? 0.0),
+      ),
+    );
+    return (size: size, lead: leadSize, trailing: trailingSize);
+  }
+
+  @override
+  Size computeDryLayout(covariant BoxConstraints constraints) {
+    return _measure(constraints, (child, constraints) {
+      return child.getDryLayout(constraints);
+    }).size;
+  }
+
+  @override
+  void performLayout() {
+    final measured = _measure(constraints, (child, constraints) {
+      child.layout(constraints, parentUsesSize: true);
+      return child.size;
+    });
+    size = measured.size;
+    final ltr = _textDirection == TextDirection.ltr;
+    final lead = measured.lead;
+    (_lead.parentData! as BoxParentData).offset = Offset(
+      ltr ? 0.0 : size.width - lead.width,
+      (size.height - lead.height) / 2.0,
+    );
+    final trailing = _trailing;
+    final trailingSize = measured.trailing;
+    if (trailing != null && trailingSize != null) {
+      final after = lead.width + _gap;
+      (trailing.parentData! as BoxParentData).offset = Offset(
+        ltr ? after : size.width - after - trailingSize.width,
+        (size.height - trailingSize.height) / 2.0,
+      );
+    }
+  }
+
+  @override
+  double? computeDistanceToActualBaseline(TextBaseline baseline) {
+    return defaultComputeDistanceToHighestActualBaseline(baseline);
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    defaultPaint(context, offset);
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
+    return defaultHitTestChildren(result, position: position);
   }
 }
 

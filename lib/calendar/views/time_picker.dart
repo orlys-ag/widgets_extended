@@ -2099,12 +2099,14 @@ class _CalendarTimePickerState extends State<CalendarTimePicker>
       decreasedValue: previous == null
           ? null
           : _labelOf(strings, column, rows[previous].number),
+      // With no time shown, a step either way picks the row the column
+      // rests on ([_stepColumn]).
       onIncrease: !takesInput || (shows && next == null)
           ? null
           : () {
               _stepColumn(column, 1);
             },
-      onDecrease: !takesInput || previous == null
+      onDecrease: !takesInput || (shows && previous == null)
           ? null
           : () {
               _stepColumn(column, -1);

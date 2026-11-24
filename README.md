@@ -561,11 +561,13 @@ calendar card of Agenda and Day, folded into its week row on the week of
 `value`, under the month's title, which opens a month picker, and chevrons
 that step a week while the card is folded, a month while it is unfolded
 and a year in the month picker. The pull tab and a drag down the week row
-unfold it into the month, and the pull tab folds it back. A tap on a day
-reports it through `onChanged`, and the picker shows it selected once you
-give it as `value`. The chevrons, a swipe of either strip and a month pick
-only move the card, unless you set `headerSelects`, under which a chevron
-step while folded and a month pick select a day, as Agenda's do. A day
+unfold it into the month, and the pull tab folds it back. A tap on a day,
+the selected one included, reports it through `onChanged`, and the picker
+shows it selected once you give it as `value`. The chevrons, a swipe of
+either strip and a month pick only move the card, unless you set
+`headerSelects`, under which a chevron step while folded and a month pick
+select a day, as Agenda's do, a pick of the selected day's own month
+reporting nothing. A day
 before `firstDay` or after `lastDay`, compared by date, or one your
 `isEnabled` refuses, draws disabled and takes no tap; the picker asks
 `isEnabled` of a day at most once for each predicate and date of `value`,
@@ -575,7 +577,10 @@ gives them, as in `CalendarView`, or the primary dot without `dayBadges`;
 with no store no day carries a badge. It shows all seven weekdays, its
 weeks starting on the column `firstColumn`, 0 for Monday to 6 for Sunday,
 opens no route, and draws in the theme a `CalendarView` would resolve
-there, with its words from `CalendarLocalizations`.
+there, with its words from `CalendarLocalizations`. A parent that asks its
+intrinsic height, such as an `IntrinsicHeight`, gets the height it lays
+out at, folded, unfolded or with its month picker open, and as it moves
+between them.
 By default it pads its sides by 8 logical pixels and centres each day's
 circle in its column; set `daysToEdges` to have the circles of the first
 and last columns reach its sides instead, so its days line up with the
@@ -592,8 +597,9 @@ naming `day`, its time view, which take turns. A control of two segments,
 Date and Time, at the end of each view's header switches between them, and
 nothing else does: a day picked keeps the date view. Its value is `day` and
 `minute`, a minute after midnight on the clock of `store`'s zone, or of the
-device without a store; a tap on a day reports that day with the minute
-through `onChanged`, or with the time of that day nearest it on
+device without a store; a tap on a day, the selected one included, reports
+that day with the minute through `onChanged`, or with the time of that day
+nearest it on
 `minuteStep` where the day does not offer the minute, and a pick of a time
 reports it with `day`, so take the two together. With a null `minute` it
 picks a day alone, showing the date view with no control. Its time view offers the times of `day` from the first
@@ -602,9 +608,12 @@ the ones the clock reads that day, so a time the clock skips draws disabled.
 It opens on the time view where `initialShowsTime` says, reports each switch
 through `onShowsTimeChanged`, and takes the day picker's parameters for its
 date view, such as `firstDay` and `dayBadges`, with `isDayEnabled` for
-`CalendarDayPicker`'s `isEnabled`. It opens no
-route, and draws in the theme a `CalendarView` would resolve there, with its
-words from `CalendarLocalizations`.
+`CalendarDayPicker`'s `isEnabled`. It opens no route: put it where your
+form shows it, the content of an `AlertDialog`, which asks its intrinsic
+width, included. There, and under an unbounded width, it is as wide as its
+views' header rows and time picker need, its days adding nothing; under a
+bounded width it takes all of it. It draws in the theme a `CalendarView`
+would resolve there, with its words from `CalendarLocalizations`.
 
 **Editing.** With `editable: true`, Week's and Day's blocks move and
 resize, and a create gesture reports a `CalendarCreateDetails` through

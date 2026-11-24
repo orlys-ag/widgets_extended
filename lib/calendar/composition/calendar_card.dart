@@ -413,9 +413,7 @@ class _CalendarCardState<T> extends State<CalendarCard<T>> {
 /// is centred on the box, overhanging each side by half a column less half
 /// a circle. Past the box's sides it is clipped [dayBadgeReach] out, where
 /// an edge column's badges draw, so a slide shows no more of the columns
-/// beyond than that. Its [LayoutBuilder] runs its builder only as the
-/// box's constraints change, which a fold, changing the child's height
-/// alone, leaves as they are.
+/// beyond than that.
 class _EdgeDays extends StatelessWidget {
   const _EdgeDays({required this.columns, required this.child});
 
@@ -424,26 +422,97 @@ class _EdgeDays extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        if (!width.isFinite || columns < 2) {
-          return child;
-        }
-        final spread = math.max(
-          width,
-          (width - dayCircleSize) / (columns - 1) * columns,
-        );
-        return ClipRect(
-          clipper: const _SideReach(),
-          child: OverflowBox(
-            minWidth: spread,
-            maxWidth: spread,
-            fit: OverflowBoxFit.deferToChild,
-            child: child,
-          ),
-        );
-      },
+    return ClipRect(
+      clipper: const _SideReach(),
+      child: _Spread(columns: columns, child: child),
+    );
+  }
+}
+
+/// Lays [child] out at the width [_RenderSpread.spreadOf] gives the box's,
+/// centred on the box, which is as wide as its constraints let it be and
+/// as tall as [child]; under an unbounded width, or for fewer than two
+/// [columns], [child] is laid out as the box is. Its intrinsic heights are
+/// [child]'s at the spread width.
+class _Spread extends SingleChildRenderObjectWidget {
+  const _Spread({required this.columns, required Widget super.child});
+
+  final int columns;
+
+  @override
+  _RenderSpread createRenderObject(BuildContext context) {
+    return _RenderSpread(columns);
+  }
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderSpread renderObject) {
+    renderObject.columns = columns;
+  }
+}
+
+class _RenderSpread extends RenderShiftedBox {
+  _RenderSpread(this._columns) : super(null);
+
+  int _columns;
+
+  set columns(int value) {
+    if (value == _columns) {
+      return;
+    }
+    _columns = value;
+    markNeedsLayout();
+  }
+
+  /// The width the child is laid out at in a box [width] wide; null where
+  /// it is laid out as the box is.
+  double? spreadOf(double width) {
+    if (!width.isFinite || _columns < 2) {
+      return null;
+    }
+    return math.max(width, (width - dayCircleSize) / (_columns - 1) * _columns);
+  }
+
+  BoxConstraints _childConstraints(BoxConstraints constraints) {
+    final spread = spreadOf(constraints.maxWidth);
+    if (spread == null) {
+      return constraints;
+    }
+    return constraints.copyWith(minWidth: spread, maxWidth: spread);
+  }
+
+  @override
+  double computeMinIntrinsicHeight(double width) {
+    return child?.getMinIntrinsicHeight(spreadOf(width) ?? width) ?? 0.0;
+  }
+
+  @override
+  double computeMaxIntrinsicHeight(double width) {
+    return child?.getMaxIntrinsicHeight(spreadOf(width) ?? width) ?? 0.0;
+  }
+
+  @override
+  Size computeDryLayout(covariant BoxConstraints constraints) {
+    final child = this.child;
+    if (child == null) {
+      return constraints.smallest;
+    }
+    return constraints.constrain(
+      child.getDryLayout(_childConstraints(constraints)),
+    );
+  }
+
+  @override
+  void performLayout() {
+    final child = this.child;
+    if (child == null) {
+      size = constraints.smallest;
+      return;
+    }
+    child.layout(_childConstraints(constraints), parentUsesSize: true);
+    size = constraints.constrain(child.size);
+    (child.parentData! as BoxParentData).offset = Offset(
+      (size.width - child.size.width) / 2.0,
+      (size.height - child.size.height) / 2.0,
     );
   }
 }
@@ -527,7 +596,12 @@ class _PickerArea extends StatelessWidget {
 
 /// [first] and [second] across its width at their own heights, both from
 /// its top, [second] painted over [first], in an area as tall as [first],
-/// [t] of the way to [second]'s height.
+/// [t] of the way to [second]'s height. Its intrinsic height lies between
+/// its children's as its height does, asking none of a child [t] gives no
+/// weight; its intrinsic width is 0, as it takes whatever width it is
+/// given and asks none of its children, whose days and month names take
+/// whatever width they are given, the strips' under a [LayoutBuilder],
+/// which answers no intrinsic width.
 class _HeightLerp extends MultiChildRenderObjectWidget {
   _HeightLerp({
     super.key,
@@ -581,6 +655,38 @@ class _RenderHeightLerp extends RenderBox
     return constraints.constrain(
       Size(constraints.maxWidth, lerpDouble(first, second, _t)!),
     );
+  }
+
+  /// The area's intrinsic height from its children's [extent], asking
+  /// none of a child [_t] gives no weight.
+  double _intrinsicHeight(double Function(RenderBox child) extent) {
+    final first = _t == 1.0 ? 0.0 : extent(firstChild!);
+    final second = _t == 0.0 ? 0.0 : extent(lastChild!);
+    return lerpDouble(first, second, _t)!;
+  }
+
+  @override
+  double computeMinIntrinsicHeight(double width) {
+    return _intrinsicHeight((child) {
+      return child.getMinIntrinsicHeight(width);
+    });
+  }
+
+  @override
+  double computeMaxIntrinsicHeight(double width) {
+    return _intrinsicHeight((child) {
+      return child.getMaxIntrinsicHeight(width);
+    });
+  }
+
+  @override
+  double computeMinIntrinsicWidth(double height) {
+    return 0.0;
+  }
+
+  @override
+  double computeMaxIntrinsicWidth(double height) {
+    return 0.0;
   }
 
   @override

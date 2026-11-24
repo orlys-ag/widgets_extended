@@ -26,9 +26,10 @@ import 'calendar_theme_extension.dart';
 /// picker, between chevrons that step a week while folded, a month while
 /// unfolded and a year in the month picker. A fold, an unfold, and the month
 /// picker's opening and closing report the view they turn to through
-/// [onViewChanged]. A tap on a day reports it through [onChanged] as the
-/// start of its date on the clock of [store]'s zone; the picker selects
-/// nothing itself and shows a new [value] once given. Its strips scroll as
+/// [onViewChanged]. A tap on a day, the selected day included, reports it
+/// through [onChanged] as the start of its date on the clock of [store]'s
+/// zone; the picker selects nothing itself and shows a new [value] once
+/// given. Its strips scroll as
 /// Agenda's: a swipe of the week row comes to rest on the whole day nearest
 /// to where a fling would carry it, a swipe of the month on the nearest
 /// whole month, and neither selects anything. By default the chevrons and a
@@ -36,8 +37,9 @@ import 'calendar_theme_extension.dart';
 /// with [headerSelects], a chevron step while folded reports the day a week
 /// from [value], and a month pick the day of that month a month step from
 /// [value] reaches, the month picker staying open, as `CalendarView`'s
-/// Agenda does, and where the picker refuses that day the card moves
-/// instead. A day before [firstDay] or after [lastDay], compared by date, or
+/// Agenda does, a pick of [value]'s own month reporting nothing; and where
+/// the picker refuses that day the card moves instead. A day before
+/// [firstDay] or after [lastDay], compared by date, or
 /// a day [isEnabled] refuses, draws disabled, at the theme's
 /// [CalendarThemeData.disabledOpacity], and takes no tap; an arrow key onto
 /// it selects nothing. The chevrons, the strips and the month picker browse
@@ -56,7 +58,11 @@ import 'calendar_theme_extension.dart';
 /// focus, and the week row takes none. The picker pads its sides by 8
 /// logical pixels and centres each day's circle in its column; with
 /// [daysToEdges] the circles of the first and last columns reach its sides
-/// instead, so its days line up with what lies above and below it.
+/// instead, so its days line up with what lies above and below it. Asked
+/// its intrinsic height at the width it lays out at, as an
+/// `IntrinsicHeight` asks, the picker answers the height it lays out at:
+/// folded, unfolded or with its month picker open, and as it moves between
+/// them.
 class CalendarDayPicker<T> extends StatefulWidget {
   /// Creates a day picker of [value].
   ///
@@ -130,8 +136,10 @@ class CalendarDayPicker<T> extends StatefulWidget {
   /// month picker select a day, as `CalendarView`'s Agenda does: the step
   /// the day a week from [value], the pick the day of that month a month
   /// step from [value] reaches, each reported through [onChanged] where the
-  /// picker takes it, and moving the card where it does not. False, the
-  /// default, leaves both to move the card only.
+  /// picker takes it, but for [value] itself, which a pick of its own month
+  /// reaches and which reports nothing, and moving the card where the
+  /// picker does not take it. False, the default, leaves both to move the
+  /// card only.
   final bool headerSelects;
 
   /// The kinds of entry the days' badges mark; null for one primary dot on
@@ -176,10 +184,13 @@ class CalendarDayPicker<T> extends StatefulWidget {
   final ValueChanged<CalendarDayPickerView>? onViewChanged;
 
   /// A widget at the end of the header's row, after its next chevron and
-  /// centred on the row, whether the picker shows its week row, its month
-  /// or its month picker; null for none. A host that puts the picker
-  /// together with controls of its own, as [CalendarDateTimePicker] does
-  /// with its Time toggle, gives them here.
+  /// centred on the row, at its own width, at most the row's, or, given
+  /// as a [Flexible] or an [Expanded], sharing the row with the chevrons
+  /// and the title by its flex, theirs being 1, as in a [Row]; whether
+  /// the picker shows its week row, its month or its month picker; null
+  /// for none. A host that puts the picker together with controls of its own,
+  /// as [CalendarDateTimePicker] does with its Time toggle, gives them
+  /// here.
   final Widget? headerTrailing;
 
   @override
@@ -442,16 +453,17 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
     );
   }
 
+  /// A chevron step or a month pick under [CalendarDayPicker.headerSelects]:
+  /// reports [day] where the picker takes it and it is not
+  /// [CalendarDayPicker.value]'s date, which it leaves as it is.
   @override
   bool selectCardDay(DateTime day) {
-    final onChanged = widget.onChanged;
-    if (onChanged == null || !_isDayEnabled(_plainOf(day)!)) {
+    if (!_takes(day)) {
       return false;
     }
-    if (_sameDate(day, widget.value)) {
-      return true;
+    if (!_sameDate(day, widget.value)) {
+      widget.onChanged!(cardDayIn(day));
     }
-    onChanged(cardDayIn(day));
     return true;
   }
 
@@ -460,9 +472,19 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
     change();
   }
 
-  /// A tap on [day] in either strip.
+  /// A tap on [day] in either strip, or an arrow key's move onto it in the
+  /// month: reports it where the picker takes it, the selected day
+  /// included.
   void _selectDay(DateTime day) {
-    selectCardDay(day);
+    if (_takes(day)) {
+      widget.onChanged!(cardDayIn(day));
+    }
+  }
+
+  /// Whether the picker takes a pick of [day]: it reports picks and does
+  /// not refuse the day.
+  bool _takes(DateTime day) {
+    return widget.onChanged != null && _isDayEnabled(_plainOf(day)!);
   }
 
   /// Whether the picker takes [day], a plain day: not before the first day

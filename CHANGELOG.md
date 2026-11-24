@@ -1353,6 +1353,41 @@ as "January" at 64 of its 72.4 px at 22 px against 15 px in a picker 240 px
 wide: it scaled every name by the widest in the marked style alone. It now
 scales them by the widest in either style, which it measures once per
 style and text scale rather than at every build.
+- Fix: `CalendarDateTimePicker` threw as the content of an `AlertDialog`, or
+of any parent that asks its intrinsic size, and under an unbounded width, as
+in a `Row`, because it built its header row under a `LayoutBuilder`. It now
+lays out there as wide as its views' header rows and time picker need, its
+control within half its row and its labels unscaled, and as tall as the
+view it shows. `CalendarDayPicker.headerTrailing` now lies at its own width,
+at most the header row's, and a `Flexible` or an `Expanded` one still shares
+the row with the chevrons and the title by its flex.
+- Fix: a tap on the selected day of `CalendarDayPicker` or
+`CalendarDateTimePicker` reported nothing; it now reports the day through
+`onChanged`, as a tap on any other day does. Under `headerSelects`, a pick
+of the selected day's own month still reports nothing.
+- Fix: with a null `value`, each column of `CalendarTimePicker` offered a
+screen reader an increase but no decrease; it now offers both, either
+picking the row the column rests on, as Up and Down do.
+- Fix: `CalendarDayPicker` under a parent that asks its intrinsic height,
+such as an `IntrinsicHeight`, answered less than the height it lays out at
+and overflowed, folded into its week row, unfolded and with its month
+picker open. It now answers the height it lays out at in each view and as
+it moves between them: as a swipe slides its month, as it folds, and as its
+month picker comes in or slides a year, with `daysToEdges` too. Every row
+of the month picker is now as tall as a month whose name is the tallest in
+either month name style, so the picker is as tall whichever months it
+marks; this differs from before only where a theme's `monthNameStyle` and
+`monthNameMarkedStyle` lay a name out at different heights, taller than a
+day's circle.
+- Fix: `CalendarView` given both a policy whose day limit is under 1 and a
+negative `bottomPadding` threw the padding's `ArgumentError`, though its doc
+names the policy's first; it now throws the policy's.
+- `CalendarThemeData.disabledOpacity` now lists every reader, adding the
+name of a month the day picker's month picker takes no tap on and the
+built-in header's previous chevron while it steps back no further; and the
+docs of `chipTitleStyle`, `monthMoreStyle`, `badgeStyle`,
+`monthCardTitleStyle` and `monthCardTimeStyle` say that a line of each sets
+how tall the all-day strip's rows and Month's lanes grow at a larger text.
 
 ## 0.0.35
 

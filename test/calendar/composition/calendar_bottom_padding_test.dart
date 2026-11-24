@@ -16,6 +16,7 @@ import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
+import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 
@@ -311,4 +312,40 @@ void main() {
       expect((error as ArgumentError).name, "bottomPadding");
     }
   });
+
+  testWidgets("BP7 a negative padding beside a policy whose day limit is "
+      "under 1 throws the policy's ArgumentError, the one CalendarView's doc "
+      "orders first, and the padding's once the policy is valid", (
+    tester,
+  ) async {
+    store = MemoryCalendarStore<String>();
+    for (final (policy, name) in <(CalendarEditPolicy<String>?, String)>[
+      (const _ZeroDayLimit(), "policy"),
+      (null, "bottomPadding"),
+    ]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CalendarView<String>(
+            store: store,
+            clock: fixedClock,
+            editPolicy: policy,
+            bottomPadding: -1.0,
+          ),
+        ),
+      );
+      final error = tester.takeException();
+      expect(error, isA<ArgumentError>(), reason: name);
+      expect((error as ArgumentError).name, name);
+    }
+  });
+}
+
+/// A policy whose day limit is 0, which the calendar's build refuses.
+final class _ZeroDayLimit extends CalendarEditPolicy<String> {
+  const _ZeroDayLimit();
+
+  @override
+  int? get dayLimit {
+    return 0;
+  }
 }

@@ -1,6 +1,6 @@
 /// The month strip on its own: where each snap brings a fling to rest,
-/// the day a month folds into, and the month it browses back no further
-/// than.
+/// the day a month folds into, the month it browses back no further than,
+/// and the intrinsic height it answers.
 library;
 
 import 'package:material_ui/material_ui.dart';
@@ -273,6 +273,79 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(browsed, <DateTime>[DateTime(2026, 5)]);
+  });
+
+  testWidgets("MS5 a month strip answers the height it lays out at as its "
+      "intrinsic height at any width: at rest, as a swipe slides it between "
+      "months of different heights, once it rests on the taller, and as it "
+      "folds", (tester) async {
+    final store = MemoryCalendarStore<String>();
+    addTearDown(store.dispose);
+    final collapse = AnimationController(vsync: tester);
+    addTearDown(collapse.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 350.0,
+            child: MonthStrip<String>(
+              store: store,
+              month: DateTime(2026, 4),
+              selectedDay: DateTime(2026, 4, 21),
+              today: DateTime(2026, 4, 21),
+              weekdays: CalendarWeekdaySet.all,
+              rowHeight: 48.0,
+              collapse: collapse,
+              onSelectDay: (day) {},
+              onBrowse: (month) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final box = tester.renderObject<RenderBox>(
+      find.byType(MonthStrip<String>),
+    );
+    void expectAnswered(String step) {
+      for (final width in <double>[350.0, 200.0]) {
+        expect(
+          box.getMinIntrinsicHeight(width),
+          moreOrLessEquals(box.size.height),
+          reason: "$step, at $width",
+        );
+        expect(
+          box.getMaxIntrinsicHeight(width),
+          moreOrLessEquals(box.size.height),
+          reason: "$step, at $width",
+        );
+      }
+    }
+
+    // Setup sanity: April's grid takes five weeks.
+    expect(box.size.height, 5 * 48.0);
+    expectAnswered("at rest");
+    // A drag right brings in March, whose grid takes six weeks, past the
+    // middle, so the release rests on it; the first move goes to the touch
+    // slop.
+    final swipe = await tester.startGesture(
+      tester.getCenter(find.byType(MonthStrip<String>)),
+    );
+    for (var move = 0; move < 6; move++) {
+      await swipe.moveBy(const Offset(50.0, 0.0));
+      await tester.pump();
+    }
+    expect(box.size.height, allOf(greaterThan(5 * 48.0), lessThan(6 * 48.0)));
+    expectAnswered("mid-swipe");
+    await swipe.up();
+    await tester.pumpAndSettle();
+    expect(box.size.height, 6 * 48.0);
+    expectAnswered("on March");
+    collapse.value = 0.5;
+    await tester.pump();
+    expect(box.size.height, allOf(greaterThan(48.0), lessThan(6 * 48.0)));
+    expectAnswered("mid-fold");
   });
 
   testWidgets("MS3 a day isDayEnabled refuses draws disabled and takes no "

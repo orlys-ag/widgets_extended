@@ -27,7 +27,9 @@ import 'package:flutter/widgets.dart';
 /// [timePickerHeaderStyle] are read by the time picker,
 /// `CalendarTimePicker`, which draws its Clear in [actionLabelStyle];
 /// [disabledOpacity] also by the day picker, `CalendarDayPicker`, for the
-/// number of a day it refuses.
+/// number of a day it refuses and the name of a month its month picker
+/// takes no tap on, and by the built-in header for its previous chevron
+/// while that steps back no further.
 ///
 /// [CalendarTheme] hands a theme down the tree, and [CalendarTheme.of]
 /// reads it.
@@ -520,12 +522,17 @@ final class CalendarThemeData with Diagnosticable {
   /// 1.
   final double pendingEntryOpacity;
 
-  /// The opacity of what the time picker and the day picker draw
-  /// disabled, from 0 to 1: the [text] of a time picker's row, in any of
-  /// its columns, no time of which may be picked, and Clear while it
-  /// takes no tap; and the number of a day `CalendarDayPicker` refuses:
-  /// one before its `firstDay` or after its `lastDay`, or one its
-  /// `isEnabled` refuses.
+  /// The opacity of what the time picker, the day picker and the built-in
+  /// header draw disabled, from 0 to 1: the [text] of a time picker's row,
+  /// in any of its columns, no time of which may be picked, and Clear while
+  /// it takes no tap; the number of a day `CalendarDayPicker` refuses, one
+  /// before its `firstDay` or after its `lastDay` or one its `isEnabled`
+  /// refuses, unless the day is selected; the name of a month its month
+  /// picker takes no tap on, one before the month it browses back to
+  /// under `browsesBeforeFirstDay` false, unless the month is selected;
+  /// and the built-in header's previous chevron while
+  /// `CalendarHeaderDetails.canStepBack` is false, as in that day picker at
+  /// the week, month or year it browses back to.
   final double disabledOpacity;
 
   /// The shadows under each grip of the selected block on the timed grid,
@@ -604,9 +611,11 @@ final class CalendarThemeData with Diagnosticable {
   /// in [onPrimary].
   final TextStyle landingLabelStyle;
 
-  /// The text of a small pill: the hidden-days pill and Agenda's duration
-  /// chip, drawn in [primary], and the current-time pill, drawn in
-  /// [onPrimary]. Its colour is not used.
+  /// The text of a small pill: the hidden-days pill, the Less pill of
+  /// Week's and Day's all-day strip and Agenda's duration chip, drawn in
+  /// [primary], and the current-time pill, drawn in [onPrimary]. Its colour
+  /// is not used. A line of it at the text scale is one the all-day strip's
+  /// rows grow to hold, as [chipTitleStyle]'s is.
   final TextStyle badgeStyle;
 
   /// The text counting entries outside the hours: Week's and Day's "+N
@@ -626,18 +635,27 @@ final class CalendarThemeData with Diagnosticable {
   final TextStyle monthDayNumberMarkedStyle;
 
   /// The "+N more" of Month and of Week's and Day's all-day strip. Its
-  /// colour is not used: it draws in [onNotice].
+  /// colour is not used: it draws in [onNotice]. A line of it at the text
+  /// scale is one Month's chip lanes and the all-day strip's rows grow to
+  /// hold, as [chipTitleStyle]'s is.
   final TextStyle monthMoreStyle;
 
   /// A chip's title, in Month and in Week's and Day's all-day strip. Its
-  /// colour is not used: it draws in [text].
+  /// colour is not used: it draws in [text]. Month's chip lanes, 18 px, and
+  /// the all-day strip's rows, 24 px, at no text scaling, grow at a larger
+  /// text to hold a line of it whole, keeping the room they leave around
+  /// it at no scaling, so a chip builder that draws its title in it fits.
   final TextStyle chipTitleStyle;
 
   /// A Month card's title. Its colour is not used: it draws in [text].
+  /// Month's card lanes, 36 px at no text scaling, grow at a larger text to
+  /// hold a line of it over one of [monthCardTimeStyle], keeping the room
+  /// they leave around them at no scaling.
   final TextStyle monthCardTitleStyle;
 
   /// A Month card's times. Its colour is not used: they draw in
-  /// [textSecondary].
+  /// [textSecondary]. A line of it under one of [monthCardTitleStyle] at
+  /// the text scale is what Month's card lanes grow to hold.
   final TextStyle monthCardTimeStyle;
 
   /// Agenda's day title, and the height an empty day's title keeps. Its
