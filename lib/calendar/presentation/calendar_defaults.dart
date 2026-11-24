@@ -166,9 +166,11 @@ Widget defaultCalendarBlockBuilder<T>(
 
 /// The default bar of Month's board and of Week's and Day's all-day strip:
 /// the entry's tint holding a 4 px band of its colour and its title, and in
-/// the [CalendarChipDetails.card] form its times under the title; rounded at
-/// an end the entry does not continue past and square where it does, and
-/// dimmed while the entry is pending.
+/// the [CalendarChipDetails.card] form its times under the title, from the
+/// bar's start in the reading direction; rounded at an end the entry does
+/// not continue past and square where it does, the left end standing for
+/// the earlier days as the views' columns run, and dimmed while the entry
+/// is pending.
 Widget defaultCalendarChipBuilder<T>(
   BuildContext context,
   CalendarShownEntry<T> entry,
@@ -207,7 +209,7 @@ Widget defaultCalendarChipBuilder<T>(
     );
   } else {
     content = Align(
-      alignment: Alignment.centerLeft,
+      alignment: AlignmentDirectional.centerStart,
       child: Text(
         calendarEntry.title,
         maxLines: 1,

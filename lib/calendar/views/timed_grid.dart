@@ -42,9 +42,15 @@ const double _numberBoxHeight = 20.0;
 /// outside the hours.
 const double _noticeHeight = 24.0;
 
-/// The height of one row of the all-day strip: a bar's 20 px and the room
-/// [_barInset] keeps above and below it.
-const double _allDayRowHeight = 24.0;
+/// The height of a bar of the all-day strip at no text scaling; a larger
+/// text grows it, keeping the room around its line
+/// ([_TimedGridState._measureStripRow]).
+const double _leastBarHeight = 20.0;
+
+/// The text one line of a style is measured with, the space
+/// [TextPainter.preferredLineHeight] lays out, whose height is any line's
+/// in the style's font.
+const List<String> _lineSample = <String>[" "];
 
 /// The room a bar of the all-day strip, and the chip counting the bars the
 /// collapsed strip hides, keep inside their lane or cell: 1 px from either
@@ -618,7 +624,11 @@ CalendarCreateRange? _createRangeOf(
 /// All-day entries ([CalendarEntry.isAllDay]) show as bars in a strip
 /// frozen under the day header, or at the grid's top where it shows none,
 /// above the hours: each bar across the columns of the shown days it
-/// covers, and the bars sharing a day in rows of their own. Past four
+/// covers, and the bars sharing a day in rows of their own, each 24 px
+/// tall, or where a line of the theme's [CalendarThemeData.chipTitleStyle],
+/// [CalendarThemeData.monthMoreStyle] or [CalendarThemeData.badgeStyle]
+/// at the text scale needs more, as much taller as holds it whole with
+/// the room the row leaves around it at no scaling. Past four
 /// rows the strip shows three and, in a fourth, a "+N more" chip in
 /// Month's look on each day that has bars below the third, counting them,
 /// a tap on which, or on its cell, shows every row; a
@@ -740,6 +750,10 @@ CalendarCreateRange? _createRangeOf(
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than [minDayWidth] and [minSlotHeight]; past those, it scrolls.
+/// The day columns run left to right under any [Directionality], while the
+/// text in a day's cell lies against the cell's start in the reading
+/// direction: the default bar's title, a "+N more" chip of the strip, and
+/// the count in a row of the entries outside the hours.
 /// The hour gutter is 56 px wide where the labels fit it on one line, or on
 /// two broken after a space where the closest labelled lines hold them at
 /// the least slot height: [minSlotHeightLow] where a pinch zooms the grid,
@@ -768,7 +782,10 @@ CalendarCreateRange? _createRangeOf(
 /// gives the all-day strip another number of rows while a block is moved or
 /// resized leaves the strip its rows until the drag requests its landing or
 /// ends, so no slot row moves under the block and its drag runs on; a bar
-/// the change adds past those rows shows then. While a bar is moved or
+/// the change adds past those rows shows then. A tap on a "+N more" chip
+/// or on the Less pill meanwhile takes effect then too, the strip showing
+/// its bars as the rows it keeps hold them, the collapsed strip's fourth
+/// row still counting the bars below its third. While a bar is moved or
 /// resized the strip takes its new rows at once, and the dragged bar keeps
 /// its row, the other bars stacking around it, until the drag requests its
 /// landing or ends.
@@ -1660,6 +1677,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ([_measureHeader]), which [_rowsConfig] gives the rows it makes.
   double _headerHeight = _leastHeaderHeight;
 
+  /// The height of a row of the all-day strip as the last build measured
+  /// it ([_measureStripRow]), which [_rowsConfig] gives the rows it makes.
+  double _stripRowHeight = _leastBarHeight + _barInset.vertical;
+
   /// The extents the axes were last given and the tracks they were given
   /// for. [_fitAxes] replaces an axis only when one of these changes.
   double _gutterWidth = _HourLabels.minGutter;
@@ -1670,6 +1691,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   late int _rowSlotMinutes = _tracks.slotMinutes;
   double _rowRoom = _initialLabelRoom;
   double _rowHeaderHeight = _leastHeaderHeight;
+  double _rowStripRowHeight = _leastBarHeight + _barInset.vertical;
   late _Notices _rowNotices = _notices;
   late int _rowStripRows = _stripRows;
   late CalendarHourLabelFormat _rowFormat = widget.hourLabelFormat;
@@ -2309,7 +2331,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// The slots of the hours, [_slotHeight] each, under the frozen day
   /// header where the grid shows one and the all-day strip's
-  /// [_stripRows], [_allDayRowHeight] each, under a row of [_labelRoom]
+  /// [_stripRows], [_stripRowHeight] each, under a row of [_labelRoom]
   /// where it has some, which holds the top half of the strip's label
   /// ([_StripLabel]); that row and the strip's first [_rowFrozenStripRows]
   /// are frozen with the header. Above the slots a row of [_labelRoom],
@@ -2322,7 +2344,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       axis: ExplicitAxis(<double>[
         if (widget.showsDayHeader) _headerHeight,
         if (_stripRows > 0) _labelRoom,
-        ...List<double>.filled(_stripRows, _allDayRowHeight),
+        ...List<double>.filled(_stripRows, _stripRowHeight),
         _edgeAbove,
         ...List<double>.filled(_tracks.rowCount, _slotHeight),
         _edgeBelow,
@@ -2347,7 +2369,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         ((size.height * _frozenStripShare -
                     _measuredHeaderExtent -
                     _labelRoom) /
-                _allDayRowHeight)
+                _stripRowHeight)
             .floor();
     return math.min(_stripRows, math.max(collapsedStripRows + 1, fit));
   }
@@ -2392,9 +2414,21 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return barRows > collapsedStripRows + 1;
   }
 
-  /// Whether the collapsed strip shows its count row, its fourth.
+  /// Whether the strip shows the collapsed strip's count row, its fourth:
+  /// where the bars overflow the collapsed strip and the strip has the
+  /// collapsed strip's rows. It follows the rows the strip has, not
+  /// [_stripExpanded], which a block's drag keeps them from following
+  /// until it ends ([_applyStripRows]).
   bool get _stripCounted {
-    return !_stripExpanded && _overflows(_layout.barRows);
+    return _overflows(_layout.barRows) && _stripRows == collapsedStripRows + 1;
+  }
+
+  /// Whether the strip shows every row of bars that overflow the
+  /// collapsed strip, so its second row's gutter cell holds the pill
+  /// collapsing it: where it has more rows than the collapsed strip, which
+  /// it follows as [_stripCounted] does.
+  bool get _stripCollapsible {
+    return _overflows(_layout.barRows) && _stripRows > collapsedStripRows + 1;
   }
 
   /// The strip rows the placement puts bars in: a collapsed strip's first
@@ -2452,7 +2486,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       today: _calendarNow.today,
       counted: _stripCounted,
       below: _layout.below,
-      collapsible: _stripExpanded && _overflows(_layout.barRows),
+      collapsible: _stripCollapsible,
     );
   }
 
@@ -2512,6 +2546,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _rowSlotMinutes = _tracks.slotMinutes;
     _rowRoom = _labelRoom;
     _rowHeaderHeight = _headerHeight;
+    _rowStripRowHeight = _stripRowHeight;
     _rowNotices = _notices;
     _rowStripRows = _stripRows;
     _rowFormat = widget.hourLabelFormat;
@@ -2550,9 +2585,36 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
   }
 
-  /// The all-day strip's height.
+  /// Measures [_stripRowHeight] in [context]: a bar [_leastBarHeight] tall
+  /// at no text scaling, inside [_barInset], and at a larger text one line
+  /// of each text a strip row holds, a bar's title in the default bar's
+  /// style, the count chip's and the Less pill's, with the room the bar
+  /// leaves around that line at no scaling, as [numberBoxIn] keeps the
+  /// room around a number. The default bar's line is the theme's
+  /// [CalendarThemeData.chipTitleStyle], which a [TimedGrid.chipBuilder]
+  /// draws in too where its bars are to fit.
+  void _measureStripRow(BuildContext context, _GridStyles styles) {
+    var bar = _leastBarHeight;
+    for (final style in <TextStyle>[
+      styles.theme.chipTitleStyle,
+      styles.stripMoreLabel,
+      styles.hiddenLabel,
+    ]) {
+      final scaled = labelSizeIn(context, style, _lineSample).height;
+      final unscaled = labelSizeIn(
+        context,
+        style,
+        _lineSample,
+        scaler: TextScaler.noScaling,
+      ).height;
+      bar = math.max(bar, scaled + math.max(0.0, _leastBarHeight - unscaled));
+    }
+    _stripRowHeight = bar + _barInset.vertical;
+  }
+
+  /// The all-day strip's height in the rows the board has.
   double get _stripExtent {
-    return _stripRows * _allDayRowHeight;
+    return _stripRows * _rowStripRowHeight;
   }
 
   /// The height of the room above the all-day strip as the board lays it
@@ -2568,7 +2630,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   double get _leadingExtent {
     return _headerExtent +
         _stripRoom +
-        _rowFrozenStripRows * _allDayRowHeight +
+        _rowFrozenStripRows * _rowStripRowHeight +
         (_aboveFrozen ? _aboveRowExtent : 0.0);
   }
 
@@ -2647,7 +2709,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         size.height -
             _measuredHeaderExtent -
             (_stripRows > 0 ? _labelRoom : 0.0) -
-            _stripExtent -
+            _stripRows * _stripRowHeight -
             _edgeAbove -
             _edgeBelow,
         _tracks.rowCount,
@@ -2666,6 +2728,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         _tracks.slotMinutes != _rowSlotMinutes ||
         _labelRoom != _rowRoom ||
         _headerHeight != _rowHeaderHeight ||
+        _stripRowHeight != _rowStripRowHeight ||
         _notices != _rowNotices ||
         _stripRows != _rowStripRows ||
         _frozenStripRows != _rowFrozenStripRows ||
@@ -4490,7 +4553,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         row = _stripStart - 1;
       } else {
         top -= _headerExtent + _stripRoom;
-        final strip = (top / _allDayRowHeight).floor();
+        final strip = (top / _rowStripRowHeight).floor();
         row = strip < _rowFrozenStripRows
             ? _stripStart + strip
             : _tracks.firstSlotRow - 1;
@@ -4505,7 +4568,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       // [_leadingExtent]; scrolled strip rows and a scrolled row above
       // the slots lie before it.
       final scrolledStrip =
-          (_stripRows - _rowFrozenStripRows) * _allDayRowHeight;
+          (_stripRows - _rowFrozenStripRows) * _rowStripRowHeight;
       final above = _aboveFrozen ? 0.0 : _aboveRowExtent;
       final content =
           y +
@@ -4519,7 +4582,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         row =
             _stripStart +
             _rowFrozenStripRows +
-            ((content + scrolledStrip + above) / _allDayRowHeight).floor();
+            ((content + scrolledStrip + above) / _rowStripRowHeight).floor();
       } else if (content < 0.0) {
         row = _tracks.firstSlotRow - 1;
       } else {
@@ -5109,10 +5172,14 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// times. A bar's day-edge resize held at [CalendarEditRules.dayLimit]
   /// requests the range it is held at, where the policy still admits it at
   /// the release ([_heldBarAdmitted]). The request's hold syncs within the
-  /// call ([_requestMove]).
+  /// call ([_requestMove]). A release requests nothing once the board no
+  /// longer drags the key: a placement that moves the dragged item, such
+  /// as the sync of a store change, cancels the board's drag at once,
+  /// while the board reports that end ([_handleDragEnd]) in a microtask,
+  /// after a release dispatched in the same call stack as the change.
   void _releaseCross(Offset local) {
     final drag = _drag;
-    if (drag == null) {
+    if (drag == null || !_board.isDragging(drag.key)) {
       return;
     }
     ({DateTime start, DateTime end})? write;
@@ -6313,6 +6380,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (widget.showsDayHeader) {
       _measureHeader(context, styles, strings);
     }
+    _measureStripRow(context, styles);
     final slotRange = range == null || range.strip || range.refused
         ? null
         : range;
@@ -7456,8 +7524,9 @@ class _StripPill extends StatelessWidget {
 /// The chip counting the bars the collapsed all-day strip hides on a day:
 /// [text] in the look of Month's "+N more", on the soft yellow of the rows
 /// counting entries outside the hours, inset in its cell by [_barInset], as
-/// a bar is in its lane, and rounded as the default bar is, scaled down
-/// rather than cut off in a day too narrow for it.
+/// a bar is in its lane, and rounded as the default bar is, its text
+/// against the chip's start in the reading direction as their count is,
+/// scaled down rather than cut off in a day too narrow for it.
 class _StripMore extends StatelessWidget {
   const _StripMore({super.key, required this.text, required this.styles});
 
@@ -7474,7 +7543,7 @@ class _StripMore extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 4.0),
           child: FittedBox(
             fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
+            alignment: AlignmentDirectional.centerStart,
             child: Text(text, maxLines: 1, style: styles.stripMoreLabel),
           ),
         ),
