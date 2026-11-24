@@ -2412,6 +2412,80 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    "VZ14 Month's long press on a day whose clock repeats a stretch, whose "
+    "first pass is taken, reports a create at the stretch's free second "
+    "pass, before the free time after the stretch (New York, 2026-11-01)",
+    (tester) async {
+      ensureZones();
+      useTallView(tester);
+      final newYork = tz.getLocation("America/New_York");
+      tz.TZDateTime inNewYork(DateTime utc) {
+        return tz.TZDateTime.from(utc, newYork);
+      }
+
+      for (final (name, firstPassTaken) in <(String, bool)>[
+        ("the first pass taken", true),
+        ("the first pass free", false),
+      ]) {
+        final store = memoryStoreIn<String>(
+          newYork,
+          entries: <CalendarEntry<String>>[
+            // 00:00 EDT to the instant the clock goes back, or to 01:00 EDT.
+            entryOf(
+              "a",
+              inNewYork(DateTime.utc(2026, 11, 1, 4)),
+              inNewYork(DateTime.utc(2026, 11, 1, firstPassTaken ? 6 : 5)),
+            ),
+            // 02:00 EST to 04:00 EST.
+            entryOf(
+              "b",
+              inNewYork(DateTime.utc(2026, 11, 1, 7)),
+              inNewYork(DateTime.utc(2026, 11, 1, 9)),
+            ),
+          ],
+        );
+        addTearDown(store.dispose);
+        final day = DateTime(2026, 11, 1);
+        final controller = CalendarController(
+          view: CalendarViewKind.month,
+          selectedDay: day,
+        );
+        addTearDown(controller.dispose);
+        final creates = <CalendarCreateRange>[];
+        await tester.pumpWidget(
+          app(
+            CalendarView<String>(
+              store: store,
+              controller: controller,
+              clock: fixedClock,
+              editable: true,
+              onCreateRange: (details) async {
+                creates.add(details.range);
+              },
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await holdInPlace(
+          tester,
+          tester.getCenter(find.byKey(monthDayKey(day))),
+        );
+        final range = creates.single;
+        // 01:00 EST, the second pass, where the first is taken; 01:00 EDT,
+        // the first pass, where it is free.
+        final start = DateTime.utc(2026, 11, 1, firstPassTaken ? 6 : 5);
+        expect(
+          (instantOf(range.start), instantOf(range.end)),
+          (instantOf(start), instantOf(start.add(const Duration(minutes: 15)))),
+          reason: name,
+        );
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+      }
+    },
+  );
 }
 
 /// The doc comment right above the line of [source] that starts with

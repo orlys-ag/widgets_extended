@@ -247,6 +247,11 @@ void main() {
   });
 
   group("on the 23-hour day", skip: shortDaySkip, () {
+    test("DT32 clockGoesBackOn of the 23-hour day is null, its clock "
+        "skipping ahead rather than going back", () {
+      expect(CalendarDates.clockGoesBackOn(shortDayStart), isNull);
+    });
+
     test("DST2 the 23-hour day lasts 23 hours and skips 02:00", () {
       final day = shortDayStart;
       expect(
@@ -277,6 +282,18 @@ void main() {
   });
 
   group("on the 25-hour day", skip: longDaySkip, () {
+    test("DT33 clockGoesBackOn of the 25-hour day, or of its last minute, "
+        "is the instant its clock reads 01:00 again", () {
+      final day = longDayStart;
+      final fold = day.add(const Duration(hours: 2));
+      final last = CalendarDates.addDays(
+        day,
+        1,
+      ).subtract(const Duration(minutes: 1));
+      expect(CalendarDates.clockGoesBackOn(day), fold);
+      expect(CalendarDates.clockGoesBackOn(last), fold);
+    });
+
     test("DST2 the 25-hour day lasts 25 hours and repeats 01:00", () {
       final day = longDayStart;
       expect(
@@ -679,6 +696,18 @@ void main() {
     "on the day whose clock repeats its last hour",
     skip: repeatedLastHourSkip,
     () {
+      test("DT34 clockGoesBackOn of the day, or of its last minute, is its "
+          "later 23:00", () {
+        final day = longDayStart;
+        expectRepeatedLastHour(day);
+        final last = CalendarDates.addDays(
+          day,
+          1,
+        ).subtract(const Duration(minutes: 1));
+        expect(CalendarDates.clockGoesBackOn(day), laterLastHour);
+        expect(CalendarDates.clockGoesBackOn(last), laterLastHour);
+      });
+
       test("DT26 the first 23:30 to the second 23:30 spans to the day's "
           "24:00, the end of its last day, where the hours read its end", () {
         final day = longDayStart;
@@ -962,6 +991,52 @@ void main() {
     int numberOf(int year, int month, int day) {
       return CalendarDates.dayNumber(DateTime.utc(year, month, day));
     }
+
+    test("ZC10 clockGoesBackOn gives the instant a zone's clock goes back, "
+        "on its clock, from any time of the day, and null on a day whose "
+        "clock does not go back", () {
+      final newYork = tz.getLocation("America/New_York");
+      final cases = <(tz.Location, int, DateTime)>[
+        (newYork, numberOf(2026, 11, 1), DateTime.utc(2026, 11, 1, 6)),
+        (
+          tz.getLocation("America/Havana"),
+          numberOf(2026, 11, 1),
+          DateTime.utc(2026, 11, 1, 5),
+        ),
+        (
+          tz.getLocation("America/Santiago"),
+          numberOf(2026, 4, 4),
+          DateTime.utc(2026, 4, 5, 3),
+        ),
+      ];
+      for (final (zone, number, fold) in cases) {
+        final day = dayOfNumberIn(number, zone);
+        final last = CalendarDates.addDays(
+          day,
+          1,
+        ).subtract(const Duration(minutes: 1));
+        for (final time in <DateTime>[day, last]) {
+          final reason = "${zone.name} from $time";
+          final found = CalendarDates.clockGoesBackOn(time);
+          expect(found, isA<tz.TZDateTime>(), reason: reason);
+          expect((found! as tz.TZDateTime).location, zone, reason: reason);
+          expect(
+            found.millisecondsSinceEpoch,
+            fold.millisecondsSinceEpoch,
+            reason: reason,
+          );
+        }
+      }
+      // New York's clock skips 02:00 on 2026-03-08, and reads every time of
+      // 2026-11-02 once.
+      for (final number in <int>[numberOf(2026, 3, 8), numberOf(2026, 11, 2)]) {
+        expect(
+          CalendarDates.clockGoesBackOn(dayOfNumberIn(number, newYork)),
+          isNull,
+          reason: "$number",
+        );
+      }
+    });
 
     test("ZC1 the zone's helpers answer Havana's and Santiago's changes", () {
       final havana = tz.getLocation("America/Havana");

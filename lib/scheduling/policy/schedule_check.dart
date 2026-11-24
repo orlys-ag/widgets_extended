@@ -433,18 +433,22 @@ final class CalendarScheduleCheck<T> {
 
   /// The first timed schedule of this one's length on its start day, in
   /// the rules' hours, from the later of its start and the day's earliest
-  /// start, that no other entry shares time with, as
-  /// [CalendarEditRules.firstSlot] finds it with that length in elapsed
-  /// minutes ([CalendarSchedule.lengthMinutes]); null for an all-day
-  /// schedule, one that spans days or has no length, and where the day
-  /// leaves no such range.
+  /// start, that no other entry shares time with and that the policy lets
+  /// the stored [entry] take ([CalendarEditPolicy.admitsChange]), so this
+  /// check admits it, as [CalendarEditRules.firstSlot] finds it with that
+  /// length in elapsed minutes ([CalendarSchedule.lengthMinutes]); null for
+  /// an all-day schedule, one that spans days or has no length, and where
+  /// the day leaves no such range, as for a stored entry whose start the
+  /// policy keeps ([startFixed]) wherever the search starts after it.
   ///
   /// Where [now]'s clock gives the schedule times, the search reads the
   /// day's clock in the occurrence of the later instant of its start and
   /// the earliest start's [CalendarEarliestStart.occurrence], from the
   /// first wall minute in that occurrence not before its start
   /// ([CalendarDates.firstWallMinuteNotBefore]), so a range in a repeated
-  /// stretch's second pass is searched for in that pass.
+  /// stretch's second pass is searched for in that pass; and a search from
+  /// the first pass reads the second after it, before the time after the
+  /// stretch, as the instants come.
   late final CalendarSchedule? nextFree = _findNextFree();
 
   CalendarSchedule? _findNextFree() {
@@ -468,17 +472,38 @@ final class CalendarScheduleCheck<T> {
           CalendarDates.dayNumber(schedule.startDay) *
               CalendarDates.minutesPerDay;
     }
+    final clear = _others.where((other) {
+      return id == null || other.id != id;
+    });
+    final stored = entry;
     final slot = rules.firstSlot(
       earliest,
-      clearOf: _others.where((other) {
-        return id == null || other.id != id;
-      }),
+      clearOf: clear,
       from: from,
       occurrence: occurrence,
       elapsedMinutes: schedule.lengthMinutes,
+      admits: stored == null
+          ? null
+          : (start, end) {
+              return rules.policy.admitsChange(
+                stored,
+                start,
+                end,
+                now,
+                isAllDay: false,
+              );
+            },
+      throughSecondPass: true,
     );
     if (slot == null) {
       return null;
+    }
+    // [CalendarEditRules.firstSlot] takes a slot whose sharing entries the
+    // policy all allows only where no slot is free.
+    for (final other in clear) {
+      if (NoOverlapsPolicy.rangeSharesTime(slot.start, slot.end, other)) {
+        return null;
+      }
     }
     return CalendarSchedule.of(slot.start, slot.end, isAllDay: false);
   }

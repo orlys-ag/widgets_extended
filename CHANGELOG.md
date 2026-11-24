@@ -1192,8 +1192,39 @@ since passed a time after which the edit policy refused that range or that
 edge, as `lockPast` does at midnight. Its release now asks the policy
 again, as a release over another day's cell does, and requests nothing
 where it refuses; at the new minute the strip's marks and the landing label
-already drop the range it refuses. Let go in the frame in which the store moved the bar's
-other edge, it requested that edge back; it now requests nothing.
+drop the range it refuses. Let go in the frame in which
+the store moved the bar's other edge, it requested that edge back; it now
+requests nothing.
+- Fix: in Week and Day, a drag held still while the clock passed a time
+after which the edit policy refused its landing, as `lockEarlierToday`
+refuses a time once it is past, kept showing that landing, which the
+release then refused: a bar's move, over a day or into the slots, and a
+block's under a policy that allows overlaps. A new minute now asks the
+drop gate again for every drag, as a reload does, so the landing label
+shows that nothing lands there.
+- Added to `CalendarEditRules.firstSlot` `throughSecondPass`, which reads a
+stretch the day's clock repeats in time order, its second pass once the
+first pass's slots are done and before the time after it, and `admits`,
+which passes over a slot it refuses.
+- Added `CalendarDates.clockGoesBackOn`, the instant a day's clock goes back,
+which starts the second pass of the stretch it repeats, or null where it does
+not go back: on the clock of a `TZDateTime` day's zone, and on the device's
+otherwise.
+- Fix: `CalendarScheduleCheck.nextFree`, from a time before a stretch the
+clock repeats or in its first pass, never offered the stretch's second pass:
+in New York on 2026-11-01, with 00:00 EDT to 01:00 EST and 02:00 EST to
+04:00 EST taken, a schedule at 00:30 EDT got 04:00 EST, not the free
+01:00 EST, and in Santiago on 2026-04-04, in hours of 23:00 to 24:00 whose
+first pass was taken, it got none. Month's long press made its create the
+same way. Both now read the second pass after the first, also from a time
+in the first pass after its last slot.
+- Fix: `CalendarScheduleCheck.nextFree` of a stored entry offered a range
+the same check refused, as for an entry whose start the policy keeps; it
+now offers only a range the policy lets the entry take
+(`CalendarEditPolicy.admitsChange`).
+- Fix: `CalendarScheduleCheck.nextFree`, under a policy that lets some
+overlaps be, offered a range sharing time with another entry where the day
+had no free range; it now offers none there, as its doc says.
 - Fix: Agenda's time column was 64 px wide at any text size, so at larger
 sizes an item's start lost its end, as "10:45 AM" did in Roboto at a text
 scale of 1.3, and a gap row, 24 px tall, cut its time to that height, as at

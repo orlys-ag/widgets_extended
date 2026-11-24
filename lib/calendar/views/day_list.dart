@@ -260,33 +260,15 @@ ValueKey<String> dayListFailedKey(DateTime day) {
 final class DayListClock {
   const DayListClock._(this.day, this._next, this.fold, this.repeated);
 
-  /// The clock of [day], a day start. On a day whose clock repeats a
-  /// stretch, finds the instant it goes back by bisecting the day's minutes
-  /// on [DateTime.timeZoneOffset], which falls once in the day.
+  /// The clock of [day], a day start, which goes back at
+  /// [CalendarDates.clockGoesBackOn].
   factory DayListClock.of(DateTime day) {
-    final next = CalendarDates.addDays(day, 1);
-    final repeated = CalendarDates.repeatedStretchOf(day).inMinutes;
-    if (repeated == 0) {
-      return DayListClock._(day, next, null, 0);
-    }
-    final offset = day.timeZoneOffset;
-    // The day's start keeps its offset, and the next day's start has the
-    // fallen one.
-    var kept = 0;
-    var fallen = next.difference(day).inMinutes;
-    while (fallen - kept > 1) {
-      final middle = (kept + fallen) ~/ 2;
-      if (day.add(Duration(minutes: middle)).timeZoneOffset == offset) {
-        kept = middle;
-      } else {
-        fallen = middle;
-      }
-    }
+    final fold = CalendarDates.clockGoesBackOn(day);
     return DayListClock._(
       day,
-      next,
-      day.add(Duration(minutes: fallen)),
-      repeated,
+      CalendarDates.addDays(day, 1),
+      fold,
+      fold == null ? 0 : CalendarDates.repeatedStretchOf(day).inMinutes,
     );
   }
 
