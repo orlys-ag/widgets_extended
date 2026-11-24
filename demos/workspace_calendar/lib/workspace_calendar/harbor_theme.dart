@@ -36,6 +36,15 @@ abstract final class HarborColors {
   static const Color errorNotice = Color(0xFFFCE8E6);
   static const Color errorNoticeEdge = Color(0xFFF2B8B5);
   static const Color onErrorNotice = Color(0xFF8C1D18);
+
+  /// The greys of a form field's box on [surface]: [fieldOutline] for its
+  /// border, [fieldText] for its icon and value, [fieldTextDisabled] for
+  /// those of a field that takes no input, and [fieldLabel] for the label
+  /// above the box.
+  static const Color fieldOutline = Color(0xFFEBEBEB);
+  static const Color fieldText = Color(0xFF424242);
+  static const Color fieldTextDisabled = Color(0xFF9B9B9B);
+  static const Color fieldLabel = Color(0xFF6F6F6F);
 }
 
 /// How an item of one type is drawn: [tint] fills it, a 4 px [edge] runs

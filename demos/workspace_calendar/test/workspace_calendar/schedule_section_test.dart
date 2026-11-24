@@ -528,15 +528,37 @@ Finder rowFinder(String row) {
   throw ArgumentError.value(row, "row", "names no row");
 }
 
-/// The box of the schedule's row [row] finds: the decoration of the first
-/// [DecoratedBox] under it.
+/// The field of the schedule's row [row] finds, under the row's label: the
+/// first [DecoratedBox] under the row.
+Finder rowField(Finder row) {
+  return find.descendant(of: row, matching: find.byType(DecoratedBox)).first;
+}
+
+/// The box of the schedule's row [row] finds: the decoration of its field
+/// ([rowField]).
 BoxDecoration rowBox(WidgetTester tester, Finder row) {
-  return tester
-          .widget<DecoratedBox>(
-            find.descendant(of: row, matching: find.byType(DecoratedBox)).first,
-          )
-          .decoration
+  return tester.widget<DecoratedBox>(rowField(row)).decoration
       as BoxDecoration;
+}
+
+/// The colour of the border of the field of the schedule's row [row]
+/// finds, the same on each side; null where the field has none.
+Color? rowEdge(WidgetTester tester, Finder row) {
+  final border = rowBox(tester, row).border as Border?;
+  if (border == null) {
+    return null;
+  }
+  expect(border.isUniform, isTrue);
+  return border.top.color;
+}
+
+/// The clock icon at the start of the field of the schedule's row [row]
+/// finds.
+Finder rowIcon(Finder row) {
+  return find.descendant(
+    of: row,
+    matching: find.byIcon(Icons.access_time_rounded),
+  );
 }
 
 /// The texts the schedule's row [row] finds shows, in their order: its
@@ -561,22 +583,10 @@ SemanticsNode rowSemantics(WidgetTester tester, Finder row) {
   );
 }
 
-/// The chevron at the end of the schedule's row [row] finds.
+/// A chevron that points down in the schedule's row [row] finds, which the
+/// rows do not show.
 Finder rowChevron(Finder row) {
   return find.descendant(of: row, matching: find.byIcon(Icons.expand_more));
-}
-
-/// The cosine of the angle the chevron of the row [row] finds is turned
-/// by: 1 where it points down, -1 where it points up.
-double chevronTurn(WidgetTester tester, Finder row) {
-  return tester
-      .widget<Transform>(
-        find
-            .ancestor(of: rowChevron(row), matching: find.byType(Transform))
-            .first,
-      )
-      .transform
-      .storage[0];
 }
 
 /// The label of the Time segment of the view control of the picker in the
@@ -2759,8 +2769,8 @@ void main() {
   });
 
   testWidgets("FR6 after a failed Save, the end's message of a timed item "
-      "that spans days shows under the End row and tints that row with the "
-      "soft error colour, the Start row keeping the page's grey", (
+      "that spans days shows under the End row and outlines that row's field "
+      "in the error colour, the Start row's keeping its grey outline", (
     tester,
   ) async {
     final store = MemoryCalendarStore<ItemPayload>(
@@ -2779,8 +2789,8 @@ void main() {
     await tester.tap(saveFinder());
     await tester.pumpAndSettle();
     expect(rowMessage("End", endMessage), findsOneWidget);
-    expect(rowBox(tester, rowFinder("End")).color, HarborColors.errorNotice);
-    expect(rowBox(tester, rowFinder("Start")).color, HarborColors.background);
+    expect(rowEdge(tester, rowFinder("End")), HarborColors.error);
+    expect(rowEdge(tester, rowFinder("Start")), HarborColors.fieldOutline);
   });
 
   testWidgets("FR7 a tap on the End row while Start's picker is open, with "
@@ -5275,9 +5285,9 @@ void main() {
   });
 
   testWidgets("IP16 the Start row and the End row show their label, Start or "
-      "End, before their day, and a chevron after their day and time at "
-      "their end, 12 pixels in, which turns to point up as the row opens, on "
-      "a timed item and on an all-day one", (tester) async {
+      "End, above their field, which shows a clock icon before their day and "
+      "time and no chevron, and whose border turns the primary colour as the "
+      "row opens, on a timed item and on an all-day one", (tester) async {
     final store = storeOf(<CalendarItem>[
       task("item-1", "Write", at(9), at(10)),
       task(
@@ -5301,27 +5311,32 @@ void main() {
           );
         }
 
+        final field = tester.getRect(rowField(row));
         expect(
-          textRect(0).right,
+          textRect(0).bottom,
+          lessThanOrEqualTo(field.top),
+          reason: "$id $name",
+        );
+        expect(
+          tester.getRect(rowIcon(row)).right,
           lessThanOrEqualTo(textRect(1).left),
           reason: "$id $name",
         );
-        final chevron = tester.getRect(rowChevron(row));
         expect(
-          chevron.left,
-          greaterThan(textRect(texts.length - 1).right),
+          field.contains(tester.getRect(rowIcon(row)).center),
+          isTrue,
           reason: "$id $name",
         );
+        expect(rowChevron(row), findsNothing, reason: "$id $name");
         expect(
-          chevron.right,
-          tester.getRect(row).right - 12.0,
+          rowEdge(tester, row),
+          HarborColors.fieldOutline,
           reason: "$id $name",
         );
-        expect(chevronTurn(tester, row), 1.0, reason: "$id $name");
       }
       await tester.tap(rowFinder("Start"));
       await tester.pumpAndSettle();
-      expect(chevronTurn(tester, rowFinder("Start")), moreOrLessEquals(-1.0));
+      expect(rowEdge(tester, rowFinder("Start")), HarborColors.primary);
       await tester.tap(formButton("Cancel"));
       await tester.pumpAndSettle();
     }
@@ -5781,10 +5796,11 @@ void main() {
   });
 
   testWidgets("SB1 the Start row and the End row each show their label, "
-      "Start or End, inside them, 12 pixels in, before their day, which lies "
-      "48 pixels after the label's start; a screen reader hears a row's "
-      "label, day and time as one button, expanded while open; an all-day "
-      "schedule's rows show their label and day alone", (tester) async {
+      "Start or End, above their field, 4 pixels in and 2 above it, and the "
+      "field a clock icon 9 pixels in, inside its border, before their day, "
+      "10 pixels after the icon; a screen reader hears a row's label, day and "
+      "time as one button, expanded while open; an all-day schedule's rows "
+      "show their label and day alone", (tester) async {
     final handle = tester.ensureSemantics();
     await pumpSection(
       tester,
@@ -5795,15 +5811,22 @@ void main() {
       ("End", "10:00"),
     ]) {
       final row = rowFinder(name);
-      final box = tester.getRect(row);
+      final field = tester.getRect(rowField(row));
       final label = tester.getRect(
         find.descendant(of: row, matching: find.text(name)),
       );
+      final icon = tester.getRect(rowIcon(row));
       final day = tester.getRect(
         find.descendant(of: row, matching: find.text("Wed, Apr 22")),
       );
-      expect(label.left, box.left + 12.0, reason: name);
-      expect(day.left, box.left + 12.0 + 48.0, reason: name);
+      expect(label.top, tester.getRect(row).top, reason: name);
+      expect(label.left, field.left + 4.0, reason: name);
+      expect(field.top, label.bottom + 2.0, reason: name);
+      expect(field.left, tester.getRect(row).left, reason: name);
+      expect(field.right, tester.getRect(row).right, reason: name);
+      expect(icon.left, field.left + 9.0, reason: name);
+      expect(icon.center.dy, moreOrLessEquals(field.center.dy), reason: name);
+      expect(day.left, icon.right + 10.0, reason: name);
       expect(
         rowSemantics(tester, row),
         isSemantics(
@@ -5848,58 +5871,78 @@ void main() {
     handle.dispose();
   });
 
-  testWidgets("SB2 a row is a box 48 high with corners rounded by 12 and no "
-      "outline, filled with the page's grey, its label at 13 pixels in a "
-      "medium weight and its chevron in the muted colour, its day and time at "
-      "15 pixels in a bold weight in the text colour, and a tap anywhere on "
-      "it opens its picker", (tester) async {
+  testWidgets("SB2 a field is a white box with corners rounded by 8 and a "
+      "1-pixel border in the field outline grey, 8 pixels in at its sides "
+      "and 6 at its top and bottom inside the border, its content at least "
+      "28 high; its label is in the theme's small label style in a bold "
+      "weight in the field label grey, and its 20-pixel clock icon, day and "
+      "time in the field text grey, the day and time in the theme's medium "
+      "body style; it shows no chevron, and a tap anywhere on it opens its "
+      "picker", (tester) async {
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
     );
     for (final name in <String>["Start", "End"]) {
       final row = rowFinder(name);
+      final textTheme = Theme.of(tester.element(row)).textTheme;
       final box = rowBox(tester, row);
-      expect(tester.getSize(row).height, 48.0, reason: name);
-      expect(box.color, HarborColors.background, reason: name);
+      expect(box.color, HarborColors.surface, reason: name);
       expect(
         box.borderRadius,
-        const BorderRadius.all(Radius.circular(12.0)),
+        const BorderRadius.all(Radius.circular(8.0)),
         reason: name,
       );
-      expect(box.border, isNull, reason: name);
+      expect(
+        box.border,
+        Border.all(color: HarborColors.fieldOutline),
+        reason: name,
+      );
+      // Setup sanity: the body text's line is shorter than the content's
+      // least height, which sets the field's.
+      expect(
+        tester
+            .getSize(find.descendant(of: row, matching: find.text("Wed, Apr 22")))
+            .height,
+        lessThan(28.0),
+        reason: name,
+      );
+      expect(
+        tester.getSize(rowField(row)).height,
+        28.0 + 2.0 * 6.0 + 2.0,
+        reason: name,
+      );
       expect(rowInks(tester, row), <Color>[
-        HarborColors.textMuted,
-        HarborColors.text,
-        HarborColors.text,
+        HarborColors.fieldLabel,
+        HarborColors.fieldText,
+        HarborColors.fieldText,
       ], reason: name);
+      final texts = rowTexts(tester, row);
       expect(
-        <(double?, FontWeight?)>[
-          for (final text in rowTexts(tester, row))
-            (text.style!.fontSize, text.style!.fontWeight),
-        ],
-        <(double?, FontWeight?)>[
-          (13.0, FontWeight.w500),
-          (15.0, FontWeight.w600),
-          (15.0, FontWeight.w600),
-        ],
+        (texts.first.style!.fontSize, texts.first.style!.fontWeight),
+        (textTheme.labelSmall!.fontSize, FontWeight.bold),
         reason: name,
       );
-      expect(
-        tester.widget<Icon>(rowChevron(row)).color,
-        HarborColors.textMuted,
-        reason: name,
-      );
+      for (final text in texts.skip(1)) {
+        expect(
+          (text.style!.fontSize, text.style!.fontWeight),
+          (textTheme.bodyMedium!.fontSize, textTheme.bodyMedium!.fontWeight),
+          reason: name,
+        );
+      }
+      final icon = tester.widget<Icon>(rowIcon(row));
+      expect((icon.size, icon.color), (20.0, HarborColors.fieldText));
+      expect(rowChevron(row), findsNothing, reason: name);
     }
-    final end = tester.getRect(rowFinder("End"));
+    final end = tester.getRect(rowField(rowFinder("End")));
     await tester.tapAt(end.bottomRight - const Offset(3.0, 3.0));
     await tester.pumpAndSettle();
     expect(panelPicker("End time"), findsOneWidget);
   });
 
-  testWidgets("SB3 a row whose picker is open is filled with the primary "
-      "tint, all it shows drawn in the primary colour and its chevron "
-      "pointing up, the other row keeping its look; it turns so over the "
+  testWidgets("SB3 a field whose picker is open turns its border the "
+      "primary colour, its fill, its label and what it shows keeping their "
+      "colours, the other field keeping its look; it turns so over the "
       "theme's motion as its picker opens, and back as it closes, and at "
       "once where the platform asks for no animations", (tester) async {
     await pumpSection(
@@ -5912,44 +5955,42 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 240));
     final half = Color.lerp(
-      HarborColors.background,
-      HarborColors.primaryTint,
+      HarborColors.fieldOutline,
+      HarborColors.primary,
       0.5,
     );
-    expect(rowBox(tester, row).color, half);
-    expect(chevronTurn(tester, row), moreOrLessEquals(0.0, epsilon: 1e-9));
+    expect(rowEdge(tester, row), half);
     await tester.pump(const Duration(milliseconds: 240));
-    expect(rowBox(tester, row).color, HarborColors.primaryTint);
+    expect(rowEdge(tester, row), HarborColors.primary);
+    expect(rowBox(tester, row).color, HarborColors.surface);
     expect(rowInks(tester, row), <Color>[
-      HarborColors.primary,
-      HarborColors.primary,
-      HarborColors.primary,
+      HarborColors.fieldLabel,
+      HarborColors.fieldText,
+      HarborColors.fieldText,
     ]);
-    expect(tester.widget<Icon>(rowChevron(row)).color, HarborColors.primary);
-    expect(chevronTurn(tester, row), moreOrLessEquals(-1.0));
-    expect(rowBox(tester, rowFinder("End")).color, HarborColors.background);
+    expect(tester.widget<Icon>(rowIcon(row)).color, HarborColors.fieldText);
+    expect(rowEdge(tester, rowFinder("End")), HarborColors.fieldOutline);
 
     await tester.tap(row);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 240));
-    expect(rowBox(tester, row).color, half);
+    expect(rowEdge(tester, row), half);
     await tester.pumpAndSettle();
-    expect(rowBox(tester, row).color, HarborColors.background);
+    expect(rowEdge(tester, row), HarborColors.fieldOutline);
 
     disableAnimations(tester);
     await tester.pump();
     await tester.tap(row);
     await tester.pump();
-    expect(rowBox(tester, row).color, HarborColors.primaryTint);
+    expect(rowEdge(tester, row), HarborColors.primary);
   });
 
-  testWidgets("SB4 a row that takes no input shows its day and time in the "
-      "muted colour with no box around them and no chevron, which a screen "
-      "reader hears as a disabled button: an all-day item's End row where "
-      "the options refuse spanning days and the item ends on its start's "
-      "day, and each row of a locked section, unless a message tints it", (
-    tester,
-  ) async {
+  testWidgets("SB4 a field that takes no input shows its icon, day and time "
+      "in the disabled field grey with no fill and no border, 2 pixels in at "
+      "its top and bottom, which a screen reader hears as a disabled button: "
+      "an all-day item's End row where the options refuse spanning days and "
+      "the item ends on its start's day, and each row of a locked section; a "
+      "message outlines it in the error colour", (tester) async {
     final handle = tester.ensureSemantics();
     await pumpSection(
       tester,
@@ -5962,23 +6003,28 @@ void main() {
       ),
     );
     final end = rowFinder("End");
-    expect(rowBox(tester, end).color, Colors.transparent);
-    expect(rowInks(tester, end).last, HarborColors.textMuted);
-    expect(rowChevron(end), findsNothing);
+    expect(rowBox(tester, end).color, isNull);
+    expect(rowEdge(tester, end), isNull);
+    expect(rowInks(tester, end).last, HarborColors.fieldTextDisabled);
+    expect(
+      tester.widget<Icon>(rowIcon(end)).color,
+      HarborColors.fieldTextDisabled,
+    );
+    expect(tester.getSize(rowField(end)).height, 28.0 + 2.0 * 2.0);
     expect(
       rowSemantics(tester, end),
       isSemantics(isButton: true, hasEnabledState: true, isEnabled: false),
     );
     // Setup sanity: the Start row takes input.
-    expect(rowBox(tester, rowFinder("Start")).color, HarborColors.background);
+    expect(rowBox(tester, rowFinder("Start")).color, HarborColors.surface);
 
     final schedule = CalendarSchedule.of(at(9), at(10), isAllDay: false);
     await pumpSection(tester, checkOf(schedule), locked: true);
     for (final name in <String>["Start", "End"]) {
       final row = rowFinder(name);
-      expect(rowBox(tester, row).color, Colors.transparent, reason: name);
-      expect(rowInks(tester, row).last, HarborColors.textMuted, reason: name);
-      expect(rowChevron(row), findsNothing, reason: name);
+      expect(rowBox(tester, row).color, isNull, reason: name);
+      expect(rowEdge(tester, row), isNull, reason: name);
+      expect(rowInks(tester, row).last, HarborColors.fieldTextDisabled);
     }
     await pumpSection(
       tester,
@@ -5986,14 +6032,17 @@ void main() {
       locked: true,
       errors: const <String, String>{"end": "Too late."},
     );
-    expect(rowBox(tester, end).color, HarborColors.errorNotice);
+    expect(rowEdge(tester, end), HarborColors.error);
+    expect(rowBox(tester, end).color, isNull);
+    expect(rowEdge(tester, rowFinder("Start")), isNull);
     handle.dispose();
   });
 
-  testWidgets("SB5 a row's message shows under it, at its left and 6 pixels "
-      "under it, in the error colour, and tints the row with the soft error "
-      "colour, its label and chevron in the error colour, while its picker "
-      "is closed; the other row keeps the page's grey", (tester) async {
+  testWidgets("SB5 a row's message shows under its field, at its left and 6 "
+      "pixels under it, in the error colour, and outlines the field and "
+      "colours the row's label in the error colour; while the row's picker is "
+      "open the field's border is the primary colour, the label keeping the "
+      "error colour; the other row keeps its look", (tester) async {
     await pumpSection(
       tester,
       checkOf(CalendarSchedule.of(at(9), at(10), isAllDay: false)),
@@ -6001,23 +6050,28 @@ void main() {
     );
     final message = find.byKey(scheduleEndErrorKey);
     final end = rowFinder("End");
+    final field = tester.getRect(rowField(end));
     expect(tester.widget<Text>(message).data, "Too late.");
     expect(tester.widget<Text>(message).style!.color, HarborColors.error);
-    expect(tester.getRect(message).left, tester.getRect(end).left);
-    expect(tester.getRect(message).top, tester.getRect(end).bottom + 6.0);
+    expect(tester.getRect(message).left, field.left);
+    expect(tester.getRect(message).top, field.bottom + 6.0);
     expect(find.byKey(scheduleStartErrorKey), findsNothing);
-    expect(rowBox(tester, end).color, HarborColors.errorNotice);
-    expect(rowInks(tester, end).first, HarborColors.error);
-    expect(tester.widget<Icon>(rowChevron(end)).color, HarborColors.error);
-    expect(rowBox(tester, rowFinder("Start")).color, HarborColors.background);
+    expect(rowEdge(tester, end), HarborColors.error);
+    expect(rowInks(tester, end), <Color>[
+      HarborColors.error,
+      HarborColors.fieldText,
+      HarborColors.fieldText,
+    ]);
+    expect(rowEdge(tester, rowFinder("Start")), HarborColors.fieldOutline);
+    expect(rowInks(tester, rowFinder("Start")).first, HarborColors.fieldLabel);
     await tester.tap(end);
     await tester.pumpAndSettle();
-    expect(rowBox(tester, end).color, HarborColors.primaryTint);
-    expect(rowInks(tester, end).first, HarborColors.primary);
+    expect(rowEdge(tester, end), HarborColors.primary);
+    expect(rowInks(tester, end).first, HarborColors.error);
     await revealForTap(tester, end);
     await tester.tap(end);
     await tester.pumpAndSettle();
-    expect(rowBox(tester, end).color, HarborColors.errorNotice);
+    expect(rowEdge(tester, end), HarborColors.error);
 
     await pumpSection(
       tester,
@@ -6028,17 +6082,17 @@ void main() {
     );
     await tester.pumpAndSettle();
     final start = rowFinder("Start");
-    expect(rowBox(tester, start).color, HarborColors.errorNotice);
+    expect(rowEdge(tester, start), HarborColors.error);
     expect(
       tester.getRect(find.byKey(scheduleStartErrorKey)).top,
-      tester.getRect(start).bottom + 6.0,
+      tester.getRect(rowField(start)).bottom + 6.0,
     );
-    expect(rowBox(tester, rowFinder("End")).color, HarborColors.background);
+    expect(rowEdge(tester, rowFinder("End")), HarborColors.fieldOutline);
   });
 
-  testWidgets("SB6 a row's day and time too wide for its box, as a 12-hour "
-      "time in a narrow section, shrink together to fit between the row's "
-      "label and its chevron, 8 pixels before the chevron, whole", (
+  testWidgets("SB6 a row's day and time too wide for its field, as a 12-hour "
+      "time in a narrow section, shrink together to fit between the clock "
+      "icon and the field's end, 9 pixels in, inside its border, whole", (
     tester,
   ) async {
     final store = storeOf(<CalendarItem>[]);
@@ -6070,13 +6124,13 @@ void main() {
     expect(tester.getRect(text).width, lessThan(paragraph.size.width));
     expect(
       tester.getRect(text).right,
-      moreOrLessEquals(tester.getRect(rowChevron(row)).left - 8.0),
+      moreOrLessEquals(tester.getRect(rowField(row)).right - 9.0),
     );
     expect(
       tester
           .getRect(find.descendant(of: row, matching: find.text("Wed, Apr 22")))
           .left,
-      tester.getRect(row).left + 12.0 + 48.0,
+      moreOrLessEquals(tester.getRect(rowIcon(row)).right + 10.0),
     );
   });
 }
