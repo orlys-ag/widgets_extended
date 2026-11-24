@@ -1540,9 +1540,11 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// sharing time only with entries its [CalendarEditPolicy.mayOverlap]
   /// allows; or where it gives none, at the first slot of the hours from
   /// that start, over an entry, refused or not, which asks [_policy]
-  /// nothing. Each is a slot whose times the clock reads, in that start's
-  /// occurrence where [day]'s clock repeats its time, so none starts before
-  /// it. Where [afterNow] and [day] is today, the start is the later of
+  /// nothing. Each is a slot whose times the clock reads, so none starts
+  /// before that start, and the slots are tried in the order of their
+  /// instants: where [day]'s clock repeats a stretch, from that start's
+  /// occurrence, and from the first pass on through the second before the
+  /// time after the stretch. Where [afterNow] and [day] is today, the start is the later of
   /// that start and the current time ([CalendarNow.timeOnToday]). It takes
   /// [globalRect] as its rect and returns the start of the range it
   /// reports with [_createRange]'s future. Where it leaves no such slot in
@@ -1568,7 +1570,8 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       return shown.entry;
     });
     final slot =
-        rules.firstSlot(start, clearOf: shown) ?? rules.firstSlot(start);
+        rules.firstSlot(start, clearOf: shown, throughSecondPass: true) ??
+        rules.firstSlot(start, throughSecondPass: true);
     if (slot == null) {
       widget.onCreateRefused?.call(day);
       return null;

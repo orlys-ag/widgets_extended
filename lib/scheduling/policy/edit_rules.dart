@@ -378,6 +378,24 @@ final class CalendarEditRules<T> {
   /// where it admits the day's start. Where the clock reads the earliest
   /// start once, that is [CalendarEarliestStart.firstSlotMinute].
   ///
+  /// Where [throughSecondPass] is true and the search reads the first pass
+  /// of a stretch the day's clock repeats, from a minute before the
+  /// stretch's end, it reads the stretch's second pass once the first
+  /// pass's slots are done, before the slots after the stretch, so the
+  /// slots come in the order of their starts' instants, and of two slots
+  /// as the next paragraph weighs them the earlier in time wins. The second
+  /// pass's slots start from the latest of the hours' start, the stretch's
+  /// start and the first wall minute in that pass not before [start]'s
+  /// earliest start, rounded up to the slot grid, whatever [from] names,
+  /// as each of them is after every first-pass start. Where it is false,
+  /// the search reads the one occurrence above, as a caller that searches
+  /// each pass on its own asks.
+  ///
+  /// Where [admits] is given, a slot it refuses is passed over: it is asked
+  /// of each slot the entries of [clearOf] leave, one no entry shares or
+  /// one taken as the next paragraph allows, in turn, before the slot is
+  /// taken.
+  ///
   /// Throws an [ArgumentError], in every build, for a [lengthMinutes] or
   /// an [elapsedMinutes] under 1, and for an [elapsedMinutes] given beside
   /// a [lengthMinutes].
@@ -389,6 +407,8 @@ final class CalendarEditRules<T> {
     int? lengthMinutes,
     DateTime? occurrence,
     int? elapsedMinutes,
+    bool Function(DateTime start, DateTime end)? admits,
+    bool throughSecondPass = false,
   }) {
     if (lengthMinutes != null && lengthMinutes < 1) {
       throw ArgumentError.value(lengthMinutes, "lengthMinutes", "is under 1");
@@ -412,6 +432,8 @@ final class CalendarEditRules<T> {
     final floor = occurrence == null
         ? start.firstSlotMinute(slotMinutes)
         : _firstSlotMinuteIn(start, occurrence);
+    final reading = occurrence ?? start.occurrence;
+    final secondPass = throughSecondPass ? _secondPassOf(start, reading) : null;
     // The first slot whose sharing entries the policy all allows, which the
     // scan holds while it looks on for a slot no entry shares.
     ({DateTime start, DateTime end})? held;
@@ -422,7 +444,8 @@ final class CalendarEditRules<T> {
       slotMinutes,
       length: elapsedMinutes ?? lengthMinutes,
       elapsed: elapsedMinutes != null,
-      occurrence: occurrence ?? start.occurrence,
+      occurrence: reading,
+      secondPass: secondPass,
       isFree: (slotStart, slotEnd) {
         CalendarOverlapCandidate<T>? candidate;
         for (final other in clearOf) {
@@ -440,6 +463,9 @@ final class CalendarEditRules<T> {
             return false;
           }
         }
+        if (admits != null && !admits(slotStart, slotEnd)) {
+          return false;
+        }
         if (candidate != null) {
           held = (start: slotStart, end: slotEnd);
           return false;
@@ -448,6 +474,38 @@ final class CalendarEditRules<T> {
       },
     );
     return free ?? held;
+  }
+
+  /// The second pass [firstSlot] reads after the first, of a search of
+  /// [start]'s day that reads its clock in [reading]'s occurrence: the
+  /// instant the clock goes back ([clockGoesBackOn]) and the minute its
+  /// slots start from no earlier than, the later of the hours' start and
+  /// the earliest start's floor in that pass. Null where the clock does not
+  /// go back, where [start] closes the day, and where the search reads the
+  /// second pass already.
+  ({DateTime at, int from})? _secondPassOf(
+    CalendarEarliestStart start,
+    DateTime? reading,
+  ) {
+    if (start.closesDay) {
+      return null;
+    }
+    final at = clockGoesBackOn(start.day);
+    if (at == null) {
+      return null;
+    }
+    final stretchStart =
+        CalendarDates.dayNumber(start.day) * CalendarDates.minutesPerDay +
+        CalendarDates.minuteOfDay(at);
+    final read = CalendarDates.timeAtWallMinute(
+      stretchStart,
+      from: reading,
+      zone: zoneOf(start.day),
+    );
+    if (read == null || !read.isBefore(at)) {
+      return null;
+    }
+    return (at: at, from: math.max(hours.start, _firstSlotMinuteIn(start, at)));
   }
 
   /// The minute of [start]'s day from which the slots of [slotMinutes]

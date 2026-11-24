@@ -906,6 +906,32 @@ bool isLaterMidnight(DateTime time) {
       CalendarDates.isLaterOccurrence(time);
 }
 
+/// The instant [day]'s clock goes back, which starts the second pass of
+/// the stretch it reads twice ([CalendarDates.repeatedStretchOf]); null
+/// where it does not go back. [day] is a day start, on the zone's clock of
+/// a `TZDateTime` and the device's otherwise. Bisects the day's minutes on
+/// [DateTime.timeZoneOffset], which falls once in it.
+DateTime? clockGoesBackOn(DateTime day) {
+  if (CalendarDates.repeatedStretchOf(day) == Duration.zero) {
+    return null;
+  }
+  final next = CalendarDates.addDays(day, 1);
+  final offset = day.timeZoneOffset;
+  // The day's start keeps its offset, and the next day's start has the
+  // fallen one.
+  var kept = 0;
+  var fallen = next.difference(day).inMinutes;
+  while (fallen - kept > 1) {
+    final middle = (kept + fallen) ~/ 2;
+    if (day.add(Duration(minutes: middle)).timeZoneOffset == offset) {
+      kept = middle;
+    } else {
+      fallen = middle;
+    }
+  }
+  return day.add(Duration(minutes: fallen));
+}
+
 /// The first range of [length] wall minutes, [slotMinutes] where it is
 /// null, on [day] whose start its clock reads
 /// ([CalendarDates.timeAtWallMinute]) and whose end converts
@@ -923,6 +949,15 @@ bool isLaterMidnight(DateTime time) {
 /// ([hoursEndMinuteOf]); the search takes each start from [from] before
 /// [until], since across the instant a clock goes back a later start's
 /// range can end at an earlier wall minute.
+///
+/// Where [secondPass] is given, its `at` the instant [day]'s clock goes back
+/// ([clockGoesBackOn]), and the search reads the first pass of the stretch
+/// the clock repeats from a minute before the stretch's end, it reads the
+/// second pass once the first pass's minutes are done, before the minutes
+/// after the stretch, so the ranges come in the order of their starts'
+/// instants: from the stretch's start, or from its `from` where that is
+/// later, on the grid of [slotMinutes], each in the second pass, ending by
+/// [until] as any range does. [isFree] is asked of the ranges in that order.
 ({DateTime start, DateTime end})? firstReadableSlot(
   DateTime day,
   int from,
@@ -932,49 +967,90 @@ bool isLaterMidnight(DateTime time) {
   bool elapsed = false,
   DateTime? occurrence,
   bool Function(DateTime start, DateTime end)? isFree,
+  ({DateTime at, int from})? secondPass,
 }) {
   final zone = zoneOf(day);
   final base = CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay;
   final span = length ?? slotMinutes;
-  var minute = from;
-  if (elapsed) {
-    final duration = Duration(minutes: span);
-    while (minute < until) {
-      final start = CalendarDates.timeAtWallMinute(
-        base + minute,
-        from: occurrence,
-        zone: zone,
-      );
-      if (start != null) {
-        final end = start.add(duration);
-        if (CalendarDates.wallSpanOf(start, end).end - base <= until &&
-            (isFree?.call(start, end) ?? true)) {
-          return (start: start, end: end);
-        }
+  final duration = Duration(minutes: span);
+
+  bool fits(int minute) {
+    return elapsed ? minute < until : minute + span <= until;
+  }
+
+  ({DateTime start, DateTime end})? rangeAt(int minute, DateTime? reading) {
+    final start = CalendarDates.timeAtWallMinute(
+      base + minute,
+      from: reading,
+      zone: zone,
+    );
+    if (start == null) {
+      return null;
+    }
+    if (elapsed) {
+      final end = start.add(duration);
+      if (CalendarDates.wallSpanOf(start, end).end - base <= until &&
+          (isFree?.call(start, end) ?? true)) {
+        return (start: start, end: end);
       }
-      minute = (minute ~/ slotMinutes + 1) * slotMinutes;
+      return null;
+    }
+    final end = CalendarDates.rangeEndAtWallMinute(
+      start,
+      base + minute + span,
+      from: reading,
+    );
+    if (end != null && (isFree?.call(start, end) ?? true)) {
+      return (start: start, end: end);
     }
     return null;
   }
-  while (minute + span <= until) {
-    final start = CalendarDates.timeAtWallMinute(
-      base + minute,
-      from: occurrence,
-      zone: zone,
-    );
-    final end = start == null
-        ? null
-        : CalendarDates.rangeEndAtWallMinute(
-            start,
-            base + minute + span,
-            from: occurrence,
-          );
-    if (start != null && end != null && (isFree?.call(start, end) ?? true)) {
-      return (start: start, end: end);
+
+  // The second pass's minutes, from [passFrom] before [passEnd], read once
+  // the walk reaches [passEnd]; null once read, or where none is.
+  int? passFrom;
+  var passEnd = 0;
+  if (secondPass != null) {
+    final stretchStart = CalendarDates.minuteOfDay(secondPass.at);
+    passEnd = stretchStart + CalendarDates.repeatedStretchOf(day).inMinutes;
+    if (from < passEnd) {
+      final first = math.max(secondPass.from, stretchStart);
+      passFrom = (first + slotMinutes - 1) ~/ slotMinutes * slotMinutes;
+    }
+  }
+
+  ({DateTime start, DateTime end})? secondPassRange(int first) {
+    for (
+      var minute = first;
+      minute < passEnd && fits(minute);
+      minute += slotMinutes
+    ) {
+      final range = rangeAt(minute, secondPass!.at);
+      if (range != null) {
+        return range;
+      }
+    }
+    return null;
+  }
+
+  var minute = from;
+  while (fits(minute)) {
+    final pass = passFrom;
+    if (pass != null && minute >= passEnd) {
+      passFrom = null;
+      final range = secondPassRange(pass);
+      if (range != null) {
+        return range;
+      }
+    }
+    final range = rangeAt(minute, occurrence);
+    if (range != null) {
+      return range;
     }
     minute = (minute ~/ slotMinutes + 1) * slotMinutes;
   }
-  return null;
+  final pass = passFrom;
+  return pass == null ? null : secondPassRange(pass);
 }
 
 /// The minute of its last day at which the hours read a range from

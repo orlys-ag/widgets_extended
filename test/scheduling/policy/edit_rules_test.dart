@@ -1302,5 +1302,184 @@ void main() {
         throwsArgumentNamed("elapsedMinutes"),
       );
     });
+
+    /// New York's 2026-11-01, an entry from its 00:00 EDT to the instant
+    /// its clock goes back, which takes the repeated stretch's first pass,
+    /// and one from 02:00 EST to 04:00 EST, so the stretch's second pass,
+    /// 01:00 EST to 02:00 EST, is its first free time.
+    tz.TZDateTime newYorkDay() {
+      return tz.TZDateTime(tz.getLocation("America/New_York"), 2026, 11, 1);
+    }
+
+    List<CalendarEntry<String>> firstPassTaken() {
+      return <CalendarEntry<String>>[
+        entryOf(
+          "a",
+          inNewYork(DateTime.utc(2026, 11, 1, 4)),
+          inNewYork(DateTime.utc(2026, 11, 1, 6)),
+        ),
+        entryOf(
+          "b",
+          inNewYork(DateTime.utc(2026, 11, 1, 7)),
+          inNewYork(DateTime.utc(2026, 11, 1, 9)),
+        ),
+      ];
+    }
+
+    test("EZ8 through the second pass, the first slot from the day's start "
+        "is the free second pass of a stretch whose first pass is taken, "
+        "before the free time after the stretch, which a search of the "
+        "first pass alone gets", () {
+      final start = CalendarEarliestStart(newYorkDay(), newYorkDay());
+      final rules = rulesOf();
+      expectSlot(
+        rules.firstSlot(
+          start,
+          clearOf: firstPassTaken(),
+          throughSecondPass: true,
+        ),
+        DateTime.utc(2026, 11, 1, 6),
+        DateTime.utc(2026, 11, 1, 6, 15),
+      );
+      expectSlot(
+        rules.firstSlot(
+          start,
+          clearOf: firstPassTaken(),
+          elapsedMinutes: 60,
+          throughSecondPass: true,
+        ),
+        DateTime.utc(2026, 11, 1, 6),
+        DateTime.utc(2026, 11, 1, 7),
+      );
+      expectSlot(
+        rules.firstSlot(start, clearOf: firstPassTaken()),
+        DateTime.utc(2026, 11, 1, 9),
+        DateTime.utc(2026, 11, 1, 9, 15),
+      );
+    });
+
+    test("EZ9 through the second pass, a free first-pass slot comes before "
+        "the second pass, and the second pass starts no earlier than the "
+        "hours", () {
+      final start = CalendarEarliestStart(newYorkDay(), newYorkDay());
+      expectSlot(
+        rulesOf().firstSlot(
+          start,
+          clearOf: <CalendarEntry<String>>[firstPassTaken().last],
+          from: 75,
+          throughSecondPass: true,
+        ),
+        DateTime.utc(2026, 11, 1, 5, 15),
+        DateTime.utc(2026, 11, 1, 5, 30),
+      );
+      expectSlot(
+        rulesOf(
+          hours: CalendarDayHours(90, 24 * 60),
+        ).firstSlot(start, clearOf: firstPassTaken(), throughSecondPass: true),
+        DateTime.utc(2026, 11, 1, 6, 30),
+        DateTime.utc(2026, 11, 1, 6, 45),
+      );
+    });
+
+    test("EZ10 through the second pass, hours that end with a stretch the "
+        "clock repeats at the day's end offer its second pass where the "
+        "first is taken (Santiago, 2026-04-04)", () {
+      final santiago = tz.getLocation("America/Santiago");
+      final day = tz.TZDateTime(santiago, 2026, 4, 4);
+      // 23:00 -03 to 24:00 -03, the first pass.
+      final first = entryOf(
+        "first",
+        tz.TZDateTime.from(DateTime.utc(2026, 4, 5, 2), santiago),
+        tz.TZDateTime.from(DateTime.utc(2026, 4, 5, 3), santiago),
+      );
+      final rules = rulesOf(hours: CalendarDayHours(23 * 60, 24 * 60));
+      final start = CalendarEarliestStart(day, day);
+      final slot = rules.firstSlot(
+        start,
+        clearOf: <CalendarEntry<String>>[first],
+        throughSecondPass: true,
+      );
+      expect(slot, isNotNull);
+      expect(
+        (slot!.start.millisecondsSinceEpoch, slot.end.millisecondsSinceEpoch),
+        (
+          DateTime.utc(2026, 4, 5, 3).millisecondsSinceEpoch,
+          DateTime.utc(2026, 4, 5, 3, 15).millisecondsSinceEpoch,
+        ),
+      );
+      expect(
+        rules.firstSlot(start, clearOf: <CalendarEntry<String>>[first]),
+        isNull,
+      );
+    });
+
+    test("EZ11 through the second pass, under a policy that limits overlaps "
+        "a free second-pass slot wins over a first-pass slot whose sharing "
+        "entries the policy allows, and with none free the first such slot "
+        "in time is taken", () {
+      final start = CalendarEarliestStart(newYorkDay(), newYorkDay());
+      final rules = CalendarEditRules<String>(
+        policy: _Pairing(),
+        hours: CalendarDayHours.allDay,
+        slotMinutes: 15,
+      );
+      final tentative = CalendarEntry<String>(
+        id: "a",
+        start: inNewYork(DateTime.utc(2026, 11, 1, 4)),
+        end: inNewYork(DateTime.utc(2026, 11, 1, 6)),
+        title: "a",
+        color: const Color(0xFF336699),
+        payload: "tentative a",
+      );
+      final entries = <CalendarEntry<String>>[tentative, firstPassTaken().last];
+      expectSlot(
+        rules.firstSlot(start, clearOf: entries, throughSecondPass: true),
+        DateTime.utc(2026, 11, 1, 6),
+        DateTime.utc(2026, 11, 1, 6, 15),
+      );
+      final secondTentative = CalendarEntry<String>(
+        id: "c",
+        start: inNewYork(DateTime.utc(2026, 11, 1, 6)),
+        end: inNewYork(DateTime.utc(2026, 11, 2, 5)),
+        title: "c",
+        color: const Color(0xFF336699),
+        payload: "tentative c",
+      );
+      expectSlot(
+        rules.firstSlot(
+          start,
+          clearOf: <CalendarEntry<String>>[tentative, secondTentative],
+          throughSecondPass: true,
+        ),
+        DateTime.utc(2026, 11, 1, 4),
+        DateTime.utc(2026, 11, 1, 4, 15),
+      );
+    });
+  });
+
+  test("ER20 a first slot whose times admits refuses is passed over, and "
+      "admits is asked only of a slot the entries leave", () {
+    final asked = <DateTime>[];
+    final found = rulesOf(hours: office).firstSlot(
+      CalendarEarliestStart(tuesday, tuesday),
+      clearOf: <CalendarEntry<String>>[
+        entryOf("busy", at(tuesday, 9), at(tuesday, 9, 30)),
+      ],
+      admits: (start, end) {
+        asked.add(start);
+        return !start.isBefore(at(tuesday, 10));
+      },
+    );
+    expect(found, slot(at(tuesday, 10), at(tuesday, 10, 15)));
+    // The office hours start at 08:00; 09:00 and 09:15 are taken.
+    expect(asked, <DateTime>[
+      at(tuesday, 8),
+      at(tuesday, 8, 15),
+      at(tuesday, 8, 30),
+      at(tuesday, 8, 45),
+      at(tuesday, 9, 30),
+      at(tuesday, 9, 45),
+      at(tuesday, 10),
+    ]);
   });
 }

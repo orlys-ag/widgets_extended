@@ -83,6 +83,25 @@ List<CalendarScheduleProblem> problemsOf(
 
 /// Holds every entry as one in progress, its start fixed and its end
 /// resizable, and admits only a change to a timed entry.
+/// A policy that forbids overlaps but lets a change share time with an
+/// entry whose id is "soft" ([CalendarEditPolicy.mayOverlap]).
+final class _SoftOverlaps extends CalendarEditPolicy<String> {
+  const _SoftOverlaps();
+
+  @override
+  bool get allowsOverlaps {
+    return false;
+  }
+
+  @override
+  bool mayOverlap(
+    CalendarOverlapCandidate<String> candidate,
+    CalendarEntry<String> other,
+  ) {
+    return other.id == "soft";
+  }
+}
+
 final class _HeldTimedOnly extends CalendarEditPolicy<String> {
   const _HeldTimedOnly();
 
@@ -1114,6 +1133,142 @@ void main() {
       );
       expect(free.lengthMinutes, 55);
     });
+
+    test("SC25 the next free range of a schedule before a stretch the clock "
+        "repeats is the stretch's free second pass, before the free time "
+        "after it", () {
+      final check = newCheck(
+        unrestricted,
+        // 00:30 EDT to 01:00 EDT.
+        inNewYorkFrom(
+          DateTime.utc(2026, 11, 1, 4, 30),
+          DateTime.utc(2026, 11, 1, 5),
+        ),
+        beforeTheChange,
+        others: <CalendarEntry<String>>[
+          // 00:00 EDT to the instant the clock goes back.
+          entryInNewYork(
+            "a",
+            DateTime.utc(2026, 11, 1, 4),
+            DateTime.utc(2026, 11, 1, 6),
+          ),
+          // 02:00 EST to 04:00 EST.
+          entryInNewYork(
+            "b",
+            DateTime.utc(2026, 11, 1, 7),
+            DateTime.utc(2026, 11, 1, 9),
+          ),
+        ],
+      );
+      // Setup sanity: the schedule shares the first pass's entry's time.
+      expect(check.overlaps.map((entry) => entry.id), <String>["a"]);
+      final free = check.nextFree;
+      expect(free, isNotNull);
+      expectTimes(
+        free!.timesOn(newYork),
+        DateTime.utc(2026, 11, 1, 6),
+        DateTime.utc(2026, 11, 1, 6, 30),
+      );
+    });
+
+    test("SC26 the next free range in hours that end with a stretch the "
+        "clock repeats at the day's end is its second pass where the first "
+        "is taken (Santiago, 2026-04-04)", () {
+      final santiago = tz.getLocation("America/Santiago");
+      tz.TZDateTime inSantiago(DateTime utc) {
+        return tz.TZDateTime.from(utc, santiago);
+      }
+
+      final first = CalendarEntry<String>(
+        id: "first",
+        // 23:00 -03 to 24:00 -03.
+        start: inSantiago(DateTime.utc(2026, 4, 5, 2)),
+        end: inSantiago(DateTime.utc(2026, 4, 5, 3)),
+        title: "first",
+        color: const Color(0xFF336699),
+        payload: "first",
+      );
+      final check = CalendarScheduleCheck<String>(
+        schedule: CalendarSchedule.of(
+          inSantiago(DateTime.utc(2026, 4, 5, 2)),
+          inSantiago(DateTime.utc(2026, 4, 5, 2, 30)),
+          isAllDay: false,
+        ),
+        rules: rulesOf(unrestricted, hours: CalendarDayHours(23 * 60, 24 * 60)),
+        now: CalendarNow(
+          time: tz.TZDateTime(santiago, 2026, 4, 1, 9),
+          today: tz.TZDateTime(santiago, 2026, 4, 1),
+        ),
+        others: <CalendarEntry<String>>[first],
+      );
+      // Setup sanity: the schedule lies in the first pass, which it shares.
+      expect(check.overlaps.map((entry) => entry.id), <String>["first"]);
+      final free = check.nextFree;
+      expect(free, isNotNull);
+      expectTimes(
+        free!.timesOn(santiago),
+        DateTime.utc(2026, 4, 5, 3),
+        DateTime.utc(2026, 4, 5, 3, 30),
+      );
+    });
+  });
+
+  test("SC27 the next free range of a stored entry whose start the policy "
+      "keeps is none, as the check admits no other start; one whose start "
+      "the policy lets move gets the free range after the overlap", () {
+    final stored = entryOf("s", tuesday, 9 * 60, 11 * 60);
+    final other = entryOf("o", tuesday, 10 * 60 + 30, 11 * 60);
+    final rules = rulesOf(
+      CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+        const HistoryLockPolicy<String>(lockEarlierToday: true),
+        const NoOverlapsPolicy<String>(),
+      ]),
+    );
+    CalendarScheduleCheck<String> checkAt(int hour) {
+      return CalendarScheduleCheck<String>(
+        schedule: timed(tuesday, 9 * 60, 11 * 60),
+        rules: rules,
+        now: CalendarNow(time: DateTime(2026, 4, 21, hour), today: tuesday),
+        others: <CalendarEntry<String>>[stored, other],
+        entry: stored,
+      );
+    }
+
+    final kept = checkAt(10);
+    // Setup sanity: at 10:00 the policy keeps the start, and the overlap is
+    // refused.
+    expect(kept.startFixed, isTrue);
+    expect(kept.problems, <CalendarScheduleProblem>[
+      CalendarScheduleOverlapRefused<String>(other),
+    ]);
+    expect(kept.nextFree, isNull);
+    final moving = checkAt(8);
+    expect(moving.startFixed, isFalse);
+    expect(moving.nextFree, timed(tuesday, 11 * 60, 13 * 60));
+  });
+
+  test("SC28 the next free range shares time with no other entry, under a "
+      "policy that lets some overlaps be: none where the day has no free "
+      "range, and otherwise the first free one", () {
+    CalendarScheduleCheck<String> checkWith(int softEnd) {
+      return CalendarScheduleCheck<String>(
+        schedule: timed(tuesday, 10 * 60, 11 * 60),
+        rules: rulesOf(
+          const _SoftOverlaps(),
+          hours: CalendarDayHours(9 * 60, 17 * 60),
+        ),
+        now: CalendarNow(time: DateTime(2026, 4, 21, 8), today: tuesday),
+        others: <CalendarEntry<String>>[entryOf("soft", tuesday, 0, softEnd)],
+      );
+    }
+
+    final allDaySoft = checkWith(23 * 60);
+    // Setup sanity: the policy lets the schedule share the soft entry.
+    expect(allDaySoft.admitted, isTrue);
+    expect(allDaySoft.overlaps.map((entry) => entry.id), <String>["soft"]);
+    expect(allDaySoft.nextFree, isNull);
+    final morningSoft = checkWith(12 * 60);
+    expect(morningSoft.nextFree, timed(tuesday, 12 * 60, 13 * 60));
   });
 
   test("SC24 the next free range of a stored entry kept before the hours "
@@ -1121,10 +1276,7 @@ void main() {
     final stored = entryOf("stored", tuesday, 7 * 60, 8 * 60);
     final check = CalendarScheduleCheck<String>(
       schedule: timed(tuesday, 7 * 60, 8 * 60),
-      rules: rulesOf(
-        unrestricted,
-        hours: CalendarDayHours(9 * 60, 17 * 60),
-      ),
+      rules: rulesOf(unrestricted, hours: CalendarDayHours(9 * 60, 17 * 60)),
       now: CalendarNow(time: DateTime(2026, 4, 20, 12), today: monday),
       others: <CalendarEntry<String>>[
         stored,
