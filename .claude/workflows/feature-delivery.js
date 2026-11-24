@@ -736,6 +736,9 @@ const PROBE_SCHEMA = obj({ stopped: bool, precondition: str, branch: str, premis
 // A repro is known by its id, R1, R2 and so on, which the extraction gives it
 // and the builder reports it by; its text is for reading only.
 const REPRO_ID = { type: 'string', pattern: '^R[0-9]+$' }
+// A commit is named by its full ID, so two names of one commit are the same
+// string.
+const COMMIT_ID = { type: 'string', pattern: '^[0-9a-f]{40}$' }
 const STEPS_SCHEMA = obj({
   decisions: DECISION_LIST,
   repros: arr(obj({ id: REPRO_ID, test: str })),
@@ -758,7 +761,7 @@ const BUILD_SCHEMA = obj({
     signal_passed: bool,
     gates: arr(GATE_RUN),
     changed_files: arr(str),
-    commit: str,
+    commit: COMMIT_ID,
   })),
   carried: arr(obj({ id: str, addressed: bool, evidence: str })),
   mutations: arr(obj({ decision: { type: 'string', pattern: '^d[0-9]+$' }, test: str, test_failed: bool, sha_before: str, sha_after: str })),
@@ -829,6 +832,9 @@ let steps = S.steps ?? null
 // reporting them again blind.
 let stepGaps = (S.stepGaps ?? []).map(g => ({ ...g }))
 const build = { ...emptyBuild(), ...(S.build ?? {}) }
+// A report keeps a verified step by its commit's full ID, so a step verified
+// under any other name of its commit is verified again.
+build.verified = build.verified.filter(v => new RegExp(COMMIT_ID.pattern).test(v.commit))
 // A run record written before repros had ids holds each repro as its text,
 // and each one recorded failing as the builder's text for it. Each repro takes
 // the R<n> its text opens with when every text opens with a distinct one, and
@@ -1632,7 +1638,7 @@ function buildPrompt(problems) {
     `3. After the last step, one mutation per pin listed to mutate: record the code site file's SHA-256, break the rule there, run the pin's test and observe it fail, restore the file, record the SHA-256 again. A test that stays green is a blocking finding: the rule is unpinned.`,
     `4. Then run every final-scope gate whose condition matches the files changed since the base commit.`,
     `A failure that shows the plan wrong stops you: report it in blocking_findings, with your last committed step in last_step. A minor slip you fix within its step and list in discoveries.`,
-    `Report via StructuredOutput: stopped (true only if that check stopped you); precondition (what that check found); branch; approval_recorded; plan_checks (each plan check by name, with passed and a note); repros (each repro you ran on the base commit: id, the R<n> step 0 gives it, and failed_on_base); steps (EVERY step of the list: n, status built or kept, signal_passed, gates you ran with name and passed, changed_files, commit); carried (each carried finding listed to address: id, addressed, and evidence, the test or check that shows it, or the confirmed reason it is obsolete); mutations (each mutation you made: decision, test, test_failed, sha_before, sha_after); final_gates; changed_files (git diff --name-only ${baseRef}..${buildBranch}); complete (true only after the final gates); last_step; blocking_findings; discoveries.`,
+    `Report via StructuredOutput: stopped (true only if that check stopped you); precondition (what that check found); branch; approval_recorded; plan_checks (each plan check by name, with passed and a note); repros (each repro you ran on the base commit: id, the R<n> step 0 gives it, and failed_on_base); steps (EVERY step of the list: n, status built or kept, signal_passed, gates you ran with name and passed, changed_files, commit: its full 40-character ID, as git rev-parse prints it); carried (each carried finding listed to address: id, addressed, and evidence, the test or check that shows it, or the confirmed reason it is obsolete); mutations (each mutation you made: decision, test, test_failed, sha_before, sha_after); final_gates; changed_files (git diff --name-only ${baseRef}..${buildBranch}); complete (true only after the final gates); last_step; blocking_findings; discoveries.`,
   ].filter(Boolean).join('\n')
 }
 
