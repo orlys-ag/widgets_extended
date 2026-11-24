@@ -1967,7 +1967,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       // new hours move every block at once.
       _sync(animate: !tracksChanged);
       if (storeChanged) {
-        _askDragAgain();
+        _askDragAgain(overlapsOnly: true);
       }
     } else if (widget.editable != oldWidget.editable &&
         _syncedReady &&
@@ -1980,12 +1980,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     // of its range read the pieces of the store this build gives.
     if (nowTaken) {
       _refillRange();
-      // A new minute can change what the gate answers, which the board
-      // keeps through the drag; the build after this one hands the board
-      // the configs, which a new store made already.
-      if (!storeChanged && _keepsGateAnswers) {
-        _askDragAgain();
-      }
+      // A new minute can change what the gate answers; the build after
+      // this one hands the board the configs.
+      _askDragAgain(overlapsOnly: false);
     } else if (storeChanged || rangeChanged) {
       _placeRangeAgain();
     }
@@ -2017,15 +2014,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (_themed != null) {
       _editConfig = _dragConfigOf(enabled: true);
     }
-  }
-
-  /// Whether the board keeps the drop gate's answers through the drag that
-  /// runs ([BoardDropFit.offersOverlaps]): where [_offersOverlaps] is true,
-  /// for a block's drag, which the board runs under [_editConfig]. It runs
-  /// a bar's under [_fitlessConfig], keeping none of its answers.
-  bool get _keepsGateAnswers {
-    final drag = _drag;
-    return _offersOverlaps && drag != null && !drag.key.isBar;
   }
 
   /// [_limits]' value as the widget and the fields stand.
@@ -2250,11 +2238,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     // stays `==` to itself and so is not taken again by an update.
     _takePolicy();
     _takeOverlapFit();
-    // And what its answers give the gate, which the board keeps through
-    // the drag; the build the reload marks hands the board the configs.
-    if (_keepsGateAnswers) {
-      _askDragAgain();
-    }
+    // And what its answers give the gate; the build the reload marks
+    // hands the board the configs.
+    _askDragAgain(overlapsOnly: false);
     // A create range in flight reads its limits and its anchor's slot
     // again by the answers the reload gives, and tests its range again.
     _refillRange();
@@ -2960,7 +2946,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _offRange = null;
     _sync();
     _placeRangeAgain();
-    _askDragAgain();
+    _askDragAgain(overlapsOnly: true);
     setState(() {});
   }
 
@@ -3058,25 +3044,29 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return shown;
   }
 
-  /// Where the board's drag session runs and the policy forbids overlaps,
-  /// makes [_editConfig] and [_fitlessConfig] again, which the next build
-  /// hands the board, reads a crossing's cell again after the frame
-  /// ([_scheduleCrossRead]), and returns true; elsewhere makes nothing and
-  /// returns false. A store notify calls it: the overlap tests read entries
-  /// a store change may have changed, and a change only on days the grid
-  /// does not show places nothing, so the board's structural channel does
-  /// not ask the drop gate again. Where the board keeps the gate's answers
-  /// through the drag ([_keepsGateAnswers]), a new minute, from either
+  /// Where the board's drag session runs, and where [overlapsOnly] the
+  /// policy forbids overlaps, makes [_editConfig] and [_fitlessConfig]
+  /// again, which the next build hands the board, reads a crossing's cell
+  /// again after the frame ([_scheduleCrossRead]), and returns true;
+  /// elsewhere makes nothing and returns false. A store notify calls it
+  /// [overlapsOnly]: of the gates' answers only the overlap tests read
+  /// entries a store change may have changed, and a change only on days
+  /// the grid does not show places nothing, so the board's structural
+  /// channel does not ask the drop gate again. A new minute, from either
   /// [TimedGrid.now]'s notify ([_handleNow]) or a new clock
-  /// ([didUpdateWidget]), and a reload ([reassemble]) call it too, as
-  /// [_canDropAt] reads [_calendarNow] and the policy's answers. A new
-  /// config on a live session asks the gate again for the placement the
-  /// pointer rests on and drops the answers the board kept
+  /// ([didUpdateWidget]), and a reload ([reassemble]) call it for every
+  /// drag, as the gates and a crossing's landing read [_calendarNow] and
+  /// the policy's answers, which the board asks again only for a new
+  /// placement, so a still pointer would keep a landing the release then
+  /// refuses. A new config on a live session asks the gate again for the
+  /// placement the pointer rests on and drops the answers the board kept
   /// ([BoardDragConfig.canDropAt]). The board tears its session down before
   /// it reports the drop, so a drop's own request makes no config.
-  bool _askDragAgain() {
+  bool _askDragAgain({required bool overlapsOnly}) {
     final drag = _drag;
-    if (_allowsOverlaps || drag == null || !_board.isDragging(drag.key)) {
+    if ((overlapsOnly && _allowsOverlaps) ||
+        drag == null ||
+        !_board.isDragging(drag.key)) {
       return false;
     }
     _editConfig = _dragConfigOf(enabled: true);
@@ -4324,15 +4314,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// resize, and [_rules] still admit the range at [_calendarNow]; null
   /// where it holds none, where the other edge moved or either refuses,
   /// or where the policy's answer throws ([_reportPolicyThrow]). The drop
-  /// gate held the range under the clock of the pointer's last move, and
-  /// a new minute since asks it nothing for a bar ([_keepsGateAnswers]),
-  /// so [_handleNow] asks this, dropping a hold it refuses with the
-  /// strip's marks and the landing label that show it, and the release
-  /// asks again, as a crossing's release reads its landing under the clock
-  /// it is let go at. A store change that keeps the bar's
-  /// span keeps the drag, and clears the hold only at the next frame's
-  /// resolve, so a release in the frame of a change that moves the other
-  /// edge would write that edge back.
+  /// gate holds the range under the clock of its last ask, and a new
+  /// minute or a store change asks it again only after the frame
+  /// ([_askDragAgain], the board's structural channel), so a release
+  /// before that asks this, as a crossing's release reads its landing
+  /// under the clock it is let go at. A store change that moves the
+  /// other edge would otherwise have the release write that edge back.
   ({DateTime start, DateTime end})? _heldBarAdmitted(_Dragging drag) {
     final held = drag.heldBar;
     final shape = _board.itemOf(drag.key);
@@ -4779,11 +4766,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// time moves, shows or goes, or today moves, or when it gives the board
   /// new drag configs; takes the new value as [_calendarNow], writing
   /// [_limits] in edit mode, refilling a create range's limits
-  /// ([_refillRange]), dropping a bar's held range that the policy no
-  /// longer admits ([_heldBarAdmitted]) and, where the board keeps the
-  /// gate's answers through the drag ([_keepsGateAnswers]), making the
-  /// configs again ([_askDragAgain]); and hands a new today to the header
-  /// cells. A notify
+  /// ([_refillRange]) and, for a drag the board runs, making the configs
+  /// again ([_askDragAgain]), as any of the drop gate's answers may change
+  /// with the time; and hands a new today to the header cells. A notify
   /// that comes with a new zone of the store, ahead of the store's own,
   /// takes the zone ([_takeZone]), which takes the new value, and leaves
   /// the rest to the store notify.
@@ -4816,13 +4801,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _limits.value = _limitsOf();
     }
     _refillRange();
-    final drag = _drag;
-    if (drag != null &&
-        drag.heldBar != null &&
-        _heldBarAdmitted(drag) == null) {
-      _holdBar(null);
-    }
-    if (_keepsGateAnswers && _askDragAgain()) {
+    if (_askDragAgain(overlapsOnly: false)) {
       setState(() {});
     }
   }

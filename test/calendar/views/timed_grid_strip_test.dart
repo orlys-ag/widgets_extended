@@ -4276,6 +4276,9 @@ void main() {
           time: at(wednesday, 0),
           today: wednesday,
         );
+        // A frame hands the board the configs the new minute made, and the
+        // next shows what its ask of the gate gave.
+        await tester.pump();
         await tester.pump();
         // The hold the policy now refuses shows no landing.
         expect(
@@ -4297,6 +4300,87 @@ void main() {
       if (requested.isEmpty) {
         expectTimes(store, "b", bar.start, bar.end, reason: name);
       }
+    }
+  });
+
+  testWidgets("TX42 under lockEarlierToday at 09:20, a bar dragged into the "
+      "slots over today's 09:30, or a block moved onto it, shows no landing "
+      "once the clock passes 09:30 and let go requests nothing, while a "
+      "clock that stays before it keeps the landing and its request", (
+    tester,
+  ) async {
+    final shown = Shown.week(monday);
+    for (final (name, bar, clock, requested)
+        in <(String, bool, int, List<(DateTime, DateTime)>)>[
+          (
+            "a bar, the clock at 09:25",
+            true,
+            25,
+            <(DateTime, DateTime)>[(at(tuesday, 9, 30), at(tuesday, 10, 30))],
+          ),
+          ("a bar, the clock at 09:31", true, 31, <(DateTime, DateTime)>[]),
+          (
+            "a block, the clock at 09:25",
+            false,
+            25,
+            <(DateTime, DateTime)>[(at(tuesday, 9, 30), at(tuesday, 10, 30))],
+          ),
+          ("a block, the clock at 09:31", false, 31, <(DateTime, DateTime)>[]),
+        ]) {
+      final dragged = bar
+          ? allDayOf("d", wednesday)
+          : entryOf("d", at(tuesday, 11), at(tuesday, 12));
+      final store = storeOf(<CalendarEntry<String>>[dragged]);
+      final harness = Harness(
+        store,
+        shown,
+        lockPast: true,
+        lockEarlierToday: true,
+        today: tuesday,
+      );
+      harness.now.value = CalendarNow(time: at(tuesday, 9, 20), today: tuesday);
+      await harness.pump(tester);
+      final slot = slotRect(tester, shown, tuesday, 9 * 60 + 30);
+      final TestGesture gesture;
+      if (bar) {
+        gesture = await liftTo(
+          tester,
+          tester.getCenter(barFinder("d")),
+          slot.center,
+        );
+      } else {
+        final block = tester.getRect(blockFinder("d", tuesday));
+        gesture = await lift(tester, block.center);
+        final step = (slot.topLeft - block.topLeft) / 2;
+        await gesture.moveBy(step);
+        await tester.pump();
+        await gesture.moveBy(step + const Offset(0.0, 2.0));
+        await tester.pump();
+      }
+      final landing = landingText(tester);
+      // Setup sanity: the drag shows a landing at today's 09:30.
+      expect(landing, isNotNull, reason: name);
+      expect(landing, isNot(english.noLanding), reason: name);
+      harness.now.value = CalendarNow(
+        time: at(tuesday, 9, clock),
+        today: tuesday,
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(
+        landingText(tester),
+        requested.isEmpty ? english.noLanding : landing,
+        reason: name,
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(
+        <(DateTime, DateTime)>[
+          for (final moved in store.moves) (moved.start, moved.end),
+        ],
+        requested,
+        reason: name,
+      );
     }
   });
 
@@ -7951,12 +8035,12 @@ void main() {
       expect(asksOf(unrestricted), 0, reason: "overlaps allowed");
     });
 
-    testWidgets("OP24 in Day under a per-pair policy a new minute, from "
-        "either clock, a reload and a store notify each give a drag's board a "
-        "new config, which drops the gate's kept answers, and under "
-        "NoOverlapsPolicy a new minute, from either clock, and a reload give "
-        "it none, nor do they under the per-pair policy for a bar's "
-        "drag", (tester) async {
+    testWidgets("OP24 in Day a new minute, from either clock, and a reload "
+        "each give a drag's board a new config, which asks the gate again "
+        "for the placement the pointer rests on and drops its kept answers, "
+        "under a per-pair policy, under NoOverlapsPolicy and for a bar's "
+        "drag, as each answer reads the time; under a per-pair policy a "
+        "store notify does too", (tester) async {
       final shown = Shown.day(tuesday);
       for (final name in const <String>["per-pair", "NoOverlapsPolicy"]) {
         final perPair = name == "per-pair";
@@ -8045,24 +8129,15 @@ void main() {
           gates = debugDropGateCount;
           await run();
           final added = debugDropGateCount - gates;
-          if (perPair) {
-            expect(
-              identical(boardOf(tester).drag, config),
-              isFalse,
-              reason: reason,
-            );
-            expect(added, greaterThan(rebuilt), reason: reason);
-            expect(added, lessThanOrEqualTo(rebuilt + refused), reason: reason);
-          } else {
-            expect(
-              identical(boardOf(tester).drag, config),
-              isTrue,
-              reason: reason,
-            );
-            if (change == "a new minute") {
-              expect(added, 0, reason: reason);
-            }
-          }
+          expect(
+            identical(boardOf(tester).drag, config),
+            isFalse,
+            reason: reason,
+          );
+          // The hosts' semantics moves, and the resolve the new config
+          // asks for, which asks no more than the lift and the refusal.
+          expect(added, greaterThan(rebuilt), reason: reason);
+          expect(added, lessThanOrEqualTo(rebuilt + refused), reason: reason);
         }
         await gesture.up();
         await tester.pumpAndSettle();
@@ -8076,7 +8151,8 @@ void main() {
         );
       }
 
-      // A bar's drag, whose board keeps no answer under any policy.
+      // A bar's drag, whose board keeps no answer under any policy, but
+      // whose gate reads the time.
       final store = storeOf(<CalendarEntry<String>>[
         entryOf("busy", at(tuesday, 10), at(tuesday, 11)),
         allDayOf("bar", tuesday),
@@ -8095,28 +8171,32 @@ void main() {
         return CalendarNow(time: time, today: tuesday);
       }
 
+      final gates = debugDropGateCount;
       harness.now.value = later();
       await tester.pump();
       expect(
         identical(boardOf(tester).drag, config),
-        isTrue,
+        isFalse,
         reason: "bar, a new minute",
       );
+      expect(debugDropGateCount, greaterThan(gates), reason: "bar, the gate");
       final given = ValueNotifier<CalendarNow>(later());
       addTearDown(given.dispose);
       harness.givenNow = given;
+      final minuteConfig = boardOf(tester).drag;
       await harness.rebuild(tester);
       expect(
-        identical(boardOf(tester).drag, config),
-        isTrue,
+        identical(boardOf(tester).drag, minuteConfig),
+        isFalse,
         reason: "bar, a new clock",
       );
+      final clockConfig = boardOf(tester).drag;
       final reassembled = tester.binding.reassembleApplication();
       await tester.pump();
       await reassembled;
       expect(
-        identical(boardOf(tester).drag, config),
-        isTrue,
+        identical(boardOf(tester).drag, clockConfig),
+        isFalse,
         reason: "bar, a reload",
       );
       await gesture.up();
