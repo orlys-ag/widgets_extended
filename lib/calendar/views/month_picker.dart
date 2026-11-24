@@ -85,9 +85,13 @@ class _PickerStyles {
   }
 
   final CalendarThemeData theme;
+
+  /// A month's name, unmarked, which the picker measures names in beside
+  /// [selectedName].
   final TextStyle name;
 
-  /// The selected month's name, which the picker also measures names in.
+  /// The selected month's name, which the picker measures names in beside
+  /// [name].
   final TextStyle selectedName;
 
   final TextStyle currentName;
@@ -106,8 +110,10 @@ class _PickerStyles {
 /// month a [MonthCell] on an equal share of the picker's width,
 /// [selectedMonth]'s filled with the primary colour and [currentMonth]'s
 /// ringed as today's number is. Every name reads at the text size, or
-/// where the widest would not fit its pill at it, at the one smaller size
-/// that fits it. The picker is as tall as its rows of cells. A tap on a
+/// where the widest, in the theme's [CalendarThemeData.monthNameStyle] or
+/// its [CalendarThemeData.monthNameMarkedStyle], would not fit its pill at
+/// it, at the one smaller size that fits it. The picker is as tall as its
+/// rows of cells. A tap on a
 /// month reports [onSelectMonth]. A month before [firstMonth] draws
 /// disabled and takes no tap.
 ///
@@ -277,8 +283,11 @@ class _MonthPickerState extends State<MonthPicker>
   }
 
   /// The text scaler of the names on cells [cellWidth] wide: the
-  /// context's, or where the widest name, as a selected cell's [Text] lays
-  /// it out, would not fit a pill at it, a smaller one that fits it.
+  /// context's, or where the widest name, in either style a cell draws a
+  /// name in ([_PickerStyles.name] or [_PickerStyles.selectedName]) as its
+  /// [Text] lays it out ([labelSizeIn]), would not fit a pill at it, a
+  /// smaller one that fits it, so every name draws whole at one text scale
+  /// whichever month is marked.
   TextScaler _nameScaler(BuildContext context, double cellWidth) {
     var scaler = MediaQuery.textScalerOf(context);
     final room = math.max(
@@ -287,26 +296,25 @@ class _MonthPickerState extends State<MonthPicker>
           MonthCell.pillMargin.horizontal -
           MonthCell.pillPadding.horizontal,
     );
-    var style = DefaultTextStyle.of(context).style.merge(_styles.selectedName);
-    final fontSize = style.fontSize ?? kDefaultFontSize;
-    if (MediaQuery.boldTextOf(context)) {
-      style = style.merge(const TextStyle(fontWeight: FontWeight.bold));
-    }
     final strings = CalendarLocalizations.of(context);
-    final painter = TextPainter(
-      textDirection: Directionality.of(context),
-      maxLines: 1,
-    );
+    final names = <String>[
+      for (var month = 1; month <= DateTime.monthsPerYear; month++)
+        strings.monthName(month),
+    ];
+    final defaults = DefaultTextStyle.of(context).style;
+    final styles = <TextStyle>[_styles.name, _styles.selectedName];
     // A name's width does not quite follow its font size, so a smaller
     // scaler aims half a pixel inside the pill and is measured again, until
     // the widest name fits.
     for (var tries = 0; tries < 4; tries++) {
-      painter.textScaler = scaler;
       var widest = 0.0;
-      for (var month = 1; month <= DateTime.monthsPerYear; month++) {
-        painter.text = TextSpan(text: strings.monthName(month), style: style);
-        painter.layout();
-        widest = math.max(widest, painter.width);
+      var fontSize = kDefaultFontSize;
+      for (final style in styles) {
+        final width = labelSizeIn(context, style, names, scaler: scaler).width;
+        if (width > widest) {
+          widest = width;
+          fontSize = defaults.merge(style).fontSize ?? kDefaultFontSize;
+        }
       }
       if (widest <= room) {
         break;
@@ -314,7 +322,6 @@ class _MonthPickerState extends State<MonthPicker>
       final size = scaler.scale(fontSize) * (room - 0.5) / widest;
       scaler = TextScaler.linear(math.max(0.0, size) / fontSize);
     }
-    painter.dispose();
     return scaler;
   }
 

@@ -1157,6 +1157,45 @@ void main() {
       expect(box.center.dy, header.center.dy, reason: step);
     }
   });
+
+  testWidgets("DP17 a screen reader hears the picker's today as today, "
+      "after its date, folded and unfolded, and no other day so", (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    const strings = DefaultCalendarLocalizations();
+    final wednesday = DateTime(2026, 4, 22);
+    for (final (step, view) in <(String, CalendarDayPickerView)>[
+      ("folded", const CalendarDayPickerView()),
+      ("unfolded", const CalendarDayPickerView(folded: false)),
+    ]) {
+      await tester.pumpWidget(
+        app(
+          CalendarDayPicker<String>(
+            key: ValueKey<String>(step),
+            value: tuesday,
+            today: wednesday,
+            onChanged: (day) {},
+            initialView: view,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.bySemanticsLabel(
+          "${strings.dayLabel(wednesday)}, ${strings.today}",
+        ),
+        findsOneWidget,
+        reason: step,
+      );
+      expect(
+        find.bySemanticsLabel(RegExp(", ${strings.today}\$")),
+        findsOneWidget,
+        reason: step,
+      );
+    }
+    semantics.dispose();
+  });
 }
 
 /// A data source each of whose reads waits until the test answers it, with

@@ -1328,6 +1328,31 @@ text scale of 1, as a day cell's number box does and the all-day strip's
 rows and Month's lanes now do: their size cache took the device's scaler
 and an unscaled one, which lay text out alike, as two keys that evicted
 each other. It now takes them as one.
+- Fix: in Month at a week scale that leaves some weeks out of view, a new
+selected day of the shown month left the board where it was, so at a week
+scale of 3 with April 28 selected, Today selected April 1 and the board
+stayed on the month's last weeks. The board now scrolls the least that
+shows a new selected day whole, after the frame that selects it and again
+once its days are read where they are not; a board that shows the day
+whole does not move, and none moves while two fingers hold it or a drag or
+its fling scrolls it.
+- Fix: under right to left, Agenda's times touched their cards, a gap row's
+time did not line up with an item's, and the marker of the current time
+drew its pill against the list's right edge, 8 px from its line, with the
+line's dot at the list's left end. A row now mirrors whole: a time ends
+8 px short of its card on the card's side, a gap row's time lines up with
+an item's, and the marker's pill sits 8 px in from the right edge with its
+line and dot starting at it.
+- Fix: a screen reader never heard "today" on today's cell in the week
+strip, the month strip or `CalendarDayPicker`, as it does in Month; the
+label now ends with `CalendarLocalizations.today`, as "Tuesday, April 21,
+has items, today".
+- Fix: the month picker cut the names of other months where
+`CalendarThemeData.monthNameStyle` was wider than `monthNameMarkedStyle`,
+as "January" at 64 of its 72.4 px at 22 px against 15 px in a picker 240 px
+wide: it scaled every name by the widest in the marked style alone. It now
+scales them by the widest in either style, which it measures once per
+style and text scale rather than at every build.
 
 ## 0.0.35
 

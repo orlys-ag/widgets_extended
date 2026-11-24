@@ -895,4 +895,145 @@ void main() {
       hasLength(1),
     );
   });
+
+  group("a plain selected day over a store zoned 9 hours from the device", () {
+    final tuesday = DateTime(2026, 4, 21);
+    late tz.Location zone;
+    late ValueNotifier<CalendarNow> now;
+    late List<DateTime> topDays;
+
+    setUp(() {
+      zone = zoneApartFromDevice(DateTime(2026, 4, 21, 12), 9);
+      now = ValueNotifier<CalendarNow>(
+        CalendarNow(time: DateTime(2026, 4, 1, 9), today: DateTime(2026, 4, 1)),
+      );
+      topDays = <DateTime>[];
+    });
+
+    tearDown(() {
+      now.dispose();
+    });
+
+    /// A store in [zone] holding an entry from 10:00 to 11:00 on each day
+    /// of April 2026 from [first] to [last].
+    MemoryCalendarStore<String> storeOf({int first = 1, int last = 0}) {
+      final store = memoryStoreIn<String>(
+        zone,
+        entries: <CalendarEntry<String>>[
+          for (var day = first; day <= last; day++)
+            CalendarEntry<String>(
+              id: "e$day",
+              start: tz.TZDateTime(zone, 2026, 4, day, 10),
+              end: tz.TZDateTime(zone, 2026, 4, day, 11),
+              title: "e$day",
+              color: const Color(0xFF336699),
+              payload: "e$day",
+            ),
+        ],
+      );
+      addTearDown(store.dispose);
+      return store;
+    }
+
+    Future<void> pumpList(
+      WidgetTester tester,
+      MemoryCalendarStore<String> store,
+      DateTime selected, {
+      CalendarWeekdaySet weekdays = CalendarWeekdaySet.all,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DayList<String>(
+            store: store,
+            weekdays: weekdays,
+            format: CalendarHourLabelFormat.twentyFourHour,
+            hours: CalendarDayHours.allDay,
+            editable: false,
+            selectedDay: selected,
+            now: now,
+            onTopDay: topDays.add,
+            onCreateRange: (details) async {},
+            onEdit: (id) {},
+            onDelete: (id) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    /// How far [day]'s header lies below the list's top.
+    double headerOffsetOf(WidgetTester tester, DateTime day) {
+      final header = find.byKey(dayListHeaderKey(day));
+      expect(header, findsOneWidget, reason: "$day");
+      return tester.getTopLeft(header).dy -
+          tester.getTopLeft(find.byType(DayList<String>)).dy;
+    }
+
+    /// The top days a drag 30 px up reports, a drag back after it.
+    Future<List<DateTime>> nudge(WidgetTester tester) async {
+      topDays.clear();
+      await tester.drag(find.byType(DayList<String>), const Offset(0.0, -30.0));
+      await tester.pumpAndSettle();
+      final reported = List<DateTime>.of(topDays);
+      await tester.drag(find.byType(DayList<String>), const Offset(0.0, 30.0));
+      await tester.pumpAndSettle();
+      return reported;
+    }
+
+    testWidgets("AZ4 is its date's day of the list as the list opens, at a "
+        "new set of weekdays and at a re-centring: its header lands at the "
+        "list's top, and a drag that keeps it there reports no top day", (
+      tester,
+    ) async {
+      // A day with no entries is its header alone, which a drag of 30 px
+      // keeps under the list's top.
+      final store = storeOf();
+      await pumpList(tester, store, tuesday);
+      expect(headerOffsetOf(tester, tuesday), moreOrLessEquals(0.0));
+      expect(await nudge(tester), isEmpty);
+
+      // A new set of weekdays, every one but Saturday, builds the list
+      // again on the selected day.
+      final weekdays = CalendarWeekdaySet.of(<int>[0, 1, 2, 3, 4, 6]);
+      await pumpList(tester, store, tuesday, weekdays: weekdays);
+      expect(headerOffsetOf(tester, tuesday), moreOrLessEquals(0.0));
+      expect(await nudge(tester), isEmpty);
+
+      // A day past the list's days re-centres the list on it.
+      final far = DateTime(2027, 2, 2);
+      await pumpList(tester, store, far, weekdays: weekdays);
+      expect(headerOffsetOf(tester, far), moreOrLessEquals(0.0));
+      expect(await nudge(tester), isEmpty);
+    });
+
+    testWidgets("AZ5 the top day a drag reported, given back as a plain "
+        "day, moves nothing", (tester) async {
+      final store = storeOf(first: 14, last: 28);
+      await pumpList(tester, store, tuesday);
+      await tester.drag(
+        find.byType(DayList<String>),
+        const Offset(0.0, -150.0),
+      );
+      await tester.pumpAndSettle();
+      final position = tester
+          .state<ScrollableState>(find.byType(Scrollable))
+          .position;
+      final dragged = position.pixels;
+      // Setup sanity: the drag reported a later day, on the store's clock,
+      // whose header lies above the list's top, where a reveal would move
+      // it.
+      expect(topDays, isNotEmpty);
+      final reported = topDays.last;
+      expect(reported, isA<tz.TZDateTime>());
+      expect(
+        CalendarDates.dayNumber(reported),
+        greaterThan(CalendarDates.dayNumber(tuesday)),
+      );
+      final plain = DateTime(reported.year, reported.month, reported.day);
+      expect(headerOffsetOf(tester, plain), lessThan(-1.0));
+
+      await pumpList(tester, store, plain);
+      expect(position.pixels, dragged);
+    });
+  });
 }

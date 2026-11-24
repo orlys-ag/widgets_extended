@@ -1,7 +1,9 @@
 /// Agenda's time column in Roboto, from the Flutter SDK's cache, at larger
 /// text sizes: an item's start, an all-day item's label and a gap row's
-/// time; what measures them again; and a font loaded while the list is up.
-/// Loaded for this file alone, so the other files keep the test font.
+/// time; what measures them again; a font loaded while the list is up; and
+/// the column and the marker of the current time under either text
+/// direction. Loaded for this file alone, so the other files keep the test
+/// font.
 library;
 
 import 'package:flutter/rendering.dart' show RenderParagraph;
@@ -70,13 +72,15 @@ class Agenda {
   );
 
   /// Pumps the list [width] wide in [fontFamily] at the text [scale], on
-  /// [format]'s clock, under [theme] where it is given, and settles.
+  /// [format]'s clock, under [theme] where it is given, in [direction], and
+  /// settles.
   Future<void> pump({
     required double scale,
     required CalendarHourLabelFormat format,
     double width = 400.0,
     String fontFamily = "Roboto",
     CalendarThemeData? theme,
+    TextDirection direction = TextDirection.ltr,
   }) async {
     tester.view.physicalSize = Size(width, 800.0);
     tester.view.devicePixelRatio = 1.0;
@@ -100,10 +104,13 @@ class Agenda {
       MaterialApp(
         theme: ThemeData(fontFamily: fontFamily),
         home: Material(
-          child: MediaQuery.withClampedTextScaling(
-            minScaleFactor: scale,
-            maxScaleFactor: scale,
-            child: list,
+          child: Directionality(
+            textDirection: direction,
+            child: MediaQuery.withClampedTextScaling(
+              minScaleFactor: scale,
+              maxScaleFactor: scale,
+              child: list,
+            ),
           ),
         ),
       ),
@@ -113,18 +120,24 @@ class Agenda {
 }
 
 /// Pumps an [Agenda] [width] wide in Roboto at the text [scale], on
-/// [format]'s clock.
+/// [format]'s clock, in [direction].
 Future<Agenda> pumpAgenda(
   WidgetTester tester, {
   required double scale,
   required CalendarHourLabelFormat format,
   double width = 400.0,
+  TextDirection direction = TextDirection.ltr,
 }) async {
   addTearDown(tester.view.reset);
   final agenda = Agenda(tester);
   addTearDown(agenda.store.dispose);
   addTearDown(agenda.now.dispose);
-  await agenda.pump(scale: scale, format: format, width: width);
+  await agenda.pump(
+    scale: scale,
+    format: format,
+    width: width,
+    direction: direction,
+  );
   return agenda;
 }
 
@@ -306,4 +319,126 @@ void main() {
     expect(tester.getRect(talk).width, lessThan(before - 20.0));
     expect(drawnScaleOf(tester, start), moreOrLessEquals(1.0));
   });
+
+  for (final direction in TextDirection.values) {
+    testWidgets("AF5 under ${direction.name}, an item's start ends "
+        "dayListTimeGap short of its card, on the card's side, and a gap "
+        "row's time lines up with it", (tester) async {
+      const format = CalendarHourLabelFormat.twelveHour;
+      await pumpAgenda(
+        tester,
+        scale: 1.0,
+        format: format,
+        direction: direction,
+      );
+      const strings = DefaultCalendarLocalizations();
+      final talk = find.byKey(dayListTimeKey("talk"));
+      final start = tester.getRect(
+        textIn(talk, strings.formatTime(10 * 60 + 45, format)),
+      );
+      final row = gapRow(11 * 60 + 15);
+      final gap = tester.getRect(
+        textIn(row, strings.formatTime(11 * 60 + 15, format)),
+      );
+      final card = tester.getRect(find.byKey(entryCardKey("talk")));
+      final column = tester.getRect(talk);
+      final rtl = direction == TextDirection.rtl;
+      // Setup sanity: the card lies after the time column in the row's
+      // direction.
+      expect(
+        rtl
+            ? card.right <= column.left + 0.01
+            : card.left >= column.right - 0.01,
+        isTrue,
+        reason: "card $card, column $column",
+      );
+      expect(
+        rtl ? start.left - card.right : card.left - start.right,
+        moreOrLessEquals(dayListTimeGap, epsilon: 0.01),
+      );
+      expect(
+        rtl ? gap.left : gap.right,
+        moreOrLessEquals(rtl ? start.left : start.right, epsilon: 0.01),
+      );
+    });
+  }
+
+  for (final (scale, format, width)
+      in <(double, CalendarHourLabelFormat, double)>[
+        (1.0, CalendarHourLabelFormat.twelveHour, 400.0),
+        (1.0, CalendarHourLabelFormat.twentyFourHour, 400.0),
+        (3.0, CalendarHourLabelFormat.twelveHour, 220.0),
+      ]) {
+    for (final direction in TextDirection.values) {
+      testWidgets("AF6 in Roboto at text scale $scale on the ${format.name} "
+          "clock in a list $width px wide under ${direction.name}, the "
+          "marker of the current time holds its time whole in a pill as "
+          "wide as it, 8 px in from the list's start edge, and runs its "
+          "line from the pill's end to the list's end edge with its dot at "
+          "the pill", (tester) async {
+        final agenda = await pumpAgenda(
+          tester,
+          scale: scale,
+          format: format,
+          width: width,
+          direction: direction,
+        );
+        agenda.now.value = CalendarNow(time: at(11), today: tuesday);
+        await tester.pumpAndSettle();
+        const strings = DefaultCalendarLocalizations();
+        final marker = find.byKey(dayListNowKey);
+        final paint = find
+            .descendant(of: marker, matching: find.byType(CustomPaint))
+            .last;
+        final line = tester.getRect(paint);
+        final pill = tester.getRect(
+          find
+              .descendant(of: marker, matching: find.byType(DecoratedBox))
+              .first,
+        );
+        final paragraph = paragraphOf(
+          tester,
+          textIn(marker, strings.formatTime(11 * 60, format)),
+        );
+        final list = tester.getRect(find.byType(DayList<String>));
+        final rtl = direction == TextDirection.rtl;
+        expect(
+          rtl ? pill.right : pill.left,
+          moreOrLessEquals(
+            rtl ? list.right - 8.0 : list.left + 8.0,
+            epsilon: 0.01,
+          ),
+          reason: "the pill 8 px in from the list's start edge",
+        );
+        expect(
+          paragraph.size.width,
+          moreOrLessEquals(
+            paragraph.getMaxIntrinsicWidth(double.infinity),
+            epsilon: 0.01,
+          ),
+          reason: "the time laid out whole",
+        );
+        expect(
+          pill.width,
+          moreOrLessEquals(paragraph.size.width + 12.0, epsilon: 0.01),
+          reason: "the pill as wide as its time and its padding",
+        );
+        expect(
+          <double>[rtl ? line.right : line.left, rtl ? line.left : line.right],
+          <Matcher>[
+            moreOrLessEquals(rtl ? pill.left : pill.right, epsilon: 0.01),
+            moreOrLessEquals(rtl ? list.left : list.right, epsilon: 0.01),
+          ],
+          reason: "the line from the pill's end to the list's end edge",
+        );
+        expect(
+          tester.renderObject(paint),
+          paints
+            ..line()
+            ..circle(x: rtl ? line.width : 0.0, y: line.height / 2.0),
+          reason: "the dot at the line's start",
+        );
+      });
+    }
+  }
 }
