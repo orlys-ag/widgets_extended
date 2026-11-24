@@ -28,5 +28,7 @@ The contract of `CalendarEntry<T>`, `CalendarCreateRange`, `CalendarSchedule` an
   announces, an entry put or removed, a range of days changed, or every
   entry changed. A stream of them delivers them in the order the source
   made them, with an every-entry change after any stretch in which it may
-  have missed one. The stream is separate from the data source, so a
-  source without one still serves.
+  have missed one. Its end means the source announces nothing more, so a
+  source whose changes go on keeps it open across a lost connection. The
+  stream is separate from the data source, so a source without one still
+  serves.

@@ -452,6 +452,107 @@ void main() {
     ], failed);
   });
 
+  testWidgets("BA13 a read day whose read again after a change fails shows "
+      "its failed row in place of its items and its header's count, and "
+      "its retry shows them again while the day is read", (tester) async {
+    final day = DateTime(2026, 4, 21);
+    final weekStart = CalendarWeekdaySet.all.weekStartOf(day);
+    final source = HeldReads();
+    final store = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(store.dispose);
+    store.show(weekStart, CalendarDates.addDays(weekStart, 6));
+    final note = CalendarEntry<String>(
+      id: "note-1",
+      start: DateTime(2026, 4, 21, 10),
+      end: DateTime(2026, 4, 21, 11),
+      title: "Note",
+      color: const Color(0xFF336699),
+      payload: "note",
+    );
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: nineOClock(), today: day),
+    );
+    addTearDown(now.dispose);
+    final failures = <CalendarFailureState>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DayList<String>(
+          store: store,
+          weekdays: CalendarWeekdaySet.all,
+          format: CalendarHourLabelFormat.twentyFourHour,
+          hours: CalendarDayHours.allDay,
+          editable: false,
+          selectedDay: day,
+          now: now,
+          onTopDay: (day) {},
+          onCreateRange: (range) async {},
+          onEdit: (id) {},
+          onDelete: (id) {},
+          cardBuilder: (context, entry, details) {
+            return Text(entry.entry.payload);
+          },
+          loadingBuilder: (context, state) {
+            return const SizedBox(height: 24.0);
+          },
+          failureBuilder: (context, state) {
+            failures.add(state);
+            return const SizedBox(height: 48.0);
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (var answered = 0; answered < source.held.length; answered++) {
+      final read = source.held[answered];
+      read.answer.complete(<CalendarEntry<String>>[
+        if (!day.isBefore(read.first) && !day.isAfter(read.last)) note,
+      ]);
+      await tester.pumpAndSettle();
+    }
+    final card = find.byKey(entryCardKey("note-1"));
+    final header = find.byKey(dayListHeaderKey(day));
+    // Setup sanity: the day is read and shows its card and its count.
+    expect(
+      (
+        store.status,
+        card.evaluate().length,
+        find
+            .descendant(of: header, matching: find.text("1 item"))
+            .evaluate()
+            .length,
+      ),
+      (CalendarLoadStatus.ready, 1, 1),
+    );
+
+    store.invalidate(day, day);
+    source.held.last.answer.completeError(StateError("Offline."));
+    await tester.pumpAndSettle();
+    expect(
+      (
+        store.isRead(day),
+        find.byKey(dayListFailedKey(day)).evaluate().length,
+        card.evaluate().length,
+        find
+            .descendant(of: header, matching: find.text("1 item"))
+            .evaluate()
+            .length,
+      ),
+      (true, 1, 0, 0),
+    );
+
+    failures.last.retry();
+    await tester.pumpAndSettle();
+    // The retry's read is still in flight.
+    expect(
+      (
+        store.status,
+        find.byKey(dayListFailedKey(day)).evaluate().length,
+        card.evaluate().length,
+      ),
+      (CalendarLoadStatus.ready, 0, 1),
+    );
+  });
+
   testWidgets("a day list asserts on its first build that its slot length "
       "is a choice, listing the choices", (tester) async {
     final day = DateTime(2026, 4, 21);

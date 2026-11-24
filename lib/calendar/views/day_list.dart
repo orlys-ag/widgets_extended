@@ -778,8 +778,10 @@ List<DayListRow> dayListRowsOf<T>(
 /// no item covers, an empty day's across the hours, with a button, which
 /// [addButtonBuilder] draws and a screen reader hears as adding an item at
 /// its time, that reports [onCreateRange]; what [loadingBuilder] draws while
-/// the day is unread; and after a failed read, what [failureBuilder] draws,
-/// with a retry that reads the shown days again. Times read in [format].
+/// the day is unread; and while a failed read leaves the day
+/// [CalendarStore.readFailed], unread or read and changed since, what
+/// [failureBuilder] draws in place of its rows, with a retry that reads the
+/// shown days again. Times read in [format].
 /// Unless [editable], the list has no dashed rows and hands the card
 /// builder no Edit or Delete, so a day without items shows its header
 /// alone, and asks [editPolicy] nothing. In edit mode a card is handed
@@ -1503,21 +1505,26 @@ class _DayListState<T> extends State<DayList<T>> {
   }
 
   /// How many items [day]'s header counts as the store holds the day, or
-  /// null while the day is not read.
+  /// null while the day is not read or its read failed.
   int? _countOf(DateTime day) {
     final store = widget.store;
-    return store.isRead(day) ? store.entriesOn(day).length : null;
+    return store.isRead(day) && !store.readFailed(day)
+        ? store.entriesOn(day).length
+        : null;
   }
 
-  /// The rows of [day]'s block as the store holds the day: its items' rows
-  /// ([dayListRowsOf]) once it is read, and until then a loading row, or a
-  /// failed row where its read failed.
+  /// The rows of [day]'s block as the store holds the day: a failed row
+  /// while its read failed ([CalendarStore.readFailed]), also a read day's
+  /// whose read again after a change failed, so the list shows no item the
+  /// source may no longer hold as current; otherwise its items' rows
+  /// ([dayListRowsOf]) once it is read, and until then a loading row.
   List<DayListRow> _blockRowsOf(DateTime day) {
     final store = widget.store;
+    if (store.readFailed(day)) {
+      return <DayListRow>[DayListFailed(day)];
+    }
     if (!store.isRead(day)) {
-      return <DayListRow>[
-        store.readFailed(day) ? DayListFailed(day) : DayListLoading(day),
-      ];
+      return <DayListRow>[DayListLoading(day)];
     }
     return dayListRowsOf(
       day,

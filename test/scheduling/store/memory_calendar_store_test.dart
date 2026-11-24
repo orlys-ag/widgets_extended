@@ -497,6 +497,68 @@ void main() {
     },
   );
 
+  test("MS15 a show whose last day comes before its first throws an "
+      "ArgumentError naming last", () {
+    final store = MemoryCalendarStore<String>();
+    addTearDown(store.dispose);
+    Object? name;
+    try {
+      store.show(DateTime(2026, 4, 26), day);
+    } on ArgumentError catch (error) {
+      name = error.name;
+    }
+    store.show(day, day);
+    expect(name, "last");
+  });
+
+  test("MS16 with no Flutter binding, a write whose listener throws "
+      "applies, notifies the other listeners, calls onChanged and "
+      "completes, the throw reported, and the store disposes", () async {
+    final events = <String>[];
+    final reported = <Object>[];
+    final store = MemoryCalendarStore<String>(
+      onChanged: (old, entry) {
+        events.add("changed");
+      },
+    );
+    const thrown = HostFailure();
+    store.addListener(() {
+      events.add("first");
+    });
+    store.addListener(() {
+      throw thrown;
+    });
+    store.addListener(() {
+      events.add("after");
+    });
+    final draft = task("item-1", day, 600, 660);
+    final onError = FlutterError.onError;
+    FlutterError.onError = (details) {
+      events.add("reported");
+      reported.add(details.exception);
+    };
+    final Object? outcome;
+    try {
+      outcome = await outcomeOf(store.create(draft));
+    } finally {
+      FlutterError.onError = onError;
+    }
+    expect(
+      (
+        outcome,
+        events.join(","),
+        reported.length,
+        reported.where((error) {
+          return identical(error, thrown);
+        }).length,
+      ),
+      (draft, "first,reported,after,changed", 1, 1),
+    );
+    // In debug builds dispose asserts that no notification is under way,
+    // as one a throw escaping it would leave.
+    store.dispose();
+  });
+
   test("MS13 under hours of 08:00 to 18:00 a create of a timed entry from "
       "Tuesday's start to Wednesday's is refused for both its times", () async {
     final recorder = Recorder();

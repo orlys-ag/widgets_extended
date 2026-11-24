@@ -13,8 +13,14 @@ import 'calendar_entry.dart';
 /// whatever zone the store above it reads in.
 ///
 /// Each call completes with what the source stored, or fails with the
-/// source's own error, which reaches unchanged the caller of the store's
-/// write, or for a read the store's `loadError`.
+/// source's own error. A write's error reaches the caller of the store's
+/// write unchanged. A read's error reaches the store's `loadError`
+/// unchanged where its failure marks a day of the shown range
+/// `readFailed`, a day the store had not read or had taken to have
+/// changed, and while that mark is the latest standing there: a failure on
+/// a day marked already leaves the mark's error, and one off the shown
+/// range reaches no `loadError`. The error of the read a `refresh` waits
+/// on fails the refresh too.
 abstract interface class CalendarDataSource<T> {
   /// Every entry with any part in the device days from [first] to [last],
   /// both inclusive, each once, each with its id, in plain local times: an
@@ -39,7 +45,11 @@ abstract interface class CalendarDataSource<T> {
 ///
 /// A stream of changes delivers them in the order the source made them, and
 /// sends a [CalendarAllChanged] after any stretch in which it may have
-/// missed one, such as a lost connection.
+/// missed one, such as a lost connection. Its end tells that the source
+/// announces nothing more: a `CachingCalendarStore` keeps the stream it is
+/// built with for its life, and once the stream ends hears of no change,
+/// so a source whose changes go on keeps the stream open across a lost
+/// connection rather than end it.
 sealed class CalendarSourceChange<T> {
   const CalendarSourceChange();
 }

@@ -20,8 +20,8 @@ typedef CalendarEntryChanged<T> =
 /// A write that passes is applied within the call, so no write is ever
 /// pending: the store notifies its listeners once, then calls [onChanged]
 /// with the old and the new entry. A throw from [onChanged] is reported
-/// through [FlutterError.reportError], as [ChangeNotifier.notifyListeners]
-/// reports a listener's, and fails no write: the write has applied its
+/// through [FlutterError.reportError], as the store reports a listener's
+/// ([CalendarStore]), and fails no write: the write has applied its
 /// change by then, and completes as it would without the throw. A
 /// refused write fails to its caller, changing nothing and notifying
 /// nothing. An update, move or delete of an id no entry has fails with an
@@ -111,9 +111,13 @@ base class MemoryCalendarStore<T> extends CalendarStore<T> {
     return null;
   }
 
-  /// Does nothing: every range shows.
+  /// Does nothing: every range shows. Throws an [ArgumentError] naming
+  /// `last` for a [last] whose day comes before [first]'s, as
+  /// [CalendarStore.show] does.
   @override
-  void show(DateTime first, DateTime last) {}
+  void show(DateTime first, DateTime last) {
+    checkShownRange(first, last);
+  }
 
   /// Does nothing: no read fails. Throws an [ArgumentError] where one of
   /// [first] and [last] is given without the other, as
@@ -319,9 +323,9 @@ base class MemoryCalendarStore<T> extends CalendarStore<T> {
 
   /// Calls [onChanged] with [old] and [entry], once the change is applied
   /// and the listeners notified. A throw from it is reported through
-  /// [FlutterError.reportError], as [ChangeNotifier.notifyListeners]
-  /// reports a listener's, rather than fail a write that applied its
-  /// change.
+  /// [FlutterError.reportError], as the store reports a listener's
+  /// ([CalendarStore.addListener]), rather than fail a write that applied
+  /// its change.
   void _reportChange(CalendarEntry<T>? old, CalendarEntry<T>? entry) {
     final onChanged = this.onChanged;
     if (onChanged == null) {
