@@ -1206,6 +1206,10 @@ shows that nothing lands there.
 stretch the day's clock repeats in time order, its second pass once the
 first pass's slots are done and before the time after it, and `admits`,
 which passes over a slot it refuses.
+- Added `CalendarDates.clockGoesBackOn`, the instant a day's clock goes back,
+which starts the second pass of the stretch it repeats, or null where it does
+not go back: on the clock of a `TZDateTime` day's zone, and on the device's
+otherwise.
 - Fix: `CalendarScheduleCheck.nextFree`, from a time before a stretch the
 clock repeats or in its first pass, never offered the stretch's second pass:
 in New York on 2026-11-01, with 00:00 EDT to 01:00 EST and 02:00 EST to

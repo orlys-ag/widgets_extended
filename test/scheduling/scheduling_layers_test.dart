@@ -61,6 +61,7 @@ const Set<String> calendarDatesStatics = <String>{
   "endAtWallMinute",
   "rangeEndAtWallMinute",
   "repeatedStretchOf",
+  "clockGoesBackOn",
   "isLaterOccurrence",
   "firstWallMinuteNotBefore",
   "lastWallMinuteNotAfter",

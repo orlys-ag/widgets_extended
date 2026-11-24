@@ -483,16 +483,15 @@ final class CalendarEditRules<T> {
   /// The second pass [firstSlot] reads after the first, of a search of
   /// [start]'s day that reads its clock in [reading]'s occurrence from its
   /// minute [from], where given: the instant the clock goes back
-  /// ([clockGoesBackOn]) and the minute its slots start from no earlier
-  /// than, the later of the hours' start and the earliest start's floor in
-  /// that pass. Null where the clock does not go back, where [start] closes
-  /// the day, where the search reads the second pass already, and where
-  /// [from] lies at the stretch's end or after it, so that every
-  /// second-pass start is before the search's first; an earliest start
-  /// there leaves the pass no slot, as its floor in the pass lies there
-  /// too. It decides on those, not on the search's own first minute, which
-  /// rounding up to the slot grid can carry from a first-pass time to the
-  /// stretch's end.
+  /// ([CalendarDates.clockGoesBackOn]) and the minute its slots start from no
+  /// earlier than, the later of the hours' start and the earliest start's floor
+  /// in that pass. Null where the clock does not go back, where [start] closes
+  /// the day, where the search reads the second pass already, and where [from]
+  /// lies at the stretch's end or after it, so that every second-pass start is
+  /// before the search's first; an earliest start there leaves the pass no
+  /// slot, as its floor in the pass lies there too. It decides on those, not on
+  /// the search's own first minute, which rounding up to the slot grid can
+  /// carry from a first-pass time to the stretch's end.
   ({DateTime at, int from})? _secondPassOf(
     CalendarEarliestStart start,
     DateTime? reading,
@@ -501,7 +500,7 @@ final class CalendarEditRules<T> {
     if (start.closesDay) {
       return null;
     }
-    final at = clockGoesBackOn(start.day);
+    final at = CalendarDates.clockGoesBackOn(start.day);
     if (at == null) {
       return null;
     }

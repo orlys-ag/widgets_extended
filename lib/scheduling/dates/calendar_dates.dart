@@ -409,6 +409,37 @@ abstract final class CalendarDates {
     return change > Duration.zero ? change : Duration.zero;
   }
 
+  /// The instant [day]'s clock goes back, which starts the second pass of
+  /// the stretch it reads twice ([repeatedStretchOf]); null where its clock
+  /// does not go back. [day] is any time of the day, read as [dateOnly]
+  /// reads it: on the clock of a `TZDateTime` [day]'s zone, the answer then
+  /// a `TZDateTime` of the zone, and on the device's clock otherwise.
+  ///
+  /// The answer is the first whole minute after the day's start whose
+  /// offset ([DateTime.timeZoneOffset]) differs from the start's, found by
+  /// bisecting the day's minutes, which takes the offset to change once in
+  /// the day.
+  static DateTime? clockGoesBackOn(DateTime day) {
+    if (repeatedStretchOf(day) == Duration.zero) {
+      return null;
+    }
+    final start = dateOnly(day);
+    final offset = start.timeZoneOffset;
+    // The day's start keeps its offset, and the next day's start has the
+    // fallen one.
+    var kept = 0;
+    var fallen = addDays(start, 1).difference(start).inMinutes;
+    while (fallen - kept > 1) {
+      final middle = (kept + fallen) ~/ 2;
+      if (start.add(Duration(minutes: middle)).timeZoneOffset == offset) {
+        kept = middle;
+      } else {
+        fallen = middle;
+      }
+    }
+    return start.add(Duration(minutes: fallen));
+  }
+
   /// Whether [time] is the later instant of a wall time its day's clock
   /// reads twice, told as of its whole minute, so the seconds past it play
   /// no part; false for a plain UTC `DateTime`, whose clock repeats nothing.
@@ -906,32 +937,6 @@ bool isLaterMidnight(DateTime time) {
       CalendarDates.isLaterOccurrence(time);
 }
 
-/// The instant [day]'s clock goes back, which starts the second pass of
-/// the stretch it reads twice ([CalendarDates.repeatedStretchOf]); null
-/// where it does not go back. [day] is a day start, on the zone's clock of
-/// a `TZDateTime` and the device's otherwise. Bisects the day's minutes on
-/// [DateTime.timeZoneOffset], which falls once in it.
-DateTime? clockGoesBackOn(DateTime day) {
-  if (CalendarDates.repeatedStretchOf(day) == Duration.zero) {
-    return null;
-  }
-  final next = CalendarDates.addDays(day, 1);
-  final offset = day.timeZoneOffset;
-  // The day's start keeps its offset, and the next day's start has the
-  // fallen one.
-  var kept = 0;
-  var fallen = next.difference(day).inMinutes;
-  while (fallen - kept > 1) {
-    final middle = (kept + fallen) ~/ 2;
-    if (day.add(Duration(minutes: middle)).timeZoneOffset == offset) {
-      kept = middle;
-    } else {
-      fallen = middle;
-    }
-  }
-  return day.add(Duration(minutes: fallen));
-}
-
 /// The first range of [length] wall minutes, [slotMinutes] where it is
 /// null, on [day] whose start its clock reads
 /// ([CalendarDates.timeAtWallMinute]) and whose end converts
@@ -951,16 +956,15 @@ DateTime? clockGoesBackOn(DateTime day) {
 /// range can end at an earlier wall minute.
 ///
 /// Where [secondPass] is given, its `at` the instant [day]'s clock goes back
-/// ([clockGoesBackOn]), for a search that reads the first pass of the
-/// stretch the clock repeats and whose first start the caller has found to
-/// lie before the stretch's end in time, the search reads the second pass
-/// once the walk reaches the stretch's end, or at once where [from] lies
-/// there or after it, as rounding a first-pass time up to the grid can
-/// give, before the minutes after the stretch, so the ranges come in the
-/// order of their starts' instants: from the stretch's start, or from its
-/// `from` where that is later, on the grid of [slotMinutes], each in the
-/// second pass, ending by [until] as any range does. [isFree] is asked of
-/// the ranges in that order.
+/// ([CalendarDates.clockGoesBackOn]), for a search that reads the first pass of
+/// the stretch the clock repeats and whose first start the caller has found to
+/// lie before the stretch's end in time, the search reads the second pass once
+/// the walk reaches the stretch's end, or at once where [from] lies there or
+/// after it, as rounding a first-pass time up to the grid can give, before the
+/// minutes after the stretch, so the ranges come in the order of their starts'
+/// instants: from the stretch's start, or from its `from` where that is later,
+/// on the grid of [slotMinutes], each in the second pass, ending by [until] as
+/// any range does. [isFree] is asked of the ranges in that order.
 ({DateTime start, DateTime end})? firstReadableSlot(
   DateTime day,
   int from,
