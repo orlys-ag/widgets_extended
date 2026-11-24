@@ -1,6 +1,7 @@
 /// Agenda's time column in Roboto, from the Flutter SDK's cache, at larger
 /// text sizes: an item's start, an all-day item's label and a gap row's
-/// time. Loaded for this file alone, so the other files keep the test font.
+/// time; what measures them again; and a font loaded while the list is up.
+/// Loaded for this file alone, so the other files keep the test font.
 library;
 
 import 'package:flutter/rendering.dart' show RenderParagraph;
@@ -8,6 +9,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_localizations.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
+import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
@@ -40,20 +43,16 @@ CalendarEntry<String> entryOf(
   );
 }
 
-/// Pumps Agenda on [tuesday], [width] wide, in Roboto at the text [scale],
-/// on [format]'s clock, holding an item from 10:45 to 11:15 and an all-day
-/// item, with the hours 09:00 to 17:00, in edit mode, so the day shows a gap
-/// row from 09:00 and one from 11:15.
-Future<void> pumpAgenda(
-  WidgetTester tester, {
-  required double scale,
-  required CalendarHourLabelFormat format,
-  double width = 400.0,
-}) async {
-  tester.view.physicalSize = Size(width, 800.0);
-  tester.view.devicePixelRatio = 1.0;
-  addTearDown(tester.view.reset);
-  final store = MemoryCalendarStore<String>(
+/// Agenda on [tuesday], holding an item from 10:45 to 11:15 and an
+/// all-day item, with the hours 09:00 to 17:00, in edit mode, so the day
+/// shows a gap row from 09:00 and one from 11:15. [pump] builds it again
+/// with what it is given, the list keeping its state.
+class Agenda {
+  Agenda(this.tester);
+
+  final WidgetTester tester;
+
+  late final MemoryCalendarStore<String> store = MemoryCalendarStore<String>(
     entries: <CalendarEntry<String>>[
       entryOf("talk", at(10, 45), at(11, 15)),
       entryOf(
@@ -65,36 +64,68 @@ Future<void> pumpAgenda(
     ],
     hours: CalendarDayHours(9 * 60, 17 * 60),
   );
-  addTearDown(store.dispose);
-  final now = ValueNotifier<CalendarNow>(
+
+  late final ValueNotifier<CalendarNow> now = ValueNotifier<CalendarNow>(
     CalendarNow(time: DateTime(2026, 4, 25, 9), today: DateTime(2026, 4, 25)),
   );
-  addTearDown(now.dispose);
-  await tester.pumpWidget(
-    MaterialApp(
-      theme: ThemeData(fontFamily: "Roboto"),
-      home: Material(
-        child: MediaQuery.withClampedTextScaling(
-          minScaleFactor: scale,
-          maxScaleFactor: scale,
-          child: DayList<String>(
-            store: store,
-            weekdays: CalendarWeekdaySet.all,
-            format: format,
-            hours: store.hours,
-            editable: true,
-            selectedDay: tuesday,
-            now: now,
-            onTopDay: (day) {},
-            onCreateRange: (details) async {},
-            onEdit: (id) {},
-            onDelete: (id) {},
+
+  /// Pumps the list [width] wide in [fontFamily] at the text [scale], on
+  /// [format]'s clock, under [theme] where it is given, and settles.
+  Future<void> pump({
+    required double scale,
+    required CalendarHourLabelFormat format,
+    double width = 400.0,
+    String fontFamily = "Roboto",
+    CalendarThemeData? theme,
+  }) async {
+    tester.view.physicalSize = Size(width, 800.0);
+    tester.view.devicePixelRatio = 1.0;
+    Widget list = DayList<String>(
+      store: store,
+      weekdays: CalendarWeekdaySet.all,
+      format: format,
+      hours: store.hours,
+      editable: true,
+      selectedDay: tuesday,
+      now: now,
+      onTopDay: (day) {},
+      onCreateRange: (details) async {},
+      onEdit: (id) {},
+      onDelete: (id) {},
+    );
+    if (theme != null) {
+      list = CalendarTheme(data: theme, child: list);
+    }
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(fontFamily: fontFamily),
+        home: Material(
+          child: MediaQuery.withClampedTextScaling(
+            minScaleFactor: scale,
+            maxScaleFactor: scale,
+            child: list,
           ),
         ),
       ),
-    ),
-  );
-  await tester.pumpAndSettle();
+    );
+    await tester.pumpAndSettle();
+  }
+}
+
+/// Pumps an [Agenda] [width] wide in Roboto at the text [scale], on
+/// [format]'s clock.
+Future<Agenda> pumpAgenda(
+  WidgetTester tester, {
+  required double scale,
+  required CalendarHourLabelFormat format,
+  double width = 400.0,
+}) async {
+  addTearDown(tester.view.reset);
+  final agenda = Agenda(tester);
+  addTearDown(agenda.store.dispose);
+  addTearDown(agenda.now.dispose);
+  await agenda.pump(scale: scale, format: format, width: width);
+  return agenda;
 }
 
 /// The [Text] showing [text] inside the widget [of] finds.
@@ -104,15 +135,40 @@ Finder textIn(Finder of, String text) {
   return label;
 }
 
+/// The paragraph [label], a [Text], lays out.
+RenderParagraph paragraphOf(WidgetTester tester, Finder label) {
+  return tester.renderObject<RenderParagraph>(
+    find.descendant(of: label, matching: find.byType(RichText)),
+  );
+}
+
+/// How wide the test font lays out what [paragraph] lays out.
+double testFontWidthOf(RenderParagraph paragraph) {
+  final painter = TextPainter(
+    text: TextSpan(
+      text: paragraph.text.toPlainText(),
+      style: paragraph.text.style!.copyWith(fontFamily: "FlutterTest"),
+    ),
+    textScaler: paragraph.textScaler,
+    textDirection: TextDirection.ltr,
+  )..layout();
+  final width = painter.width;
+  painter.dispose();
+  return width;
+}
+
 /// Expects [label], a one-line [Text], to lie whole and at its full size
 /// in [box]: not cut off at its end or to the box's height, not scaled
 /// down, and within the box's top and bottom.
 void expectWhole(WidgetTester tester, Finder label, Finder box, String what) {
-  final paragraph = tester.renderObject<RenderParagraph>(
-    find.descendant(of: label, matching: find.byType(RichText)),
+  final paragraph = paragraphOf(tester, label);
+  // Setup sanity: the label is laid out in Roboto, whose glyphs are
+  // narrower than the test font's em squares.
+  expect(
+    paragraph.size.width,
+    lessThan(0.8 * testFontWidthOf(paragraph)),
+    reason: "$what in Roboto",
   );
-  // Setup sanity: the label is laid out in Roboto.
-  expect(paragraph.text.style?.fontFamily, "Roboto", reason: what);
   expect(paragraph.didExceedMaxLines, isFalse, reason: "$what cut off");
   expect(
     paragraph.size.height,
@@ -189,12 +245,65 @@ void main() {
     );
     final talk = find.byKey(dayListTimeKey("talk"));
     final label = textIn(talk, start);
-    final paragraph = tester.renderObject<RenderParagraph>(
-      find.descendant(of: label, matching: find.byType(RichText)),
-    );
-    expect(paragraph.didExceedMaxLines, isFalse);
+    expect(paragraphOf(tester, label).didExceedMaxLines, isFalse);
     expect(drawnScaleOf(tester, label), lessThan(1.0));
     expect(tester.getRect(talk).width, lessThanOrEqualTo((220.0 - 32.0) / 2));
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("AF3 a theme that changes only colours lays out no time label "
+      "again, as each frame of a colour transition gives one, while a new "
+      "text size measures them again", (tester) async {
+    const format = CalendarHourLabelFormat.twelveHour;
+    final agenda = await pumpAgenda(tester, scale: 1.0, format: format);
+    const theme = CalendarThemeData.builtIn;
+    await agenda.pump(scale: 1.0, format: format, theme: theme);
+    final before = debugLabelSizeMeasures;
+    final recoloured = theme.copyWith(
+      textSecondary: const Color(0xFF00AA00),
+      textMuted: const Color(0xFF0000AA),
+      primary: const Color(0xFFAA0000),
+    );
+    await agenda.pump(scale: 1.0, format: format, theme: recoloured);
+    final talk = find.byKey(dayListTimeKey("talk"));
+    const strings = DefaultCalendarLocalizations();
+    final start = textIn(talk, strings.formatTime(10 * 60 + 45, format));
+    // Setup sanity: the new colours reach the time column.
+    expect(
+      paragraphOf(tester, start).text.style?.color,
+      const Color(0xFF00AA00),
+    );
+    expect(debugLabelSizeMeasures, before);
+    await agenda.pump(scale: 1.5, format: format, theme: recoloured);
+    expect(debugLabelSizeMeasures, greaterThan(before));
+  });
+
+  testWidgets("AF4 a font loaded while Agenda is up measures its times "
+      "again: the column narrows to the loaded font's widest time", (
+    tester,
+  ) async {
+    const format = CalendarHourLabelFormat.twelveHour;
+    addTearDown(tester.view.reset);
+    final agenda = Agenda(tester);
+    addTearDown(agenda.store.dispose);
+    addTearDown(agenda.now.dispose);
+    await agenda.pump(scale: 2.0, format: format, fontFamily: "LateRoboto");
+    final talk = find.byKey(dayListTimeKey("talk"));
+    final before = tester.getRect(talk).width;
+    await tester.runAsync(() async {
+      final late = FontLoader("LateRoboto")
+        ..addFont(Future<ByteData>.value(materialFont("roboto-medium.ttf")));
+      await late.load();
+    });
+    await tester.pumpAndSettle();
+    const strings = DefaultCalendarLocalizations();
+    final start = textIn(talk, strings.formatTime(10 * 60 + 45, format));
+    final paragraph = paragraphOf(tester, start);
+    // Setup sanity: the label now lays out in the loaded font, narrower
+    // than the test font it laid out in before.
+    expect(paragraph.size.width, lessThan(0.8 * testFontWidthOf(paragraph)));
+    expect(before, greaterThan(paragraph.size.width + 8.0 + 20.0));
+    expect(tester.getRect(talk).width, lessThan(before - 20.0));
+    expect(drawnScaleOf(tester, start), moreOrLessEquals(1.0));
   });
 }

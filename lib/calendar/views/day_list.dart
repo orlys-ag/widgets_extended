@@ -968,6 +968,21 @@ class _DayListState<T> extends State<DayList<T>> {
   /// The box the widest label of the time column takes ([_measureTimes]).
   Size _timeLabel = Size.zero;
 
+  /// The labels [_measureTimes] lays out, made for the localizations and
+  /// the clock [_timeLabelsFor] holds.
+  ({
+    List<String> hours,
+    List<String> minutes,
+    List<String> base,
+    List<String> allDay,
+  })?
+  _timeLabels;
+  (CalendarLocalizations, CalendarHourLabelFormat)? _timeLabelsFor;
+
+  /// Set where the fonts changed since [_measureTimes] last measured, so the
+  /// next build measures again ([_handleFonts]).
+  bool _fontsChanged = false;
+
   /// The [CalendarDates.dayNumber]s of the first and the last day the list
   /// holds.
   late int _first;
@@ -1121,6 +1136,7 @@ class _DayListState<T> extends State<DayList<T>> {
     _zone = widget.store.zone;
     _centreOn(widget.selectedDay);
     _scroll = ScrollController(initialScrollOffset: _offsetOf(_topDay));
+    PaintingBinding.instance.systemFonts.addListener(_handleFonts);
     widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
     _scheduleLanding();
@@ -1146,35 +1162,61 @@ class _DayListState<T> extends State<DayList<T>> {
     _treeMadeFor = null;
   }
 
-  /// The minutes past each hour [_measureTimes] measures, which put each
-  /// digit in each place of a minute: 0 to 5 first, 0 to 9 second.
-  static const List<int> _measuredMinutes = <int>[
-    0,
-    11,
-    22,
-    33,
-    44,
-    55,
-    6,
-    17,
-    28,
-    39,
-  ];
+  /// The hour whose minutes [_measureTimes] lays out.
+  static const int _measuredHour = 10;
 
-  /// Measures [_timeLabel] ([labelSizeIn]) in the time style: each hour of
-  /// the day at [_measuredMinutes] on [DayList.format]'s clock, and the
-  /// all-day label, the labels the time column shows whole. Makes the
-  /// list depend on the text size and the fonts, and the locale, which
-  /// [didChangeDependencies] then measures again.
+  /// Measures [_timeLabel] ([labelSizeIn]) in the time style on
+  /// [DayList.format]'s clock: as wide as the widest hour at minute 0,
+  /// widened by as much as the widest minute of [_measuredHour] outgrows
+  /// that hour's minute 0, which is the widest time where a time lays out
+  /// its hour and its minute side by side, and as the all-day label where
+  /// that is wider; as tall as the tallest of them. Lays out 86 labels where
+  /// it keeps no size of them. Makes the list depend on the text size and
+  /// the locale, which [didChangeDependencies] then measures again; a change
+  /// of the fonts measures again at the next build ([_handleFonts]).
   void _measureTimes() {
     final strings = _strings;
     final format = widget.format;
-    _timeLabel = labelSizeIn(context, _styles.time, <String>[
-      for (var hour = 0; hour < 24; hour++)
-        for (final minute in _measuredMinutes)
-          strings.formatTime(hour * 60 + minute, format),
-      strings.allDay,
-    ]);
+    var labels = _timeLabels;
+    final madeFor = _timeLabelsFor;
+    if (labels == null ||
+        madeFor == null ||
+        !identical(madeFor.$1, strings) ||
+        madeFor.$2 != format) {
+      labels = _timeLabels = (
+        hours: <String>[
+          for (var hour = 0; hour < 24; hour++)
+            strings.formatTime(hour * 60, format),
+        ],
+        minutes: <String>[
+          for (var minute = 0; minute < 60; minute++)
+            strings.formatTime(_measuredHour * 60 + minute, format),
+        ],
+        base: <String>[strings.formatTime(_measuredHour * 60, format)],
+        allDay: <String>[strings.allDay],
+      );
+      _timeLabelsFor = (strings, format);
+    }
+    final style = _styles.time;
+    final hours = labelSizeIn(context, style, labels.hours);
+    final minutes = labelSizeIn(context, style, labels.minutes);
+    final base = labelSizeIn(context, style, labels.base);
+    final allDay = labelSizeIn(context, style, labels.allDay);
+    _timeLabel = Size(
+      math.max(hours.width + minutes.width - base.width, allDay.width),
+      math.max(math.max(hours.height, minutes.height), allDay.height),
+    );
+  }
+
+  /// Measures the times again at the next build where a font loaded at run
+  /// time changes how they lay out, as [labelSizeIn] forgets its sizes on
+  /// the same notify.
+  void _handleFonts() {
+    if (mounted) {
+      setState(() {
+        _fontsChanged = true;
+      });
+    }
   }
 
   /// The width of the time column in a list [listWidth] wide: the widest
@@ -1255,6 +1297,7 @@ class _DayListState<T> extends State<DayList<T>> {
 
   @override
   void dispose() {
+    PaintingBinding.instance.systemFonts.removeListener(_handleFonts);
     widget.store.removeListener(_handleStore);
     widget.now.removeListener(_handleNow);
     _calendarNow.dispose();
@@ -1774,6 +1817,11 @@ class _DayListState<T> extends State<DayList<T>> {
 
   @override
   Widget build(BuildContext context) {
+    if (_fontsChanged) {
+      _fontsChanged = false;
+      _measureTimes();
+      _treeMadeFor = null;
+    }
     var tree = _treeWidget;
     final fresh = tree == null || !_treeStands();
     if (fresh) {

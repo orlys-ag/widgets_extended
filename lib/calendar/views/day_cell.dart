@@ -157,9 +157,11 @@ final List<String> dayNumbers = List<String>.unmodifiable(<String>[
 /// word spacing overrides, at the context's text height behaviour and
 /// locale, and at [scaler], or where it is null the context's text scale.
 /// Makes [context] depend on what it reads there. Keeps the sizes it measured
-/// last, so a build that asks again measures nothing, until the fonts
-/// change ([PaintingBinding.systemFonts]), as a font loaded at run time
-/// changes them.
+/// last, so a build that asks again measures nothing, also under a style
+/// that differs only in what paints the text, such as its colour
+/// ([TextStyle.compareTo]), until the fonts change
+/// ([PaintingBinding.systemFonts]), as a font loaded at run time changes
+/// them.
 Size labelSizeIn(
   BuildContext context,
   TextStyle style,
@@ -212,6 +214,13 @@ const int _labelSizesKept = 32;
 /// Whether a change of the fonts empties [_labelSizes].
 bool _labelSizesFollowFonts = false;
 
+/// How many times [labelSizeIn] has laid labels out rather than reading a
+/// size it kept, in a debug build; it only counts up. A test reads it to
+/// pin what measures again: a size kept or measured is the same size, so
+/// no widget shows the difference.
+@visibleForTesting
+int debugLabelSizeMeasures = 0;
+
 /// What [labelSizeIn] measures a size from.
 @immutable
 final class _LabelKey {
@@ -230,6 +239,10 @@ final class _LabelKey {
   final List<String> texts;
 
   Size measure() {
+    assert(() {
+      debugLabelSizeMeasures++;
+      return true;
+    }());
     final painter = TextPainter(
       textDirection: TextDirection.ltr,
       textScaler: scaler,
@@ -249,10 +262,12 @@ final class _LabelKey {
     return Size(width, height);
   }
 
+  /// Equal where the styles lay text out alike ([TextStyle.compareTo]),
+  /// whatever paints it.
   @override
   bool operator ==(Object other) {
     return other is _LabelKey &&
-        other.style == style &&
+        other.style.compareTo(style) != RenderComparison.layout &&
         other.scaler == scaler &&
         other.behavior == behavior &&
         other.locale == locale &&
@@ -261,7 +276,18 @@ final class _LabelKey {
 
   @override
   int get hashCode {
-    return Object.hash(style, scaler, behavior, locale, Object.hashAll(texts));
+    // Of the fields [TextStyle.compareTo] reads to tell a layout apart, so
+    // keys equal under [==] hash alike.
+    final layout = Object.hash(
+      style.fontFamily,
+      style.fontSize,
+      style.fontWeight,
+      style.fontStyle,
+      style.letterSpacing,
+      style.wordSpacing,
+      style.height,
+    );
+    return Object.hash(layout, scaler, behavior, locale, Object.hashAll(texts));
   }
 }
 
