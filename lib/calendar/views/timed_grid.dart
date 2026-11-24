@@ -1219,7 +1219,9 @@ final class _Dragging extends _GridMode {
   DateTime? laterDayEnd;
 
   /// The range a bar's day-edge resize past [CalendarEditRules.dayLimit] is
-  /// held at ([CalendarEditRules.heldToLimit]), which its release writes.
+  /// held at ([CalendarEditRules.heldToLimit]), which its release writes
+  /// where the policy still admits it then
+  /// ([_TimedGridState._heldBarAdmitted]).
   ({DateTime start, DateTime end})? heldBar;
 
   /// Set once a crossing's release wrote or refused its landing, so the
@@ -3483,7 +3485,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// day-edge resize of the bar ([_barResizeOf]) past
   /// [CalendarEditRules.dayLimit]'s days is refused, and holds the drag's
   /// [_Dragging.heldBar] at the range the limit admits, which the release
-  /// writes, unless that range moves the dragged edge against the drag
+  /// writes where it is still admitted then ([_heldBarAdmitted]), unless
+  /// that range moves the dragged edge against the drag
   /// ([_holdsAgainstDrag]); every other span of that resize clears it.
   bool _canDropBar(GridKey key, BoardSpan span) {
     if (span.rowStart < _stripStart ||
@@ -4315,6 +4318,55 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return end;
   }
 
+  /// The range [drag]'s day-edge resize of a bar is held at
+  /// ([_Dragging.heldBar]) where the entry's edge the drag does not move
+  /// is still the held range's, [_policy] still lets the dragged edge
+  /// resize, and [_rules] still admit the range at [_calendarNow]; null
+  /// where it holds none, where the other edge moved or either refuses,
+  /// or where the policy's answer throws ([_reportPolicyThrow]). The drop
+  /// gate held the range under the clock of the pointer's last move, and
+  /// a new minute since asks it nothing for a bar ([_keepsGateAnswers]),
+  /// so [_handleNow] asks this, dropping a hold it refuses with the
+  /// strip's marks and the landing label that show it, and the release
+  /// asks again, as a crossing's release reads its landing under the clock
+  /// it is let go at. A store change that keeps the bar's
+  /// span keeps the drag, and clears the hold only at the next frame's
+  /// resolve, so a release in the frame of a change that moves the other
+  /// edge would write that edge back.
+  ({DateTime start, DateTime end})? _heldBarAdmitted(_Dragging drag) {
+    final held = drag.heldBar;
+    final shape = _board.itemOf(drag.key);
+    if (held == null || shape == null) {
+      return null;
+    }
+    final entry = shape.shown.entry;
+    final atStart = drag.kind == BoardDragKind.resizeColStart;
+    if (atStart
+        ? !held.end.isAtSameMomentAs(entry.end)
+        : !held.start.isAtSameMomentAs(entry.start)) {
+      return null;
+    }
+    final now = _calendarNow;
+    try {
+      final edges = _policy.resizableEdges(entry, now);
+      final edgeResizes = atStart ? edges.hasStart : edges.hasEnd;
+      if (!edgeResizes ||
+          !_rules.admitsTimes(
+            entry,
+            held.start,
+            held.end,
+            now,
+            isAllDay: true,
+          )) {
+        return null;
+      }
+    } catch (exception, stack) {
+      _reportPolicyThrow(exception, stack);
+      return null;
+    }
+    return held;
+  }
+
   /// Whether [held], where [CalendarEditRules.heldToLimit] holds a resized
   /// edge, lies on the other side of [stored], the edge as stored, from
   /// [dragged], where the drag took it: a hold that moves the edge against
@@ -4727,9 +4779,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// time moves, shows or goes, or today moves, or when it gives the board
   /// new drag configs; takes the new value as [_calendarNow], writing
   /// [_limits] in edit mode, refilling a create range's limits
-  /// ([_refillRange]) and, where the board keeps the gate's answers through
-  /// the drag ([_keepsGateAnswers]), making the configs again
-  /// ([_askDragAgain]); and hands a new today to the header cells. A notify
+  /// ([_refillRange]), dropping a bar's held range that the policy no
+  /// longer admits ([_heldBarAdmitted]) and, where the board keeps the
+  /// gate's answers through the drag ([_keepsGateAnswers]), making the
+  /// configs again ([_askDragAgain]); and hands a new today to the header
+  /// cells. A notify
   /// that comes with a new zone of the store, ahead of the store's own,
   /// takes the zone ([_takeZone]), which takes the new value, and leaves
   /// the rest to the store notify.
@@ -4762,6 +4816,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _limits.value = _limitsOf();
     }
     _refillRange();
+    final drag = _drag;
+    if (drag != null &&
+        drag.heldBar != null &&
+        _heldBarAdmitted(drag) == null) {
+      _holdBar(null);
+    }
     if (_keepsGateAnswers && _askDragAgain()) {
       setState(() {});
     }
@@ -5057,7 +5117,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// carries the kind the release gives ([_landsAllDay]), so a block let go
   /// on its own day's strip cell requests the entry all-day at the same
   /// times. A bar's day-edge resize held at [CalendarEditRules.dayLimit]
-  /// requests the range it is held at. The request's hold syncs within the
+  /// requests the range it is held at, where the policy still admits it at
+  /// the release ([_heldBarAdmitted]). The request's hold syncs within the
   /// call ([_requestMove]).
   void _releaseCross(Offset local) {
     final drag = _drag;
@@ -5093,7 +5154,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
       drag.spent = true;
     } else {
-      write = drag.heldBar;
+      write = _heldBarAdmitted(drag);
     }
     if (write == null) {
       return;

@@ -1186,6 +1186,21 @@ scrolling under it. The shadows are the new
 `CalendarThemeExtension.fromColorScheme` gives in the scheme's `shadow`
 colour; an empty list casts none. A block lifted across the edge paints
 over the shadow.
+- Fix: in Week and Day, a bar's day-edge resize held at the day limit
+requested the range it was held at when let go, though the clock had
+since passed a time after which the edit policy refused that range or that
+edge, as `lockPast` does at midnight. Its release now asks the policy
+again, as a release over another day's cell does, and requests nothing
+where it refuses; at the new minute the strip's marks and the landing label
+already drop the range it refuses. Let go in the frame in which the store moved the bar's
+other edge, it requested that edge back; it now requests nothing.
+- Fix: Agenda's time column was 64 px wide at any text size, so at larger
+sizes an item's start lost its end, as "10:45 AM" did in Roboto at a text
+scale of 1.3, and a gap row, 24 px tall, cut its time to that height, as at
+a text scale of 2. The column is now as wide as the widest time it shows,
+and the all-day label, at the text size and in the fonts loaded, and at
+most half of a row's content, in which a time scales down rather than
+losing its end; a gap row is as tall as its time.
 
 ## 0.0.35
 

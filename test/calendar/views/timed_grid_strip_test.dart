@@ -4200,6 +4200,180 @@ void main() {
     expectTimes(store, "meet", tuesday, wednesday);
   });
 
+  testWidgets("TX40 in Week under maxDayCount 2, Wednesday's bar's start "
+      "edge held at the limit over Monday at Tuesday 23:59 and let go "
+      "requests Tuesday to Thursday, and once the clock reaches Wednesday "
+      "shows no landing and let go requests nothing where the policy then "
+      "refuses that range or that edge", (tester) async {
+    final shown = Shown.week(monday);
+    for (final (name, lockPast, editPolicy, clockMoves, requested)
+        in <
+          (
+            String,
+            bool,
+            CalendarEditPolicy<String>?,
+            bool,
+            List<(DateTime, DateTime)>,
+          )
+        >[
+          (
+            "lockPast, the clock still",
+            true,
+            null,
+            false,
+            <(DateTime, DateTime)>[(tuesday, thursday)],
+          ),
+          (
+            "lockPast, the clock moved",
+            true,
+            null,
+            true,
+            <(DateTime, DateTime)>[],
+          ),
+          (
+            "start edge locked from Wednesday, the clock moved",
+            false,
+            CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+              _StartEdgeUntil<String>("b", wednesday),
+              DayLimitPolicy<String>(2),
+            ]),
+            true,
+            <(DateTime, DateTime)>[],
+          ),
+        ]) {
+      final bar = allDayOf("b", wednesday);
+      final store = storeOf(<CalendarEntry<String>>[bar]);
+      final harness = Harness(
+        store,
+        shown,
+        lockPast: lockPast,
+        maxDayCount: 2,
+        editPolicy: editPolicy,
+        today: tuesday,
+      );
+      harness.now.value = CalendarNow(
+        time: at(tuesday, 23, 59),
+        today: tuesday,
+      );
+      await harness.pump(tester);
+      await selectBar(tester, "b");
+      final cell = stripRect(tester, shown, monday);
+      final gesture = await holdEdge(
+        tester,
+        "b",
+        AxisDirection.left,
+        Offset(cell.left + 4.0, tester.getCenter(barFinder("b")).dy),
+      );
+      await tester.pump();
+      // Setup sanity: the limit holds the start edge at Tuesday.
+      expect(
+        markedOf(tester, <DateTime>[monday, tuesday, wednesday]),
+        <DateTime>[tuesday, wednesday],
+        reason: name,
+      );
+      if (clockMoves) {
+        harness.now.value = CalendarNow(
+          time: at(wednesday, 0),
+          today: wednesday,
+        );
+        await tester.pump();
+        // The hold the policy now refuses shows no landing.
+        expect(
+          markedOf(tester, <DateTime>[monday, tuesday, wednesday]),
+          isEmpty,
+          reason: name,
+        );
+        expect(landingText(tester), isNull, reason: name);
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(
+        <(DateTime, DateTime)>[
+          for (final moved in store.moves) (moved.start, moved.end),
+        ],
+        requested,
+        reason: name,
+      );
+      if (requested.isEmpty) {
+        expectTimes(store, "b", bar.start, bar.end, reason: name);
+      }
+    }
+  });
+
+  testWidgets("TX41 in Week under maxDayCount 4, a bar's start edge, or "
+      "its end edge, held at the limit and let go in the frame in which the "
+      "store moves the bar's other edge outside the week requests nothing, "
+      "leaving the new edge", (tester) async {
+    final shown = Shown.week(monday);
+    final sundayBefore = CalendarDates.addDays(monday, -1);
+    for (final (name, bar, side, over, marked, moved)
+        in <
+          (
+            String,
+            CalendarEntry<String>,
+            AxisDirection,
+            DateTime,
+            List<DateTime>,
+            CalendarEntry<String> Function(CalendarEntry<String> bar),
+          )
+        >[
+          (
+            "the start edge, the end moved later",
+            allDayOf("b", saturday, days: 3),
+            AxisDirection.left,
+            wednesday,
+            <DateTime>[friday, saturday, sunday],
+            (bar) => bar.copyWith(end: CalendarDates.addDays(bar.end, 1)),
+          ),
+          (
+            "the end edge, the start moved earlier",
+            allDayOf("b", sundayBefore, days: 2),
+            AxisDirection.right,
+            friday,
+            <DateTime>[monday, tuesday, wednesday],
+            (bar) => bar.copyWith(start: CalendarDates.addDays(bar.start, -1)),
+          ),
+        ]) {
+      final store = storeOf(<CalendarEntry<String>>[bar]);
+      final harness = Harness(store, shown, maxDayCount: 4);
+      await harness.pump(tester);
+      await selectBar(tester, "b");
+      final cell = stripRect(tester, shown, over);
+      final gesture = await holdEdge(
+        tester,
+        "b",
+        side,
+        Offset(
+          side == AxisDirection.left ? cell.left + 4.0 : cell.right - 4.0,
+          tester.getCenter(barFinder("b")).dy,
+        ),
+      );
+      await tester.pump();
+      // Setup sanity: the limit holds the dragged edge short of [over].
+      expect(
+        markedOf(tester, <DateTime>[
+          monday,
+          tuesday,
+          wednesday,
+          thursday,
+          friday,
+          saturday,
+          sunday,
+        ]),
+        marked,
+        reason: name,
+      );
+      final changed = moved(bar);
+      unawaited(store.update(changed));
+      // Setup sanity: the store holds the moved edge before the release.
+      expectTimes(store, "b", changed.start, changed.end, reason: name);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(store.moves, isEmpty, reason: name);
+      expectTimes(store, "b", changed.start, changed.end, reason: name);
+    }
+  });
+
   testWidgets("TX36 in Week, leaving edit mode while a block's move, its "
       "move onto a strip cell, or its end handle's resize into a later day "
       "runs ends it: the frame that leaves edit mode asks the policy "
@@ -10839,4 +11013,22 @@ Future<void> packedCreateDrag(
 /// What a throwing per-pair answer throws in OP11.
 class PairFailure implements Exception {
   const PairFailure();
+}
+
+/// Lets the start edge of the entry [id] resize while the clock reads a
+/// time before [until], and every other edge and change always, as TX40
+/// needs. Compared by identity.
+final class _StartEdgeUntil<T> extends CalendarEditPolicy<T> {
+  const _StartEdgeUntil(this.id, this.until);
+
+  final String id;
+  final DateTime until;
+
+  @override
+  CalendarResizeEdges resizableEdges(CalendarEntry<T> entry, CalendarNow now) {
+    if (entry.id == id && !now.time.isBefore(until)) {
+      return CalendarResizeEdges.end;
+    }
+    return CalendarResizeEdges.both;
+  }
 }
