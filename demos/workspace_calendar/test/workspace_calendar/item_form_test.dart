@@ -113,6 +113,22 @@ final class _TimedChangesOnly extends CalendarEditPolicy<ItemPayload> {
   }
 }
 
+/// A policy that admits every change, and gives [earliest]'s day the
+/// earliest start [earliest] and every other day none.
+final class _EarliestStartAt extends CalendarEditPolicy<ItemPayload> {
+  const _EarliestStartAt(this.earliest);
+
+  final DateTime earliest;
+
+  @override
+  DateTime? earliestStartOn(DateTime day, CalendarNow now) {
+    if (CalendarDates.dayNumber(day) != CalendarDates.dayNumber(earliest)) {
+      return null;
+    }
+    return earliest;
+  }
+}
+
 void main() {
   testWidgets("R1 a new start time moves the end and keeps the length", (
     tester,
@@ -600,6 +616,102 @@ void main() {
       expect(timeFieldShows("End time", "01:00"), findsOneWidget);
       await openTimePicker(tester, "End time");
       expect(offeredTimes(tester, "End time"), containsAll(<int>[60, 75]));
+    });
+
+    testWidgets("IF10 an all-day item on a day whose clock goes back takes, "
+        "as its times, the free hour in the stretch's second pass where its "
+        "first pass is taken", (tester) async {
+      final newYork = tz.getLocation("America/New_York");
+      final writes = <CalendarItem?>[];
+      final store = MemoryCalendarStore<ItemPayload>(
+        entries: <CalendarItem>[
+          calendarItem(
+            id: "item-1",
+            type: CalendarItemType.task,
+            title: "Write",
+            start: tz.TZDateTime(newYork, 2026, 11, 1),
+            end: tz.TZDateTime(newYork, 2026, 11, 2),
+            fields: const <String, Object?>{"status": "toDo"},
+            isAllDay: true,
+          ),
+          // 00:00 EDT to 01:00 EST: the first pass and the hour before it.
+          calendarItem(
+            id: "item-2",
+            type: CalendarItemType.task,
+            title: "Read",
+            start: inNewYork(DateTime.utc(2026, 11, 1, 4)),
+            end: inNewYork(DateTime.utc(2026, 11, 1, 6)),
+            fields: const <String, Object?>{"status": "toDo"},
+          ),
+        ],
+        zone: newYork,
+        onChanged: (old, entry) {
+          writes.add(entry);
+        },
+      );
+      addTearDown(store.dispose);
+      await openBeforeTheChange(tester, store);
+      await tester.tap(allDaySwitch());
+      await tester.pumpAndSettle();
+      expect(timeFieldShows("Start time", "01:00"), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, "Save"));
+      await tester.pumpAndSettle();
+      expect(writes, hasLength(1));
+      expect(utcOf(writes.single!.start), DateTime.utc(2026, 11, 1, 6));
+      expect(utcOf(writes.single!.end), DateTime.utc(2026, 11, 1, 7));
+    });
+
+    testWidgets("IF11 an all-day item on a day whose clock goes back, where "
+        "every hour is shared and the earliest start lies in the first pass "
+        "after its last slot, takes the first hour of the second pass", (
+      tester,
+    ) async {
+      final newYork = tz.getLocation("America/New_York");
+      final store = MemoryCalendarStore<ItemPayload>(
+        entries: <CalendarItem>[
+          calendarItem(
+            id: "item-1",
+            type: CalendarItemType.task,
+            title: "Write",
+            start: tz.TZDateTime(newYork, 2026, 11, 1),
+            end: tz.TZDateTime(newYork, 2026, 11, 2),
+            fields: const <String, Object?>{"status": "toDo"},
+            isAllDay: true,
+          ),
+          // The whole day.
+          calendarItem(
+            id: "item-2",
+            type: CalendarItemType.task,
+            title: "Read",
+            start: inNewYork(DateTime.utc(2026, 11, 1, 4)),
+            end: inNewYork(DateTime.utc(2026, 11, 2, 5)),
+            fields: const <String, Object?>{"status": "toDo"},
+          ),
+        ],
+        zone: newYork,
+      );
+      addTearDown(store.dispose);
+      await openForm(
+        tester,
+        store,
+        slotMinutes: 15,
+        // 01:50 EDT, after the first pass's last slot, 01:45 EDT.
+        policy: _EarliestStartAt(inNewYork(DateTime.utc(2026, 11, 1, 5, 50))),
+        now: tz.TZDateTime(newYork, 2026, 10, 30, 9),
+        today: tz.TZDateTime(newYork, 2026, 10, 30),
+      );
+      await tester.tap(allDaySwitch());
+      await tester.pumpAndSettle();
+      expect(timeFieldShows("Start time", "01:00"), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(scheduleZoneKey),
+          matching: find.text(
+            const DefaultCalendarLocalizations().utcOffset(-300),
+          ),
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets("IF9 the zone box names the offset at a later-pass start", (

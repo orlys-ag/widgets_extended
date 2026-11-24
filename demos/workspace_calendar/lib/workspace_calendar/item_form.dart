@@ -364,8 +364,11 @@ class _ItemFormState extends State<_ItemForm> {
   /// [CalendarSchedule.withAllDay] off to restore, so it keeps, as its
   /// timed ones, the first hour of the store's hours on its start day that
   /// no shown item shares, or the first hour where each is shared, as
-  /// [CalendarEditRules.firstSlot] finds them; and its first day's 00:00 to
-  /// its last day's 24:00 where the start day leaves no hour.
+  /// [CalendarEditRules.firstSlot] finds them in the order of their
+  /// instants, the second pass of a stretch the day's clock repeats after
+  /// the first ([CalendarEditRules.firstSlot]'s `throughSecondPass`); and
+  /// its first day's 00:00 to its last day's 24:00 where the start day
+  /// leaves no hour.
   CalendarSchedule _openingSchedule() {
     final item = widget.item;
     final schedule = CalendarSchedule.of(
@@ -386,8 +389,13 @@ class _ItemFormState extends State<_ItemForm> {
           start,
           clearOf: shown,
           lengthMinutes: _timedLengthMinutes,
+          throughSecondPass: true,
         ) ??
-        _rules.firstSlot(start, lengthMinutes: _timedLengthMinutes);
+        _rules.firstSlot(
+          start,
+          lengthMinutes: _timedLengthMinutes,
+          throughSecondPass: true,
+        );
     if (slot == null) {
       return schedule;
     }
