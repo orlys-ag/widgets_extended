@@ -439,7 +439,7 @@ final class CalendarScheduleCheck<T> {
   /// length in elapsed minutes ([CalendarSchedule.lengthMinutes]); null for
   /// an all-day schedule, one that spans days or has no length, and where
   /// the day leaves no such range, as for a stored entry whose start the
-  /// policy keeps ([startFixed]) where its own times are not free.
+  /// policy keeps ([startFixed]) wherever the search starts after it.
   ///
   /// Where [now]'s clock gives the schedule times, the search reads the
   /// day's clock in the occurrence of the later instant of its start and

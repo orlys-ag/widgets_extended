@@ -81,8 +81,6 @@ List<CalendarScheduleProblem> problemsOf(
   ).problems;
 }
 
-/// Holds every entry as one in progress, its start fixed and its end
-/// resizable, and admits only a change to a timed entry.
 /// A policy that forbids overlaps but lets a change share time with an
 /// entry whose id is "soft" ([CalendarEditPolicy.mayOverlap]).
 final class _SoftOverlaps extends CalendarEditPolicy<String> {
@@ -102,6 +100,8 @@ final class _SoftOverlaps extends CalendarEditPolicy<String> {
   }
 }
 
+/// Holds every entry as one in progress, its start fixed and its end
+/// resizable, and admits only a change to a timed entry.
 final class _HeldTimedOnly extends CalendarEditPolicy<String> {
   const _HeldTimedOnly();
 
@@ -1162,6 +1162,27 @@ void main() {
       );
       // Setup sanity: the schedule shares the first pass's entry's time.
       expect(check.overlaps.map((entry) => entry.id), <String>["a"]);
+      final free = check.nextFree;
+      expect(free, isNotNull);
+      expectTimes(
+        free!.timesOn(newYork),
+        DateTime.utc(2026, 11, 1, 6),
+        DateTime.utc(2026, 11, 1, 6, 30),
+      );
+    });
+
+    test("SC29 the next free range under the lock at a time after the first "
+        "pass's last slot is the stretch's free second pass", () {
+      final check = newCheck(
+        lockNow,
+        // 00:30 EDT to 01:00 EDT.
+        inNewYorkFrom(
+          DateTime.utc(2026, 11, 1, 4, 30),
+          DateTime.utc(2026, 11, 1, 5),
+        ),
+        // 01:50 EDT, after the first pass's last slot, 01:45 EDT.
+        nowOnTheChange(DateTime.utc(2026, 11, 1, 5, 50)),
+      );
       final free = check.nextFree;
       expect(free, isNotNull);
       expectTimes(

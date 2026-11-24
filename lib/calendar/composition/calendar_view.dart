@@ -1544,8 +1544,9 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
   /// before that start, and the slots are tried in the order of their
   /// instants: where [day]'s clock repeats a stretch, from that start's
   /// occurrence, and from the first pass on through the second before the
-  /// time after the stretch. Where [afterNow] and [day] is today, the start is the later of
-  /// that start and the current time ([CalendarNow.timeOnToday]). It takes
+  /// time after the stretch. Where [afterNow] and [day] is today, the start
+  /// is the later of that start and the current time
+  /// ([CalendarNow.timeOnToday]). It takes
   /// [globalRect] as its rect and returns the start of the range it
   /// reports with [_createRange]'s future. Where it leaves no such slot in
   /// the hours, it reports [CalendarView.onCreateRefused] instead and

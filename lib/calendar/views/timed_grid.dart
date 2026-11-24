@@ -1966,7 +1966,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       // New days are not ready yet, so they do not animate in either way;
       // new hours move every block at once.
       _sync(animate: !tracksChanged);
-      if (storeChanged) {
+      // A new minute in the same update asks below, for every drag.
+      if (storeChanged && !nowTaken) {
         _askDragAgain(overlapsOnly: true);
       }
     } else if (widget.editable != oldWidget.editable &&
@@ -4316,10 +4317,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// or where the policy's answer throws ([_reportPolicyThrow]). The drop
   /// gate holds the range under the clock of its last ask, and a new
   /// minute or a store change asks it again only after the frame
-  /// ([_askDragAgain], the board's structural channel), so a release
-  /// before that asks this, as a crossing's release reads its landing
-  /// under the clock it is let go at. A store change that moves the
-  /// other edge would otherwise have the release write that edge back.
+  /// ([_askDragAgain], the board's structural channel), so a new minute
+  /// ([_handleNow]) and a release before that ask this, as a crossing's
+  /// release reads its landing under the clock it is let go at. A store
+  /// change that moves the other edge would otherwise have the release
+  /// write that edge back.
   ({DateTime start, DateTime end})? _heldBarAdmitted(_Dragging drag) {
     final held = drag.heldBar;
     final shape = _board.itemOf(drag.key);
@@ -4766,9 +4768,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// time moves, shows or goes, or today moves, or when it gives the board
   /// new drag configs; takes the new value as [_calendarNow], writing
   /// [_limits] in edit mode, refilling a create range's limits
-  /// ([_refillRange]) and, for a drag the board runs, making the configs
-  /// again ([_askDragAgain]), as any of the drop gate's answers may change
-  /// with the time; and hands a new today to the header cells. A notify
+  /// ([_refillRange]), dropping at once a bar's held range that the policy
+  /// no longer admits ([_heldBarAdmitted]), with the strip's marks and the
+  /// landing label that show it, and, for a drag the board runs, making the
+  /// configs again ([_askDragAgain]), as any of the drop gate's answers may
+  /// change with the time and the board asks it again only after the
+  /// frame; and hands a new today to the header cells. A notify
   /// that comes with a new zone of the store, ahead of the store's own,
   /// takes the zone ([_takeZone]), which takes the new value, and leaves
   /// the rest to the store notify.
@@ -4801,6 +4806,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _limits.value = _limitsOf();
     }
     _refillRange();
+    final drag = _drag;
+    if (drag != null &&
+        drag.heldBar != null &&
+        _heldBarAdmitted(drag) == null) {
+      _holdBar(null);
+    }
     if (_askDragAgain(overlapsOnly: false)) {
       setState(() {});
     }

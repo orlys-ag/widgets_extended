@@ -951,13 +951,16 @@ DateTime? clockGoesBackOn(DateTime day) {
 /// range can end at an earlier wall minute.
 ///
 /// Where [secondPass] is given, its `at` the instant [day]'s clock goes back
-/// ([clockGoesBackOn]), and the search reads the first pass of the stretch
-/// the clock repeats from a minute before the stretch's end, it reads the
-/// second pass once the first pass's minutes are done, before the minutes
-/// after the stretch, so the ranges come in the order of their starts'
-/// instants: from the stretch's start, or from its `from` where that is
-/// later, on the grid of [slotMinutes], each in the second pass, ending by
-/// [until] as any range does. [isFree] is asked of the ranges in that order.
+/// ([clockGoesBackOn]), for a search that reads the first pass of the
+/// stretch the clock repeats and whose first start the caller has found to
+/// lie before the stretch's end in time, the search reads the second pass
+/// once the walk reaches the stretch's end, or at once where [from] lies
+/// there or after it, as rounding a first-pass time up to the grid can
+/// give, before the minutes after the stretch, so the ranges come in the
+/// order of their starts' instants: from the stretch's start, or from its
+/// `from` where that is later, on the grid of [slotMinutes], each in the
+/// second pass, ending by [until] as any range does. [isFree] is asked of
+/// the ranges in that order.
 ({DateTime start, DateTime end})? firstReadableSlot(
   DateTime day,
   int from,
@@ -1013,10 +1016,8 @@ DateTime? clockGoesBackOn(DateTime day) {
   if (secondPass != null) {
     final stretchStart = CalendarDates.minuteOfDay(secondPass.at);
     passEnd = stretchStart + CalendarDates.repeatedStretchOf(day).inMinutes;
-    if (from < passEnd) {
-      final first = math.max(secondPass.from, stretchStart);
-      passFrom = (first + slotMinutes - 1) ~/ slotMinutes * slotMinutes;
-    }
+    final first = math.max(secondPass.from, stretchStart);
+    passFrom = (first + slotMinutes - 1) ~/ slotMinutes * slotMinutes;
   }
 
   ({DateTime start, DateTime end})? secondPassRange(int first) {

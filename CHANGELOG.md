@@ -1191,8 +1191,8 @@ requested the range it was held at when let go, though the clock had
 since passed a time after which the edit policy refused that range or that
 edge, as `lockPast` does at midnight. Its release now asks the policy
 again, as a release over another day's cell does, and requests nothing
-where it refuses; from the frame after the new minute the strip's marks and
-the landing label drop the range it refuses. Let go in the frame in which
+where it refuses; at the new minute the strip's marks and the landing label
+drop the range it refuses. Let go in the frame in which
 the store moved the bar's other edge, it requested that edge back; it now
 requests nothing.
 - Fix: in Week and Day, a drag held still while the clock passed a time
@@ -1212,7 +1212,8 @@ in New York on 2026-11-01, with 00:00 EDT to 01:00 EST and 02:00 EST to
 04:00 EST taken, a schedule at 00:30 EDT got 04:00 EST, not the free
 01:00 EST, and in Santiago on 2026-04-04, in hours of 23:00 to 24:00 whose
 first pass was taken, it got none. Month's long press made its create the
-same way. Both now read the second pass after the first.
+same way. Both now read the second pass after the first, also from a time
+in the first pass after its last slot.
 - Fix: `CalendarScheduleCheck.nextFree` of a stored entry offered a range
 the same check refused, as for an entry whose start the policy keeps; it
 now offers only a range the policy lets the entry take

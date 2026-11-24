@@ -4276,11 +4276,9 @@ void main() {
           time: at(wednesday, 0),
           today: wednesday,
         );
-        // A frame hands the board the configs the new minute made, and the
-        // next shows what its ask of the gate gave.
         await tester.pump();
-        await tester.pump();
-        // The hold the policy now refuses shows no landing.
+        // The hold the policy now refuses shows no landing, from the frame
+        // of the new minute.
         expect(
           markedOf(tester, <DateTime>[monday, tuesday, wednesday]),
           isEmpty,

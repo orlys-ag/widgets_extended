@@ -1455,6 +1455,51 @@ void main() {
         DateTime.utc(2026, 11, 1, 4, 15),
       );
     });
+
+    test("EZ12 through the second pass, an earliest start in the first pass "
+        "after its last slot, whose floor rounds up to the stretch's end, "
+        "still gets the free second pass, while a search from a minute "
+        "after the stretch, or an earliest start there, does not go back to "
+        "it", () {
+      final day = newYorkDay();
+      final rules = rulesOf();
+      // 01:50 EDT, after the first pass's last slot, 01:45 EDT.
+      final late = CalendarEarliestStart(
+        day,
+        inNewYork(DateTime.utc(2026, 11, 1, 5, 50)),
+      );
+      expectSlot(
+        rules.firstSlot(late, throughSecondPass: true),
+        DateTime.utc(2026, 11, 1, 6),
+        DateTime.utc(2026, 11, 1, 6, 15),
+      );
+      expectSlot(
+        rules.firstSlot(late, elapsedMinutes: 30, throughSecondPass: true),
+        DateTime.utc(2026, 11, 1, 6),
+        DateTime.utc(2026, 11, 1, 6, 30),
+      );
+      // 02:30 EST, after the stretch.
+      expectSlot(
+        rules.firstSlot(
+          CalendarEarliestStart(day, day),
+          from: 150,
+          throughSecondPass: true,
+        ),
+        DateTime.utc(2026, 11, 1, 7, 30),
+        DateTime.utc(2026, 11, 1, 7, 45),
+      );
+      expectSlot(
+        rules.firstSlot(
+          CalendarEarliestStart(
+            day,
+            inNewYork(DateTime.utc(2026, 11, 1, 7, 30)),
+          ),
+          throughSecondPass: true,
+        ),
+        DateTime.utc(2026, 11, 1, 7, 30),
+        DateTime.utc(2026, 11, 1, 7, 45),
+      );
+    });
   });
 
   test("ER20 a first slot whose times admits refuses is passed over, and "
