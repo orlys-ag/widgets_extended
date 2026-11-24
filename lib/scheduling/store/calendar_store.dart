@@ -9,19 +9,21 @@ import 'package:flutter/foundation.dart';
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
 
-/// Whether every day of the range a store shows is read (ready), or one
-/// of its unread days is marked [CalendarStore.readFailed], its last read
-/// having failed, though another read of it may be on the way (failed);
-/// loading otherwise.
+/// Whether every day of the range a store shows is read and none is marked
+/// [CalendarStore.readFailed] (ready), or a day of it is marked, a read of
+/// it having failed before the store read it as its source holds it,
+/// though another read of it may be on the way (failed); loading
+/// otherwise.
 enum CalendarLoadStatus {
-  /// No unread day of the range is marked failed, and one or more is
-  /// unread; or no range is shown yet.
+  /// No day of the range is marked failed, and one or more is unread; or
+  /// no range is shown yet.
   loading,
 
-  /// An unread day of the range is marked [CalendarStore.readFailed].
+  /// A day of the range is marked [CalendarStore.readFailed].
   failed,
 
-  /// Every day of the range is read.
+  /// Every day of the range is read, and none is marked
+  /// [CalendarStore.readFailed].
   ready,
 }
 
@@ -131,8 +133,12 @@ final class CalendarWritePendingException extends CalendarStoreException {
 /// The entries a calendar shows, the load state of the range it shows, and
 /// its writes.
 ///
-/// A store notifies its listeners whenever what it answers changes. An
-/// entry has one write in flight at most: while it runs the entry shows
+/// A store notifies its listeners whenever what it answers changes. A
+/// listener's throw is reported through [FlutterError.reportError],
+/// whatever [Listenable.onError] does, as with no Flutter binding, where it
+/// rethrows, and the store notifies its other listeners all the same: the
+/// throw fails no write and escapes no call into the store. An entry has
+/// one write in flight at most: while it runs the entry shows
 /// [CalendarShownEntry.pending], and a write on it sends nothing and fails
 /// with a [CalendarWritePendingException]. Each write returns a future
 /// that completes once the store's source, a data source it writes
@@ -151,6 +157,79 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
 
   CalendarDayHours _hours;
   Location? _zone;
+
+  /// Each listener [addListener] registered, by itself: the function
+  /// registered in its place, which reports its throw, and how many times
+  /// it is registered.
+  final Map<VoidCallback, ({VoidCallback guarded, int count})> _guarded =
+      <VoidCallback, ({VoidCallback guarded, int count})>{};
+
+  /// Registers [listener], called whenever what the store answers changes,
+  /// once for each time it is registered. A throw from it is reported
+  /// through [FlutterError.reportError] and the other listeners are called
+  /// all the same, whatever [Listenable.onError] does.
+  @override
+  void addListener(VoidCallback listener) {
+    final registered = _guarded[listener];
+    final guarded =
+        registered?.guarded ??
+        () {
+          _callReporting(listener);
+        };
+    super.addListener(guarded);
+    _guarded[listener] = (
+      guarded: guarded,
+      count: (registered?.count ?? 0) + 1,
+    );
+  }
+
+  /// Removes one registration of [listener], if any.
+  @override
+  void removeListener(VoidCallback listener) {
+    final registered = _guarded[listener];
+    if (registered == null) {
+      return;
+    }
+    super.removeListener(registered.guarded);
+    if (registered.count == 1) {
+      _guarded.remove(listener);
+    } else {
+      _guarded[listener] = (
+        guarded: registered.guarded,
+        count: registered.count - 1,
+      );
+    }
+  }
+
+  /// Calls [listener], reporting its throw through
+  /// [FlutterError.reportError]: [ChangeNotifier.notifyListeners] hands a
+  /// listener's throw to [Listenable.onError], which with no Flutter binding
+  /// rethrows it, ending the notification there and leaving the notifier
+  /// counted as notifying, which a later [dispose] asserts against.
+  static void _callReporting(VoidCallback listener) {
+    try {
+      listener();
+    } on Object catch (exception, stack) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: exception,
+          stack: stack,
+          library: "widgets_extended calendar",
+          context: ErrorDescription(
+            "while notifying the listeners of a calendar store",
+          ),
+        ),
+      );
+    }
+  }
+
+  /// Drops every listener, as [ChangeNotifier.dispose] does; the store is
+  /// not used after.
+  @override
+  void dispose() {
+    _guarded.clear();
+    super.dispose();
+  }
 
   /// The hours a new entry, and a write that changes an entry's start, end
   /// or kind, must lie in ([CalendarDayHours.holdsTimes]), which hold every
@@ -209,35 +288,38 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
   }
 
   /// Follows from the shown range's days alone: ready once none of them is
-  /// unread, failed while an unread one is [readFailed], and loading
+  /// unread or [readFailed], failed while one is [readFailed], and loading
   /// otherwise.
   CalendarLoadStatus get status;
 
   /// While [status] is [CalendarLoadStatus.failed], the error of the
   /// latest failed read among those whose [readFailed] marks stand on the
-  /// shown range's unread days; null otherwise.
+  /// shown range's days; null otherwise.
   Object? get loadError;
 
-  /// Shows [first] to [last], both inclusive, reading the days not read
-  /// yet, which ends their [readFailed] marks: the marked ones with a read
-  /// of their own though a read is on the way, as [retry] does, and the
-  /// others with one read from the first to the last of them, or with none
-  /// where one read on the way covers them all.
+  /// Shows [first] to [last], both inclusive, reading its days marked
+  /// [readFailed] and those not read yet, which ends their marks: the
+  /// marked ones with a read of their own though a read is on the way, as
+  /// [retry] does, and the other unread ones with one read from the first
+  /// to the last of them, or with none where one read on the way covers
+  /// them all. Throws an [ArgumentError], in every build, naming `last` for
+  /// a [last] whose day comes before [first]'s.
   ///
   /// A store that reads ahead of the shown range, as a caching store given
-  /// a read-ahead does, reads the unread days beside the range too, and
-  /// ends their [readFailed] marks with the range's, in the same read; a
-  /// read on the way then covers the days to read only where it covers
-  /// the read-ahead's days as well.
+  /// a read-ahead does, reads the marked and unread days beside the range
+  /// too, and ends their [readFailed] marks with the range's, in the same
+  /// read; a read on the way then covers the days to read only where it
+  /// covers the read-ahead's days as well.
   void show(DateTime first, DateTime last);
 
   /// Ends the [readFailed] marks of the shown range's days and, where
   /// given, of the days from [first] to [last], both inclusive, and reads
-  /// those of them not read yet: the marked ones with a read of their own
-  /// though a read is on the way, and, of each of the two ranges, the
-  /// others with one read from the first to the last of them, or with none
-  /// where one read on the way covers them all. Throws an [ArgumentError]
-  /// where one of [first] and [last] is given without the other.
+  /// those of them marked or not read yet: the marked ones with a read of
+  /// their own though a read is on the way, and, of each of the two
+  /// ranges, the other unread ones with one read from the first to the
+  /// last of them, or with none where one read on the way covers them all.
+  /// Throws an [ArgumentError] where one of [first] and [last] is given
+  /// without the other.
   ///
   /// A store that reads ahead of the shown range, as [show] does, ends the
   /// marks of the read-ahead's days and reads them with the shown range's,
@@ -263,9 +345,11 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
   /// Whether [day] is read.
   bool isRead(DateTime day);
 
-  /// Whether the last read of [day], which is unread, failed: true until a
-  /// read fills the day, a [show], a [retry] or a [refresh] reads it, or a
-  /// zone change, which ends the mark.
+  /// Whether a read of [day] failed before the store read the day as its
+  /// source holds it: while the day was unread, or read and taken to have
+  /// changed at its source since. True until a read fills the day, a
+  /// [show], a [retry] or a [refresh] reads it, or a zone change, which
+  /// ends the mark.
   bool readFailed(DateTime day);
 
   /// Whether the shown range is exactly [first] to [last].
@@ -917,6 +1001,19 @@ final class _PendingFiled<T> {
   /// Whether [entry] has a part in [day].
   bool covers(int day) {
     return day >= firstDay && day <= lastDay;
+  }
+}
+
+/// Throws an [ArgumentError] naming `last` where [last]'s day comes before
+/// [first]'s, as [CalendarStore.show] does: a shown range holds one day or
+/// more.
+void checkShownRange(DateTime first, DateTime last) {
+  if (CalendarDates.dayNumber(last) < CalendarDates.dayNumber(first)) {
+    throw ArgumentError.value(
+      last,
+      "last",
+      "A shown range ends on its first day or a later one, $first",
+    );
   }
 }
 

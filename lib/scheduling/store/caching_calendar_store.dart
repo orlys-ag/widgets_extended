@@ -94,9 +94,9 @@ class _EntryTime {
   final _EntryTime? beneath;
 }
 
-/// The failure that marked an unread day [CachingCalendarStore.readFailed]:
-/// the [error] the read failed with, and the [order] of that failure among
-/// the store's failed reads.
+/// The failure that marked a day [CachingCalendarStore.readFailed]: the
+/// [error] the read failed with, and the [order] of that failure among the
+/// store's failed reads.
 typedef _Mark = ({Object error, int order});
 
 /// A read day.
@@ -129,8 +129,11 @@ class _Day {
 /// also lay on read days outside the read leaves those days changed, since
 /// what the source holds there is unknown. A failed read leaves its unread
 /// days unread, so the next read that covers them reads them again, and
-/// marks [readFailed] each of them that no read a [show], a [retry] or a
-/// [refresh] asked for since it was sent covers in flight. A mark ends
+/// marks [readFailed] each of them, and each of its read days taken to
+/// have changed since the read that last filled it, that no read a
+/// [show], a [retry] or a [refresh] asked for since it was sent covers in
+/// flight; the read a refresh waits on marks only its unread days, since
+/// its failure fails the refresh. A mark ends
 /// once a read fills the day or a [show], a [retry] or a [refresh] reads
 /// it, which each does with a read of its own though a read in flight
 /// covers the day, since that read may fail as the last one did, and at
@@ -139,7 +142,7 @@ class _Day {
 /// only by filling the day, and keeps no failed read from making one. The
 /// shown range's [status] and [loadError] follow from its days and their
 /// marks alone: a mark keeps the error of the failure that made it, and
-/// [loadError] is the latest such error on the range's unread days.
+/// [loadError] is the latest such error on the range's days.
 ///
 /// A day once read stays read, except that a zone change re-keys the read
 /// days to those its earlier reads fully cover under the new zone, each read
@@ -149,11 +152,15 @@ class _Day {
 /// shown range alone. A host whose users switch zones sets a [readAhead] of
 /// 2, which keeps the shown days read across a change between any two
 /// zones once the store's reads have answered, the last zone change's
-/// re-reads included. [invalidate], [refresh] and the changes the
-/// source announces take a read day's entries to have changed: the day
-/// still shows what the store holds, and is read again in the background,
-/// at once where the shown range holds it and otherwise once a [show] or a
-/// [prefetch] covers it. A background read of the shown range's changed
+/// re-reads included. [invalidate], [refresh], a zone change and the
+/// changes the source announces take a read day's entries to have
+/// changed: the day still shows what the store holds, and is read again in
+/// the background, at once where the shown range holds it and otherwise
+/// once a [show] or a [prefetch] covers it. Where that read fails, the day
+/// is marked [readFailed] as above, so a shown range holding it is failed
+/// rather than ready with what the source may no longer hold, until a
+/// read fills the day or a [show], a [retry] or a [refresh] reads it. A
+/// background read of the shown range's changed
 /// days runs from the first to the last of them that no read in flight
 /// covers; a shown day changed since the read covering it was sent is
 /// read once more when that read answers, so a burst of changes on a
@@ -192,7 +199,9 @@ class _Day {
 /// The store holds the source to its contract: a read answering an entry
 /// with no id fails as a read does, a create answering one with no id
 /// fails to its caller, and a write answered under another id than the one
-/// written fails as that write fails, each with a [StateError]. A source
+/// written fails as that write fails, each with a [StateError]; and a read
+/// answering a time the zone cannot represent, as a date its clock skips,
+/// fails as a read does, with an [ArgumentError]. A source
 /// call that throws instead of answering a future fails within the call,
 /// with the error it threw. Only the first answer or failure of a source
 /// call's future is heard: a future whose `then` throws once it answered
@@ -210,8 +219,15 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// is applied without a read, a [CalendarDaysChanged] is an [invalidate]
   /// of its days, or with a zone of the zone days its device days touch,
   /// and a [CalendarAllChanged], or an error on the stream, is an
-  /// [invalidate] of every day. A [show] and a [retry] also read the
-  /// [readAhead] days on each side of the shown range.
+  /// [invalidate] of every day. The end of [changes] ends the
+  /// announcements, and reads nothing: the store then hears of no change
+  /// at the source, as a store given no stream, so a change made there
+  /// shows once the store reads its day again, as at an [invalidate] or a
+  /// [refresh]. [changes] is the store's for its life, so a source whose
+  /// announcements can stop for a while, as across a lost connection,
+  /// keeps the stream open ([CalendarSourceChange]). A [show] and a
+  /// [retry] also read the [readAhead] days on each side of the shown
+  /// range.
   ///
   /// Throws an [ArgumentError] naming `readAhead`, in every build, for a
   /// negative [readAhead].
@@ -286,10 +302,12 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// The reads in flight, in the order they were sent.
   final List<_Read> _reads = <_Read>[];
 
-  /// The unread days, by [CalendarDates.dayNumber], whose last read failed,
-  /// each with the failure that marked it, until a read fills them, a [show],
-  /// a [retry] or a [refresh] reads them, or a zone change, which ends every
-  /// mark.
+  /// The days, by [CalendarDates.dayNumber], whose read failed while they
+  /// were unread or changed ([readFailed]), each with the failure that
+  /// marked it, until a read fills them, a [show], a [retry] or a [refresh]
+  /// reads them, or a zone change, which ends every mark. Each is unread or
+  /// changed: a mark is made only on such a day, and a read day stays
+  /// changed until a read fills it, which ends its mark.
   final Map<int, _Mark> _failedDays = <int, _Mark>{};
 
   /// The count of failed reads, which orders their marks in [_failedDays].
@@ -316,21 +334,25 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   bool _notifyPending = false;
 
   /// Follows from the shown range's days alone: ready once none of them is
-  /// unread, failed while an unread one is [readFailed], whether or not
-  /// another read of it is in flight, and otherwise loading, as before the
-  /// first [show]. A failed range stays failed while a read it did not ask
-  /// for, such as a [prefetch], reads its failed days, until a [show], a
+  /// unread or [readFailed], failed while one is [readFailed], whether or
+  /// not another read of it is in flight, and otherwise loading, as before
+  /// the first [show]. A failed range stays failed while a read it did not
+  /// ask for, such as a [prefetch], reads its failed days, until a [show], a
   /// [retry] or a [refresh] reads them, reads fill them, or a zone change,
-  /// which ends every mark.
+  /// which ends every mark. A read day changed at its source stays ready
+  /// while it is read again, and makes the range failed once that read
+  /// fails, unless a refresh waited on it.
   @override
   CalendarLoadStatus get status {
     return _status;
   }
 
   /// While [status] is failed, the error of the latest failed read among
-  /// those whose marks stand on the shown range's unread days
-  /// ([readFailed]): the data source's error, or a [StateError] where the
-  /// read answered an entry with no id. Null otherwise.
+  /// those whose marks stand on the shown range's days ([readFailed]): the
+  /// data source's error, a [StateError] where the read answered an entry
+  /// with no id, or an [ArgumentError] where it answered a time the zone
+  /// cannot represent. A mark keeps the error of the failure that made it,
+  /// which a later failure on its day does not replace. Null otherwise.
   @override
   Object? get loadError {
     return _loadError;
@@ -338,26 +360,31 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
 
   /// Shows [first] to [last], both inclusive. A range whose days are all
   /// read is ready at once; otherwise it is loading. Where no read in
-  /// flight covers its unread days, the show sends one read of them and of
-  /// its changed days. Where one does, the show takes that read over as
-  /// its own, and reads the range's [readFailed] days again with a read of
-  /// its own, as [retry] does, since the read in flight may fail as the
-  /// last one did. Changed days of the range that no read in flight covers
-  /// are read again too, in one read with those [readFailed] days, and the
-  /// range does not wait on them. The show ends the [readFailed] mark of
-  /// each day it reads.
+  /// flight covers its unread days, the show sends one read of them, of its
+  /// changed days and of its [readFailed] days. Where one does, or none is
+  /// unread, the show takes that read, if any, over as its own, and reads
+  /// the range's [readFailed] days again with a read of its own, as [retry]
+  /// does, since a read in flight may fail as the last one did. Changed
+  /// days of the range that no read in flight covers are read again too, in
+  /// one read with those [readFailed] days, and the range does not wait on
+  /// them. The show ends the [readFailed] mark of each day it reads, so it
+  /// leaves no day of the range marked.
   /// A read the source answers within the call, as a [SynchronousFuture]'s
   /// does, is applied within it, so the call can leave the range ready, or
-  /// failed where such a read failed and left a day of it unread with no
-  /// read asked for since in flight. Showing the range already shown
-  /// changes nothing, and so does a show after [dispose].
+  /// failed where such a read failed and marked a day of it with no read
+  /// asked for since in flight. Showing the range already shown changes
+  /// nothing, and so does a show after [dispose]. Throws an [ArgumentError]
+  /// naming `last`, in every build, for a [last] whose day comes before
+  /// [first]'s, also after [dispose].
   ///
-  /// The unread days the [readAhead] adds on each side of the range are
-  /// read as the range's own: in the read the show sends, which a read in
-  /// flight replaces only where it covers them too, and their [readFailed]
-  /// marks end with the range's. [status] follows the range alone.
+  /// The unread and [readFailed] days the [readAhead] adds on each side of
+  /// the range are read as the range's own: in the read the show sends,
+  /// which a read in flight replaces only where it covers them too, and
+  /// their [readFailed] marks end with the range's. [status] follows the
+  /// range alone.
   @override
   void show(DateTime first, DateTime last) {
+    checkShownRange(first, last);
     final firstDay = CalendarDates.dayNumber(first);
     final lastDay = CalendarDates.dayNumber(last);
     if (_disposed || (firstDay == _shownFirst && lastDay == _shownLast)) {
@@ -367,16 +394,16 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
       _shownFirst = firstDay;
       _shownLast = lastDay;
       _showCount++;
-      ({int first, int last})? failed;
+      var failed = _failedSpanOf(firstDay - readAhead, lastDay + readAhead);
       final unread = _unreadSpan();
-      if (unread != null) {
-        final covering = _inFlightCovering(unread.first, unread.last);
-        if (covering == null) {
-          _readShown(unread);
-        } else {
-          _takeOver(covering);
-          failed = _failedSpanOf(unread.first, unread.last);
-        }
+      final covering = unread == null
+          ? null
+          : _inFlightCovering(unread.first, unread.last);
+      if (unread != null && covering == null) {
+        _readShown(_joined(unread, failed)!);
+        failed = null;
+      } else if (covering != null) {
+        _takeOver(covering);
       }
       _readChangedShown(requested: true, failed: failed);
       _settleStatus();
@@ -390,13 +417,15 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     return _days.containsKey(CalendarDates.dayNumber(day));
   }
 
-  /// Whether a read of [day], which is unread, failed while no read a
+  /// Whether a read of [day] failed while [day] was unread, or read and
+  /// changed since the read that last filled it, and while no read a
   /// [show], a [retry] or a [refresh] asked for since it was sent was in
   /// flight over it, and neither a read has filled it nor a [show], a
   /// [retry] or a [refresh] has read it since, nor a zone change, which ends
-  /// every mark, has come since. A read the store sends in the background,
-  /// as a [prefetch] or the read of changed days does, leaves the mark until
-  /// it fills the day.
+  /// every mark, has come since. The read a refresh waits on marks no read
+  /// day, its failure failing the refresh. A read the store sends in the
+  /// background, as a [prefetch] or the read of changed days does, leaves
+  /// the mark until it fills the day.
   @override
   bool readFailed(DateTime day) {
     return _failedDays.containsKey(CalendarDates.dayNumber(day));
@@ -522,10 +551,11 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// fills the day, and notifies nothing itself, so a failed shown range
   /// stays failed while it reads the range's failed days. Its read counts
   /// toward [status] once it answers, as any read does: one leaving the
-  /// shown range with no unread day makes it ready, and a failed one leaves
-  /// its unread days unread and marks [readFailed] those that no read a
-  /// [show], a [retry] or a [refresh] asked for since covers in flight,
-  /// which makes a shown range holding one failed.
+  /// shown range with no unread or [readFailed] day makes it ready, and a
+  /// failed one leaves its unread days unread and marks [readFailed] those
+  /// and its changed days that no read a [show], a [retry] or a [refresh]
+  /// asked for since covers in flight, which makes a shown range holding
+  /// one failed. [first] after [last] gives no day.
   @override
   void prefetch(DateTime first, DateTime last) {
     if (_disposed) {
@@ -544,10 +574,12 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// to have changed. Each read day of them still shows what the store
   /// holds, and is read again: at once where the shown range holds it, and
   /// otherwise once a [show] or a [prefetch] covers it. A read in flight
-  /// over them leaves them changed once it answers. It notifies nothing
-  /// itself: a read it sends notifies once it changes what the store
-  /// answers, within the call where the source answers within it. Does
-  /// nothing after [dispose].
+  /// over them leaves them changed once it answers. Where the read of a
+  /// changed day fails, the day is marked [readFailed], which makes a shown
+  /// range holding it failed. It notifies nothing itself: a read it sends
+  /// notifies once it changes what the store answers or marks a day,
+  /// within the call where the source answers within it. [first] after
+  /// [last] gives no day. Does nothing after [dispose].
   @override
   void invalidate(DateTime first, DateTime last) {
     final firstDay = CalendarDates.dayNumber(first);
@@ -564,7 +596,9 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// [readFailed] mark of each of its days, so a failed shown range is
   /// loading again, as after [retry], unless the source answers that read
   /// within the call, as for [show]. A range whose days are all read
-  /// stays ready, and a failed read leaves its days changed. Notifies as a
+  /// stays ready, also once the read fails: its failure fails the refresh,
+  /// whose caller hears it, and marks [readFailed] the range's unread days
+  /// alone, leaving its read days changed. Notifies as a
   /// [retry] does, only where it changes something: a read that fails
   /// within the call with the error the range's marks hold notifies
   /// nothing. Completes once that read answers, or fails with the error it
@@ -634,7 +668,7 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
       if (record == null) {
         continue;
       }
-      if (math.max(record.changedAt, _allChangedAt) > record.filledAt &&
+      if (_isChanged(record) &&
           !(uncovered && _inFlightCovering(day, day) != null)) {
         first ??= day;
         last = day;
@@ -644,6 +678,12 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
       return null;
     }
     return (first: first, last: last!);
+  }
+
+  /// Whether [record], a read day, is changed: a change on it, or on every
+  /// day, was announced since the read that last filled it was sent.
+  bool _isChanged(_Day record) {
+    return math.max(record.changedAt, _allChangedAt) > record.filledAt;
   }
 
   /// The span a [prefetch] of [firstDay] to [lastDay] reads: from the
@@ -841,17 +881,18 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     return null;
   }
 
-  /// Sends a read of the [unread] days of the shown range and its
-  /// [readAhead], and of the range's changed days, as one span, which a
-  /// [show] asked for, so it ends the [readFailed] marks over that span.
-  void _readShown(({int first, int last}) unread) {
+  /// Sends a read of [days], the span of the unread and [readFailed] days
+  /// of the shown range and its [readAhead], and of the range's changed
+  /// days, as one span, which a [show] asked for, so it ends the
+  /// [readFailed] marks over that span.
+  void _readShown(({int first, int last}) days) {
     final changed = _changedSpanOf(_shownFirst!, _shownLast!);
     final first = changed == null
-        ? unread.first
-        : math.min(unread.first, changed.first);
+        ? days.first
+        : math.min(days.first, changed.first);
     final last = changed == null
-        ? unread.last
-        : math.max(unread.last, changed.last);
+        ? days.last
+        : math.max(days.last, changed.last);
     _endFailed(first, last);
     _send(first, last, requested: true);
   }
@@ -883,9 +924,9 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
 
   /// Sets [status] and [loadError] from the shown range's days and their
   /// marks alone, and returns whether either changed: ready once none is
-  /// unread; failed once an unread one is [readFailed], with the error of
-  /// the latest failure among the marks on its unread days; and otherwise
-  /// loading.
+  /// unread or [readFailed]; failed once one is [readFailed], with the
+  /// error of the latest failure among the marks on its days; and
+  /// otherwise loading.
   bool _settleStatus() {
     final first = _shownFirst;
     final last = _shownLast;
@@ -895,10 +936,9 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     var unread = false;
     _Mark? latest;
     for (var day = first; day <= last; day++) {
-      if (_days.containsKey(day)) {
-        continue;
+      if (!_days.containsKey(day)) {
+        unread = true;
       }
-      unread = true;
       final mark = _failedDays[day];
       if (mark != null && (latest == null || mark.order > latest.order)) {
         latest = mark;
@@ -1061,12 +1101,14 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// answered or failed, and completes nothing, its wait having passed to
   /// the read of the shown range that zone change sent. One that answers
   /// ends the [readFailed] mark of each day it fills, and sends the read
-  /// again of the shown range's days
-  /// announced changed meanwhile. A failed one marks [readFailed] each of
-  /// its days that no read has filled and that no read a [show], a [retry]
-  /// or a [refresh] asked for since it was sent covers in flight
-  /// ([_requestedSince]), whatever a read in flight in the background will
-  /// answer; a day marked already keeps its mark and the mark's error. It
+  /// again of the shown range's changed days, a day announced changed
+  /// meanwhile or marked [readFailed] among them. A failed one marks
+  /// [readFailed] each of its days that is unread or changed, the read
+  /// days only where no refresh waits on it ([_Read.done]), and that no
+  /// read a [show], a [retry] or a [refresh] asked for since it was sent
+  /// covers in flight ([_requestedSince]), whatever a read in flight in the
+  /// background will answer; a day marked already keeps its mark and the
+  /// mark's error. It
   /// notifies when it changed [status], [loadError], what the store
   /// answers, or [readFailed], except that it leaves to a [retry] or a
   /// [refresh] under way the marks it makes again on the days that call
@@ -1116,8 +1158,12 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     var failed = false;
     if (answered == null) {
       final mark = (error: failure!, order: ++_failures);
+      // The failure of a read a refresh waits on reaches the refresh's
+      // caller, so of the read days it marks none.
+      final heard = read.done != null;
       for (var day = read.first; day <= read.last; day++) {
-        if (!_days.containsKey(day) &&
+        final record = _days[day];
+        if ((record == null || (!heard && _isChanged(record))) &&
             !_requestedSince(read, day) &&
             !_failedDays.containsKey(day)) {
           _failedDays[day] = mark;
@@ -1166,10 +1212,11 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   }
 
   /// Applies [entries], the answer of [read], and returns whether what the
-  /// store answers changed.
+  /// store answers, or a day's [readFailed] mark, changed.
   ///
   /// The read fills its unread days, and its read ones that no read sent later
-  /// filled. Each entry it answers replaces the held one, and each held entry
+  /// filled, ending the mark of each day it fills. Each entry it answers
+  /// replaces the held one, and each held entry
   /// on a day it fills that it does not answer is forgotten, except an entry a
   /// write confirmed, a change announced or a read sent since set or removed. A
   /// read sent later that removed an entry told nothing of the days it did not
@@ -1195,6 +1242,7 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     final at = read.sentAt;
     final opened = <int>[];
     final filled = <int>[];
+    var unmarked = false;
     for (var day = read.first; day <= read.last; day++) {
       final record = _days[day];
       if (record == null) {
@@ -1205,6 +1253,7 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
       } else if (record.filledAt < at) {
         record.filledAt = at;
         filled.add(day);
+        unmarked = _failedDays.remove(day) != null || unmarked;
       }
     }
     if (filled.isNotEmpty) {
@@ -1217,7 +1266,7 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
       }
     }
     _index.open(opened);
-    var changed = opened.isNotEmpty;
+    var changed = opened.isNotEmpty || unmarked;
     final answered = <String>{};
     final updated = <CalendarEntry<T>>[];
     for (final entry in entries) {

@@ -9,7 +9,11 @@ paths:
 The contract of `CalendarStore` and its two stores. The layer's imports are in `scheduling.md`'s table, and the conventions every layer follows in `scheduling.md` and `shared-calendar-conventions.md`.
 
 - **`CalendarStore`** is listenable, and answers the entries covering a
-  range, the load state of the range the calendar shows, and writes.
+  range, the load state of the range the calendar shows, and writes. A
+  shown range holds one day or more: `show` throws an `ArgumentError` for
+  a last day before the first. A listener's throw is reported, whatever
+  `Listenable.onError` does, and the other listeners are notified: it
+  fails no write and escapes no call into the store.
 - **Hours and the zone.** The store holds the calendar's one copy of its
   hours, which its writes must lie in, and the zone whose clock it reads
   them on; a set of other hours notifies, and a set of another zone refiles
@@ -31,20 +35,22 @@ The contract of `CalendarStore` and its two stores. The layer's imports are in `
   reads and writes sent, writes confirmed and changes announced. An entry
   a read forgets that also lay on read days outside it leaves those days
   changed. A failed read leaves its unread days unread, so the next read
-  that covers them reads them again, and marks failed each of them that
-  no read a show, a retry or a refresh asked for since it was sent
-  covers in flight, whether sent or taken over. A mark ends only when a
-  read fills the day, when a show, a retry or a refresh reads it, which
-  each does with a read of its own though a read in flight covers the
-  day, since that read may fail as the last one did, or at a zone change,
-  which ends them all; a read the store
-  sends in the background, such as a prefetch, ends a mark only by
-  filling the day, and keeps no failed read from making one. The shown
-  range's status follows from its days alone: ready once none is unread,
-  failed while an unread one is marked, and loading otherwise, however
+  that covers them reads them again, and marks failed each of them, and
+  each of its read days changed since the read that last filled it, that
+  no read a show, a retry or a refresh asked for since it was sent covers
+  in flight, whether sent or taken over; the read a refresh waits on,
+  whose failure fails the refresh, marks only its unread days. A mark ends
+  only when a read fills the day, when a show, a retry or a refresh reads
+  it, which each does with a read of its own though a read in flight
+  covers the day, since that read may fail as the last one did, or at a
+  zone change, which ends them all; a read the store sends in the
+  background, such as a prefetch, ends a mark only by filling the day, and
+  keeps no failed read from making one. The shown
+  range's status follows from its days alone: ready once none is unread
+  or marked, failed while one is marked, and loading otherwise, however
   many reads cover its unread days. A mark keeps the error of the failure
   that made it, which a later failure on the marked day does not replace,
-  and the load error is the latest such error on the shown range's unread
+  and the load error is the latest such error on the shown range's
   days. A retry ends the marks of the shown range's days, of its
   read-ahead's days and of the days it is given, and reads them again:
   the marked days with a read of its
@@ -59,14 +65,16 @@ The contract of `CalendarStore` and its two stores. The layer's imports are in `
   reads again; a changed day keeps showing what the
   store holds while it is read again in the background, at once where the
   shown range holds it and otherwise once a show or a prefetch covers it,
-  and a day being changed does not change the load status. A background
+  and a day being changed does not change the load status until a read of
+  it fails and marks it. A background
   read of the shown range's changed days runs from the first to the last
   of them that no read in flight covers; a shown day changed since the
   read covering it was sent is read once more when that read answers. A
   stream of `CalendarSourceChange`s, when given, is applied as it arrives:
   a put or a removal without a read, a change of days as an `invalidate`,
   and a change of all, or an error on the stream, as an `invalidate` of
-  every day. Where a change announced since a write was sent, or a read
+  every day; its end ends the announcements and reads nothing. Where a
+  change announced since a write was sent, or a read
   sent since, contradicts the write's answer, the store keeps what it
   holds, and the days of both entries, read or under a read in flight,
   are read again; the read's answer may arrive before the write's or

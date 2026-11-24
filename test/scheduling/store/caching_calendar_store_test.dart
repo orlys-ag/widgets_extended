@@ -1728,6 +1728,94 @@ void main() {
     ]);
   });
 
+  test("CS28 with no Flutter binding, a listener's throw is reported, the "
+      "other listeners are notified, and a move returns its future, sends "
+      "the move and completes with its answer", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
+    store.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+    await settle();
+    store.addListener(() {
+      throw const SourceFailure("Listener.");
+    });
+    var after = 0;
+    store.addListener(() {
+      after++;
+    });
+    final moved = retimed(item, 720, 780);
+
+    Future<CalendarEntry<String>>? move;
+    Object? thrown;
+    final caught = await caughtIn(() {
+      try {
+        move = store.requestMove(moved);
+      } on Object catch (error) {
+        thrown = error;
+      }
+    });
+    expect(
+      (
+        thrown,
+        move != null,
+        harness.source.calls.length,
+        store.isPending("item-1"),
+        after,
+        caught.reported.join(","),
+        caught.uncaught.length,
+      ),
+      (null, true, 2, true, 1, "SourceFailure", 0),
+    );
+
+    final outcome = outcomeOf(move!);
+    final answered = await caughtIn(() {
+      harness.lastCall.succeed(moved);
+    });
+    expect(
+      (
+        await outcome,
+        store.isPending("item-1"),
+        after,
+        answered.reported.join(","),
+      ),
+      (moved, false, 2, "SourceFailure"),
+    );
+    // In debug builds dispose asserts that no notification is under way,
+    // as one a throw escaping it would leave.
+    store.dispose();
+  });
+
+  test("M12 a show whose last day comes before its first throws an "
+      "ArgumentError naming last, also after dispose, and sends and "
+      "changes nothing", () async {
+    final harness = Harness();
+    final store = harness.store;
+    Object? error;
+    try {
+      store.show(weekLast, weekFirst);
+    } on ArgumentError catch (thrown) {
+      error = thrown.name;
+    }
+    store.dispose();
+    Object? disposedError;
+    try {
+      store.show(weekLast, weekFirst);
+    } on ArgumentError catch (thrown) {
+      disposedError = thrown.name;
+    }
+    expect(
+      (
+        error,
+        disposedError,
+        harness.source.calls.length,
+        store.isShown(weekLast, weekFirst),
+        store.status,
+      ),
+      ("last", "last", 0, false, CalendarLoadStatus.loading),
+    );
+  });
+
   test("FR1 an invalidated shown day keeps showing what the store holds "
       "while it is read again, and the answer replaces its entries", () async {
     final harness = Harness();
@@ -4344,6 +4432,140 @@ void main() {
     expect(harness.source.calls, hasLength(calls));
   });
 
+  test("FR83 a shown day taken to have changed whose read again fails is "
+      "marked readFailed, still answering its entries, which makes the "
+      "range failed with that read's error until a retry reads the day "
+      "again", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final day = DateTime(2026, 4, 21);
+    store.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[
+      task("item-1", day, 600, 660),
+    ]);
+    await settle();
+    store.invalidate(day, day);
+    // Setup sanity: the change sends a read of the day, and the range stays
+    // ready while it runs.
+    expect(
+      (harness.source.calls.length, harness.lastCall.first, store.status),
+      (2, day, CalendarLoadStatus.ready),
+    );
+    final notifications = harness.notifications;
+
+    final error = harness.lastCall.fail();
+    await settle();
+    expect(
+      (
+        store.status,
+        store.loadError,
+        store.readFailed(day),
+        store.isRead(day),
+        idsOn(store, day).join(","),
+        harness.notifications - notifications,
+      ),
+      (CalendarLoadStatus.failed, error, true, true, "item-1", 1),
+    );
+
+    store.retry();
+    expect(
+      (
+        store.status,
+        store.readFailed(day),
+        harness.source.calls.length,
+        harness.lastCall.first,
+        harness.lastCall.last,
+      ),
+      (CalendarLoadStatus.ready, false, 3, day, day),
+    );
+  });
+
+  test("FR84 a show reads the days a failed read again left readFailed, in "
+      "the range and its read-ahead, with a read of its own though a read "
+      "in flight covers them, which ends their marks", () async {
+    final source = FakeDataSource();
+    final store = CachingCalendarStore<String>(
+      dataSource: source,
+      readAhead: 1,
+    );
+    addTearDown(store.dispose);
+    final ahead = DateTime(2026, 4, 27);
+    store.show(weekFirst, weekLast);
+    source.calls.last.succeed(const <CalendarEntry<String>>[]);
+    await settle();
+    store.show(DateTime(2026, 4, 13), DateTime(2026, 4, 19));
+    source.calls.last.succeed(const <CalendarEntry<String>>[]);
+    await settle();
+    // Both days are read; a change on them is read again by a prefetch,
+    // which fails and marks them.
+    store.invalidate(DateTime(2026, 4, 22), ahead);
+    store.prefetch(DateTime(2026, 4, 22), ahead);
+    source.calls.last.fail();
+    await settle();
+    store.prefetch(DateTime(2026, 4, 22), ahead);
+    final inFlight = source.calls.length;
+    // Setup sanity: both are read and marked, under a read in flight.
+    expect(
+      (
+        store.isRead(DateTime(2026, 4, 22)),
+        store.isRead(ahead),
+        store.readFailed(DateTime(2026, 4, 22)),
+        store.readFailed(ahead),
+        source.calls.last.completer.isCompleted,
+      ),
+      (true, true, true, true, false),
+    );
+
+    store.show(weekFirst, weekLast);
+    expect(
+      (
+        store.readFailed(DateTime(2026, 4, 22)),
+        store.readFailed(ahead),
+        store.status,
+        source.calls.length - inFlight,
+        source.calls.last.first,
+        source.calls.last.last,
+      ),
+      (false, false, CalendarLoadStatus.ready, 1, DateTime(2026, 4, 22), ahead),
+    );
+  });
+
+  test("FR85 a read that fills a day marked readFailed after a change ends "
+      "its mark and notifies, while the read a refresh waits on marks no "
+      "read day", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final day = DateTime(2026, 4, 21);
+    store.show(weekFirst, weekLast);
+    harness.lastCall.succeed(const <CalendarEntry<String>>[]);
+    await settle();
+    store.invalidate(day, day);
+    harness.lastCall.fail();
+    await settle();
+    expect(store.readFailed(day), isTrue, reason: "setup sanity");
+    store.prefetch(day, day);
+    final notifications = harness.notifications;
+
+    harness.lastCall.succeed(const <CalendarEntry<String>>[]);
+    await settle();
+    expect(
+      (
+        store.readFailed(day),
+        store.status,
+        harness.notifications - notifications,
+      ),
+      (false, CalendarLoadStatus.ready, 1),
+    );
+
+    final refreshing = errorOf(store.refresh());
+    final error = harness.lastCall.fail();
+    await settle();
+    expect(
+      (refreshing(), store.readFailed(day), store.status),
+      (error, false, CalendarLoadStatus.ready),
+    );
+  });
+
   group("CF the changes the source announces", () {
     late StreamController<CalendarSourceChange<String>> changes;
 
@@ -4683,6 +4905,87 @@ void main() {
         "move": (moved, 3),
         "delete": (null, 3),
       });
+    });
+
+    test("CF14 the read again of shown days an announced change or a "
+        "contradicted write's answer left changed marks them readFailed "
+        "where it fails", () async {
+      final outcomes = <String, (CalendarLoadStatus, Object?, bool)>{};
+      final failures = <String, Object>{};
+      for (final cause in <String>["days", "all", "error", "contradicted"]) {
+        final stream = StreamController<CalendarSourceChange<String>>();
+        final harness = Harness(changes: stream.stream);
+        final store = harness.store;
+        final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
+        store.show(weekFirst, weekLast);
+        harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+        await settle();
+        final calls = harness.source.calls.length;
+        switch (cause) {
+          case "days":
+            stream.add(CalendarDaysChanged<String>(item.start, item.start));
+          case "all":
+            stream.add(const CalendarAllChanged<String>());
+          case "error":
+            stream.addError(const SourceFailure("Disconnected."));
+          case "contradicted":
+            final moved = onDay(item, DateTime(2026, 4, 23));
+            store.requestMove(moved);
+            final write = harness.lastCall;
+            stream.add(CalendarEntryPut<String>(moved));
+            stream.add(
+              CalendarEntryPut<String>(onDay(item, DateTime(2026, 4, 25))),
+            );
+            await settle();
+            write.succeed(moved);
+        }
+        await settle();
+        // Setup sanity: one read again is sent, of shown days only.
+        expect(
+          (
+            harness.source.calls.length - calls,
+            !harness.lastCall.first!.isBefore(weekFirst),
+            !harness.lastCall.last!.isAfter(weekLast),
+          ),
+          (cause == "contradicted" ? 2 : 1, true, true),
+          reason: cause,
+        );
+        failures[cause] = harness.lastCall.fail();
+        await settle();
+        outcomes[cause] = (
+          store.status,
+          store.loadError,
+          store.readFailed(harness.lastCall.first!),
+        );
+        await stream.close();
+      }
+      expect(outcomes, <String, (CalendarLoadStatus, Object?, bool)>{
+        for (final MapEntry(key: cause, value: failure) in failures.entries)
+          cause: (CalendarLoadStatus.failed, failure, true),
+      });
+    });
+
+    test("CF15 the end of the change stream reads nothing and notifies "
+        "nothing, and the store keeps what it holds", () async {
+      final harness = Harness(changes: changes.stream);
+      final store = harness.store;
+      final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
+      store.show(weekFirst, weekLast);
+      harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+      await settle();
+      final notifications = harness.notifications;
+
+      await changes.close();
+      await settle();
+      expect(
+        (
+          harness.source.calls.length,
+          harness.notifications - notifications,
+          store.status,
+          idsOn(store, DateTime(2026, 4, 21)).join(","),
+        ),
+        (1, 0, CalendarLoadStatus.ready, "item-1"),
+      );
     });
   });
 
@@ -6199,8 +6502,9 @@ void _zoneTests() {
       expect(failed.dayHasShownEntries(keptDay), isTrue);
 
       // A read run wider than a shown range wholly kept: its re-reads fail,
-      // the shown range is ready, and an announced put files on the open
-      // day.
+      // which marks the kept days, taken to have changed at the zone
+      // change, so the shown range is failed, and an announced put files on
+      // the open day.
       final changes =
           StreamController<CalendarSourceChange<String>>.broadcast();
       addTearDown(changes.close);
@@ -6230,7 +6534,10 @@ void _zoneTests() {
         call.fail();
       }
       await settle();
-      expect(store.status, CalendarLoadStatus.ready);
+      expect(
+        (store.status, store.readFailed(dateOf(base + 1))),
+        (CalendarLoadStatus.failed, true),
+      );
       final announced = timesEntry(
         "put",
         plainOf(zoned.add(const Duration(hours: 1))),
@@ -6242,6 +6549,12 @@ void _zoneTests() {
       expect(store.isRead(openDay), isFalse);
       expect(store.dayHasShownEntries(openDay), isFalse);
 
+      // A shown range not ready shows no marker on a day read under its
+      // show, so the retry reads it again first.
+      store.retry();
+      answer(readsOf(source).last, const <CalendarEntry<String>>[]);
+      await settle();
+      expect(store.status, CalendarLoadStatus.ready);
       store.prefetch(openDay, openDay);
       answer(readsOf(source).last, <CalendarEntry<String>>[held, announced]);
       await settle();
@@ -6520,6 +6833,38 @@ void _zoneTests() {
         expect(numberOf(again.first!), firstExpected);
         expect(numberOf(again.last!), lastExpected);
       }
+    });
+
+    test("CZ29 a read answering an all-day date the zone's clock skips "
+        "fails as a read does, with an ArgumentError as the load "
+        "error", () async {
+      // Apia's clock skips 2011-12-30 whole.
+      final apia = tz.getLocation("Pacific/Apia");
+      final source = FakeDataSource();
+      final store = cachingStoreIn<String>(apia, dataSource: source);
+      addTearDown(store.dispose);
+      final skipped = DateTime(2011, 12, 30);
+      store.show(DateTime(2011, 12, 29), DateTime(2011, 12, 31));
+      readsOf(source).single.succeed(<CalendarEntry<String>>[
+        CalendarEntry<String>(
+          id: "skipped",
+          start: skipped,
+          end: DateTime(2011, 12, 31),
+          title: "Skipped",
+          color: taskColor,
+          payload: "task",
+          isAllDay: true,
+        ),
+      ]);
+      await settle();
+      expect(
+        (
+          store.status,
+          store.loadError.runtimeType,
+          store.storedEntry("skipped"),
+        ),
+        (CalendarLoadStatus.failed, ArgumentError, null),
+      );
     });
   });
 }

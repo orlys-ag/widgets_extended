@@ -1265,6 +1265,34 @@ second pass: on St. John's 2010-11-06 the 24:00 end of a range from
 23:45 NST was 02:30Z, before the range's start, and `lastWallMinuteNotAfter`
 of 23:59 NST from 23:45 NST gave 24:00. A `from` in that second pass now
 reads the later 24:00, 03:30Z.
+- Fix: a `CachingCalendarStore` day already read, then taken to have changed
+by `invalidate`, an announced change, an error on the change stream, a
+contradicted write or a zone change, stayed ready when its read again
+failed: the shown range kept showing what the source may no longer hold,
+with `readFailed` false and no `loadError`. Such a failure now marks the
+day `readFailed`, still answering its entries, so the range is failed with
+the read's error as `loadError`. Month, Week and Day show their failure
+cover, Agenda shows the day's failed row in place of its items, and `show`,
+`retry` and `refresh` read the day again. The read a `refresh` waits on
+still marks only unread days, its failure failing the refresh.
+- Fix: `show` with a last day before its first made that range the shown
+one, ready with nothing read, and a later `refresh` or zone change asked
+the data source for the reversed range. Both stores' `show` now throws an
+`ArgumentError` naming `last`, in every build, as `CalendarDaysChanged`
+does.
+- Fix: with no Flutter binding, as in a plain Dart test, a store listener's
+throw escaped the call that notified. A `MemoryCalendarStore` write threw
+after applying its change, without calling `onChanged` or the later
+listeners, and `CachingCalendarStore.requestMove` threw after sending, so
+its caller got no future while the entry stayed pending. A store now
+reports a listener's throw through `FlutterError.reportError`, whatever
+`Listenable.onError` does, and notifies its other listeners.
+- `CalendarDataSource` now documents which read errors reach `loadError`;
+`CalendarSourceChange` documents that the end of a change stream means the
+source announces nothing more, which a `CachingCalendarStore` takes as
+silence, keeping what it holds; and `CachingCalendarStore.loadError`
+documents the `ArgumentError` of a read answering a time the store's zone
+cannot represent.
 
 ## 0.0.35
 

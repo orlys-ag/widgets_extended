@@ -437,8 +437,10 @@ has one.
 **Stores.** `MemoryCalendarStore` holds the entries you give it and applies
 each write within the call. `CachingCalendarStore` reads by days through
 your `CalendarDataSource` (`read`, `create`, `replace` and `delete`), keeps
-showing what it holds while it reads changed days again, and applies the
-changes a stream of `CalendarSourceChange`s announces, if you give one;
+showing what it holds while it reads changed days again, marks such a day
+`readFailed`, which fails the shown range, where that read fails, and
+applies the changes a stream of `CalendarSourceChange`s announces, if you
+give one;
 `invalidate` and `refresh` tell it that entries changed at the source, so
 it reads those days again. A store of your own extends `CalendarStore`
 and answers entries in the order `compareCalendarEntries` gives.
@@ -656,7 +658,10 @@ over a fake or mock `CalendarDataSource` tests reads, writes and
 failures. `CalendarController`, the stores, `CalendarEditPolicy` and the
 localizations are `base` classes, which no class outside the package
 implements, so a mock that implements one does not compile; a spy
-extends one in a `final` class and overrides what it records.
+extends one in a `final` class and overrides what it records. A store
+reports a listener's throw through `FlutterError.reportError` rather than
+let it fail the call, also in a plain Dart test with no binding, so a test
+that expects one sets `FlutterError.onError`.
 
 `demos/workspace_calendar/` is a complete calendar app on the public API.
 
