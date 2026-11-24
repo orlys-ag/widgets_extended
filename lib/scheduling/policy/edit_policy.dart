@@ -310,6 +310,10 @@ abstract base class CalendarEditPolicy<T> {
   /// [day] itself for no limit; an instant on it, which carries the
   /// occurrence of a time [day]'s clock repeats; and null, or an instant on
   /// a later day, where none may start on it. [day] here.
+  ///
+  /// The answer may be given on any clock, a plain UTC time or a
+  /// `TZDateTime` of another zone than [day]'s included: the edit rules
+  /// read it as its instant on [day]'s clock (`CalendarEarliestStart`).
   DateTime? earliestStartOn(DateTime day, CalendarNow now) {
     return day;
   }

@@ -251,32 +251,51 @@ ValueKey<String> dayListFailedKey(DateTime day) {
 }
 
 /// How the times of [day] order. An unfolded minute of the day is the
-/// minute its clock reads up to the instant the clock goes back, [fold],
-/// and from that instant on the minute its clock reads plus the length of
-/// the stretch it reads twice, [repeated], so unfolded minutes rise with
-/// time. On a day whose clock repeats no stretch, an unfolded minute is the
-/// minute the clock reads.
+/// minute its clock reads up to the instant the second pass of the stretch
+/// it reads twice starts, [fold], and from that instant on the minute its
+/// clock reads plus the length of that stretch, [repeated], so unfolded
+/// minutes rise with time. On a day whose clock repeats no stretch, an
+/// unfolded minute is the minute the clock reads.
+///
+/// Where the clock goes back across midnight, [day]'s times are not one
+/// run of instants: where [day] is the earlier of the two days, its clock
+/// reads the next day's first minutes before going back to [day]'s end,
+/// and where it is the later, it goes back from [day]'s first minutes to
+/// the day before's end. An instant before [fold] that reads another day
+/// than [day] lies at [foldMinute], where [day]'s first pass ends, and
+/// [day]'s times end where its second pass does, after the next day's
+/// start.
 @immutable
 final class DayListClock {
-  const DayListClock._(this.day, this._next, this.fold, this.repeated);
+  const DayListClock._(this.day, this._end, this.fold, this.repeated);
 
-  /// The clock of [day], a day start, which goes back at
+  /// The clock of [day], a day start, whose second pass starts at
   /// [CalendarDates.clockGoesBackOn].
   factory DayListClock.of(DateTime day) {
     final fold = CalendarDates.clockGoesBackOn(day);
+    final repeated = fold == null
+        ? 0
+        : CalendarDates.repeatedStretchOf(day).inMinutes;
+    final next = CalendarDates.addDays(day, 1);
+    final secondPassEnd = fold?.add(Duration(minutes: repeated));
     return DayListClock._(
       day,
-      CalendarDates.addDays(day, 1),
+      secondPassEnd != null && secondPassEnd.isAfter(next)
+          ? secondPassEnd
+          : next,
       fold,
-      fold == null ? 0 : CalendarDates.repeatedStretchOf(day).inMinutes,
+      repeated,
     );
   }
 
   final DateTime day;
-  final DateTime _next;
 
-  /// The instant the clock goes back, which starts the second pass of the
-  /// stretch it reads twice; null where it does not go back.
+  /// The instant after [day]'s last time: the next day's start, or the end
+  /// of [day]'s second pass where that is later.
+  final DateTime _end;
+
+  /// The instant the second pass of the stretch the clock reads twice
+  /// starts; null where the clock does not go back.
   final DateTime? fold;
 
   /// The minutes of the stretch the clock reads twice, 0 where none.
@@ -294,11 +313,19 @@ final class DayListClock {
     return CalendarDates.minutesPerDay + repeated;
   }
 
-  /// The unfolded minute of [time], a time on [day].
+  /// The unfolded minute of [time], a time on [day], or an instant between
+  /// [day]'s passes that reads another day, which lies at [foldMinute].
   int minuteOf(DateTime time) {
     final fold = this.fold;
-    final unfolded = fold != null && !time.isBefore(fold) ? repeated : 0;
-    return CalendarDates.minuteOfDay(time) + unfolded;
+    if (fold == null) {
+      return CalendarDates.minuteOfDay(time);
+    }
+    if (!time.isBefore(fold)) {
+      return CalendarDates.minuteOfDay(time) + repeated;
+    }
+    return CalendarDates.dayNumber(time) == CalendarDates.dayNumber(day)
+        ? CalendarDates.minuteOfDay(time)
+        : foldMinute;
   }
 
   /// The unfolded minute a part on [day] of a range from [start] starts
@@ -310,9 +337,11 @@ final class DayListClock {
   }
 
   /// The unfolded minute a part on [day] of a range to [end] ends at:
-  /// [endMinute] for an [end] at the next day's start or after it.
+  /// [endMinute] for an [end] at or after the instant after [day]'s last
+  /// time, the next day's start or, where the clock goes back across
+  /// midnight to [day], the end of [day]'s second pass.
   int endOf(DateTime end) {
-    return end.isBefore(_next) ? minuteOf(end) : endMinute;
+    return end.isBefore(_end) ? minuteOf(end) : endMinute;
   }
 
   /// The minute the clock reads at the unfolded minute [unfolded] as a
@@ -1991,7 +2020,7 @@ class _DayListState<T> extends State<DayList<T>> {
   /// whose times the clock reads must fit the gap, so a gap shorter than a
   /// slot, as entries off the slot grid can leave, or one the clock skips,
   /// offers no add. [CalendarEditRules.firstSlot] reads the clock's minutes
-  /// in one pass, so a gap across the instant the clock goes back
+  /// in one pass, so a gap across the instant the second pass starts
   /// ([DayListClock.fold]) asks it about the part before that instant, and
   /// where that part has none, about the part after it.
   ({DateTime start, DateTime end})? _gapAddOf(DayListGap gap) {

@@ -1038,6 +1038,134 @@ void main() {
       }
     });
 
+    test("ZC11 where a clock goes back across midnight, each of the two days "
+        "has its part of the time read twice, whose second pass starts where "
+        "the clock reads that part again", () {
+      // St. John's goes back from 00:01 NDT on 2010-11-07 to 23:01 NST of
+      // Nov 6, at 02:31Z, and Casey from 02:00 on 2010-03-05 to 23:00 of
+      // Mar 4, at 15:00Z.
+      final stJohns = tz.getLocation("America/St_Johns");
+      final casey = tz.getLocation("Antarctica/Casey");
+      final cases = <(tz.Location, int, int, DateTime?)>[
+        (stJohns, numberOf(2010, 11, 5), 0, null),
+        (stJohns, numberOf(2010, 11, 6), 59, DateTime.utc(2010, 11, 7, 2, 31)),
+        (stJohns, numberOf(2010, 11, 7), 1, DateTime.utc(2010, 11, 7, 3, 30)),
+        (stJohns, numberOf(2010, 11, 8), 0, null),
+        (casey, numberOf(2010, 3, 4), 60, DateTime.utc(2010, 3, 4, 15)),
+        (casey, numberOf(2010, 3, 5), 120, DateTime.utc(2010, 3, 4, 16)),
+      ];
+      for (final (zone, number, minutes, secondPass) in cases) {
+        final day = dayOfNumberIn(number, zone);
+        final last = CalendarDates.addDays(
+          day,
+          1,
+        ).subtract(const Duration(minutes: 1));
+        for (final time in <DateTime>[day, last]) {
+          final reason =
+              "${zone.name} ${CalendarDates.isoDate(day)} from $time";
+          expect(
+            CalendarDates.repeatedStretchOf(time),
+            Duration(minutes: minutes),
+            reason: reason,
+          );
+          expect(
+            CalendarDates.clockGoesBackOn(time),
+            secondPass == null
+                ? isNull
+                : isA<tz.TZDateTime>()
+                      .having((found) => found.location, "location", zone)
+                      .having(
+                        (found) => found.millisecondsSinceEpoch,
+                        "instant",
+                        secondPass.millisecondsSinceEpoch,
+                      ),
+            reason: reason,
+          );
+        }
+      }
+    });
+
+    test("ZC12 where a clock goes back across midnight, a range to the "
+        "later 00:00 spans to where its first pass reached, or from the "
+        "second pass of the day before to that day's 24:00", () {
+      final stJohns = tz.getLocation("America/St_Johns");
+      tz.TZDateTime inStJohns(int hour, int minute) {
+        return tz.TZDateTime.from(
+          DateTime.utc(2010, 11, 7, hour, minute),
+          stJohns,
+        );
+      }
+
+      final nov6 = numberOf(2010, 11, 6) * CalendarDates.minutesPerDay;
+      // 00:00 NST of Nov 7, the clock having gone back at 00:01 NDT.
+      final laterMidnight = inStJohns(3, 30);
+      // From 23:30 NDT, whose pass ran to 00:01 of Nov 7.
+      expect(CalendarDates.wallSpanOf(inStJohns(2, 0), laterMidnight), (
+        start: nov6 + 1410,
+        end: nov6 + 1441,
+      ));
+      // From 23:30 NST, in Nov 6's second pass.
+      expect(CalendarDates.wallSpanOf(inStJohns(3, 0), laterMidnight), (
+        start: nov6 + 1410,
+        end: nov6 + 1440,
+      ));
+      // Casey's first pass from 22:00 on 2010-03-04 ran to 02:00 of Mar 5,
+      // before its clock went back three hours.
+      final casey = tz.getLocation("Antarctica/Casey");
+      final mar4 = numberOf(2010, 3, 4) * CalendarDates.minutesPerDay;
+      expect(
+        CalendarDates.wallSpanOf(
+          tz.TZDateTime.from(DateTime.utc(2010, 3, 4, 11), casey),
+          tz.TZDateTime.from(DateTime.utc(2010, 3, 4, 16), casey),
+        ),
+        (start: mar4 + 1320, end: mar4 + 1440 + 120),
+      );
+    });
+
+    test("ZC13 where a clock goes back across midnight, an end at the 24:00 "
+        "of the day before, which the clock reads in each pass of its "
+        "stretch, is read in the pass its occurrence names", () {
+      final stJohns = tz.getLocation("America/St_Johns");
+      tz.TZDateTime inStJohns(int hour, int minute) {
+        return tz.TZDateTime.from(
+          DateTime.utc(2010, 11, 7, hour, minute),
+          stJohns,
+        );
+      }
+
+      final midnight = numberOf(2010, 11, 7) * CalendarDates.minutesPerDay;
+      // 23:45 NST of Nov 6, in its second pass, which reaches 24:00 at the
+      // second reading of Nov 7's 00:00, 03:30Z.
+      final second = inStJohns(3, 15);
+      expect(
+        CalendarDates.endAtWallMinute(midnight, from: second),
+        inStJohns(3, 30),
+      );
+      expect(
+        CalendarDates.rangeEndAtWallMinute(
+          second,
+          midnight,
+          from: inStJohns(2, 31),
+        ),
+        inStJohns(3, 30),
+      );
+      // 23:59 NST, before that pass reaches 24:00.
+      expect(
+        CalendarDates.lastWallMinuteNotAfter(inStJohns(3, 29), from: second),
+        midnight - 1,
+      );
+      // 23:45 NDT, in the first pass, which reaches 24:00 at 02:30Z.
+      final first = inStJohns(2, 15);
+      expect(
+        CalendarDates.endAtWallMinute(midnight, from: first),
+        inStJohns(2, 30),
+      );
+      expect(
+        CalendarDates.rangeEndAtWallMinute(first, midnight, from: first),
+        inStJohns(2, 30),
+      );
+    });
+
     test("ZC1 the zone's helpers answer Havana's and Santiago's changes", () {
       final havana = tz.getLocation("America/Havana");
       final santiago = tz.getLocation("America/Santiago");

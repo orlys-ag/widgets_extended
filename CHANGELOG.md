@@ -1206,10 +1206,12 @@ shows that nothing lands there.
 stretch the day's clock repeats in time order, its second pass once the
 first pass's slots are done and before the time after it, and `admits`,
 which passes over a slot it refuses.
-- Added `CalendarDates.clockGoesBackOn`, the instant a day's clock goes back,
-which starts the second pass of the stretch it repeats, or null where it does
-not go back: on the clock of a `TZDateTime` day's zone, and on the device's
-otherwise.
+- Added `CalendarDates.clockGoesBackOn`, the instant the second pass starts of
+the stretch a day's clock reads twice (`repeatedStretchOf`): the instant the
+clock goes back, or, on the later of two days a clock going back across
+midnight repeats parts of, the instant it reads the day's 00:00 again; null
+where the day's clock reads each time of the day once. It reads the clock of
+a `TZDateTime` day's zone, and the device's otherwise.
 - Fix: `CalendarScheduleCheck.nextFree`, from a time before a stretch the
 clock repeats or in its first pass, never offered the stretch's second pass:
 in New York on 2026-11-01, with 00:00 EDT to 01:00 EST and 02:00 EST to
@@ -1232,6 +1234,37 @@ a text scale of 2. The column is now as wide as the widest time it shows,
 and the all-day label, at the text size and in the fonts loaded, and at
 most half of a row's content, in which a time scales down rather than
 losing its end; a gap row is as tall as its time.
+- Fix: a policy's earliest start (`CalendarEditPolicy.earliestStartOn`) given
+as a `TZDateTime` of another zone than the day's was read on that zone's
+clock. On New York's 2026-04-21, 21:00 EDT given as its UTC time closed the
+day, and 09:00 EDT given as 13:00Z made `CalendarEditRules.firstSlot`,
+`CalendarScheduleCheck.firstStartMinute` and its `nextFree` start at
+13:00 EDT, while the same check's problems read the instant right.
+`CalendarEarliestStart` now holds its earliest as the same instant on its
+day's clock, whatever clock it is given on, and keeps its day as given,
+where it read a plain day beside a `TZDateTime` earliest as the day start of
+the earliest's zone; `CalendarEditRules.earliestStartOn` still reads a plain
+day as the day start of a zoned `now`'s zone before it asks the policy.
+- Fix: where a clock goes back across midnight, `CalendarDates.repeatedStretchOf`
+and `CalendarDates.clockGoesBackOn` gave the repeated stretch to the later
+day: St. John's clock, going back from 00:01 NDT on 2010-11-07 to 23:01 NST
+of Nov 6, gave Nov 6 no stretch and Nov 7 one of 60 minutes. So
+`CalendarEditRules.firstSlot` with `throughSecondPass` found no slot on Nov 6
+once its first pass was taken, Agenda left out the gap rows of Nov 6's second
+pass and gave Nov 7 gap rows out of time order, and Week and Day, under a
+policy that forbids overlaps, let a hold on a slot of Nov 6's stretch create
+a range sharing time with an entry drawn on another row. Each day now has
+its own part: Nov 6 reads 23:01 to 24:00 twice, 59 minutes, its second pass
+from 02:31Z, and Nov 7 reads 00:00 to 00:01 twice, 1 minute, its second pass
+from 03:30Z, when its clock reads 00:00 again. Of the 15,040 offset falls of
+1970 to 2037 in the zone data, 87 cross midnight.
+- Fix: `CalendarDates.endAtWallMinute` and `rangeEndAtWallMinute` read a
+day's 24:00, which a clock going back across midnight reads in each pass of
+the day before's stretch, at its first reading even from a time in the
+second pass: on St. John's 2010-11-06 the 24:00 end of a range from
+23:45 NST was 02:30Z, before the range's start, and `lastWallMinuteNotAfter`
+of 23:59 NST from 23:45 NST gave 24:00. A `from` in that second pass now
+reads the later 24:00, 03:30Z.
 
 ## 0.0.35
 

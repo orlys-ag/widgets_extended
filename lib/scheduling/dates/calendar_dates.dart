@@ -277,9 +277,13 @@ abstract final class CalendarDates {
   /// [timeAtWallMinute]'s, on the clock it reads and [from] read as it
   /// reads it, except that minute 0 of a day whose clock skips its
   /// midnight, the 24:00 of the day before, is the day's start. A day's
-  /// 24:00 is the next day's minute 0. The
-  /// minute a stretch its day's clock repeats ends at is the instant after
-  /// the stretch's second pass, whichever occurrence [from] picks.
+  /// 24:00 is the next day's minute 0, and a [from] on that day before
+  /// picks its occurrence too: where a clock going back across midnight
+  /// reads it in each pass of the day before's stretch, the later reading
+  /// where [from] is a later occurrence on that day, which ends the second
+  /// pass, and the earlier otherwise. The minute a stretch its day's clock
+  /// repeats ends at is otherwise the instant after the stretch's second
+  /// pass, whichever occurrence [from] picks.
   ///
   /// [rangeEndAtWallMinute] ends a range from the stretch's first pass there
   /// with that pass.
@@ -360,13 +364,13 @@ abstract final class CalendarDates {
     if (!reads(time)) {
       return end && minute == 0 ? date : null;
     }
-    final change = repeatedStretchOf(date);
-    if (change == Duration.zero) {
+    final fall = _deviceFallAround(day);
+    if (fall == 0) {
       return time;
     }
-    // The clock repeats a stretch of [change] on this day, so the time may
-    // have a second instant [change] away, whichever one the constructor
-    // picked.
+    // The offset falls by [fall] near this day, so the time may have a
+    // second instant [fall] away, whichever one the constructor picked.
+    final change = Duration(milliseconds: fall);
     DateTime? earliest;
     DateTime? latest;
     for (final candidate in <DateTime>[
@@ -381,63 +385,47 @@ abstract final class CalendarDates {
     }
     // A plain UTC [from] names its instant, which the device's clock reads.
     final fromHere = from?.toLocal();
-    if (fromHere != null &&
-        dayNumber(fromHere) == day &&
-        isLaterOccurrence(fromHere)) {
-      return latest;
+    if (fromHere != null) {
+      // An end at minute 0 is the 24:00 of the day before, too.
+      final fromDay = dayNumber(fromHere);
+      if ((fromDay == day || end && minute == 0 && fromDay == day - 1) &&
+          isLaterOccurrence(fromHere)) {
+        return latest;
+      }
     }
     return earliest;
   }
 
-  /// How long the stretch of wall time is that [day]'s clock reads twice,
-  /// as a clock turned back does: how far its offset falls by the next day's
-  /// start, and zero where it does not fall.
+  /// How long the stretch of [day]'s wall time is that its clock reads
+  /// twice, as a clock turned back does: the part on [day] of the wall time
+  /// the clock reads again once it goes back, which is how far its offset
+  /// falls where it goes back to a time of the same day. Where it goes back
+  /// across midnight, each of the two days has its part: going back from
+  /// 00:01 to 23:01 of the day before, that day reads 23:01 to 24:00 twice,
+  /// 59 minutes, and the day it goes back from reads 00:00 to 00:01 twice.
+  /// Zero where [day]'s clock reads each time of the day once. [day] is any
+  /// time of the day, read as [clockGoesBackOn] reads it.
   static Duration repeatedStretchOf(DateTime day) {
-    if (day is TZDateTime) {
-      final number = dayNumber(day);
-      final clock = _ZoneClock(
-        day.location,
-        number * Duration.millisecondsPerDay,
-      );
-      final change =
-          clock.offsetAt(clock.dayStartMs(number)) -
-          clock.offsetAt(clock.dayStartMs(number + 1));
-      return change > 0 ? Duration(milliseconds: change) : Duration.zero;
-    }
-    final date = dateOnly(day);
-    final change = date.timeZoneOffset - addDays(date, 1).timeZoneOffset;
-    return change > Duration.zero ? change : Duration.zero;
+    final part = _repeatedPartOf(day);
+    return part == null ? Duration.zero : Duration(milliseconds: part.stretch);
   }
 
-  /// The instant [day]'s clock goes back, which starts the second pass of
-  /// the stretch it reads twice ([repeatedStretchOf]); null where its clock
-  /// does not go back. [day] is any time of the day, read as [dateOnly]
-  /// reads it: on the clock of a `TZDateTime` [day]'s zone, the answer then
-  /// a `TZDateTime` of the zone, and on the device's clock otherwise.
-  ///
-  /// The answer is the first whole minute after the day's start whose
-  /// offset ([DateTime.timeZoneOffset]) differs from the start's, found by
-  /// bisecting the day's minutes, which takes the offset to change once in
-  /// the day.
+  /// The instant the second pass starts of the stretch [day]'s clock reads
+  /// twice ([repeatedStretchOf]): the instant the clock goes back, or where
+  /// it goes back from a time of [day] to one of the day before, the
+  /// instant it reads [day]'s 00:00 again. Null where [day]'s clock reads
+  /// each time of the day once. [day] is any time of the day, read as
+  /// [dateOnly] reads it: on the clock of a `TZDateTime` [day]'s zone, the
+  /// answer then a `TZDateTime` of the zone, and on the device's clock
+  /// otherwise.
   static DateTime? clockGoesBackOn(DateTime day) {
-    if (repeatedStretchOf(day) == Duration.zero) {
+    final part = _repeatedPartOf(day);
+    if (part == null) {
       return null;
     }
-    final start = dateOnly(day);
-    final offset = start.timeZoneOffset;
-    // The day's start keeps its offset, and the next day's start has the
-    // fallen one.
-    var kept = 0;
-    var fallen = addDays(start, 1).difference(start).inMinutes;
-    while (fallen - kept > 1) {
-      final middle = (kept + fallen) ~/ 2;
-      if (start.add(Duration(minutes: middle)).timeZoneOffset == offset) {
-        kept = middle;
-      } else {
-        fallen = middle;
-      }
-    }
-    return start.add(Duration(minutes: fallen));
+    return day is TZDateTime
+        ? _zoneTime(day.location, part.secondPass)
+        : DateTime.fromMillisecondsSinceEpoch(part.secondPass);
   }
 
   /// Whether [time] is the later instant of a wall time its day's clock
@@ -581,15 +569,22 @@ abstract final class CalendarDates {
   /// as the 24:00 before it, ends at its day's minute the length of the
   /// repeated stretch ([repeatedStretchOf]), 01:00 for an hour, where a
   /// clock going back to 00:00 ends the first pass, so the range has a piece
-  /// on the day it ends on. And an end whose wall minute is not after the
-  /// start's is the start plus the range's length in minutes, held at the
-  /// 24:00 of the end's day, the last day the range has a piece on
-  /// ([lastDayNumberOf]).
+  /// on the day it ends on; a range from after that first pass, which
+  /// starts in the second pass of the day before's stretch where the clock
+  /// goes back across midnight, ends at that 24:00. And an end whose wall
+  /// minute is not after the start's is the start plus the range's length
+  /// in minutes, held at the 24:00 of the end's day, the last day the range
+  /// has a piece on ([lastDayNumberOf]).
   static ({int start, int end}) wallSpanOf(DateTime start, DateTime end) {
     final from = wallMinuteOf(start);
     var to = endWallMinuteOf(end);
     if (isLaterMidnight(end)) {
-      to += repeatedStretchOf(end).inMinutes;
+      // A range from before the clock goes back reads its day's stretch in
+      // the first pass, up to the stretch's end.
+      final part = _repeatedPartOf(end);
+      if (part != null && start.millisecondsSinceEpoch < part.back) {
+        to += part.stretch ~/ Duration.millisecondsPerMinute;
+      }
     }
     if (to <= from) {
       to = math.min(
@@ -698,20 +693,125 @@ DateTime? endAtWallMinuteInPass(
 }
 
 /// The latest instant reading the wall minute [wall] on the device's clock,
-/// [earliest] being the earliest: [earliest] plus the stretch its day's
-/// clock reads twice ([CalendarDates.repeatedStretchOf]) where that instant
-/// reads [wall] too, and [earliest] otherwise.
+/// [earliest] being the earliest: [earliest] plus how far the offset falls
+/// near its day ([_deviceFallAround]) where that instant reads [wall] too,
+/// and [earliest] otherwise.
 DateTime _latestOnDevice(DateTime earliest, int wall) {
   final minute = wall % CalendarDates.minutesPerDay;
-  final day = (wall - minute) ~/ CalendarDates.minutesPerDay;
-  final stretch = CalendarDates.repeatedStretchOf(
-    CalendarDates.dateOfDayNumber(day),
+  final fall = _deviceFallAround(
+    (wall - minute) ~/ CalendarDates.minutesPerDay,
   );
-  if (stretch == Duration.zero) {
+  if (fall == 0) {
     return earliest;
   }
-  final later = earliest.add(stretch);
+  final later = earliest.add(Duration(milliseconds: fall));
   return CalendarDates.wallMinuteOf(later) == wall ? later : earliest;
+}
+
+/// A change of a clock's offset, in milliseconds: the instant it changes
+/// at, and the offsets before and after it.
+typedef _OffsetChange = ({int at, int before, int after});
+
+/// Where the clock of [day], a `TZDateTime` [day]'s zone's or the
+/// device's, reads a stretch of [day]'s wall time twice, all in
+/// milliseconds: the instant the clock goes back, `back`; the instant the
+/// second pass of the stretch starts, `secondPass`; and the stretch's
+/// length, `stretch`; of the first fall of the offset whose wall times read
+/// again meet [day]'s. Null where none does.
+///
+/// A fall at the instant `at` from the offset `before` to `after` reads the
+/// wall times from `at + after` up to `at + before` a second time, from
+/// `at`. Every instant reading a time of [day] lies within a day of the
+/// time, offsets lying within 14 hours of UTC, so the falls searched for
+/// are those from a day before [day]'s wall times to a day after them.
+({int back, int secondPass, int stretch})? _repeatedPartOf(DateTime day) {
+  const msPerDay = Duration.millisecondsPerDay;
+  final wall = CalendarDates.dayNumber(day) * msPerDay;
+  final zone = zoneOf(day);
+  final until = wall + 2 * msPerDay;
+  var from = wall - msPerDay;
+  while (true) {
+    final change = zone == null
+        ? _deviceOffsetChange(from, until)
+        : _zoneOffsetChange(zone, from, until);
+    if (change == null) {
+      return null;
+    }
+    final readAgain = change.at + change.after;
+    final first = math.max(readAgain, wall);
+    final last = math.min(change.at + change.before, wall + msPerDay);
+    if (first < last) {
+      return (
+        back: change.at,
+        secondPass: change.at + first - readAgain,
+        stretch: last - first,
+      );
+    }
+    from = change.at;
+  }
+}
+
+/// The first change of [zone]'s offset after the instant [from] and before
+/// [until], in milliseconds; null where the offset holds.
+_OffsetChange? _zoneOffsetChange(Location zone, int from, int until) {
+  final span = zone.lookupTimeZone(from);
+  if (span.end >= until) {
+    return null;
+  }
+  return (
+    at: span.end,
+    before: span.timeZone.offset.inMilliseconds,
+    after: zone.lookupTimeZone(span.end).timeZone.offset.inMilliseconds,
+  );
+}
+
+/// The change of the device's offset after the instant [from] and by
+/// [until], in milliseconds, at the first whole minute of the new offset,
+/// found by bisecting the whole minutes between them; null where the offset
+/// at [until] is the one at [from].
+///
+/// It takes the offset to change at most once between them: the zone data
+/// of 1970 to 2037 changes no zone's offset twice within three days, the
+/// longest span [_repeatedPartOf] asks about.
+_OffsetChange? _deviceOffsetChange(int from, int until) {
+  final before = _deviceOffsetAt(from);
+  if (_deviceOffsetAt(until) == before) {
+    return null;
+  }
+  const msPerMinute = Duration.millisecondsPerMinute;
+  var kept = from ~/ msPerMinute;
+  var changed = until ~/ msPerMinute;
+  while (changed - kept > 1) {
+    final middle = (kept + changed) ~/ 2;
+    if (_deviceOffsetAt(middle * msPerMinute) == before) {
+      kept = middle;
+    } else {
+      changed = middle;
+    }
+  }
+  final at = changed * msPerMinute;
+  return (at: at, before: before, after: _deviceOffsetAt(at));
+}
+
+/// The device's offset at the instant [instant], in milliseconds.
+int _deviceOffsetAt(int instant) {
+  return DateTime.fromMillisecondsSinceEpoch(
+    instant,
+  ).timeZoneOffset.inMilliseconds;
+}
+
+/// How far the device's offset falls, in milliseconds, from a day before
+/// the wall times of the day numbered [day] to a day after them, where
+/// every instant reading one of its times lies, or zero where it does not
+/// fall; so a time of the day its clock reads twice has its two instants
+/// that far apart. Asks two offsets, taking the offset to change at most
+/// once there, as [_deviceOffsetChange] does.
+int _deviceFallAround(int day) {
+  const msPerDay = Duration.millisecondsPerDay;
+  final wall = day * msPerDay;
+  final fall =
+      _deviceOffsetAt(wall - msPerDay) - _deviceOffsetAt(wall + 2 * msPerDay);
+  return fall > 0 ? fall : 0;
 }
 
 /// Whether [time]'s clock reads its whole minute twice, as in a stretch a
@@ -955,16 +1055,17 @@ bool isLaterMidnight(DateTime time) {
 /// [until], since across the instant a clock goes back a later start's
 /// range can end at an earlier wall minute.
 ///
-/// Where [secondPass] is given, its `at` the instant [day]'s clock goes back
-/// ([CalendarDates.clockGoesBackOn]), for a search that reads the first pass of
-/// the stretch the clock repeats and whose first start the caller has found to
-/// lie before the stretch's end in time, the search reads the second pass once
-/// the walk reaches the stretch's end, or at once where [from] lies there or
-/// after it, as rounding a first-pass time up to the grid can give, before the
-/// minutes after the stretch, so the ranges come in the order of their starts'
-/// instants: from the stretch's start, or from its `from` where that is later,
-/// on the grid of [slotMinutes], each in the second pass, ending by [until] as
-/// any range does. [isFree] is asked of the ranges in that order.
+/// Where [secondPass] is given, its `at` the instant the second pass starts of
+/// the stretch [day]'s clock reads twice ([CalendarDates.clockGoesBackOn]),
+/// for a search that reads the first pass of that stretch and whose first
+/// start the caller has found to lie before the stretch's end in time, the
+/// search reads the second pass once the walk reaches the stretch's end, or
+/// at once where [from] lies there or after it, as rounding a first-pass time
+/// up to the grid can give, before the minutes after the stretch, so the
+/// ranges come in the order of their starts' instants: from the stretch's
+/// start, or from its `from` where that is later, on the grid of
+/// [slotMinutes], each in the second pass, ending by [until] as any range
+/// does. [isFree] is asked of the ranges in that order.
 ({DateTime start, DateTime end})? firstReadableSlot(
   DateTime day,
   int from,
@@ -1571,7 +1672,8 @@ final class _ZoneClock {
   /// [wall]'s instant as [CalendarDates.timeAtWallMinute] or, where [end],
   /// [CalendarDates.endAtWallMinute] reads it on this clock, with [from]
   /// picking the later of two readings on its own day where it is a later
-  /// occurrence.
+  /// occurrence; an end at minute 0, the 24:00 of the day before, is of
+  /// that day before too.
   int? instantAtWall(int wall, TZDateTime? from, {required bool end}) {
     final minute = wall % CalendarDates.minutesPerDay;
     final day = (wall - minute) ~/ CalendarDates.minutesPerDay;
@@ -1580,8 +1682,12 @@ final class _ZoneClock {
     if (earliest == null) {
       return end && minute == 0 ? dayStartMs(day) : null;
     }
-    if (from != null && CalendarDates.dayNumber(from) == day && isLater(from)) {
-      return _lastReading(wallMs);
+    if (from != null) {
+      final fromDay = CalendarDates.dayNumber(from);
+      if ((fromDay == day || end && minute == 0 && fromDay == day - 1) &&
+          isLater(from)) {
+        return _lastReading(wallMs);
+      }
     }
     return earliest;
   }
