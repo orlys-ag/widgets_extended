@@ -845,4 +845,36 @@ void main() {
       },
     );
   });
+
+  test("SY13 schedule_problem.dart declares exactly the problem classes the "
+      "barrel shows from it, and imports only Flutter's foundation and the "
+      "entry, so the edit policy names the problems without an import "
+      "cycle", () {
+    const path = "lib/scheduling/policy/schedule_problem.dart";
+    final source = withoutComments(File(path).readAsStringSync());
+    final declared = <String>[
+      for (final match in classDeclaration.allMatches(source)) match.group(2)!,
+    ];
+    final shown = exportsOf(File(barrelPath).readAsStringSync(), barrelPath)
+        .singleWhere((export) {
+          return export.path == path;
+        })
+        .shown!;
+    expect(declared.toSet(), shown.toSet());
+    expect(declared, hasLength(16));
+    expect(
+      declared,
+      containsAll(<String>[
+        "CalendarScheduleProblem",
+        "CalendarScheduleOverlapRefused",
+      ]),
+    );
+    expect(
+      directiveUris(source),
+      unorderedEquals(<String>[
+        "package:flutter/foundation.dart",
+        "../entries/calendar_entry.dart",
+      ]),
+    );
+  });
 }
