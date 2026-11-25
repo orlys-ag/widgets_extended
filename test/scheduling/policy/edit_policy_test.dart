@@ -359,6 +359,114 @@ void main() {
     );
   });
 
+  test("EP24 a change holds the stored entry, with its payload, and the "
+      "times and kind it requests; changes of equal entries, times and kind "
+      "are equal with equal hash codes, zoned times at the same instants "
+      "included, and differ in each field; its string names the entry; and "
+      "each one built counts once in a debug build", () {
+    ensureZones();
+    CalendarEntry<String> stored() {
+      return CalendarEntry<String>(
+        id: "moved",
+        start: at(tuesday, 8),
+        end: at(tuesday, 9),
+        title: "moved",
+        color: const Color(0xFF336699),
+        payload: "tentative",
+      );
+    }
+
+    final moved = stored();
+    final before = debugCalendarChangeCount;
+    final change = CalendarChange<String>(
+      entry: moved,
+      start: at(tuesday, 9),
+      end: at(tuesday, 10),
+      isAllDay: false,
+    );
+    expect(debugCalendarChangeCount - before, 1);
+    expect(change.entry, same(moved));
+    expect(change.entry.payload, "tentative");
+    expect(change.start, at(tuesday, 9));
+    expect(change.end, at(tuesday, 10));
+    expect(change.isAllDay, isFalse);
+    expect(
+      CalendarChange<String>(
+        entry: moved,
+        start: tuesday,
+        end: wednesday,
+        isAllDay: true,
+      ).isAllDay,
+      isTrue,
+    );
+    expect(debugCalendarChangeCount - before, 2);
+
+    final again = CalendarChange<String>(
+      entry: stored(),
+      start: at(tuesday, 9),
+      end: at(tuesday, 10),
+      isAllDay: false,
+    );
+    // Setup sanity: equal entries, not the same one.
+    expect(identical(again.entry, moved), isFalse);
+    expect(again, change);
+    expect(again.hashCode, change.hashCode);
+
+    final zone = tz.getLocation("Asia/Tokyo");
+    final zoned = CalendarChange<String>(
+      entry: moved,
+      start: tz.TZDateTime.from(at(tuesday, 9), zone),
+      end: tz.TZDateTime.from(at(tuesday, 10), zone),
+      isAllDay: false,
+    );
+    expect(zoned, change);
+    expect(change, zoned);
+    expect(zoned.hashCode, change.hashCode);
+
+    final other = CalendarEntry<String>(
+      id: "other",
+      start: at(tuesday, 8),
+      end: at(tuesday, 9),
+      title: "moved",
+      color: const Color(0xFF336699),
+      payload: "tentative",
+    );
+    for (final differing in <CalendarChange<String>>[
+      CalendarChange<String>(
+        entry: other,
+        start: at(tuesday, 9),
+        end: at(tuesday, 10),
+        isAllDay: false,
+      ),
+      CalendarChange<String>(
+        entry: moved,
+        start: at(tuesday, 9, 15),
+        end: at(tuesday, 10),
+        isAllDay: false,
+      ),
+      CalendarChange<String>(
+        entry: moved,
+        start: at(tuesday, 9),
+        end: at(tuesday, 10, 15),
+        isAllDay: false,
+      ),
+      CalendarChange<String>(
+        entry: moved,
+        start: at(tuesday, 9),
+        end: at(tuesday, 10),
+        isAllDay: true,
+      ),
+    ]) {
+      expect(differing, isNot(change), reason: "$differing");
+      expect(change, isNot(differing), reason: "$differing");
+    }
+    expect(debugCalendarChangeCount - before, 8);
+
+    expect(change.toString(), contains(moved.toString()));
+    expect(change.toString(), contains("2026-04-21 09:00 to 2026-04-21 10:00"));
+    expect(change.toString(), endsWith("timed)"));
+  });
+
   test("EP3 a CalendarNow takes today to its midnight, rounds the time of "
       "day on today up to a whole minute, and compares by its time and "
       "today", () {

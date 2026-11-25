@@ -34,6 +34,7 @@ export 'entries/calendar_entry.dart' show CalendarCreateRange, CalendarEntry;
 export 'entries/calendar_schedule.dart' show CalendarSchedule;
 export 'policy/edit_policy.dart'
     show
+        CalendarChange,
         CalendarEditPolicy,
         CalendarNow,
         CalendarOverlapCandidate,

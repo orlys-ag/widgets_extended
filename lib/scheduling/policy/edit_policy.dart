@@ -210,6 +210,77 @@ final class CalendarOverlapCandidate<T> {
   }
 }
 
+/// The changes [CalendarChange]'s constructor has built, in a debug build;
+/// tests read differences.
+int debugCalendarChangeCount = 0;
+
+/// Adds one to [debugCalendarChangeCount] in a debug build.
+void noteCalendarChange() {
+  assert(() {
+    debugCalendarChangeCount++;
+    return true;
+  }());
+}
+
+/// A change of a stored entry: the [entry] as stored, and the [start],
+/// [end] and kind ([isAllDay]) the change requests, which a move or a
+/// resize of it gives, or a form's edit of its schedule.
+///
+/// Compared and hashed by [entry], [start], [end] and [isAllDay]. Its
+/// constructor is not const because it counts each change built, in a
+/// debug build (`noteCalendarChange`).
+@immutable
+final class CalendarChange<T> {
+  /// The change of [entry] to the times [start] to [end], all-day where
+  /// [isAllDay] and timed otherwise. It checks neither time.
+  CalendarChange({
+    required this.entry,
+    required this.start,
+    required this.end,
+    required this.isAllDay,
+  }) {
+    noteCalendarChange();
+  }
+
+  /// The entry the change is of, as stored, with its payload.
+  final CalendarEntry<T> entry;
+
+  /// The start the change requests.
+  final DateTime start;
+
+  /// The end the change requests.
+  final DateTime end;
+
+  /// Whether the change requests an all-day entry; a timed one otherwise.
+  /// A move between the all-day strip and the slots changes the kind,
+  /// possibly with the times unchanged.
+  final bool isAllDay;
+
+  @override
+  bool operator ==(Object other) {
+    return other is CalendarChange<T> &&
+        other.entry == entry &&
+        sameTime(other.start, start) &&
+        sameTime(other.end, end) &&
+        other.isAllDay == isAllDay;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(entry, start, end, isAllDay);
+  }
+
+  @override
+  String toString() {
+    return "CalendarChange($entry, "
+        "${CalendarDates.isoDate(start)} "
+        "${CalendarDates.isoTime(CalendarDates.minuteOfDay(start))} "
+        "to ${CalendarDates.isoDate(end)} "
+        "${CalendarDates.isoTime(CalendarDates.minuteOfDay(end))}, "
+        "${isAllDay ? "all-day" : "timed"})";
+  }
+}
+
 /// The limits on what may change of a calendar's entries, and where a new
 /// entry may start: each answer asked of an entry, a change or a day, at
 /// the time [CalendarNow] gives.

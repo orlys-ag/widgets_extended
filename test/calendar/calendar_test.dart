@@ -202,6 +202,7 @@ void main() {
       CalendarDates.weekdayColumnOfDay,
       CalendarEntry,
       CalendarDataSource,
+      CalendarChange,
       CalendarEditPolicy,
       CalendarNow,
       CalendarResizeEdges,

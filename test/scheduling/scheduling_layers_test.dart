@@ -251,6 +251,7 @@ void main() {
           "CalendarSchedule",
         },
         "lib/scheduling/policy/edit_policy.dart": <String>{
+          "CalendarChange",
           "CalendarEditPolicy",
           "CalendarNow",
           "CalendarOverlapCandidate",
