@@ -79,6 +79,12 @@ const Set<String> overlapStatics = <String>{
   "timesOverlap",
 };
 
+/// A class declaration at the start of a line: its modifiers, and its name.
+final RegExp classDeclaration = RegExp(
+  r"^((?:(?:abstract|base|final|interface|sealed)\s+)*)class\s+(\w+)",
+  multiLine: true,
+);
+
 /// [source] without its comments.
 String withoutComments(String source) {
   return source
@@ -347,10 +353,6 @@ void main() {
       ))
         ...export.shown!,
     };
-    final classDeclaration = RegExp(
-      r"^((?:(?:abstract|base|final|interface|sealed)\s+)*)class\s+(\w+)",
-      multiLine: true,
-    );
     final otherDeclaration = RegExp(
       r"^(?:enum|typedef|mixin|extension\s+type)\s+(\w+)"
       r"|^(?:const|final)\s+(?:[\w<>?, ]+\s+)?(\w+)\s*="
@@ -811,4 +813,31 @@ void main() {
       );
     }
   });
+
+  test("SY12 the store exception and the source change are abstract base "
+      "classes, so a host declares its own refusals and changes", () {
+    const files = <String, String>{
+      "CalendarStoreException": "lib/scheduling/store/calendar_store.dart",
+      "CalendarSourceChange":
+          "lib/scheduling/entries/calendar_data_source.dart",
+    };
+    // Each name's declarations, by their modifiers, so a missing or a
+    // second declaration fails as a wrong one does.
+    expect(
+      <String, List<String>>{
+        for (final MapEntry(key: name, value: path) in files.entries)
+          name: <String>[
+            for (final match in classDeclaration.allMatches(
+              File(path).readAsStringSync(),
+            ))
+              if (match.group(2) == name)
+                match.group(1)!.trim().split(RegExp(r"\s+")).join(" "),
+          ],
+      },
+      <String, List<String>>{
+        "CalendarStoreException": <String>["abstract base"],
+        "CalendarSourceChange": <String>["abstract base"],
+      },
+    );
+  }, skip: true);
 }
