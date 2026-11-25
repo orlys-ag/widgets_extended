@@ -72,8 +72,8 @@ The contract of `CalendarStore` and its two stores. The layer's imports are in `
   read covering it was sent is read once more when that read answers. A
   stream of `CalendarSourceChange`s, when given, is applied as it arrives:
   a put or a removal without a read, a change of days as an `invalidate`,
-  and a change of all, or an error on the stream, as an `invalidate` of
-  every day; its end ends the announcements and reads nothing. Where a
+  and a change of all, a change of a kind it does not know, or an error on
+  the stream, as an `invalidate` of every day; its end ends the announcements and reads nothing. Where a
   change announced since a write was sent, or a read
   sent since, contradicts the write's answer, the store keeps what it
   holds, and the days of both entries, read or under a read in flight,

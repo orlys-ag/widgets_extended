@@ -218,8 +218,8 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// until it is disposed: a [CalendarEntryPut] or a [CalendarEntryRemoved]
   /// is applied without a read, a [CalendarDaysChanged] is an [invalidate]
   /// of its days, or with a zone of the zone days its device days touch,
-  /// and a [CalendarAllChanged], or an error on the stream, is an
-  /// [invalidate] of every day. The end of [changes] ends the
+  /// and a [CalendarAllChanged], a change of a kind it does not know, or an
+  /// error on the stream, is an [invalidate] of every day. The end of [changes] ends the
   /// announcements, and reads nothing: the store then hears of no change
   /// at the source, as a store given no stream, so a change made there
   /// shows once the store reads its day again, as at an [invalidate] or a
@@ -1461,6 +1461,10 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
       case CalendarDaysChanged<T>(:final first, :final last):
         _invalidateDeviceDays(first, last);
       case CalendarAllChanged<T>():
+        _changeAll();
+      default:
+        // A kind of change the store does not know, which may have changed
+        // any entry.
         _changeAll();
     }
   }

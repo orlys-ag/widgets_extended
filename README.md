@@ -440,7 +440,9 @@ your `CalendarDataSource` (`read`, `create`, `replace` and `delete`), keeps
 showing what it holds while it reads changed days again, marks such a day
 `readFailed`, which fails the shown range, where that read fails, and
 applies the changes a stream of `CalendarSourceChange`s announces, if you
-give one;
+give one; a change of a kind it does not know, such as a
+`CalendarSourceChange` subclass of your own, it takes as a
+`CalendarAllChanged`;
 `invalidate` and `refresh` tell it that entries changed at the source, so
 it reads those days again. A store of your own extends `CalendarStore`
 and answers entries in the order `compareCalendarEntries` gives.

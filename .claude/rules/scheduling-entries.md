@@ -25,8 +25,9 @@ The contract of `CalendarEntry<T>`, `CalendarCreateRange`, `CalendarSchedule` an
   range of days, and writes that create, replace or delete one entry. A read
   or write completes with what it stored, or fails with an error.
 - **Source changes**: a `CalendarSourceChange` is a change the source
-  announces, an entry put or removed, a range of days changed, or every
-  entry changed. A stream of them delivers them in the order the source
+  announces, an entry put or removed, a range of days changed, every entry
+  changed, or a kind of the host's own, which a store that does not know it
+  takes as every entry changed. A stream of them delivers them in the order the source
   made them, with an every-entry change after any stretch in which it may
   have missed one. Its end means the source announces nothing more, so a
   source whose changes go on keeps it open across a lost connection. The

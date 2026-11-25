@@ -34,7 +34,8 @@ Normative for `lib/scheduling/`, the scheduling module: the experimental schedul
 - **The public API grows only by additions,** made as
   `shared-calendar-conventions.md` states. Each class the barrel shows says
   how a host builds on it: `CalendarStore`, its two stores,
-  `CalendarEditPolicy` and `CalendarScheduleProblem` are `base`,
+  `CalendarEditPolicy`, `CalendarScheduleProblem`,
+  `CalendarStoreException` and `CalendarSourceChange` are `base`,
   `CalendarDataSource` is an `interface`,
   and every other class is `final` or `sealed`. A vocabulary that will
   grow, such as item kinds, refusal reasons, resource kinds or recurrence

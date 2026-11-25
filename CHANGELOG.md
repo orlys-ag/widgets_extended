@@ -1407,6 +1407,10 @@ entry's reasons from a policy's `mayEdit`, `mayMove`, `resizableEdges` and
 `earliestStartOn`: it reports the policy's refusals as it gives them, and
 `CalendarScheduleRefused` only where a policy gives it, beside any problem
 the rules find.
+- `CalendarStoreException` and `CalendarSourceChange` are `abstract base`
+rather than `sealed`, so a host declares its own subclasses, and a `switch`
+over either needs a default case. A `CachingCalendarStore` takes a change of
+a kind it does not know as a `CalendarAllChanged`.
 
 ## 0.0.35
 

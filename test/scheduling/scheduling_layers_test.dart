@@ -336,8 +336,8 @@ void main() {
   });
 
   test("SY5 each class the barrel shows says how a host builds on it: the "
-      "stores, the edit policy and the schedule problem base, the data "
-      "source an interface, and "
+      "stores, the edit policy, the schedule problem, the store exception "
+      "and the source change bases, the data source an interface, and "
       "every other class final or sealed; and each function or constant it "
       "shows names the calendar", () {
     final files = schedulingFiles();
@@ -347,6 +347,8 @@ void main() {
       "CachingCalendarStore",
       "CalendarEditPolicy",
       "CalendarScheduleProblem",
+      "CalendarStoreException",
+      "CalendarSourceChange",
     };
     const interfaces = <String>{"CalendarDataSource"};
     final shown = <String>{
@@ -842,5 +844,5 @@ void main() {
         "CalendarSourceChange": <String>["abstract base"],
       },
     );
-  }, skip: true);
+  });
 }
