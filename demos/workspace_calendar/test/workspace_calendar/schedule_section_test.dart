@@ -1711,8 +1711,8 @@ void main() {
     expect(stored.firstStartMinute, 10 * 60);
     await pumpSection(tester, stored);
     await openTimePicker(tester, "Start time");
-    // The policy keeps the default admitsChange, which takes every change
-    // of a stored item.
+    // The policy keeps the default refusalsOf, which refuses no change of a
+    // stored item.
     expect(offeredTimes(tester, "Start time"), <int>[
       for (var minute = 0; minute <= 23 * 60 + 45; minute += 15) minute,
     ]);

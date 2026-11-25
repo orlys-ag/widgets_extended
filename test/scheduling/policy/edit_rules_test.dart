@@ -12,6 +12,7 @@ import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/policy/edit_rules.dart';
+import 'package:widgets_extended/scheduling/policy/schedule_problem.dart';
 
 import '../dst_days.dart';
 import '../zones.dart';
@@ -63,16 +64,15 @@ final class _Asking extends CalendarEditPolicy<String> {
   }
 
   @override
-  bool admitsChange(
-    CalendarEntry<String> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now, {
-    required bool isAllDay,
-  }) {
-    _note("admitsChange");
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<String> change,
+    CalendarNow now,
+  ) {
+    _note("refusalsOf");
     final admits = this.admits;
-    return admits == null || admits(start, end, isAllDay);
+    return admits == null || admits(change.start, change.end, change.isAllDay)
+        ? const <CalendarScheduleProblem>[]
+        : const <CalendarScheduleProblem>[CalendarScheduleRefused()];
   }
 
   @override
@@ -85,6 +85,23 @@ final class _Asking extends CalendarEditPolicy<String> {
   bool get allowsOverlaps {
     _note("allowsOverlaps");
     return _allowsOverlaps;
+  }
+}
+
+/// A policy that refuses nothing and records each change it is asked
+/// about in [changes]. Compared by identity.
+final class _Recording extends CalendarEditPolicy<String> {
+  _Recording();
+
+  final List<CalendarChange<String>> changes = <CalendarChange<String>>[];
+
+  @override
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<String> change,
+    CalendarNow now,
+  ) {
+    changes.add(change);
+    return const <CalendarScheduleProblem>[];
   }
 }
 
@@ -572,7 +589,7 @@ void main() {
       ),
       isFalse,
     );
-    expect(policy.asks["admitsChange"], isNull);
+    expect(policy.asks["refusalsOf"], isNull);
     expect(
       rules.admitsTimes(
         entry,
@@ -583,7 +600,7 @@ void main() {
       ),
       isTrue,
     );
-    expect(policy.asks["admitsChange"], 1);
+    expect(policy.asks["refusalsOf"], 1);
     expect(
       rules.admitsTimes(
         entry,
@@ -594,12 +611,69 @@ void main() {
       ),
       isFalse,
     );
-    expect(policy.asks["admitsChange"], 2);
+    expect(policy.asks["refusalsOf"], 2);
     expect(
       rules.admitsTimes(entry, tuesday, wednesday, now, isAllDay: true),
       isTrue,
     );
-    expect(policy.asks["admitsChange"], 3);
+    expect(policy.asks["refusalsOf"], 3);
+  });
+
+  test("ER21 admitsTimes builds one change per ask once the hours hold the "
+      "times, the change it asks the policy about, and none where they "
+      "refuse them", () {
+    final policy = _Recording();
+    final rules = CalendarEditRules<String>(
+      policy: policy,
+      hours: office,
+      slotMinutes: 15,
+    );
+    final entry = entryOf("entry", at(tuesday, 9), at(tuesday, 10));
+    var before = debugCalendarChangeCount;
+    expect(
+      rules.admitsTimes(
+        entry,
+        at(tuesday, 7),
+        at(tuesday, 8),
+        now,
+        isAllDay: false,
+      ),
+      isFalse,
+    );
+    expect(debugCalendarChangeCount - before, 0);
+    expect(policy.changes, isEmpty);
+
+    before = debugCalendarChangeCount;
+    expect(
+      rules.admitsTimes(
+        entry,
+        at(tuesday, 9),
+        at(tuesday, 11),
+        now,
+        isAllDay: false,
+      ),
+      isTrue,
+    );
+    expect(debugCalendarChangeCount - before, 1);
+    expect(
+      rules.admitsTimes(entry, tuesday, wednesday, now, isAllDay: true),
+      isTrue,
+    );
+    expect(debugCalendarChangeCount - before, 2);
+    expect(policy.changes, <CalendarChange<String>>[
+      CalendarChange<String>(
+        entry: entry,
+        start: at(tuesday, 9),
+        end: at(tuesday, 11),
+        isAllDay: false,
+      ),
+      CalendarChange<String>(
+        entry: entry,
+        start: tuesday,
+        end: wednesday,
+        isAllDay: true,
+      ),
+    ]);
   });
 
   test("ER6 rules read the day limit and the answer on overlaps once, when "
@@ -935,12 +1009,12 @@ void main() {
       inOffice.admitsTimes(entry, tuesday, wednesday, now, isAllDay: false),
       isFalse,
     );
-    expect(policy.asks["admitsChange"], isNull);
+    expect(policy.asks["refusalsOf"], isNull);
     expect(
       inOffice.admitsTimes(entry, tuesday, wednesday, now, isAllDay: true),
       isTrue,
     );
-    expect(policy.asks["admitsChange"], 1);
+    expect(policy.asks["refusalsOf"], 1);
 
     final timedOnly = CalendarEditRules<String>(
       policy: _Asking(

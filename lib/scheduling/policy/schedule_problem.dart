@@ -7,9 +7,12 @@ import 'package:flutter/foundation.dart';
 
 import '../entries/calendar_entry.dart';
 
-/// Why a `CalendarScheduleCheck` does not admit a schedule. The library
-/// adds subclasses as it learns new reasons, so a host's `switch` over a
-/// problem keeps a default case. A host names each in its own words.
+/// Why a `CalendarScheduleCheck` does not admit a schedule, or why a policy
+/// refuses a change of a stored entry. The library adds subclasses as it
+/// learns new reasons, so a host's `switch` over a problem keeps a default
+/// case. A host's policy gives its own subclasses from its
+/// `CalendarEditPolicy.refusalsOf`, which the check reports as it gives
+/// them. A host names each in its own words.
 ///
 /// Compared by type, and by the data a subclass carries.
 @immutable
@@ -127,8 +130,10 @@ final class CalendarScheduleOutsideHours extends CalendarScheduleProblem {
   }
 }
 
-/// No new entry may start on the start's day
-/// (`CalendarEarliestStart.closesDay`).
+/// No new entry may start on the start's day: for a new entry, as the
+/// earliest start of that day says (`CalendarEarliestStart.closesDay`), and
+/// for a stored one, as a policy's `CalendarEditPolicy.refusalsOf` gives
+/// it.
 final class CalendarSchedulePastDay extends CalendarScheduleProblem {
   const CalendarSchedulePastDay();
 
@@ -138,8 +143,9 @@ final class CalendarSchedulePastDay extends CalendarScheduleProblem {
   }
 }
 
-/// The start lies before the earliest start its day takes
-/// (`CalendarEditRules.earliestStartOn`).
+/// The start lies before the earliest start its day takes: for a new entry,
+/// as the rules' `CalendarEditRules.earliestStartOn` says, and for a stored
+/// one, as a policy's `CalendarEditPolicy.refusalsOf` gives it.
 final class CalendarScheduleBeforeEarliest extends CalendarScheduleProblem {
   const CalendarScheduleBeforeEarliest();
 
@@ -149,8 +155,8 @@ final class CalendarScheduleBeforeEarliest extends CalendarScheduleProblem {
   }
 }
 
-/// The policy lets the stored entry not be edited
-/// (`CalendarEditPolicy.mayEdit`).
+/// The stored entry is locked, so it may not change, as a policy's
+/// `CalendarEditPolicy.refusalsOf` gives it.
 final class CalendarScheduleLocked extends CalendarScheduleProblem {
   const CalendarScheduleLocked();
 
@@ -161,7 +167,8 @@ final class CalendarScheduleLocked extends CalendarScheduleProblem {
 }
 
 /// The stored entry may neither move nor resize at its start, and the
-/// schedule moves its start.
+/// schedule moves its start, as a policy's `CalendarEditPolicy.refusalsOf`
+/// gives it.
 final class CalendarScheduleStartKept extends CalendarScheduleProblem {
   const CalendarScheduleStartKept();
 
@@ -172,7 +179,8 @@ final class CalendarScheduleStartKept extends CalendarScheduleProblem {
 }
 
 /// The stored entry may neither move nor resize at its start, and the
-/// schedule changes whether it is all-day.
+/// schedule changes whether it is all-day, as a policy's
+/// `CalendarEditPolicy.refusalsOf` gives it.
 final class CalendarScheduleKindKept extends CalendarScheduleProblem {
   const CalendarScheduleKindKept();
 
@@ -183,7 +191,8 @@ final class CalendarScheduleKindKept extends CalendarScheduleProblem {
 }
 
 /// The stored entry may neither move nor resize at its start, and the
-/// policy refuses the schedule's end with the entry's start and kind.
+/// policy refuses the schedule's end with the entry's start and kind, as
+/// its `CalendarEditPolicy.refusalsOf` gives it.
 final class CalendarScheduleEndInPast extends CalendarScheduleProblem {
   const CalendarScheduleEndInPast();
 
@@ -224,8 +233,8 @@ final class CalendarScheduleOverlapRefused<T> extends CalendarScheduleProblem {
   }
 }
 
-/// The policy refuses the change to the stored entry
-/// (`CalendarEditPolicy.admitsChange`) for a reason no other problem names.
+/// A policy refuses the change to the stored entry for a reason no other
+/// problem names, as its `CalendarEditPolicy.refusalsOf` gives it.
 final class CalendarScheduleRefused extends CalendarScheduleProblem {
   const CalendarScheduleRefused();
 

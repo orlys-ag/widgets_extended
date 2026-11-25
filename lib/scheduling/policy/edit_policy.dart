@@ -403,18 +403,18 @@ abstract base class CalendarEditPolicy<T> {
     return true;
   }
 
-  /// Whether [entry] may take the times [start] to [end], all-day where
-  /// [isAllDay] and timed otherwise, which a move or a resize of it gives;
-  /// a move between the all-day strip and the slots changes the kind,
-  /// possibly with the times unchanged. True here.
-  bool admitsChange(
-    CalendarEntry<T> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now, {
-    required bool isAllDay,
-  }) {
-    return true;
+  /// Whether [refusalsOf] answers no problem for [change] at [now]: a
+  /// question for a host's code.
+  ///
+  /// A policy limits changes through [refusalsOf] and does not override
+  /// this. The module never asks it, asking [refusalsOf] itself, so an
+  /// override, which the analyzer reports as
+  /// `invalid_override_of_non_virtual_member`, is asked by no view, rule or
+  /// check. An implementation of [refusalsOf] never asks it of its own
+  /// policy, since it answers through [refusalsOf].
+  @nonVirtual
+  bool admitsChange(CalendarChange<T> change, CalendarNow now) {
+    return refusalsOf(change, now).isEmpty;
   }
 
   /// The reasons [change], a change of a stored entry, is refused at
@@ -428,6 +428,15 @@ abstract base class CalendarEditPolicy<T> {
   /// asked of a stored entry's change only, never of a create, whose start
   /// [earliestStartOn] limits. Its askers read the answer and never modify
   /// or keep it, so a const list answer allocates nothing per ask.
+  ///
+  /// Its askers: `CalendarEditRules.admitsTimes`, through which a
+  /// calendar's Week and Day ask it at each placement a move or a resize
+  /// tests, per pointer move, and, as they build an entry's piece for
+  /// editing, for each move its accessibility actions offer, per layout;
+  /// and the schedule check, `CalendarScheduleCheck`, which reports the
+  /// answer. An implementation never asks its own policy's [admitsChange],
+  /// which answers through this member, so such an ask recurses without
+  /// end.
   List<CalendarScheduleProblem> refusalsOf(
     CalendarChange<T> change,
     CalendarNow now,
@@ -737,22 +746,6 @@ final class _AllEditPolicies<T> extends CalendarEditPolicy<T> {
   bool mayDelete(CalendarEntry<T> entry, CalendarNow now) {
     for (final policy in policies) {
       if (!policy.mayDelete(entry, now)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  @override
-  bool admitsChange(
-    CalendarEntry<T> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now, {
-    required bool isAllDay,
-  }) {
-    for (final policy in policies) {
-      if (!policy.admitsChange(entry, start, end, now, isAllDay: isAllDay)) {
         return false;
       }
     }

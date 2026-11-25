@@ -1388,6 +1388,25 @@ built-in header's previous chevron while it steps back no further; and the
 docs of `chipTitleStyle`, `monthMoreStyle`, `badgeStyle`,
 `monthCardTitleStyle` and `monthCardTimeStyle` say that a line of each sets
 how tall the all-day strip's rows and Month's lanes grow at a larger text.
+- `CalendarEditPolicy.refusalsOf` asks a policy about a change of a stored
+entry, a `CalendarChange` of the entry as stored and the start, end and kind
+the change requests, and answers the `CalendarScheduleProblem`s that refuse
+it, of the module's subclasses or the host's own, empty where it admits it.
+`admitsChange` now takes a `CalendarChange` and a `CalendarNow`, answers
+whether `refusalsOf` answers none, and is not to be overridden: a host
+policy that overrides it with its old parameters no longer compiles, one
+that overrides it with the new ones draws an analyzer warning and is asked
+by no view, rule or check, and a policy limits changes by overriding
+`refusalsOf`. `CalendarEditPolicy.all` answers the refusals of the first of
+its policies that refuses, so over two history locks with the weaker first
+the check reports the weaker lock's problems for a change both refuse, which
+may differ from those it reported, while the same changes are refused.
+`HistoryLockPolicy` gives its problems itself, so the check reports for it
+what it reported before. `CalendarScheduleCheck` no longer derives a stored
+entry's reasons from a policy's `mayEdit`, `mayMove`, `resizableEdges` and
+`earliestStartOn`: it reports the policy's refusals as it gives them, and
+`CalendarScheduleRefused` only where a policy gives it, beside any problem
+the rules find.
 
 ## 0.0.35
 

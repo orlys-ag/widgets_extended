@@ -99,11 +99,13 @@ void main() {
     ));
     expect(
       policy.admitsChange(
-        ended,
-        ended.start,
-        at(today, 1),
+        CalendarChange<String>(
+          entry: ended,
+          start: ended.start,
+          end: at(today, 1),
+          isAllDay: false,
+        ),
         now,
-        isAllDay: false,
       ),
       isFalse,
     );
@@ -117,25 +119,37 @@ void main() {
     ));
     expect(
       policy.admitsChange(
-        running,
-        running.start,
-        at(today, 3),
+        CalendarChange<String>(
+          entry: running,
+          start: running.start,
+          end: at(today, 3),
+          isAllDay: false,
+        ),
         now,
-        isAllDay: false,
       ),
       isTrue,
     );
     expect(
-      policy.admitsChange(running, running.start, today, now, isAllDay: false),
+      policy.admitsChange(
+        CalendarChange<String>(
+          entry: running,
+          start: running.start,
+          end: today,
+          isAllDay: false,
+        ),
+        now,
+      ),
       isFalse,
     );
     expect(
       policy.admitsChange(
-        running,
-        at(monday, 22, 15),
-        running.end,
+        CalendarChange<String>(
+          entry: running,
+          start: at(monday, 22, 15),
+          end: running.end,
+          isAllDay: false,
+        ),
         now,
-        isAllDay: false,
       ),
       isFalse,
     );
@@ -148,16 +162,26 @@ void main() {
       true,
     ));
     expect(
-      policy.admitsChange(free, at(monday, 23), today, now, isAllDay: false),
+      policy.admitsChange(
+        CalendarChange<String>(
+          entry: free,
+          start: at(monday, 23),
+          end: today,
+          isAllDay: false,
+        ),
+        now,
+      ),
       isFalse,
     );
     expect(
       policy.admitsChange(
-        free,
-        at(today, 3),
-        at(today, 4),
+        CalendarChange<String>(
+          entry: free,
+          start: at(today, 3),
+          end: at(today, 4),
+          isAllDay: false,
+        ),
         now,
-        isAllDay: false,
       ),
       isTrue,
     );
@@ -525,11 +549,13 @@ void main() {
       expect(unrestricted.earliestStartOn(monday, now), monday);
       expect(
         unrestricted.admitsChange(
-          ended,
-          at(monday, 8),
-          at(monday, 9),
+          CalendarChange<String>(
+            entry: ended,
+            start: at(monday, 8),
+            end: at(monday, 9),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isTrue,
       );
@@ -538,16 +564,26 @@ void main() {
       expect(past.earliestStartOn(today, now), today);
       expect(past.earliestStartOn(monday, now), isNull);
       expect(
-        past.admitsChange(free, today, at(today, 1), now, isAllDay: false),
+        past.admitsChange(
+          CalendarChange<String>(
+            entry: free,
+            start: today,
+            end: at(today, 1),
+            isAllDay: false,
+          ),
+          now,
+        ),
         isTrue,
       );
       expect(
         past.admitsChange(
-          free,
-          at(monday, 23),
-          at(today, 1),
+          CalendarChange<String>(
+            entry: free,
+            start: at(monday, 23),
+            end: at(today, 1),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isFalse,
       );
@@ -555,21 +591,25 @@ void main() {
       expect(earlier.earliestStartOn(today, now), midMorning);
       expect(
         earlier.admitsChange(
-          free,
-          midMorning,
-          at(today, 12),
+          CalendarChange<String>(
+            entry: free,
+            start: midMorning,
+            end: at(today, 12),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isTrue,
       );
       expect(
         earlier.admitsChange(
-          free,
-          at(today, 11, 6),
-          at(today, 12),
+          CalendarChange<String>(
+            entry: free,
+            start: at(today, 11, 6),
+            end: at(today, 12),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isFalse,
       );
@@ -645,71 +685,85 @@ void main() {
       final ended = entryOf("ended", at(today, 8), at(today, 9));
       expect(
         earlier.admitsChange(
-          later,
-          at(today, 11, 15),
-          at(today, 12),
+          CalendarChange<String>(
+            entry: later,
+            start: at(today, 11, 15),
+            end: at(today, 12),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isTrue,
       );
       expect(
         earlier.admitsChange(
-          later,
-          at(today, 11),
-          at(today, 12),
+          CalendarChange<String>(
+            entry: later,
+            start: at(today, 11),
+            end: at(today, 12),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isFalse,
       );
       expect(
         earlier.admitsChange(
-          running,
-          running.start,
-          at(today, 11, 15),
+          CalendarChange<String>(
+            entry: running,
+            start: running.start,
+            end: at(today, 11, 15),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isTrue,
       );
       expect(
         earlier.admitsChange(
-          running,
-          running.start,
-          at(today, 11),
+          CalendarChange<String>(
+            entry: running,
+            start: running.start,
+            end: at(today, 11),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isFalse,
       );
       expect(
         earlier.admitsChange(
-          running,
-          at(today, 10, 15),
-          running.end,
+          CalendarChange<String>(
+            entry: running,
+            start: at(today, 10, 15),
+            end: running.end,
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isFalse,
       );
       expect(
         earlier.admitsChange(
-          ended,
-          ended.start,
-          ended.end,
+          CalendarChange<String>(
+            entry: ended,
+            start: ended.start,
+            end: ended.end,
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isTrue,
       );
       expect(
         earlier.admitsChange(
-          ended,
-          ended.start,
-          at(today, 9, 15),
+          CalendarChange<String>(
+            entry: ended,
+            start: ended.start,
+            end: at(today, 9, 15),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isFalse,
       );
@@ -741,45 +795,61 @@ void main() {
       expect(past.resizableEdges(entry, now), CalendarResizeEdges.end);
       expect(
         past.admitsChange(
-          entry,
-          entry.start,
-          at(today, 3),
+          CalendarChange<String>(
+            entry: entry,
+            start: entry.start,
+            end: at(today, 3),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isTrue,
       );
       expect(
-        past.admitsChange(entry, entry.start, today, now, isAllDay: false),
-        isFalse,
-      );
-      expect(
         past.admitsChange(
-          entry,
-          entry.start,
-          at(monday, 23),
+          CalendarChange<String>(
+            entry: entry,
+            start: entry.start,
+            end: today,
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isFalse,
       );
       expect(
         past.admitsChange(
-          entry,
-          at(monday, 22, 15),
-          entry.end,
+          CalendarChange<String>(
+            entry: entry,
+            start: entry.start,
+            end: at(monday, 23),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isFalse,
       );
       expect(
         past.admitsChange(
-          entry,
-          at(today, 9),
-          at(today, 10),
+          CalendarChange<String>(
+            entry: entry,
+            start: at(monday, 22, 15),
+            end: entry.end,
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
+        ),
+        isFalse,
+      );
+      expect(
+        past.admitsChange(
+          CalendarChange<String>(
+            entry: entry,
+            start: at(today, 9),
+            end: at(today, 10),
+            isAllDay: false,
+          ),
+          now,
         ),
         isFalse,
       );
@@ -794,21 +864,25 @@ void main() {
       // Its end may move to a later day start, and its start not at all.
       expect(
         earlier.admitsChange(
-          entry,
-          today,
-          CalendarDates.addDays(today, 2),
+          CalendarChange<String>(
+            entry: entry,
+            start: today,
+            end: CalendarDates.addDays(today, 2),
+            isAllDay: true,
+          ),
           tenOClock,
-          isAllDay: true,
         ),
         isTrue,
       );
       expect(
         earlier.admitsChange(
-          entry,
-          wednesday,
-          CalendarDates.addDays(today, 2),
+          CalendarChange<String>(
+            entry: entry,
+            start: wednesday,
+            end: CalendarDates.addDays(today, 2),
+            isAllDay: true,
+          ),
           tenOClock,
-          isAllDay: true,
         ),
         isFalse,
       );
@@ -857,11 +931,13 @@ void main() {
         required bool isAllDay,
       }) {
         return policy.admitsChange(
-          entry,
-          entry.start,
-          entry.end,
+          CalendarChange<String>(
+            entry: entry,
+            start: entry.start,
+            end: entry.end,
+            isAllDay: isAllDay,
+          ),
           at,
-          isAllDay: isAllDay,
         );
       }
 
@@ -883,11 +959,13 @@ void main() {
       );
       expect(
         earlier.admitsChange(
-          todayAllDay,
-          today,
-          CalendarDates.addDays(today, 2),
+          CalendarChange<String>(
+            entry: todayAllDay,
+            start: today,
+            end: CalendarDates.addDays(today, 2),
+            isAllDay: true,
+          ),
           tenOClock,
-          isAllDay: true,
         ),
         isTrue,
       );
@@ -1015,11 +1093,13 @@ void main() {
 
       expect(
         lock.admitsChange(
-          ended,
-          plain(ended.start),
-          plain(ended.end),
+          CalendarChange<String>(
+            entry: ended,
+            start: plain(ended.start),
+            end: plain(ended.end),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isTrue,
       );
@@ -1036,11 +1116,13 @@ void main() {
       );
       expect(
         lock.admitsChange(
-          plainEnded,
-          plainEnded.start.toUtc(),
-          plainEnded.end.toUtc(),
+          CalendarChange<String>(
+            entry: plainEnded,
+            start: plainEnded.start.toUtc(),
+            end: plainEnded.end.toUtc(),
+            isAllDay: false,
+          ),
           plainNow,
-          isAllDay: false,
         ),
         isFalse,
       );
@@ -1059,21 +1141,25 @@ void main() {
       );
       expect(
         lock.admitsChange(
-          plainEnded,
-          zonedOf(plainEnded.start),
-          zonedOf(plainEnded.end),
+          CalendarChange<String>(
+            entry: plainEnded,
+            start: zonedOf(plainEnded.start),
+            end: zonedOf(plainEnded.end),
+            isAllDay: false,
+          ),
           plainNow,
-          isAllDay: false,
         ),
         isTrue,
       );
       expect(
         lock.admitsChange(
-          plainStarted,
-          zonedOf(plainStarted.start),
-          zonedOf(plainStarted.end),
+          CalendarChange<String>(
+            entry: plainStarted,
+            start: zonedOf(plainStarted.start),
+            end: zonedOf(plainStarted.end),
+            isAllDay: false,
+          ),
           plainNow,
-          isAllDay: false,
         ),
         isTrue,
       );

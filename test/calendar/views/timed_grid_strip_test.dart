@@ -7649,6 +7649,85 @@ void main() {
       expect(harness.creates, hasLength(1));
     });
 
+    testWidgets("OP30 among 200 packed entries in Week, a move, a resize of "
+        "either edge and a bar landing on the slots build at most one change "
+        "per ask of refusalsOf, whether the policy allows overlaps or forbids "
+        "them", (tester) async {
+      final shown = Shown.week(monday);
+      for (final inner in const <CalendarEditPolicy<String>>[
+        UnrestrictedEditPolicy<String>(),
+        NoOverlapsPolicy<String>(),
+      ]) {
+        for (final name in const <String>["move", "start", "end", "bar"]) {
+          final policy = CountingEditPolicy<String>(inner);
+          await Harness(
+            packedStore(200),
+            shown,
+            editPolicy: policy,
+          ).pump(tester);
+          final built = debugCalendarChangeCount;
+          final asks = policy.asked.length;
+          await packedGestures(tester, shown)[name]!();
+          final changes = debugCalendarChangeCount - built;
+          final reason = "$name under $inner";
+          final refusals = policy.asked.skip(asks).where((ask) {
+            return ask.name == "refusalsOf";
+          }).length;
+          expect(refusals, greaterThan(0), reason: reason);
+          expect(changes, lessThanOrEqualTo(refusals), reason: reason);
+        }
+      }
+    });
+
+    testWidgets("OP31 an end handle let go over a later day builds at most "
+        "one change per ask of refusalsOf", (tester) async {
+      final policy = CountingEditPolicy<String>(
+        const UnrestrictedEditPolicy<String>(),
+      );
+      final built = debugCalendarChangeCount;
+      final store = await releaseEndOver(
+        tester,
+        entries: <CalendarEntry<String>>[nightEntry()],
+        id: "night",
+        day: tuesday,
+        over: wednesday,
+        minute: 12 * 60,
+        editPolicy: policy,
+      );
+      final changes = debugCalendarChangeCount - built;
+      // Setup sanity: the one move ends at the end of Wednesday's 12:00
+      // slot, an end only the later-day gate gives a release.
+      expect(store.moves, hasLength(1));
+      expect(store.moves.single.end, at(wednesday, 12, 15));
+      final refusals = policy.asked.where((ask) {
+        return ask.name == "refusalsOf";
+      }).length;
+      expect(refusals, greaterThan(0));
+      expect(changes, lessThanOrEqualTo(refusals));
+    });
+
+    testWidgets("OP32 with no gesture, the pieces the grid builds for "
+        "editing ask refusalsOf for the moves their semantics actions offer, "
+        "and build at most one change per ask", (tester) async {
+      final policy = CountingEditPolicy<String>(
+        const UnrestrictedEditPolicy<String>(),
+      );
+      final built = debugCalendarChangeCount;
+      await Harness(
+        packedStore(200),
+        Shown.week(monday),
+        editPolicy: policy,
+      ).pump(tester);
+      final changes = debugCalendarChangeCount - built;
+      // Setup sanity: with no drag, only the board's semantics move
+      // actions ask the change question.
+      final refusals = policy.asked.where((ask) {
+        return ask.name == "refusalsOf";
+      }).length;
+      expect(refusals, greaterThan(0));
+      expect(changes, lessThanOrEqualTo(refusals));
+    });
+
     testWidgets("OP11 a per-pair answer that throws is reported: a bar's "
         "landing on the slots and an end handle's later day refuse, and a "
         "create range whose entries a store notify or a new minute reads "

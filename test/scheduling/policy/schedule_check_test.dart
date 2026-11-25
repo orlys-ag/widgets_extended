@@ -102,7 +102,8 @@ final class _SoftOverlaps extends CalendarEditPolicy<String> {
 }
 
 /// Holds every entry as one in progress, its start fixed and its end
-/// resizable, and admits only a change to a timed entry.
+/// resizable, and admits only a change to a timed entry, refusing one to an
+/// all-day entry with [CalendarScheduleKindKept].
 final class _HeldTimedOnly extends CalendarEditPolicy<String> {
   const _HeldTimedOnly();
 
@@ -120,14 +121,13 @@ final class _HeldTimedOnly extends CalendarEditPolicy<String> {
   }
 
   @override
-  bool admitsChange(
-    CalendarEntry<String> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now, {
-    required bool isAllDay,
-  }) {
-    return !isAllDay;
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<String> change,
+    CalendarNow now,
+  ) {
+    return change.isAllDay
+        ? const <CalendarScheduleProblem>[CalendarScheduleKindKept()]
+        : const <CalendarScheduleProblem>[];
   }
 }
 
@@ -137,14 +137,104 @@ final class _EndsByNoon extends CalendarEditPolicy<String> {
   const _EndsByNoon();
 
   @override
-  bool admitsChange(
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<String> change,
+    CalendarNow now,
+  ) {
+    return CalendarDates.endMinuteOfDay(change.end) <= 12 * 60
+        ? const <CalendarScheduleProblem>[]
+        : const <CalendarScheduleProblem>[CalendarScheduleRefused()];
+  }
+}
+
+/// A host's own reason, at the start.
+final class _OwnProblem extends CalendarScheduleProblem {
+  const _OwnProblem();
+
+  @override
+  bool get atEnd {
+    return false;
+  }
+}
+
+/// A host's own reason at the schedule's start.
+final class _AtStart extends CalendarScheduleProblem {
+  const _AtStart();
+
+  @override
+  bool get atEnd {
+    return false;
+  }
+}
+
+/// A host's own reason at the schedule's end.
+final class _AtEnd extends CalendarScheduleProblem {
+  const _AtEnd();
+
+  @override
+  bool get atEnd {
+    return true;
+  }
+}
+
+/// Refuses a change ending after 12:00 of its end's day with
+/// [_OwnProblem], overriding no other member, and records each change it
+/// is asked about in [asked].
+final class _OwnNoon extends CalendarEditPolicy<String> {
+  _OwnNoon();
+
+  final List<CalendarChange<String>> asked = <CalendarChange<String>>[];
+
+  @override
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<String> change,
+    CalendarNow now,
+  ) {
+    asked.add(change);
+    return CalendarDates.endMinuteOfDay(change.end) <= 12 * 60
+        ? const <CalendarScheduleProblem>[]
+        : const <CalendarScheduleProblem>[_OwnProblem()];
+  }
+}
+
+/// Refuses every change with [refusals], in their order.
+final class _Giving extends CalendarEditPolicy<String> {
+  const _Giving(this.refusals);
+
+  final List<CalendarScheduleProblem> refusals;
+
+  @override
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<String> change,
+    CalendarNow now,
+  ) {
+    return refusals;
+  }
+}
+
+/// Keeps every entry's start, its end alone resizable, and overrides
+/// [admitsChange] to refuse every change, which nothing in the module
+/// asks, and not [refusalsOf], which refuses none.
+final class _OverridesAdmits extends CalendarEditPolicy<String> {
+  const _OverridesAdmits();
+
+  @override
+  bool mayMove(CalendarEntry<String> entry, CalendarNow now) {
+    return false;
+  }
+
+  @override
+  CalendarResizeEdges resizableEdges(
     CalendarEntry<String> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now, {
-    required bool isAllDay,
-  }) {
-    return CalendarDates.endMinuteOfDay(end) <= 12 * 60;
+    CalendarNow now,
+  ) {
+    return CalendarResizeEdges.end;
+  }
+
+  @override
+  // ignore: invalid_override_of_non_virtual_member
+  bool admitsChange(CalendarChange<String> change, CalendarNow now) {
+    return false;
   }
 }
 
@@ -197,15 +287,12 @@ final class _Counting extends CalendarEditPolicy<String> {
   }
 
   @override
-  bool admitsChange(
-    CalendarEntry<String> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now, {
-    required bool isAllDay,
-  }) {
-    changeAsked.add(end);
-    return inner.admitsChange(entry, start, end, now, isAllDay: isAllDay);
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<String> change,
+    CalendarNow now,
+  ) {
+    changeAsked.add(change.end);
+    return inner.refusalsOf(change, now);
   }
 
   @override
@@ -307,11 +394,13 @@ List<CalendarScheduleProblem>? derivedProblemsOf(
   final policy = rules.policy;
   final isAllDay = schedule.isAllDay;
   final admitsChange = policy.admitsChange(
-    entry,
-    times.start,
-    times.end,
+    CalendarChange<String>(
+      entry: entry,
+      start: times.start,
+      end: times.end,
+      isAllDay: isAllDay,
+    ),
     now,
-    isAllDay: isAllDay,
   );
   var asksEarliest = false;
   if (!admitsChange) {
@@ -325,11 +414,13 @@ List<CalendarScheduleProblem>? derivedProblemsOf(
         found.add(const CalendarScheduleKindKept());
       }
       if (!policy.admitsChange(
-        entry,
-        entry.start,
-        times.end,
+        CalendarChange<String>(
+          entry: entry,
+          start: entry.start,
+          end: times.end,
+          isAllDay: entry.isAllDay,
+        ),
         now,
-        isAllDay: entry.isAllDay,
       )) {
         found.add(const CalendarScheduleEndInPast());
       }
@@ -350,6 +441,29 @@ List<CalendarScheduleProblem>? derivedProblemsOf(
     found.add(const CalendarScheduleRefused());
   }
   return found;
+}
+
+/// The times SC33 and SC34 check at: Tuesday 00:00, 11:07 and 23:59:30.
+List<CalendarNow> checkedNows() {
+  return <CalendarNow>[
+    CalendarNow(time: tuesday, today: tuesday),
+    elevenOhSeven,
+    CalendarNow(time: DateTime(2026, 4, 21, 23, 59, 30), today: tuesday),
+  ];
+}
+
+/// The stored entries SC33 and SC34 check: Monday 09:00 to 10:00, Monday
+/// 22:00 to Tuesday 02:00, Tuesday 10:00 to 12:00, Wednesday 09:00 to
+/// 10:00, and Monday and Tuesday all-day.
+List<CalendarEntry<String>> checkedEntries() {
+  return <CalendarEntry<String>>[
+    entryOf("monday", monday, 540, 600),
+    entryOf("overnight", monday, 22 * 60, 26 * 60),
+    entryOf("tuesday", tuesday, 600, 720),
+    entryOf("wednesday", wednesday, 540, 600),
+    entryOf("monday all-day", monday, 0, 1440, isAllDay: true),
+    entryOf("tuesday all-day", tuesday, 0, 1440, isAllDay: true),
+  ];
 }
 
 /// The schedules SC33 checks for the stored [entry]: for a timed entry the
@@ -510,7 +624,7 @@ void main() {
       <CalendarScheduleProblem>[const CalendarSchedulePastDay()],
     );
 
-    // The end is asked with the stored kind.
+    // The policy's own reason is reported as it gives it.
     const held = _HeldTimedOnly();
     final wholeDay = entryOf("whole", tuesday, 0, 1440);
     expect(problemsOf(held, timed(tuesday, 0, 1440), entry: wholeDay), isEmpty);
@@ -751,8 +865,8 @@ void main() {
     expect(checkOf(timed(wednesday, 720, 780)).firstStartMinute, 0);
   });
 
-  test("SC7 a refusal no problem names is reported alone, and none where "
-      "a named problem explains it", () {
+  test("SC7 a refusal a policy gives no reason of its own for is reported "
+      "as CalendarScheduleRefused, after the problems the rules find", () {
     const noon = _EndsByNoon();
     final stored = entryOf("stored", wednesday, 540, 600);
     expect(
@@ -775,7 +889,10 @@ void main() {
         timed(wednesday, 540, 780).withEndDay(DateTime(2026, 4, 23)),
         entry: stored,
       ),
-      <CalendarScheduleProblem>[const CalendarScheduleTooManyDays()],
+      <CalendarScheduleProblem>[
+        const CalendarScheduleTooManyDays(),
+        const CalendarScheduleRefused(),
+      ],
     );
   });
 
@@ -810,25 +927,12 @@ void main() {
             const HistoryLockPolicy<String>(),
           ]),
     };
-    final nows = <CalendarNow>[
-      CalendarNow(time: tuesday, today: tuesday),
-      elevenOhSeven,
-      CalendarNow(time: DateTime(2026, 4, 21, 23, 59, 30), today: tuesday),
-    ];
-    final entries = <CalendarEntry<String>>[
-      entryOf("monday", monday, 540, 600),
-      entryOf("overnight", monday, 22 * 60, 26 * 60),
-      entryOf("tuesday", tuesday, 600, 720),
-      entryOf("wednesday", wednesday, 540, 600),
-      entryOf("monday all-day", monday, 0, 1440, isAllDay: true),
-      entryOf("tuesday all-day", tuesday, 0, 1440, isAllDay: true),
-    ];
     final seen = <Type>{};
     var cases = 0;
     for (final MapEntry(key: name, value: policy) in policies.entries) {
       final rules = rulesOf(policy);
-      for (final now in nows) {
-        for (final entry in entries) {
+      for (final now in checkedNows()) {
+        for (final entry in checkedEntries()) {
           for (final MapEntry(key: what, value: schedule) in schedulesFor(
             entry,
           ).entries) {
@@ -881,6 +985,157 @@ void main() {
       CalendarSchedulePastDay,
       CalendarScheduleBeforeEarliest,
     });
+  });
+
+  test("SC31 a stored entry's problems are the policy's own refusals of "
+      "the change, with no CalendarScheduleRefused beside them, and a new "
+      "entry's schedule is not asked about", () {
+    final policy = _OwnNoon();
+    final stored = entryOf("stored", wednesday, 540, 600);
+    expect(
+      problemsOf(policy, timed(wednesday, 540, 780), entry: stored),
+      <CalendarScheduleProblem>[const _OwnProblem()],
+    );
+    // Setup sanity: the policy was asked about the stored entry's change.
+    expect(policy.asked, hasLength(1));
+    policy.asked.clear();
+    expect(problemsOf(policy, timed(wednesday, 540, 780)), isEmpty);
+    expect(policy.asked, isEmpty);
+  });
+
+  test("SC32 the policy's refusals are reported in the order it gives "
+      "them", () {
+    final stored = entryOf("stored", wednesday, 540, 600);
+    expect(
+      problemsOf(
+        const _Giving(<CalendarScheduleProblem>[_AtStart(), _AtEnd()]),
+        timed(wednesday, 540, 660),
+        entry: stored,
+      ),
+      <CalendarScheduleProblem>[const _AtStart(), const _AtEnd()],
+    );
+    expect(
+      problemsOf(
+        const _Giving(<CalendarScheduleProblem>[_AtEnd(), _AtStart()]),
+        timed(wednesday, 540, 660),
+        entry: stored,
+      ),
+      <CalendarScheduleProblem>[const _AtEnd(), const _AtStart()],
+    );
+  });
+
+  test("SC34 under two history locks with the weaker first, a stored "
+      "entry's problems are the first refusing lock's, and the composite "
+      "refuses exactly what the stricter refuses alone", () {
+    const weaker = HistoryLockPolicy<String>();
+    const stricter = HistoryLockPolicy<String>(lockEarlierToday: true);
+    final both = CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+      weaker,
+      stricter,
+    ]);
+    final rules = rulesOf(both);
+    var weakerRefused = 0;
+    var cases = 0;
+    for (final now in checkedNows()) {
+      for (final entry in checkedEntries()) {
+        for (final MapEntry(key: what, value: schedule) in schedulesFor(
+          entry,
+        ).entries) {
+          final reason = "$now, ${entry.id} $what";
+          final times = schedule.timesOn(null)!;
+          final change = CalendarChange<String>(
+            entry: entry,
+            start: times.start,
+            end: times.end,
+            isAllDay: schedule.isAllDay,
+          );
+          final first = weaker.refusalsOf(change, now);
+          if (first.isNotEmpty) {
+            weakerRefused++;
+          }
+          expect(
+            CalendarScheduleCheck<String>(
+              schedule: schedule,
+              rules: rules,
+              now: now,
+              entry: entry,
+            ).problems,
+            first.isNotEmpty ? first : stricter.refusalsOf(change, now),
+            reason: reason,
+          );
+          expect(
+            both.admitsChange(change, now),
+            stricter.admitsChange(change, now),
+            reason: reason,
+          );
+          cases++;
+        }
+      }
+    }
+    // Setup sanity: the weaker lock refuses some changes, and leaves the
+    // stricter others to refuse.
+    expect(cases, greaterThan(100));
+    expect(weakerRefused, inExclusiveRange(0, cases));
+
+    final overnight = entryOf("overnight", monday, 22 * 60, 26 * 60);
+    final later = CalendarSchedule.of(
+      DateTime(2026, 4, 20, 23),
+      DateTime(2026, 4, 21, 3),
+      isAllDay: false,
+    );
+    expect(problemsOf(both, later, entry: overnight), <CalendarScheduleProblem>[
+      const CalendarScheduleStartKept(),
+    ]);
+    expect(
+      derivedProblemsOf(rules, later, overnight, elevenOhSeven),
+      <CalendarScheduleProblem>[const CalendarScheduleLocked()],
+    );
+  });
+
+  test("SC35 an override of admitsChange is asked by no rule or check: "
+      "under a policy whose admitsChange refuses every change and whose "
+      "refusalsOf refuses none, the rules admit times, the problems are "
+      "none, and the next free range and the end days are those refusalsOf "
+      "gives", () {
+    const policy = _OverridesAdmits();
+    final stored = entryOf("stored", wednesday, 540, 600);
+    // Setup sanity: the override refuses.
+    expect(
+      policy.admitsChange(
+        CalendarChange<String>(
+          entry: stored,
+          start: stored.start,
+          end: stored.end,
+          isAllDay: false,
+        ),
+        elevenOhSeven,
+      ),
+      isFalse,
+    );
+    expect(
+      rulesOf(policy).admitsTimes(
+        stored,
+        stored.start,
+        DateTime(2026, 4, 22, 11),
+        elevenOhSeven,
+        isAllDay: false,
+      ),
+      isTrue,
+    );
+    expect(
+      problemsOf(policy, timed(wednesday, 540, 780), entry: stored),
+      isEmpty,
+    );
+    final check = CalendarScheduleCheck<String>(
+      schedule: timed(wednesday, 540, 780),
+      rules: rulesOf(policy),
+      now: elevenOhSeven,
+      entry: stored,
+    );
+    // Setup sanity: the policy keeps the start, so the end days ask it.
+    expect(check.startFixed, isTrue);
+    expect(check.nextFree, isNotNull);
+    expect(check.endDays.first, plainDate(wednesday));
   });
 
   test("SC8 the times are checked where the end is after the start and the "

@@ -85,33 +85,6 @@ final class HistoryLockPolicy<T> extends CalendarEditPolicy<T> {
     return _holdOf(entry, now) == _Hold.free;
   }
 
-  /// For an entry starting at the boundary or after it, whether [start] is
-  /// not before the boundary; for one in progress, whether it keeps its
-  /// start and its kind ([isAllDay]) and [end] is after the boundary; and
-  /// for one that has ended, whether it keeps both its times and its kind.
-  @override
-  bool admitsChange(
-    CalendarEntry<T> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now, {
-    required bool isAllDay,
-  }) {
-    final boundary = _boundaryOf(now);
-    switch (_holdOf(entry, now)) {
-      case _Hold.free:
-        return !start.isBefore(boundary);
-      case _Hold.started:
-        return sameTime(start, entry.start) &&
-            isAllDay == entry.isAllDay &&
-            end.isAfter(boundary);
-      case _Hold.locked:
-        return sameTime(start, entry.start) &&
-            sameTime(end, entry.end) &&
-            isAllDay == entry.isAllDay;
-    }
-  }
-
   /// For an entry starting at the boundary or after it: none where
   /// [CalendarChange.start] is not before the boundary; otherwise
   /// [CalendarSchedulePastDay] where the start is before today, or the

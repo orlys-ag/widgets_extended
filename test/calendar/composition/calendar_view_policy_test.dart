@@ -17,6 +17,7 @@ import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
+import 'package:widgets_extended/scheduling/policy/schedule_problem.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart'
     show DayList, dayListGapKey;
@@ -35,6 +36,36 @@ final DateTime tuesday = DateTime(2026, 4, 21);
 final DateTime wednesday = DateTime(2026, 4, 22);
 final DateTime thursday = DateTime(2026, 4, 23);
 final DateTime friday = DateTime(2026, 4, 24);
+
+/// A host's own reason a change is refused.
+final class _NotAtFourteen extends CalendarScheduleProblem {
+  const _NotAtFourteen();
+
+  @override
+  bool get atEnd {
+    return false;
+  }
+}
+
+/// Refuses, with [_NotAtFourteen], a change starting at 14:00, overriding
+/// no other member, and records the start of each change it is asked
+/// about in [starts]. Compared by identity.
+final class _RefusesFourteen extends CalendarEditPolicy<String> {
+  _RefusesFourteen();
+
+  final List<DateTime> starts = <DateTime>[];
+
+  @override
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<String> change,
+    CalendarNow now,
+  ) {
+    starts.add(change.start);
+    return change.start.hour == 14 && change.start.minute == 0
+        ? const <CalendarScheduleProblem>[_NotAtFourteen()]
+        : const <CalendarScheduleProblem>[];
+  }
+}
 
 /// [hour]:[minute]:[second] on [day].
 DateTime at(DateTime day, int hour, [int minute = 0, int second = 0]) {
@@ -1651,6 +1682,55 @@ void main() {
       ], reason: view.name);
       expect(host.store.moves, isEmpty, reason: view.name);
     }
+  });
+
+  testWidgets("PV26 a policy that limits changes through refusalsOf alone "
+      "keeps Week's move off the times it refuses, and lets one land on "
+      "times it admits", (tester) async {
+    final meet = entryOf("M", at(tuesday, 10), at(tuesday, 11));
+    final requests = <CalendarMoveRequest<String>>[];
+    final policy = _RefusesFourteen();
+    final host = Host(
+      storeOf(<CalendarEntry<String>>[meet]),
+      view: CalendarViewKind.week,
+      day: tuesday,
+      time: at(monday, 8),
+      policy: policy,
+      onMoveRequest: (request) async {
+        requests.add(request);
+      },
+    );
+    await host.pump(tester);
+    final from = tester.getCenter(blockFinder("M"));
+    // The offset of [hours] hours of rows down.
+    Offset rowsDown(int hours) {
+      return slotCenter(tester, tuesday, (10 + hours) * 60) -
+          slotCenter(tester, tuesday, 10 * 60);
+    }
+
+    // Four hours down, so the block's top lands on 14:00, which the policy
+    // refuses: the move goes back.
+    var gesture = await liftTo(tester, from, from + rowsDown(4));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(requests, isEmpty);
+    expect(policy.starts, contains(at(tuesday, 14)));
+
+    // Three hours down, to 13:00, which it admits.
+    gesture = await liftTo(
+      tester,
+      tester.getCenter(blockFinder("M")),
+      from + rowsDown(3),
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(requests, <CalendarMoveRequest<String>>[
+      CalendarMoveRequest<String>(
+        entry: meet,
+        requested: meet.copyWith(start: at(tuesday, 13), end: at(tuesday, 14)),
+        kind: CalendarMoveKind.move,
+      ),
+    ]);
   });
 
   testWidgets("PV10 within a minute Week's blocks, Agenda's rows and cards "

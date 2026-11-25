@@ -633,7 +633,13 @@ it is, `NoOverlapsPolicy` keeps Week's and Day's moves, resizes and
 creates off other timed entries' times, `DayLimitPolicy` caps the days a
 range covers, and `CalendarEditPolicy.all` combines them. A policy of
 your own extends `CalendarEditPolicy`, in a class you declare `final` or
-`base`. Where its `allowsOverlaps` is false, its `mayOverlap` may still let
+`base`. Its `refusalsOf` refuses a change of a stored entry, given a
+`CalendarChange` of the entry and the start, end and kind the change
+requests, with one `CalendarScheduleProblem` or more, of a subclass of your
+own too: the views keep a move or a resize off the times it refuses, and
+`CalendarScheduleCheck.problems` reports its problems. `admitsChange`
+answers whether it refuses nothing; a policy overrides `refusalsOf`, never
+`admitsChange`, which no view, rule or check asks. Where its `allowsOverlaps` is false, its `mayOverlap` may still let
 a change share time with some entries: the views ask it about each timed
 entry a change would share time with, given a `CalendarOverlapCandidate`
 of the change's times and the entry it changes.

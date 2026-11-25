@@ -8,6 +8,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
+import 'package:widgets_extended/scheduling/policy/schedule_problem.dart';
 import 'package:widgets_extended/scheduling/store/calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/entry_split.dart';
@@ -59,15 +60,12 @@ final class CountingEditPolicy<T> extends CalendarEditPolicy<T> {
   }
 
   @override
-  bool admitsChange(
-    CalendarEntry<T> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now, {
-    required bool isAllDay,
-  }) {
-    _note("admitsChange");
-    return inner.admitsChange(entry, start, end, now, isAllDay: isAllDay);
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<T> change,
+    CalendarNow now,
+  ) {
+    _note("refusalsOf");
+    return inner.refusalsOf(change, now);
   }
 
   @override
@@ -234,15 +232,15 @@ final class ScriptedEditPolicy<T> extends CalendarEditPolicy<T> {
   }
 
   @override
-  bool admitsChange(
-    CalendarEntry<T> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now, {
-    required bool isAllDay,
-  }) {
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<T> change,
+    CalendarNow now,
+  ) {
     final admits = this.admits;
-    return admits == null || admits(entry, start, end, isAllDay);
+    return admits == null ||
+            admits(change.entry, change.start, change.end, change.isAllDay)
+        ? const <CalendarScheduleProblem>[]
+        : const <CalendarScheduleProblem>[CalendarScheduleRefused()];
   }
 
   @override

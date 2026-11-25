@@ -679,7 +679,7 @@ CalendarCreateRange? _createRangeOf(
 /// where it lets an edge of it resize, and a selected one has the handles
 /// of the edges it lets resize ([CalendarEditPolicy.resizableEdges]); no
 /// move or resize lands an entry on times it refuses
-/// ([CalendarEditPolicy.admitsChange]); and no create gesture starts or
+/// ([CalendarEditPolicy.refusalsOf]); and no create gesture starts or
 /// reaches before the earliest start it gives the day the range starts on
 /// ([CalendarEditPolicy.earliestStartOn]).
 /// A block dragged above the first slot or below the last stops there, and
@@ -4352,7 +4352,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     final now = _calendarNow;
     try {
       if (!_policy.resizableEdges(entry, now).hasEnd ||
-          !_policy.admitsChange(entry, start, end, now, isAllDay: false)) {
+          !_rules.admitsTimes(entry, start, end, now, isAllDay: false)) {
         return null;
       }
     } catch (exception, stack) {

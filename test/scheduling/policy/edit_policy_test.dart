@@ -62,7 +62,7 @@ final class _Forbidding extends CalendarEditPolicy<String> {
 
 /// A policy giving the answers it is made with, recording each ask in
 /// [log] as its [name] and the member's, and the kind of each
-/// [admitsChange] ask in [kinds], where given, as its [name] and "all-day"
+/// [refusalsOf] ask in [kinds], where given, as its [name] and "all-day"
 /// or "timed". Its [mayOverlap] refuses the other entries whose ids
 /// [refused] holds, whatever [overlaps] is, and its [refusesEveryOverlap]
 /// answers [refusesEvery], whatever [mayOverlap] answers. Compared by
@@ -133,16 +133,15 @@ final class _Answering extends CalendarEditPolicy<String> {
   }
 
   @override
-  bool admitsChange(
-    CalendarEntry<String> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now, {
-    required bool isAllDay,
-  }) {
-    log.add("$name.admitsChange");
-    kinds?.add("$name ${isAllDay ? "all-day" : "timed"}");
-    return admits;
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<String> change,
+    CalendarNow now,
+  ) {
+    log.add("$name.refusalsOf");
+    kinds?.add("$name ${change.isAllDay ? "all-day" : "timed"}");
+    return admits
+        ? const <CalendarScheduleProblem>[]
+        : const <CalendarScheduleProblem>[CalendarScheduleRefused()];
   }
 
   @override
@@ -228,21 +227,25 @@ void main() {
     // A move into the past, and a resize of the start.
     expect(
       policy.admitsChange(
-        past,
-        at(monday, 7),
-        at(monday, 8),
+        CalendarChange<String>(
+          entry: past,
+          start: at(monday, 7),
+          end: at(monday, 8),
+          isAllDay: false,
+        ),
         now,
-        isAllDay: false,
       ),
       isTrue,
     );
     expect(
       policy.admitsChange(
-        past,
-        at(monday, 8),
-        at(monday, 10),
+        CalendarChange<String>(
+          entry: past,
+          start: at(monday, 8),
+          end: at(monday, 10),
+          isAllDay: false,
+        ),
         now,
-        isAllDay: false,
       ),
       isTrue,
     );
@@ -650,11 +653,13 @@ void main() {
       expect(both.mayDelete(entry, now), isTrue);
       expect(
         both.admitsChange(
-          entry,
-          at(tuesday, 11),
-          at(tuesday, 12),
+          CalendarChange<String>(
+            entry: entry,
+            start: at(tuesday, 11),
+            end: at(tuesday, 12),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isTrue,
       );
@@ -674,11 +679,13 @@ void main() {
         expect(policy.mayDelete(entry, now), isFalse, reason: reason);
         expect(
           policy.admitsChange(
-            entry,
-            at(tuesday, 11),
-            at(tuesday, 12),
+            CalendarChange<String>(
+              entry: entry,
+              start: at(tuesday, 11),
+              end: at(tuesday, 12),
+              isAllDay: false,
+            ),
             now,
-            isAllDay: false,
           ),
           isFalse,
           reason: reason,
@@ -759,11 +766,13 @@ void main() {
       expect(refusing.mayDelete(entry, now), isFalse);
       expect(
         refusing.admitsChange(
-          entry,
-          at(tuesday, 11),
-          at(tuesday, 12),
+          CalendarChange<String>(
+            entry: entry,
+            start: at(tuesday, 11),
+            end: at(tuesday, 12),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isFalse,
       );
@@ -772,7 +781,7 @@ void main() {
         "shut.mayMove",
         "shut.mayEdit",
         "shut.mayDelete",
-        "shut.admitsChange",
+        "shut.refusalsOf",
         "shut.allowsOverlaps",
       ]);
 
@@ -860,7 +869,41 @@ void main() {
         identical(opening.refusalsOf(refused(), now), first.refusals),
         isTrue,
       );
-      expect(log, <String>["first.refusalsOf"]);
+      expect(log, <String>["open.refusalsOf", "first.refusalsOf"]);
+    });
+
+    test("EP25 admitsChange answers whether refusalsOf refuses nothing, "
+        "alone and under the policy of all of several", () {
+      final refusing = _Refusing(
+        "refusing",
+        log,
+        at(tuesday, 11),
+        const <CalendarScheduleProblem>[CalendarScheduleLocked()],
+      );
+      final refused = CalendarChange<String>(
+        entry: entry,
+        start: at(tuesday, 11),
+        end: at(tuesday, 12),
+        isAllDay: false,
+      );
+      final admitted = CalendarChange<String>(
+        entry: entry,
+        start: at(tuesday, 13),
+        end: at(tuesday, 14),
+        isAllDay: false,
+      );
+      expect(refusing.admitsChange(refused, now), isFalse);
+      expect(refusing.admitsChange(admitted, now), isTrue);
+      final both = CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+        const UnrestrictedEditPolicy<String>(),
+        refusing,
+      ]);
+      expect(both.admitsChange(refused, now), isFalse);
+      expect(both.admitsChange(admitted, now), isTrue);
+      // Setup sanity: each answer asked the policy's refusals.
+      expect(log, <String>[
+        for (var ask = 0; ask < 4; ask++) "refusing.refusalsOf",
+      ]);
     });
 
     test("EP9 of no policies limits nothing", () {
@@ -873,11 +916,13 @@ void main() {
       expect(nothing.mayDelete(entry, now), isTrue);
       expect(
         nothing.admitsChange(
-          entry,
-          at(monday, 7),
-          at(monday, 8),
+          CalendarChange<String>(
+            entry: entry,
+            start: at(monday, 7),
+            end: at(monday, 8),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isTrue,
       );
@@ -950,11 +995,27 @@ void main() {
         _Answering("b", log, kinds: kinds),
       ]);
       expect(
-        both.admitsChange(entry, tuesday, wednesday, now, isAllDay: true),
+        both.admitsChange(
+          CalendarChange<String>(
+            entry: entry,
+            start: tuesday,
+            end: wednesday,
+            isAllDay: true,
+          ),
+          now,
+        ),
         isTrue,
       );
       expect(
-        both.admitsChange(entry, tuesday, wednesday, now, isAllDay: false),
+        both.admitsChange(
+          CalendarChange<String>(
+            entry: entry,
+            start: tuesday,
+            end: wednesday,
+            isAllDay: false,
+          ),
+          now,
+        ),
         isTrue,
       );
       expect(kinds, <String>["a all-day", "b all-day", "a timed", "b timed"]);
@@ -1054,11 +1115,13 @@ void main() {
       expect(policy.resizableEdges(past, now), CalendarResizeEdges.both);
       expect(
         policy.admitsChange(
-          past,
-          at(monday, 7),
-          at(monday, 8),
+          CalendarChange<String>(
+            entry: past,
+            start: at(monday, 7),
+            end: at(monday, 8),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isTrue,
       );
@@ -1116,11 +1179,13 @@ void main() {
       expect(policy.resizableEdges(past, now), CalendarResizeEdges.both);
       expect(
         policy.admitsChange(
-          past,
-          at(monday, 7),
-          at(monday, 8),
+          CalendarChange<String>(
+            entry: past,
+            start: at(monday, 7),
+            end: at(monday, 8),
+            isAllDay: false,
+          ),
           now,
-          isAllDay: false,
         ),
         isTrue,
       );
