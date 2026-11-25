@@ -14,7 +14,9 @@ The contract of the rules that limit edits. The layer's imports are in `scheduli
   statics of `NoOverlapsPolicy`: `timesOverlap`, `rangeSharesTime` and
   `entriesShareTime`.
 - **Combined policies.** `CalendarEditPolicy.all` allows only what each of
-  its policies allows: each answer is the strictest of theirs.
+  its policies allows: its refusals of a change are those of the first of
+  its policies that refuses, and each other answer is the strictest of
+  theirs.
 - **Single-purpose policies.** `DayLimitPolicy` limits only the days a
   gesture's range covers, and `NoOverlapsPolicy` forbids only overlaps;
   each gives its limit to the policies it is combined with.

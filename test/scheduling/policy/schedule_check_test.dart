@@ -281,6 +281,161 @@ void expectTimes(
   expect((utcOf(times!.start), utcOf(times.end)), (utcOf(start), utcOf(end)));
 }
 
+/// The day-limit and change problems of [schedule] under [rules] at [now]
+/// for the stored [entry], derived from the policy's answers as the check
+/// derived them before a policy gave its own refusals: the day limit; then,
+/// where the policy refuses the change, locked where it lets the entry not
+/// be edited; where it keeps the start, a kept start or else a kept kind,
+/// and an end in the past where it refuses the end with the stored start
+/// and kind; and otherwise the earliest start's past day or start before
+/// it; and refused where it found nothing else. Null where [now]'s clock
+/// does not read the schedule's times.
+List<CalendarScheduleProblem>? derivedProblemsOf(
+  CalendarEditRules<String> rules,
+  CalendarSchedule schedule,
+  CalendarEntry<String> entry,
+  CalendarNow now,
+) {
+  final times = schedule.timesOn(zoneOf(now.time));
+  if (times == null) {
+    return null;
+  }
+  final found = <CalendarScheduleProblem>[];
+  if (!rules.coversAtMost(times.start, times.end)) {
+    found.add(const CalendarScheduleTooManyDays());
+  }
+  final policy = rules.policy;
+  final isAllDay = schedule.isAllDay;
+  final admitsChange = policy.admitsChange(
+    entry,
+    times.start,
+    times.end,
+    now,
+    isAllDay: isAllDay,
+  );
+  var asksEarliest = false;
+  if (!admitsChange) {
+    if (!policy.mayEdit(entry, now)) {
+      found.add(const CalendarScheduleLocked());
+    } else if (!policy.mayMove(entry, now) &&
+        !policy.resizableEdges(entry, now).hasStart) {
+      if (!times.start.isAtSameMomentAs(entry.start)) {
+        found.add(const CalendarScheduleStartKept());
+      } else if (isAllDay != entry.isAllDay) {
+        found.add(const CalendarScheduleKindKept());
+      }
+      if (!policy.admitsChange(
+        entry,
+        entry.start,
+        times.end,
+        now,
+        isAllDay: entry.isAllDay,
+      )) {
+        found.add(const CalendarScheduleEndInPast());
+      }
+    } else {
+      asksEarliest = true;
+    }
+  }
+  if (asksEarliest) {
+    final earliest = rules.earliestStartOn(schedule.startDay, now);
+    if (earliest.closesDay) {
+      found.add(const CalendarSchedulePastDay());
+    } else if (!earliest.admitsDayStart &&
+        times.start.isBefore(earliest.earliest!)) {
+      found.add(const CalendarScheduleBeforeEarliest());
+    }
+  }
+  if (!admitsChange && found.isEmpty) {
+    found.add(const CalendarScheduleRefused());
+  }
+  return found;
+}
+
+/// The schedules SC33 checks for the stored [entry]: for a timed entry the
+/// entry unchanged, moved an hour later and earlier, moved to start at
+/// Monday 09:00, Tuesday 09:00 and Tuesday 22:00 keeping its length, its
+/// end moved to Monday 23:30 and to Tuesday 13:00, and made all-day over
+/// its days; for an all-day one the entry unchanged, moved a day later and
+/// earlier, its end moved a day later, and made timed from 09:00 to 10:00
+/// on its first day. Each by its name, those whose end is not after their
+/// start left out.
+Map<String, CalendarSchedule> schedulesFor(CalendarEntry<String> entry) {
+  final candidates = <String, (DateTime, DateTime, bool)>{};
+  if (entry.isAllDay) {
+    candidates["unchanged"] = (entry.start, entry.end, true);
+    candidates["a day later"] = (
+      CalendarDates.addDays(entry.start, 1),
+      CalendarDates.addDays(entry.end, 1),
+      true,
+    );
+    candidates["a day earlier"] = (
+      CalendarDates.addDays(entry.start, -1),
+      CalendarDates.addDays(entry.end, -1),
+      true,
+    );
+    candidates["end a day later"] = (
+      entry.start,
+      CalendarDates.addDays(entry.end, 1),
+      true,
+    );
+    candidates["timed 09:00 to 10:00"] = (
+      DateTime(entry.start.year, entry.start.month, entry.start.day, 9),
+      DateTime(entry.start.year, entry.start.month, entry.start.day, 10),
+      false,
+    );
+  } else {
+    final length = entry.end.difference(entry.start);
+    const hour = Duration(hours: 1);
+    candidates["unchanged"] = (entry.start, entry.end, false);
+    candidates["an hour later"] = (
+      entry.start.add(hour),
+      entry.end.add(hour),
+      false,
+    );
+    candidates["an hour earlier"] = (
+      entry.start.subtract(hour),
+      entry.end.subtract(hour),
+      false,
+    );
+    for (final start in <DateTime>[
+      DateTime(2026, 4, 20, 9),
+      DateTime(2026, 4, 21, 9),
+      DateTime(2026, 4, 21, 22),
+    ]) {
+      final at = CalendarDates.isoTime(CalendarDates.minuteOfDay(start));
+      candidates["from ${CalendarDates.isoDate(start)} $at"] = (
+        start,
+        start.add(length),
+        false,
+      );
+    }
+    candidates["end Monday 23:30"] = (
+      entry.start,
+      DateTime(2026, 4, 20, 23, 30),
+      false,
+    );
+    candidates["end Tuesday 13:00"] = (
+      entry.start,
+      DateTime(2026, 4, 21, 13),
+      false,
+    );
+    candidates["all-day"] = (
+      CalendarDates.dateOnly(entry.start),
+      CalendarDates.dateOfDayNumber(
+        CalendarDates.lastDayNumberOf(entry.start, entry.end) + 1,
+      ),
+      true,
+    );
+  }
+  return <String, CalendarSchedule>{
+    for (final MapEntry(key: name, value: (start, end, isAllDay))
+        in candidates.entries)
+      if (end.isAfter(start))
+        name: CalendarSchedule.of(start, end, isAllDay: isAllDay),
+  };
+}
+
 /// Matches the plain local date of [date], a local midnight: that instant,
 /// not a UTC time and not a zone's `TZDateTime`.
 Matcher plainDate(DateTime date) {
@@ -622,6 +777,110 @@ void main() {
       ),
       <CalendarScheduleProblem>[const CalendarScheduleTooManyDays()],
     );
+  });
+
+  test("SC33 for each built-in policy, and each combination of them that "
+      "holds one history lock or its locks strictest first, a stored "
+      "entry's problems are those the check derived from the policy's "
+      "answers, and are the day limit's followed by the policy's refusals "
+      "of the change", () {
+    final policies = <String, CalendarEditPolicy<String>>{
+      "unrestricted": const UnrestrictedEditPolicy<String>(),
+      "a day limit of 1": DayLimitPolicy<String>(1),
+      "no overlaps": const NoOverlapsPolicy<String>(),
+      "the lock at today's start": const HistoryLockPolicy<String>(),
+      "the lock at the current minute": const HistoryLockPolicy<String>(
+        lockEarlierToday: true,
+      ),
+      "the minute's lock, a limit of 2 and no overlaps":
+          CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+            const HistoryLockPolicy<String>(lockEarlierToday: true),
+            DayLimitPolicy<String>(2),
+            const NoOverlapsPolicy<String>(),
+          ]),
+      "no overlaps and the day's lock": CalendarEditPolicy<String>.all(
+        <CalendarEditPolicy<String>>[
+          const NoOverlapsPolicy<String>(),
+          const HistoryLockPolicy<String>(),
+        ],
+      ),
+      "the minute's lock and the day's lock":
+          CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+            const HistoryLockPolicy<String>(lockEarlierToday: true),
+            const HistoryLockPolicy<String>(),
+          ]),
+    };
+    final nows = <CalendarNow>[
+      CalendarNow(time: tuesday, today: tuesday),
+      elevenOhSeven,
+      CalendarNow(time: DateTime(2026, 4, 21, 23, 59, 30), today: tuesday),
+    ];
+    final entries = <CalendarEntry<String>>[
+      entryOf("monday", monday, 540, 600),
+      entryOf("overnight", monday, 22 * 60, 26 * 60),
+      entryOf("tuesday", tuesday, 600, 720),
+      entryOf("wednesday", wednesday, 540, 600),
+      entryOf("monday all-day", monday, 0, 1440, isAllDay: true),
+      entryOf("tuesday all-day", tuesday, 0, 1440, isAllDay: true),
+    ];
+    final seen = <Type>{};
+    var cases = 0;
+    for (final MapEntry(key: name, value: policy) in policies.entries) {
+      final rules = rulesOf(policy);
+      for (final now in nows) {
+        for (final entry in entries) {
+          for (final MapEntry(key: what, value: schedule) in schedulesFor(
+            entry,
+          ).entries) {
+            final reason = "$name, $now, ${entry.id} $what";
+            final problems = CalendarScheduleCheck<String>(
+              schedule: schedule,
+              rules: rules,
+              now: now,
+              entry: entry,
+            ).problems;
+            final derived = derivedProblemsOf(rules, schedule, entry, now);
+            // Setup sanity: the clock reads every schedule's times.
+            expect(derived, isNotNull, reason: reason);
+            expect(problems, derived, reason: reason);
+            final times = schedule.timesOn(null)!;
+            expect(problems, <CalendarScheduleProblem>[
+              if (!rules.coversAtMost(times.start, times.end))
+                const CalendarScheduleTooManyDays(),
+              ...policy.refusalsOf(
+                CalendarChange<String>(
+                  entry: entry,
+                  start: times.start,
+                  end: times.end,
+                  isAllDay: schedule.isAllDay,
+                ),
+                now,
+              ),
+            ], reason: reason);
+            seen.addAll(<Type>[
+              for (final problem in problems) problem.runtimeType,
+            ]);
+            if (problems.isEmpty) {
+              seen.add(Null);
+            }
+            cases++;
+          }
+        }
+      }
+    }
+    // Setup sanity: the cases reach admitted changes and every problem the
+    // derivation names but a kept kind, which no case's start keeps, and
+    // its fallback.
+    expect(cases, greaterThan(1000));
+    expect(seen, <Type>{
+      Null,
+      CalendarScheduleTooManyDays,
+      CalendarScheduleLocked,
+      CalendarScheduleStartKept,
+      CalendarScheduleEndInPast,
+      CalendarSchedulePastDay,
+      CalendarScheduleBeforeEarliest,
+    });
   });
 
   test("SC8 the times are checked where the end is after the start and the "

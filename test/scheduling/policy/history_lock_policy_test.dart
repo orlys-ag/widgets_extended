@@ -12,6 +12,7 @@ import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/policy/edit_rules.dart';
 import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
+import 'package:widgets_extended/scheduling/policy/schedule_problem.dart';
 
 import '../zones.dart';
 
@@ -184,6 +185,330 @@ void main() {
         CalendarNow(time: at(today, 23, 59, 30), today: today),
       ),
       wednesday,
+    );
+  });
+
+  test("HP3 the lock's refusals of a change are its reasons, as const "
+      "lists: for a free entry a past day or a start before the earliest, "
+      "for one in progress a kept start or kind, then an end in the past, "
+      "and for an ended one the lock", () {
+    const lock = HistoryLockPolicy<String>();
+    const earlier = HistoryLockPolicy<String>(lockEarlierToday: true);
+    final elevenOhSeven = CalendarNow(time: at(today, 11, 7), today: today);
+    final lateNight = CalendarNow(time: at(today, 23, 59, 30), today: today);
+
+    CalendarChange<String> change(
+      CalendarEntry<String> entry,
+      DateTime start,
+      DateTime end, {
+      bool? isAllDay,
+    }) {
+      return CalendarChange<String>(
+        entry: entry,
+        start: start,
+        end: end,
+        isAllDay: isAllDay ?? entry.isAllDay,
+      );
+    }
+
+    final running = entryOf("running", at(monday, 22), at(today, 2));
+    expect(
+      lock.refusalsOf(
+        change(running, at(monday, 23), at(monday, 23, 30)),
+        elevenOhSeven,
+      ),
+      <CalendarScheduleProblem>[
+        const CalendarScheduleStartKept(),
+        const CalendarScheduleEndInPast(),
+      ],
+    );
+
+    // Each row of the lock's answers under each setting that reaches it:
+    // the lock at today's start at 11:07, and the lock at the current
+    // minute at 11:07 and at 23:59:30, whose boundary is the next day's
+    // start.
+    final rows =
+        <
+          (
+            String,
+            HistoryLockPolicy<String>,
+            CalendarNow,
+            CalendarChange<String>,
+            List<CalendarScheduleProblem>,
+          )
+        >[];
+    void row(
+      String name,
+      HistoryLockPolicy<String> policy,
+      CalendarNow now,
+      CalendarChange<String> asked,
+      List<CalendarScheduleProblem> expected,
+    ) {
+      rows.add((name, policy, now, asked, expected));
+    }
+
+    // The lock at today's start, at 11:07.
+    final freeToday = entryOf("free", at(today, 10), at(today, 12));
+    final ended = entryOf("ended", at(monday, 9), at(monday, 10));
+    row(
+      "today: free, start not before the boundary",
+      lock,
+      elevenOhSeven,
+      change(freeToday, today, at(today, 2)),
+      <CalendarScheduleProblem>[],
+    );
+    row(
+      "today: free, start before today",
+      lock,
+      elevenOhSeven,
+      change(freeToday, at(monday, 23), at(today, 1)),
+      <CalendarScheduleProblem>[const CalendarSchedulePastDay()],
+    );
+    row(
+      "today: started, start moved",
+      lock,
+      elevenOhSeven,
+      change(running, at(monday, 23), at(today, 3)),
+      <CalendarScheduleProblem>[const CalendarScheduleStartKept()],
+    );
+    row(
+      "today: started, kind changed",
+      lock,
+      elevenOhSeven,
+      change(running, running.start, wednesday, isAllDay: true),
+      <CalendarScheduleProblem>[const CalendarScheduleKindKept()],
+    );
+    row(
+      "today: started, kind changed, end at the boundary",
+      lock,
+      elevenOhSeven,
+      change(running, running.start, today, isAllDay: true),
+      <CalendarScheduleProblem>[
+        const CalendarScheduleKindKept(),
+        const CalendarScheduleEndInPast(),
+      ],
+    );
+    row(
+      "today: started, end after the boundary",
+      lock,
+      elevenOhSeven,
+      change(running, running.start, at(today, 3)),
+      <CalendarScheduleProblem>[],
+    );
+    row(
+      "today: started, end at the boundary",
+      lock,
+      elevenOhSeven,
+      change(running, running.start, today),
+      <CalendarScheduleProblem>[const CalendarScheduleEndInPast()],
+    );
+    row(
+      "today: ended, kept",
+      lock,
+      elevenOhSeven,
+      change(ended, ended.start, ended.end),
+      <CalendarScheduleProblem>[],
+    );
+    row(
+      "today: ended, moved",
+      lock,
+      elevenOhSeven,
+      change(ended, at(monday, 10), at(monday, 11)),
+      <CalendarScheduleProblem>[const CalendarScheduleLocked()],
+    );
+    row(
+      "today: ended, kind changed",
+      lock,
+      elevenOhSeven,
+      change(ended, ended.start, ended.end, isAllDay: true),
+      <CalendarScheduleProblem>[const CalendarScheduleLocked()],
+    );
+
+    // The lock at the current minute, at 11:07.
+    final freeLater = entryOf("free", at(today, 12), at(today, 13));
+    final runningNow = entryOf("running", at(today, 10), at(today, 12));
+    final endedNow = entryOf("ended", at(today, 9), at(today, 10));
+    row(
+      "11:07: free, start at the boundary",
+      earlier,
+      elevenOhSeven,
+      change(freeLater, at(today, 11, 7), at(today, 12, 7)),
+      <CalendarScheduleProblem>[],
+    );
+    row(
+      "11:07: free, start before today",
+      earlier,
+      elevenOhSeven,
+      change(freeLater, at(monday, 12), at(monday, 13)),
+      <CalendarScheduleProblem>[const CalendarSchedulePastDay()],
+    );
+    row(
+      "11:07: free, start on today before the boundary",
+      earlier,
+      elevenOhSeven,
+      change(freeLater, at(today, 10), at(today, 11)),
+      <CalendarScheduleProblem>[const CalendarScheduleBeforeEarliest()],
+    );
+    row(
+      "11:07: started, start moved",
+      earlier,
+      elevenOhSeven,
+      change(runningNow, at(today, 10, 30), at(today, 12)),
+      <CalendarScheduleProblem>[const CalendarScheduleStartKept()],
+    );
+    row(
+      "11:07: started, start moved, end before the boundary",
+      earlier,
+      elevenOhSeven,
+      change(runningNow, at(today, 10, 30), at(today, 11)),
+      <CalendarScheduleProblem>[
+        const CalendarScheduleStartKept(),
+        const CalendarScheduleEndInPast(),
+      ],
+    );
+    row(
+      "11:07: started, kind changed",
+      earlier,
+      elevenOhSeven,
+      change(runningNow, runningNow.start, wednesday, isAllDay: true),
+      <CalendarScheduleProblem>[const CalendarScheduleKindKept()],
+    );
+    row(
+      "11:07: started, end after the boundary",
+      earlier,
+      elevenOhSeven,
+      change(runningNow, runningNow.start, at(today, 13)),
+      <CalendarScheduleProblem>[],
+    );
+    row(
+      "11:07: started, end at the boundary",
+      earlier,
+      elevenOhSeven,
+      change(runningNow, runningNow.start, at(today, 11, 7)),
+      <CalendarScheduleProblem>[const CalendarScheduleEndInPast()],
+    );
+    row(
+      "11:07: ended, kept",
+      earlier,
+      elevenOhSeven,
+      change(endedNow, endedNow.start, endedNow.end),
+      <CalendarScheduleProblem>[],
+    );
+    row(
+      "11:07: ended, end moved",
+      earlier,
+      elevenOhSeven,
+      change(endedNow, endedNow.start, at(today, 10, 30)),
+      <CalendarScheduleProblem>[const CalendarScheduleLocked()],
+    );
+
+    // The lock at the current minute, at 23:59:30: the boundary is
+    // Wednesday's start.
+    final freeTomorrow = entryOf("free", at(wednesday, 9), at(wednesday, 10));
+    final runningLate = entryOf("running", at(today, 23), at(wednesday, 1));
+    final endedLate = entryOf("ended", at(today, 22), at(today, 23));
+    row(
+      "23:59:30: free, start at the boundary",
+      earlier,
+      lateNight,
+      change(freeTomorrow, wednesday, at(wednesday, 1)),
+      <CalendarScheduleProblem>[],
+    );
+    row(
+      "23:59:30: free, start before today",
+      earlier,
+      lateNight,
+      change(freeTomorrow, at(monday, 9), at(monday, 10)),
+      <CalendarScheduleProblem>[const CalendarSchedulePastDay()],
+    );
+    row(
+      "23:59:30: free, start on today, the boundary on a later day",
+      earlier,
+      lateNight,
+      change(freeTomorrow, at(today, 23), at(wednesday, 1)),
+      <CalendarScheduleProblem>[const CalendarSchedulePastDay()],
+    );
+    row(
+      "23:59:30: started, start moved, end at the boundary",
+      earlier,
+      lateNight,
+      change(runningLate, at(today, 23, 30), wednesday),
+      <CalendarScheduleProblem>[
+        const CalendarScheduleStartKept(),
+        const CalendarScheduleEndInPast(),
+      ],
+    );
+    row(
+      "23:59:30: started, kind changed",
+      earlier,
+      lateNight,
+      change(
+        runningLate,
+        runningLate.start,
+        CalendarDates.addDays(wednesday, 1),
+        isAllDay: true,
+      ),
+      <CalendarScheduleProblem>[const CalendarScheduleKindKept()],
+    );
+    row(
+      "23:59:30: started, end after the boundary",
+      earlier,
+      lateNight,
+      change(runningLate, runningLate.start, at(wednesday, 2)),
+      <CalendarScheduleProblem>[],
+    );
+    row(
+      "23:59:30: started, end at the boundary",
+      earlier,
+      lateNight,
+      change(runningLate, runningLate.start, wednesday),
+      <CalendarScheduleProblem>[const CalendarScheduleEndInPast()],
+    );
+    row(
+      "23:59:30: ended, kept",
+      earlier,
+      lateNight,
+      change(endedLate, endedLate.start, endedLate.end),
+      <CalendarScheduleProblem>[],
+    );
+    row(
+      "23:59:30: ended, moved",
+      earlier,
+      lateNight,
+      change(endedLate, at(today, 21), at(today, 22)),
+      <CalendarScheduleProblem>[const CalendarScheduleLocked()],
+    );
+
+    for (final (name, policy, now, asked, expected) in rows) {
+      expect(policy.refusalsOf(asked, now), expected, reason: name);
+    }
+
+    // Two refusals for one reason answer the identical list.
+    expect(
+      identical(
+        lock.refusalsOf(
+          change(running, at(monday, 23), at(today, 3)),
+          elevenOhSeven,
+        ),
+        lock.refusalsOf(
+          change(running, at(monday, 21), at(today, 4)),
+          elevenOhSeven,
+        ),
+      ),
+      isTrue,
+    );
+    expect(
+      identical(
+        lock.refusalsOf(
+          change(ended, at(monday, 10), at(monday, 11)),
+          elevenOhSeven,
+        ),
+        lock.refusalsOf(
+          change(ended, ended.start, ended.end, isAllDay: true),
+          elevenOhSeven,
+        ),
+      ),
+      isTrue,
     );
   });
 

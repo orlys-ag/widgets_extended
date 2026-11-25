@@ -12,6 +12,7 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
+import 'package:widgets_extended/scheduling/policy/schedule_problem.dart';
 
 import '../dst_days.dart';
 import '../zones.dart';
@@ -175,6 +176,29 @@ final class _Answering extends CalendarEditPolicy<String> {
   ) {
     log.add("$name.mayOverlap");
     return !refused.contains(other.id);
+  }
+}
+
+/// A policy whose [refusalsOf] answers [refusals] for a change starting at
+/// [refusedStart] and none for any other, recording each ask in [log] as
+/// its [name] and the member's. Compared by identity.
+final class _Refusing extends CalendarEditPolicy<String> {
+  const _Refusing(this.name, this.log, this.refusedStart, this.refusals);
+
+  final String name;
+  final List<String> log;
+  final DateTime refusedStart;
+  final List<CalendarScheduleProblem> refusals;
+
+  @override
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<String> change,
+    CalendarNow now,
+  ) {
+    log.add("$name.refusalsOf");
+    return change.start == refusedStart
+        ? refusals
+        : const <CalendarScheduleProblem>[];
   }
 }
 
@@ -495,6 +519,45 @@ void main() {
     expect(nowAt(at(tuesday, 11, 7, 30), wednesday), isNot(now));
   });
 
+  test("EP27 whether the time of day on today lies on a later day: true "
+      "past 23:59, false at 23:59 and before it, and true where a zone's "
+      "clock skips today's end", () {
+    ensureZones();
+    expect(
+      timeOnTodayOnLaterDay(
+        CalendarNow(time: at(tuesday, 23, 59, 30), today: tuesday),
+      ),
+      isTrue,
+    );
+    expect(
+      timeOnTodayOnLaterDay(
+        CalendarNow(time: at(tuesday, 23, 59), today: tuesday),
+      ),
+      isFalse,
+    );
+    expect(
+      timeOnTodayOnLaterDay(
+        CalendarNow(time: at(tuesday, 11, 7), today: tuesday),
+      ),
+      isFalse,
+    );
+
+    final havana = tz.getLocation("America/Havana");
+    final skipped = CalendarNow(
+      time: tz.TZDateTime(havana, 2026, 3, 7, 23, 59, 30),
+      today: tz.TZDateTime(havana, 2026, 3, 7),
+    );
+    // Setup sanity: Havana's clock skips 2026-03-08's first hour, so the
+    // rounded time of day is that day's 01:00.
+    expect(
+      skipped.timeOnToday.isAtSameMomentAs(
+        tz.TZDateTime(havana, 2026, 3, 8, 1),
+      ),
+      isTrue,
+    );
+    expect(timeOnTodayOnLaterDay(skipped), isTrue);
+  });
+
   test(
     "RC8 a CalendarNow takes a UTC time as its local time, the same "
     "instant",
@@ -748,6 +811,56 @@ void main() {
       ]);
       expect(limits.dayLimit, 1);
       expect(log, <String>["one.dayLimit", "open.dayLimit"]);
+    });
+
+    test("EP26 answers the refusals of the first of its policies that "
+        "refuses, asking none after it", () {
+      final first = _Refusing(
+        "first",
+        log,
+        at(tuesday, 11),
+        const <CalendarScheduleProblem>[CalendarScheduleLocked()],
+      );
+      final second = _Refusing(
+        "second",
+        log,
+        at(tuesday, 11),
+        const <CalendarScheduleProblem>[CalendarScheduleStartKept()],
+      );
+      CalendarChange<String> refused() {
+        return CalendarChange<String>(
+          entry: entry,
+          start: at(tuesday, 11),
+          end: at(tuesday, 12),
+          isAllDay: false,
+        );
+      }
+
+      // Setup sanity: each refuses the change, with its own problem.
+      expect(second.refusalsOf(refused(), now), <CalendarScheduleProblem>[
+        const CalendarScheduleStartKept(),
+      ]);
+      log.clear();
+
+      final both = CalendarEditPolicy<String>.all(<CalendarEditPolicy<String>>[
+        first,
+        second,
+      ]);
+      expect(
+        identical(both.refusalsOf(refused(), now), first.refusals),
+        isTrue,
+      );
+      expect(log, <String>["first.refusalsOf"]);
+
+      log.clear();
+      final opening = CalendarEditPolicy<String>.all(
+        <CalendarEditPolicy<String>>[open, first, second],
+      );
+      expect(
+        identical(opening.refusalsOf(refused(), now), first.refusals),
+        isTrue,
+      );
+      expect(log, <String>["first.refusalsOf"]);
     });
 
     test("EP9 of no policies limits nothing", () {
