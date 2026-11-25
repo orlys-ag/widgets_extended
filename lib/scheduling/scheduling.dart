@@ -44,16 +44,16 @@ export 'policy/edit_policy.dart'
 export 'policy/edit_rules.dart' show CalendarEarliestStart, CalendarEditRules;
 export 'policy/history_lock_policy.dart' show HistoryLockPolicy;
 export 'policy/schedule_check.dart'
+    show CalendarScheduleCheck, CalendarScheduleOptions;
+export 'policy/schedule_problem.dart'
     show
         CalendarScheduleAllDayNotAllowed,
         CalendarScheduleBeforeEarliest,
-        CalendarScheduleCheck,
         CalendarScheduleEndInPast,
         CalendarScheduleEndNotAfterStart,
         CalendarScheduleEndSkipped,
         CalendarScheduleKindKept,
         CalendarScheduleLocked,
-        CalendarScheduleOptions,
         CalendarScheduleOutsideHours,
         CalendarScheduleOverlapRefused,
         CalendarSchedulePastDay,

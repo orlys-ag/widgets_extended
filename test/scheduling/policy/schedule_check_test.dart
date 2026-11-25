@@ -14,6 +14,7 @@ import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/policy/edit_rules.dart';
 import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
 import 'package:widgets_extended/scheduling/policy/schedule_check.dart';
+import 'package:widgets_extended/scheduling/policy/schedule_problem.dart';
 
 import '../zones.dart';
 
