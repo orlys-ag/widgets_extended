@@ -494,6 +494,35 @@ void main() {
     expect(change.toString(), endsWith("timed)"));
   });
 
+  test("EP28 a policy that does not override refusalsOf refuses no change, "
+      "answering the one const list at every ask", () {
+    final now = CalendarNow(time: at(tuesday, 11, 7), today: tuesday);
+    final past = entryOf("past", at(monday, 9), at(monday, 10));
+    CalendarChange<String> earlier() {
+      return CalendarChange<String>(
+        entry: past,
+        start: at(monday, 7),
+        end: at(monday, 8),
+        isAllDay: false,
+      );
+    }
+
+    for (final policy in <CalendarEditPolicy<String>>[
+      const _Plain(),
+      const UnrestrictedEditPolicy<String>(),
+      DayLimitPolicy<String>(1),
+      const NoOverlapsPolicy<String>(),
+    ]) {
+      final refusals = policy.refusalsOf(earlier(), now);
+      expect(refusals, isEmpty, reason: "$policy");
+      expect(
+        identical(policy.refusalsOf(earlier(), now), refusals),
+        isTrue,
+        reason: "$policy",
+      );
+    }
+  });
+
   test("EP3 a CalendarNow takes today to its midnight, rounds the time of "
       "day on today up to a whole minute, and compares by its time and "
       "today", () {
