@@ -119,7 +119,8 @@ DayRange gridRange(
 
 /// A data source that answers each read within the call, through a
 /// [SynchronousFuture], with the entries covering its days, or, while
-/// [holds] is set, holds the answer until the test runs [pending].
+/// [holds] is set, holds the answer until the test runs [pending]; and
+/// that records the days of each read in [reads].
 class HeldSource implements CalendarDataSource<String> {
   HeldSource(this.entries);
 
@@ -133,8 +134,21 @@ class HeldSource implements CalendarDataSource<String> {
 
   final List<VoidCallback> pending = <VoidCallback>[];
 
+  /// The days of each read, in the order asked.
+  final List<({DateTime first, DateTime last})> reads =
+      <({DateTime first, DateTime last})>[];
+
+  /// What each read throws within the call while it is set, once it has
+  /// recorded its days in [reads].
+  Object? failure;
+
   @override
   Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    reads.add((first: first, last: last));
+    final thrown = failure;
+    if (thrown != null) {
+      throw thrown;
+    }
     final from = CalendarDates.dayNumber(first);
     final to = CalendarDates.dayNumber(last);
     final day = withheld;
@@ -4146,4 +4160,296 @@ void main() {
     expect(controller.selectedDay, first);
     expect(shows(first), isTrue);
   });
+
+  testWidgets("CV73 a change at the source sends within the call the reads "
+      "it sent, and after the frame one read of each run of the changed "
+      "days the views show outside the shown range, and none of a shown "
+      "day", (tester) async {
+    useTallView(tester);
+    String spanOf(DayRange read) {
+      return "${CalendarDates.isoDate(read.first)}.."
+          "${CalendarDates.isoDate(read.last)}";
+    }
+
+    List<String> spansOf(Iterable<DayRange> reads) {
+      return <String>[for (final read in reads) spanOf(read)];
+    }
+
+    DayRange days(DateTime first, DateTime last) {
+      return (first: first, last: last);
+    }
+
+    // The reads each change sends within its call, the stream's add
+    // included, recorded at the base commit, by view, read-ahead and
+    // change.
+    const within = <String, List<String>>{
+      "day, read-ahead 0, invalidate shown": <String>["2026-04-21..2026-04-21"],
+      "day, read-ahead 0, invalidate outside": <String>[],
+      "day, read-ahead 0, days changed": <String>[],
+      "day, read-ahead 0, refresh": <String>["2026-04-20..2026-04-26"],
+      "day, read-ahead 0, failed refresh": <String>["2026-04-20..2026-04-26"],
+      "day, read-ahead 2, invalidate shown": <String>["2026-04-21..2026-04-21"],
+      "day, read-ahead 2, invalidate outside": <String>[],
+      "day, read-ahead 2, days changed": <String>[],
+      "day, read-ahead 2, refresh": <String>["2026-04-20..2026-04-26"],
+      "day, read-ahead 2, failed refresh": <String>["2026-04-20..2026-04-26"],
+      "agenda, read-ahead 0, invalidate shown": <String>[
+        "2026-04-30..2026-04-30",
+      ],
+      "agenda, read-ahead 0, invalidate outside": <String>[],
+      "agenda, read-ahead 0, days changed": <String>[],
+      "agenda, read-ahead 0, refresh": <String>["2026-03-30..2026-05-03"],
+      "agenda, read-ahead 0, failed refresh": <String>[
+        "2026-03-30..2026-05-03",
+      ],
+      "agenda, read-ahead 2, invalidate shown": <String>[
+        "2026-04-30..2026-04-30",
+      ],
+      "agenda, read-ahead 2, invalidate outside": <String>[],
+      "agenda, read-ahead 2, days changed": <String>[],
+      "agenda, read-ahead 2, refresh": <String>["2026-03-30..2026-05-03"],
+      "agenda, read-ahead 2, failed refresh": <String>[
+        "2026-03-30..2026-05-03",
+      ],
+      "week, read-ahead 0, invalidate shown": <String>[
+        "2026-04-21..2026-04-21",
+      ],
+      "week, read-ahead 0, invalidate outside": <String>[],
+      "week, read-ahead 0, days changed": <String>[],
+      "week, read-ahead 0, refresh": <String>["2026-04-20..2026-04-26"],
+      "week, read-ahead 0, failed refresh": <String>["2026-04-20..2026-04-26"],
+      "week, read-ahead 2, invalidate shown": <String>[
+        "2026-04-21..2026-04-21",
+      ],
+      "week, read-ahead 2, invalidate outside": <String>[],
+      "week, read-ahead 2, days changed": <String>[],
+      "week, read-ahead 2, refresh": <String>["2026-04-20..2026-04-26"],
+      "week, read-ahead 2, failed refresh": <String>["2026-04-20..2026-04-26"],
+      "month, read-ahead 0, invalidate shown": <String>[
+        "2026-04-21..2026-04-21",
+      ],
+      "month, read-ahead 0, invalidate outside": <String>[],
+      "month, read-ahead 0, days changed": <String>[],
+      "month, read-ahead 0, refresh": <String>["2026-03-30..2026-05-03"],
+      "month, read-ahead 0, failed refresh": <String>["2026-03-30..2026-05-03"],
+      "month, read-ahead 2, invalidate shown": <String>[
+        "2026-04-21..2026-04-21",
+      ],
+      "month, read-ahead 2, invalidate outside": <String>[],
+      "month, read-ahead 2, days changed": <String>[],
+      "month, read-ahead 2, refresh": <String>["2026-03-30..2026-05-03"],
+      "month, read-ahead 2, failed refresh": <String>["2026-03-30..2026-05-03"],
+    };
+    const changes = <String>[
+      "invalidate shown",
+      "invalidate outside",
+      "days changed",
+      "refresh",
+      "failed refresh",
+    ];
+    for (final view in <CalendarViewKind>[
+      CalendarViewKind.day,
+      CalendarViewKind.agenda,
+      CalendarViewKind.week,
+      CalendarViewKind.month,
+    ]) {
+      for (final readAhead in <int>[0, 2]) {
+        final selected = view == CalendarViewKind.agenda
+            ? DateTime(2026, 4, 30)
+            : tuesday;
+        final grid = CalendarMonthGrid.of(selected);
+        final source = HeldSource(<CalendarEntry<String>>[
+          entryOf("talk", tuesday, 10 * 60, 11 * 60),
+        ]);
+        final stream = StreamController<CalendarSourceChange<String>>(
+          sync: true,
+        );
+        final caching = CachingCalendarStore<String>(
+          dataSource: source,
+          changes: stream.stream,
+          readAhead: readAhead,
+        );
+        final controller = CalendarController(
+          view: view,
+          selectedDay: selected,
+        );
+        await tester.pumpWidget(
+          app(
+            CalendarView<String>(
+              key: UniqueKey(),
+              store: caching,
+              controller: controller,
+              clock: fixedClock,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(source.pending, isEmpty);
+        final shown = switch (view) {
+          CalendarViewKind.agenda ||
+          CalendarViewKind.month => days(grid.firstDay, grid.lastDay),
+          _ => days(monday, sunday),
+        };
+        final outside = switch (view) {
+          CalendarViewKind.agenda ||
+          CalendarViewKind.month => CalendarDates.addDays(grid.lastDay, 1),
+          _ => DateTime(2026, 4, 8),
+        };
+
+        // The list's mounted weeks: the weeks of the days whose headers it
+        // builds.
+        DayRange mountedWeeks() {
+          final keys = <Key>{
+            for (final element in find.byWidgetPredicate((widget) {
+              return widget.key != null;
+            }, skipOffstage: false).evaluate())
+              element.widget.key!,
+          };
+          DateTime? first;
+          DateTime? last;
+          for (
+            var day = DateTime(2026, 3, 1);
+            !day.isAfter(DateTime(2026, 6, 30));
+            day = CalendarDates.addDays(day, 1)
+          ) {
+            if (keys.contains(dayListHeaderKey(day))) {
+              first ??= day;
+              last = day;
+            }
+          }
+          return days(
+            CalendarWeekdaySet.all.weekStartOf(first!),
+            CalendarDates.addDays(
+              CalendarWeekdaySet.all.weekStartOf(last!),
+              DateTime.daysPerWeek - 1,
+            ),
+          );
+        }
+
+        if (view == CalendarViewKind.agenda) {
+          // Setup sanity: the list's mounted weeks pass the grid's end.
+          expect(
+            find.byKey(dayListHeaderKey(outside), skipOffstage: false),
+            findsOneWidget,
+          );
+        }
+
+        // The runs of the read days the views show outside the shown
+        // range, each of which a change of every day leaves stale: the
+        // card's month grid in Day, and the list's mounted weeks in Agenda.
+        List<String> outsideRuns() {
+          final showing = switch (view) {
+            CalendarViewKind.day => days(grid.firstDay, grid.lastDay),
+            CalendarViewKind.agenda => mountedWeeks(),
+            _ => null,
+          };
+          if (showing == null) {
+            return const <String>[];
+          }
+          return <String>[
+            if (showing.first.isBefore(shown.first))
+              spanOf(
+                days(showing.first, CalendarDates.addDays(shown.first, -1)),
+              ),
+            if (showing.last.isAfter(shown.last))
+              spanOf(days(CalendarDates.addDays(shown.last, 1), showing.last)),
+          ];
+        }
+
+        final showsOutside =
+            view == CalendarViewKind.day || view == CalendarViewKind.agenda;
+        for (final change in changes) {
+          final label = "${view.name}, read-ahead $readAhead, $change";
+          final afterFrame = switch (change) {
+            "invalidate outside" || "days changed" =>
+              showsOutside
+                  ? <String>[spanOf(days(outside, outside))]
+                  : const <String>[],
+            "refresh" || "failed refresh" => outsideRuns(),
+            _ => const <String>[],
+          };
+          source.holds = true;
+          final before = source.reads.length;
+          var refreshed = false;
+          Object? refreshError;
+          final failure = StateError("The source failed.");
+          switch (change) {
+            case "invalidate shown":
+              caching.invalidate(selected, selected);
+            case "invalidate outside":
+              caching.invalidate(outside, outside);
+            case "days changed":
+              stream.add(CalendarDaysChanged<String>(outside, outside));
+            case "refresh":
+              caching.refresh().then<void>((_) {
+                refreshed = true;
+              });
+            case "failed refresh":
+              source.failure = failure;
+              caching.refresh().then<void>(
+                (_) {
+                  refreshed = true;
+                },
+                onError: (Object error) {
+                  refreshError = error;
+                },
+              );
+              source.failure = null;
+          }
+          expect(
+            spansOf(source.reads.skip(before)),
+            within[label],
+            reason: "$label: within the call",
+          );
+          final sentWithin = source.reads.length;
+          await tester.pump();
+          final sentAfterFrame = source.reads.length;
+          expect(
+            spansOf(source.reads.skip(sentWithin)),
+            afterFrame,
+            reason: "$label: after the frame",
+          );
+          for (final read in source.reads.skip(sentWithin)) {
+            expect(
+              read.last.isBefore(shown.first) || read.first.isAfter(shown.last),
+              isTrue,
+              reason: "$label: ${spanOf(read)} holds a shown day",
+            );
+          }
+          if (change == "failed refresh") {
+            expect(refreshed, isFalse, reason: label);
+            expect(refreshError, same(failure), reason: label);
+          }
+          var firstAnswer = true;
+          while (source.pending.isNotEmpty) {
+            source.pending.removeAt(0)();
+            await tester.pump();
+            if (change == "refresh" && firstAnswer) {
+              // The shown range's read answered, the views' reads held.
+              expect(refreshed, isTrue, reason: label);
+              expect(
+                source.pending,
+                hasLength(sentAfterFrame - sentWithin),
+                reason: label,
+              );
+            }
+            firstAnswer = false;
+          }
+          await tester.pumpAndSettle();
+          expect(
+            spansOf(source.reads.skip(sentAfterFrame)),
+            change == "failed refresh" && showsOutside
+                ? <String>[spanOf(shown)]
+                : const <String>[],
+            reason: "$label: while the held reads are answered",
+          );
+          source.holds = false;
+        }
+        await tester.pumpWidget(const SizedBox());
+        caching.dispose();
+        controller.dispose();
+        unawaited(stream.close());
+      }
+    }
+  }, skip: true);
 }

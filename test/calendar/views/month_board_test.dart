@@ -609,6 +609,74 @@ void main() {
     expect(store.isReadCalls, 0);
   });
 
+  testWidgets("MB10 a month board built with no layout lays out as "
+      "fitScreen", (tester) async {
+    tester.view.physicalSize = const Size(400.0, 600.0);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        for (var hour = 8; hour < 20; hour++)
+          CalendarEntry<String>(
+            id: "task$hour",
+            start: DateTime(2026, 4, 21, hour),
+            end: DateTime(2026, 4, 21, hour + 1),
+            title: "task$hour",
+            color: const Color(0xFF336699),
+            payload: "task$hour",
+          ),
+      ],
+    );
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 21, 9), today: april(21)),
+    );
+    addTearDown(now.dispose);
+
+    /// The height of the 21st's cell on a board built with [layout], or
+    /// with none where it is null.
+    Future<double> heightUnder(CalendarMonthLayout? layout) async {
+      final key = ValueKey<Object?>(layout);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: layout == null
+              ? MonthBoard<String>(
+                  key: key,
+                  store: store,
+                  grid: grid,
+                  selectedDay: april(20),
+                  now: now,
+                  onSelectDay: (day) {},
+                  onOpenDay: (day) {},
+                  onCreateOnDay: null,
+                  onOpenEntry: (id) {},
+                )
+              : MonthBoard<String>(
+                  key: key,
+                  store: store,
+                  grid: grid,
+                  layout: layout,
+                  selectedDay: april(20),
+                  now: now,
+                  onSelectDay: (day) {},
+                  onOpenDay: (day) {},
+                  onCreateOnDay: null,
+                  onOpenEntry: (id) {},
+                ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return tester.getRect(find.byKey(monthDayKey(april(21)))).height;
+    }
+
+    final byDefault = await heightUnder(null);
+    final fitted = await heightUnder(CalendarMonthLayout.fitScreen);
+    final grown = await heightUnder(CalendarMonthLayout.showAll);
+    // Setup sanity: the two layouts give the 21st's week other heights.
+    expect(grown, isNot(fitted));
+    expect(byDefault, fitted);
+  }, skip: true);
+
   testWidgets("MB2 the clock alone, with no build from above, builds no day "
       "cell again at a new minute of the same today, and moves the today "
       "mark to the day a new today marks", (tester) async {

@@ -15,25 +15,13 @@ import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
-import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_strip.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 
+import '../view_doubles.dart';
+
 final DateTime tuesday = DateTime(2026, 4, 21);
-
-/// A store with no entries that records the scheduler's phase at each
-/// prefetch, and the days it reads.
-final class PhaseStore extends MemoryCalendarStore<String> {
-  final List<SchedulerPhase> prefetches = <SchedulerPhase>[];
-  final List<(DateTime, DateTime)> reads = <(DateTime, DateTime)>[];
-
-  @override
-  void prefetch(DateTime first, DateTime last) {
-    prefetches.add(SchedulerBinding.instance.schedulerPhase);
-    reads.add((first, last));
-  }
-}
 
 /// A data source whose reads never answer, which records the scheduler's
 /// phase at each read, and the days it reads, so every day a store over it

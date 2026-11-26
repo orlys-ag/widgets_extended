@@ -85,13 +85,6 @@ final RegExp classDeclaration = RegExp(
   multiLine: true,
 );
 
-/// [source] without its comments.
-String withoutComments(String source) {
-  return source
-      .replaceAll(RegExp(r"/\*[\s\S]*?\*/"), "")
-      .replaceAll(RegExp(r"//[^\n]*"), "");
-}
-
 /// The index of the [close] bracket that matches the [open] bracket of
 /// [source] at [at].
 int matchingBracket(String source, int at, String open, String close) {
@@ -845,6 +838,38 @@ void main() {
       },
     );
   });
+
+  test("SY14 the read model is an abstract base class, which the store "
+      "extends with ChangeNotifier", () {
+    const path = "lib/scheduling/store/calendar_store.dart";
+    final source = withoutComments(File(path).readAsStringSync());
+    // Each name's declarations, by their modifiers, so a missing or a
+    // second declaration fails as a wrong one does.
+    expect(
+      <String, List<String>>{
+        for (final name in <String>["CalendarEntryReader", "CalendarStore"])
+          name: <String>[
+            for (final match in classDeclaration.allMatches(source))
+              if (match.group(2) == name)
+                match.group(1)!.trim().split(RegExp(r"\s+")).join(" "),
+          ],
+      },
+      <String, List<String>>{
+        "CalendarEntryReader": <String>["abstract base"],
+        "CalendarStore": <String>["abstract base"],
+      },
+    );
+    expect(
+      source,
+      matches(
+        RegExp(
+          r"^abstract base class CalendarStore<T>\s+extends\s+"
+          r"CalendarEntryReader<T>\s+with\s+ChangeNotifier\s*\{",
+          multiLine: true,
+        ),
+      ),
+    );
+  }, skip: true);
 
   test("SY13 schedule_problem.dart declares exactly the problem classes the "
       "barrel shows from it, and imports only Flutter's foundation and the "

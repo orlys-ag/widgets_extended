@@ -10,7 +10,6 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
-import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
@@ -22,6 +21,7 @@ import 'package:widgets_extended/calendar/views/day_list.dart';
 
 import '../../scheduling/store/zone_support.dart';
 import '../../scheduling/zones.dart';
+import '../view_doubles.dart';
 
 typedef ShownItem = CalendarShownEntry<String>;
 
@@ -71,47 +71,6 @@ List<Object> rowsOf(
         _ => throw StateError("$row is not an item, a gap or a banner."),
       },
   ];
-}
-
-/// A data source whose reads wait in [held] for the test to answer them.
-class HeldReads implements CalendarDataSource<String> {
-  final List<
-    ({
-      DateTime first,
-      DateTime last,
-      Completer<List<CalendarEntry<String>>> answer,
-    })
-  >
-  held =
-      <
-        ({
-          DateTime first,
-          DateTime last,
-          Completer<List<CalendarEntry<String>>> answer,
-        })
-      >[];
-
-  @override
-  Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
-    final answer = Completer<List<CalendarEntry<String>>>();
-    held.add((first: first, last: last, answer: answer));
-    return answer.future;
-  }
-
-  @override
-  Future<CalendarEntry<String>> create(CalendarEntry<String> draft) {
-    throw UnimplementedError();
-  }
-
-  @override
-  Future<CalendarEntry<String>> replace(CalendarEntry<String> entry) {
-    throw UnimplementedError();
-  }
-
-  @override
-  Future<void> delete(String id) {
-    throw UnimplementedError();
-  }
 }
 
 /// The decoration of the list's create mark under the theme above [view]:

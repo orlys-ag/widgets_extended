@@ -608,6 +608,42 @@ void main() {
     }
   });
 
+  test("LY6 no file under lib/calendar/views names a store class or calls "
+      "a write", () {
+    final storeClass = RegExp(
+      r"\b(CalendarStore|MemoryCalendarStore|CachingCalendarStore)\b",
+    );
+    final write = RegExp(
+      r"\b(?:store|reader)\s*\.\s*(?:create|update|requestMove|requestDelete)"
+      r"\s*\("
+      r"|\.\s*(?:requestMove|requestDelete)\s*\(",
+    );
+    final views = trackedDartFiles("lib/calendar/views");
+    // Setup sanity: the views are listed, and each pattern finds what it
+    // looks for.
+    expect(
+      views,
+      containsAll(<String>[
+        "lib/calendar/views/timed_grid.dart",
+        "lib/calendar/views/month_board.dart",
+      ]),
+    );
+    expect(write.hasMatch("store.requestMove(x)"), isTrue);
+    expect(storeClass.hasMatch("CalendarStore<T>"), isTrue);
+    final offending = <String, List<String>>{};
+    for (final path in views) {
+      final source = withoutComments(File(path).readAsStringSync());
+      final found = <String>[
+        for (final pattern in <RegExp>[storeClass, write])
+          for (final match in pattern.allMatches(source)) match.group(0)!,
+      ];
+      if (found.isNotEmpty) {
+        offending[path] = found;
+      }
+    }
+    expect(offending, isEmpty);
+  }, skip: true);
+
   test("RC19 each class whose values a host gives checks them with a throw "
       "of an ArgumentError, and with no assert and no debug-only "
       "branch", () {
