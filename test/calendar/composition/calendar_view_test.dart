@@ -4452,4 +4452,493 @@ void main() {
       }
     }
   }, skip: true);
+
+  testWidgets("CV69 opening each view, stepping in it, switching views, a "
+      "new controller, a zone, a new store and a goTo send the reads they "
+      "sent", (tester) async {
+    useTallView(tester);
+    // The reads each case sends, recorded at the base commit, by view,
+    // read-ahead and whether the source holds its answers.
+    const expected = <String, List<String>>{
+      "agenda, read-ahead 0, answering": <String>[
+        "2026-03-30..2026-05-03",
+        "2026-05-04..2026-05-17",
+        "2026-05-18..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-06-01..2026-07-05",
+        "2026-07-27..2026-09-06",
+        "2026-07-06..2026-07-26",
+        "2026-09-07..2026-09-13",
+        "2026-09-14..2026-09-20",
+        "2026-09-21..2026-10-04",
+        "2026-09-13..2026-09-20",
+        "2026-03-29..2026-09-13",
+        "2026-09-20..2026-10-05",
+        "2026-09-14..2026-09-20",
+        "2026-08-31..2026-10-04",
+        "2026-06-15..2026-06-21",
+        "2026-06-29..2026-08-02",
+        "2026-06-01..2026-06-28",
+      ],
+      "agenda, read-ahead 0, holding": <String>[
+        "2026-03-30..2026-05-03",
+        "2026-04-13..2026-05-17",
+        "2026-05-18..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-06-01..2026-07-05",
+        "2026-07-27..2026-09-06",
+        "2026-07-06..2026-08-02",
+        "2026-07-20..2026-08-23",
+        "2026-09-07..2026-09-13",
+        "2026-09-14..2026-09-20",
+        "2026-09-21..2026-10-04",
+        "2026-09-13..2026-09-20",
+        "2026-03-29..2026-09-13",
+        "2026-09-20..2026-10-05",
+        "2026-09-14..2026-09-20",
+        "2026-08-31..2026-10-04",
+        "2026-06-15..2026-06-21",
+        "2026-06-29..2026-08-02",
+        "2026-06-01..2026-07-05",
+      ],
+      "agenda, read-ahead 2, answering": <String>[
+        "2026-03-28..2026-05-05",
+        "2026-05-06..2026-05-17",
+        "2026-05-18..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-06-01..2026-07-05",
+        "2026-07-25..2026-09-08",
+        "2026-07-06..2026-07-24",
+        "2026-09-09..2026-09-13",
+        "2026-09-14..2026-09-20",
+        "2026-09-21..2026-09-22",
+        "2026-09-23..2026-10-04",
+        "2026-09-13..2026-09-20",
+        "2026-03-27..2026-09-13",
+        "2026-09-20..2026-10-05",
+        "2026-09-12..2026-09-22",
+        "2026-08-31..2026-10-04",
+        "2026-06-13..2026-06-23",
+        "2026-06-29..2026-08-02",
+        "2026-06-01..2026-06-28",
+      ],
+      "agenda, read-ahead 2, holding": <String>[
+        "2026-03-28..2026-05-05",
+        "2026-04-13..2026-05-17",
+        "2026-05-18..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-06-01..2026-07-05",
+        "2026-07-25..2026-09-08",
+        "2026-07-06..2026-08-02",
+        "2026-07-20..2026-08-23",
+        "2026-09-09..2026-09-13",
+        "2026-09-14..2026-09-20",
+        "2026-09-21..2026-09-22",
+        "2026-09-21..2026-10-04",
+        "2026-09-13..2026-09-20",
+        "2026-03-27..2026-09-13",
+        "2026-09-20..2026-10-05",
+        "2026-09-12..2026-09-22",
+        "2026-08-31..2026-10-04",
+        "2026-06-13..2026-06-23",
+        "2026-06-29..2026-08-02",
+        "2026-06-01..2026-07-05",
+      ],
+      "day, read-ahead 0, answering": <String>[
+        "2026-04-20..2026-04-26",
+        "2026-03-30..2026-05-03",
+        "2026-05-04..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-08-10..2026-08-16",
+        "2026-06-29..2026-08-02",
+        "2026-08-03..2026-09-06",
+        "2026-09-14..2026-09-20",
+        "2026-09-13..2026-09-20",
+        "2026-03-29..2026-06-01",
+        "2026-06-28..2026-09-07",
+        "2026-09-20..2026-09-21",
+        "2026-09-14..2026-09-20",
+        "2026-06-15..2026-06-21",
+      ],
+      "day, read-ahead 0, holding": <String>[
+        "2026-04-20..2026-04-26",
+        "2026-03-30..2026-05-03",
+        "2026-05-04..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-08-10..2026-08-16",
+        "2026-06-29..2026-08-02",
+        "2026-07-27..2026-09-06",
+        "2026-09-14..2026-09-20",
+        "2026-09-13..2026-09-20",
+        "2026-03-29..2026-06-01",
+        "2026-06-28..2026-09-07",
+        "2026-09-20..2026-09-21",
+        "2026-09-14..2026-09-20",
+        "2026-06-15..2026-06-21",
+      ],
+      "day, read-ahead 2, answering": <String>[
+        "2026-04-18..2026-04-28",
+        "2026-03-30..2026-05-03",
+        "2026-03-28..2026-05-05",
+        "2026-05-06..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-08-08..2026-08-18",
+        "2026-06-29..2026-08-02",
+        "2026-08-03..2026-09-06",
+        "2026-09-12..2026-09-22",
+        "2026-09-13..2026-09-20",
+        "2026-03-27..2026-06-01",
+        "2026-06-28..2026-09-07",
+        "2026-09-11..2026-09-13",
+        "2026-09-20..2026-09-23",
+        "2026-09-12..2026-09-22",
+        "2026-06-13..2026-06-23",
+      ],
+      "day, read-ahead 2, holding": <String>[
+        "2026-04-18..2026-04-28",
+        "2026-03-30..2026-05-03",
+        "2026-03-28..2026-05-05",
+        "2026-05-04..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-08-08..2026-08-18",
+        "2026-06-29..2026-08-02",
+        "2026-07-27..2026-09-06",
+        "2026-09-12..2026-09-22",
+        "2026-09-13..2026-09-20",
+        "2026-03-27..2026-06-01",
+        "2026-06-28..2026-09-07",
+        "2026-09-11..2026-09-13",
+        "2026-09-20..2026-09-23",
+        "2026-09-12..2026-09-22",
+        "2026-06-13..2026-06-23",
+      ],
+      "week, read-ahead 0, answering": <String>[
+        "2026-04-20..2026-04-26",
+        "2026-04-27..2026-05-03",
+        "2026-05-04..2026-05-10",
+        "2026-03-30..2026-04-19",
+        "2026-05-11..2026-05-31",
+        "2026-08-10..2026-08-16",
+        "2026-08-31..2026-10-04",
+        "2026-08-30..2026-10-04",
+        "2026-03-29..2026-06-01",
+        "2026-08-09..2026-08-17",
+        "2026-10-04..2026-10-05",
+        "2026-08-31..2026-10-04",
+        "2026-06-01..2026-07-05",
+      ],
+      "week, read-ahead 0, holding": <String>[
+        "2026-04-20..2026-04-26",
+        "2026-04-27..2026-05-03",
+        "2026-05-04..2026-05-10",
+        "2026-03-30..2026-04-19",
+        "2026-05-11..2026-05-31",
+        "2026-08-10..2026-08-16",
+        "2026-08-31..2026-10-04",
+        "2026-08-30..2026-10-04",
+        "2026-03-29..2026-06-01",
+        "2026-08-09..2026-08-17",
+        "2026-10-04..2026-10-05",
+        "2026-08-31..2026-10-04",
+        "2026-06-01..2026-07-05",
+      ],
+      "week, read-ahead 2, answering": <String>[
+        "2026-04-18..2026-04-28",
+        "2026-04-29..2026-05-05",
+        "2026-05-06..2026-05-12",
+        "2026-03-28..2026-04-17",
+        "2026-05-13..2026-05-31",
+        "2026-06-01..2026-06-07",
+        "2026-08-08..2026-08-18",
+        "2026-08-29..2026-10-06",
+        "2026-08-30..2026-10-04",
+        "2026-03-27..2026-06-08",
+        "2026-08-07..2026-08-19",
+        "2026-08-28..2026-08-30",
+        "2026-10-04..2026-10-07",
+        "2026-08-29..2026-10-06",
+        "2026-05-30..2026-07-07",
+      ],
+      "week, read-ahead 2, holding": <String>[
+        "2026-04-18..2026-04-28",
+        "2026-04-29..2026-05-05",
+        "2026-05-06..2026-05-12",
+        "2026-03-28..2026-04-17",
+        "2026-05-13..2026-05-31",
+        "2026-06-01..2026-06-07",
+        "2026-08-08..2026-08-18",
+        "2026-08-29..2026-10-06",
+        "2026-08-30..2026-10-04",
+        "2026-03-27..2026-06-08",
+        "2026-08-07..2026-08-19",
+        "2026-08-28..2026-08-30",
+        "2026-10-04..2026-10-07",
+        "2026-08-29..2026-10-06",
+        "2026-05-30..2026-07-07",
+      ],
+      "month, read-ahead 0, answering": <String>[
+        "2026-03-30..2026-05-03",
+        "2026-05-04..2026-05-31",
+        "2026-06-01..2026-07-05",
+        "2026-07-27..2026-09-06",
+        "2026-09-07..2026-10-04",
+        "2026-10-05..2026-10-11",
+        "2026-10-12..2026-10-18",
+        "2026-10-19..2026-10-25",
+        "2026-08-30..2026-10-04",
+        "2026-03-29..2026-07-06",
+        "2026-07-26..2026-08-30",
+        "2026-10-04..2026-10-26",
+        "2026-08-31..2026-10-04",
+        "2026-10-05..2026-10-25",
+        "2026-06-01..2026-07-05",
+        "2026-07-06..2026-08-02",
+        "2026-08-03..2026-08-30",
+      ],
+      "month, read-ahead 0, holding": <String>[
+        "2026-03-30..2026-05-03",
+        "2026-05-04..2026-05-31",
+        "2026-06-01..2026-07-05",
+        "2026-07-27..2026-09-06",
+        "2026-09-07..2026-10-04",
+        "2026-09-07..2026-10-11",
+        "2026-10-12..2026-10-18",
+        "2026-10-19..2026-10-25",
+        "2026-08-30..2026-10-04",
+        "2026-03-29..2026-07-06",
+        "2026-07-26..2026-08-30",
+        "2026-10-04..2026-10-26",
+        "2026-09-06..2026-10-25",
+        "2026-08-31..2026-10-04",
+        "2026-09-07..2026-10-25",
+        "2026-06-01..2026-07-05",
+        "2026-06-29..2026-08-02",
+        "2026-07-27..2026-08-30",
+        "2026-06-15..2026-07-19",
+        "2026-06-08..2026-07-12",
+      ],
+      "month, read-ahead 2, answering": <String>[
+        "2026-03-28..2026-05-05",
+        "2026-05-06..2026-06-02",
+        "2026-06-03..2026-07-07",
+        "2026-07-25..2026-09-08",
+        "2026-09-09..2026-10-06",
+        "2026-10-07..2026-10-11",
+        "2026-10-12..2026-10-18",
+        "2026-10-19..2026-10-25",
+        "2026-08-30..2026-10-04",
+        "2026-03-27..2026-07-08",
+        "2026-07-24..2026-08-30",
+        "2026-10-04..2026-10-26",
+        "2026-08-29..2026-10-06",
+        "2026-10-07..2026-10-25",
+        "2026-05-30..2026-07-07",
+        "2026-07-08..2026-08-02",
+        "2026-08-03..2026-08-28",
+      ],
+      "month, read-ahead 2, holding": <String>[
+        "2026-03-28..2026-05-05",
+        "2026-05-06..2026-06-02",
+        "2026-06-03..2026-07-07",
+        "2026-07-25..2026-09-08",
+        "2026-09-09..2026-10-06",
+        "2026-09-09..2026-10-11",
+        "2026-10-12..2026-10-18",
+        "2026-10-19..2026-10-25",
+        "2026-08-30..2026-10-04",
+        "2026-03-27..2026-07-08",
+        "2026-07-24..2026-08-30",
+        "2026-10-04..2026-10-26",
+        "2026-09-06..2026-10-25",
+        "2026-08-29..2026-10-06",
+        "2026-09-07..2026-10-25",
+        "2026-05-30..2026-07-07",
+        "2026-06-29..2026-08-02",
+        "2026-07-27..2026-08-28",
+        "2026-06-15..2026-07-19",
+        "2026-06-08..2026-07-12",
+      ],
+    };
+    const views = CalendarViewKind.values;
+    for (final view in views) {
+      for (final readAhead in <int>[0, 2]) {
+        for (final holds in <bool>[false, true]) {
+          final label =
+              "${view.name}, read-ahead $readAhead, "
+              "${holds ? "holding" : "answering"}";
+          final source = HeldSource(<CalendarEntry<String>>[
+            entryOf("talk", tuesday, 10 * 60, 11 * 60),
+          ])..holds = holds;
+          final stores = <CachingCalendarStore<String>>[
+            CachingCalendarStore<String>(
+              dataSource: source,
+              readAhead: readAhead,
+            ),
+          ];
+          final controllers = <CalendarController>[
+            CalendarController(view: view, selectedDay: tuesday),
+          ];
+          final key = UniqueKey();
+          Future<void> pumpCalendar() async {
+            await tester.pumpWidget(
+              app(
+                CalendarView<String>(
+                  key: key,
+                  store: stores.last,
+                  controller: controllers.last,
+                  clock: fixedClock,
+                  loadingBuilder: (context, state) {
+                    return const Text("loading");
+                  },
+                  failureBuilder: (context, state) {
+                    return const Text("failed");
+                  },
+                ),
+              ),
+            );
+          }
+
+          // Settles, then answers the reads held and settles again, until
+          // none is held.
+          Future<void> settle() async {
+            await tester.pumpAndSettle();
+            while (source.pending.isNotEmpty) {
+              final answers = List.of(source.pending);
+              source.pending.clear();
+              for (final answer in answers) {
+                answer();
+              }
+              await tester.pumpAndSettle();
+            }
+          }
+
+          await pumpCalendar();
+          await settle();
+          for (final tooltip in <String>["^Next ", "^Next ", "^Previous "]) {
+            await tester.tap(find.byTooltip(RegExp(tooltip)));
+            await settle();
+          }
+          for (final other in views) {
+            if (other != view) {
+              controllers.last.view = other;
+              await settle();
+            }
+          }
+          controllers.last.view = view;
+          await settle();
+          controllers.add(
+            CalendarController(view: view, selectedDay: DateTime(2026, 8, 12)),
+          );
+          await pumpCalendar();
+          await settle();
+          controllers.add(
+            CalendarController(
+              view: views[(views.indexOf(view) + 1) % views.length],
+              selectedDay: DateTime(2026, 9, 16),
+            ),
+          );
+          await pumpCalendar();
+          await settle();
+          stores.last.zone = zoneApartFromDevice(DateTime(2026, 4, 21), 6);
+          await settle();
+          stores.add(
+            CachingCalendarStore<String>(
+              dataSource: source,
+              readAhead: readAhead,
+            ),
+          );
+          await pumpCalendar();
+          await settle();
+          controllers.last.goTo(DateTime(2026, 6, 17));
+          await settle();
+          expect(
+            <String>[
+              for (final read in source.reads)
+                "${CalendarDates.isoDate(read.first)}.."
+                    "${CalendarDates.isoDate(read.last)}",
+            ],
+            expected[label],
+            reason: label,
+          );
+          await tester.pumpWidget(const SizedBox());
+          for (final store in stores) {
+            store.dispose();
+          }
+          for (final controller in controllers) {
+            controller.dispose();
+          }
+        }
+      }
+    }
+  });
+
+  testWidgets("CV70 the retry of a failed view's cover sends the reads it "
+      "sent", (tester) async {
+    useTallView(tester);
+    // The reads each retry sends, recorded at the base commit, by view and
+    // read-ahead.
+    const expected = <String, List<String>>{
+      "day, read-ahead 0": <String>["2026-04-20..2026-04-26"],
+      "day, read-ahead 2": <String>["2026-04-18..2026-04-28"],
+      "week, read-ahead 0": <String>["2026-04-20..2026-04-26"],
+      "week, read-ahead 2": <String>["2026-04-18..2026-04-28"],
+      "month, read-ahead 0": <String>["2026-03-30..2026-05-03"],
+      "month, read-ahead 2": <String>["2026-03-28..2026-05-05"],
+    };
+    for (final view in <CalendarViewKind>[
+      CalendarViewKind.day,
+      CalendarViewKind.week,
+      CalendarViewKind.month,
+    ]) {
+      for (final readAhead in <int>[0, 2]) {
+        final label = "${view.name}, read-ahead $readAhead";
+        final source = HeldSource(<CalendarEntry<String>>[
+          entryOf("talk", tuesday, 10 * 60, 11 * 60),
+        ])..failure = StateError("The source failed.");
+        final caching = CachingCalendarStore<String>(
+          dataSource: source,
+          readAhead: readAhead,
+        );
+        final controller = CalendarController(view: view, selectedDay: tuesday);
+        CalendarFailureState? failure;
+        await tester.pumpWidget(
+          app(
+            CalendarView<String>(
+              key: UniqueKey(),
+              store: caching,
+              controller: controller,
+              clock: fixedClock,
+              failureBuilder: (context, state) {
+                if (state.site == CalendarStateSite.cover) {
+                  failure = state;
+                }
+                return const Text("failed");
+              },
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        // Setup sanity: the view's cover failed.
+        expect(failure, isNotNull, reason: label);
+        expect(find.text("failed"), findsOneWidget, reason: label);
+        source.failure = null;
+        final before = source.reads.length;
+        failure!.retry();
+        await tester.pumpAndSettle();
+        expect(find.text("failed"), findsNothing, reason: label);
+        expect(
+          <String>[
+            for (final read in source.reads.skip(before))
+              "${CalendarDates.isoDate(read.first)}.."
+                  "${CalendarDates.isoDate(read.last)}",
+          ],
+          expected[label],
+          reason: label,
+        );
+        await tester.pumpWidget(const SizedBox());
+        caching.dispose();
+        controller.dispose();
+      }
+    }
+  });
 }

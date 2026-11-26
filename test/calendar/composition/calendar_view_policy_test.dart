@@ -2519,6 +2519,42 @@ void main() {
     ]);
   });
 
+  testWidgets("PV27 Month in edit mode asks its policy, from the pump through "
+      "the first settle and at a long press on a day, what it asked", (
+    tester,
+  ) async {
+    final policy = CountingEditPolicy<String>(
+      const UnrestrictedEditPolicy<String>(),
+    );
+    final host = Host(
+      storeOf(<CalendarEntry<String>>[
+        entryOf("meet", at(tuesday, 9), at(tuesday, 10)),
+      ]),
+      view: CalendarViewKind.month,
+      day: tuesday,
+      time: at(tuesday, 11, 7),
+      policy: policy,
+    );
+    List<String> names() {
+      return <String>[for (final ask in policy.asked) ask.name];
+    }
+
+    await host.pump(tester);
+    // The asks recorded at the base commit.
+    expect(names(), <String>["dayLimit", "allowsOverlaps"]);
+    policy.asked.clear();
+    await tester.longPress(find.byKey(monthStripKey(tuesday)));
+    await tester.pumpAndSettle();
+    // Setup sanity: the long press created on the 21st.
+    expect(host.creates, hasLength(1));
+    expect(
+      CalendarDates.dayNumber(host.creates.single.start),
+      CalendarDates.dayNumber(tuesday),
+    );
+    // The press asks neither dayLimit nor allowsOverlaps.
+    expect(names(), <String>["earliestStartOn"]);
+  });
+
   testWidgets("RC17 Month's long press after a set of store hours off the "
       "grid and before the next build creates nothing and reports the "
       "rules' ArgumentError, and the build throws the store hours'", (
