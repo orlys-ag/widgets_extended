@@ -79,6 +79,12 @@ const Set<String> overlapStatics = <String>{
   "timesOverlap",
 };
 
+/// A class declaration at the start of a line: its modifiers, and its name.
+final RegExp classDeclaration = RegExp(
+  r"^((?:(?:abstract|base|final|interface|sealed)\s+)*)class\s+(\w+)",
+  multiLine: true,
+);
+
 /// [source] without its comments.
 String withoutComments(String source) {
   return source
@@ -245,6 +251,7 @@ void main() {
           "CalendarSchedule",
         },
         "lib/scheduling/policy/edit_policy.dart": <String>{
+          "CalendarChange",
           "CalendarEditPolicy",
           "CalendarNow",
           "CalendarOverlapCandidate",
@@ -261,15 +268,17 @@ void main() {
           "HistoryLockPolicy",
         },
         "lib/scheduling/policy/schedule_check.dart": <String>{
+          "CalendarScheduleCheck",
+          "CalendarScheduleOptions",
+        },
+        "lib/scheduling/policy/schedule_problem.dart": <String>{
           "CalendarScheduleAllDayNotAllowed",
           "CalendarScheduleBeforeEarliest",
-          "CalendarScheduleCheck",
           "CalendarScheduleEndInPast",
           "CalendarScheduleEndNotAfterStart",
           "CalendarScheduleEndSkipped",
           "CalendarScheduleKindKept",
           "CalendarScheduleLocked",
-          "CalendarScheduleOptions",
           "CalendarScheduleOutsideHours",
           "CalendarScheduleOverlapRefused",
           "CalendarSchedulePastDay",
@@ -327,8 +336,8 @@ void main() {
   });
 
   test("SY5 each class the barrel shows says how a host builds on it: the "
-      "stores, the edit policy and the schedule problem base, the data "
-      "source an interface, and "
+      "stores, the edit policy, the schedule problem, the store exception "
+      "and the source change bases, the data source an interface, and "
       "every other class final or sealed; and each function or constant it "
       "shows names the calendar", () {
     final files = schedulingFiles();
@@ -338,6 +347,8 @@ void main() {
       "CachingCalendarStore",
       "CalendarEditPolicy",
       "CalendarScheduleProblem",
+      "CalendarStoreException",
+      "CalendarSourceChange",
     };
     const interfaces = <String>{"CalendarDataSource"};
     final shown = <String>{
@@ -347,10 +358,6 @@ void main() {
       ))
         ...export.shown!,
     };
-    final classDeclaration = RegExp(
-      r"^((?:(?:abstract|base|final|interface|sealed)\s+)*)class\s+(\w+)",
-      multiLine: true,
-    );
     final otherDeclaration = RegExp(
       r"^(?:enum|typedef|mixin|extension\s+type)\s+(\w+)"
       r"|^(?:const|final)\s+(?:[\w<>?, ]+\s+)?(\w+)\s*="
@@ -810,5 +817,64 @@ void main() {
         reason: name,
       );
     }
+  });
+
+  test("SY12 the store exception and the source change are abstract base "
+      "classes, so a host declares its own refusals and changes", () {
+    const files = <String, String>{
+      "CalendarStoreException": "lib/scheduling/store/calendar_store.dart",
+      "CalendarSourceChange":
+          "lib/scheduling/entries/calendar_data_source.dart",
+    };
+    // Each name's declarations, by their modifiers, so a missing or a
+    // second declaration fails as a wrong one does.
+    expect(
+      <String, List<String>>{
+        for (final MapEntry(key: name, value: path) in files.entries)
+          name: <String>[
+            for (final match in classDeclaration.allMatches(
+              File(path).readAsStringSync(),
+            ))
+              if (match.group(2) == name)
+                match.group(1)!.trim().split(RegExp(r"\s+")).join(" "),
+          ],
+      },
+      <String, List<String>>{
+        "CalendarStoreException": <String>["abstract base"],
+        "CalendarSourceChange": <String>["abstract base"],
+      },
+    );
+  });
+
+  test("SY13 schedule_problem.dart declares exactly the problem classes the "
+      "barrel shows from it, and imports only Flutter's foundation and the "
+      "entry, so the edit policy names the problems without an import "
+      "cycle", () {
+    const path = "lib/scheduling/policy/schedule_problem.dart";
+    final source = withoutComments(File(path).readAsStringSync());
+    final declared = <String>[
+      for (final match in classDeclaration.allMatches(source)) match.group(2)!,
+    ];
+    final shown = exportsOf(File(barrelPath).readAsStringSync(), barrelPath)
+        .singleWhere((export) {
+          return export.path == path;
+        })
+        .shown!;
+    expect(declared.toSet(), shown.toSet());
+    expect(declared, hasLength(16));
+    expect(
+      declared,
+      containsAll(<String>[
+        "CalendarScheduleProblem",
+        "CalendarScheduleOverlapRefused",
+      ]),
+    );
+    expect(
+      directiveUris(source),
+      unorderedEquals(<String>[
+        "package:flutter/foundation.dart",
+        "../entries/calendar_entry.dart",
+      ]),
+    );
   });
 }

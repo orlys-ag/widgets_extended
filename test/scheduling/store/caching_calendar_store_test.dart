@@ -137,6 +137,17 @@ class FakeDataSource implements CalendarDataSource<String> {
   }
 }
 
+/// A refusal a host's store declares of its own.
+final class _HostRefusal extends CalendarStoreException {
+  const _HostRefusal();
+}
+
+/// A kind of change a host's source announces of its own, which no store
+/// of the module knows.
+final class _BatchChanged<T> extends CalendarSourceChange<T> {
+  const _BatchChanged();
+}
+
 /// A store over a fake data source, recording how often it notifies, and
 /// applying [changes], if given.
 class Harness {
@@ -1726,6 +1737,25 @@ void main() {
     expect(store.entriesOn(DateTime(2026, 4, 21)), <CalendarShownEntry<String>>[
       CalendarShownEntry<String>(item, pending: true),
     ]);
+  });
+
+  test("CS29 a host declares a store exception of its own, which a store's "
+      "update fails with to its caller as its source gives it", () async {
+    const refusal = _HostRefusal();
+    expect(refusal, isA<CalendarStoreException>());
+    final harness = Harness();
+    final store = harness.store;
+    final item = task("item-1", DateTime(2026, 4, 21), 600, 660);
+    store.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[item]);
+    await settle();
+    final edit = errorOf(store.update(item.copyWith(title: "Renamed")));
+    final write = harness.lastCall;
+    // Setup sanity: the update sent its replace call.
+    expect(write.method, SourceMethod.replace);
+    write.completer.completeError(refusal);
+    await settle();
+    expect(edit(), same(refusal));
   });
 
   test("CS28 with no Flutter binding, a listener's throw is reported, the "
@@ -4986,6 +5016,52 @@ void main() {
         ),
         (1, 0, CalendarLoadStatus.ready, "item-1"),
       );
+    });
+
+    test("CF16 a change of a kind the store does not know reads again the "
+        "days it holds, as a change of all does", () async {
+      final earlierFirst = DateTime(2026, 4, 13);
+      final earlierLast = DateTime(2026, 4, 19);
+      final readsOf = <String, List<(DateTime?, DateTime?)>>{};
+      for (final MapEntry(key: name, value: announced)
+          in <String, CalendarSourceChange<String>?>{
+            "a kind of its own": const _BatchChanged<String>(),
+            "all changed": const CalendarAllChanged<String>(),
+            "none": null,
+          }.entries) {
+        final announcing = StreamController<CalendarSourceChange<String>>();
+        addTearDown(announcing.close);
+        final harness = Harness(changes: announcing.stream);
+        final store = harness.store;
+        store.show(earlierFirst, earlierLast);
+        harness.lastCall.succeed(<CalendarEntry<String>>[]);
+        await settle();
+        store.show(weekFirst, weekLast);
+        harness.lastCall.succeed(<CalendarEntry<String>>[]);
+        await settle();
+        final calls = harness.source.calls.length;
+        if (announced != null) {
+          announcing.add(announced);
+          await settle();
+          // The read the announcement sent, where it sent one, answers.
+          if (harness.source.calls.length > calls) {
+            harness.lastCall.succeed(<CalendarEntry<String>>[]);
+            await settle();
+          }
+        }
+        store.show(earlierFirst, earlierLast);
+        await settle();
+        readsOf[name] = <(DateTime?, DateTime?)>[
+          for (final call in harness.source.calls.skip(calls))
+            (call.first, call.last),
+        ];
+      }
+      expect(readsOf["a kind of its own"], <(DateTime?, DateTime?)>[
+        (weekFirst, weekLast),
+        (earlierFirst, earlierLast),
+      ]);
+      expect(readsOf["all changed"], readsOf["a kind of its own"]);
+      expect(readsOf["none"], isEmpty);
     });
   });
 

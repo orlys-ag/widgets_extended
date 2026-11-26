@@ -91,20 +91,20 @@ Finder pageFinder() {
       .first;
 }
 
-/// A policy that admits only a change to a timed item, and gives no day an
+/// A policy that admits only a change to a timed item, refusing one to an
+/// all-day item with [CalendarScheduleRefused], and gives no day an
 /// earliest start, so the form keys every change it refuses.
 final class _TimedChangesOnly extends CalendarEditPolicy<ItemPayload> {
   const _TimedChangesOnly();
 
   @override
-  bool admitsChange(
-    CalendarEntry<ItemPayload> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now, {
-    required bool isAllDay,
-  }) {
-    return !isAllDay;
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<ItemPayload> change,
+    CalendarNow now,
+  ) {
+    return change.isAllDay
+        ? const <CalendarScheduleProblem>[CalendarScheduleRefused()]
+        : const <CalendarScheduleProblem>[];
   }
 
   @override

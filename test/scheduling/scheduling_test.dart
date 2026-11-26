@@ -90,6 +90,11 @@ void main() {
         calendar.CalendarEntry,
         widgets_extended.CalendarEntry,
       ],
+      "CalendarChange": <Object>[
+        scheduling.CalendarChange,
+        calendar.CalendarChange,
+        widgets_extended.CalendarChange,
+      ],
       "CalendarEditPolicy": <Object>[
         scheduling.CalendarEditPolicy,
         calendar.CalendarEditPolicy,
@@ -286,7 +291,7 @@ void main() {
         widgets_extended.CalendarScheduleTooManyDays,
       ],
     };
-    expect(names, hasLength(53));
+    expect(names, hasLength(54));
     for (final MapEntry(key: name, value: values) in names.entries) {
       expect(values[1], values[0], reason: "calendar: $name");
       expect(values[2], values[0], reason: "package: $name");

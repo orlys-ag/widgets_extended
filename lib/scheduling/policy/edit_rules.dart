@@ -256,11 +256,13 @@ final class CalendarEditRules<T> {
   /// Whether [entry] may take the times [start] to [end] at [now], all-day
   /// where [isAllDay] and timed otherwise, as the caller tells it: the
   /// [hours] hold them ([CalendarDayHours.holdsTimes]), as they hold every
-  /// all-day range and a timed one only within them, and [policy] admits
-  /// the change of that kind ([CalendarEditPolicy.admitsChange]). Asks the
-  /// policy once at most, and not where the hours refuse. It tests neither
-  /// the day limit ([coversAtMost]) nor whether the times share time with
-  /// another entry ([allowsOverlaps]).
+  /// all-day range and a timed one only within them, and [policy] refuses
+  /// the change of that kind with no problem
+  /// ([CalendarEditPolicy.refusalsOf]). Where the hours hold the times it
+  /// builds one [CalendarChange] and asks the policy about it once; where
+  /// they refuse, it builds none and asks nothing. It tests neither the day
+  /// limit ([coversAtMost]) nor whether the times share time with another
+  /// entry ([allowsOverlaps]).
   bool admitsTimes(
     CalendarEntry<T> entry,
     DateTime start,
@@ -268,8 +270,20 @@ final class CalendarEditRules<T> {
     CalendarNow now, {
     required bool isAllDay,
   }) {
-    return hours.holdsTimes(start, end, isAllDay: isAllDay) &&
-        policy.admitsChange(entry, start, end, now, isAllDay: isAllDay);
+    if (!hours.holdsTimes(start, end, isAllDay: isAllDay)) {
+      return false;
+    }
+    return policy
+        .refusalsOf(
+          CalendarChange<T>(
+            entry: entry,
+            start: start,
+            end: end,
+            isAllDay: isAllDay,
+          ),
+          now,
+        )
+        .isEmpty;
   }
 
   /// Whether the range from [start] to [end] covers at most [dayLimit]

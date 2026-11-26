@@ -15,6 +15,7 @@ export '../scheduling/scheduling.dart'
     show
         CachingCalendarStore,
         CalendarAllChanged,
+        CalendarChange,
         CalendarCreateRange,
         CalendarDataSource,
         CalendarDates,

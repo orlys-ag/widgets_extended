@@ -679,7 +679,7 @@ CalendarCreateRange? _createRangeOf(
 /// where it lets an edge of it resize, and a selected one has the handles
 /// of the edges it lets resize ([CalendarEditPolicy.resizableEdges]); no
 /// move or resize lands an entry on times it refuses
-/// ([CalendarEditPolicy.admitsChange]); and no create gesture starts or
+/// ([CalendarEditPolicy.refusalsOf]); and no create gesture starts or
 /// reaches before the earliest start it gives the day the range starts on
 /// ([CalendarEditPolicy.earliestStartOn]).
 /// A block dragged above the first slot or below the last stops there, and
@@ -4319,10 +4319,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ([CalendarEditRules.heldToLimit]); null where that end is a time the
   /// clock skips, where the hold would end the entry earlier than it ends,
   /// as for an entry already past the limit ([_holdsAgainstDrag]), where
-  /// [_policy] does not let the entry's end resize or
-  /// refuses the range from the entry's start to it, or its answer throws
-  /// ([_reportPolicyThrow]), where the hours ([CalendarDayHours.holdsTimes])
-  /// refuse that range, or where the policy's
+  /// [_policy] does not let the entry's end resize, where [_rules] do not
+  /// admit the range from the entry's start to it
+  /// ([CalendarEditRules.admitsTimes], which tests the hours before it asks
+  /// the policy), where the policy's answer throws
+  /// ([_reportPolicyThrow]), or where the policy's
   /// [CalendarEditPolicy.allowsOverlaps] is false and it shares time with
   /// another timed entry the store shows that the policy does not let it
   /// share ([_meetsOtherEntry]).
@@ -4346,13 +4347,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       }
       end = held.end;
     }
-    if (!_tracks.hours.holdsTimes(start, end, isAllDay: false)) {
-      return null;
-    }
     final now = _calendarNow;
     try {
       if (!_policy.resizableEdges(entry, now).hasEnd ||
-          !_policy.admitsChange(entry, start, end, now, isAllDay: false)) {
+          !_rules.admitsTimes(entry, start, end, now, isAllDay: false)) {
         return null;
       }
     } catch (exception, stack) {

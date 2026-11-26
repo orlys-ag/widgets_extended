@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
+import 'schedule_problem.dart';
 
 /// The time a [CalendarEditPolicy] answers at: the clock reading [time],
 /// and [today], the day the calendar marks as today, which a host may pin
@@ -36,8 +37,9 @@ final class CalendarNow {
       milliseconds: local.millisecond,
       microseconds: local.microsecond,
     );
+    final dayNumber = CalendarDates.dayNumber(day);
     final wall =
-        CalendarDates.dayNumber(day) * CalendarDates.minutesPerDay +
+        dayNumber * CalendarDates.minutesPerDay +
         CalendarDates.minuteOfDay(local);
     DateTime onToday;
     if (sameTime(CalendarDates.dateOnly(local), day)) {
@@ -62,10 +64,20 @@ final class CalendarNow {
     } else if (into > Duration.zero) {
       onToday = onToday.add(const Duration(minutes: 1));
     }
-    return CalendarNow._(local, day, onToday);
+    return CalendarNow._(
+      local,
+      day,
+      onToday,
+      CalendarDates.dayNumber(onToday) > dayNumber,
+    );
   }
 
-  const CalendarNow._(this.time, this.today, this.timeOnToday);
+  const CalendarNow._(
+    this.time,
+    this.today,
+    this.timeOnToday,
+    this._timeOnTodayOnLaterDay,
+  );
 
   /// The instant of the first wall minute from [wall]
   /// ([CalendarDates.wallMinuteOf]) that [zone]'s clock, or with none the
@@ -99,6 +111,10 @@ final class CalendarNow {
   /// stretch it keeps [time]'s occurrence.
   final DateTime timeOnToday;
 
+  /// Whether [timeOnToday] lies on a later day than [today], computed with
+  /// it, so a reader compares no `DateTime` field (`timeOnTodayOnLaterDay`).
+  final bool _timeOnTodayOnLaterDay;
+
   @override
   bool operator ==(Object other) {
     return other is CalendarNow &&
@@ -115,6 +131,13 @@ final class CalendarNow {
   String toString() {
     return "CalendarNow($time, today ${CalendarDates.isoDate(today)})";
   }
+}
+
+/// Whether [now]'s [CalendarNow.timeOnToday] lies on a later day than its
+/// [CalendarNow.today], as the next day's start for a time past 23:59 does.
+/// Reads a field the value computed when it was made.
+bool timeOnTodayOnLaterDay(CalendarNow now) {
+  return now._timeOnTodayOnLaterDay;
 }
 
 /// Which edges of an entry may be dragged to resize it: its start's, its
@@ -210,6 +233,83 @@ final class CalendarOverlapCandidate<T> {
   }
 }
 
+/// The changes [CalendarChange]'s constructor has built, in a debug build;
+/// tests read differences.
+int debugCalendarChangeCount = 0;
+
+/// Adds one to [debugCalendarChangeCount] in a debug build.
+void noteCalendarChange() {
+  assert(() {
+    debugCalendarChangeCount++;
+    return true;
+  }());
+}
+
+/// A change of a stored entry: the [entry] as stored, and the [start],
+/// [end] and kind ([isAllDay]) the change requests, which a move or a
+/// resize of it gives, or a form's edit of its schedule.
+/// [CalendarEditPolicy.refusalsOf] is asked about it.
+///
+/// What a change requests grows as a field: a later field is a getter
+/// backed by an optional named constructor parameter whose absence takes
+/// the stored [entry]'s value, so a later release tells a policy more of a
+/// change without a new parameter of [CalendarEditPolicy.refusalsOf].
+///
+/// Compared and hashed by [entry], [start], [end] and [isAllDay]. Its
+/// constructor is not const because it counts each change built, in a
+/// debug build (`noteCalendarChange`).
+@immutable
+final class CalendarChange<T> {
+  /// The change of [entry] to the times [start] to [end], all-day where
+  /// [isAllDay] and timed otherwise. It checks neither time.
+  CalendarChange({
+    required this.entry,
+    required this.start,
+    required this.end,
+    required this.isAllDay,
+  }) {
+    noteCalendarChange();
+  }
+
+  /// The entry the change is of, as stored, with its payload.
+  final CalendarEntry<T> entry;
+
+  /// The start the change requests.
+  final DateTime start;
+
+  /// The end the change requests.
+  final DateTime end;
+
+  /// Whether the change requests an all-day entry; a timed one otherwise.
+  /// A move between the all-day strip and the slots changes the kind,
+  /// possibly with the times unchanged.
+  final bool isAllDay;
+
+  @override
+  bool operator ==(Object other) {
+    return other is CalendarChange<T> &&
+        other.entry == entry &&
+        sameTime(other.start, start) &&
+        sameTime(other.end, end) &&
+        other.isAllDay == isAllDay;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(entry, start, end, isAllDay);
+  }
+
+  @override
+  String toString() {
+    return "CalendarChange($entry, "
+        "${CalendarDates.isoDate(start)} "
+        "${CalendarDates.isoTime(CalendarDates.minuteOfDay(start))} "
+        "to ${CalendarDates.isoDate(end)} "
+        "${CalendarDates.isoTime(CalendarDates.minuteOfDay(end))}, "
+        "${isAllDay ? "all-day" : "timed"})";
+  }
+}
+
 /// The limits on what may change of a calendar's entries, and where a new
 /// entry may start: each answer asked of an entry, a change or a day, at
 /// the time [CalendarNow] gives.
@@ -243,9 +343,11 @@ abstract base class CalendarEditPolicy<T> {
   /// Const, so a subclass can be const.
   const CalendarEditPolicy();
 
-  /// A policy that allows only what each of [policies] allows, each answer
-  /// the strictest of theirs: [mayMove], [mayEdit], [mayDelete],
-  /// [admitsChange] and [allowsOverlaps] are true where every one's is;
+  /// A policy that allows only what each of [policies] allows: [refusalsOf]
+  /// answers the refusals of the first of them that refuses, and none where
+  /// none does, and each other answer is the strictest of theirs:
+  /// [mayMove], [mayEdit], [mayDelete], [admitsChange] and [allowsOverlaps]
+  /// are true where every one's is;
   /// [mayOverlap] is true where every one's is, a policy whose
   /// [allowsOverlaps] is true allowing every pair and not being asked;
   /// [refusesEveryOverlap] is true where that of any one whose
@@ -255,7 +357,16 @@ abstract base class CalendarEditPolicy<T> {
   /// give, and null where none gives one. A plain day given to
   /// [earliestStartOn] under a `now` whose time carries a zone is read as
   /// that date's day start in the zone, so with no policies it answers that
-  /// day start. With no policies it limits nothing.
+  /// day start. With no policies it limits nothing. Over two
+  /// `HistoryLockPolicy`s with the weaker first, such as
+  /// `CalendarEditPolicy.all([HistoryLockPolicy(),
+  /// HistoryLockPolicy(lockEarlierToday: true)])`, [refusalsOf] answers
+  /// the weaker lock's problems for a change both refuse, which may differ
+  /// from those the stricter answers alone: for an entry in progress at
+  /// today's start that has ended by the current minute, a move gets
+  /// [CalendarScheduleStartKept] where the stricter answers
+  /// [CalendarScheduleLocked]. It refuses exactly the changes the stricter
+  /// refuses alone.
   ///
   /// It asks [policies] in their order and stops once an answer settles
   /// its own: at a refusal, at a policy that refuses every overlap, at no
@@ -292,18 +403,45 @@ abstract base class CalendarEditPolicy<T> {
     return true;
   }
 
-  /// Whether [entry] may take the times [start] to [end], all-day where
-  /// [isAllDay] and timed otherwise, which a move or a resize of it gives;
-  /// a move between the all-day strip and the slots changes the kind,
-  /// possibly with the times unchanged. True here.
-  bool admitsChange(
-    CalendarEntry<T> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now, {
-    required bool isAllDay,
-  }) {
-    return true;
+  /// Whether [refusalsOf] answers no problem for [change] at [now]: a
+  /// question for a host's code.
+  ///
+  /// A policy limits changes through [refusalsOf] and does not override
+  /// this. The module never asks it, asking [refusalsOf] itself, so an
+  /// override, which the analyzer reports as
+  /// `invalid_override_of_non_virtual_member`, is asked by no view, rule or
+  /// check. An implementation of [refusalsOf] never asks it of its own
+  /// policy, since it answers through [refusalsOf].
+  @nonVirtual
+  bool admitsChange(CalendarChange<T> change, CalendarNow now) {
+    return refusalsOf(change, now).isEmpty;
+  }
+
+  /// The reasons [change], a change of a stored entry, is refused at
+  /// [now], in the order the policy gives them; empty where it is
+  /// admitted. Empty here.
+  ///
+  /// A refusal names one problem or more, of the module's
+  /// [CalendarScheduleProblem] subclasses or of the host's own, and a
+  /// refusal that names no reason of its own answers
+  /// `const <CalendarScheduleProblem>[CalendarScheduleRefused()]`. It is
+  /// asked of a stored entry's change only, never of a create, whose start
+  /// [earliestStartOn] limits. Its askers read the answer and never modify
+  /// or keep it, so a const list answer allocates nothing per ask.
+  ///
+  /// Its askers: `CalendarEditRules.admitsTimes`, through which a
+  /// calendar's Week and Day ask it at each placement a move or a resize
+  /// tests, per pointer move, and, as they build an entry's piece for
+  /// editing, for each move its accessibility actions offer, per layout;
+  /// and the schedule check, `CalendarScheduleCheck`, which reports the
+  /// answer. An implementation never asks its own policy's [admitsChange],
+  /// which answers through this member, so such an ask recurses without
+  /// end.
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<T> change,
+    CalendarNow now,
+  ) {
+    return const <CalendarScheduleProblem>[];
   }
 
   /// The earliest instant a new entry may start at on [day], a day's start:
@@ -615,19 +753,17 @@ final class _AllEditPolicies<T> extends CalendarEditPolicy<T> {
   }
 
   @override
-  bool admitsChange(
-    CalendarEntry<T> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now, {
-    required bool isAllDay,
-  }) {
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<T> change,
+    CalendarNow now,
+  ) {
     for (final policy in policies) {
-      if (!policy.admitsChange(entry, start, end, now, isAllDay: isAllDay)) {
-        return false;
+      final refusals = policy.refusalsOf(change, now);
+      if (refusals.isNotEmpty) {
+        return refusals;
       }
     }
-    return true;
+    return const <CalendarScheduleProblem>[];
   }
 
   @override

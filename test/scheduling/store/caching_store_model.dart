@@ -1151,6 +1151,7 @@ class FuzzRun {
                   "${CalendarDates.dayNumber(first)}.."
                   "${CalendarDates.dayNumber(last)}",
             CalendarAllChanged<String>() => "announce all",
+            _ => "announce $change",
           };
     _call(name, () {
       if (queued.error) {

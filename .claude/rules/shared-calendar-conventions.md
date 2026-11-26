@@ -22,7 +22,11 @@ Normative for `lib/scheduling/` and `lib/calendar/`, beside each module's own ru
 - **The public API grows by additions.** A later release adds to a
   module's API so that a host's code still compiles: a member added to a
   `base` class has a default, which breaks only a host subclass that
-  declares a member of the same name; a field added to a class is a getter
+  declares a member of the same name; the parameter list of an
+  overridable member of a `base` class never changes, since a changed one
+  breaks every host override: what a later release tells the member is a
+  field of a `final` value class it takes, such as `CalendarChange`, or
+  else a new member with a default; a field added to a class is a getter
   or an optional named parameter; no shown type gains a type parameter;
   and no shown enum or sealed class gains a value or a subtype, which a
   host's exhaustive `switch` would miss.

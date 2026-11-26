@@ -71,7 +71,12 @@ final class CalendarShownEntry<T> {
 }
 
 /// A write the store refuses itself, sending nothing to a data source.
-sealed class CalendarStoreException implements Exception {
+///
+/// A host's store declares its own refusals as subclasses, in a class it
+/// declares `final` or `base`. The module adds subclasses as it learns new
+/// refusals, so a `switch` over a store exception keeps a default case.
+abstract base class CalendarStoreException implements Exception {
+  /// Const, so a subclass can be const.
   const CalendarStoreException();
 }
 

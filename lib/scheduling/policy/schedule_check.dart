@@ -5,6 +5,7 @@ import '../entries/calendar_entry.dart';
 import '../entries/calendar_schedule.dart';
 import 'edit_policy.dart';
 import 'edit_rules.dart';
+import 'schedule_problem.dart';
 
 /// What a form offers one kind of entry for its schedule: whether it takes
 /// all-day and whether it may span days.
@@ -48,243 +49,16 @@ final class CalendarScheduleOptions {
   }
 }
 
-/// Why a [CalendarScheduleCheck] does not admit a schedule. The library
-/// adds subclasses as it learns new reasons, so a host's `switch` over a
-/// problem keeps a default case. A host names each in its own words.
-///
-/// Compared by type, and by the data a subclass carries.
-@immutable
-abstract base class CalendarScheduleProblem {
-  /// Const, so a subclass can be const.
-  const CalendarScheduleProblem();
-
-  /// Whether the problem concerns the schedule's end; its start otherwise.
-  bool get atEnd;
-
-  @override
-  bool operator ==(Object other) {
-    return other.runtimeType == runtimeType;
-  }
-
-  @override
-  int get hashCode {
-    return runtimeType.hashCode;
-  }
-
-  @override
-  String toString() {
-    return "$runtimeType";
-  }
-}
-
-/// The end is not after the start.
-final class CalendarScheduleEndNotAfterStart extends CalendarScheduleProblem {
-  const CalendarScheduleEndNotAfterStart();
-
-  @override
-  bool get atEnd {
-    return true;
-  }
-}
-
-/// The schedule covers more days than the rules' day limit
-/// ([CalendarEditRules.coversAtMost]).
-final class CalendarScheduleTooManyDays extends CalendarScheduleProblem {
-  const CalendarScheduleTooManyDays();
-
-  @override
-  bool get atEnd {
-    return true;
-  }
-}
-
-/// The schedule spans days, which its options do not take
-/// ([CalendarScheduleOptions.spansDays]).
-final class CalendarScheduleSpansDays extends CalendarScheduleProblem {
-  const CalendarScheduleSpansDays();
-
-  @override
-  bool get atEnd {
-    return true;
-  }
-}
-
-/// The schedule is all-day, which its options do not take
-/// ([CalendarScheduleOptions.allowsAllDay]).
-final class CalendarScheduleAllDayNotAllowed extends CalendarScheduleProblem {
-  const CalendarScheduleAllDayNotAllowed();
-
-  @override
-  bool get atEnd {
-    return false;
-  }
-}
-
-/// The clock skips the schedule's start.
-final class CalendarScheduleStartSkipped extends CalendarScheduleProblem {
-  const CalendarScheduleStartSkipped();
-
-  @override
-  bool get atEnd {
-    return false;
-  }
-}
-
-/// The clock skips the schedule's end.
-final class CalendarScheduleEndSkipped extends CalendarScheduleProblem {
-  const CalendarScheduleEndSkipped();
-
-  @override
-  bool get atEnd {
-    return true;
-  }
-}
-
-/// The rules' hours do not hold the timed schedule
-/// ([CalendarDayHours.holdsTimes]): its start where [atEnd] is false, and
-/// otherwise its end. Not reported of a stored entry whose start, end and
-/// kind the schedule keeps, which a store writes outside its hours too.
-final class CalendarScheduleOutsideHours extends CalendarScheduleProblem {
-  /// Outside the hours at the end where [atEnd], and at the start
-  /// otherwise.
-  const CalendarScheduleOutsideHours({required this.atEnd});
-
-  @override
-  final bool atEnd;
-
-  @override
-  bool operator ==(Object other) {
-    return other is CalendarScheduleOutsideHours && other.atEnd == atEnd;
-  }
-
-  @override
-  int get hashCode {
-    return Object.hash(runtimeType, atEnd);
-  }
-
-  @override
-  String toString() {
-    return "CalendarScheduleOutsideHours(atEnd: $atEnd)";
-  }
-}
-
-/// No new entry may start on the start's day
-/// ([CalendarEarliestStart.closesDay]).
-final class CalendarSchedulePastDay extends CalendarScheduleProblem {
-  const CalendarSchedulePastDay();
-
-  @override
-  bool get atEnd {
-    return false;
-  }
-}
-
-/// The start lies before the earliest start its day takes
-/// ([CalendarEditRules.earliestStartOn]).
-final class CalendarScheduleBeforeEarliest extends CalendarScheduleProblem {
-  const CalendarScheduleBeforeEarliest();
-
-  @override
-  bool get atEnd {
-    return false;
-  }
-}
-
-/// The policy lets the stored entry not be edited
-/// ([CalendarEditPolicy.mayEdit]).
-final class CalendarScheduleLocked extends CalendarScheduleProblem {
-  const CalendarScheduleLocked();
-
-  @override
-  bool get atEnd {
-    return false;
-  }
-}
-
-/// The stored entry may neither move nor resize at its start, and the
-/// schedule moves its start.
-final class CalendarScheduleStartKept extends CalendarScheduleProblem {
-  const CalendarScheduleStartKept();
-
-  @override
-  bool get atEnd {
-    return false;
-  }
-}
-
-/// The stored entry may neither move nor resize at its start, and the
-/// schedule changes whether it is all-day.
-final class CalendarScheduleKindKept extends CalendarScheduleProblem {
-  const CalendarScheduleKindKept();
-
-  @override
-  bool get atEnd {
-    return false;
-  }
-}
-
-/// The stored entry may neither move nor resize at its start, and the
-/// policy refuses the schedule's end with the entry's start and kind.
-final class CalendarScheduleEndInPast extends CalendarScheduleProblem {
-  const CalendarScheduleEndInPast();
-
-  @override
-  bool get atEnd {
-    return true;
-  }
-}
-
-/// The schedule shares time with [other], which the policy refuses
-/// ([CalendarEditPolicy.mayOverlap]).
-final class CalendarScheduleOverlapRefused<T> extends CalendarScheduleProblem {
-  /// The refused overlap with [other].
-  const CalendarScheduleOverlapRefused(this.other);
-
-  /// The entry the schedule may not share time with.
-  final CalendarEntry<T> other;
-
-  @override
-  bool get atEnd {
-    return false;
-  }
-
-  @override
-  bool operator ==(Object other) {
-    return other is CalendarScheduleOverlapRefused<T> &&
-        other.other == this.other;
-  }
-
-  @override
-  int get hashCode {
-    return Object.hash(runtimeType, other);
-  }
-
-  @override
-  String toString() {
-    return "CalendarScheduleOverlapRefused(${other.id})";
-  }
-}
-
-/// The policy refuses the change to the stored entry
-/// ([CalendarEditPolicy.admitsChange]) for a reason no other problem names.
-final class CalendarScheduleRefused extends CalendarScheduleProblem {
-  const CalendarScheduleRefused();
-
-  @override
-  bool get atEnd {
-    return false;
-  }
-}
-
 /// What the edit rules answer of one schedule for one entry at one time:
 /// its [problems], the entries it [overlaps], the first minute its start
 /// may take, and the [nextFree] range of its length.
 ///
-/// The check decides nothing itself: every rule it reports is an answer of
-/// [rules] or of their policy, and it only names which answer refused. The
-/// schedule's times are made on [now]'s clock, as
-/// [CalendarEditRules.earliestStartOn] reads a plain day
-/// ([CalendarSchedule.timesOn]).
+/// The check decides nothing itself: it reports the policy's refusals of a
+/// stored entry's change as the policy gives them
+/// ([CalendarEditPolicy.refusalsOf]), and for every other rule names which
+/// answer of [rules] or of their policy refused. The schedule's times are
+/// made on [now]'s clock, as [CalendarEditRules.earliestStartOn] reads a
+/// plain day ([CalendarSchedule.timesOn]).
 ///
 /// [problems] is answered when the check is made; [overlaps],
 /// [firstStartMinute], [nextFree], [startFixed], [firstStartDay] and
@@ -352,9 +126,11 @@ final class CalendarScheduleCheck<T> {
 
   /// Why the schedule is not admitted, in this order: end not after
   /// start, too many days, spanning days, all-day not allowed, start
-  /// skipped, end skipped, outside the hours, past day, before the earliest
-  /// start, locked, start kept, kind kept, end in the past, each refused
-  /// overlap, and refused; empty where it is admitted. Unmodifiable.
+  /// skipped, end skipped, outside the hours; for a new entry past day or
+  /// before the earliest start, and for a stored one the policy's refusals
+  /// of the change in the order it gives them
+  /// ([CalendarEditPolicy.refusalsOf]); then each refused overlap. Empty
+  /// where it is admitted. Unmodifiable.
   late final List<CalendarScheduleProblem> problems;
 
   /// Whether the schedule has no problems.
@@ -433,10 +209,11 @@ final class CalendarScheduleCheck<T> {
 
   /// The first timed schedule of this one's length on its start day, in
   /// the rules' hours, from the later of its start and the day's earliest
-  /// start, that no other entry shares time with and that the policy lets
-  /// the stored [entry] take ([CalendarEditPolicy.admitsChange]), so this
-  /// check admits it, as [CalendarEditRules.firstSlot] finds it with that
-  /// length in elapsed minutes ([CalendarSchedule.lengthMinutes]); null for
+  /// start, that no other entry shares time with and that the policy
+  /// refuses the stored [entry] with no problem
+  /// ([CalendarEditPolicy.refusalsOf]), so this check admits it, as
+  /// [CalendarEditRules.firstSlot] finds it with that length in elapsed
+  /// minutes ([CalendarSchedule.lengthMinutes]); null for
   /// an all-day schedule, one that spans days or has no length, and where
   /// the day leaves no such range, as for a stored entry whose start the
   /// policy keeps ([startFixed]) wherever the search starts after it.
@@ -485,13 +262,17 @@ final class CalendarScheduleCheck<T> {
       admits: stored == null
           ? null
           : (start, end) {
-              return rules.policy.admitsChange(
-                stored,
-                start,
-                end,
-                now,
-                isAllDay: false,
-              );
+              return rules.policy
+                  .refusalsOf(
+                    CalendarChange<T>(
+                      entry: stored,
+                      start: start,
+                      end: end,
+                      isAllDay: false,
+                    ),
+                    now,
+                  )
+                  .isEmpty;
             },
       throughSecondPass: true,
     );
@@ -541,8 +322,9 @@ final class CalendarScheduleCheck<T> {
   ///
   /// `first` is the schedule's start day ([CalendarSchedule.startDay]);
   /// where [startFixed], the first day from it whose 24:00, the start of the
-  /// next day on [now]'s clock, the policy admits as the stored entry's end
-  /// with its start and kind ([CalendarEditPolicy.admitsChange]), each day
+  /// next day on [now]'s clock, the policy refuses with no problem as the
+  /// stored entry's end with its start and kind
+  /// ([CalendarEditPolicy.refusalsOf]), each day
   /// asked in turn up to the entry's last day; where none is, the day after
   /// the entry's last day, or the start day where that lies later. `last`
   /// is the start day where [options] take no spanning days
@@ -569,13 +351,17 @@ final class CalendarScheduleCheck<T> {
       first = entryLastDay + 1 > startDay ? entryLastDay + 1 : startDay;
       for (var day = startDay; day <= entryLastDay; day++) {
         final end = CalendarDates.dateOfDayNumber(day + 1, zone: zone);
-        if (rules.policy.admitsChange(
-          entry,
-          entry.start,
-          end,
-          now,
-          isAllDay: entry.isAllDay,
-        )) {
+        if (rules.policy
+            .refusalsOf(
+              CalendarChange<T>(
+                entry: entry,
+                start: entry.start,
+                end: end,
+                isAllDay: entry.isAllDay,
+              ),
+              now,
+            )
+            .isEmpty) {
           first = day;
           break;
         }
@@ -641,40 +427,7 @@ final class CalendarScheduleCheck<T> {
       );
     }
     final policy = rules.policy;
-    var admitsChange = true;
-    var asksEarliest = entry == null;
-    if (entry != null) {
-      admitsChange = policy.admitsChange(
-        entry,
-        times.start,
-        times.end,
-        now,
-        isAllDay: isAllDay,
-      );
-      if (!admitsChange) {
-        if (!policy.mayEdit(entry, now)) {
-          found.add(const CalendarScheduleLocked());
-        } else if (startFixed) {
-          if (!times.start.isAtSameMomentAs(entry.start)) {
-            found.add(const CalendarScheduleStartKept());
-          } else if (isAllDay != entry.isAllDay) {
-            found.add(const CalendarScheduleKindKept());
-          }
-          if (!policy.admitsChange(
-            entry,
-            entry.start,
-            times.end,
-            now,
-            isAllDay: entry.isAllDay,
-          )) {
-            found.add(const CalendarScheduleEndInPast());
-          }
-        } else {
-          asksEarliest = true;
-        }
-      }
-    }
-    if (asksEarliest) {
+    if (entry == null) {
       final earliest = _startEarliest;
       if (earliest.closesDay) {
         found.add(const CalendarSchedulePastDay());
@@ -684,6 +437,18 @@ final class CalendarScheduleCheck<T> {
         // CalendarEarliestStart.firstWallMinute rounds that minute up.
         found.add(const CalendarScheduleBeforeEarliest());
       }
+    } else {
+      found.addAll(
+        policy.refusalsOf(
+          CalendarChange<T>(
+            entry: entry,
+            start: times.start,
+            end: times.end,
+            isAllDay: isAllDay,
+          ),
+          now,
+        ),
+      );
     }
     if (!rules.allowsOverlaps && overlaps.isNotEmpty) {
       final candidate = CalendarOverlapCandidate<T>(
@@ -696,9 +461,6 @@ final class CalendarScheduleCheck<T> {
           found.add(CalendarScheduleOverlapRefused<T>(other));
         }
       }
-    }
-    if (!admitsChange && found.isEmpty) {
-      found.add(const CalendarScheduleRefused());
     }
     return found;
   }

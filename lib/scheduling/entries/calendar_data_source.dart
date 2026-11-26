@@ -50,7 +50,13 @@ abstract interface class CalendarDataSource<T> {
 /// built with for its life, and once the stream ends hears of no change,
 /// so a source whose changes go on keeps the stream open across a lost
 /// connection rather than end it.
-sealed class CalendarSourceChange<T> {
+///
+/// A host may announce a kind of change of its own, a subclass it declares
+/// `final` or `base`, which a `CachingCalendarStore` takes as a
+/// [CalendarAllChanged]. The module adds kinds as it learns them, so a
+/// `switch` over a source change keeps a default case.
+abstract base class CalendarSourceChange<T> {
+  /// Const, so a subclass can be const.
   const CalendarSourceChange();
 }
 

@@ -5,6 +5,7 @@ library;
 import '../dates/calendar_dates.dart';
 import '../entries/calendar_entry.dart';
 import 'edit_policy.dart';
+import 'schedule_problem.dart';
 
 /// How the history lock holds an entry: free where it starts at the
 /// boundary or after it, started where it starts before it and ends after
@@ -84,30 +85,65 @@ final class HistoryLockPolicy<T> extends CalendarEditPolicy<T> {
     return _holdOf(entry, now) == _Hold.free;
   }
 
-  /// For an entry starting at the boundary or after it, whether [start] is
-  /// not before the boundary; for one in progress, whether it keeps its
-  /// start and its kind ([isAllDay]) and [end] is after the boundary; and
-  /// for one that has ended, whether it keeps both its times and its kind.
+  /// For an entry starting at the boundary or after it: none where
+  /// [CalendarChange.start] is not before the boundary; otherwise
+  /// [CalendarSchedulePastDay] where the start is before today, or the
+  /// boundary lies on a later day than today, as it does past 23:59 under
+  /// [lockEarlierToday], and [CalendarScheduleBeforeEarliest] where it is
+  /// on today before the boundary. For one in progress:
+  /// [CalendarScheduleStartKept] where the change moves its start, or else
+  /// [CalendarScheduleKindKept] where it changes its kind, each followed by
+  /// [CalendarScheduleEndInPast] where the change's end is at the boundary
+  /// or before it, which alone is the answer for a change that keeps both.
+  /// For one that has ended: none where the change keeps both its times and
+  /// its kind, and [CalendarScheduleLocked] otherwise. Each answer is a
+  /// const list, so two refusals for one reason answer the identical list.
   @override
-  bool admitsChange(
-    CalendarEntry<T> entry,
-    DateTime start,
-    DateTime end,
-    CalendarNow now, {
-    required bool isAllDay,
-  }) {
+  List<CalendarScheduleProblem> refusalsOf(
+    CalendarChange<T> change,
+    CalendarNow now,
+  ) {
     final boundary = _boundaryOf(now);
+    final entry = change.entry;
     switch (_holdOf(entry, now)) {
       case _Hold.free:
-        return !start.isBefore(boundary);
+        if (!change.start.isBefore(boundary)) {
+          return const <CalendarScheduleProblem>[];
+        }
+        if (change.start.isBefore(now.today) || timeOnTodayOnLaterDay(now)) {
+          return const <CalendarScheduleProblem>[CalendarSchedulePastDay()];
+        }
+        return const <CalendarScheduleProblem>[
+          CalendarScheduleBeforeEarliest(),
+        ];
       case _Hold.started:
-        return sameTime(start, entry.start) &&
-            isAllDay == entry.isAllDay &&
-            end.isAfter(boundary);
+        final endInPast = !change.end.isAfter(boundary);
+        if (!sameTime(change.start, entry.start)) {
+          return endInPast
+              ? const <CalendarScheduleProblem>[
+                  CalendarScheduleStartKept(),
+                  CalendarScheduleEndInPast(),
+                ]
+              : const <CalendarScheduleProblem>[CalendarScheduleStartKept()];
+        }
+        if (change.isAllDay != entry.isAllDay) {
+          return endInPast
+              ? const <CalendarScheduleProblem>[
+                  CalendarScheduleKindKept(),
+                  CalendarScheduleEndInPast(),
+                ]
+              : const <CalendarScheduleProblem>[CalendarScheduleKindKept()];
+        }
+        return endInPast
+            ? const <CalendarScheduleProblem>[CalendarScheduleEndInPast()]
+            : const <CalendarScheduleProblem>[];
       case _Hold.locked:
-        return sameTime(start, entry.start) &&
-            sameTime(end, entry.end) &&
-            isAllDay == entry.isAllDay;
+        if (sameTime(change.start, entry.start) &&
+            sameTime(change.end, entry.end) &&
+            change.isAllDay == entry.isAllDay) {
+          return const <CalendarScheduleProblem>[];
+        }
+        return const <CalendarScheduleProblem>[CalendarScheduleLocked()];
     }
   }
 
