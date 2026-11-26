@@ -538,6 +538,11 @@ Future<({List<Type> uncaught, List<Type> reported})> caughtIn(
   return (uncaught: uncaught, reported: reported);
 }
 
+/// A stale-days report a test expects: its days as day numbers, null for
+/// every day, and the calls the source had received when it was heard,
+/// -1 where that goes unchecked.
+typedef StaleReport = ({int? first, int? last, int calls});
+
 void main() {
   test("M1 a read range sends nothing", () async {
     final harness = Harness();
@@ -1756,6 +1761,409 @@ void main() {
     write.completer.completeError(refusal);
     await settle();
     expect(edit(), same(refusal));
+  });
+
+  test(
+    "CS30 a range other than the shown one is loading while unread, "
+    "failed with its read's error once that read fails, and ready once "
+    "read; the shown range's answers are its status and load error",
+    () async {
+      final harness = Harness();
+      final store = harness.store;
+      final mayFourth = DateTime(2026, 5, 4);
+      final maySunday = DateTime(2026, 5, 10);
+      void expectShownAnswers(CalendarLoadStatus status) {
+        // Setup sanity: the shown range is in the state named.
+        expect(store.status, status);
+        expect(store.statusOf(weekFirst, weekLast), store.status);
+        expect(store.loadErrorOf(weekFirst, weekLast), same(store.loadError));
+      }
+
+      store.show(weekFirst, weekLast);
+      final shownRead = harness.lastCall;
+      expectShownAnswers(CalendarLoadStatus.loading);
+      expect(store.statusOf(mayFourth, maySunday), CalendarLoadStatus.loading);
+      expect(store.loadErrorOf(mayFourth, maySunday), isNull);
+
+      store.prefetch(mayFourth, maySunday);
+      final failure = harness.lastCall.fail("May failed.");
+      await settle();
+      expect(store.statusOf(mayFourth, maySunday), CalendarLoadStatus.failed);
+      expect(store.loadErrorOf(mayFourth, maySunday), same(failure));
+
+      store.prefetch(mayFourth, maySunday);
+      harness.lastCall.succeed(<CalendarEntry<String>>[]);
+      await settle();
+      expect(store.statusOf(mayFourth, maySunday), CalendarLoadStatus.ready);
+      expect(store.loadErrorOf(mayFourth, maySunday), isNull);
+
+      final shownFailure = shownRead.fail("The week failed.");
+      await settle();
+      expectShownAnswers(CalendarLoadStatus.failed);
+      expect(store.loadErrorOf(weekFirst, weekLast), same(shownFailure));
+      store.retry();
+      harness.lastCall.succeed(<CalendarEntry<String>>[]);
+      await settle();
+      expectShownAnswers(CalendarLoadStatus.ready);
+    },
+  );
+
+  test("CS31 the load error of a range other than the shown one is the "
+      "error of the latest failure marking its days", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final mayFourth = DateTime(2026, 5, 4);
+    final mayFifth = DateTime(2026, 5, 5);
+    store.prefetch(mayFourth, mayFourth);
+    final first = harness.lastCall.fail("The first failed.");
+    await settle();
+    store.prefetch(mayFifth, mayFifth);
+    final second = harness.lastCall.fail("The second failed.");
+    await settle();
+    expect(store.loadErrorOf(mayFourth, mayFourth), same(first));
+    expect(store.loadErrorOf(mayFifth, mayFifth), same(second));
+    expect(store.loadErrorOf(mayFourth, mayFifth), same(second));
+  });
+
+  test("CS32 the store reports stale, once as each call ends and after the "
+      "reads it sends, the read days a call leaves changed, a zone change's "
+      "excepted, and those a show or a refresh's failed read leaves stale, "
+      "and notifies its listeners as a store heard by no stale-days "
+      "listener", () async {
+    int dayOf(int month, int day) {
+      return CalendarDates.dayNumber(DateTime(2026, month, day));
+    }
+
+    StaleReport days(int firstMonth, int firstDay, int lastMonth, int lastDay) {
+      return (
+        first: dayOf(firstMonth, firstDay),
+        last: dayOf(lastMonth, lastDay),
+        calls: -1,
+      );
+    }
+
+    const StaleReport every = (first: null, last: null, calls: -1);
+
+    Future<List<int>> run({required bool listening}) async {
+      final notified = <int>[];
+      final changes = StreamController<CalendarSourceChange<String>>(
+        sync: true,
+      );
+      final harness = Harness(changes: changes.stream);
+      final store = harness.store;
+      final reports = <StaleReport>[];
+      if (listening) {
+        store.addStaleDaysListener((stale) {
+          final first = stale.first;
+          final last = stale.last;
+          reports.add((
+            first: first == null ? null : CalendarDates.dayNumber(first),
+            last: last == null ? null : CalendarDates.dayNumber(last),
+            calls: harness.source.calls.length,
+          ));
+        });
+      }
+      var heard = 0;
+      // Checks what one call into the store reported, [expected] with the
+      // calls the source had received when it was heard unchecked where
+      // they are -1, and records how often the store had notified.
+      void call(List<StaleReport> expected, [String? reason]) {
+        notified.add(harness.notifications);
+        final made = reports.sublist(heard);
+        heard = reports.length;
+        if (!listening) {
+          return;
+        }
+        expect(
+          <StaleReport>[
+            for (final (index, report) in made.indexed)
+              index < expected.length && expected[index].calls == -1
+                  ? (first: report.first, last: report.last, calls: -1)
+                  : report,
+          ],
+          expected,
+          reason: reason,
+        );
+      }
+
+      Future<void> answer(
+        FakeCall read,
+        List<CalendarEntry<String>> entries, [
+        List<StaleReport> expected = const <StaleReport>[],
+        String? reason,
+      ]) async {
+        read.succeed(entries);
+        await settle();
+        call(expected, reason);
+      }
+
+      final e = task("e", DateTime(2026, 4, 22), 600, 660);
+      final f = task("f", DateTime(2026, 4, 26), 600, 660, dayCount: 2);
+      final g = task("g", DateTime(2026, 4, 25), 600, 660);
+
+      store.show(weekFirst, weekLast);
+      call(const <StaleReport>[], "the first show");
+      await answer(harness.lastCall, <CalendarEntry<String>>[e, f, g]);
+      store.prefetch(DateTime(2026, 4, 27), DateTime(2026, 5, 3));
+      call(const <StaleReport>[]);
+      await answer(harness.lastCall, <CalendarEntry<String>>[f]);
+
+      // An invalidate of two shown days, after the read of them it sends.
+      store.invalidate(DateTime(2026, 4, 21), DateTime(2026, 4, 22));
+      call(<StaleReport>[
+        (
+          first: dayOf(4, 21),
+          last: dayOf(4, 22),
+          calls: harness.source.calls.length,
+        ),
+      ], "invalidate");
+      await answer(harness.lastCall, <CalendarEntry<String>>[e]);
+
+      // A change of days, with no zone.
+      changes.add(
+        CalendarDaysChanged<String>(
+          DateTime(2026, 4, 23),
+          DateTime(2026, 4, 23),
+        ),
+      );
+      call(<StaleReport>[days(4, 23, 4, 23)], "a change of days");
+      await answer(harness.lastCall, <CalendarEntry<String>>[]);
+
+      // A change of all.
+      changes.add(const CalendarAllChanged<String>());
+      call(<StaleReport>[every], "a change of all");
+      await answer(harness.lastCall, <CalendarEntry<String>>[e, f, g]);
+
+      // A refresh, after the read of the shown range it sends.
+      unawaited(store.refresh());
+      call(<StaleReport>[
+        (first: null, last: null, calls: harness.source.calls.length),
+      ], "refresh");
+      await answer(harness.lastCall, <CalendarEntry<String>>[e, f, g]);
+
+      // A read sent before an invalidate of some of its unread days
+      // reports them as it answers.
+      store.prefetch(DateTime(2026, 5, 4), DateTime(2026, 5, 10));
+      final before = harness.lastCall;
+      call(const <StaleReport>[]);
+      store.invalidate(DateTime(2026, 5, 5), DateTime(2026, 5, 5));
+      call(const <StaleReport>[], "an invalidate of unread days");
+      await answer(before, <CalendarEntry<String>>[], <StaleReport>[
+        days(5, 5, 5, 5),
+      ], "the read sent before the invalidate");
+      // One sent before an invalidate of other days reports nothing.
+      store.prefetch(DateTime(2026, 5, 11), DateTime(2026, 5, 17));
+      final otherDays = harness.lastCall;
+      call(const <StaleReport>[]);
+      store.invalidate(DateTime(2026, 4, 21), DateTime(2026, 4, 21));
+      call(<StaleReport>[days(4, 21, 4, 21)]);
+      await answer(harness.lastCall, <CalendarEntry<String>>[]);
+      await answer(otherDays, <CalendarEntry<String>>[]);
+      // Nor does one sent after an invalidate of its days.
+      store.invalidate(DateTime(2026, 5, 6), DateTime(2026, 5, 6));
+      call(<StaleReport>[days(5, 6, 5, 6)], "an invalidate outside");
+      store.prefetch(DateTime(2026, 5, 4), DateTime(2026, 5, 10));
+      call(const <StaleReport>[]);
+      await answer(harness.lastCall, <CalendarEntry<String>>[]);
+
+      // A read sent before a refresh reports the days it fills.
+      store.prefetch(DateTime(2026, 5, 18), DateTime(2026, 5, 24));
+      final beforeRefresh = harness.lastCall;
+      call(const <StaleReport>[]);
+      unawaited(store.refresh());
+      call(<StaleReport>[every]);
+      await answer(harness.lastCall, <CalendarEntry<String>>[e, f, g]);
+      await answer(beforeRefresh, <CalendarEntry<String>>[], <StaleReport>[
+        days(5, 18, 5, 24),
+      ], "the read sent before the refresh");
+
+      // A read's answer that contradicts a write's stored answer reports
+      // the days of both entries.
+      final eMoved = onDay(e, DateTime(2026, 4, 24));
+      store.update(eMoved).ignore();
+      final update = harness.lastCall;
+      call(const <StaleReport>[]);
+      store.invalidate(DateTime(2026, 4, 23), DateTime(2026, 4, 24));
+      final sinceUpdate = harness.lastCall;
+      call(<StaleReport>[days(4, 23, 4, 24)]);
+      update.succeed(eMoved);
+      await settle();
+      call(const <StaleReport>[], "the update's answer");
+      // Setup sanity: the store holds the update's answer.
+      expect(store.storedEntry("e"), eMoved);
+      await answer(
+        sinceUpdate,
+        <CalendarEntry<String>>[onDay(e, DateTime(2026, 4, 23))],
+        <StaleReport>[days(4, 23, 4, 24)],
+        "the read contradicting the stored answer",
+      );
+      await answer(harness.lastCall, <CalendarEntry<String>>[eMoved]);
+      // A write's answer that a read sent since contradicts reports the
+      // days of both entries.
+      final gMoved = onDay(g, DateTime(2026, 4, 23));
+      store.update(gMoved).ignore();
+      final second = harness.lastCall;
+      call(const <StaleReport>[]);
+      store.invalidate(DateTime(2026, 4, 24), DateTime(2026, 4, 25));
+      call(<StaleReport>[days(4, 24, 4, 25)]);
+      await answer(harness.lastCall, <CalendarEntry<String>>[
+        eMoved,
+        onDay(g, DateTime(2026, 4, 24)),
+      ]);
+      second.succeed(gMoved);
+      await settle();
+      call(<StaleReport>[
+        days(4, 23, 4, 24),
+      ], "the write's answer a read contradicts");
+      await answer(harness.lastCall, <CalendarEntry<String>>[eMoved, gMoved]);
+
+      // A read's answer that forgets an entry lying on a read day outside
+      // the read too reports that day.
+      store.invalidate(DateTime(2026, 4, 26), DateTime(2026, 4, 26));
+      call(<StaleReport>[days(4, 26, 4, 26)]);
+      await answer(harness.lastCall, <CalendarEntry<String>>[], <StaleReport>[
+        days(4, 27, 4, 27),
+      ], "the forgotten entry");
+
+      // After a refresh whose read throws within the call, a show of
+      // another range reports the shown one's days.
+      harness.source.thrown = const SourceFailure("Thrown.");
+      store.refresh().ignore();
+      harness.source.thrown = null;
+      call(<StaleReport>[every], "the thrown refresh");
+      final mayFourth = DateTime(2026, 5, 4);
+      final maySunday = DateTime(2026, 5, 10);
+      store.show(mayFourth, maySunday);
+      call(<StaleReport>[
+        days(4, 20, 4, 26),
+      ], "the show after the thrown refresh");
+      await answer(harness.lastCall, <CalendarEntry<String>>[]);
+      // Once a read has filled them, a show back and away again reports
+      // none.
+      store.show(weekFirst, weekLast);
+      call(const <StaleReport>[], "the show back");
+      await answer(harness.lastCall, <CalendarEntry<String>>[e, f, g]);
+      final sentBefore = harness.source.calls.length;
+      store.show(mayFourth, maySunday);
+      call(const <StaleReport>[], "the show away again");
+      // Setup sanity: the days the show returns to are read and unchanged.
+      expect(harness.source.calls, hasLength(sentBefore));
+
+      // A show while a refresh's read is in flight reports none of the
+      // range it leaves, and that read's failure reports them.
+      final refreshed = store.refresh();
+      refreshed.ignore();
+      final refreshRead = harness.lastCall;
+      call(<StaleReport>[every]);
+      store.show(weekFirst, weekLast);
+      final weekRead = harness.lastCall;
+      call(const <StaleReport>[], "the show during the refresh");
+      refreshRead.fail();
+      await settle();
+      call(<StaleReport>[days(5, 4, 5, 10)], "the refresh's failure");
+      await answer(weekRead, <CalendarEntry<String>>[e, f, g]);
+
+      // A zone change reports nothing.
+      setStoreZone(store, zoneApartFromDevice(DateTime(2026, 4, 21), 6));
+      call(const <StaleReport>[], "the zone change");
+      while (harness.source.calls.any((read) {
+        return !read.completer.isCompleted;
+      })) {
+        await answer(
+          harness.source.calls.firstWhere((read) {
+            return !read.completer.isCompleted;
+          }),
+          <CalendarEntry<String>>[e, f, g],
+          const <StaleReport>[],
+          "a read the zone change sent",
+        );
+      }
+      // A change of days with a zone reports the zone days it marks.
+      changes.add(
+        CalendarDaysChanged<String>(
+          DateTime(2026, 4, 22),
+          DateTime(2026, 4, 22),
+        ),
+      );
+      call(<StaleReport>[days(4, 22, 4, 23)], "a change of days in a zone");
+      await answer(harness.lastCall, <CalendarEntry<String>>[]);
+
+      // After dispose, nothing.
+      store.prefetch(DateTime(2026, 6, 1), DateTime(2026, 6, 7));
+      final afterDispose = harness.lastCall;
+      call(const <StaleReport>[]);
+      store.dispose();
+      afterDispose.succeed(<CalendarEntry<String>>[]);
+      await settle();
+      store.invalidate(DateTime(2026, 4, 21), DateTime(2026, 4, 21));
+      expect(reports, hasLength(heard));
+      await changes.close();
+      return notified;
+    }
+
+    final heard = await run(listening: true);
+    final unheard = await run(listening: false);
+    expect(heard, unheard);
+
+    // Before the first show, a refresh reports every day at once.
+    final fresh = Harness();
+    final reports = <CalendarStaleDays>[];
+    fresh.store.addStaleDaysListener(reports.add);
+    await fresh.store.refresh();
+    expect(reports, hasLength(1));
+    expect(reports.single.first, isNull);
+    expect(reports.single.last, isNull);
+    expect(fresh.source.calls, isEmpty);
+    fresh.store.dispose();
+  });
+
+  test("CS33 a day is stale while it is read, changed, outside the shown "
+      "range, unmarked and under no read in flight", () async {
+    final harness = Harness();
+    final store = harness.store;
+    final mayFourth = DateTime(2026, 5, 4);
+    final mayFifth = DateTime(2026, 5, 5);
+    store.show(weekFirst, weekLast);
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    expect(store.isStale(mayFourth), isFalse, reason: "unread");
+    store.prefetch(mayFourth, mayFifth);
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    expect(store.isStale(mayFourth), isFalse, reason: "not changed");
+    store.invalidate(mayFourth, mayFifth);
+    expect(store.isStale(mayFourth), isTrue, reason: "invalidated");
+    store.prefetch(mayFourth, mayFourth);
+    final read = harness.lastCall;
+    expect(store.isStale(mayFourth), isFalse, reason: "under a read");
+    // Setup sanity: the read in flight covers the fourth alone.
+    expect(store.isStale(mayFifth), isTrue);
+    read.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    expect(store.isStale(mayFourth), isFalse, reason: "filled");
+    store.prefetch(mayFifth, mayFifth);
+    harness.lastCall.fail();
+    await settle();
+    // Setup sanity: the failure marked the fifth.
+    expect(store.readFailed(mayFifth), isTrue);
+    expect(store.isStale(mayFifth), isFalse, reason: "marked");
+
+    // After a refresh whose read throws within the call, the shown range's
+    // read days are changed and unmarked but not stale, and the others
+    // are stale, the shown ones too once a show leaves them.
+    store.prefetch(DateTime(2026, 5, 6), DateTime(2026, 5, 6));
+    harness.lastCall.succeed(<CalendarEntry<String>>[]);
+    await settle();
+    harness.source.thrown = const SourceFailure("Thrown.");
+    store.refresh().ignore();
+    harness.source.thrown = null;
+    final tuesday = DateTime(2026, 4, 21);
+    expect(store.readFailed(tuesday), isFalse);
+    expect(store.isStale(tuesday), isFalse, reason: "shown");
+    expect(store.isStale(DateTime(2026, 5, 6)), isTrue, reason: "outside");
+    store.show(mayFourth, DateTime(2026, 5, 10));
+    expect(store.isStale(tuesday), isTrue, reason: "left by a show");
+    store.dispose();
   });
 
   test("CS28 with no Flutter binding, a listener's throw is reported, the "

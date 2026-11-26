@@ -135,6 +135,229 @@ final class CalendarWritePendingException extends CalendarStoreException {
   }
 }
 
+/// The days whose entries may have changed at their source since a reader
+/// read them, which a reader reports to its stale-days listeners
+/// ([CalendarEntryReader.addStaleDaysListener]): the days from [first] to
+/// [last], both inclusive, or every day where both are null.
+@immutable
+final class CalendarStaleDays {
+  /// The days from [first] to [last], both inclusive.
+  ///
+  /// Throws an [ArgumentError], in every build, naming `last` for a [last]
+  /// whose day comes before [first]'s. The days compare by their day
+  /// numbers ([CalendarDates.dayNumber]), so a [last] earlier on [first]'s
+  /// day is taken.
+  CalendarStaleDays(DateTime this.first, DateTime this.last) {
+    if (CalendarDates.dayNumber(last!) < CalendarDates.dayNumber(first!)) {
+      throw ArgumentError.value(
+        last,
+        "last",
+        "Stale days end on their first day or a later one, $first",
+      );
+    }
+  }
+
+  /// Every day.
+  const CalendarStaleDays.all() : first = null, last = null;
+
+  /// The first stale day; null for every day.
+  final DateTime? first;
+
+  /// The last stale day; null for every day.
+  final DateTime? last;
+
+  @override
+  String toString() {
+    return first == null
+        ? "CalendarStaleDays.all()"
+        : "CalendarStaleDays($first, $last)";
+  }
+}
+
+/// One registration of a stale-days listener with a reader.
+final class _StaleDaysRegistration {
+  _StaleDaysRegistration(this.listener);
+
+  final ValueChanged<CalendarStaleDays> listener;
+
+  /// Whether the registration still stands, false once it is removed.
+  bool registered = true;
+}
+
+/// What the calendar's views, its calendar card and its pickers read: the
+/// entries on a range of days, whether those days are read, and the asks
+/// that read them.
+///
+/// Every [CalendarStore] is a reader. A host's own reader, such as one
+/// filtering a store or merging several, extends this class, in a class it
+/// declares `final` or `base`, and answers the members without bodies. It
+/// notifies its listeners whenever what it answers changes. A view takes a
+/// new reader, not the same object as the last, as a reason to ask for its
+/// days again, so a host keeps one reader across builds, as it keeps a
+/// controller.
+///
+/// A reader also reports the days whose entries may have changed at their
+/// source since it read them ([notifyStaleDays]), which it answers as they
+/// were until a read replaces them: a widget showing such a day that
+/// [isStale] answers true for asks for it after the frame. A reader that
+/// reports none, as by default, tells its listeners of no such change. A
+/// reader over other readers forwards both kinds of registration to each of
+/// them, [addListener] and [addStaleDaysListener] with their removals, and
+/// answers [isStale] from theirs.
+abstract base class CalendarEntryReader<T> implements Listenable {
+  /// The stale-days listeners, one entry per registration, in the order
+  /// registered.
+  final List<_StaleDaysRegistration> _staleDaysListeners =
+      <_StaleDaysRegistration>[];
+
+  /// Registers [listener], called whenever what the reader answers
+  /// changes, once for each time it is registered.
+  @override
+  void addListener(VoidCallback listener);
+
+  /// Removes one registration of [listener], if any.
+  @override
+  void removeListener(VoidCallback listener);
+
+  /// The zone whose clock the reader reads its days and times on, or null
+  /// for the device's.
+  Location? get zone;
+
+  /// The entries shown on [day], sorted by start, end, title and id; a new
+  /// list.
+  List<CalendarShownEntry<T>> entriesOn(DateTime day);
+
+  /// The entries shown on any day from [first] to [last], each once,
+  /// sorted as [entriesOn] sorts; a new list.
+  List<CalendarShownEntry<T>> entriesBetween(DateTime first, DateTime last);
+
+  /// Whether [day] shows a marker for the entries on it.
+  bool dayHasShownEntries(DateTime day);
+
+  /// Whether a write on the entry [id] runs.
+  bool isPending(String id);
+
+  /// The entry [id] as stored, without a pending move's requested time.
+  CalendarEntry<T>? storedEntry(String id);
+
+  /// Whether [day] is read.
+  bool isRead(DateTime day);
+
+  /// Whether a read of [day] failed before the reader read the day as its
+  /// source holds it: while the day was unread, or read and taken to have
+  /// changed at its source since. True until a read fills the day, a
+  /// [retry] reads it, or, in a store, a [CalendarStore.show] or a
+  /// [CalendarStore.refresh] reads it or a zone change ends the mark.
+  bool readFailed(DateTime day);
+
+  /// Reads the unread days from [first] to [last], both inclusive,
+  /// without showing them. The read leaves each [readFailed] mark until
+  /// it fills the day. A reader that reports stale days
+  /// ([notifyStaleDays]) also reads each day among them that it reported
+  /// and has not read since, while [isStale] answers true for it, which a
+  /// view's ask for the stale days it shows relies on; a reader that
+  /// reports none reads the unread days alone.
+  void prefetch(DateTime first, DateTime last);
+
+  /// Ends the [readFailed] marks of the days from [first] to [last], both
+  /// inclusive, where given, and reads those of them marked or not read
+  /// yet: the marked ones with a read of their own though a read is on the
+  /// way, and the other unread ones with one read from the first to the
+  /// last of them, or with none where one read on the way covers them all.
+  /// A reader that shows a range, as a store does, retries that range too
+  /// ([CalendarStore.retry]). Throws an [ArgumentError] where one of
+  /// [first] and [last] is given without the other.
+  void retry([DateTime? first, DateTime? last]);
+
+  /// The load state of the days from [first] to [last], both inclusive:
+  /// failed where one of them is [readFailed], loading where one is not
+  /// [isRead], and ready otherwise, and ready for a [first] after [last],
+  /// a range of no day. A store answers its shown range's [CalendarStore.status].
+  CalendarLoadStatus statusOf(DateTime first, DateTime last) {
+    final lastDay = CalendarDates.dayNumber(last);
+    var status = CalendarLoadStatus.ready;
+    for (
+      var day = first;
+      CalendarDates.dayNumber(day) <= lastDay;
+      day = CalendarDates.addDays(day, 1)
+    ) {
+      if (readFailed(day)) {
+        return CalendarLoadStatus.failed;
+      }
+      if (!isRead(day)) {
+        status = CalendarLoadStatus.loading;
+      }
+    }
+    return status;
+  }
+
+  /// The error of the failed read the reader holds for the days from
+  /// [first] to [last], both inclusive, while [statusOf] answers failed
+  /// for them; null where it holds none, as by default. A store answers
+  /// its shown range's [CalendarStore.loadError].
+  Object? loadErrorOf(DateTime first, DateTime last) {
+    return null;
+  }
+
+  /// Registers [listener], which [notifyStaleDays] calls with the days the
+  /// reader reports stale, once for each time it is registered.
+  void addStaleDaysListener(ValueChanged<CalendarStaleDays> listener) {
+    _staleDaysListeners.add(_StaleDaysRegistration(listener));
+  }
+
+  /// Removes one registration of [listener], if any.
+  void removeStaleDaysListener(ValueChanged<CalendarStaleDays> listener) {
+    for (var index = 0; index < _staleDaysListeners.length; index++) {
+      final registration = _staleDaysListeners[index];
+      if (registration.listener == listener) {
+        registration.registered = false;
+        _staleDaysListeners.removeAt(index);
+        return;
+      }
+    }
+  }
+
+  /// Reports [days], whose entries may have changed at their source since
+  /// the reader read them and which it answers as they were until a read
+  /// replaces them, to each stale-days listener registered when the report
+  /// starts and still registered at its turn, in the order registered. A
+  /// throw from one is reported through [FlutterError.reportError] and the
+  /// rest are called all the same.
+  @protected
+  void notifyStaleDays(CalendarStaleDays days) {
+    for (final registration in List.of(_staleDaysListeners)) {
+      if (!registration.registered) {
+        continue;
+      }
+      try {
+        registration.listener(days);
+      } on Object catch (exception, stack) {
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: exception,
+            stack: stack,
+            library: "widgets_extended calendar",
+            context: ErrorDescription(
+              "while reporting stale days to the listeners of a calendar "
+              "reader",
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  /// Whether [day] is read, its entries may have changed at their source
+  /// since, and the reader reads it again only once a [prefetch] covers
+  /// it, so a widget showing it asks for it. True by default, so each day
+  /// a reader reports and tells nothing more of counts as stale; a reader
+  /// that reads a changed day again itself, as a store reads its shown
+  /// range's, answers false for it.
+  bool isStale(DateTime day) {
+    return true;
+  }
+}
+
 /// The entries a calendar shows, the load state of the range it shows, and
 /// its writes.
 ///
@@ -151,7 +374,11 @@ final class CalendarWritePendingException extends CalendarStoreException {
 /// source stored, or fails to its caller with the error that kept it from
 /// being stored. A host's own store extends this class, in a class it
 /// declares `final` or `base`.
-abstract base class CalendarStore<T> extends ChangeNotifier {
+///
+/// A store is a [CalendarEntryReader]: it answers [statusOf] and
+/// [loadErrorOf] of its shown range from [status] and [loadError].
+abstract base class CalendarStore<T> extends CalendarEntryReader<T>
+    with ChangeNotifier {
   /// A store holding writes to [hours], reading times on the clock of
   /// [zone], or with none on the device's.
   CalendarStore({
@@ -228,11 +455,15 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
     }
   }
 
-  /// Drops every listener, as [ChangeNotifier.dispose] does; the store is
-  /// not used after.
+  /// Drops every listener, as [ChangeNotifier.dispose] does, and every
+  /// stale-days listener; the store is not used after.
   @override
   void dispose() {
     _guarded.clear();
+    for (final registration in _staleDaysListeners) {
+      registration.registered = false;
+    }
+    _staleDaysListeners.clear();
     super.dispose();
   }
 
@@ -269,6 +500,7 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
   /// represent throws an [ArgumentError], leaving the zone and the entries
   /// as they were. A calendar listening builds again at a notify, so a host
   /// sets the zone outside a build.
+  @override
   Location? get zone {
     return _zone;
   }
@@ -330,32 +562,23 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
   /// marks of the read-ahead's days and reads them with the shown range's,
   /// in the same read; a read on the way then covers the days to read only
   /// where it covers the read-ahead's days as well.
+  @override
   void retry([DateTime? first, DateTime? last]);
-
-  /// Reads the unread days from [first] to [last], both inclusive,
-  /// without showing them. The read leaves each [readFailed] mark until
-  /// it fills the day.
-  void prefetch(DateTime first, DateTime last);
 
   /// Takes every entry with a part in the days from [first] to [last],
   /// both inclusive, to have changed at its source, so the store answers
-  /// those days anew.
+  /// those days anew. A store that reads such a day again only once a
+  /// [prefetch] or a [show] covers it reports the day stale through
+  /// [notifyStaleDays], so the widgets showing it ask for it.
   void invalidate(DateTime first, DateTime last);
 
   /// Takes every entry to have changed at its source, so the store answers
   /// every day anew. Completes once the shown range is answered anew, or
-  /// fails with the error that kept it from being read.
+  /// fails with the error that kept it from being read. A store that reads
+  /// a changed day again only once a [prefetch] or a [show] covers it
+  /// reports the days stale through [notifyStaleDays], so the widgets
+  /// showing them ask for them.
   Future<void> refresh();
-
-  /// Whether [day] is read.
-  bool isRead(DateTime day);
-
-  /// Whether a read of [day] failed before the store read the day as its
-  /// source holds it: while the day was unread, or read and taken to have
-  /// changed at its source since. True until a read fills the day, a
-  /// [show], a [retry] or a [refresh] reads it, or a zone change, which
-  /// ends the mark.
-  bool readFailed(DateTime day);
 
   /// Whether the shown range is exactly [first] to [last].
   bool isShown(DateTime first, DateTime last);
@@ -363,22 +586,27 @@ abstract base class CalendarStore<T> extends ChangeNotifier {
   /// Whether the shown range holds every day from [first] to [last].
   bool isWithinShown(DateTime first, DateTime last);
 
-  /// The entries shown on [day], sorted by start, end, title and id; a new
-  /// list.
-  List<CalendarShownEntry<T>> entriesOn(DateTime day);
+  /// The load state of the days from [first] to [last]: [status] where
+  /// they are the shown range ([isShown]), and otherwise the reader's walk
+  /// of their days ([CalendarEntryReader.statusOf]).
+  @override
+  CalendarLoadStatus statusOf(DateTime first, DateTime last) {
+    if (isShown(first, last)) {
+      return status;
+    }
+    return super.statusOf(first, last);
+  }
 
-  /// The entries shown on any day from [first] to [last], each once,
-  /// sorted as [entriesOn] sorts; a new list.
-  List<CalendarShownEntry<T>> entriesBetween(DateTime first, DateTime last);
-
-  /// Whether [day] shows a marker for the entries on it.
-  bool dayHasShownEntries(DateTime day);
-
-  /// Whether a write on the entry [id] runs.
-  bool isPending(String id);
-
-  /// The entry [id] as stored, without a pending move's requested time.
-  CalendarEntry<T>? storedEntry(String id);
+  /// The error of the failed read of the days from [first] to [last]:
+  /// [loadError] where they are the shown range ([isShown]), and otherwise
+  /// the reader's answer ([CalendarEntryReader.loadErrorOf]).
+  @override
+  Object? loadErrorOf(DateTime first, DateTime last) {
+    if (isShown(first, last)) {
+      return loadError;
+    }
+    return super.loadErrorOf(first, last);
+  }
 
   /// Stores [draft]; completes with the entry as the store's source stored
   /// it, which has an id, or fails with the error that kept it from being

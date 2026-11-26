@@ -1418,6 +1418,32 @@ given shares, or the one an overlap the policy allows takes, or else the
 first slot of the hours from that start; null where the hours leave none.
 `CalendarView`'s long press in Month and `CalendarController.createOn` take
 their slot from it, on the same slots as before.
+- `CalendarEntryReader` is the read side of a store: listenable, it answers
+`zone`, `entriesOn`, `entriesBetween`, `dayHasShownEntries`, `isPending`,
+`storedEntry`, `isRead` and `readFailed`, and takes `prefetch` and `retry`.
+`CalendarStore` extends it, and a host's reader, such as one filtering a
+store, extends it in a `final` or `base` class. `statusOf` answers the load
+state of any range of days, walked from `isRead` and `readFailed` by
+default, and `loadErrorOf` its read error, null by default; a store answers
+its shown range's `status` and `loadError`, and a `CachingCalendarStore`
+any other range from its days and their failure marks.
+- A reader reports stale days, a `CalendarStaleDays` of one day or more or
+of every day, to the listeners `addStaleDaysListener` registers and
+`removeStaleDaysListener` removes, through `notifyStaleDays`, and `isStale`
+answers whether a day is one only a `prefetch` reads again, true by
+default; a reader over other readers forwards both registrations to them
+and answers `isStale` from theirs. A `CachingCalendarStore` reports, as each
+call into it ends, the read days the call left changed, a zone change's
+excepted, and the read days a show or a refresh's failed read leaves stale
+outside the shown range, and its `isStale` answers true for a read day
+outside the shown range that is changed, not marked `readFailed` and under
+no read in flight. A `MemoryCalendarStore` reports none, and its `isStale`
+answers false.
+- A host store that declares a member named `statusOf`, `loadErrorOf`,
+`addStaleDaysListener`, `removeStaleDaysListener`, `notifyStaleDays` or
+`isStale`, which `CalendarStore` now inherits from `CalendarEntryReader`,
+no longer compiles where its signature is no valid override of the
+reader's member, and otherwise overrides it.
 
 ## 0.0.35
 

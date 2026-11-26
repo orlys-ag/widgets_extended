@@ -6,8 +6,25 @@ paths:
 
 # scheduling architecture: store
 
-The contract of `CalendarStore` and its two stores. The layer's imports are in `scheduling.md`'s table, and the conventions every layer follows in `scheduling.md` and `shared-calendar-conventions.md`.
+The contract of `CalendarEntryReader`, `CalendarStore` and its two stores. The layer's imports are in `scheduling.md`'s table, and the conventions every layer follows in `scheduling.md` and `shared-calendar-conventions.md`.
 
+- **`CalendarEntryReader`** is the read side of a store: listenable, it
+  answers `zone`, `entriesOn`, `entriesBetween`, `dayHasShownEntries`,
+  `isPending`, `storedEntry`, `isRead` and `readFailed`, and takes
+  `prefetch` and `retry`. Its `statusOf` of a range is failed where a day
+  of it is `readFailed`, loading where one is unread, and ready otherwise,
+  a range of no day included, and its `loadErrorOf` is null; a store
+  answers its shown range's `status` and `loadError`, and the caching store
+  any other range from its days and their marks, with the error of the
+  latest failure marking them. A reader reports stale days, a
+  `CalendarStaleDays` of one day or more or of every day, to each listener
+  `addStaleDaysListener` registers, once per registration, in order, a
+  listener's throw reported through `FlutterError.reportError`, and none
+  removed before its turn; `isStale` answers whether a day is one that
+  only a `prefetch` reads again, true by default. `CalendarStore` extends
+  it; a host's reader extends it in a `final` or `base` class and is kept
+  across builds, and one over other readers forwards the stale-days
+  registrations to them and answers `isStale` from theirs.
 - **`CalendarStore`** is listenable, and answers the entries covering a
   range, the load state of the range the calendar shows, and writes. A
   shown range holds one day or more: `show` throws an `ArgumentError` for
@@ -94,8 +111,14 @@ The contract of `CalendarStore` and its two stores. The layer's imports are in `
   entry unstored and its days to read again. A grid move or resize shows
   the requested entry, pending, until the data source answers; a delete and
   an update show the stored entry pending, as it is stored meanwhile; a
-  create shows nothing until the entry is stored.
+  create shows nothing until the entry is stored. As each call into it
+  ends, the store reports stale the read days the call left changed, a
+  zone change's excepted, which reads again every day it keeps, and the
+  read days a show or a refresh's failed read leaves stale outside the
+  shown range. `isStale` answers true for a read day outside the shown
+  range that is changed, unmarked and under no read in flight, and false
+  for every shown day, whose changed days the store reads again itself.
 - **The in-memory store** holds the entries the host gives it, and is
   always loaded. It applies each write within the call, so none is
   pending. It is its entries' source, so `invalidate` and `refresh` do
-  nothing.
+  nothing, and it reports no stale day: its `isStale` is false.

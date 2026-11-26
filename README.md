@@ -445,7 +445,12 @@ give one; a change of a kind it does not know, such as a
 `CalendarAllChanged`;
 `invalidate` and `refresh` tell it that entries changed at the source, so
 it reads those days again. A store of your own extends `CalendarStore`
-and answers entries in the order `compareCalendarEntries` gives.
+and answers entries in the order `compareCalendarEntries` gives. Every
+store is a `CalendarEntryReader`, its read side: a reader of your own,
+such as one filtering a store, extends `CalendarEntryReader`, forwards
+`addStaleDaysListener` and `removeStaleDaysListener` to the readers it
+reads, answers `isStale` from theirs, and is created once and kept across
+builds, as a store is.
 `CalendarDates` holds the civil-date helpers the calendar counts days and
 minutes with, such as `addDays` and `dayNumber`.
 
@@ -673,13 +678,14 @@ and failure builders replace what the views draw, and
 **Testing.** A test drives a real `CalendarController` and fills a
 `MemoryCalendarStore` with the entries it needs; a `CachingCalendarStore`
 over a fake or mock `CalendarDataSource` tests reads, writes and
-failures. `CalendarController`, the stores, `CalendarEditPolicy` and the
-localizations are `base` classes, which no class outside the package
-implements, so a mock that implements one does not compile; a spy
-extends one in a `final` class and overrides what it records. A store
-reports a listener's throw through `FlutterError.reportError` rather than
-let it fail the call, also in a plain Dart test with no binding, so a test
-that expects one sets `FlutterError.onError`.
+failures. `CalendarController`, `CalendarEntryReader`, the stores,
+`CalendarEditPolicy` and the localizations are `base` classes, which no
+class outside the package implements, so a mock that implements one
+does not compile; a spy extends one in a `final` class and overrides what
+it records. A store reports a listener's throw through
+`FlutterError.reportError` rather than let it fail the call, also in a
+plain Dart test with no binding, so a test that expects one sets
+`FlutterError.onError`.
 
 `demos/workspace_calendar/` is a complete calendar app on the public API.
 

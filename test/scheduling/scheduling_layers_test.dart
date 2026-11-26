@@ -286,9 +286,11 @@ void main() {
           "CachingCalendarStore",
         },
         "lib/scheduling/store/calendar_store.dart": <String>{
+          "CalendarEntryReader",
           "CalendarHoursException",
           "CalendarLoadStatus",
           "CalendarShownEntry",
+          "CalendarStaleDays",
           "CalendarStore",
           "CalendarStoreException",
           "CalendarWritePendingException",
@@ -329,12 +331,13 @@ void main() {
   });
 
   test("SY5 each class the barrel shows says how a host builds on it: the "
-      "stores, the edit policy, the schedule problem, the store exception "
-      "and the source change bases, the data source an interface, and "
-      "every other class final or sealed; and each function or constant it "
-      "shows names the calendar", () {
+      "reader, the stores, the edit policy, the schedule problem, the store "
+      "exception and the source change bases, the data source an "
+      "interface, and every other class final or sealed; and each function "
+      "or constant it shows names the calendar", () {
     final files = schedulingFiles();
     const bases = <String>{
+      "CalendarEntryReader",
       "CalendarStore",
       "MemoryCalendarStore",
       "CachingCalendarStore",
@@ -525,6 +528,10 @@ void main() {
           name: "CalendarShownEntry",
         ),
         (
+          path: "lib/scheduling/store/calendar_store.dart",
+          name: "CalendarStaleDays",
+        ),
+        (
           path: "lib/scheduling/entries/calendar_entry.dart",
           name: "CalendarCreateRange",
         ),
@@ -592,7 +599,10 @@ void main() {
           "CalendarEditRules({",
           "CalendarEditRules<T> updated(",
         ],
-        "store/calendar_store.dart": <String>["CalendarShownEntry("],
+        "store/calendar_store.dart": <String>[
+          "CalendarShownEntry(",
+          "CalendarStaleDays(",
+        ],
         "store/caching_calendar_store.dart": <String>["CachingCalendarStore({"],
       };
       final collected = <String>[];
@@ -869,7 +879,53 @@ void main() {
         ),
       ),
     );
-  }, skip: true);
+  });
+
+  test("SY15 the read model declares exactly the members the views and "
+      "the pickers read, its two load queries and its stale days", () {
+    final body = classBody(
+      File("lib/scheduling/store/calendar_store.dart").readAsStringSync(),
+      "CalendarEntryReader",
+    );
+    // Each line of the class's own depth that opens a member: its name is
+    // the last identifier before its parameters, its initializer, its
+    // body or its semicolon.
+    final members = <String>{
+      for (final line in body.split("\n"))
+        if (RegExp(r"^  [^\s@})]").hasMatch(line))
+          RegExp(
+            r"(\w+)\s*$",
+          ).firstMatch(line.substring(2).split(RegExp(r"[(=;{]")).first)![1]!,
+    };
+    expect(
+      <String>{
+        for (final name in members)
+          if (!name.startsWith("_")) name,
+      },
+      <String>{
+        "addListener",
+        "removeListener",
+        "zone",
+        "entriesOn",
+        "entriesBetween",
+        "dayHasShownEntries",
+        "isPending",
+        "storedEntry",
+        "isRead",
+        "readFailed",
+        "prefetch",
+        "retry",
+        "statusOf",
+        "loadErrorOf",
+        "addStaleDaysListener",
+        "removeStaleDaysListener",
+        "notifyStaleDays",
+        "isStale",
+      },
+    );
+    // Setup sanity: the scan reads the private list beside the members.
+    expect(members, contains("_staleDaysListeners"));
+  });
 
   test("SY13 schedule_problem.dart declares exactly the problem classes the "
       "barrel shows from it, and imports only Flutter's foundation and the "

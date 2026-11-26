@@ -240,6 +240,8 @@ void main() {
       MemoryCalendarStore,
       CalendarShownEntry,
       CalendarLoadStatus,
+      CalendarEntryReader,
+      CalendarStaleDays,
       CalendarEntryChanged,
       CalendarStoreException,
       CalendarHoursException,
