@@ -219,14 +219,14 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// is applied without a read, a [CalendarDaysChanged] is an [invalidate]
   /// of its days, or with a zone of the zone days its device days touch,
   /// and a [CalendarAllChanged], a change of a kind it does not know, or an
-  /// error on the stream, is an [invalidate] of every day. The end of [changes] ends the
-  /// announcements, and reads nothing: the store then hears of no change
-  /// at the source, as a store given no stream, so a change made there
-  /// shows once the store reads its day again, as at an [invalidate] or a
-  /// [refresh]. [changes] is the store's for its life, so a source whose
-  /// announcements can stop for a while, as across a lost connection,
-  /// keeps the stream open ([CalendarSourceChange]). A [show] and a
-  /// [retry] also read the [readAhead] days on each side of the shown
+  /// error on the stream, is an [invalidate] of every day. The end of
+  /// [changes] ends the announcements, and reads nothing: the store then
+  /// hears of no change at the source, as a store given no stream, so a
+  /// change made there shows once the store reads its day again, as at an
+  /// [invalidate] or a [refresh]. [changes] is the store's for its life, so
+  /// a source whose announcements can stop for a while, as across a lost
+  /// connection, keeps the stream open ([CalendarSourceChange]). A [show]
+  /// and a [retry] also read the [readAhead] days on each side of the shown
   /// range.
   ///
   /// Throws an [ArgumentError] naming `readAhead`, in every build, for a

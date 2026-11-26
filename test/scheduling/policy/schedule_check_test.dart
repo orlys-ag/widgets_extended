@@ -369,8 +369,11 @@ void expectTimes(
 }
 
 /// The day-limit and change problems of [schedule] under [rules] at [now]
-/// for the stored [entry], derived from the policy's answers as the check
-/// derived them before a policy gave its own refusals: the day limit; then,
+/// for the stored [entry], derived from the policy's yes-or-no answers
+/// ([CalendarEditPolicy.admitsChange], [CalendarEditPolicy.mayEdit],
+/// [CalendarEditPolicy.mayMove] and [CalendarEditPolicy.resizableEdges])
+/// and the rules' [CalendarEditRules.earliestStartOn], never from
+/// [CalendarEditPolicy.refusalsOf]'s problems: the day limit; then,
 /// where the policy refuses the change, locked where it lets the entry not
 /// be edited; where it keeps the start, a kept start or else a kept kind,
 /// and an end in the past where it refuses the end with the stored start

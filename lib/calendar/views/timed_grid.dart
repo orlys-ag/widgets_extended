@@ -4319,10 +4319,11 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ([CalendarEditRules.heldToLimit]); null where that end is a time the
   /// clock skips, where the hold would end the entry earlier than it ends,
   /// as for an entry already past the limit ([_holdsAgainstDrag]), where
-  /// [_policy] does not let the entry's end resize or
-  /// refuses the range from the entry's start to it, or its answer throws
-  /// ([_reportPolicyThrow]), where the hours ([CalendarDayHours.holdsTimes])
-  /// refuse that range, or where the policy's
+  /// [_policy] does not let the entry's end resize, where [_rules] do not
+  /// admit the range from the entry's start to it
+  /// ([CalendarEditRules.admitsTimes], which tests the hours before it asks
+  /// the policy), where the policy's answer throws
+  /// ([_reportPolicyThrow]), or where the policy's
   /// [CalendarEditPolicy.allowsOverlaps] is false and it shares time with
   /// another timed entry the store shows that the policy does not let it
   /// share ([_meetsOtherEntry]).
@@ -4345,9 +4346,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         return null;
       }
       end = held.end;
-    }
-    if (!_tracks.hours.holdsTimes(start, end, isAllDay: false)) {
-      return null;
     }
     final now = _calendarNow;
     try {
