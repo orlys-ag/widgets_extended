@@ -1411,6 +1411,13 @@ the rules find.
 rather than `sealed`, so a host declares its own subclasses, and a `switch`
 over either needs a default case. A `CachingCalendarStore` takes a change of
 a kind it does not know as a `CalendarAllChanged`.
+- `CalendarEditRules.createSlotOn` answers the slot a create on a day takes,
+as Month's long press creates: from the policy's earliest start on the day,
+optionally not before the current time on today, the first slot no entry
+given shares, or the one an overlap the policy allows takes, or else the
+first slot of the hours from that start; null where the hours leave none.
+`CalendarView`'s long press in Month and `CalendarController.createOn` take
+their slot from it, on the same slots as before.
 
 ## 0.0.35
 

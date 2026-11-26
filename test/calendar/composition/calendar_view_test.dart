@@ -27,6 +27,7 @@ import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
+import 'package:widgets_extended/scheduling/policy/edit_rules.dart';
 import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_day_badges.dart';
@@ -4939,6 +4940,52 @@ void main() {
         caching.dispose();
         controller.dispose();
       }
+    }
+  });
+
+  testWidgets("CV71 Month's long press reports the slot the edit rules give "
+      "a create on its day", (tester) async {
+    final office = CalendarDayHours(8 * 60, 18 * 60);
+    final rules = CalendarEditRules<String>(
+      policy: const UnrestrictedEditPolicy<String>(),
+      hours: office,
+      slotMinutes: CalendarDates.defaultSlotMinutes,
+    );
+    final now = CalendarNow(time: fixedClock(), today: tuesday);
+    for (final end in <int>[9 * 60, 18 * 60]) {
+      final entries = <CalendarEntry<String>>[
+        entryOf("busy", tuesday, 8 * 60, end),
+      ];
+      final memory = MemoryCalendarStore<String>(
+        entries: entries,
+        hours: office,
+      );
+      final controller = CalendarController(view: CalendarViewKind.month);
+      final creates = <CalendarCreateRange>[];
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            key: UniqueKey(),
+            store: memory,
+            controller: controller,
+            clock: fixedClock,
+            editable: true,
+            onCreateRange: (details) async {
+              creates.add(details.range);
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.longPress(find.byKey(monthStripKey(tuesday)));
+      await tester.pumpAndSettle();
+      final slot = rules.createSlotOn(tuesday, now, entries: entries)!;
+      expect(creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: slot.start, end: slot.end),
+      ], reason: "an entry to $end");
+      await tester.pumpWidget(const SizedBox());
+      memory.dispose();
+      controller.dispose();
     }
   });
 }

@@ -1532,47 +1532,26 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     return _openCreateFlow(_dayIn(day), globalRect);
   }
 
-  /// Reports a create on [day], from the earliest start [_policy] gives it
-  /// ([CalendarEditPolicy.earliestStartOn]), at the slot
-  /// [CalendarEditRules.firstSlot] gives over the entries the store shows
-  /// on it: the first no entry shares, or, where [_policy]'s
-  /// [CalendarEditPolicy.allowsOverlaps] is false and none is, the first
-  /// sharing time only with entries its [CalendarEditPolicy.mayOverlap]
-  /// allows; or where it gives none, at the first slot of the hours from
-  /// that start, over an entry, refused or not, which asks [_policy]
-  /// nothing. Each is a slot whose times the clock reads, so none starts
-  /// before that start, and the slots are tried in the order of their
-  /// instants: where [day]'s clock repeats a stretch, from that start's
-  /// occurrence, and from the first pass on through the second before the
-  /// time after the stretch. Where [afterNow] and [day] is today, the start
-  /// is the later of that start and the current time
-  /// ([CalendarNow.timeOnToday]). It takes
-  /// [globalRect] as its rect and returns the start of the range it
-  /// reports with [_createRange]'s future. Where it leaves no such slot in
-  /// the hours, it reports [CalendarView.onCreateRefused] instead and
+  /// Reports a create on [day] at the slot the rules of the moment give it
+  /// over the entries the store shows on it
+  /// ([CalendarEditRules.createSlotOn]), not before the current time where
+  /// [afterNow]. It takes [globalRect] as its rect and returns the start
+  /// of the range it reports with [_createRange]'s future. Where the rules
+  /// give no slot, it reports [CalendarView.onCreateRefused] instead and
   /// returns null.
   ({DateTime start, Future<void> done})? _openCreateFlow(
     DateTime day,
     Rect globalRect, {
     bool afterNow = false,
   }) {
-    final rules = _takeRules();
-    final now = _now.value;
-    var start = rules.earliestStartOn(day, now);
-    final earliest = start.earliest;
-    if (afterNow &&
-        earliest != null &&
-        CalendarDates.dayNumber(start.day) ==
-            CalendarDates.dayNumber(now.today) &&
-        earliest.isBefore(now.timeOnToday)) {
-      start = CalendarEarliestStart(start.day, now.timeOnToday);
-    }
-    final shown = widget.store.entriesOn(day).map((shown) {
-      return shown.entry;
-    });
-    final slot =
-        rules.firstSlot(start, clearOf: shown, throughSecondPass: true) ??
-        rules.firstSlot(start, throughSecondPass: true);
+    final slot = _takeRules().createSlotOn(
+      day,
+      _now.value,
+      entries: widget.store.entriesOn(day).map((shown) {
+        return shown.entry;
+      }),
+      notBeforeNow: afterNow,
+    );
     if (slot == null) {
       widget.onCreateRefused?.call(day);
       return null;

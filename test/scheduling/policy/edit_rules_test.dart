@@ -12,6 +12,7 @@ import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/policy/edit_rules.dart';
+import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
 import 'package:widgets_extended/scheduling/policy/schedule_problem.dart';
 
 import '../dst_days.dart';
@@ -1725,5 +1726,62 @@ void main() {
       at(tuesday, 9, 45),
       at(tuesday, 10),
     ]);
+  });
+
+  test("ER22 a create on a day takes the first slot no entry shares", () {
+    expect(
+      rulesOf(hours: office).createSlotOn(
+        tuesday,
+        now,
+        entries: <CalendarEntry<String>>[
+          entryOf("busy", at(tuesday, 8), at(tuesday, 9)),
+        ],
+      ),
+      slot(at(tuesday, 9), at(tuesday, 9, 15)),
+    );
+  });
+
+  test("ER23 a create on a day whose entries fill every slot takes the "
+      "first slot of the hours, over an entry", () {
+    expect(
+      rulesOf(hours: office).createSlotOn(
+        tuesday,
+        now,
+        entries: <CalendarEntry<String>>[
+          entryOf("busy", at(tuesday, 8), at(tuesday, 18)),
+        ],
+      ),
+      slot(at(tuesday, 8), at(tuesday, 8, 15)),
+    );
+  });
+
+  test("ER24 a create on a day whose earliest start leaves no slot in the "
+      "hours takes none", () {
+    final rules = CalendarEditRules<String>(
+      policy: const HistoryLockPolicy<String>(lockEarlierToday: true),
+      hours: office,
+      slotMinutes: 15,
+    );
+    expect(
+      rules.createSlotOn(
+        tuesday,
+        CalendarNow(time: at(tuesday, 18, 30), today: tuesday),
+      ),
+      isNull,
+    );
+  });
+
+  test("ER25 a create on today not before now starts at the first slot "
+      "from the current time", () {
+    final rules = rulesOf(hours: office);
+    final early = CalendarNow(time: at(tuesday, 10, 7), today: tuesday);
+    expect(
+      rules.createSlotOn(tuesday, early, notBeforeNow: true),
+      slot(at(tuesday, 10, 15), at(tuesday, 10, 30)),
+    );
+    expect(
+      rules.createSlotOn(tuesday, early),
+      slot(at(tuesday, 8), at(tuesday, 8, 15)),
+    );
   });
 }
