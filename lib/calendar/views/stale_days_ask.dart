@@ -16,10 +16,13 @@ import '../../scheduling/scheduling.dart';
 ///
 /// [shownDays] answers the days the widget shows, as day numbers
 /// ([CalendarDates.dayNumber]), or null while it shows none. A report is
-/// clipped to them as it arrives, and the span held is clipped to them
-/// again when the ask runs, so a day the widget no longer shows by then,
-/// as one of the days a rebuild after the report moves it off, is not
-/// read. A report of no day the widget shows schedules nothing.
+/// clipped to them as it arrives, and to its first and last days the
+/// reader then answers stale, and the span held is clipped to the shown
+/// days again when the ask runs, so a day the widget no longer shows by
+/// then, as one of the days a rebuild after the report moves it off, is
+/// not read. A report of no day the widget shows that the reader answers
+/// stale, such as one of a store's shown days, which the store reads again
+/// itself, schedules nothing.
 ///
 /// The widget makes one in its state's `initState`, calls [listen] with
 /// its reader there and in each `didUpdateWidget`, and calls [dispose] in
@@ -72,13 +75,18 @@ final class StaleDaysAsk<T> {
     _last = null;
   }
 
-  /// Takes the reported [days] the widget shows into the span held, and
-  /// where no ask waits, asks for them after the frame, since a prefetch
-  /// can notify the reader's listeners, which no build or layout may, and
-  /// asks for that frame.
+  /// Takes the reported [days] the widget shows, from the first to the
+  /// last of them the reader answers stale, into the span held, and where
+  /// no ask waits, asks for them after the frame, since a prefetch can
+  /// notify the reader's listeners, which no build or layout may, and asks
+  /// for that frame. A reported day the reader does not answer stale is
+  /// left out, as the reader reports it again once
+  /// [CalendarEntryReader.isStale] comes to answer true for it
+  /// ([CalendarEntryReader]).
   void _handleStale(CalendarStaleDays days) {
+    final reader = _reader;
     final shown = shownDays();
-    if (shown == null) {
+    if (reader == null || shown == null) {
       return;
     }
     var first = shown.first;
@@ -88,9 +96,20 @@ final class StaleDaysAsk<T> {
     if (reportedFirst != null && reportedLast != null) {
       first = math.max(first, CalendarDates.dayNumber(reportedFirst));
       last = math.min(last, CalendarDates.dayNumber(reportedLast));
-      if (first > last) {
-        return;
-      }
+    }
+    final zone = reader.zone;
+    bool stale(int day) {
+      return reader.isStale(CalendarDates.dateOfDayNumber(day, zone: zone));
+    }
+
+    while (first <= last && !stale(first)) {
+      first++;
+    }
+    if (first > last) {
+      return;
+    }
+    while (!stale(last)) {
+      last--;
     }
     final heldFirst = _first;
     final heldLast = _last;

@@ -1518,6 +1518,82 @@ void main() {
     expect(dayCell(wednesday), findsOneWidget);
     semantics.dispose();
   });
+
+  testWidgets("DP23 over a caching store showing other days, a day the "
+      "picker shows that an invalidate changes is read again after the "
+      "frame, once, and its new entry badges it", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final wednesday = DateTime(2026, 4, 22);
+    final source = HeldReads(<CalendarEntry<String>>[]);
+    final caching = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(caching.dispose);
+    caching.show(DateTime(2026, 6, 1), DateTime(2026, 6, 30));
+    await answerReads(tester, source);
+    await tester.pumpWidget(
+      app(
+        CalendarDayPicker<String>(
+          value: tuesday,
+          onChanged: (day) {},
+          store: caching,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await answerReads(tester, source);
+    // Setup sanity: the picker read Wednesday, which holds nothing.
+    expect(caching.isRead(wednesday), isTrue);
+    expect(dayCell(wednesday), findsOneWidget);
+
+    source.entries.add(
+      CalendarEntry<String>(
+        id: "write",
+        start: DateTime(2026, 4, 22, 9),
+        end: DateTime(2026, 4, 22, 10),
+        title: "Write",
+        color: const Color(0xFF3366CC),
+        payload: "write",
+      ),
+    );
+    caching.invalidate(wednesday, wednesday);
+    expect(source.reads, isEmpty);
+    await tester.pump();
+    expect(readDays(source), <(int, int)>[
+      (CalendarDates.dayNumber(wednesday), CalendarDates.dayNumber(wednesday)),
+    ]);
+    await answerReads(tester, source);
+    expect(
+      find.bySemanticsLabel(
+        const DefaultCalendarLocalizations().dayWithBadges(
+          wednesday,
+          const <String?>[null],
+        ),
+      ),
+      findsOneWidget,
+    );
+    semantics.dispose();
+  });
+}
+
+/// The days of each read [source] holds, as day numbers, in the order
+/// sent.
+List<(int, int)> readDays(HeldReads source) {
+  return <(int, int)>[
+    for (final read in source.reads)
+      (CalendarDates.dayNumber(read.first), CalendarDates.dayNumber(read.last)),
+  ];
+}
+
+/// Answers the reads [source] holds, and those their answers send, until
+/// it holds none, taking each out and settling after each round.
+Future<void> answerReads(WidgetTester tester, HeldReads source) async {
+  while (source.reads.isNotEmpty) {
+    final reads = List.of(source.reads);
+    source.reads.clear();
+    for (final read in reads) {
+      read.answer();
+    }
+    await tester.pumpAndSettle();
+  }
 }
 
 /// A data source each of whose reads waits until the test answers it, with

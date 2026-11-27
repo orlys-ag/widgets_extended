@@ -4182,8 +4182,7 @@ void main() {
     }
 
     // The reads each change sends within its call, the stream's add
-    // included, recorded at the base commit, by view, read-ahead and
-    // change.
+    // included, by view, read-ahead and change.
     const within = <String, List<String>>{
       "day, read-ahead 0, invalidate shown": <String>["2026-04-21..2026-04-21"],
       "day, read-ahead 0, invalidate outside": <String>[],
@@ -4583,8 +4582,8 @@ void main() {
       "new controller, a zone, a new store and a goTo send the reads they "
       "sent", (tester) async {
     useTallView(tester);
-    // The reads each case sends, recorded at the base commit, by view,
-    // read-ahead and whether the source holds its answers.
+    // The reads each case sends, by view, read-ahead and whether the
+    // source holds its answers.
     const expected = <String, List<String>>{
       "agenda, read-ahead 0, answering": <String>[
         "2026-03-30..2026-05-03",
@@ -5001,8 +5000,7 @@ void main() {
   testWidgets("CV70 the retry of a failed view's cover sends the reads it "
       "sent", (tester) async {
     useTallView(tester);
-    // The reads each retry sends, recorded at the base commit, by view and
-    // read-ahead.
+    // The reads each retry sends, by view and read-ahead.
     const expected = <String, List<String>>{
       "day, read-ahead 0": <String>["2026-04-20..2026-04-26"],
       "day, read-ahead 2": <String>["2026-04-18..2026-04-28"],

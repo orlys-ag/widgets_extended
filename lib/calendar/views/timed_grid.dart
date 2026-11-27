@@ -672,38 +672,34 @@ CalendarCreateRange? _createRangeOf(
 /// repeats keeps the occurrence the gesture began in. Every other move or
 /// resize that lands is a [CalendarMoveRequest], which [onMoveRequest]
 /// receives, and which the grid shows at its requested times, pending,
-/// until that function's future completes; the grid writes nothing. Out of edit mode the grid is read-only and asks
-/// [editPolicy] nothing: no block moves or
-/// resizes, and an empty slot creates nothing. In it [editPolicy] limits
-/// the gestures: a block or a bar whose entry it lets not move
+/// until that function's future completes; the grid writes nothing. Out of edit
+/// mode the grid is read-only and asks [editPolicy] nothing: no block moves or
+/// resizes, and an empty slot creates nothing. In it [editPolicy] limits the
+/// gestures: a block or a bar whose entry it lets not move
 /// ([CalendarEditPolicy.mayMove]) takes no drag, a long press selecting it
-/// where it lets an edge of it resize, and a selected one has the handles
-/// of the edges it lets resize ([CalendarEditPolicy.resizableEdges]); no
-/// move or resize lands an entry on times it refuses
-/// ([CalendarEditPolicy.refusalsOf]); and no create gesture starts or
-/// reaches before the earliest start it gives the day the range starts on
-/// ([CalendarEditPolicy.earliestStartOn]).
-/// A block dragged above the first slot or below the last stops there, and
-/// so does a handle dragged past either. Where [editPolicy] allows overlaps
-/// ([CalendarEditPolicy.allowsOverlaps]), a move, a resize and a create go
-/// over other entries' times as over free ones, the blocks sharing a day's
-/// time laid side by side, and a move or a resize another answer refuses
-/// goes back rather than sliding to free time. Where it forbids them, a
-/// move, a resize and a create go over the times only of the entries
-/// [CalendarEditPolicy.mayOverlap] lets the change share. A move dropped
-/// where the policy refuses lands at the nearest time that shows, on that
-/// day or the day before or after it, whose sharing entries
-/// the policy all lets it share, or where the policy refuses every overlap
-/// ([CalendarEditPolicy.refusesEveryOverlap]) that no other entry's block
-/// covers, and goes back where there is none; a resize the policy refuses
-/// stops its dragged edge at the first entry in its way that the policy
-/// refuses; and a create's range stops short
-/// of the entry nearest the slot it started on that the policy does not let
-/// the range share, or keeps that slot alone where the entry shares its
-/// time. While a drag runs, a label
-/// over the grid names the days and times a release would give, or that a
-/// move has nowhere to land, and a move outlines the times it would land
-/// on.
+/// where it lets an edge of it resize, and a selected one has the handles of
+/// the edges it lets resize ([CalendarEditPolicy.resizableEdges]); no move or
+/// resize lands an entry on times it refuses ([CalendarEditPolicy.refusalsOf]);
+/// and no create gesture starts or reaches before the earliest start it gives
+/// the day the range starts on ([CalendarEditPolicy.earliestStartOn]). A block
+/// dragged above the first slot or below the last stops there, and so does a
+/// handle dragged past either. Where [editPolicy] allows overlaps
+/// ([CalendarEditPolicy.allowsOverlaps]), a move, a resize and a create go over
+/// other entries' times as over free ones, the blocks sharing a day's time laid
+/// side by side, and a move or a resize another answer refuses goes back rather
+/// than sliding to free time. Where it forbids them, a move, a resize and a
+/// create go over the times only of the entries [CalendarEditPolicy.mayOverlap]
+/// lets the change share. A move dropped where the policy refuses lands at the
+/// nearest time that shows, on that day or the day before or after it, whose
+/// sharing entries the policy all lets it share, or where the policy refuses
+/// every overlap ([CalendarEditPolicy.refusesEveryOverlap]) that no other
+/// entry's block covers, and goes back where there is none; a resize the policy
+/// refuses stops its dragged edge at the first entry in its way that the policy
+/// refuses; and a create's range stops short of the entry nearest the slot it
+/// started on that the policy does not let the range share, or keeps that slot
+/// alone where the entry shares its time. While a drag runs, a label over the
+/// grid names the days and times a release would give, or that a move has
+/// nowhere to land, and a move outlines the times it would land on.
 ///
 /// In edit mode a bar takes a long press as a block does. On a grid of more
 /// than one day column it moves by days, and once selected its left grip drags
@@ -799,12 +795,12 @@ CalendarCreateRange? _createRangeOf(
 /// them ready ([CalendarEntryReader.statusOf]). After the frame that the
 /// store reports stale days of them
 /// ([CalendarEntryReader.addStaleDaysListener]), it reads again each run of
-/// them the store answers [CalendarEntryReader.isStale] for. A new
-/// [loadRange] of other days clears the selection. While its days are not ready a cover over
-/// the grid takes every press, centring what [loadingBuilder] draws while
-/// they are read, and what [failureBuilder] draws when their read failed,
-/// with the store's error for them ([CalendarEntryReader.loadErrorOf]) and
-/// a retry of them ([CalendarEntryReader.retry]).
+/// them the store answers [CalendarEntryReader.isStale] for. A new [loadRange]
+/// of other days clears the selection. While its days are not ready a cover
+/// over the grid takes every press, centring what [loadingBuilder] draws while
+/// they are read, and what [failureBuilder] draws when their read failed, with
+/// the store's error for them ([CalendarEntryReader.loadErrorOf]) and a retry
+/// of them ([CalendarEntryReader.retry]).
 ///
 /// The grid draws in the [CalendarTheme] above it and animates on the
 /// theme's motion; a block's content, the loading and the failure state

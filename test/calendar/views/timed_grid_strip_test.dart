@@ -594,17 +594,15 @@ class HeldSource implements CalendarDataSource<String> {
 /// shows at the default [minSlotHeight] and every day column at the
 /// default [minDayWidth]; [creates] records each create range it reports,
 /// unless [onCreate] takes them, and [opened] each entry it opens,
-/// [onMoveRequest] takes each move and
-/// resize it lands, or with none [store] writes it ([writeMoveTo]), and
-/// [onZoom] each zoom a pinch reports, which the grid does not show. The grid writes times in [hourLabelFormat], under
-/// [theme] where it is given. [store],
-/// [editable], [first], [hours], [slotMinutes] and [editPolicy] start as
-/// given, and [rebuild] builds the grid again with them and with
-/// [givenNow]. The grid's policy is [editPolicy]
-/// where it is given, and otherwise the one [lockPast],
-/// [lockEarlierToday], [maxDayCount] and [allowsOverlaps] make
-/// ([policy]). Its clock is [givenNow] where it is set, and [now]
-/// otherwise.
+/// [onMoveRequest] takes each move and resize it lands, or with none [store]
+/// writes it ([writeMoveTo]), and [onZoom] each zoom a pinch reports, which the
+/// grid does not show. The grid writes times in [hourLabelFormat], under
+/// [theme] where it is given. [store], [editable], [first], [hours],
+/// [slotMinutes] and [editPolicy] start as given, and [rebuild] builds the grid
+/// again with them and with [givenNow]. The grid's policy is [editPolicy] where
+/// it is given, and otherwise the one [lockPast], [lockEarlierToday],
+/// [maxDayCount] and [allowsOverlaps] make ([policy]). Its clock is [givenNow]
+/// where it is set, and [now] otherwise.
 class Harness {
   Harness(
     this.store,

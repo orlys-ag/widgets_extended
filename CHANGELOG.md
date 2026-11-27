@@ -1431,8 +1431,11 @@ any other range from its days and their failure marks.
 of every day, to the listeners `addStaleDaysListener` registers and
 `removeStaleDaysListener` removes, through `notifyStaleDays`, and `isStale`
 answers whether a day is one only a `prefetch` reads again, true by
-default; a reader over other readers forwards both registrations to them
-and answers `isStale` from theirs. A `CachingCalendarStore` reports, as each
+default; a widget asks it of the days reported as the report arrives and
+again after the frame, so a reader reports a day again once `isStale`
+comes to answer true for it; a reader over other readers forwards both
+registrations to them and answers `isStale` from theirs. A
+`CachingCalendarStore` reports, as each
 call into it ends, the read days the call left changed, a zone change's
 excepted, and the read days a show or a refresh's failed read leaves stale
 outside the shown range, and its `isStale` answers true for a read day
@@ -1461,6 +1464,15 @@ the store shows days outside its shown range and reads them again, as
 Day's card, Agenda's list or a host's picker over the same store does,
 the first answer to those reads has the store read its shown range again,
 and where that read fails too, the shown range fails.
+- In Week and Month, `CalendarView`'s timed grid and month board ask the
+store for the days they show, through `prefetch`, after the frame that
+brings them those days, as Day's calendar card and Agenda's list already
+ask for theirs, and their failure state's retry is a `retry(first, last)`
+of those days, where it was `retry()`. A `MemoryCalendarStore` reads
+nothing, and a `CachingCalendarStore`'s `prefetch` sends nothing where the
+read of its `show` covers those days; a host store whose `prefetch` reads
+again days a read in flight covers sends a second read of them at each
+step.
 - `CalendarDayPicker.store` and `CalendarDateTimePicker.store` take any
 `CalendarEntryReader`, a store or a reader of the host's own, so a
 `store:` argument still compiles; code that reads a picker's `store` as a

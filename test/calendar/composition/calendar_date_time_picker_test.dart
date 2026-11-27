@@ -1434,6 +1434,99 @@ void main() {
     expect(dayCell(wednesday), findsOneWidget);
     semantics.dispose();
   });
+
+  testWidgets("DT36 over a caching store showing other days, a day the "
+      "picker shows that an invalidate changes is read again after the "
+      "frame, once, and its new entry badges it", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final entries = <CalendarEntry<String>>[];
+    final source = HeldReads();
+    final caching = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(caching.dispose);
+    caching.show(DateTime(2026, 6, 1), DateTime(2026, 6, 30));
+    await answerHeld(tester, source, entries);
+    await tester.pumpWidget(
+      app(
+        CalendarDateTimePicker<String>(
+          day: tuesday,
+          minute: 600,
+          today: thursday,
+          onChanged: (day, minute) {},
+          store: caching,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await answerHeld(tester, source, entries);
+    // Setup sanity: the picker read Wednesday, which holds nothing.
+    expect(caching.isRead(wednesday), isTrue);
+    expect(dayCell(wednesday), findsOneWidget);
+
+    entries.add(
+      CalendarEntry<String>(
+        id: "write",
+        start: DateTime(2026, 4, 22, 9),
+        end: DateTime(2026, 4, 22, 10),
+        title: "Write",
+        color: const Color(0xFF3366CC),
+        payload: "write",
+      ),
+    );
+    caching.invalidate(wednesday, wednesday);
+    expect(source.held, isEmpty);
+    await tester.pump();
+    expect(
+      <(int, int)>[
+        for (final read in source.held)
+          (
+            CalendarDates.dayNumber(read.first),
+            CalendarDates.dayNumber(read.last),
+          ),
+      ],
+      <(int, int)>[
+        (
+          CalendarDates.dayNumber(wednesday),
+          CalendarDates.dayNumber(wednesday),
+        ),
+      ],
+    );
+    await answerHeld(tester, source, entries);
+    expect(
+      find.bySemanticsLabel(
+        const DefaultCalendarLocalizations().dayWithBadges(
+          wednesday,
+          const <String?>[null],
+        ),
+      ),
+      findsOneWidget,
+    );
+    semantics.dispose();
+  });
+}
+
+/// Answers the reads [source] holds, and those their answers send, until
+/// it holds none, each with those of [entries] that start on its days,
+/// taking each out and settling after each round.
+Future<void> answerHeld(
+  WidgetTester tester,
+  HeldReads source,
+  List<CalendarEntry<String>> entries,
+) async {
+  while (source.held.isNotEmpty) {
+    final held = List.of(source.held);
+    source.held.clear();
+    for (final read in held) {
+      final from = CalendarDates.dayNumber(read.first);
+      final to = CalendarDates.dayNumber(read.last);
+      read.answer.complete(<CalendarEntry<String>>[
+        for (final entry in entries)
+          if (CalendarDates.dayNumber(entry.start) >= from &&
+              CalendarDates.dayNumber(entry.start) <= to)
+            entry,
+      ]);
+    }
+    await tester.pumpAndSettle();
+  }
 }
 
 /// The default localizations with a Time label longer than the Date one.

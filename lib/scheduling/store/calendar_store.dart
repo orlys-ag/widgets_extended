@@ -198,11 +198,14 @@ final class _StaleDaysRegistration {
 ///
 /// A reader also reports the days whose entries may have changed at their
 /// source since it read them ([notifyStaleDays]), which it answers as they
-/// were until a read replaces them: a widget showing such a day that
-/// [isStale] answers true for asks for it after the frame. A reader that
-/// reports none, as by default, tells its listeners of no such change. A
-/// reader over other readers forwards both kinds of registration to each of
-/// them, [addListener] and [addStaleDaysListener] with their removals, and
+/// were until a read replaces them: a widget showing such a day asks for
+/// it after the frame where [isStale] answers true for it both as the
+/// report arrives and then. So a reader reports a day again once [isStale]
+/// comes to answer true for it after a report, as a caching store does
+/// when a read in flight over a changed day answers. A reader that reports
+/// none, as by default, tells its listeners of no such change. A reader
+/// over other readers forwards both kinds of registration to each of them,
+/// [addListener] and [addStaleDaysListener] with their removals, and
 /// answers [isStale] from theirs.
 abstract base class CalendarEntryReader<T> implements Listenable {
   /// The stale-days listeners, one entry per registration, in the order
@@ -269,10 +272,10 @@ abstract base class CalendarEntryReader<T> implements Listenable {
   /// [first] and [last] is given without the other.
   void retry([DateTime? first, DateTime? last]);
 
-  /// The load state of the days from [first] to [last], both inclusive:
-  /// failed where one of them is [readFailed], loading where one is not
-  /// [isRead], and ready otherwise, and ready for a [first] after [last],
-  /// a range of no day. A store answers its shown range's [CalendarStore.status].
+  /// The load state of the days from [first] to [last], both inclusive: failed
+  /// where one of them is [readFailed], loading where one is not [isRead], and
+  /// ready otherwise, and ready for a [first] after [last], a range of no day.
+  /// A store answers its shown range's [CalendarStore.status].
   CalendarLoadStatus statusOf(DateTime first, DateTime last) {
     final lastDay = CalendarDates.dayNumber(last);
     var status = CalendarLoadStatus.ready;

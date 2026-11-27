@@ -988,4 +988,50 @@ void main() {
     expect(tester.binding.hasScheduledFrame, isFalse);
     expect(second.staleListeners, 0);
   });
+
+  testWidgets("VR12 a change of a day the store shows, which the store reads "
+      "again itself, schedules no frame in the views showing it, and a "
+      "change of a day they show outside it schedules one", (tester) async {
+    useTallView(tester);
+    final now = clockOn(DateTime(2026, 11, 18));
+    addTearDown(now.dispose);
+    final day = DateTime(2026, 11, 18);
+    final outside = DateTime(2026, 11, 25);
+    final weekStart = DateTime(2026, 11, 16);
+    final entries = <CalendarEntry<String>>[entryOn("a", day, 10)];
+    final source = HeldReads();
+    final store = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(store.dispose);
+    store.show(weekStart, DateTime(2026, 11, 22));
+    answerHeld(source, entries);
+    await tester.pumpWidget(
+      app(
+        Column(
+          children: <Widget>[
+            Expanded(child: gridOf(store, weekStart, now)),
+            Expanded(child: boardOf(store, november, now)),
+          ],
+        ),
+      ),
+    );
+    await answerAll(tester, source, entries);
+    // Setup sanity: the board read a day it shows outside the store's.
+    expect(store.isRead(outside), isTrue);
+
+    store.invalidate(day, day);
+    // Setup sanity: the store reads its shown day again itself.
+    expect(heldDays(source), <({int first, int last})>[dayNumbers(day, day)]);
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    await answerAll(tester, source, entries);
+
+    store.invalidate(outside, outside);
+    expect(source.held, isEmpty);
+    expect(tester.binding.hasScheduledFrame, isTrue);
+    await tester.pump();
+    expect(heldDays(source), <({int first, int last})>[
+      dayNumbers(outside, outside),
+    ]);
+    await answerAll(tester, source, entries);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

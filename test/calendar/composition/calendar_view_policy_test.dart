@@ -2700,7 +2700,7 @@ void main() {
     }
 
     await host.pump(tester);
-    // The asks recorded at the base commit.
+    // Month's asks of its policy from the pump through the first settle.
     expect(names(), <String>["dayLimit", "allowsOverlaps"]);
     policy.asked.clear();
     await tester.longPress(find.byKey(monthStripKey(tuesday)));
