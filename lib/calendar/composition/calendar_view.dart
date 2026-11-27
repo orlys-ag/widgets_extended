@@ -294,8 +294,10 @@ class CalendarView<T> extends StatefulWidget {
     this.bottomPadding = 0.0,
   });
 
-  /// The entries the calendar shows and its views write, and the hours it
-  /// shows and schedules in ([CalendarStore.hours]). The calendar asks it
+  /// The entries the calendar shows, and the hours it shows and schedules
+  /// in ([CalendarStore.hours]). The calendar, not its views, writes to it
+  /// a move or a resize no [onMoveRequest] takes
+  /// ([CalendarStore.requestMove]). The calendar asks it
   /// to show the range of days its view shows, and never disposes it. The
   /// calendar draws on its zone ([CalendarStore.zone]), the device's clock
   /// where it has none.
@@ -1467,6 +1469,17 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     });
   }
 
+  /// The write of a move or a resize no [CalendarView.onMoveRequest]
+  /// takes: [request]'s requested entry written to the store
+  /// ([CalendarStore.requestMove]), its failure caught, whether it throws
+  /// within the call or its future fails, as a failed write shows the
+  /// stored entry again.
+  Future<void> _writeMove(CalendarMoveRequest<T> request) {
+    return Future<CalendarEntry<T>>.sync(() {
+      return widget.store.requestMove(request.requested);
+    }).then<void>((_) {}, onError: (Object error) {});
+  }
+
   void _requestEdit(String id) {
     final onEditRequest = widget.onEditRequest;
     final entry = widget.store.storedEntry(id);
@@ -1765,7 +1778,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                     onSelectDay: _select,
                     onOpenEntry: _openEntry,
                     onCreate: _createRange,
-                    onMoveRequest: widget.onMoveRequest,
+                    onMoveRequest: widget.onMoveRequest ?? _writeMove,
                     onZoom: (minSlotHeight, minDayWidth) {
                       controller.setZoom(
                         minSlotHeight: minSlotHeight,

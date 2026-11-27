@@ -670,9 +670,8 @@ CalendarCreateRange? _createRangeOf(
 /// time the clock skips requests and reports nothing; one on a time it
 /// repeats keeps the occurrence the gesture began in. Every other move or
 /// resize that lands is a [CalendarMoveRequest], which [onMoveRequest]
-/// receives, or with none the store writes ([CalendarStore.requestMove]),
-/// and which the grid shows at its requested times, pending, until that
-/// future completes. Out of edit mode the grid is read-only and asks
+/// receives, and which the grid shows at its requested times, pending,
+/// until that function's future completes; the grid writes nothing. Out of edit mode the grid is read-only and asks
 /// [editPolicy] nothing: no block moves or
 /// resizes, and an empty slot creates nothing. In it [editPolicy] limits
 /// the gestures: a block or a bar whose entry it lets not move
@@ -820,7 +819,7 @@ class TimedGrid<T> extends StatefulWidget {
     required this.onSelectDay,
     required this.onOpenEntry,
     required this.onCreate,
-    this.onMoveRequest,
+    required this.onMoveRequest,
     this.editable = false,
     this.editPolicy,
     this.weekdays = CalendarWeekdaySet.all,
@@ -897,16 +896,13 @@ class TimedGrid<T> extends StatefulWidget {
   final Future<void> Function(CalendarCreateDetails details) onCreate;
 
   /// Takes each move or resize a gesture lands, and completes once the
-  /// host has written it or let it go. Until then the grid shows the
+  /// owner has written it or let it go. Until then the grid shows the
   /// entry at its requested times and pending, as a pending write shows
   /// it: a tap on it opens nothing, and no drag lifts it. Then the grid
-  /// shows the store's entry again. Null writes the request through the
-  /// store ([CalendarStore.requestMove]) and catches the write's failure,
-  /// as a failed write shows the stored entry again; a host that wants to
-  /// see failures passes its own function. A failure of the function,
-  /// whether it throws within the call or its future fails, is not caught:
-  /// a host that handles one passes a function that does.
-  final Future<void> Function(CalendarMoveRequest<T> request)? onMoveRequest;
+  /// shows the store's entry again. A failure of the function, whether it
+  /// throws within the call or its future fails, is not caught: an owner
+  /// that handles one passes a function that does.
+  final Future<void> Function(CalendarMoveRequest<T> request) onMoveRequest;
 
   /// Whether the grid is in edit mode: its blocks move and resize, and its
   /// empty slots take a create gesture, as [editPolicy] lets them. Out of
@@ -3078,16 +3074,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
   }
 
-  /// Hands [request] to [TimedGrid.onMoveRequest], or with none writes it
-  /// ([CalendarStore.requestMove]), holding it in [_held] until the future
-  /// completes, or fails, a throw within the call included. The hold syncs
-  /// within the call ([_handleStore]), as a store write's notify does, a
-  /// drag of the entry noted as requested first ([_Dragging.requested]).
-  ///
-  /// A failure of the store's write, whether [CalendarStore.requestMove]
-  /// throws within the call or its future fails, is caught, as a failed
-  /// write shows the stored entry again. A failure of
-  /// [TimedGrid.onMoveRequest], either way, is left uncaught in the zone.
+  /// Hands [request] to [TimedGrid.onMoveRequest], holding it in [_held]
+  /// until the future completes, or fails, a throw within the call
+  /// included. The hold syncs within the call ([_handleStore]), as a store
+  /// write's notify does, a drag of the entry noted as requested first
+  /// ([_Dragging.requested]). A failure of the function, either way, is
+  /// left uncaught in the zone.
   void _requestMove(CalendarMoveRequest<T> request) {
     final id = request.entry.id!;
     final drag = _drag;
@@ -3097,17 +3089,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _held[id] = (request: request, shown: request.requested);
     _handleStore();
     final onMoveRequest = widget.onMoveRequest;
-    final store = widget.store;
-    final Future<void> moving;
-    if (onMoveRequest == null) {
-      moving = Future<CalendarEntry<T>>.sync(() {
-        return store.requestMove(request.requested);
-      }).then<void>((_) {}, onError: (Object error) {});
-    } else {
-      moving = Future<void>.sync(() {
-        return onMoveRequest(request);
-      });
-    }
+    final moving = Future<void>.sync(() {
+      return onMoveRequest(request);
+    });
     moving.whenComplete(() {
       if (!identical(_held[id]?.request, request)) {
         return;

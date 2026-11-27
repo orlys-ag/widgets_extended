@@ -21,6 +21,8 @@ import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 
+import '../view_doubles.dart';
+
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
 
@@ -183,6 +185,7 @@ class Harness {
         builder: (context, setState) {
           final Widget grid = TimedGrid<String>(
             store: store,
+            onMoveRequest: writeMoveTo(store),
             firstDay: monday,
             dayCount: 7,
             selectedDay: tuesday,

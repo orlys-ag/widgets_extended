@@ -178,6 +178,7 @@ TimedGrid<String> gridOf(
 }) {
   return TimedGrid<String>(
     store: store,
+    onMoveRequest: writeMoveTo(store),
     firstDay: firstDay,
     dayCount: DateTime.daysPerWeek,
     selectedDay: firstDay,

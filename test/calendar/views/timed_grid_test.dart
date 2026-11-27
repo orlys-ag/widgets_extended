@@ -36,6 +36,7 @@ import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
 import '../../scheduling/store/zone_support.dart';
 import '../../scheduling/zones.dart';
+import '../view_doubles.dart';
 
 /// The Monday of the week shown.
 final int weekStartDay = CalendarDates.dayNumber(DateTime(2026, 4, 20));
@@ -598,6 +599,7 @@ void main() {
       MaterialApp(
         home: TimedGrid<String>(
           store: store,
+          onMoveRequest: writeMoveTo(store),
           firstDay: day,
           dayCount: 1,
           selectedDay: day,
@@ -648,6 +650,7 @@ void main() {
     }) {
       return TimedGrid<String>(
         store: store,
+        onMoveRequest: writeMoveTo(store),
         firstDay: monday,
         dayCount: 7,
         selectedDay: tuesday,
@@ -743,6 +746,7 @@ void main() {
     }) {
       return TimedGrid<String>(
         store: store,
+        onMoveRequest: writeMoveTo(store),
         firstDay: monday,
         dayCount: 2,
         selectedDay: tuesday,
@@ -904,6 +908,7 @@ void main() {
       size,
       TimedGrid<String>(
         store: store,
+        onMoveRequest: writeMoveTo(store),
         firstDay: monday,
         dayCount: 7,
         selectedDay: tuesday,
@@ -936,6 +941,7 @@ void main() {
         size,
         TimedGrid<String>(
           store: store,
+          onMoveRequest: writeMoveTo(store),
           firstDay: monday,
           dayCount: 7,
           selectedDay: tuesday,
@@ -955,6 +961,7 @@ void main() {
         size,
         TimedGrid<String>(
           store: store,
+          onMoveRequest: writeMoveTo(store),
           firstDay: monday,
           dayCount: 7,
           selectedDay: tuesday,
@@ -984,6 +991,7 @@ void main() {
     }) {
       return TimedGrid<String>(
         store: store,
+        onMoveRequest: writeMoveTo(store),
         firstDay: monday,
         dayCount: 7,
         selectedDay: tuesday,
@@ -1016,6 +1024,7 @@ void main() {
     TimedGrid<String> grid(int slotMinutes) {
       return TimedGrid<String>(
         store: store,
+        onMoveRequest: writeMoveTo(store),
         firstDay: monday,
         dayCount: 7,
         selectedDay: tuesday,
@@ -1082,6 +1091,7 @@ void main() {
           size,
           TimedGrid<String>(
             store: store,
+            onMoveRequest: writeMoveTo(store),
             firstDay: monday,
             dayCount: 7,
             selectedDay: tuesday,
@@ -1140,6 +1150,7 @@ void main() {
     }) {
       return TimedGrid<String>(
         store: store,
+        onMoveRequest: writeMoveTo(store),
         firstDay: tuesday,
         dayCount: 1,
         selectedDay: tuesday,
@@ -1228,6 +1239,7 @@ void main() {
     TimedGrid<String> grid(DateTime first) {
       return TimedGrid<String>(
         store: store,
+        onMoveRequest: writeMoveTo(store),
         firstDay: first,
         dayCount: 7,
         selectedDay: first,
@@ -1324,6 +1336,7 @@ void main() {
                     child: TimedGrid<String>(
                       key: ValueKey<int>(dayCount),
                       store: store,
+                      onMoveRequest: writeMoveTo(store),
                       firstDay: dayCount == 1 ? tuesday : monday,
                       dayCount: dayCount,
                       selectedDay: tuesday,
@@ -1409,6 +1422,7 @@ void main() {
       const Size(400.0, 800.0),
       TimedGrid<String>(
         store: store,
+        onMoveRequest: writeMoveTo(store),
         firstDay: monday,
         dayCount: 4,
         selectedDay: tuesday,
@@ -1536,6 +1550,7 @@ void main() {
       return MaterialApp(
         home: TimedGrid<String>(
           store: store,
+          onMoveRequest: writeMoveTo(store),
           firstDay: monday,
           dayCount: 7,
           selectedDay: tuesday,
@@ -1592,6 +1607,7 @@ void main() {
       size,
       TimedGrid<String>(
         store: store,
+        onMoveRequest: writeMoveTo(store),
         firstDay: tuesday,
         dayCount: 1,
         selectedDay: tuesday,
@@ -1907,6 +1923,7 @@ void main() {
       const Size(800.0, 2000.0),
       TimedGrid<String>(
         store: store,
+        onMoveRequest: writeMoveTo(store),
         firstDay: first,
         dayCount: 7,
         selectedDay: first,
@@ -1983,6 +2000,7 @@ void main() {
       const Size(800.0, 2000.0),
       TimedGrid<String>(
         store: store,
+        onMoveRequest: writeMoveTo(store),
         firstDay: nov6,
         dayCount: 1,
         selectedDay: nov6,

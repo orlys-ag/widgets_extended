@@ -27,6 +27,7 @@ import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 
 import '../../scheduling/dst_days.dart';
+import '../view_doubles.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -263,7 +264,9 @@ class HeldSource implements CalendarDataSource<String> {
 /// What a test pumps: the grid of [shown] over [store], in a view 800 wide
 /// and 2000 tall, where every slot of the day shows; [creates] records each
 /// create range it reports, and where [recordsMoves] is true, [moves] each
-/// move and resize request it lands, which the store then does not write.
+/// move and resize request it lands, which the store then does not write,
+/// and otherwise the grid's requests are written to [store]
+/// ([writeMoveTo]).
 /// [hours] and [slotMinutes] start as [shown]'s, and [rebuild] builds the
 /// grid again with them. The grid's policy is the unrestricted one,
 /// combined with a [DayLimitPolicy] of [maxDayCount] where it is given and
@@ -322,7 +325,7 @@ class Harness {
           ? (request) async {
               moves.add(request);
             }
-          : null,
+          : writeMoveTo(store),
       editable: editable,
       editPolicy: policy,
       hours: hours,

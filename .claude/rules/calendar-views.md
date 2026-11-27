@@ -25,6 +25,8 @@ The contract of the four views and their parts. The conventions every layer foll
   loading and failure states from those days alone. A view that asks for
   its days reads again the stale days it shows after the frame that
   reports them.
+- **Writes.** A view writes nothing: it reports each write as a request
+  through a callback.
 - **No UI of its own.** A view opens no route, dialog or form: it reports a
   tap on an entry, a create range, a move or resize request, and edit and
   delete requests through callbacks.

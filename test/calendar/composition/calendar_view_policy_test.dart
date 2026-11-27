@@ -6,6 +6,9 @@
 /// Day.
 library;
 
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
@@ -14,10 +17,15 @@ import 'package:widgets_extended/board/board.dart';
 import 'package:widgets_extended/calendar/composition/calendar_header.dart';
 import 'package:widgets_extended/calendar/composition/calendar_view.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
+import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
 import 'package:widgets_extended/scheduling/policy/schedule_problem.dart';
+import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_activity_indicator.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart'
     show DayList, dayListGapKey;
@@ -508,6 +516,157 @@ Future<void> tickTo(WidgetTester tester, Host host, DateTime time) async {
   host.time = time;
   await tester.pump(const Duration(minutes: 1));
   await tester.pump();
+}
+
+/// Whether a rect lies within 1 px of [expected] on every edge.
+Matcher nearRect(Rect expected) {
+  return _NearRect(expected);
+}
+
+class _NearRect extends Matcher {
+  const _NearRect(this.expected);
+
+  final Rect expected;
+
+  @override
+  bool matches(Object? item, Map<dynamic, dynamic> matchState) {
+    if (item is! Rect) {
+      return false;
+    }
+    return (item.left - expected.left).abs() <= 1.0 &&
+        (item.top - expected.top).abs() <= 1.0 &&
+        (item.right - expected.right).abs() <= 1.0 &&
+        (item.bottom - expected.bottom).abs() <= 1.0;
+  }
+
+  @override
+  Description describe(Description description) {
+    return description.add("within 1 px of $expected");
+  }
+}
+
+/// A data source that answers each read at once with the entries having
+/// any part in its days, and holds each replace in [replaces] until the
+/// test completes it.
+class HeldReplaces implements CalendarDataSource<String> {
+  HeldReplaces(this.entries);
+
+  final List<CalendarEntry<String>> entries;
+
+  final List<Completer<CalendarEntry<String>>> replaces =
+      <Completer<CalendarEntry<String>>>[];
+
+  @override
+  Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    final from = CalendarDates.dayNumber(first);
+    final to = CalendarDates.dayNumber(last);
+    return SynchronousFuture<List<CalendarEntry<String>>>(
+      <CalendarEntry<String>>[
+        for (final entry in entries)
+          if (CalendarDates.dayNumber(entry.start) <= to &&
+              CalendarDates.lastDayNumberOf(entry.start, entry.end) >= from)
+            entry,
+      ],
+    );
+  }
+
+  @override
+  Future<CalendarEntry<String>> create(CalendarEntry<String> draft) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<CalendarEntry<String>> replace(CalendarEntry<String> entry) {
+    final completer = Completer<CalendarEntry<String>>();
+    replaces.add(completer);
+    return completer.future;
+  }
+
+  @override
+  Future<void> delete(String id) {
+    return SynchronousFuture<void>(null);
+  }
+}
+
+/// A [MoveRecordingStore] whose [requestMove] records the move and throws
+/// [thrown] within the call.
+final class ThrowingMoveStore extends MoveRecordingStore {
+  ThrowingMoveStore(List<CalendarEntry<String>> entries, this.thrown)
+    : super(entries: entries);
+
+  final Object thrown;
+
+  @override
+  Future<CalendarEntry<String>> requestMove(CalendarEntry<String> requested) {
+    moves.add(requested);
+    throw thrown;
+  }
+}
+
+/// What [MemoryCalendarStore.onChanged] throws in MR6.
+class HostFailure implements Exception {
+  const HostFailure();
+}
+
+/// An editable Week of Tuesday over [store] with no
+/// [CalendarView.onMoveRequest], pumped as [Host] pumps: in a view 800 wide
+/// and 2000 tall, its clock at 08:00 on Monday.
+Future<void> pumpWriteWeek(
+  WidgetTester tester,
+  CalendarStore<String> store,
+) async {
+  tester.view.devicePixelRatio = 1.0;
+  tester.view.physicalSize = const Size(800.0, 2000.0);
+  addTearDown(tester.view.reset);
+  final controller = CalendarController(
+    view: CalendarViewKind.week,
+    selectedDay: tuesday,
+  );
+  addTearDown(controller.dispose);
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: ThemeData(splashFactory: NoSplash.splashFactory),
+      home: CalendarView<String>(
+        store: store,
+        controller: controller,
+        clock: () {
+          return at(monday, 8);
+        },
+        editable: true,
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+/// Lifts what lies at [from] with [lift], moves the pointer to [to] and
+/// lets go, then pumps a frame and one second; the pending indicator runs
+/// while its entry is pending, so the frames do not settle.
+///
+/// An error left uncaught in the test's own zone ends the test as failed
+/// ([TestWidgetsFlutterBinding] runs the test body in a zone whose handler
+/// reports it), before [WidgetTester.takeException] can take it. So the
+/// move and the release run in a zone of their own, which adds to
+/// [uncaught] each error the futures they start leave uncaught.
+Future<void> dropInZone(
+  WidgetTester tester,
+  Offset from,
+  Offset to,
+  List<Object> uncaught,
+) async {
+  final gesture = await lift(tester, from);
+  await runZonedGuarded(
+    () async {
+      await gesture.moveTo(to);
+      await tester.pump();
+      await gesture.up();
+    },
+    (error, stackTrace) {
+      uncaught.add(error);
+    },
+  );
+  await tester.pump();
+  await tester.pump(const Duration(seconds: 1));
 }
 
 void main() {
@@ -2589,6 +2748,93 @@ void main() {
       );
     });
     await gesture.up();
+  });
+
+  testWidgets("MR4 with no onMoveRequest, a move whose write the caching "
+      "store fails leaves no error uncaught, and its block shows the stored "
+      "entry again, at its stored times and not pending", (tester) async {
+    final source = HeldReplaces(<CalendarEntry<String>>[
+      entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
+    ]);
+    final store = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(store.dispose);
+    await pumpWriteWeek(tester, store);
+    final from = slotCenter(tester, tuesday, 10 * 60);
+    final to = slotCenter(tester, tuesday, 14 * 60);
+    final stored = tester.getRect(blockFinder("meet", tuesday));
+    final requested = stored.shift(to - from);
+    final uncaught = <Object>[];
+    await dropInZone(tester, from, to, uncaught);
+    // Setup sanity: the drop's move shows at the requested times, and the
+    // calendar wrote it through the store.
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(requested));
+    expect(source.replaces, hasLength(1));
+    source.replaces.single.completeError(StateError("Offline."));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(uncaught, isEmpty);
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
+    expect(
+      find.descendant(
+        of: blockFinder("meet", tuesday),
+        matching: find.byType(CalendarActivityIndicator),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets("MR5 with no onMoveRequest, a move whose write the store "
+      "throws within the call leaves no error uncaught, and its block shows "
+      "at its stored times again", (tester) async {
+    final meet = entryOf("meet", at(tuesday, 10), at(tuesday, 11));
+    final store = ThrowingMoveStore(<CalendarEntry<String>>[
+      meet,
+    ], StateError("Refused."));
+    addTearDown(store.dispose);
+    await pumpWriteWeek(tester, store);
+    final stored = tester.getRect(blockFinder("meet", tuesday));
+    final uncaught = <Object>[];
+    await dropInZone(
+      tester,
+      slotCenter(tester, tuesday, 10 * 60),
+      slotCenter(tester, tuesday, 14 * 60),
+      uncaught,
+    );
+    // Setup sanity: the calendar wrote the drop's move through the store.
+    expect(store.moves, <CalendarEntry<String>>[
+      meet.copyWith(start: at(tuesday, 14), end: at(tuesday, 15)),
+    ]);
+    expect(uncaught, isEmpty);
+    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
+  });
+
+  testWidgets("MR6 with no onMoveRequest, a move the in-memory store "
+      "stores, whose onChanged then throws, leaves no error uncaught and "
+      "reports the throw", (tester) async {
+    final meet = entryOf("meet", at(tuesday, 10), at(tuesday, 11));
+    const thrown = HostFailure();
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[meet],
+      onChanged: (old, entry) {
+        throw thrown;
+      },
+    );
+    addTearDown(store.dispose);
+    await pumpWriteWeek(tester, store);
+    final uncaught = <Object>[];
+    await dropInZone(
+      tester,
+      slotCenter(tester, tuesday, 10 * 60),
+      slotCenter(tester, tuesday, 14 * 60),
+      uncaught,
+    );
+    // Setup sanity: the store stored the drop's move.
+    expect(
+      store.storedEntry("meet"),
+      meet.copyWith(start: at(tuesday, 14), end: at(tuesday, 15)),
+    );
+    expect(uncaught, isEmpty);
+    expect(tester.takeException(), same(thrown));
   });
 }
 

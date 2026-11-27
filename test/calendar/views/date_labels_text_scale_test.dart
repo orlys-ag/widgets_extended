@@ -19,6 +19,7 @@ import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 
 import '../recording_errors.dart';
+import '../view_doubles.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -252,6 +253,7 @@ Widget week() {
   addTearDown(now.dispose);
   return TimedGrid<String>(
     store: store,
+    onMoveRequest: writeMoveTo(store),
     firstDay: monday,
     dayCount: 7,
     selectedDay: tuesday,
