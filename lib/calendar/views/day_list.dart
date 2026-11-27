@@ -24,6 +24,7 @@ import '../presentation/calendar_theme.dart';
 import 'answer_builder.dart';
 import 'create_details.dart';
 import 'day_cell.dart' show labelSizeIn;
+import 'stale_days_ask.dart';
 
 /// The style the day list animates its rows with under [theme]: every
 /// family over its [CalendarThemeData.motionDuration] on its
@@ -833,9 +834,12 @@ List<DayListRow> dayListRowsOf<T>(
 /// list on it at once. While a drag or a fling scrolls it, the list
 /// reports through [onTopDay] each new day under its top, and reads the
 /// weeks of the days it holds built once it rests, as it does from a new
-/// [store], after the frame that gives it. A top day near the end of
-/// the list's days adds as many again after them, and one near their start
-/// re-centres the list on it.
+/// [store], after the frame that gives it. After the frame that the store
+/// reports stale days of those weeks
+/// ([CalendarEntryReader.addStaleDaysListener]), it reads again each run of
+/// them the store answers [CalendarEntryReader.isStale] for. A top day
+/// near the end of the list's days adds as many again after them, and one
+/// near their start re-centres the list on it.
 ///
 /// Every state stays inside one always-scrollable scroll view, so a drag
 /// on it reports the scroll an ancestor's listener reads.
@@ -1065,6 +1069,10 @@ class _DayListState<T> extends State<DayList<T>> {
   /// Whether a frame will read the weeks of the days the list holds built.
   bool _prefetchScheduled = false;
 
+  /// Reads again, after the frame, the days of [_mountedWeeks] the store
+  /// reports stale ([StaleDaysAsk]).
+  late final StaleDaysAsk<T> _staleAsk;
+
   /// The day at the list's top as last reported or revealed, a day of the
   /// rows ([_listDayOf]).
   late DateTime _topDay;
@@ -1105,7 +1113,8 @@ class _DayListState<T> extends State<DayList<T>> {
   /// to the day by the tree's own measure.
   bool _landing = true;
 
-  /// The rows mounted, which [_dayAtTop] and [_prefetchShown] read.
+  /// The rows mounted, which [_dayAtTop], [_prefetchShown] and [_staleAsk]
+  /// read.
   final Set<_DayMarkerState> _markers = <_DayMarkerState>{};
 
   /// The day of the time [DayList.now] reads, whose block marks the
@@ -1174,6 +1183,7 @@ class _DayListState<T> extends State<DayList<T>> {
     PaintingBinding.instance.systemFonts.addListener(_handleFonts);
     widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
+    _staleAsk = StaleDaysAsk<T>(_mountedWeeks)..listen(widget.store);
     _scheduleLanding();
   }
 
@@ -1290,6 +1300,7 @@ class _DayListState<T> extends State<DayList<T>> {
       // mount need ask it.
       _schedulePrefetch();
     }
+    _staleAsk.listen(widget.store);
     if (widget.store.zone != _zone) {
       _takeZone();
     }
@@ -1335,6 +1346,7 @@ class _DayListState<T> extends State<DayList<T>> {
   void dispose() {
     PaintingBinding.instance.systemFonts.removeListener(_handleFonts);
     widget.store.removeListener(_handleStore);
+    _staleAsk.dispose();
     widget.now.removeListener(_handleNow);
     _calendarNow.dispose();
     _scroll.dispose();

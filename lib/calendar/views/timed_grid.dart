@@ -26,6 +26,7 @@ import 'day_cell.dart' show fittedLabel, labelSizeIn, numberBoxIn;
 import 'entry_split.dart';
 import 'move_request.dart';
 import 'pinch_zoom.dart';
+import 'stale_days_ask.dart';
 import 'timed_grid_layout.dart';
 
 /// The least height of the day header, which a text too tall for it grows
@@ -794,8 +795,11 @@ CalendarCreateRange? _createRangeOf(
 /// asks [store] for them after the frame that brings it those days, a new
 /// store or a new zone of the store ([CalendarEntryReader.prefetch]),
 /// unless their read failed, and they are ready while the store answers
-/// them ready ([CalendarEntryReader.statusOf]). A new [loadRange] of other
-/// days clears the selection. While its days are not ready a cover over
+/// them ready ([CalendarEntryReader.statusOf]). After the frame that the
+/// store reports stale days of them
+/// ([CalendarEntryReader.addStaleDaysListener]), it reads again each run of
+/// them the store answers [CalendarEntryReader.isStale] for. A new
+/// [loadRange] of other days clears the selection. While its days are not ready a cover over
 /// the grid takes every press, centring what [loadingBuilder] draws while
 /// they are read, and what [failureBuilder] draws when their read failed,
 /// with the store's error for them ([CalendarEntryReader.loadErrorOf]) and
@@ -1797,6 +1801,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// ([_handleNow]), still asks.
   Location? _askedZone;
 
+  /// Reads again, after the frame, the days of the load range the store
+  /// reports stale ([StaleDaysAsk]).
+  late final StaleDaysAsk<T> _staleAsk;
+
   /// Whether a frame callback will put the styles' animation back.
   bool _restoreScheduled = false;
 
@@ -1839,6 +1847,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
     _takeLoadRange();
+    _staleAsk = StaleDaysAsk<T>(_loadDays)..listen(widget.store);
     _noteLoad();
     _sync();
     SchedulerBinding.instance.addPostFrameCallback((_) {
@@ -1913,6 +1922,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       widget.store.addListener(_handleStore);
       _offRange = null;
     }
+    _staleAsk.listen(widget.store);
     final nowChanged = widget.now != oldWidget.now;
     if (nowChanged) {
       oldWidget.now.removeListener(_handleNow);
@@ -2334,6 +2344,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _pressRange.dispose();
     _delayedRange.dispose();
     widget.store.removeListener(_handleStore);
+    _staleAsk.dispose();
     _header.dispose();
     _hiddenCount.dispose();
     _strip.dispose();
@@ -3186,6 +3197,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     _loadFirstDay = CalendarDates.dayNumber(_loadFirst);
     _loadLastDay = CalendarDates.dayNumber(_loadLast);
+  }
+
+  /// The load range's day numbers, the days whose stale days the grid
+  /// reads again ([_staleAsk]).
+  ({int first, int last}) _loadDays() {
+    return (first: _loadFirstDay, last: _loadLastDay);
   }
 
   /// Notes the store's status of the load range, and its error where that

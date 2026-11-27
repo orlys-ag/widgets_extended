@@ -1453,6 +1453,14 @@ is the error of the failed read that marked it, and over a host store that
 does not override `loadErrorOf` is null unless the store shows that day
 alone; it gave the shown range's `loadError`, null while that range was
 ready.
+- After a change at the source, the views, the calendar card and the
+pickers read again, after the frame, the changed days they show outside
+the range the store shows, which the store reports stale, one read for
+each run of them. After a refresh whose read fails, where a widget over
+the store shows days outside its shown range and reads them again, as
+Day's card, Agenda's list or a host's picker over the same store does,
+the first answer to those reads has the store read its shown range again,
+and where that read fails too, the shown range fails.
 
 ## 0.0.35
 

@@ -13,8 +13,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
+import 'package:widgets_extended/calendar/presentation/calendar_day_badges.dart';
+import 'package:widgets_extended/calendar/views/day_cell.dart';
+import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
+import 'package:widgets_extended/calendar/views/week_strip.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
@@ -136,11 +140,13 @@ MonthBoard<String> boardOf(
   ValueListenable<CalendarNow> now, {
   String name = "board",
   ValueChanged<CalendarFailureState>? onFailure,
+  double weekScale = 1.0,
 }) {
   return MonthBoard<String>(
     store: store,
     grid: grid,
     layout: CalendarMonthLayout.showAll,
+    weekScale: weekScale,
     selectedDay: CalendarDates.shownDayNear(
       DateTime(grid.year, grid.month),
       grid.weekdays,
@@ -197,6 +203,38 @@ Finder chipOf(String id, DateTime weekStart) {
 /// The block of [id]'s piece on [day].
 Finder blockOf(String id, DateTime day) {
   return find.byKey(blockKey(id, day));
+}
+
+/// A caching store that counts the stale-days listeners registered with
+/// it.
+final class CountingStaleStore extends CachingCalendarStore<String> {
+  CountingStaleStore(HeldReads source) : super(dataSource: source);
+
+  int staleListeners = 0;
+
+  @override
+  void addStaleDaysListener(ValueChanged<CalendarStaleDays> listener) {
+    staleListeners++;
+    super.addStaleDaysListener(listener);
+  }
+
+  @override
+  void removeStaleDaysListener(ValueChanged<CalendarStaleDays> listener) {
+    staleListeners--;
+    super.removeStaleDaysListener(listener);
+  }
+}
+
+/// A [CountingStaleStore] over [source] showing 2026-12-07 to 2026-12-13,
+/// whose read is answered with [entries].
+CountingStaleStore staleStore(
+  HeldReads source,
+  List<CalendarEntry<String>> entries,
+) {
+  final store = CountingStaleStore(source);
+  store.show(DateTime(2026, 12, 7), DateTime(2026, 12, 13));
+  answerHeld(source, entries);
+  return store;
 }
 
 void main() {
@@ -491,5 +529,228 @@ void main() {
       store.dispose();
       unawaited(changes.close());
     }
-  }, skip: true);
+  });
+
+  testWidgets("VR8 a week strip mounted alone over a caching store showing "
+      "other days reads again after the frame a day it shows that an "
+      "invalidate changed, and badges its new entry", (tester) async {
+    final day = DateTime(2026, 11, 18);
+    final entries = <CalendarEntry<String>>[];
+    final source = HeldReads();
+    final store = staleStore(source, entries);
+    addTearDown(store.dispose);
+    await tester.pumpWidget(
+      app(
+        Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 350.0,
+            child: WeekStrip<String>(
+              store: store,
+              selectedDay: day,
+              today: day,
+              weekdays: CalendarWeekdaySet.all,
+              onSelectDay: (day) {},
+              onBrowse: (day) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    store.prefetch(DateTime(2026, 11, 16), DateTime(2026, 11, 22));
+    await answerAll(tester, source, entries);
+    List<CalendarBadgeKind?> badgesOf(DateTime day) {
+      return tester
+          .widget<DayCell>(
+            find.descendant(
+              of: find.byKey(weekStripDayKey(day)),
+              matching: find.byType(DayCell),
+            ),
+          )
+          .badges;
+    }
+
+    // Setup sanity: the 18th is read and holds nothing.
+    expect(store.isRead(day), isTrue);
+    expect(badgesOf(day), isEmpty);
+    entries.add(entryOn("a", day, 10));
+    store.invalidate(day, day);
+    expect(source.held, isEmpty);
+    await tester.pump();
+    expect(heldDays(source), <({int first, int last})>[dayNumbers(day, day)]);
+    await answerAll(tester, source, entries);
+    expect(badgesOf(day), <CalendarBadgeKind?>[null]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets("VR9 a timed grid and a month board sharing stale days read "
+      "each of them once after the frame, the grid, mounted first, asking "
+      "first", (tester) async {
+    useTallView(tester);
+    final now = clockOn(DateTime(2026, 11, 18));
+    addTearDown(now.dispose);
+    final day = DateTime(2026, 11, 18);
+    final weekStart = DateTime(2026, 11, 16);
+    final entries = <CalendarEntry<String>>[entryOn("a", day, 10)];
+    final source = HeldReads();
+    final store = staleStore(source, entries);
+    addTearDown(store.dispose);
+    await tester.pumpWidget(
+      app(
+        Column(
+          children: <Widget>[
+            Expanded(child: gridOf(store, weekStart, now)),
+            Expanded(child: boardOf(store, november, now)),
+          ],
+        ),
+      ),
+    );
+    await answerAll(tester, source, entries);
+
+    store.invalidate(day, day);
+    await tester.pump();
+    expect(heldDays(source), <({int first, int last})>[dayNumbers(day, day)]);
+    await answerAll(tester, source, entries);
+
+    unawaited(store.refresh());
+    // The refresh's own read, of the shown range.
+    expect(heldDays(source), <({int first, int last})>[
+      dayNumbers(DateTime(2026, 12, 7), DateTime(2026, 12, 13)),
+    ]);
+    await tester.pump();
+    final asked = heldDays(source).skip(1).toList();
+    // Setup sanity: the grid asked first.
+    expect(asked.first, dayNumbers(weekStart, DateTime(2026, 11, 22)));
+    final sorted = List.of(asked)
+      ..sort((a, b) {
+        return a.first.compareTo(b.first);
+      });
+    for (var index = 1; index < sorted.length; index++) {
+      expect(
+        sorted[index].first,
+        sorted[index - 1].last + 1,
+        reason: "the reads after the frame are disjoint and leave no gap",
+      );
+    }
+    expect(sorted.first.first, CalendarDates.dayNumber(november.firstDay));
+    expect(sorted.last.last, CalendarDates.dayNumber(november.lastDay));
+    await answerAll(tester, source, entries);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets("VR10 a day list's own read of its weeks at a scroll's end "
+      "reads again the stale days its stale ask sent for", (tester) async {
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(400.0, 800.0);
+    addTearDown(tester.view.reset);
+    final now = clockOn(tuesday);
+    addTearDown(now.dispose);
+    final thursday = DateTime(2026, 4, 23);
+    final entries = <CalendarEntry<String>>[
+      entryOn("a", tuesday, 10),
+      entryOn("b", thursday, 10),
+    ];
+    final source = HeldReads();
+    final store = CachingCalendarStore<String>(dataSource: source);
+    addTearDown(store.dispose);
+    await tester.pumpWidget(
+      app(
+        DayList<String>(
+          store: store,
+          weekdays: CalendarWeekdaySet.all,
+          format: CalendarHourLabelFormat.twentyFourHour,
+          hours: CalendarDayHours.allDay,
+          editable: false,
+          selectedDay: tuesday,
+          now: now,
+          onTopDay: (day) {},
+          onCreateRange: (details) async {},
+          onEdit: (id) {},
+          onDelete: (id) {},
+          loadingBuilder: (context, state) {
+            return const Text("loading");
+          },
+        ),
+      ),
+    );
+    await answerAll(tester, source, entries);
+    // Setup sanity: the list read the days, and nothing shows a range.
+    expect(store.isRead(tuesday), isTrue);
+    expect(store.isRead(thursday), isTrue);
+    expect(store.isShown(tuesday, tuesday), isFalse);
+    store.invalidate(tuesday, tuesday);
+    store.invalidate(thursday, thursday);
+    expect(source.held, isEmpty);
+    await tester.drag(find.byType(DayList<String>), const Offset(0.0, -40.0));
+    await tester.pumpAndSettle();
+    final held = heldDays(source);
+    expect(held, hasLength(3));
+    expect(held[0], dayNumbers(tuesday, tuesday));
+    expect(held[1], dayNumbers(thursday, thursday));
+    expect(held[2].first, lessThanOrEqualTo(CalendarDates.dayNumber(tuesday)));
+    expect(
+      held[2].last,
+      greaterThanOrEqualTo(CalendarDates.dayNumber(thursday)),
+    );
+    await answerAll(tester, source, entries);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets("VR11 a view keeps the stale days it heard through a rebuild "
+      "with the same store, hears only the store it is given, and hears "
+      "none once unmounted", (tester) async {
+    useTallView(tester);
+    final now = clockOn(DateTime(2026, 11, 18));
+    addTearDown(now.dispose);
+    final day = DateTime(2026, 11, 18);
+    final entries = <CalendarEntry<String>>[entryOn("a", day, 10)];
+    final firstSource = HeldReads();
+    final first = staleStore(firstSource, entries);
+    addTearDown(first.dispose);
+    final secondSource = HeldReads();
+    final second = staleStore(secondSource, entries);
+    addTearDown(second.dispose);
+    Widget board(CountingStaleStore store, {double weekScale = 1.0}) {
+      return app(boardOf(store, november, now, weekScale: weekScale));
+    }
+
+    await tester.pumpWidget(board(first));
+    await answerAll(tester, firstSource, entries);
+    expect(first.staleListeners, 1);
+
+    // A rebuild with the same store between the report and its frame.
+    first.invalidate(day, day);
+    await tester.pumpWidget(board(first, weekScale: 1.5));
+    expect(heldDays(firstSource), <({int first, int last})>[
+      dayNumbers(day, day),
+    ]);
+    await answerAll(tester, firstSource, entries);
+
+    // Another store: only its reports are heard.
+    await tester.pumpWidget(board(second));
+    await answerAll(tester, secondSource, entries);
+    first.invalidate(day, day);
+    await tester.pump();
+    expect(firstSource.held, isEmpty);
+    second.invalidate(day, day);
+    await tester.pump();
+    expect(heldDays(secondSource), <({int first, int last})>[
+      dayNumbers(day, day),
+    ]);
+    await answerAll(tester, secondSource, entries);
+    expect(first.staleListeners, 0);
+    expect(second.staleListeners, 1);
+
+    // Unmounted in the frame after a report: that frame reads nothing, a
+    // later report schedules no frame, and no listener stays.
+    second.invalidate(day, day);
+    await tester.pumpWidget(const SizedBox());
+    expect(secondSource.held, isEmpty);
+    await tester.pumpAndSettle();
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    second.invalidate(day, day);
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    expect(second.staleListeners, 0);
+  });
 }

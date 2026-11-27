@@ -4452,7 +4452,133 @@ void main() {
         unawaited(stream.close());
       }
     }
-  }, skip: true);
+  });
+
+  testWidgets("CV74 after a refresh whose read failed, a step off the shown "
+      "range reads the days it leaves once where the card still shows them, "
+      "in Day, and none of them in Week and Month", (tester) async {
+    useTallView(tester);
+    String spanOf(DayRange read) {
+      return "${CalendarDates.isoDate(read.first)}.."
+          "${CalendarDates.isoDate(read.last)}";
+    }
+
+    List<String> spansOf(Iterable<DayRange> reads) {
+      return <String>[for (final read in reads) spanOf(read)];
+    }
+
+    final april = CalendarMonthGrid.of(tuesday);
+    final may = CalendarMonthGrid.of(DateTime(2026, 5, 1));
+    for (final view in <CalendarViewKind>[
+      CalendarViewKind.day,
+      CalendarViewKind.week,
+      CalendarViewKind.month,
+    ]) {
+      final label = view.name;
+      final source = HeldSource(<CalendarEntry<String>>[
+        entryOf("talk", tuesday, 10 * 60, 11 * 60),
+      ]);
+      final caching = CachingCalendarStore<String>(dataSource: source);
+      final controller = CalendarController(view: view, selectedDay: tuesday);
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            key: UniqueKey(),
+            store: caching,
+            controller: controller,
+            clock: fixedClock,
+            loadingBuilder: (context, state) {
+              return const Text("loading");
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(source.pending, isEmpty, reason: label);
+
+      source.holds = true;
+      final failure = StateError("The source failed.");
+      Object? refreshError;
+      source.failure = failure;
+      caching.refresh().then<void>(
+        (_) {},
+        onError: (Object error) {
+          refreshError = error;
+        },
+      );
+      source.failure = null;
+      final sentWithin = source.reads.length;
+      await tester.pump();
+      expect(refreshError, same(failure), reason: label);
+      // In Day the card asks for the runs of its month grid outside the
+      // shown week; Week and Month show no day outside the shown range.
+      expect(
+        spansOf(source.reads.skip(sentWithin)),
+        view == CalendarViewKind.day
+            ? <String>[
+                spanOf((
+                  first: april.firstDay,
+                  last: CalendarDates.addDays(monday, -1),
+                )),
+                spanOf((
+                  first: CalendarDates.addDays(sunday, 1),
+                  last: april.lastDay,
+                )),
+              ]
+            : const <String>[],
+        reason: "$label: after the frame",
+      );
+
+      // The days the step leaves that the new shown range does not hold.
+      final DayRange left = view == CalendarViewKind.month
+          ? (
+              first: april.firstDay,
+              last: CalendarDates.addDays(may.firstDay, -1),
+            )
+          : (first: monday, last: sunday);
+      final beforeStep = source.reads.length;
+      if (view == CalendarViewKind.day) {
+        controller.goTo(DateTime(2026, 4, 28));
+      } else {
+        await tester.tap(find.byTooltip(RegExp("^Next ")));
+      }
+      await tester.pumpAndSettle();
+      final sinceStep = source.reads.skip(beforeStep).toList();
+      // Setup sanity: the shown range moved off the days left.
+      expect(
+        caching.isWithinShown(left.first, left.first),
+        isFalse,
+        reason: label,
+      );
+      final holdingLeft = <DayRange>[
+        for (final read in sinceStep)
+          if (!read.last.isBefore(left.first) && !read.first.isAfter(left.last))
+            read,
+      ];
+      if (view == CalendarViewKind.day) {
+        expect(
+          spansOf(holdingLeft),
+          <String>[spanOf(left)],
+          reason: "$label: since the step",
+        );
+      } else {
+        expect(
+          spansOf(holdingLeft),
+          isEmpty,
+          reason: "$label: since the step, ${spansOf(sinceStep)}",
+        );
+      }
+      while (source.pending.isNotEmpty) {
+        source.pending.removeAt(0)();
+        await tester.pump();
+      }
+      source.holds = false;
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox());
+      caching.dispose();
+      controller.dispose();
+    }
+  });
 
   testWidgets("CV69 opening each view, stepping in it, switching views, a "
       "new controller, a zone, a new store and a goTo send the reads they "

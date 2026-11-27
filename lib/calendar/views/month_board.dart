@@ -22,6 +22,7 @@ import 'create_details.dart';
 import 'day_cell.dart';
 import 'entry_split.dart';
 import 'pinch_zoom.dart';
+import 'stale_days_ask.dart';
 
 /// The height of a day's number strip, which the weeks' lanes start
 /// below: the row axis's lane padding.
@@ -738,7 +739,10 @@ enum CalendarMonthLayout {
 /// that brings it its grid, a new store or a new zone of the store
 /// ([CalendarEntryReader.prefetch]), unless their read failed, and they
 /// are ready while the store answers them ready
-/// ([CalendarEntryReader.statusOf]). While they are not ready a cover over
+/// ([CalendarEntryReader.statusOf]). After the frame that the store
+/// reports stale days of them ([CalendarEntryReader.addStaleDaysListener]),
+/// it reads again each run of them the store answers
+/// [CalendarEntryReader.isStale] for. While they are not ready a cover over
 /// the board takes every press, centring what [loadingBuilder] draws while
 /// they are read, and what [failureBuilder] draws when their read failed,
 /// with the store's error for them ([CalendarEntryReader.loadErrorOf]) and
@@ -1117,6 +1121,10 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// ([_handleNow]), still asks.
   Location? _askedZone;
 
+  /// Reads again, after the frame, the days of [MonthBoard.grid] the store
+  /// reports stale ([StaleDaysAsk]).
+  late final StaleDaysAsk<T> _staleAsk;
+
   /// Whether a layout still owes a reveal of the selected day: set at the
   /// start, by a new grid, by a new [MonthBoard.minDayWidth] or
   /// [MonthBoard.weekScale], and by a new selected day while the days are
@@ -1211,6 +1219,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
     _pinch.holding.addListener(_handleHolding);
+    _staleAsk = StaleDaysAsk<T>(_gridDays)..listen(widget.store);
     _noteLoad();
     _scheduleAsk();
   }
@@ -1263,6 +1272,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       widget.store.addListener(_handleStore);
       _syncPending = true;
     }
+    _staleAsk.listen(widget.store);
     if (widget.store.zone != _zone) {
       _takeZone();
     }
@@ -1314,6 +1324,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   @override
   void dispose() {
     widget.store.removeListener(_handleStore);
+    _staleAsk.dispose();
     widget.now.removeListener(_handleNow);
     _pinch.dispose();
     _scrollHold.release();
@@ -1443,6 +1454,16 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
         CalendarLoadStatus.failed) {
       store.prefetch(grid.firstDay, grid.lastDay);
     }
+  }
+
+  /// The day numbers of [MonthBoard.grid]'s days, whose stale days the
+  /// board reads again ([_staleAsk]).
+  ({int first, int last}) _gridDays() {
+    final grid = widget.grid;
+    return (
+      first: CalendarDates.dayNumber(grid.firstDay),
+      last: CalendarDates.dayNumber(grid.lastDay),
+    );
   }
 
   /// The failure state's retry: a retry of the grid's days

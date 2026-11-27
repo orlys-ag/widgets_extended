@@ -22,7 +22,9 @@ The contract of the four views and their parts. The conventions every layer foll
   build or layout. A view asks its reader for the days it shows only after
   the frame; the timed grid and the month board ask after the frame that
   brings them those days, a new reader or a new zone, and judge their
-  loading and failure states from those days alone.
+  loading and failure states from those days alone. A view that asks for
+  its days reads again the stale days it shows after the frame that
+  reports them.
 - **No UI of its own.** A view opens no route, dialog or form: it reports a
   tap on an entry, a create range, a move or resize request, and edit and
   delete requests through callbacks.

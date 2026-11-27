@@ -9,6 +9,7 @@ import '../../scheduling/scheduling.dart';
 import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
 import 'day_cell.dart';
+import 'stale_days_ask.dart';
 
 /// The key of the week strip's cell showing [day].
 ValueKey<String> weekStripDayKey(DateTime day) {
@@ -35,7 +36,10 @@ ValueKey<String> weekStripDayKey(DateTime day) {
 /// rests, and after the frame that gives it a new [store], it asks the
 /// store to read the shown days of the weeks of the days it shows, so
 /// their markers show, and Day, which reads
-/// a selected day's whole week, shows any of them at once on a tap. A new
+/// a selected day's whole week, shows any of them at once on a tap. After
+/// the frame that the store reports stale days of those weeks
+/// ([CalendarEntryReader.addStaleDaysListener]), it reads again each run of
+/// them the store answers [CalendarEntryReader.isStale] for. A new
 /// [selectedDay] the strip does not show the middle of brings the strip,
 /// after the frame, to the shown days of that day's week, sliding there
 /// over the [CalendarTheme]'s motion, or at once where its duration is
@@ -210,6 +214,10 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
   /// Whether a frame will read the weeks of the days the strip shows.
   bool _prefetchScheduled = false;
 
+  /// Reads again, after the frame, the days of [_shownWeeks] the store
+  /// reports stale ([StaleDaysAsk]).
+  late final StaleDaysAsk<T> _staleAsk;
+
   /// The theme above the strip, whose motion a slide takes when it starts.
   late CalendarThemeData _theme;
 
@@ -218,6 +226,7 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
     super.initState();
     _selectedDay = _plainTwinOf(widget.selectedDay);
     _today = _plainTwinOf(widget.today);
+    _staleAsk = StaleDaysAsk<T>(_shownWeeks)..listen(widget.store);
   }
 
   @override
@@ -245,6 +254,7 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
     if (widget.store != oldWidget.store) {
       _schedulePrefetch();
     }
+    _staleAsk.listen(widget.store);
     // Any new selected date, even one the strip showed, since a drag may
     // have moved it away since; the same date given on another clock moves
     // nothing.
@@ -270,6 +280,7 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
 
   @override
   void dispose() {
+    _staleAsk.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -421,18 +432,36 @@ class _WeekStripState<T> extends State<WeekStrip<T>> {
     SchedulerBinding.instance.ensureVisualUpdate();
   }
 
-  /// Reads the weeks of the days the strip shows.
-  void _prefetchShown() {
+  /// The shown days of the weeks of the days the strip shows, from the
+  /// first to the last, as [CalendarDates.dayNumber]s; null before the
+  /// strip's first layout.
+  ({int first, int last})? _shownWeeks() {
     final extent = _extent;
     if (extent == null || !_scroll.hasClients) {
-      return;
+      return null;
     }
     final start = _scroll.position.pixels / extent;
     final first = _dayAt((start + _epsilon).floor());
     final last = _dayAt((start + _count - _epsilon).ceil() - 1);
+    return (
+      first: CalendarDates.dayNumber(
+        CalendarDates.shownDaysOfWeek(first, widget.weekdays).first,
+      ),
+      last: CalendarDates.dayNumber(
+        CalendarDates.shownDaysOfWeek(last, widget.weekdays).last,
+      ),
+    );
+  }
+
+  /// Reads the days of [_shownWeeks].
+  void _prefetchShown() {
+    final weeks = _shownWeeks();
+    if (weeks == null) {
+      return;
+    }
     widget.store.prefetch(
-      CalendarDates.shownDaysOfWeek(first, widget.weekdays).first,
-      CalendarDates.shownDaysOfWeek(last, widget.weekdays).last,
+      CalendarDates.dateOfDayNumber(weeks.first),
+      CalendarDates.dateOfDayNumber(weeks.last),
     );
   }
 
