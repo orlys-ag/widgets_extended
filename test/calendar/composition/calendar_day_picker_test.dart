@@ -17,6 +17,8 @@ import 'package:widgets_extended/calendar/composition/calendar_header.dart'
     show CalendarHeaderRow;
 import 'package:widgets_extended/widgets_extended.dart';
 
+import '../view_doubles.dart';
+
 /// The day cell of [day], as a screen reader names a day with no badge.
 Finder dayCell(DateTime day) {
   return find.bySemanticsLabel(
@@ -1466,6 +1468,55 @@ void main() {
         }
       }
     }
+  });
+  testWidgets("DP22 a reader that is no store, given as the store, badges "
+      "the days of the entries it keeps alone", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final wednesday = DateTime(2026, 4, 22);
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        for (final (id, day) in <(String, DateTime)>[
+          ("a", tuesday),
+          ("b", wednesday),
+        ])
+          CalendarEntry<String>(
+            id: id,
+            start: DateTime(day.year, day.month, day.day, 9),
+            end: DateTime(day.year, day.month, day.day, 10),
+            title: id,
+            color: const Color(0xFF3366CC),
+            payload: id,
+          ),
+      ],
+    );
+    addTearDown(store.dispose);
+    final reader = ForwardingReader<String>(
+      store,
+      keep: (entry) {
+        return entry.id == "a";
+      },
+    );
+    await tester.pumpWidget(
+      app(
+        CalendarDayPicker<String>(
+          value: tuesday,
+          onChanged: (day) {},
+          store: reader,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.bySemanticsLabel(
+        const DefaultCalendarLocalizations().dayWithBadges(
+          tuesday,
+          const <String?>[null],
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(dayCell(wednesday), findsOneWidget);
+    semantics.dispose();
   });
 }
 

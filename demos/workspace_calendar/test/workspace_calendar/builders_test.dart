@@ -1682,7 +1682,11 @@ void main() {
     expect(kept.length, greaterThan(4));
     counts.clear();
 
-    final store = tester.widget<MonthBoard<ItemPayload>>(month).store;
+    final store = tester
+        .widget<CalendarView<ItemPayload>>(
+          find.byType(CalendarView<ItemPayload>),
+        )
+        .store;
     store.requestDelete(brainstormId);
     await tester.pump();
     expect(counts.chipCalls[brainstormId], greaterThan(0));

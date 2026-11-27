@@ -133,7 +133,7 @@ class MonthStrip<T> extends StatefulWidget {
     this.browseFrom,
   });
 
-  final CalendarStore<T> store;
+  final CalendarEntryReader<T> store;
 
   /// The first day of the month the strip shows.
   final DateTime month;
@@ -738,7 +738,7 @@ class _NeighbourDay<T> extends StatelessWidget {
     required this.dayBadges,
   });
 
-  final CalendarStore<T> store;
+  final CalendarEntryReader<T> store;
   final DateTime day;
   final bool isSelected;
   final bool isToday;

@@ -19,13 +19,13 @@ ValueKey<String> dayCellKey(DateTime day) {
 }
 
 /// The badges of [day]'s circle: none where [store] shows no marker for
-/// it ([CalendarStore.dayHasShownEntries]); otherwise, where [badges] is
+/// it ([CalendarEntryReader.dayHasShownEntries]); otherwise, where [badges] is
 /// null, the primary dot alone, a null; and otherwise each kind of
 /// [badges] that [CalendarDayBadges.kindOf] answers for one of the day's
 /// shown entries, in [CalendarDayBadges.kinds]' order, then a null for the
 /// entries it answers null for.
 List<CalendarBadgeKind?> dayBadgesOf<T>(
-  CalendarStore<T> store,
+  CalendarEntryReader<T> store,
   DateTime day,
   CalendarDayBadges<T>? badges,
 ) {
@@ -73,7 +73,7 @@ class DayMarkerListener<T> extends StatefulWidget {
     this.badges,
   });
 
-  final CalendarStore<T> store;
+  final CalendarEntryReader<T> store;
   final DateTime day;
 
   /// The kinds the badges mark; null for the primary dot alone.

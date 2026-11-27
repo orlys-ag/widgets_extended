@@ -969,7 +969,9 @@ void main() {
       final a = chipFinder("item-1", monday);
       final bKey = "month-chip-item-2@${isoDate(monday)}";
       final store = tester
-          .widget<MonthBoard<ItemPayload>>(find.byType(MonthBoard<ItemPayload>))
+          .widget<CalendarView<ItemPayload>>(
+            find.byType(CalendarView<ItemPayload>),
+          )
           .store;
 
       store.requestDelete("item-1");

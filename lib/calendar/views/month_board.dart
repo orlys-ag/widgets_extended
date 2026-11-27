@@ -794,7 +794,7 @@ class MonthBoard<T> extends StatefulWidget {
          "A MonthBoard's bottomPadding must be non-negative and finite.",
        );
 
-  final CalendarStore<T> store;
+  final CalendarEntryReader<T> store;
 
   /// The month the board shows.
   final CalendarMonthGrid grid;

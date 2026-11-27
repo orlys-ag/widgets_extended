@@ -1461,6 +1461,10 @@ the store shows days outside its shown range and reads them again, as
 Day's card, Agenda's list or a host's picker over the same store does,
 the first answer to those reads has the store read its shown range again,
 and where that read fails too, the shown range fails.
+- `CalendarDayPicker.store` and `CalendarDateTimePicker.store` take any
+`CalendarEntryReader`, a store or a reader of the host's own, so a
+`store:` argument still compiles; code that reads a picker's `store` as a
+`CalendarStore` no longer compiles and needs the store itself.
 
 ## 0.0.35
 

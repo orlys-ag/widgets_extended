@@ -1,8 +1,10 @@
-/// The views read their own days: a timed grid and a month board mounted
+/// The views read their own days through a reader: they show the entries
+/// a reader that is no store keeps; a timed grid and a month board mounted
 /// alone load the days they show after the frame, judge their loading and
 /// failure states from those days, retry them, read them again on a new
-/// zone's clock, and read again after the frame the days a change at the
-/// source leaves stale.
+/// zone's clock or a new reader; and every view that asks for its days
+/// reads again after the frame the days a change at the source leaves
+/// stale.
 library;
 
 import 'dart:async';
@@ -17,6 +19,8 @@ import 'package:widgets_extended/calendar/presentation/calendar_day_badges.dart'
 import 'package:widgets_extended/calendar/views/day_cell.dart';
 import 'package:widgets_extended/calendar/views/day_list.dart';
 import 'package:widgets_extended/calendar/views/month_board.dart';
+import 'package:widgets_extended/calendar/views/month_strip.dart';
+import 'package:widgets_extended/calendar/views/pinch_zoom.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
@@ -25,6 +29,7 @@ import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
 import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
 import 'package:widgets_extended/scheduling/store/calendar_store.dart';
+import 'package:widgets_extended/scheduling/store/memory_calendar_store.dart';
 
 import '../../scheduling/zones.dart';
 import '../view_doubles.dart';
@@ -135,7 +140,7 @@ ValueNotifier<CalendarNow> clockOn(DateTime today) {
 /// A month board of [grid] over [store], its cover drawing [name]'s
 /// "loading" and "failed", and handing its failure's retry to [onFailure].
 MonthBoard<String> boardOf(
-  CalendarStore<String> store,
+  CalendarEntryReader<String> store,
   CalendarMonthGrid grid,
   ValueListenable<CalendarNow> now, {
   String name = "board",
@@ -170,15 +175,17 @@ MonthBoard<String> boardOf(
 /// drawing [name]'s "loading" and "failed", and handing its failure's
 /// retry to [onFailure].
 TimedGrid<String> gridOf(
-  CalendarStore<String> store,
+  CalendarEntryReader<String> store,
   DateTime firstDay,
   ValueListenable<CalendarNow> now, {
   String name = "grid",
   ValueChanged<CalendarFailureState>? onFailure,
+  double minSlotHeight = defaultMinSlotHeight,
 }) {
   return TimedGrid<String>(
     store: store,
-    onMoveRequest: writeMoveTo(store),
+    onMoveRequest: (request) async {},
+    minSlotHeight: minSlotHeight,
     firstDay: firstDay,
     dayCount: DateTime.daysPerWeek,
     selectedDay: firstDay,
@@ -192,6 +199,31 @@ TimedGrid<String> gridOf(
     failureBuilder: (context, state) {
       onFailure?.call(state);
       return Text("$name failed");
+    },
+  );
+}
+
+/// A day list opening on [day] over [store], out of edit mode, its
+/// loading rows saying "loading".
+DayList<String> listOf(
+  CalendarEntryReader<String> store,
+  DateTime day,
+  ValueListenable<CalendarNow> now,
+) {
+  return DayList<String>(
+    store: store,
+    weekdays: CalendarWeekdaySet.all,
+    format: CalendarHourLabelFormat.twentyFourHour,
+    hours: CalendarDayHours.allDay,
+    editable: false,
+    selectedDay: day,
+    now: now,
+    onTopDay: (day) {},
+    onCreateRange: (details) async {},
+    onEdit: (id) {},
+    onDelete: (id) {},
+    loadingBuilder: (context, state) {
+      return const Text("loading");
     },
   );
 }
@@ -239,6 +271,139 @@ CountingStaleStore staleStore(
 }
 
 void main() {
+  testWidgets("VR1 the timed grid, the month board, the day list, the "
+      "strips and a day cell read through a reader that is no store, and "
+      "show the entries it keeps alone", (tester) async {
+    useTallView(tester);
+    final now = clockOn(tuesday);
+    addTearDown(now.dispose);
+    final wednesday = DateTime(2026, 4, 22);
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        entryOn("a", tuesday, 10),
+        entryOn("b", wednesday, 10),
+      ],
+    );
+    addTearDown(store.dispose);
+    final reader = ForwardingReader<String>(
+      store,
+      keep: (entry) {
+        return entry.id == "a";
+      },
+    );
+
+    await tester.pumpWidget(app(gridOf(reader, monday, now)));
+    await tester.pumpAndSettle();
+    expect(blockOf("a", tuesday), findsOneWidget);
+    expect(blockOf("b", wednesday), findsNothing);
+
+    await tester.pumpWidget(app(boardOf(reader, april, now)));
+    await tester.pumpAndSettle();
+    expect(chipOf("a", monday), findsOneWidget);
+    expect(chipOf("b", monday), findsNothing);
+
+    await tester.pumpWidget(app(listOf(reader, tuesday, now)));
+    await tester.pumpAndSettle();
+    // Setup sanity: the list builds Wednesday's rows.
+    expect(
+      find.byKey(dayListHeaderKey(wednesday), skipOffstage: false),
+      findsOneWidget,
+    );
+    expect(find.byKey(entryCardKey("a")), findsOneWidget);
+    expect(find.byKey(entryCardKey("b"), skipOffstage: false), findsNothing);
+
+    List<CalendarBadgeKind?> badgesOf(DateTime day) {
+      return tester
+          .widget<DayCell>(
+            find.byWidgetPredicate((widget) {
+              return widget is DayCell && widget.day == day && widget.inMonth;
+            }),
+          )
+          .badges;
+    }
+
+    void expectBadges(String name) {
+      expect(badgesOf(tuesday), <CalendarBadgeKind?>[null], reason: name);
+      expect(badgesOf(wednesday), isEmpty, reason: name);
+    }
+
+    await tester.pumpWidget(
+      app(
+        Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 350.0,
+            child: WeekStrip<String>(
+              store: reader,
+              selectedDay: tuesday,
+              today: tuesday,
+              weekdays: CalendarWeekdaySet.all,
+              onSelectDay: (day) {},
+              onBrowse: (day) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expectBadges("week strip");
+
+    await tester.pumpWidget(
+      app(
+        Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 350.0,
+            child: MonthStrip<String>(
+              store: reader,
+              month: DateTime(2026, 4),
+              selectedDay: tuesday,
+              today: tuesday,
+              weekdays: CalendarWeekdaySet.all,
+              rowHeight: 48.0,
+              collapse: kAlwaysDismissedAnimation,
+              onSelectDay: (day) {},
+              onBrowse: (day) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expectBadges("month strip");
+
+    await tester.pumpWidget(
+      app(
+        Row(
+          children: <Widget>[
+            for (final day in <DateTime>[tuesday, wednesday])
+              SizedBox(
+                width: 48.0,
+                height: 48.0,
+                child: DayMarkerListener<String>(
+                  store: reader,
+                  day: day,
+                  builder: (context, badges) {
+                    return DayCell(
+                      day: day,
+                      inMonth: true,
+                      isSelected: false,
+                      isToday: false,
+                      badges: badges,
+                      collapse: kAlwaysCompleteAnimation,
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expectBadges("day marker listener");
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets("VR2 a month board and a timed grid, each mounted alone over "
       "a caching store nothing has shown, read their own days after the "
       "first frame, and leave the loading cover for the entries its read "
@@ -351,6 +516,94 @@ void main() {
     expect(find.text("grid loading"), findsNothing);
     expect(blockOf("b", DateTime(2026, 12, 8)), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets("VR4 a month board and a timed grid over a reader that is no "
+      "store ask it for their days after the frame of a new range or a new "
+      "reader alone", (tester) async {
+    useTallView(tester);
+    final now = clockOn(tuesday);
+    addTearDown(now.dispose);
+    for (final board in <bool>[true, false]) {
+      final name = board ? "board" : "grid";
+      final store = CachingCalendarStore<String>(dataSource: HeldReads());
+      final first = ForwardingReader<String>(store);
+      final days = board
+          ? dayNumbers(april.firstDay, april.lastDay)
+          : dayNumbers(monday, DateTime(2026, 4, 26));
+      final may = CalendarMonthGrid(2026, 5);
+      final nextWeek = DateTime(2026, 4, 27);
+      final next = board
+          ? dayNumbers(may.firstDay, may.lastDay)
+          : dayNumbers(nextWeek, DateTime(2026, 5, 3));
+      Widget view(
+        CalendarEntryReader<String> reader, {
+        bool later = false,
+        bool zoomed = false,
+      }) {
+        return app(
+          board
+              ? boardOf(
+                  reader,
+                  later ? may : april,
+                  now,
+                  weekScale: zoomed ? 1.5 : 1.0,
+                )
+              : gridOf(
+                  reader,
+                  later ? nextWeek : monday,
+                  now,
+                  minSlotHeight: zoomed ? 24.0 : defaultMinSlotHeight,
+                ),
+        );
+      }
+
+      List<({int first, int last})> prefetchesOf(
+        ForwardingReader<String> reader,
+      ) {
+        return <({int first, int last})>[
+          for (final ask in reader.asks)
+            if (ask.member == "prefetch") dayNumbers(ask.first!, ask.last!),
+        ];
+      }
+
+      await tester.pumpWidget(view(first));
+      expect(prefetchesOf(first), <({int first, int last})>[
+        days,
+      ], reason: name);
+      await tester.pumpWidget(view(first, zoomed: true));
+      await tester.pump();
+      expect(prefetchesOf(first), <({int first, int last})>[
+        days,
+      ], reason: "$name, zoomed");
+      await tester.pumpWidget(view(first, later: true, zoomed: true));
+      await tester.pump();
+      expect(prefetchesOf(first), <({int first, int last})>[
+        days,
+        next,
+      ], reason: "$name, later");
+      final second = ForwardingReader<String>(store);
+      await tester.pumpWidget(view(second, later: true, zoomed: true));
+      await tester.pump();
+      expect(prefetchesOf(second), <({int first, int last})>[
+        next,
+      ], reason: "$name, a new reader");
+      expect(first.asks, hasLength(2), reason: "$name, the old reader");
+      for (final ask
+          in <
+            ({
+              String member,
+              DateTime? first,
+              DateTime? last,
+              SchedulerPhase phase,
+            })
+          >[...first.asks, ...second.asks]) {
+        expect(ask.member, "prefetch", reason: name);
+        expect(ask.phase, SchedulerPhase.postFrameCallbacks, reason: name);
+      }
+      await tester.pumpWidget(const SizedBox());
+      store.dispose();
+    }
   });
 
   testWidgets("VR5 a month board alone over a caching store shows its days' "
@@ -655,26 +908,7 @@ void main() {
     final source = HeldReads();
     final store = CachingCalendarStore<String>(dataSource: source);
     addTearDown(store.dispose);
-    await tester.pumpWidget(
-      app(
-        DayList<String>(
-          store: store,
-          weekdays: CalendarWeekdaySet.all,
-          format: CalendarHourLabelFormat.twentyFourHour,
-          hours: CalendarDayHours.allDay,
-          editable: false,
-          selectedDay: tuesday,
-          now: now,
-          onTopDay: (day) {},
-          onCreateRange: (details) async {},
-          onEdit: (id) {},
-          onDelete: (id) {},
-          loadingBuilder: (context, state) {
-            return const Text("loading");
-          },
-        ),
-      ),
-    );
+    await tester.pumpWidget(app(listOf(store, tuesday, now)));
     await answerAll(tester, source, entries);
     // Setup sanity: the list read the days, and nothing shows a range.
     expect(store.isRead(tuesday), isTrue);

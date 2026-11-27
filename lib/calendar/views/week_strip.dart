@@ -71,7 +71,7 @@ class WeekStrip<T> extends StatefulWidget {
     this.browseFrom,
   });
 
-  final CalendarStore<T> store;
+  final CalendarEntryReader<T> store;
 
   /// The selected day, on a weekday [weekdays] holds.
   final DateTime selectedDay;

@@ -131,10 +131,10 @@ Future<String> idOn(
   return items.singleWhere((item) => item["title"] == title)["id"]! as String;
 }
 
-/// The store the week grid shows.
+/// The calendar's store, which the week grid shows.
 CalendarStore<ItemPayload> storeOf(WidgetTester tester) {
   return tester
-      .widget<TimedGrid<ItemPayload>>(find.byType(TimedGrid<ItemPayload>))
+      .widget<CalendarView<ItemPayload>>(find.byType(CalendarView<ItemPayload>))
       .store;
 }
 

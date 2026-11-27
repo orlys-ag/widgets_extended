@@ -139,7 +139,8 @@ class CalendarCard<T> extends StatefulWidget {
   /// The card's fold, browse and month picker, and their motions.
   final CalendarCardController controller;
 
-  final CalendarStore<T> store;
+  /// What the card's days read their entries from: a store or any reader.
+  final CalendarEntryReader<T> store;
 
   /// The first day of the month the card shows.
   final DateTime month;

@@ -644,7 +644,7 @@ void main() {
       }
     }
     expect(offending, isEmpty);
-  }, skip: true);
+  });
 
   test("RC19 each class whose values a host gives checks them with a throw "
       "of an ArgumentError, and with no assert and no debug-only "

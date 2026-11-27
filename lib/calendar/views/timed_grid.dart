@@ -850,7 +850,7 @@ class TimedGrid<T> extends StatefulWidget {
          "A TimedGrid's minSlotHeight must be positive and finite.",
        );
 
-  final CalendarStore<T> store;
+  final CalendarEntryReader<T> store;
 
   /// Whether row 0 is a frozen header naming each column's day, whose
   /// corner over the gutter holds the pill counting the items on no shown
@@ -3871,9 +3871,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// The index of the timed entries the store shows on the days outside
   /// the tracks' range that the [CalendarDates.dayNumber]s [firstDay] to
-  /// [lastDay] cover, [_offRange], having read first the days among them it has
-  /// not: one [CalendarStore.entriesBetween] before the range and one after it
-  /// at most, each wholly outside the range.
+  /// [lastDay] cover, [_offRange], having read first the days among them
+  /// it has not: one [CalendarEntryReader.entriesBetween] before the range
+  /// and one after it at most, each wholly outside the range.
   GridOverlapIndex<T> _offRangeOver(int firstDay, int lastDay) {
     final tracks = _tracks;
     final index = _offRange ??= GridOverlapIndex<T>(

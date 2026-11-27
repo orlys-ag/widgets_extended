@@ -693,7 +693,7 @@ final class DayListFailed extends DayListRow {
 }
 
 /// The rows of [day]'s block for [entries], the entries the store answers
-/// on [day], sorted as [CalendarStore.entriesOn] sorts them, each row
+/// on [day], sorted as [CalendarEntryReader.entriesOn] sorts them, each row
 /// holding the entry's piece on [day] ([CalendarDates.pieceOn]), a timed
 /// one's from no earlier than the minute [day]'s clock starts at, so on a
 /// day whose clock skips its midnight a piece carried from the day before
@@ -796,7 +796,7 @@ List<DayListRow> dayListRowsOf<T>(
 /// [addButtonBuilder] draws and a screen reader hears as adding an item at
 /// its time, that reports [onCreateRange]; what [loadingBuilder] draws while
 /// the day is unread; and while a failed read leaves the day
-/// [CalendarStore.readFailed], unread or read and changed since, what
+/// [CalendarEntryReader.readFailed], unread or read and changed since, what
 /// [failureBuilder] draws in place of its rows, with a retry that reads the
 /// shown days again. Times read in [format].
 /// Unless [editable], the list has no dashed rows and hands the card
@@ -874,7 +874,7 @@ class DayList<T> extends StatefulWidget {
     this.failureBuilder,
   });
 
-  final CalendarStore<T> store;
+  final CalendarEntryReader<T> store;
 
   /// The days the list shows.
   final CalendarWeekdaySet weekdays;
@@ -903,7 +903,7 @@ class DayList<T> extends StatefulWidget {
   final CalendarEditPolicy<T>? editPolicy;
 
   /// The day the list brings to its top; a shown day, which the list reads
-  /// by its date on the store's clock ([CalendarStore.zone]), so a plain
+  /// by its date on the store's clock ([CalendarEntryReader.zone]), so a plain
   /// day and the store's day of the same date select the same day.
   final DateTime selectedDay;
 
@@ -1558,10 +1558,10 @@ class _DayListState<T> extends State<DayList<T>> {
   }
 
   /// The rows of [day]'s block as the store holds the day: a failed row
-  /// while its read failed ([CalendarStore.readFailed]), also a read day's
-  /// whose read again after a change failed, so the list shows no item the
-  /// source may no longer hold as current; otherwise its items' rows
-  /// ([dayListRowsOf]) once it is read, and until then a loading row.
+  /// while its read failed ([CalendarEntryReader.readFailed]), also a read
+  /// day's whose read again after a change failed, so the list shows no
+  /// item the source may no longer hold as current; otherwise its items'
+  /// rows ([dayListRowsOf]) once it is read, and until then a loading row.
   List<DayListRow> _blockRowsOf(DateTime day) {
     final store = widget.store;
     if (store.readFailed(day)) {
@@ -1861,10 +1861,11 @@ class _DayListState<T> extends State<DayList<T>> {
     );
   }
 
-  /// A failed row's retry: one [CalendarStore.retry] of the store's shown
-  /// range and [_mountedWeeks], which ends their days' failed marks, so
-  /// the rows of those days show loading at once, and reads their unread
-  /// days; with no row mounted, of the shown range alone.
+  /// A failed row's retry: one [CalendarEntryReader.retry] of
+  /// [_mountedWeeks], and of the range the reader shows where it shows
+  /// one, as a store does, which ends their days' failed marks, so the
+  /// rows of those days show loading at once, and reads their unread days;
+  /// with no row mounted, of the range the reader shows alone.
   void _retry() {
     final weeks = _mountedWeeks();
     if (weeks == null) {

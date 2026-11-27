@@ -11,9 +11,10 @@ The contract of the four views and their parts. The conventions every layer foll
 - **Imports**: of Flutter, `package:flutter/widgets.dart` and the libraries
   below it; the scheduling module, through
   `lib/scheduling/scheduling.dart`; and the board and sliver_tree modules.
-- **Reads.** A view reads entries only through a `CalendarStore`, every
-  colour, text style, motion and icon from `CalendarTheme`, and every word
-  from `CalendarLocalizations`. It builds entry content and the loading and
+- **Reads.** A view reads entries only through a `CalendarEntryReader`,
+  a store or a reader of its owner's own, every colour, text style, motion
+  and icon from `CalendarTheme`, and every word from
+  `CalendarLocalizations`. It builds entry content and the loading and
   failure states through the presentation layer's builders, and takes its
   edit limits from the scheduling module's `CalendarEditPolicy` and
   `CalendarEditRules`.

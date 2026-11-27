@@ -102,8 +102,9 @@ class CalendarDayPicker<T> extends StatefulWidget {
   /// [store]'s zone; null makes the picker take no pick.
   final ValueChanged<DateTime>? onChanged;
 
-  /// The store whose entries badge the days; null for no badges.
-  final CalendarStore<T>? store;
+  /// The store, or any reader, whose entries badge the days; null for no
+  /// badges.
+  final CalendarEntryReader<T>? store;
 
   /// The day the picker rings as today; null for the date the device's
   /// clock reads on [store]'s zone as the picker builds.
@@ -266,7 +267,7 @@ class _CalendarDayPickerState<T> extends State<CalendarDayPicker<T>>
   /// under.
   Map<DateTime, bool> _answers = <DateTime, bool>{};
 
-  CalendarStore<T> get _store {
+  CalendarEntryReader<T> get _store {
     return widget.store ?? _ownStore!;
   }
 

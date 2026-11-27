@@ -31,6 +31,7 @@ import 'package:widgets_extended/widgets_extended.dart';
 
 import '../../scheduling/zones.dart';
 import '../recording_errors.dart';
+import '../view_doubles.dart';
 
 final DateTime tuesday = DateTime(2026, 4, 21);
 final DateTime wednesday = DateTime(2026, 4, 22);
@@ -1382,6 +1383,56 @@ void main() {
       expect(cut, isEmpty);
       expect(outside, isEmpty);
     });
+  });
+  testWidgets("DT35 a reader that is no store, given as the store, badges "
+      "the days of the entries it keeps alone", (tester) async {
+    final semantics = tester.ensureSemantics();
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        for (final (id, day) in <(String, DateTime)>[
+          ("a", tuesday),
+          ("b", wednesday),
+        ])
+          CalendarEntry<String>(
+            id: id,
+            start: DateTime(day.year, day.month, day.day, 9),
+            end: DateTime(day.year, day.month, day.day, 10),
+            title: id,
+            color: const Color(0xFF3366CC),
+            payload: id,
+          ),
+      ],
+    );
+    addTearDown(store.dispose);
+    final reader = ForwardingReader<String>(
+      store,
+      keep: (entry) {
+        return entry.id == "a";
+      },
+    );
+    await tester.pumpWidget(
+      app(
+        CalendarDateTimePicker<String>(
+          day: tuesday,
+          minute: 600,
+          today: thursday,
+          onChanged: (day, minute) {},
+          store: reader,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.bySemanticsLabel(
+        const DefaultCalendarLocalizations().dayWithBadges(
+          tuesday,
+          const <String?>[null],
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(dayCell(wednesday), findsOneWidget);
+    semantics.dispose();
   });
 }
 

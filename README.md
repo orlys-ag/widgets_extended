@@ -578,13 +578,15 @@ reporting nothing. A day
 before `firstDay` or after `lastDay`, compared by date, or one your
 `isEnabled` refuses, draws disabled and takes no tap; the picker asks
 `isEnabled` of a day at most once for each predicate and date of `value`,
-so give a function not `==` to the last where its answers change. With a
-`store`, a day with entries carries a badge for each kind your `dayBadges`
-gives them, as in `CalendarView`, or the primary dot without `dayBadges`;
-with no store no day carries a badge. It shows all seven weekdays, its
-weeks starting on the column `firstColumn`, 0 for Monday to 6 for Sunday,
-opens no route, and draws in the theme a `CalendarView` would resolve
-there, with its words from `CalendarLocalizations`. A parent that asks its
+so give a function not `==` to the last where its answers change. Its
+`store` takes a store or any `CalendarEntryReader`, such as one of yours
+filtering a store. With one, a day with entries carries a badge for each
+kind your `dayBadges` gives them, as in `CalendarView`, or the primary dot
+without `dayBadges`; with no store no day carries a badge. It shows all
+seven weekdays, its weeks starting on the column `firstColumn`, 0 for
+Monday to 6 for Sunday, opens no route, and draws in the theme a
+`CalendarView` would resolve there, with its words from
+`CalendarLocalizations`. A parent that asks its
 intrinsic height, such as an `IntrinsicHeight`, gets the height it lays
 out at, folded, unfolded or with its month picker open, and as it moves
 between them.
@@ -604,7 +606,8 @@ naming `day`, its time view, which take turns. A control of two segments,
 Date and Time, at the end of each view's header switches between them, and
 nothing else does: a day picked keeps the date view. Its value is `day` and
 `minute`, a minute after midnight on the clock of `store`'s zone, or of the
-device without a store; a tap on a day, the selected one included, reports
+device without a store, which, as the day picker's, takes a store or any
+`CalendarEntryReader`; a tap on a day, the selected one included, reports
 that day with the minute through `onChanged`, or with the time of that day
 nearest it on
 `minuteStep` where the day does not offer the minute, and a pick of a time
