@@ -1444,6 +1444,15 @@ answers false.
 `isStale`, which `CalendarStore` now inherits from `CalendarEntryReader`,
 no longer compiles where its signature is no valid override of the
 reader's member, and otherwise overrides it.
+- A step of Week or Day that moves the range the calendar shows clears the
+block selection over a `MemoryCalendarStore` too, as it does over a
+`CachingCalendarStore`.
+- Agenda's failed row gives as `CalendarFailureState.error` its own day's
+read error (`loadErrorOf` of that day), which over a `CachingCalendarStore`
+is the error of the failed read that marked it, and over a host store that
+does not override `loadErrorOf` is null unless the store shows that day
+alone; it gave the shown range's `loadError`, null while that range was
+ready.
 
 ## 0.0.35
 

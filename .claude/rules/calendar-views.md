@@ -17,9 +17,12 @@ The contract of the four views and their parts. The conventions every layer foll
   failure states through the presentation layer's builders, and takes its
   edit limits from the scheduling module's `CalendarEditPolicy` and
   `CalendarEditRules`.
-- **Store calls.** A view calls a store method that can notify, such as
-  `prefetch`, `retry` or a write, from a gesture or after the frame, never
-  during layout.
+- **Reader calls.** A view calls a reader method that can notify, such as
+  `prefetch` or `retry`, from a gesture or after the frame, never during
+  build or layout. A view asks its reader for the days it shows only after
+  the frame; the timed grid and the month board ask after the frame that
+  brings them those days, a new reader or a new zone, and judge their
+  loading and failure states from those days alone.
 - **No UI of its own.** A view opens no route, dialog or form: it reports a
   tap on an entry, a create range, a move or resize request, and edit and
   delete requests through callbacks.
