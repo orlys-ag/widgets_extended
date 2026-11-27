@@ -191,13 +191,13 @@ class Harness {
             selectedDay: tuesday,
             now: now,
             onSelectDay: (day) {},
-            onOpenEntry: (id) {},
-            onCreate: (range) async {},
+            onEntryTap: (details) {},
+            onCreateRange: (range) async {},
             onZoom: zooms
-                ? (slot, day) {
+                ? (details) {
                     setState(() {
-                      minSlotHeight = slot;
-                      minDayWidth = day;
+                      minSlotHeight = details.minSlotHeight;
+                      minDayWidth = details.minDayWidth;
                     });
                   }
                 : null,

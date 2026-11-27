@@ -100,8 +100,8 @@ Widget month(
         now: now,
         onSelectDay: (day) {},
         onOpenDay: (day) {},
-        onCreateOnDay: null,
-        onOpenEntry: (id) {},
+        onCreateRange: (details) async {},
+        onEntryTap: (details) {},
       ),
     ),
   );
@@ -257,12 +257,13 @@ void main() {
               return MonthBoard<String>(
                 store: store,
                 grid: CalendarMonthGrid.of(tuesday),
+                layout: CalendarMonthLayout.showAll,
                 selectedDay: tuesday,
                 now: now,
                 onSelectDay: (day) {},
                 onOpenDay: (day) {},
-                onCreateOnDay: null,
-                onOpenEntry: (id) {},
+                onCreateRange: (details) async {},
+                onEntryTap: (details) {},
               );
             },
           ),

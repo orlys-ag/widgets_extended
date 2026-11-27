@@ -335,6 +335,9 @@ void main() {
         "CalendarMoveRequest",
       },
       "lib/calendar/views/time_picker.dart": <String>{"CalendarTimePicker"},
+      "lib/calendar/views/view_details.dart": <String>{
+        "CalendarEntryTapDetails",
+      },
     });
     expect(
       <List<String>?>[
@@ -393,6 +396,34 @@ void main() {
       }.difference(<String>{"hashCode"}),
       <String>{"range", "globalRect", "userChoseLength"},
     );
+  });
+
+  test("B6 CalendarEntryTapDetails is declared once, under the views, as "
+      "an immutable final class, which the barrel shows from that file", () {
+    final declaration = RegExp(
+      r"^((?:@\w+\s+)*)((?:(?:abstract|base|final|interface|sealed)\s+)*)"
+      r"class\s+CalendarEntryTapDetails\b",
+      multiLine: true,
+    );
+    final declaring = <String, RegExpMatch>{
+      for (final file in moduleFiles())
+        file: ?declaration.firstMatch(
+          withoutComments(File(file).readAsStringSync()),
+        ),
+    };
+    expect(declaring.keys, hasLength(1));
+    final path = declaring.keys.single;
+    expect(path, startsWith("lib/calendar/views/"));
+    final match = declaring[path]!;
+    expect(match.group(1)!.split(RegExp(r"\s+")), contains("@immutable"));
+    expect(match.group(2)!.trim(), "final");
+    expect(<String>[
+      for (final export in exportsOf(
+        File(barrelPath).readAsStringSync(),
+        barrelPath,
+      ))
+        if (export.path == path) ...export.shown!,
+    ], contains("CalendarEntryTapDetails"));
   });
 
   test("B4 each class the barrel shows of the module's own files says how "

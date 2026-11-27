@@ -23,6 +23,7 @@ import 'day_cell.dart';
 import 'entry_split.dart';
 import 'pinch_zoom.dart';
 import 'stale_days_ask.dart';
+import 'view_details.dart';
 
 /// The height of a day's number strip, which the weeks' lanes start
 /// below: the row axis's lane padding.
@@ -725,10 +726,11 @@ enum CalendarMonthLayout {
 /// weeks and the days, and each day of another month lies on the background
 /// colour.
 ///
-/// A tap on a chip reports [onOpenEntry], a tap anywhere else on a day
-/// [onOpenDay], and a long press on a day outside its chips
-/// [onCreateOnDay], or where there is none [onOpenDay] as a tap does; the
-/// last two give the board the keyboard. Its arrow keys report through
+/// A tap on a chip reports [onEntryTap], a tap anywhere else on a day
+/// [onOpenDay], and a long press on a day outside its chips, in edit mode
+/// with [takeRules] given, a create on that day through [onCreateRange],
+/// or otherwise [onOpenDay] as a tap does; the last two give the board
+/// the keyboard. Its arrow keys report through
 /// [onSelectDay] the shown day before or after the selected one on the
 /// screen, or the day a week before or after it, in whatever month that
 /// day lies: a day the grid shows is selected on the board and scrolled
@@ -772,7 +774,7 @@ class MonthBoard<T> extends StatefulWidget {
     super.key,
     required this.store,
     required this.grid,
-    this.layout = CalendarMonthLayout.showAll,
+    this.layout = CalendarMonthLayout.fitScreen,
     this.minDayWidth = minDayWidthLow,
     this.weekScale = 1.0,
     this.hours = CalendarDayHours.allDay,
@@ -781,8 +783,12 @@ class MonthBoard<T> extends StatefulWidget {
     required this.now,
     required this.onSelectDay,
     required this.onOpenDay,
-    required this.onCreateOnDay,
-    required this.onOpenEntry,
+    this.editable = false,
+    this.editPolicy,
+    this.takeRules,
+    required this.onCreateRange,
+    this.onCreateRefused,
+    this.onEntryTap,
     this.onZoom,
     this.chipBuilder,
     this.loadingBuilder,
@@ -800,7 +806,8 @@ class MonthBoard<T> extends StatefulWidget {
   final CalendarMonthGrid grid;
 
   /// Whether a week grows to hold its chips or keeps its share of the
-  /// height and hides the chips that do not fit.
+  /// height and hides the chips that do not fit; the latter,
+  /// [CalendarMonthLayout.fitScreen], by default.
   final CalendarMonthLayout layout;
 
   /// The least width of a day, in logical pixels.
@@ -830,35 +837,63 @@ class MonthBoard<T> extends StatefulWidget {
 
   /// A key moved the selection onto this day, which an arrow key can find
   /// in the month before or after [grid]'s: the owner then shows that
-  /// day's month, as [selectedDay] is a day of [grid]'s month.
+  /// day's month, as [selectedDay] is a day of [grid]'s month. A long
+  /// press in edit mode on a day of [grid], which creates on it, reports
+  /// that day too, before it creates.
   final ValueChanged<DateTime> onSelectDay;
 
   /// This day was tapped outside its chips.
   final ValueChanged<DateTime> onOpenDay;
 
-  /// This day was long-pressed outside its chips, its cell lying at the
-  /// rect, in global logical pixels, the function is given: it returns the
-  /// start of the range it reports and the future of that create, or null
-  /// where it reports none, as where the create is refused. The board
-  /// marks the day while that future runs, until it completes or fails,
-  /// unless a later long press's create has moved the mark to its own day;
-  /// a new zone of the store moves the mark to the day holding the start
-  /// on the new clock. A failure is left uncaught in the zone the long
-  /// press ran in. Null where a long press creates nothing, as out of edit
-  /// mode, and opens the day as a tap does.
-  final ({DateTime start, Future<void> done})? Function(
-    DateTime day,
-    Rect globalRect,
-  )?
-  onCreateOnDay;
+  /// Whether the board is in edit mode, where a long press on a day
+  /// creates on it by the rules [takeRules] gives, and a tap's
+  /// [CalendarEntryTapDetails.editable] can be true.
+  final bool editable;
 
-  /// The chip of this item, which is not pending, was tapped.
-  final ValueChanged<String> onOpenEntry;
+  /// The policy a tap judges an entry's editability by
+  /// ([CalendarEditPolicy.mayEdit]); null for an [UnrestrictedEditPolicy],
+  /// as the timed grid takes.
+  final CalendarEditPolicy<T>? editPolicy;
+
+  /// Gives the rules a long press in edit mode creates by, which the
+  /// board's owner makes of its policy, [hours] and slot length. The board
+  /// calls it once at each such press, so the press creates by the rules
+  /// of that moment, and a throw of it, such as the rules' [ArgumentError]
+  /// for hours off the grid of their slots, ends the press uncaught. With
+  /// none, a long press creates nothing and opens the day as a tap does.
+  final CalendarEditRules<T> Function()? takeRules;
+
+  /// Opens the create flow for a long press in edit mode on a day outside
+  /// its chips, and completes when it closes. The details give as their
+  /// range the slot the rules [takeRules] gives answer for that day on the
+  /// store's clock, over the entries the store shows on it
+  /// ([CalendarEditRules.createSlotOn]); as their rect the day's cell, in
+  /// global logical pixels; and false for whether the user chose the
+  /// length. The board marks the day while the future runs, until it
+  /// completes or fails, unless a later long press's create has moved the
+  /// mark to its own day; a new zone of the store moves the mark to the
+  /// day holding the slot's start on the new clock. A failure, whether the
+  /// function throws within the call or its future fails, is left uncaught
+  /// in the zone the long press ran in.
+  final Future<void> Function(CalendarCreateDetails details) onCreateRange;
+
+  /// Reports a long press in edit mode on a day for which the rules give
+  /// no slot, with the day on the store's clock; the board then marks
+  /// nothing.
+  final ValueChanged<DateTime>? onCreateRefused;
+
+  /// Reports a tap on a chip whose item is not pending: the entry as
+  /// [store] stores it ([CalendarEntryReader.storedEntry]), and whether it
+  /// is editable, [editable] and [editPolicy] letting it be edited
+  /// ([CalendarEditPolicy.mayEdit]). The board reports nothing where the
+  /// store holds no stored entry of the id. Null for a board whose taps on
+  /// chips report nothing, which then asks [editPolicy] nothing at a tap.
+  final ValueChanged<CalendarEntryTapDetails<T>>? onEntryTap;
 
   /// Reports the week scale and the least day width a pinch zooms to,
   /// which the board shows once [weekScale] and [minDayWidth] bring them;
   /// null for a board no pinch zooms.
-  final void Function(double weekScale, double minDayWidth)? onZoom;
+  final ValueChanged<CalendarMonthZoomDetails>? onZoom;
 
   /// Draws each bar's content inside the lane the board gives it, in its
   /// chip or card form; null for [defaultCalendarChipBuilder]. A new one,
@@ -1029,11 +1064,22 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     return CalendarDates.dateOfDayNumber(CalendarDates.dayNumber(day));
   }
 
-  /// Whether [MonthBoard.onCreateOnDay] is given, which the kept day cells
-  /// listen to, so a long press on them creates only while it is.
+  /// Whether a long press on a day creates ([_createsOn]), which the kept
+  /// day cells listen to, so a long press on them creates only while it
+  /// does.
   late final ValueNotifier<bool> _creates = ValueNotifier<bool>(
-    widget.onCreateOnDay != null,
+    _createsOn(widget),
   );
+
+  /// Whether a long press on a day of [widget] creates: in edit mode, with
+  /// [MonthBoard.takeRules] given.
+  static bool _createsOn<T>(MonthBoard<T> widget) {
+    return widget.editable && widget.takeRules != null;
+  }
+
+  /// The policy a tap asks where [MonthBoard.editPolicy] is null.
+  late final UnrestrictedEditPolicy<T> _unrestricted =
+      UnrestrictedEditPolicy<T>();
 
   /// The day whose long press reported the latest create, while that
   /// create's future runs, which the kept day cells listen to and mark: a
@@ -1281,7 +1327,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       widget.now.addListener(_handleNow);
       _today.value = _plainTwinOf(widget.now.value.today);
     }
-    _creates.value = widget.onCreateOnDay != null;
+    _creates.value = _createsOn(widget);
     _bannerHours.value = _bannerHoursOf(widget);
     if (widget.hours != oldWidget.hours) {
       _syncPending = true;
@@ -1616,24 +1662,56 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     widget.onOpenDay(day);
   }
 
-  /// Reports a create on [day] for a long press on its cell, or for a
-  /// screen reader's long press, with the platform's long-press feedback
+  /// Reports a create on [day], a plain day of the grid whose cell lies at
+  /// [globalRect], for a long press on its cell, or for a screen reader's
+  /// long press, with the platform's long-press feedback
   /// ([Feedback.forLongPress]) for both, as Material's `InkWell` gives.
+  /// It reports [day] through [MonthBoard.onSelectDay] where it is a day
+  /// of the grid's month, then takes the rules of the moment
+  /// ([MonthBoard.takeRules]) and asks them for the slot a create on the
+  /// day takes on the store's clock ([CalendarEditRules.createSlotOn]),
+  /// over the entries the store shows on it. Where they give none it
+  /// reports [MonthBoard.onCreateRefused] and marks nothing; otherwise it
+  /// reports the slot through [MonthBoard.onCreateRange] and marks [day]
+  /// while that create runs.
   void _createOnDay(DateTime day, Rect globalRect) {
-    final create = widget.onCreateOnDay;
-    if (create == null || _pinch.pinched.value) {
+    final takeRules = widget.takeRules;
+    if (!widget.editable || takeRules == null || _pinch.pinched.value) {
       return;
     }
     Feedback.forLongPress(context);
     _focusNode.requestFocus();
-    final created = create(day, globalRect);
-    if (created == null) {
+    if (widget.grid.contains(day)) {
+      widget.onSelectDay(day);
+    }
+    final store = widget.store;
+    final zoned = CalendarDates.dateOfDayNumber(
+      CalendarDates.dayNumber(day),
+      zone: store.zone,
+    );
+    final slot = takeRules().createSlotOn(
+      zoned,
+      widget.now.value,
+      entries: store.entriesOn(zoned).map((shown) {
+        return shown.entry;
+      }),
+    );
+    if (slot == null) {
+      widget.onCreateRefused?.call(zoned);
       return;
     }
+    final details = CalendarCreateDetails(
+      range: CalendarCreateRange(start: slot.start, end: slot.end),
+      globalRect: globalRect,
+      userChoseLength: false,
+    );
+    final done = Future<void>.sync(() {
+      return widget.onCreateRange(details);
+    });
     final count = ++_createCount;
     _createMark.value = day;
-    _createAt = created.start;
-    created.done.whenComplete(() {
+    _createAt = slot.start;
+    done.whenComplete(() {
       // After dispose the notifier takes no write.
       if (mounted && count == _createCount) {
         _createMark.value = null;
@@ -1642,10 +1720,28 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     });
   }
 
+  /// A tap on the chip of [id]: reports through [MonthBoard.onEntryTap]
+  /// the stored entry and whether it is editable, asking
+  /// [MonthBoard.editPolicy], or with none [_unrestricted], at
+  /// [MonthBoard.now]; reports and asks nothing while the board is
+  /// pinched, or where there is no [MonthBoard.onEntryTap] or no stored
+  /// entry of [id].
   void _openEntry(String id) {
-    if (!_pinch.pinched.value) {
-      widget.onOpenEntry(id);
+    final onEntryTap = widget.onEntryTap;
+    if (_pinch.pinched.value || onEntryTap == null) {
+      return;
     }
+    final entry = widget.store.storedEntry(id);
+    if (entry == null) {
+      return;
+    }
+    final policy = widget.editPolicy ?? _unrestricted;
+    onEntryTap(
+      CalendarEntryTapDetails<T>(
+        entry: entry,
+        editable: widget.editable && policy.mayEdit(entry, widget.now.value),
+      ),
+    );
   }
 
   bool _startPinch(PinchAxis axis, Offset focal) {
@@ -1679,7 +1775,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       return;
     }
     _pinchFocal = area.globalToLocal(update.focal);
-    onZoom(weekScale, day);
+    onZoom(CalendarMonthZoomDetails(weekScale: weekScale, minDayWidth: day));
   }
 
   void _endPinch() {

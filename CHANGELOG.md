@@ -1465,6 +1465,12 @@ and where that read fails too, the shown range fails.
 `CalendarEntryReader`, a store or a reader of the host's own, so a
 `store:` argument still compiles; code that reads a picker's `store` as a
 `CalendarStore` no longer compiles and needs the store itself.
+- `CalendarEntryTapDetails` is declared in
+`package:widgets_extended/calendar/views/view_details.dart`, beside the
+other details the views report, and the calendar barrel shows it from
+there, so code that names it through a barrel still compiles; code that
+imports it from `calendar/composition/calendar_view.dart` imports
+`calendar/views/view_details.dart` instead.
 
 ## 0.0.35
 

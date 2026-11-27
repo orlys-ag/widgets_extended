@@ -45,6 +45,7 @@ import 'package:widgets_extended/calendar/views/month_picker.dart';
 import 'package:widgets_extended/calendar/views/month_strip.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
+import 'package:widgets_extended/calendar/views/view_details.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 
 import '../../scheduling/dst_days.dart';
@@ -4556,11 +4557,9 @@ void main() {
             read,
       ];
       if (view == CalendarViewKind.day) {
-        expect(
-          spansOf(holdingLeft),
-          <String>[spanOf(left)],
-          reason: "$label: since the step",
-        );
+        expect(spansOf(holdingLeft), <String>[
+          spanOf(left),
+        ], reason: "$label: since the step");
       } else {
         expect(
           spansOf(holdingLeft),

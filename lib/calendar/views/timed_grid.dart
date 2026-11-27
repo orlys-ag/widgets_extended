@@ -28,6 +28,7 @@ import 'move_request.dart';
 import 'pinch_zoom.dart';
 import 'stale_days_ask.dart';
 import 'timed_grid_layout.dart';
+import 'view_details.dart';
 
 /// The least height of the day header, which a text too tall for it grows
 /// ([_TimedGridState._measureHeader]).
@@ -616,7 +617,7 @@ CalendarCreateRange? _createRangeOf(
 /// from Monday 22:00 to Tuesday 02:00 shows one block at the end of
 /// Monday and one at the start of Tuesday. Rows follow the wall clock: on
 /// a day of 23 or 25 hours every column still has the same rows. A tap on
-/// a block that is not pending reports [onOpenEntry] with its entry's id; a
+/// a block that is not pending reports [onEntryTap] with its stored entry; a
 /// tap on a day header reports [onSelectDay]. Each block's content is what
 /// [blockBuilder] draws, told on a grid of one day column that the block
 /// is detailed, and which of its ends the hours cut or continue on
@@ -652,7 +653,7 @@ CalendarCreateRange? _createRangeOf(
 /// runs along the margin's bottom edge, where the first slot's line lies
 /// with the hours at their top. Each bar's content is what [chipBuilder]
 /// draws, told which of its ends continue past the shown days. A tap on a
-/// bar that is not pending reports [onOpenEntry] with its entry's id, in
+/// bar that is not pending reports [onEntryTap] with its stored entry, in
 /// edit mode and out of it.
 ///
 /// In edit mode, which [editable] turns on, a long press on any block of
@@ -734,7 +735,7 @@ CalendarCreateRange? _createRangeOf(
 /// frozen against the last slot does; the hour gutter runs on beside both. An
 /// entry on no shown day has no block either, and a pill in the day header's
 /// corner counts it. In edit mode empty body cells take a create gesture,
-/// reported through [onCreate], which a press starts once held for the
+/// reported through [onCreateRange], which a press starts once held for the
 /// long-press timeout ([kLongPressTimeout]), with the platform's long-press
 /// feedback ([Feedback.forLongPress]), or, with a mouse, a stylus or a
 /// trackpad, once moved more than 4 logical pixels, whichever comes first; a
@@ -746,7 +747,8 @@ CalendarCreateRange? _createRangeOf(
 /// entry [CalendarEditPolicy.mayOverlap] does not let a create of the slot
 /// share takes no create gesture, and a press on a block starts none,
 /// whatever the policy answers about it. The range picked stays marked, as a
-/// range being dragged is, until the create flow [onCreate] opens closes.
+/// range being dragged is, until the create flow [onCreateRange] opens
+/// closes.
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than [minDayWidth] and [minSlotHeight]; past those, it scrolls.
@@ -817,8 +819,8 @@ class TimedGrid<T> extends StatefulWidget {
     required this.selectedDay,
     required this.now,
     required this.onSelectDay,
-    required this.onOpenEntry,
-    required this.onCreate,
+    this.onEntryTap,
+    required this.onCreateRange,
     required this.onMoveRequest,
     this.editable = false,
     this.editPolicy,
@@ -878,8 +880,14 @@ class TimedGrid<T> extends StatefulWidget {
 
   final ValueChanged<DateTime> onSelectDay;
 
-  /// Reports a tap on a block that is not pending, with its entry's id.
-  final ValueChanged<String> onOpenEntry;
+  /// Reports a tap on a block or a bar that is not pending: the entry as
+  /// [store] stores it ([CalendarEntryReader.storedEntry]), and whether it
+  /// is editable, [editable] and [editPolicy] letting it be edited
+  /// ([CalendarEditPolicy.mayEdit]). The grid reports nothing where the
+  /// store holds no stored entry of the id. Null for a grid whose taps on
+  /// entries report nothing, which then asks [editPolicy] nothing at a
+  /// tap.
+  final ValueChanged<CalendarEntryTapDetails<T>>? onEntryTap;
 
   /// Opens the create flow for a create gesture on empty cells, and
   /// completes when it closes: the details give the range the gesture
@@ -893,7 +901,7 @@ class TimedGrid<T> extends StatefulWidget {
   /// let go. A failure of the function, whether it throws within the call
   /// or its future fails, is not caught: a host that handles one passes a
   /// function that does.
-  final Future<void> Function(CalendarCreateDetails details) onCreate;
+  final Future<void> Function(CalendarCreateDetails details) onCreateRange;
 
   /// Takes each move or resize a gesture lands, and completes once the
   /// owner has written it or let it go. Until then the grid shows the
@@ -994,7 +1002,7 @@ class TimedGrid<T> extends StatefulWidget {
   /// Reports the least slot height and day width a pinch zooms to, which
   /// the grid shows once its owner builds it with them as [minSlotHeight]
   /// and [minDayWidth]; null for a grid no pinch zooms.
-  final void Function(double minSlotHeight, double minDayWidth)? onZoom;
+  final ValueChanged<CalendarGridZoomDetails>? onZoom;
 
   /// The days, both inclusive, that the grid asks [store] for and judges
   /// its loading and failure states by, which hold the grid's days; null
@@ -2020,9 +2028,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     if (storeChanged || rangeChanged) {
       _noteLoad();
     }
-    if (storeChanged ||
-        loadDaysChanged ||
-        widget.store.zone != _askedZone) {
+    if (storeChanged || loadDaysChanged || widget.store.zone != _askedZone) {
       _scheduleAsk();
     }
     if (storeChanged || tracksChanged || rangeChanged) {
@@ -2977,7 +2983,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     _pinchFocal = box.globalToLocal(update.focal);
     _forgetPinchFocalAfterFrame();
-    onZoom(slot, day);
+    onZoom(CalendarGridZoomDetails(minSlotHeight: slot, minDayWidth: day));
   }
 
   /// Forgets [_pinchFocal] and [_rowFocal] once the next frame is done,
@@ -5315,7 +5321,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _besideCursor.value = cursor;
   }
 
-  /// Reports [range] through [TimedGrid.onCreate], marking until the
+  /// Reports [range] through [TimedGrid.onCreateRange], marking until the
   /// create flow closes the range from the slot of [anchor] to that of
   /// [focus], or for a range across the strip, [strip], the strip cells of
   /// its days, on whichever days the grid shows meanwhile. The report says
@@ -5352,7 +5358,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     });
     _updateStripMark();
     Future<void>.sync(() {
-      return widget.onCreate(details);
+      return widget.onCreateRange(details);
     }).whenComplete(() {
       if (mounted && create == _creates) {
         setState(() {
@@ -6223,6 +6229,29 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
   }
 
+  /// A tap on the block or the bar of [id]: reports through
+  /// [TimedGrid.onEntryTap] the stored entry and whether it is editable,
+  /// asking [TimedGrid.editPolicy], or with none [_unrestricted], at
+  /// [TimedGrid.now]; reports and asks nothing where there is no
+  /// [TimedGrid.onEntryTap] or no stored entry of [id].
+  void _openEntry(String id) {
+    final onEntryTap = widget.onEntryTap;
+    if (onEntryTap == null) {
+      return;
+    }
+    final entry = widget.store.storedEntry(id);
+    if (entry == null) {
+      return;
+    }
+    final policy = widget.editPolicy ?? _unrestricted;
+    onEntryTap(
+      CalendarEntryTapDetails<T>(
+        entry: entry,
+        editable: widget.editable && policy.mayEdit(entry, widget.now.value),
+      ),
+    );
+  }
+
   Widget _buildBar(GridBar<T> bar) {
     final entry = bar.shown;
     final days = _tracks.columnCount > 1;
@@ -6246,7 +6275,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       onOpen: entry.pending
           ? null
           : () {
-              widget.onOpenEntry(entry.id);
+              _openEntry(entry.id);
             },
     );
   }
@@ -6347,7 +6376,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       onOpen: entry.pending
           ? null
           : () {
-              widget.onOpenEntry(entry.id);
+              _openEntry(entry.id);
             },
     );
   }

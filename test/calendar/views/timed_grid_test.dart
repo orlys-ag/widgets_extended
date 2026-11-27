@@ -605,8 +605,8 @@ void main() {
           selectedDay: day,
           now: now,
           onSelectDay: (day) {},
-          onOpenEntry: (id) {},
-          onCreate: (range) async {},
+          onEntryTap: (details) {},
+          onCreateRange: (range) async {},
           blockBuilder: (context, entry, details) {
             calls.add(entry);
             return Text(entry.entry.payload);
@@ -656,8 +656,8 @@ void main() {
         selectedDay: tuesday,
         now: now,
         onSelectDay: (day) {},
-        onOpenEntry: (id) {},
-        onCreate: (range) async {},
+        onEntryTap: (details) {},
+        onCreateRange: (range) async {},
         weekdays: CalendarWeekdaySet.workweek,
         hours: CalendarDayHours(8 * 60, 18 * 60),
         hourLabelFormat: format,
@@ -752,8 +752,8 @@ void main() {
         selectedDay: tuesday,
         now: now,
         onSelectDay: (day) {},
-        onOpenEntry: (id) {},
-        onCreate: (range) async {},
+        onEntryTap: (details) {},
+        onCreateRange: (range) async {},
         editable: editable,
         editPolicy: lockPast
             ? HistoryLockPolicy<String>(lockEarlierToday: lockEarlierToday)
@@ -914,8 +914,8 @@ void main() {
         selectedDay: tuesday,
         now: now,
         onSelectDay: (day) {},
-        onOpenEntry: (id) {},
-        onCreate: (range) async {},
+        onEntryTap: (details) {},
+        onCreateRange: (range) async {},
       ),
     );
     await tester.pumpAndSettle();
@@ -947,8 +947,8 @@ void main() {
           selectedDay: tuesday,
           now: now,
           onSelectDay: (day) {},
-          onOpenEntry: (id) {},
-          onCreate: (range) async {},
+          onEntryTap: (details) {},
+          onCreateRange: (range) async {},
           editable: true,
         ),
       ),
@@ -967,8 +967,8 @@ void main() {
           selectedDay: tuesday,
           now: now,
           onSelectDay: (day) {},
-          onOpenEntry: (id) {},
-          onCreate: (range) async {},
+          onEntryTap: (details) {},
+          onCreateRange: (range) async {},
           editable: true,
           editPolicy: const HistoryLockPolicy<String>(),
         ),
@@ -997,8 +997,8 @@ void main() {
         selectedDay: tuesday,
         now: now,
         onSelectDay: (day) {},
-        onOpenEntry: (id) {},
-        onCreate: (range) async {},
+        onEntryTap: (details) {},
+        onCreateRange: (range) async {},
         minDayWidth: minDayWidth,
         minSlotHeight: minSlotHeight,
       );
@@ -1030,8 +1030,8 @@ void main() {
         selectedDay: tuesday,
         now: now,
         onSelectDay: (day) {},
-        onOpenEntry: (id) {},
-        onCreate: (range) async {},
+        onEntryTap: (details) {},
+        onCreateRange: (range) async {},
         slotMinutes: slotMinutes,
       );
     }
@@ -1097,8 +1097,8 @@ void main() {
             selectedDay: tuesday,
             now: now,
             onSelectDay: (day) {},
-            onOpenEntry: (id) {},
-            onCreate: (range) async {},
+            onEntryTap: (details) {},
+            onCreateRange: (range) async {},
             editable: true,
           ),
         ),
@@ -1156,8 +1156,8 @@ void main() {
         selectedDay: tuesday,
         now: now,
         onSelectDay: (day) {},
-        onOpenEntry: (id) {},
-        onCreate: (range) async {},
+        onEntryTap: (details) {},
+        onCreateRange: (range) async {},
         minSlotHeight: minSlotHeight,
         loadRange: range,
         loadingBuilder: loadingText,
@@ -1245,8 +1245,8 @@ void main() {
         selectedDay: first,
         now: now,
         onSelectDay: (day) {},
-        onOpenEntry: (id) {},
-        onCreate: (range) async {},
+        onEntryTap: (details) {},
+        onCreateRange: (range) async {},
         editable: true,
         loadRange: (first: first, last: CalendarDates.addDays(first, 6)),
       );
@@ -1342,8 +1342,8 @@ void main() {
                       selectedDay: tuesday,
                       now: now,
                       onSelectDay: (day) {},
-                      onOpenEntry: (id) {},
-                      onCreate: (range) async {},
+                      onEntryTap: (details) {},
+                      onCreateRange: (range) async {},
                       editable: true,
                       showsDayHeader: dayCount > 1,
                     ),
@@ -1428,8 +1428,8 @@ void main() {
         selectedDay: tuesday,
         now: now,
         onSelectDay: (day) {},
-        onOpenEntry: (id) {},
-        onCreate: (range) async {},
+        onEntryTap: (details) {},
+        onCreateRange: (range) async {},
         editable: true,
         editPolicy: const HistoryLockPolicy<String>(lockEarlierToday: true),
         hours: CalendarDayHours(0, 16 * 60),
@@ -1556,8 +1556,8 @@ void main() {
           selectedDay: tuesday,
           now: now,
           onSelectDay: (day) {},
-          onOpenEntry: (id) {},
-          onCreate: (range) async {},
+          onEntryTap: (details) {},
+          onCreateRange: (range) async {},
           hours: CalendarDayHours(8 * 60, 18 * 60),
           hourLabelFormat: format,
           blockBuilder: recordBlock,
@@ -1613,8 +1613,8 @@ void main() {
         selectedDay: tuesday,
         now: now,
         onSelectDay: (day) {},
-        onOpenEntry: (id) {},
-        onCreate: (range) async {},
+        onEntryTap: (details) {},
+        onCreateRange: (range) async {},
         loadRange: week,
         loadingBuilder: loadingText,
         failureBuilder: (context, state) {
@@ -1686,8 +1686,8 @@ void main() {
           selectedDay: first,
           now: now,
           onSelectDay: (day) {},
-          onOpenEntry: (id) {},
-          onCreate: (details) async {
+          onEntryTap: (details) {},
+          onCreateRange: (details) async {
             creates.add(details.range);
           },
           onMoveRequest: (request) async {
@@ -1828,8 +1828,8 @@ void main() {
           selectedDay: first,
           now: now,
           onSelectDay: (day) {},
-          onOpenEntry: (id) {},
-          onCreate: (details) async {},
+          onEntryTap: (details) {},
+          onCreateRange: (details) async {},
           onMoveRequest: (request) {
             moves.add(request);
             return answer.future;
@@ -1929,8 +1929,8 @@ void main() {
         selectedDay: first,
         now: now,
         onSelectDay: (day) {},
-        onOpenEntry: (id) {},
-        onCreate: (details) async {},
+        onEntryTap: (details) {},
+        onCreateRange: (details) async {},
       ),
     );
     await tester.pumpAndSettle();
@@ -2006,8 +2006,8 @@ void main() {
         selectedDay: nov6,
         now: now,
         onSelectDay: (day) {},
-        onOpenEntry: (id) {},
-        onCreate: (details) async {
+        onEntryTap: (details) {},
+        onCreateRange: (details) async {
           creates.add(details.range);
         },
         editPolicy: const NoOverlapsPolicy<String>(),

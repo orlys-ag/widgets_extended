@@ -69,8 +69,7 @@ export '../scheduling/scheduling.dart'
         NoOverlapsPolicy,
         UnrestrictedEditPolicy,
         compareCalendarEntries;
-export 'composition/calendar_date_time_picker.dart'
-    show CalendarDateTimePicker;
+export 'composition/calendar_date_time_picker.dart' show CalendarDateTimePicker;
 export 'composition/calendar_day_picker.dart'
     show CalendarDayPicker, CalendarDayPickerView;
 export 'composition/calendar_header.dart'
@@ -81,8 +80,7 @@ export 'composition/calendar_header.dart'
         CalendarViewKind,
         defaultCalendarHeaderBuilder;
 export 'composition/calendar_theme_extension.dart' show CalendarThemeExtension;
-export 'composition/calendar_view.dart'
-    show CalendarController, CalendarEntryTapDetails, CalendarView;
+export 'composition/calendar_view.dart' show CalendarController, CalendarView;
 export 'composition/calendar_zone_panel.dart'
     show CalendarZoneController, CalendarZonePanel;
 export 'presentation/calendar_activity_indicator.dart'
@@ -120,3 +118,4 @@ export 'views/create_details.dart' show CalendarCreateDetails;
 export 'views/month_board.dart' show CalendarMonthLayout;
 export 'views/move_request.dart' show CalendarMoveKind, CalendarMoveRequest;
 export 'views/time_picker.dart' show CalendarTimePicker;
+export 'views/view_details.dart' show CalendarEntryTapDetails;

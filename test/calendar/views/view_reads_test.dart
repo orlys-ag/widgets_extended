@@ -159,8 +159,8 @@ MonthBoard<String> boardOf(
     now: now,
     onSelectDay: (day) {},
     onOpenDay: (day) {},
-    onCreateOnDay: null,
-    onOpenEntry: (id) {},
+    onCreateRange: (details) async {},
+    onEntryTap: (details) {},
     loadingBuilder: (context, state) {
       return Text("$name loading");
     },
@@ -191,8 +191,8 @@ TimedGrid<String> gridOf(
     selectedDay: firstDay,
     now: now,
     onSelectDay: (day) {},
-    onOpenEntry: (id) {},
-    onCreate: (details) async {},
+    onEntryTap: (details) {},
+    onCreateRange: (details) async {},
     loadingBuilder: (context, state) {
       return Text("$name loading");
     },
@@ -213,15 +213,15 @@ DayList<String> listOf(
   return DayList<String>(
     store: store,
     weekdays: CalendarWeekdaySet.all,
-    format: CalendarHourLabelFormat.twentyFourHour,
+    hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
     hours: CalendarDayHours.allDay,
     editable: false,
     selectedDay: day,
     now: now,
     onTopDay: (day) {},
     onCreateRange: (details) async {},
-    onEdit: (id) {},
-    onDelete: (id) {},
+    onEditRequest: (details) {},
+    onDeleteRequest: (details) {},
     loadingBuilder: (context, state) {
       return const Text("loading");
     },

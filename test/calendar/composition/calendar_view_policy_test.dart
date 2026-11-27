@@ -34,6 +34,7 @@ import 'package:widgets_extended/calendar/views/month_board.dart';
 import 'package:widgets_extended/calendar/views/move_request.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
+import 'package:widgets_extended/calendar/views/view_details.dart';
 
 import '../../scheduling/dst_days.dart';
 import '../edit_policies.dart';

@@ -223,15 +223,15 @@ void main() {
         home: DayList<String>(
           store: store,
           weekdays: CalendarWeekdaySet.all,
-          format: CalendarHourLabelFormat.twentyFourHour,
+          hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
           hours: CalendarDayHours.allDay,
           editable: false,
           selectedDay: day,
           now: now,
           onTopDay: (day) {},
           onCreateRange: (range) async {},
-          onEdit: (id) {},
-          onDelete: (id) {},
+          onEditRequest: (details) {},
+          onDeleteRequest: (details) {},
           cardBuilder: (context, entry, details) {
             calls.add(entry);
             return Text(entry.entry.payload);
@@ -275,15 +275,15 @@ void main() {
         home: DayList<String>(
           store: store,
           weekdays: CalendarWeekdaySet.all,
-          format: CalendarHourLabelFormat.twentyFourHour,
+          hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
           hours: CalendarDayHours.allDay,
           editable: false,
           selectedDay: day,
           now: now,
           onTopDay: (day) {},
           onCreateRange: (range) async {},
-          onEdit: (id) {},
-          onDelete: (id) {},
+          onEditRequest: (details) {},
+          onDeleteRequest: (details) {},
           loadingBuilder: (context, state) {
             return const SizedBox(height: 24.0);
           },
@@ -353,15 +353,15 @@ void main() {
         home: DayList<String>(
           store: store,
           weekdays: CalendarWeekdaySet.all,
-          format: CalendarHourLabelFormat.twentyFourHour,
+          hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
           hours: CalendarDayHours.allDay,
           editable: false,
           selectedDay: day,
           now: now,
           onTopDay: (day) {},
           onCreateRange: (range) async {},
-          onEdit: (id) {},
-          onDelete: (id) {},
+          onEditRequest: (details) {},
+          onDeleteRequest: (details) {},
           loadingBuilder: (context, state) {
             return const SizedBox(height: 24.0);
           },
@@ -438,15 +438,15 @@ void main() {
         home: DayList<String>(
           store: store,
           weekdays: CalendarWeekdaySet.all,
-          format: CalendarHourLabelFormat.twentyFourHour,
+          hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
           hours: CalendarDayHours.allDay,
           editable: false,
           selectedDay: day,
           now: now,
           onTopDay: (day) {},
           onCreateRange: (range) async {},
-          onEdit: (id) {},
-          onDelete: (id) {},
+          onEditRequest: (details) {},
+          onDeleteRequest: (details) {},
           cardBuilder: (context, entry, details) {
             return Text(entry.entry.payload);
           },
@@ -526,7 +526,7 @@ void main() {
         home: DayList<String>(
           store: store,
           weekdays: CalendarWeekdaySet.all,
-          format: CalendarHourLabelFormat.twentyFourHour,
+          hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
           hours: CalendarDayHours.allDay,
           slotMinutes: slotMinutes,
           editable: false,
@@ -534,8 +534,8 @@ void main() {
           now: now,
           onTopDay: (day) {},
           onCreateRange: (range) async {},
-          onEdit: (id) {},
-          onDelete: (id) {},
+          onEditRequest: (details) {},
+          onDeleteRequest: (details) {},
         ),
       );
     }
@@ -571,7 +571,7 @@ void main() {
           home: DayList<String>(
             store: store,
             weekdays: CalendarWeekdaySet.all,
-            format: CalendarHourLabelFormat.twentyFourHour,
+            hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
             hours: CalendarDayHours.allDay,
             editable: true,
             selectedDay: dayOfNumberIn(CalendarDates.dayNumber(monday), ahead),
@@ -581,8 +581,8 @@ void main() {
               creates.add(details.range);
               return done.future;
             },
-            onEdit: (id) {},
-            onDelete: (id) {},
+            onEditRequest: (details) {},
+            onDeleteRequest: (details) {},
             addButtonBuilder: (context, details) {
               return GestureDetector(
                 onTap: details.onPressed,
@@ -671,15 +671,15 @@ void main() {
           child: DayList<String>(
             store: store,
             weekdays: CalendarWeekdaySet.all,
-            format: CalendarHourLabelFormat.twentyFourHour,
+            hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
             hours: CalendarDayHours.allDay,
             editable: false,
             selectedDay: dayOfNumberIn(CalendarDates.dayNumber(tuesday), six),
             now: now,
             onTopDay: topDays.add,
             onCreateRange: (details) async {},
-            onEdit: (id) {},
-            onDelete: (id) {},
+            onEditRequest: (details) {},
+            onDeleteRequest: (details) {},
           ),
         ),
       ),
@@ -731,7 +731,7 @@ void main() {
           home: DayList<String>(
             store: store,
             weekdays: CalendarWeekdaySet.all,
-            format: CalendarHourLabelFormat.twentyFourHour,
+            hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
             hours: CalendarDayHours.allDay,
             editable: false,
             selectedDay: dayOfNumberIn(
@@ -741,8 +741,8 @@ void main() {
             now: now,
             onTopDay: (day) {},
             onCreateRange: (details) async {},
-            onEdit: (id) {},
-            onDelete: (id) {},
+            onEditRequest: (details) {},
+            onDeleteRequest: (details) {},
           ),
         ),
       );
@@ -820,15 +820,15 @@ void main() {
         home: DayList<String>(
           store: store,
           weekdays: CalendarWeekdaySet.all,
-          format: CalendarHourLabelFormat.twentyFourHour,
+          hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
           hours: CalendarDayHours.allDay,
           editable: false,
           selectedDay: dayOfNumberIn(CalendarDates.dayNumber(tuesday), behind),
           now: now,
           onTopDay: (day) {},
           onCreateRange: (details) async {},
-          onEdit: (id) {},
-          onDelete: (id) {},
+          onEditRequest: (details) {},
+          onDeleteRequest: (details) {},
         ),
       ),
     );
@@ -905,15 +905,15 @@ void main() {
           home: DayList<String>(
             store: store,
             weekdays: weekdays,
-            format: CalendarHourLabelFormat.twentyFourHour,
+            hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
             hours: CalendarDayHours.allDay,
             editable: false,
             selectedDay: selected,
             now: now,
             onTopDay: topDays.add,
             onCreateRange: (details) async {},
-            onEdit: (id) {},
-            onDelete: (id) {},
+            onEditRequest: (details) {},
+            onDeleteRequest: (details) {},
           ),
         ),
       );

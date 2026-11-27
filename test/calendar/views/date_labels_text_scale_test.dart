@@ -259,8 +259,8 @@ Widget week() {
     selectedDay: tuesday,
     now: now,
     onSelectDay: (day) {},
-    onOpenEntry: (id) {},
-    onCreate: (details) async {},
+    onEntryTap: (details) {},
+    onCreateRange: (details) async {},
   );
 }
 
@@ -826,12 +826,13 @@ void main() {
       return MonthBoard<String>(
         store: store,
         grid: CalendarMonthGrid.of(selected),
+        layout: CalendarMonthLayout.showAll,
         selectedDay: selected,
         now: now,
         onSelectDay: (day) {},
         onOpenDay: (day) {},
-        onCreateOnDay: null,
-        onOpenEntry: (id) {},
+        onCreateRange: (details) async {},
+        onEntryTap: (details) {},
       );
     }
 

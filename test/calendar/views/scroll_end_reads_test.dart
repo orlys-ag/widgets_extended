@@ -162,15 +162,15 @@ void main() {
     final view = DayList<String>(
       store: store,
       weekdays: CalendarWeekdaySet.all,
-      format: CalendarHourLabelFormat.twentyFourHour,
+      hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
       hours: CalendarDayHours.allDay,
       editable: false,
       selectedDay: tuesday,
       now: now,
       onTopDay: (day) {},
       onCreateRange: (range) async {},
-      onEdit: (id) {},
-      onDelete: (id) {},
+      onEditRequest: (details) {},
+      onDeleteRequest: (details) {},
     );
     await pumpSized(tester, view, width: width, height: height);
 
@@ -274,15 +274,15 @@ void main() {
         return DayList<String>(
           store: store,
           weekdays: CalendarWeekdaySet.all,
-          format: CalendarHourLabelFormat.twentyFourHour,
+          hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
           hours: CalendarDayHours.allDay,
           editable: false,
           selectedDay: tuesday,
           now: now,
           onTopDay: (day) {},
           onCreateRange: (range) async {},
-          onEdit: (id) {},
-          onDelete: (id) {},
+          onEditRequest: (details) {},
+          onDeleteRequest: (details) {},
           loadingBuilder: (context, state) {
             return const SizedBox(height: 24.0);
           },

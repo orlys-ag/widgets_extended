@@ -167,8 +167,8 @@ Future<void> pumpGrid(
             selectedDay: today,
             now: now,
             onSelectDay: (day) {},
-            onOpenEntry: (id) {},
-            onCreate: (range) async {},
+            onEntryTap: (details) {},
+            onCreateRange: (range) async {},
             // Writes each move to the store, catching the write's failure,
             // as the calendar writes one its host takes no move for.
             onMoveRequest: (request) {

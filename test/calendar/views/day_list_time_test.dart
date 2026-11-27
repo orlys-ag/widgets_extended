@@ -124,7 +124,7 @@ Future<ValueNotifier<CalendarNow>> pumpList(
         key: UniqueKey(),
         store: store,
         weekdays: CalendarWeekdaySet.all,
-        format: CalendarHourLabelFormat.twentyFourHour,
+        hourLabelFormat: CalendarHourLabelFormat.twentyFourHour,
         hours: CalendarDayHours.allDay,
         slotMinutes: slotMinutes,
         editable: editable,
@@ -135,8 +135,8 @@ Future<ValueNotifier<CalendarNow>> pumpList(
         onCreateRange: (details) async {
           creates?.add(details.range);
         },
-        onEdit: (id) {},
-        onDelete: (id) {},
+        onEditRequest: (details) {},
+        onDeleteRequest: (details) {},
         cardBuilder: (context, entry, details) {
           if (cards != null) {
             (cards[entry.id] ??= <CalendarCardDetails>[]).add(details);

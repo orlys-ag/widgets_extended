@@ -693,6 +693,7 @@ class Harness {
   }
 
   TimedGrid<String> grid() {
+    final onZoom = this.onZoom;
     return TimedGrid<String>(
       key: ObjectKey(this),
       store: store,
@@ -701,14 +702,20 @@ class Harness {
       selectedDay: first,
       now: givenNow ?? now,
       onSelectDay: (day) {},
-      onOpenEntry: opened.add,
-      onCreate:
+      onEntryTap: (details) {
+        opened.add(details.entry.id!);
+      },
+      onCreateRange:
           onCreate ??
           (details) async {
             creates.add(details.range);
           },
       onMoveRequest: onMoveRequest ?? writeMoveTo(store),
-      onZoom: onZoom,
+      onZoom: onZoom == null
+          ? null
+          : (details) {
+              onZoom(details.minSlotHeight, details.minDayWidth);
+            },
       editable: editable,
       editPolicy: policy,
       hours: hours,
@@ -1214,7 +1221,7 @@ Future<void> dropMeetInZone(
   await tester.pump(const Duration(seconds: 1));
 }
 
-/// What [TimedGrid.onCreate] throws within the call in CR1.
+/// What [TimedGrid.onCreateRange] throws within the call in CR1.
 class CreateFailure implements Exception {}
 
 /// What a [Brittle] payload's `==` throws.
@@ -1290,8 +1297,8 @@ Future<List<CalendarMoveRequest<Brittle>>> pumpBrittleWeek(
         selectedDay: monday,
         now: now,
         onSelectDay: (day) {},
-        onOpenEntry: (id) {},
-        onCreate: (range) async {},
+        onEntryTap: (details) {},
+        onCreateRange: (range) async {},
         onMoveRequest: (request) async {
           requests.add(request);
         },
