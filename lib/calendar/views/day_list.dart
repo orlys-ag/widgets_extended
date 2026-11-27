@@ -2203,16 +2203,14 @@ class _DayListState<T> extends State<DayList<T>> {
           ConstrainedBox(
             key: dayListFailedKey(day),
             constraints: const BoxConstraints(minHeight: _failedRowExtent),
-            // Built again where the store's load error changes, which the
-            // day's body does not hold.
+            // Built again where the store's error for the day changes, which
+            // the day's body does not hold.
             child: AnswerBuilder<Object?>(
               listenables: <Listenable>[widget.store],
               answer: () {
-                return widget.store.loadError;
+                return widget.store.loadErrorOf(day, day);
               },
               builder: (context, error, child) {
-                // A day a prefetch failed to read, while the shown range is
-                // ready, has no load error.
                 return failure(
                   context,
                   CalendarFailureState(

@@ -2064,7 +2064,7 @@ void main() {
     expect(RegExp(r"\b_takeRules\(").hasMatch(build), isTrue);
   });
 
-  testWidgets("CV23 Week's and Day's grid takes as its store range the "
+  testWidgets("CV23 Week's and Day's grid takes as its load range the "
       "range the store is shown", (tester) async {
     final controller = CalendarController(view: CalendarViewKind.week);
     addTearDown(controller.dispose);
@@ -2083,7 +2083,7 @@ void main() {
       final grid = tester.widget<TimedGrid<String>>(
         find.byType(TimedGrid<String>),
       );
-      expect(grid.storeRange, range);
+      expect(grid.loadRange, range);
       expect(store.shows.last, range);
       expect(controller.visibleRange, range);
     }

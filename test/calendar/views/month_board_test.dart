@@ -162,18 +162,25 @@ class ReadSource implements CalendarDataSource<String> {
   }
 }
 
-/// A caching store over a [ReadSource] that counts its [isRead] calls.
+/// A caching store over a [ReadSource] that counts the queries of the
+/// load state of a range it answers, [statusOf] and [loadErrorOf].
 final class CountingStore extends CachingCalendarStore<String> {
   CountingStore(this.source) : super(dataSource: source);
 
   final ReadSource source;
 
-  int isReadCalls = 0;
+  int loadQueries = 0;
 
   @override
-  bool isRead(DateTime day) {
-    isReadCalls++;
-    return super.isRead(day);
+  CalendarLoadStatus statusOf(DateTime first, DateTime last) {
+    loadQueries++;
+    return super.statusOf(first, last);
+  }
+
+  @override
+  Object? loadErrorOf(DateTime first, DateTime last) {
+    loadQueries++;
+    return super.loadErrorOf(first, last);
   }
 }
 
@@ -503,9 +510,9 @@ void main() {
   });
 
   testWidgets("MB1 a month board whose grid the store does not show is "
-      "ready once every day of its grid is read, covers a failed read of "
-      "another range with the loading state, and reads no day in a "
-      "layout", (tester) async {
+      "ready once every day of its grid is read, which a failed read of "
+      "another range leaves so, shows the failure state once its own read "
+      "fails, and asks the store nothing in a layout", (tester) async {
     final source = ReadSource(<CalendarEntry<String>>[
       CalendarEntry<String>(
         id: "talk",
@@ -583,9 +590,10 @@ void main() {
     await tester.pumpAndSettle();
     expectShows(chips: true);
 
+    // June's own read, which the board asks for after the frame, fails.
     await tester.pumpWidget(board(june));
     await tester.pumpAndSettle();
-    expectShows(chips: false, cover: "loading");
+    expectShows(chips: false, cover: "failed");
 
     await tester.pumpWidget(board(workweek));
     await tester.pumpAndSettle();
@@ -596,7 +604,7 @@ void main() {
         )
         .controller
         .rows;
-    store.isReadCalls = 0;
+    store.loadQueries = 0;
     await tester.pumpWidget(board(workweek, weekScale: 1.5));
     final scaled = tester
         .widget<Board<String, MonthChip<String>>>(
@@ -606,7 +614,7 @@ void main() {
         .rows;
     // The new scale laid the weeks out again.
     expect(identical(scaled.axis, rows.axis), isFalse);
-    expect(store.isReadCalls, 0);
+    expect(store.loadQueries, 0);
   });
 
   testWidgets("MB10 a month board built with no layout lays out as "

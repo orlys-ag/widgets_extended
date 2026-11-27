@@ -1780,7 +1780,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                     hourLabelFormat: widget.hourLabelFormat,
                     minDayWidth: controller.minDayWidth,
                     minSlotHeight: controller.minSlotHeight,
-                    storeRange: range,
+                    loadRange: range,
                     // The week strip names Day's one day.
                     showsDayHeader: week,
                     blockBuilder: widget.blockBuilder,

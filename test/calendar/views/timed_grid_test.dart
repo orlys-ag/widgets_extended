@@ -212,18 +212,25 @@ class ReadSource implements CalendarDataSource<String> {
   }
 }
 
-/// A caching store over a [ReadSource] that counts its [isRead] calls.
+/// A caching store over a [ReadSource] that counts the queries of the
+/// load state of a range it answers, [statusOf] and [loadErrorOf].
 final class CountingStore extends CachingCalendarStore<String> {
   CountingStore(this.source) : super(dataSource: source);
 
   final ReadSource source;
 
-  int isReadCalls = 0;
+  int loadQueries = 0;
 
   @override
-  bool isRead(DateTime day) {
-    isReadCalls++;
-    return super.isRead(day);
+  CalendarLoadStatus statusOf(DateTime first, DateTime last) {
+    loadQueries++;
+    return super.statusOf(first, last);
+  }
+
+  @override
+  Object? loadErrorOf(DateTime first, DateTime last) {
+    loadQueries++;
+    return super.loadErrorOf(first, last);
   }
 }
 
@@ -1109,10 +1116,10 @@ void main() {
     expect((gripBox.decoration as BoxDecoration).boxShadow, grip);
   });
 
-  testWidgets("TG6 a timed grid given the range its owner asks is ready "
-      "where the store shows that range ready, or another once every day of "
-      "that range is read, covers a failed read of another range with the "
-      "loading state, and reads no day in a layout", (tester) async {
+  testWidgets("TG6 a timed grid judges the range it is given, or with none "
+      "its own days, ready where the store shows that range ready or has "
+      "read every day of it, which a failed read of another range leaves "
+      "so, and asks the store nothing in a layout", (tester) async {
     const size = Size(300.0, 400.0);
     final source = ReadSource(<CalendarEntry<String>>[
       entryOf("talk", tuesday, 10 * 60, 11 * 60),
@@ -1141,7 +1148,7 @@ void main() {
         onOpenEntry: (id) {},
         onCreate: (range) async {},
         minSlotHeight: minSlotHeight,
-        storeRange: range,
+        loadRange: range,
         loadingBuilder: loadingText,
         failureBuilder: failureText,
       );
@@ -1164,7 +1171,7 @@ void main() {
     final toSunday = (first: monday, last: DateTime(2026, 4, 26));
 
     // The shown range, April 20 to 24, holds April 21 and is ready, but
-    // April 27 is not read.
+    // April 27 is not read until the grid's ask after the frame.
     await pumpBoxed(tester, size, grid(toMonday));
     expectShows(block: false, cover: "loading");
     await tester.pumpWidget(boxed(size, grid(toFriday)));
@@ -1180,26 +1187,26 @@ void main() {
     expect(store.status, CalendarLoadStatus.failed);
     await tester.pumpWidget(boxed(size, grid(toSunday)));
     expectShows(block: true);
+    // April 27 was read by the grid's first ask.
     await tester.pumpWidget(boxed(size, grid(toMonday)));
-    expectShows(block: false, cover: "loading");
-    // Given none, the grid keeps the store's shown range's status, where
-    // the read of its own day would draw the block.
+    expectShows(block: true);
+    // Given none, the grid judges its own day, which is read.
     await tester.pumpWidget(boxed(size, grid(null)));
-    expectShows(block: false, cover: "failed");
+    expectShows(block: true);
 
     await tester.pumpWidget(boxed(size, grid(toSunday)));
     expectShows(block: true);
     final viewport = viewportOf(tester);
     expect(viewport.rectOfCell(2, 1)!.height, defaultMinSlotHeight);
-    store.isReadCalls = 0;
+    store.loadQueries = 0;
     await tester.pumpWidget(boxed(size, grid(toSunday, minSlotHeight: 24.0)));
     expect(viewport.rectOfCell(2, 1)!.height, 24.0);
-    expect(store.isReadCalls, 0);
+    expect(store.loadQueries, 0);
   });
 
-  testWidgets("TG7 a store notify that moves the store off the grid's range "
-      "clears the selection, though the selected entry covers the days the "
-      "grid takes next", (tester) async {
+  testWidgets("TG7 a new load range of other days clears the selection, "
+      "though the selected entry covers the days the grid takes "
+      "next", (tester) async {
     const size = Size(400.0, 800.0);
     final saturday = DateTime(2026, 4, 25);
     final sunday = DateTime(2026, 4, 26);
@@ -1229,7 +1236,7 @@ void main() {
         onOpenEntry: (id) {},
         onCreate: (range) async {},
         editable: true,
-        storeRange: (first: first, last: CalendarDates.addDays(first, 6)),
+        loadRange: (first: first, last: CalendarDates.addDays(first, 6)),
       );
     }
 
@@ -1592,7 +1599,7 @@ void main() {
         onSelectDay: (day) {},
         onOpenEntry: (id) {},
         onCreate: (range) async {},
-        storeRange: week,
+        loadRange: week,
         loadingBuilder: loadingText,
         failureBuilder: (context, state) {
           failure = state;

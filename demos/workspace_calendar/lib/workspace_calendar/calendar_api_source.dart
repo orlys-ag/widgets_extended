@@ -60,8 +60,8 @@ String writeFailureMessage(Object error) {
   return "$error";
 }
 
-/// What a day row says for a day whose read failed while the range the
-/// calendar shows is ready, which leaves it no error.
+/// What a failed row or cover says where the calendar's reader holds no
+/// error for its days.
 const String unreadDayMessage = "This day could not be read.";
 
 /// The sentence the calendar shows for a failed read of [error], as the

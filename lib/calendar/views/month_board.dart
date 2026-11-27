@@ -734,13 +734,15 @@ enum CalendarMonthLayout {
 /// into view at once, and a day of another month once the owner shows its
 /// month. Home, End and the page keys move the board's selection within
 /// [grid] and report its day. The
-/// days are ready while the store shows exactly [grid]'s days and its
-/// status is ready, or, while it shows another range, as it does in the
-/// frame before the board's owner asks it for [grid]'s, once it has read
-/// every one of them. While they are not ready a cover over the board
-/// takes every press, centring what [loadingBuilder] draws while they are
-/// read, and what [failureBuilder] draws when the read the store waits on
-/// for [grid]'s days failed. A change of the
+/// board loads [grid]'s days: it asks [store] for them after the frame
+/// that brings it its grid, a new store or a new zone of the store
+/// ([CalendarEntryReader.prefetch]), unless their read failed, and they
+/// are ready while the store answers them ready
+/// ([CalendarEntryReader.statusOf]). While they are not ready a cover over
+/// the board takes every press, centring what [loadingBuilder] draws while
+/// they are read, and what [failureBuilder] draws when their read failed,
+/// with the store's error for them ([CalendarEntryReader.loadErrorOf]) and
+/// a retry of them ([CalendarEntryReader.retry]). A change of the
 /// store animates over the theme's motion; a new month or a new set of
 /// weekdays does not, and
 /// settles at once whatever chip was still growing in or shrinking out. A
@@ -1099,9 +1101,21 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// Whether the last sync found its days ready.
   bool _syncedReady = false;
 
-  /// Whether the store has read every day of [MonthBoard.grid], as
-  /// [_noteRange] last found it.
-  bool _rangeRead = false;
+  /// What the store answers for the status of [MonthBoard.grid]'s days
+  /// and, where it is failed, their error, as [_noteLoad] last found them,
+  /// which [_daysReady] and the cover read, so a layout reads fields
+  /// rather than the store.
+  CalendarLoadStatus _loadStatus = CalendarLoadStatus.loading;
+  Object? _loadError;
+
+  /// Whether an ask for the grid's days waits for the end of the frame
+  /// ([_scheduleAsk]).
+  bool _askPending = false;
+
+  /// The store's zone at the last ask ([_askDays]), which the ask alone
+  /// writes, so a zone the board took earlier, at its clock's notify
+  /// ([_handleNow]), still asks.
+  Location? _askedZone;
 
   /// Whether a layout still owes a reveal of the selected day: set at the
   /// start, by a new grid, by a new [MonthBoard.minDayWidth] or
@@ -1197,7 +1211,8 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
     _pinch.holding.addListener(_handleHolding);
-    _noteRange();
+    _noteLoad();
+    _scheduleAsk();
   }
 
   @override
@@ -1269,7 +1284,12 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       _background = _MonthGridPainter(widget.grid, _styles);
     }
     if (gridChanged || widget.store != oldWidget.store) {
-      _noteRange();
+      _noteLoad();
+    }
+    if (gridChanged ||
+        widget.store != oldWidget.store ||
+        widget.store.zone != _askedZone) {
+      _scheduleAsk();
     }
     if ((widget.minDayWidth != oldWidget.minDayWidth ||
             widget.weekScale != oldWidget.weekScale) &&
@@ -1338,12 +1358,17 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
 
   /// Follows the store, taking a new zone first ([_takeZone]): the layout
   /// it asks for lays the refiled entries out as it does any change of
-  /// them.
+  /// them. It notes the grid's days' state again ([_noteLoad]), and where
+  /// the store's zone is not the one the last ask asked on, asks for them
+  /// after the frame ([_scheduleAsk]).
   void _handleStore() {
     if (widget.store.zone != _zone) {
       _takeZone();
     }
-    _noteRange();
+    _noteLoad();
+    if (widget.store.zone != _askedZone) {
+      _scheduleAsk();
+    }
     setState(() {
       _syncPending = true;
     });
@@ -1373,37 +1398,64 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     }
   }
 
-  /// Notes whether the store has read every day of [MonthBoard.grid],
-  /// which [_daysReady] reads, so a layout reads a field rather than the
-  /// store's days.
-  void _noteRange() {
-    _rangeRead = _everyDayRead(widget.store, widget.grid);
-  }
-
-  static bool _everyDayRead<T>(CalendarStore<T> store, CalendarMonthGrid grid) {
-    final last = grid.lastDay;
-    for (
-      var day = grid.firstDay;
-      !day.isAfter(last);
-      day = CalendarDates.addDays(day, 1)
-    ) {
-      if (!store.isRead(day)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /// Whether this grid's days are ready: while the store shows exactly
-  /// them, ready, and while it shows another range, once every one of them
-  /// is read, which is the status the store takes when it shows them.
-  bool get _daysReady {
+  /// Notes the store's status of [MonthBoard.grid]'s days, and their error
+  /// where that is failed ([CalendarEntryReader.statusOf],
+  /// [CalendarEntryReader.loadErrorOf]), which [_daysReady] and the cover
+  /// read. Runs in [initState], in [didUpdateWidget] for a new store or a
+  /// new grid, and at each store notify ([_handleStore]).
+  void _noteLoad() {
     final store = widget.store;
     final grid = widget.grid;
-    if (store.isShown(grid.firstDay, grid.lastDay)) {
-      return store.status == CalendarLoadStatus.ready;
+    final status = store.statusOf(grid.firstDay, grid.lastDay);
+    _loadStatus = status;
+    _loadError = status == CalendarLoadStatus.failed
+        ? store.loadErrorOf(grid.firstDay, grid.lastDay)
+        : null;
+  }
+
+  /// Asks for the grid's days after the frame ([_askDays]), once however
+  /// many new grids, stores and zones a frame brings, and asks for that
+  /// frame where none is under way, since a store's ask can notify and a
+  /// build or a layout must not.
+  void _scheduleAsk() {
+    if (_askPending) {
+      return;
     }
-    return _rangeRead;
+    _askPending = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _askPending = false;
+      if (mounted) {
+        _askDays();
+      }
+    });
+    SchedulerBinding.instance.ensureVisualUpdate();
+  }
+
+  /// Reads the grid's unread days ([CalendarEntryReader.prefetch]), unless
+  /// their read failed: a failed read leaves its days unread, and the
+  /// cover's retry reads them again ([_retryLoad]). Takes the store's zone
+  /// as the one asked on ([_askedZone]).
+  void _askDays() {
+    final store = widget.store;
+    final grid = widget.grid;
+    _askedZone = store.zone;
+    if (store.statusOf(grid.firstDay, grid.lastDay) !=
+        CalendarLoadStatus.failed) {
+      store.prefetch(grid.firstDay, grid.lastDay);
+    }
+  }
+
+  /// The failure state's retry: a retry of the grid's days
+  /// ([CalendarEntryReader.retry]).
+  void _retryLoad() {
+    final grid = widget.grid;
+    widget.store.retry(grid.firstDay, grid.lastDay);
+  }
+
+  /// Whether this grid's days are ready: whether the store answered them
+  /// ready when [_noteLoad] last asked.
+  bool get _daysReady {
+    return _loadStatus == CalendarLoadStatus.ready;
   }
 
   /// Selects the selected day's cell on the board. The board reports the
@@ -2189,10 +2241,10 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   }
 
   /// The cover's content: what the failure builder draws for the grid's
-  /// days when the read the store waits on for them failed, with the
-  /// store's load error as it holds it, and what the loading builder draws
-  /// otherwise, as it does for a failed read of another range.
-  Widget _buildCover(BuildContext context, CalendarStore<T> store) {
+  /// days when their read failed, with the store's error for them and a
+  /// retry of them ([_retryLoad]), and what the loading builder draws
+  /// otherwise.
+  Widget _buildCover(BuildContext context) {
     final grid = widget.grid;
     // The grid's days are plain; a host is told them on the store's clock.
     final first = CalendarDates.dateOfDayNumber(
@@ -2203,8 +2255,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       CalendarDates.dayNumber(grid.lastDay),
       zone: _zone,
     );
-    if (store.status == CalendarLoadStatus.failed &&
-        store.isShown(grid.firstDay, grid.lastDay)) {
+    if (_loadStatus == CalendarLoadStatus.failed) {
       final failure = widget.failureBuilder ?? defaultCalendarFailureBuilder;
       return failure(
         context,
@@ -2212,8 +2263,8 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
           site: CalendarStateSite.cover,
           first: first,
           last: last,
-          error: store.loadError,
-          retry: store.retry,
+          error: _loadError,
+          retry: _retryLoad,
         ),
       );
     }
@@ -2297,7 +2348,6 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
         // The board takes the height between the letters, whose columns
         // the layout sizes first, and the padding.
         _layoutBoard(Size(size.width, below - padding));
-        final store = widget.store;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
@@ -2344,7 +2394,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
                       child: _MonthLoadOverlay(
                         child: Builder(
                           builder: (context) {
-                            return _buildCover(context, store);
+                            return _buildCover(context);
                           },
                         ),
                       ),

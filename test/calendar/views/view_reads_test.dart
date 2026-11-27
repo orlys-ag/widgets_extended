@@ -227,7 +227,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       store.dispose();
     }
-  }, skip: true);
+  });
 
   testWidgets("VR3 a month board and a timed grid over one store each "
       "leave their loading cover once their days answer, and a failed read "
@@ -312,7 +312,7 @@ void main() {
     expect(find.text("grid loading"), findsNothing);
     expect(blockOf("b", DateTime(2026, 12, 8)), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
-  }, skip: true);
+  });
 
   testWidgets("VR5 a month board alone over a caching store shows its days' "
       "entries on a new zone's clock once the store's reads under it "
@@ -372,7 +372,7 @@ void main() {
     expect(chipOf("a", monday), findsOneWidget);
     expect(chipOnDay(22), isTrue);
     await tester.pumpWidget(const SizedBox());
-  }, skip: true);
+  });
 
   testWidgets("VR6 a month board and a timed grid each mounted alone ask "
       "for their days after the first frame, and again after the frame of "
@@ -407,7 +407,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       store.dispose();
     }
-  }, skip: true);
+  });
 
   testWidgets("VR7 a month board and a timed grid each mounted alone over a "
       "caching store showing other days read again after the frame a day "

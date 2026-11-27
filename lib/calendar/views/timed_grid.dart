@@ -790,16 +790,16 @@ CalendarCreateRange? _createRangeOf(
 /// its row, the other bars stacking around it, until the drag requests its
 /// landing or ends.
 ///
-/// With no [storeRange], the days are ready while the store's shown range
-/// holds every one of them and its status is ready. With one, they are
-/// ready while the store shows exactly [storeRange] and its status is
-/// ready, or, while it shows another range, once it has read every day of
-/// [storeRange]; a store notify that moves the store off [storeRange]
-/// clears the selection. While its days are not ready a cover over the
-/// grid takes every press, centring what [loadingBuilder] draws while they
-/// are read, and what [failureBuilder] draws when the read the store waits
-/// on failed, where that read is of the grid's own range: [storeRange],
-/// or with none the store's shown range.
+/// The grid loads the days of [loadRange], or with none its own days: it
+/// asks [store] for them after the frame that brings it those days, a new
+/// store or a new zone of the store ([CalendarEntryReader.prefetch]),
+/// unless their read failed, and they are ready while the store answers
+/// them ready ([CalendarEntryReader.statusOf]). A new [loadRange] of other
+/// days clears the selection. While its days are not ready a cover over
+/// the grid takes every press, centring what [loadingBuilder] draws while
+/// they are read, and what [failureBuilder] draws when their read failed,
+/// with the store's error for them ([CalendarEntryReader.loadErrorOf]) and
+/// a retry of them ([CalendarEntryReader.retry]).
 ///
 /// The grid draws in the [CalendarTheme] above it and animates on the
 /// theme's motion; a block's content, the loading and the failure state
@@ -826,7 +826,7 @@ class TimedGrid<T> extends StatefulWidget {
     this.minDayWidth = minDayWidthLow,
     this.minSlotHeight = defaultMinSlotHeight,
     this.onZoom,
-    this.storeRange,
+    this.loadRange,
     this.showsDayHeader = true,
     this.blockBuilder,
     this.chipBuilder,
@@ -996,12 +996,12 @@ class TimedGrid<T> extends StatefulWidget {
   /// and [minDayWidth]; null for a grid no pinch zooms.
   final void Function(double minSlotHeight, double minDayWidth)? onZoom;
 
-  /// The range, both days inclusive, that the grid's owner asks [store] to
-  /// show for it, which holds the grid's days; null where the grid reads
-  /// the store's shown range alone. Where the store shows another range,
-  /// as it does in the frame before the owner's ask reaches it, the grid
-  /// is ready once the store has read every day of this one.
-  final ({DateTime first, DateTime last})? storeRange;
+  /// The days, both inclusive, that the grid asks [store] for and judges
+  /// its loading and failure states by, which hold the grid's days; null
+  /// for the grid's own days, from [firstDay] for [dayCount] days. A grid
+  /// that shows some days of a range its owner shows takes that range, so
+  /// its cover follows the whole range's read.
+  final ({DateTime first, DateTime last})? loadRange;
 
   /// Draws each block's content inside the box the grid gives it; null
   /// for [defaultCalendarBlockBuilder]. A new one, not `==` to the last,
@@ -1775,11 +1775,27 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// Whether the last [_sync] found its days ready.
   bool _syncedReady = false;
 
-  /// Whether the store has read every day of [TimedGrid.storeRange], and
-  /// whether it shows exactly that range, as [_noteRange] last found them;
-  /// both false with no range.
-  bool _rangeRead = false;
-  bool _showsRange = false;
+  /// The days the grid loads ([TimedGrid.loadRange], or with none the
+  /// tracks' days), as dates and as day numbers ([_takeLoadRange]).
+  late DateTime _loadFirst;
+  late DateTime _loadLast;
+  late int _loadFirstDay;
+  late int _loadLastDay;
+
+  /// What the store answers for the load range's status and, where it is
+  /// failed, error, as [_noteLoad] last found them, which [_daysReady] and
+  /// the cover read, so a layout reads fields rather than the store.
+  CalendarLoadStatus _loadStatus = CalendarLoadStatus.loading;
+  Object? _loadError;
+
+  /// Whether an ask for the load range waits for the end of the frame
+  /// ([_scheduleAsk]).
+  bool _askPending = false;
+
+  /// The store's zone at the last ask ([_askDays]), which the ask alone
+  /// writes, so a zone the grid took earlier, at its clock's notify
+  /// ([_handleNow]), still asks.
+  Location? _askedZone;
 
   /// Whether a frame callback will put the styles' animation back.
   bool _restoreScheduled = false;
@@ -1822,7 +1838,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
     widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
-    _noteRange();
+    _takeLoadRange();
+    _noteLoad();
     _sync();
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
@@ -1844,6 +1861,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         );
       }
     });
+    _scheduleAsk();
   }
 
   @override
@@ -1980,9 +1998,26 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             widget.bottomPadding != oldWidget.bottomPadding)) {
       _fitAxes(size);
     }
-    final rangeChanged = widget.storeRange != oldWidget.storeRange;
+    final rangeChanged =
+        widget.loadRange != oldWidget.loadRange ||
+        (widget.loadRange == null && tracksChanged);
+    var loadDaysChanged = false;
+    if (rangeChanged) {
+      final firstDay = _loadFirstDay;
+      final lastDay = _loadLastDay;
+      _takeLoadRange();
+      loadDaysChanged = _loadFirstDay != firstDay || _loadLastDay != lastDay;
+      if (loadDaysChanged && widget.loadRange != null) {
+        _selectedBlock.value = null;
+      }
+    }
     if (storeChanged || rangeChanged) {
-      _noteRange();
+      _noteLoad();
+    }
+    if (storeChanged ||
+        loadDaysChanged ||
+        widget.store.zone != _askedZone) {
+      _scheduleAsk();
     }
     if (storeChanged || tracksChanged || rangeChanged) {
       // New days are not ready yet, so they do not animate in either way;
@@ -2991,21 +3026,20 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Follows the store, taking a new zone first ([_takeZone]), so the sync
   /// lays the refiled entries on tracks of the new clock and animates as
-  /// any store change does. A notify that moves it off the range it showed
-  /// for this grid clears the selection: the grid's owner, which moved it,
-  /// builds the grid on the days of its new range next. The entries of
-  /// the days outside the range are read again when a check next needs
-  /// them ([_offRange]), a create range in flight places its anchor again
-  /// on the entries the sync placed and tests the range a release there
-  /// would report ([_placeRangeAgain]), and where the policy forbids
-  /// overlaps a drag the board runs asks its gates again
+  /// any store change does. It notes the load range's state again
+  /// ([_noteLoad]), and where the store's zone is not the one the last ask
+  /// asked on, asks for the load range after the frame ([_scheduleAsk]).
+  /// The entries of the days outside the range are read again when a check
+  /// next needs them ([_offRange]), a create range in flight places its
+  /// anchor again on the entries the sync placed and tests the range a
+  /// release there would report ([_placeRangeAgain]), and where the policy
+  /// forbids overlaps a drag the board runs asks its gates again
   /// ([_askDragAgain]).
   void _handleStore() {
     _takeZone(widget);
-    final showedRange = _showsRange;
-    _noteRange();
-    if (showedRange && !_showsRange) {
-      _selectedBlock.value = null;
+    _noteLoad();
+    if (widget.store.zone != _askedZone) {
+      _scheduleAsk();
     }
     _offRange = null;
     _sync();
@@ -3139,62 +3173,79 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return true;
   }
 
-  /// Notes whether the store has read every day of [TimedGrid.storeRange]
-  /// and whether it shows exactly that range, which [_daysReady] and
-  /// [_handleStore] read, so a layout reads fields rather than the store's
-  /// days.
-  void _noteRange() {
-    final range = widget.storeRange;
-    final store = widget.store;
+  /// Takes the load range: [TimedGrid.loadRange], or with none the tracks'
+  /// days, as local dates.
+  void _takeLoadRange() {
+    final range = widget.loadRange;
     if (range == null) {
-      _rangeRead = false;
-      _showsRange = false;
-      return;
+      _loadFirst = CalendarDates.dateOfDayNumber(_tracks.firstDay);
+      _loadLast = _lastDay;
+    } else {
+      _loadFirst = range.first;
+      _loadLast = range.last;
     }
-    _showsRange = store.isShown(range.first, range.last);
-    _rangeRead = _everyDayRead(store, range.first, range.last);
+    _loadFirstDay = CalendarDates.dayNumber(_loadFirst);
+    _loadLastDay = CalendarDates.dayNumber(_loadLast);
   }
 
-  static bool _everyDayRead<T>(
-    CalendarStore<T> store,
-    DateTime first,
-    DateTime last,
-  ) {
-    for (
-      var day = first;
-      !day.isAfter(last);
-      day = CalendarDates.addDays(day, 1)
-    ) {
-      if (!store.isRead(day)) {
-        return false;
-      }
+  /// Notes the store's status of the load range, and its error where that
+  /// is failed ([CalendarEntryReader.statusOf],
+  /// [CalendarEntryReader.loadErrorOf]), which [_daysReady] and the cover
+  /// read. Runs in [initState], in [didUpdateWidget] for a new store or a
+  /// new load range, and at each store notify ([_handleStore]).
+  void _noteLoad() {
+    final store = widget.store;
+    final status = store.statusOf(_loadFirst, _loadLast);
+    _loadStatus = status;
+    _loadError = status == CalendarLoadStatus.failed
+        ? store.loadErrorOf(_loadFirst, _loadLast)
+        : null;
+  }
+
+  /// Asks for the load range after the frame ([_askDays]), once however
+  /// many new ranges, stores and zones a frame brings, and asks for that
+  /// frame where none is under way, since a store's ask can notify and a
+  /// build or a layout must not.
+  void _scheduleAsk() {
+    if (_askPending) {
+      return;
     }
-    return true;
+    _askPending = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _askPending = false;
+      if (mounted) {
+        _askDays();
+      }
+    });
+    SchedulerBinding.instance.ensureVisualUpdate();
+  }
+
+  /// Reads the load range's unread days ([CalendarEntryReader.prefetch]),
+  /// unless their read failed: a failed read leaves its days unread, and
+  /// the cover's retry reads them again ([_retryLoad]). Takes the store's
+  /// zone as the one asked on ([_askedZone]).
+  void _askDays() {
+    final store = widget.store;
+    _askedZone = store.zone;
+    if (store.statusOf(_loadFirst, _loadLast) != CalendarLoadStatus.failed) {
+      store.prefetch(_loadFirst, _loadLast);
+    }
+  }
+
+  /// The failure state's retry: a retry of the load range
+  /// ([CalendarEntryReader.retry]).
+  void _retryLoad() {
+    widget.store.retry(_loadFirst, _loadLast);
   }
 
   DateTime get _lastDay {
     return CalendarDates.dateOfDayNumber(_tracks.lastDay);
   }
 
-  /// Whether this grid's days are ready. With no [TimedGrid.storeRange],
-  /// while the store's shown range holds every one of them, all read: the
-  /// range may be wider than the grid, as a range holding the grid's whole
-  /// week is, and a sync that runs between the store taking a range
-  /// without this grid's days and this grid getting new ones finds them
-  /// not ready. With one, while the store shows exactly that range, ready,
-  /// and while it shows another, once every day of that range is read,
-  /// which is the status the store takes when it shows it.
+  /// Whether this grid's days are ready: whether the store answered the
+  /// load range ready when [_noteLoad] last asked.
   bool get _daysReady {
-    final store = widget.store;
-    final range = widget.storeRange;
-    if (range == null) {
-      return store.status == CalendarLoadStatus.ready &&
-          store.isWithinShown(widget.firstDay, _lastDay);
-    }
-    if (store.isShown(range.first, range.last)) {
-      return store.status == CalendarLoadStatus.ready;
-    }
-    return _rangeRead;
+    return _loadStatus == CalendarLoadStatus.ready;
   }
 
   /// Splits the days' shown entries when the days are ready, and none
@@ -6315,10 +6366,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// The cover's content: what the failure builder draws for the grid's
-  /// days when the read the store waits on for [TimedGrid.storeRange], or
-  /// with none for its shown range, failed, with the store's load error as
-  /// it holds it, and what the loading builder draws otherwise.
-  Widget _buildCover(BuildContext context, CalendarStore<T> store) {
+  /// days when the load range's read failed, with the store's error for
+  /// it and a retry of it ([_retryLoad]), and what the loading builder
+  /// draws otherwise.
+  Widget _buildCover(BuildContext context) {
     final first = CalendarDates.dateOfDayNumber(
       _tracks.firstDay,
       zone: _tracks.zone,
@@ -6327,9 +6378,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _tracks.lastDay,
       zone: _tracks.zone,
     );
-    final range = widget.storeRange;
-    if (store.status == CalendarLoadStatus.failed &&
-        (range == null || store.isShown(range.first, range.last))) {
+    if (_loadStatus == CalendarLoadStatus.failed) {
       final failure = widget.failureBuilder ?? defaultCalendarFailureBuilder;
       return failure(
         context,
@@ -6337,8 +6386,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
           site: CalendarStateSite.cover,
           first: first,
           last: last,
-          error: store.loadError,
-          retry: store.retry,
+          error: _loadError,
+          retry: _retryLoad,
         ),
       );
     }
@@ -6355,7 +6404,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   @override
   Widget build(BuildContext context) {
-    final store = widget.store;
     final range = _range;
     final drag = _drag;
     final styles = _styles;
@@ -6483,7 +6531,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
                 child: _LoadOverlay(
                   child: Builder(
                     builder: (context) {
-                      return _buildCover(context, store);
+                      return _buildCover(context);
                     },
                   ),
                 ),
