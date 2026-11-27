@@ -22,6 +22,8 @@ import 'create_details.dart';
 import 'day_cell.dart';
 import 'entry_split.dart';
 import 'pinch_zoom.dart';
+import 'stale_days_ask.dart';
+import 'view_details.dart';
 
 /// The height of a day's number strip, which the weeks' lanes start
 /// below: the row axis's lane padding.
@@ -724,23 +726,29 @@ enum CalendarMonthLayout {
 /// weeks and the days, and each day of another month lies on the background
 /// colour.
 ///
-/// A tap on a chip reports [onOpenEntry], a tap anywhere else on a day
-/// [onOpenDay], and a long press on a day outside its chips
-/// [onCreateOnDay], or where there is none [onOpenDay] as a tap does; the
-/// last two give the board the keyboard. Its arrow keys report through
+/// A tap on a chip reports [onEntryTap], a tap anywhere else on a day
+/// [onOpenDay], and a long press on a day outside its chips, in edit mode
+/// with [takeRules] given, a create on that day through [onCreateRange],
+/// or otherwise [onOpenDay] as a tap does; the last two give the board
+/// the keyboard. Its arrow keys report through
 /// [onSelectDay] the shown day before or after the selected one on the
 /// screen, or the day a week before or after it, in whatever month that
 /// day lies: a day the grid shows is selected on the board and scrolled
 /// into view at once, and a day of another month once the owner shows its
 /// month. Home, End and the page keys move the board's selection within
 /// [grid] and report its day. The
-/// days are ready while the store shows exactly [grid]'s days and its
-/// status is ready, or, while it shows another range, as it does in the
-/// frame before the board's owner asks it for [grid]'s, once it has read
-/// every one of them. While they are not ready a cover over the board
-/// takes every press, centring what [loadingBuilder] draws while they are
-/// read, and what [failureBuilder] draws when the read the store waits on
-/// for [grid]'s days failed. A change of the
+/// board loads [grid]'s days: it asks [store] for them after the frame
+/// that brings it its grid, a new store or a new zone of the store
+/// ([CalendarEntryReader.prefetch]), unless their read failed, and they
+/// are ready while the store answers them ready
+/// ([CalendarEntryReader.statusOf]). After the frame that the store
+/// reports stale days of them ([CalendarEntryReader.addStaleDaysListener]),
+/// it reads again each run of them the store answers
+/// [CalendarEntryReader.isStale] for. While they are not ready a cover over
+/// the board takes every press, centring what [loadingBuilder] draws while
+/// they are read, and what [failureBuilder] draws when their read failed,
+/// with the store's error for them ([CalendarEntryReader.loadErrorOf]) and
+/// a retry of them ([CalendarEntryReader.retry]). A change of the
 /// store animates over the theme's motion; a new month or a new set of
 /// weekdays does not, and
 /// settles at once whatever chip was still growing in or shrinking out. A
@@ -766,7 +774,7 @@ class MonthBoard<T> extends StatefulWidget {
     super.key,
     required this.store,
     required this.grid,
-    this.layout = CalendarMonthLayout.showAll,
+    this.layout = CalendarMonthLayout.fitScreen,
     this.minDayWidth = minDayWidthLow,
     this.weekScale = 1.0,
     this.hours = CalendarDayHours.allDay,
@@ -775,8 +783,12 @@ class MonthBoard<T> extends StatefulWidget {
     required this.now,
     required this.onSelectDay,
     required this.onOpenDay,
-    required this.onCreateOnDay,
-    required this.onOpenEntry,
+    this.editable = false,
+    this.editPolicy,
+    this.takeRules,
+    required this.onCreateRange,
+    this.onCreateRefused,
+    this.onEntryTap,
     this.onZoom,
     this.chipBuilder,
     this.loadingBuilder,
@@ -788,13 +800,14 @@ class MonthBoard<T> extends StatefulWidget {
          "A MonthBoard's bottomPadding must be non-negative and finite.",
        );
 
-  final CalendarStore<T> store;
+  final CalendarEntryReader<T> store;
 
   /// The month the board shows.
   final CalendarMonthGrid grid;
 
   /// Whether a week grows to hold its chips or keeps its share of the
-  /// height and hides the chips that do not fit.
+  /// height and hides the chips that do not fit; the latter,
+  /// [CalendarMonthLayout.fitScreen], by default.
   final CalendarMonthLayout layout;
 
   /// The least width of a day, in logical pixels.
@@ -824,35 +837,63 @@ class MonthBoard<T> extends StatefulWidget {
 
   /// A key moved the selection onto this day, which an arrow key can find
   /// in the month before or after [grid]'s: the owner then shows that
-  /// day's month, as [selectedDay] is a day of [grid]'s month.
+  /// day's month, as [selectedDay] is a day of [grid]'s month. A long
+  /// press in edit mode on a day of [grid], which creates on it, reports
+  /// that day too, before it creates.
   final ValueChanged<DateTime> onSelectDay;
 
   /// This day was tapped outside its chips.
   final ValueChanged<DateTime> onOpenDay;
 
-  /// This day was long-pressed outside its chips, its cell lying at the
-  /// rect, in global logical pixels, the function is given: it returns the
-  /// start of the range it reports and the future of that create, or null
-  /// where it reports none, as where the create is refused. The board
-  /// marks the day while that future runs, until it completes or fails,
-  /// unless a later long press's create has moved the mark to its own day;
-  /// a new zone of the store moves the mark to the day holding the start
-  /// on the new clock. A failure is left uncaught in the zone the long
-  /// press ran in. Null where a long press creates nothing, as out of edit
-  /// mode, and opens the day as a tap does.
-  final ({DateTime start, Future<void> done})? Function(
-    DateTime day,
-    Rect globalRect,
-  )?
-  onCreateOnDay;
+  /// Whether the board is in edit mode, where a long press on a day
+  /// creates on it by the rules [takeRules] gives, and a tap's
+  /// [CalendarEntryTapDetails.editable] can be true.
+  final bool editable;
 
-  /// The chip of this item, which is not pending, was tapped.
-  final ValueChanged<String> onOpenEntry;
+  /// The policy a tap judges an entry's editability by
+  /// ([CalendarEditPolicy.mayEdit]); null for an [UnrestrictedEditPolicy],
+  /// as the timed grid takes.
+  final CalendarEditPolicy<T>? editPolicy;
+
+  /// Gives the rules a long press in edit mode creates by, which the
+  /// board's owner makes of its policy, [hours] and slot length. The board
+  /// calls it once at each such press, so the press creates by the rules
+  /// of that moment, and a throw of it, such as the rules' [ArgumentError]
+  /// for hours off the grid of their slots, ends the press uncaught. With
+  /// none, a long press creates nothing and opens the day as a tap does.
+  final CalendarEditRules<T> Function()? takeRules;
+
+  /// Opens the create flow for a long press in edit mode on a day outside
+  /// its chips, and completes when it closes. The details give as their
+  /// range the slot the rules [takeRules] gives answer for that day on the
+  /// store's clock, over the entries the store shows on it
+  /// ([CalendarEditRules.createSlotOn]); as their rect the day's cell, in
+  /// global logical pixels; and false for whether the user chose the
+  /// length. The board marks the day while the future runs, until it
+  /// completes or fails, unless a later long press's create has moved the
+  /// mark to its own day; a new zone of the store moves the mark to the
+  /// day holding the slot's start on the new clock. A failure, whether the
+  /// function throws within the call or its future fails, is left uncaught
+  /// in the zone the long press ran in.
+  final Future<void> Function(CalendarCreateDetails details) onCreateRange;
+
+  /// Reports a long press in edit mode on a day for which the rules give
+  /// no slot, with the day on the store's clock; the board then marks
+  /// nothing.
+  final ValueChanged<DateTime>? onCreateRefused;
+
+  /// Reports a tap on a chip whose item is not pending: the entry as
+  /// [store] stores it ([CalendarEntryReader.storedEntry]), and whether it
+  /// is editable, [editable] and [editPolicy] letting it be edited
+  /// ([CalendarEditPolicy.mayEdit]). The board reports nothing where the
+  /// store holds no stored entry of the id. Null for a board whose taps on
+  /// chips report nothing, which then asks [editPolicy] nothing at a tap.
+  final ValueChanged<CalendarEntryTapDetails<T>>? onEntryTap;
 
   /// Reports the week scale and the least day width a pinch zooms to,
   /// which the board shows once [weekScale] and [minDayWidth] bring them;
   /// null for a board no pinch zooms.
-  final void Function(double weekScale, double minDayWidth)? onZoom;
+  final ValueChanged<CalendarMonthZoomDetails>? onZoom;
 
   /// Draws each bar's content inside the lane the board gives it, in its
   /// chip or card form; null for [defaultCalendarChipBuilder]. A new one,
@@ -1023,11 +1064,22 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     return CalendarDates.dateOfDayNumber(CalendarDates.dayNumber(day));
   }
 
-  /// Whether [MonthBoard.onCreateOnDay] is given, which the kept day cells
-  /// listen to, so a long press on them creates only while it is.
+  /// Whether a long press on a day creates ([_createsOn]), which the kept
+  /// day cells listen to, so a long press on them creates only while it
+  /// does.
   late final ValueNotifier<bool> _creates = ValueNotifier<bool>(
-    widget.onCreateOnDay != null,
+    _createsOn(widget),
   );
+
+  /// Whether a long press on a day of [widget] creates: in edit mode, with
+  /// [MonthBoard.takeRules] given.
+  static bool _createsOn<T>(MonthBoard<T> widget) {
+    return widget.editable && widget.takeRules != null;
+  }
+
+  /// The policy a tap asks where [MonthBoard.editPolicy] is null.
+  late final UnrestrictedEditPolicy<T> _unrestricted =
+      UnrestrictedEditPolicy<T>();
 
   /// The day whose long press reported the latest create, while that
   /// create's future runs, which the kept day cells listen to and mark: a
@@ -1099,9 +1151,25 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   /// Whether the last sync found its days ready.
   bool _syncedReady = false;
 
-  /// Whether the store has read every day of [MonthBoard.grid], as
-  /// [_noteRange] last found it.
-  bool _rangeRead = false;
+  /// What the store answers for the status of [MonthBoard.grid]'s days
+  /// and, where it is failed, their error, as [_noteLoad] last found them,
+  /// which [_daysReady] and the cover read, so a layout reads fields
+  /// rather than the store.
+  CalendarLoadStatus _loadStatus = CalendarLoadStatus.loading;
+  Object? _loadError;
+
+  /// Whether an ask for the grid's days waits for the end of the frame
+  /// ([_scheduleAsk]).
+  bool _askPending = false;
+
+  /// The store's zone at the last ask ([_askDays]), which the ask alone
+  /// writes, so a zone the board took earlier, at its clock's notify
+  /// ([_handleNow]), still asks.
+  Location? _askedZone;
+
+  /// Reads again, after the frame, the days of [MonthBoard.grid] the store
+  /// reports stale ([StaleDaysAsk]).
+  late final StaleDaysAsk<T> _staleAsk;
 
   /// Whether a layout still owes a reveal of the selected day: set at the
   /// start, by a new grid, by a new [MonthBoard.minDayWidth] or
@@ -1197,7 +1265,9 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
     _pinch.holding.addListener(_handleHolding);
-    _noteRange();
+    _staleAsk = StaleDaysAsk<T>(_gridDays)..listen(widget.store);
+    _noteLoad();
+    _scheduleAsk();
   }
 
   @override
@@ -1248,6 +1318,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       widget.store.addListener(_handleStore);
       _syncPending = true;
     }
+    _staleAsk.listen(widget.store);
     if (widget.store.zone != _zone) {
       _takeZone();
     }
@@ -1256,7 +1327,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       widget.now.addListener(_handleNow);
       _today.value = _plainTwinOf(widget.now.value.today);
     }
-    _creates.value = widget.onCreateOnDay != null;
+    _creates.value = _createsOn(widget);
     _bannerHours.value = _bannerHoursOf(widget);
     if (widget.hours != oldWidget.hours) {
       _syncPending = true;
@@ -1269,7 +1340,12 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       _background = _MonthGridPainter(widget.grid, _styles);
     }
     if (gridChanged || widget.store != oldWidget.store) {
-      _noteRange();
+      _noteLoad();
+    }
+    if (gridChanged ||
+        widget.store != oldWidget.store ||
+        widget.store.zone != _askedZone) {
+      _scheduleAsk();
     }
     if ((widget.minDayWidth != oldWidget.minDayWidth ||
             widget.weekScale != oldWidget.weekScale) &&
@@ -1294,6 +1370,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   @override
   void dispose() {
     widget.store.removeListener(_handleStore);
+    _staleAsk.dispose();
     widget.now.removeListener(_handleNow);
     _pinch.dispose();
     _scrollHold.release();
@@ -1338,12 +1415,17 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
 
   /// Follows the store, taking a new zone first ([_takeZone]): the layout
   /// it asks for lays the refiled entries out as it does any change of
-  /// them.
+  /// them. It notes the grid's days' state again ([_noteLoad]), and where
+  /// the store's zone is not the one the last ask asked on, asks for them
+  /// after the frame ([_scheduleAsk]).
   void _handleStore() {
     if (widget.store.zone != _zone) {
       _takeZone();
     }
-    _noteRange();
+    _noteLoad();
+    if (widget.store.zone != _askedZone) {
+      _scheduleAsk();
+    }
     setState(() {
       _syncPending = true;
     });
@@ -1373,37 +1455,74 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     }
   }
 
-  /// Notes whether the store has read every day of [MonthBoard.grid],
-  /// which [_daysReady] reads, so a layout reads a field rather than the
-  /// store's days.
-  void _noteRange() {
-    _rangeRead = _everyDayRead(widget.store, widget.grid);
-  }
-
-  static bool _everyDayRead<T>(CalendarStore<T> store, CalendarMonthGrid grid) {
-    final last = grid.lastDay;
-    for (
-      var day = grid.firstDay;
-      !day.isAfter(last);
-      day = CalendarDates.addDays(day, 1)
-    ) {
-      if (!store.isRead(day)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /// Whether this grid's days are ready: while the store shows exactly
-  /// them, ready, and while it shows another range, once every one of them
-  /// is read, which is the status the store takes when it shows them.
-  bool get _daysReady {
+  /// Notes the store's status of [MonthBoard.grid]'s days, and their error
+  /// where that is failed ([CalendarEntryReader.statusOf],
+  /// [CalendarEntryReader.loadErrorOf]), which [_daysReady] and the cover
+  /// read. Runs in [initState], in [didUpdateWidget] for a new store or a
+  /// new grid, and at each store notify ([_handleStore]).
+  void _noteLoad() {
     final store = widget.store;
     final grid = widget.grid;
-    if (store.isShown(grid.firstDay, grid.lastDay)) {
-      return store.status == CalendarLoadStatus.ready;
+    final status = store.statusOf(grid.firstDay, grid.lastDay);
+    _loadStatus = status;
+    _loadError = status == CalendarLoadStatus.failed
+        ? store.loadErrorOf(grid.firstDay, grid.lastDay)
+        : null;
+  }
+
+  /// Asks for the grid's days after the frame ([_askDays]), once however
+  /// many new grids, stores and zones a frame brings, and asks for that
+  /// frame where none is under way, since a store's ask can notify and a
+  /// build or a layout must not.
+  void _scheduleAsk() {
+    if (_askPending) {
+      return;
     }
-    return _rangeRead;
+    _askPending = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _askPending = false;
+      if (mounted) {
+        _askDays();
+      }
+    });
+    SchedulerBinding.instance.ensureVisualUpdate();
+  }
+
+  /// Reads the grid's unread days ([CalendarEntryReader.prefetch]), unless
+  /// their read failed: a failed read leaves its days unread, and the
+  /// cover's retry reads them again ([_retryLoad]). Takes the store's zone
+  /// as the one asked on ([_askedZone]).
+  void _askDays() {
+    final store = widget.store;
+    final grid = widget.grid;
+    _askedZone = store.zone;
+    if (store.statusOf(grid.firstDay, grid.lastDay) !=
+        CalendarLoadStatus.failed) {
+      store.prefetch(grid.firstDay, grid.lastDay);
+    }
+  }
+
+  /// The day numbers of [MonthBoard.grid]'s days, whose stale days the
+  /// board reads again ([_staleAsk]).
+  ({int first, int last}) _gridDays() {
+    final grid = widget.grid;
+    return (
+      first: CalendarDates.dayNumber(grid.firstDay),
+      last: CalendarDates.dayNumber(grid.lastDay),
+    );
+  }
+
+  /// The failure state's retry: a retry of the grid's days
+  /// ([CalendarEntryReader.retry]).
+  void _retryLoad() {
+    final grid = widget.grid;
+    widget.store.retry(grid.firstDay, grid.lastDay);
+  }
+
+  /// Whether this grid's days are ready: whether the store answered them
+  /// ready when [_noteLoad] last asked.
+  bool get _daysReady {
+    return _loadStatus == CalendarLoadStatus.ready;
   }
 
   /// Selects the selected day's cell on the board. The board reports the
@@ -1543,24 +1662,56 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     widget.onOpenDay(day);
   }
 
-  /// Reports a create on [day] for a long press on its cell, or for a
-  /// screen reader's long press, with the platform's long-press feedback
+  /// Reports a create on [day], a plain day of the grid whose cell lies at
+  /// [globalRect], for a long press on its cell, or for a screen reader's
+  /// long press, with the platform's long-press feedback
   /// ([Feedback.forLongPress]) for both, as Material's `InkWell` gives.
+  /// It reports [day] through [MonthBoard.onSelectDay] where it is a day
+  /// of the grid's month, then takes the rules of the moment
+  /// ([MonthBoard.takeRules]) and asks them for the slot a create on the
+  /// day takes on the store's clock ([CalendarEditRules.createSlotOn]),
+  /// over the entries the store shows on it. Where they give none it
+  /// reports [MonthBoard.onCreateRefused] and marks nothing; otherwise it
+  /// reports the slot through [MonthBoard.onCreateRange] and marks [day]
+  /// while that create runs.
   void _createOnDay(DateTime day, Rect globalRect) {
-    final create = widget.onCreateOnDay;
-    if (create == null || _pinch.pinched.value) {
+    final takeRules = widget.takeRules;
+    if (!widget.editable || takeRules == null || _pinch.pinched.value) {
       return;
     }
     Feedback.forLongPress(context);
     _focusNode.requestFocus();
-    final created = create(day, globalRect);
-    if (created == null) {
+    if (widget.grid.contains(day)) {
+      widget.onSelectDay(day);
+    }
+    final store = widget.store;
+    final zoned = CalendarDates.dateOfDayNumber(
+      CalendarDates.dayNumber(day),
+      zone: store.zone,
+    );
+    final slot = takeRules().createSlotOn(
+      zoned,
+      widget.now.value,
+      entries: store.entriesOn(zoned).map((shown) {
+        return shown.entry;
+      }),
+    );
+    if (slot == null) {
+      widget.onCreateRefused?.call(zoned);
       return;
     }
+    final details = CalendarCreateDetails(
+      range: CalendarCreateRange(start: slot.start, end: slot.end),
+      globalRect: globalRect,
+      userChoseLength: false,
+    );
+    final done = Future<void>.sync(() {
+      return widget.onCreateRange(details);
+    });
     final count = ++_createCount;
     _createMark.value = day;
-    _createAt = created.start;
-    created.done.whenComplete(() {
+    _createAt = slot.start;
+    done.whenComplete(() {
       // After dispose the notifier takes no write.
       if (mounted && count == _createCount) {
         _createMark.value = null;
@@ -1569,10 +1720,28 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
     });
   }
 
+  /// A tap on the chip of [id]: reports through [MonthBoard.onEntryTap]
+  /// the stored entry and whether it is editable, asking
+  /// [MonthBoard.editPolicy], or with none [_unrestricted], at
+  /// [MonthBoard.now]; reports and asks nothing while the board is
+  /// pinched, or where there is no [MonthBoard.onEntryTap] or no stored
+  /// entry of [id].
   void _openEntry(String id) {
-    if (!_pinch.pinched.value) {
-      widget.onOpenEntry(id);
+    final onEntryTap = widget.onEntryTap;
+    if (_pinch.pinched.value || onEntryTap == null) {
+      return;
     }
+    final entry = widget.store.storedEntry(id);
+    if (entry == null) {
+      return;
+    }
+    final policy = widget.editPolicy ?? _unrestricted;
+    onEntryTap(
+      CalendarEntryTapDetails<T>(
+        entry: entry,
+        editable: widget.editable && policy.mayEdit(entry, widget.now.value),
+      ),
+    );
   }
 
   bool _startPinch(PinchAxis axis, Offset focal) {
@@ -1606,7 +1775,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       return;
     }
     _pinchFocal = area.globalToLocal(update.focal);
-    onZoom(weekScale, day);
+    onZoom(CalendarMonthZoomDetails(weekScale: weekScale, minDayWidth: day));
   }
 
   void _endPinch() {
@@ -2189,10 +2358,10 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
   }
 
   /// The cover's content: what the failure builder draws for the grid's
-  /// days when the read the store waits on for them failed, with the
-  /// store's load error as it holds it, and what the loading builder draws
-  /// otherwise, as it does for a failed read of another range.
-  Widget _buildCover(BuildContext context, CalendarStore<T> store) {
+  /// days when their read failed, with the store's error for them and a
+  /// retry of them ([_retryLoad]), and what the loading builder draws
+  /// otherwise.
+  Widget _buildCover(BuildContext context) {
     final grid = widget.grid;
     // The grid's days are plain; a host is told them on the store's clock.
     final first = CalendarDates.dateOfDayNumber(
@@ -2203,8 +2372,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
       CalendarDates.dayNumber(grid.lastDay),
       zone: _zone,
     );
-    if (store.status == CalendarLoadStatus.failed &&
-        store.isShown(grid.firstDay, grid.lastDay)) {
+    if (_loadStatus == CalendarLoadStatus.failed) {
       final failure = widget.failureBuilder ?? defaultCalendarFailureBuilder;
       return failure(
         context,
@@ -2212,8 +2380,8 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
           site: CalendarStateSite.cover,
           first: first,
           last: last,
-          error: store.loadError,
-          retry: store.retry,
+          error: _loadError,
+          retry: _retryLoad,
         ),
       );
     }
@@ -2297,7 +2465,6 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
         // The board takes the height between the letters, whose columns
         // the layout sizes first, and the padding.
         _layoutBoard(Size(size.width, below - padding));
-        final store = widget.store;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
@@ -2344,7 +2511,7 @@ class _MonthBoardState<T> extends State<MonthBoard<T>>
                       child: _MonthLoadOverlay(
                         child: Builder(
                           builder: (context) {
-                            return _buildCover(context, store);
+                            return _buildCover(context);
                           },
                         ),
                       ),

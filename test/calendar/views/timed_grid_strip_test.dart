@@ -41,6 +41,7 @@ import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
 import '../../scheduling/dst_days.dart';
 import '../edit_policies.dart';
 import '../recording_errors.dart';
+import '../view_doubles.dart';
 
 final DateTime monday = DateTime(2026, 4, 20);
 final DateTime tuesday = DateTime(2026, 4, 21);
@@ -593,17 +594,15 @@ class HeldSource implements CalendarDataSource<String> {
 /// shows at the default [minSlotHeight] and every day column at the
 /// default [minDayWidth]; [creates] records each create range it reports,
 /// unless [onCreate] takes them, and [opened] each entry it opens,
-/// [onMoveRequest] takes each move and
-/// resize it lands, and [onZoom] each zoom a pinch reports, which the grid
-/// does not show. The grid writes times in [hourLabelFormat], under
-/// [theme] where it is given. [store],
-/// [editable], [first], [hours], [slotMinutes] and [editPolicy] start as
-/// given, and [rebuild] builds the grid again with them and with
-/// [givenNow]. The grid's policy is [editPolicy]
-/// where it is given, and otherwise the one [lockPast],
-/// [lockEarlierToday], [maxDayCount] and [allowsOverlaps] make
-/// ([policy]). Its clock is [givenNow] where it is set, and [now]
-/// otherwise.
+/// [onMoveRequest] takes each move and resize it lands, or with none [store]
+/// writes it ([writeMoveTo]), and [onZoom] each zoom a pinch reports, which the
+/// grid does not show. The grid writes times in [hourLabelFormat], under
+/// [theme] where it is given. [store], [editable], [first], [hours],
+/// [slotMinutes] and [editPolicy] start as given, and [rebuild] builds the grid
+/// again with them and with [givenNow]. The grid's policy is [editPolicy] where
+/// it is given, and otherwise the one [lockPast], [lockEarlierToday],
+/// [maxDayCount] and [allowsOverlaps] make ([policy]). Its clock is [givenNow]
+/// where it is set, and [now] otherwise.
 class Harness {
   Harness(
     this.store,
@@ -692,6 +691,7 @@ class Harness {
   }
 
   TimedGrid<String> grid() {
+    final onZoom = this.onZoom;
     return TimedGrid<String>(
       key: ObjectKey(this),
       store: store,
@@ -700,14 +700,20 @@ class Harness {
       selectedDay: first,
       now: givenNow ?? now,
       onSelectDay: (day) {},
-      onOpenEntry: opened.add,
-      onCreate:
+      onEntryTap: (details) {
+        opened.add(details.entry.id!);
+      },
+      onCreateRange:
           onCreate ??
           (details) async {
             creates.add(details.range);
           },
-      onMoveRequest: onMoveRequest,
-      onZoom: onZoom,
+      onMoveRequest: onMoveRequest ?? writeMoveTo(store),
+      onZoom: onZoom == null
+          ? null
+          : (details) {
+              onZoom(details.minSlotHeight, details.minDayWidth);
+            },
       editable: editable,
       editPolicy: policy,
       hours: hours,
@@ -1213,28 +1219,8 @@ Future<void> dropMeetInZone(
   await tester.pump(const Duration(seconds: 1));
 }
 
-/// A [MoveRecordingStore] whose [requestMove] records the move and throws
-/// [thrown] within the call.
-final class ThrowingMoveStore extends MoveRecordingStore {
-  ThrowingMoveStore(List<CalendarEntry<String>> entries, this.thrown)
-    : super(entries: entries);
-
-  final Object thrown;
-
-  @override
-  Future<CalendarEntry<String>> requestMove(CalendarEntry<String> requested) {
-    moves.add(requested);
-    throw thrown;
-  }
-}
-
-/// What [TimedGrid.onCreate] throws within the call in CR1.
+/// What [TimedGrid.onCreateRange] throws within the call in CR1.
 class CreateFailure implements Exception {}
-
-/// What [MemoryCalendarStore.onChanged] throws in MR6.
-class HostFailure implements Exception {
-  const HostFailure();
-}
 
 /// What a [Brittle] payload's `==` throws.
 class BrittleFailure implements Exception {
@@ -1309,8 +1295,8 @@ Future<List<CalendarMoveRequest<Brittle>>> pumpBrittleWeek(
         selectedDay: monday,
         now: now,
         onSelectDay: (day) {},
-        onOpenEntry: (id) {},
-        onCreate: (range) async {},
+        onEntryTap: (details) {},
+        onCreateRange: (range) async {},
         onMoveRequest: (request) async {
           requests.add(request);
         },
@@ -9477,89 +9463,6 @@ void main() {
     await dropMeetInZone(tester, shown, uncaught);
     expect(uncaught, <Object>[same(thrown)]);
     expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
-  });
-
-  testWidgets("MR4 with no onMoveRequest, a move whose write the caching "
-      "store fails leaves no error uncaught, and its block shows the stored "
-      "entry again, at its stored times and not pending", (tester) async {
-    final shown = Shown.week(monday);
-    final source = HeldSource(<CalendarEntry<String>>[
-      entryOf("meet", at(tuesday, 10), at(tuesday, 11)),
-    ]);
-    final store = CachingCalendarStore<String>(dataSource: source);
-    addTearDown(store.dispose);
-    store.show(monday, sunday);
-    await Harness(store, shown).pump(tester);
-    final stored = tester.getRect(blockFinder("meet", tuesday));
-    final requested = stored.translate(
-      0.0,
-      slotRect(tester, shown, tuesday, 14 * 60).top -
-          slotRect(tester, shown, tuesday, 10 * 60).top,
-    );
-    final uncaught = <Object>[];
-    await dropMeetInZone(tester, shown, uncaught);
-    // Setup sanity: the drop's move shows at the requested times, and the
-    // grid wrote it through the store.
-    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(requested));
-    expect(source.replaces, hasLength(1));
-    source.replaces.single.completeError(StateError("Offline."));
-    await tester.pump();
-    await tester.pump(const Duration(seconds: 1));
-    expect(uncaught, isEmpty);
-    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
-    expect(
-      find.descendant(
-        of: blockFinder("meet", tuesday),
-        matching: find.byType(CalendarActivityIndicator),
-      ),
-      findsNothing,
-    );
-  });
-
-  testWidgets("MR5 with no onMoveRequest, a move whose write the store "
-      "throws within the call leaves no error uncaught, and its block shows "
-      "at its stored times again", (tester) async {
-    final shown = Shown.week(monday);
-    final meet = entryOf("meet", at(tuesday, 10), at(tuesday, 11));
-    final store = ThrowingMoveStore(<CalendarEntry<String>>[
-      meet,
-    ], StateError("Refused."));
-    addTearDown(store.dispose);
-    await Harness(store, shown).pump(tester);
-    final stored = tester.getRect(blockFinder("meet", tuesday));
-    final uncaught = <Object>[];
-    await dropMeetInZone(tester, shown, uncaught);
-    // Setup sanity: the grid wrote the drop's move through the store.
-    expect(store.moves, <CalendarEntry<String>>[
-      meet.copyWith(start: at(tuesday, 14), end: at(tuesday, 15)),
-    ]);
-    expect(uncaught, isEmpty);
-    expect(tester.getRect(blockFinder("meet", tuesday)), nearRect(stored));
-  });
-
-  testWidgets("MR6 with no onMoveRequest, a move the in-memory store "
-      "stores, whose onChanged then throws, leaves no error uncaught and "
-      "reports the throw", (tester) async {
-    final shown = Shown.week(monday);
-    final meet = entryOf("meet", at(tuesday, 10), at(tuesday, 11));
-    const thrown = HostFailure();
-    final store = MemoryCalendarStore<String>(
-      entries: <CalendarEntry<String>>[meet],
-      onChanged: (old, entry) {
-        throw thrown;
-      },
-    );
-    addTearDown(store.dispose);
-    await Harness(store, shown).pump(tester);
-    final uncaught = <Object>[];
-    await dropMeetInZone(tester, shown, uncaught);
-    // Setup sanity: the store stored the drop's move.
-    expect(
-      store.storedEntry("meet"),
-      meet.copyWith(start: at(tuesday, 14), end: at(tuesday, 15)),
-    );
-    expect(uncaught, isEmpty);
-    expect(tester.takeException(), same(thrown));
   });
 
   testWidgets("MR7 a block dropped back where it was requests nothing, and "

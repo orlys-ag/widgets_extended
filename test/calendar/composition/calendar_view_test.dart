@@ -27,6 +27,7 @@ import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
+import 'package:widgets_extended/scheduling/policy/edit_rules.dart';
 import 'package:widgets_extended/scheduling/policy/history_lock_policy.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_day_badges.dart';
@@ -44,6 +45,7 @@ import 'package:widgets_extended/calendar/views/month_picker.dart';
 import 'package:widgets_extended/calendar/views/month_strip.dart';
 import 'package:widgets_extended/calendar/views/timed_grid.dart';
 import 'package:widgets_extended/calendar/views/timed_grid_layout.dart';
+import 'package:widgets_extended/calendar/views/view_details.dart';
 import 'package:widgets_extended/calendar/views/week_strip.dart';
 
 import '../../scheduling/dst_days.dart';
@@ -119,7 +121,8 @@ DayRange gridRange(
 
 /// A data source that answers each read within the call, through a
 /// [SynchronousFuture], with the entries covering its days, or, while
-/// [holds] is set, holds the answer until the test runs [pending].
+/// [holds] is set, holds the answer until the test runs [pending]; and
+/// that records the days of each read in [reads].
 class HeldSource implements CalendarDataSource<String> {
   HeldSource(this.entries);
 
@@ -133,8 +136,21 @@ class HeldSource implements CalendarDataSource<String> {
 
   final List<VoidCallback> pending = <VoidCallback>[];
 
+  /// The days of each read, in the order asked.
+  final List<({DateTime first, DateTime last})> reads =
+      <({DateTime first, DateTime last})>[];
+
+  /// What each read throws within the call while it is set, once it has
+  /// recorded its days in [reads].
+  Object? failure;
+
   @override
   Future<List<CalendarEntry<String>>> read(DateTime first, DateTime last) {
+    reads.add((first: first, last: last));
+    final thrown = failure;
+    if (thrown != null) {
+      throw thrown;
+    }
     final from = CalendarDates.dayNumber(first);
     final to = CalendarDates.dayNumber(last);
     final day = withheld;
@@ -2049,7 +2065,7 @@ void main() {
     expect(RegExp(r"\b_takeRules\(").hasMatch(build), isTrue);
   });
 
-  testWidgets("CV23 Week's and Day's grid takes as its store range the "
+  testWidgets("CV23 Week's and Day's grid takes as its load range the "
       "range the store is shown", (tester) async {
     final controller = CalendarController(view: CalendarViewKind.week);
     addTearDown(controller.dispose);
@@ -2068,7 +2084,7 @@ void main() {
       final grid = tester.widget<TimedGrid<String>>(
         find.byType(TimedGrid<String>),
       );
-      expect(grid.storeRange, range);
+      expect(grid.loadRange, range);
       expect(store.shows.last, range);
       expect(controller.visibleRange, range);
     }
@@ -4145,5 +4161,954 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.selectedDay, first);
     expect(shows(first), isTrue);
+  });
+
+  testWidgets("CV73 a change at the source sends within the call the reads "
+      "it sent, and after the frame one read of each run of the changed "
+      "days the views show outside the shown range, and none of a shown "
+      "day", (tester) async {
+    useTallView(tester);
+    String spanOf(DayRange read) {
+      return "${CalendarDates.isoDate(read.first)}.."
+          "${CalendarDates.isoDate(read.last)}";
+    }
+
+    List<String> spansOf(Iterable<DayRange> reads) {
+      return <String>[for (final read in reads) spanOf(read)];
+    }
+
+    DayRange days(DateTime first, DateTime last) {
+      return (first: first, last: last);
+    }
+
+    // The reads each change sends within its call, the stream's add
+    // included, by view, read-ahead and change.
+    const within = <String, List<String>>{
+      "day, read-ahead 0, invalidate shown": <String>["2026-04-21..2026-04-21"],
+      "day, read-ahead 0, invalidate outside": <String>[],
+      "day, read-ahead 0, days changed": <String>[],
+      "day, read-ahead 0, refresh": <String>["2026-04-20..2026-04-26"],
+      "day, read-ahead 0, failed refresh": <String>["2026-04-20..2026-04-26"],
+      "day, read-ahead 2, invalidate shown": <String>["2026-04-21..2026-04-21"],
+      "day, read-ahead 2, invalidate outside": <String>[],
+      "day, read-ahead 2, days changed": <String>[],
+      "day, read-ahead 2, refresh": <String>["2026-04-20..2026-04-26"],
+      "day, read-ahead 2, failed refresh": <String>["2026-04-20..2026-04-26"],
+      "agenda, read-ahead 0, invalidate shown": <String>[
+        "2026-04-30..2026-04-30",
+      ],
+      "agenda, read-ahead 0, invalidate outside": <String>[],
+      "agenda, read-ahead 0, days changed": <String>[],
+      "agenda, read-ahead 0, refresh": <String>["2026-03-30..2026-05-03"],
+      "agenda, read-ahead 0, failed refresh": <String>[
+        "2026-03-30..2026-05-03",
+      ],
+      "agenda, read-ahead 2, invalidate shown": <String>[
+        "2026-04-30..2026-04-30",
+      ],
+      "agenda, read-ahead 2, invalidate outside": <String>[],
+      "agenda, read-ahead 2, days changed": <String>[],
+      "agenda, read-ahead 2, refresh": <String>["2026-03-30..2026-05-03"],
+      "agenda, read-ahead 2, failed refresh": <String>[
+        "2026-03-30..2026-05-03",
+      ],
+      "week, read-ahead 0, invalidate shown": <String>[
+        "2026-04-21..2026-04-21",
+      ],
+      "week, read-ahead 0, invalidate outside": <String>[],
+      "week, read-ahead 0, days changed": <String>[],
+      "week, read-ahead 0, refresh": <String>["2026-04-20..2026-04-26"],
+      "week, read-ahead 0, failed refresh": <String>["2026-04-20..2026-04-26"],
+      "week, read-ahead 2, invalidate shown": <String>[
+        "2026-04-21..2026-04-21",
+      ],
+      "week, read-ahead 2, invalidate outside": <String>[],
+      "week, read-ahead 2, days changed": <String>[],
+      "week, read-ahead 2, refresh": <String>["2026-04-20..2026-04-26"],
+      "week, read-ahead 2, failed refresh": <String>["2026-04-20..2026-04-26"],
+      "month, read-ahead 0, invalidate shown": <String>[
+        "2026-04-21..2026-04-21",
+      ],
+      "month, read-ahead 0, invalidate outside": <String>[],
+      "month, read-ahead 0, days changed": <String>[],
+      "month, read-ahead 0, refresh": <String>["2026-03-30..2026-05-03"],
+      "month, read-ahead 0, failed refresh": <String>["2026-03-30..2026-05-03"],
+      "month, read-ahead 2, invalidate shown": <String>[
+        "2026-04-21..2026-04-21",
+      ],
+      "month, read-ahead 2, invalidate outside": <String>[],
+      "month, read-ahead 2, days changed": <String>[],
+      "month, read-ahead 2, refresh": <String>["2026-03-30..2026-05-03"],
+      "month, read-ahead 2, failed refresh": <String>["2026-03-30..2026-05-03"],
+    };
+    const changes = <String>[
+      "invalidate shown",
+      "invalidate outside",
+      "days changed",
+      "refresh",
+      "failed refresh",
+    ];
+    for (final view in <CalendarViewKind>[
+      CalendarViewKind.day,
+      CalendarViewKind.agenda,
+      CalendarViewKind.week,
+      CalendarViewKind.month,
+    ]) {
+      for (final readAhead in <int>[0, 2]) {
+        final selected = view == CalendarViewKind.agenda
+            ? DateTime(2026, 4, 30)
+            : tuesday;
+        final grid = CalendarMonthGrid.of(selected);
+        final source = HeldSource(<CalendarEntry<String>>[
+          entryOf("talk", tuesday, 10 * 60, 11 * 60),
+        ]);
+        final stream = StreamController<CalendarSourceChange<String>>(
+          sync: true,
+        );
+        final caching = CachingCalendarStore<String>(
+          dataSource: source,
+          changes: stream.stream,
+          readAhead: readAhead,
+        );
+        final controller = CalendarController(
+          view: view,
+          selectedDay: selected,
+        );
+        await tester.pumpWidget(
+          app(
+            CalendarView<String>(
+              key: UniqueKey(),
+              store: caching,
+              controller: controller,
+              clock: fixedClock,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(source.pending, isEmpty);
+        final shown = switch (view) {
+          CalendarViewKind.agenda ||
+          CalendarViewKind.month => days(grid.firstDay, grid.lastDay),
+          _ => days(monday, sunday),
+        };
+        final outside = switch (view) {
+          CalendarViewKind.agenda ||
+          CalendarViewKind.month => CalendarDates.addDays(grid.lastDay, 1),
+          _ => DateTime(2026, 4, 8),
+        };
+
+        // The list's mounted weeks: the weeks of the days whose headers it
+        // builds.
+        DayRange mountedWeeks() {
+          final keys = <Key>{
+            for (final element in find.byWidgetPredicate((widget) {
+              return widget.key != null;
+            }, skipOffstage: false).evaluate())
+              element.widget.key!,
+          };
+          DateTime? first;
+          DateTime? last;
+          for (
+            var day = DateTime(2026, 3, 1);
+            !day.isAfter(DateTime(2026, 6, 30));
+            day = CalendarDates.addDays(day, 1)
+          ) {
+            if (keys.contains(dayListHeaderKey(day))) {
+              first ??= day;
+              last = day;
+            }
+          }
+          return days(
+            CalendarWeekdaySet.all.weekStartOf(first!),
+            CalendarDates.addDays(
+              CalendarWeekdaySet.all.weekStartOf(last!),
+              DateTime.daysPerWeek - 1,
+            ),
+          );
+        }
+
+        if (view == CalendarViewKind.agenda) {
+          // Setup sanity: the list's mounted weeks pass the grid's end.
+          expect(
+            find.byKey(dayListHeaderKey(outside), skipOffstage: false),
+            findsOneWidget,
+          );
+        }
+
+        // The runs of the read days the views show outside the shown
+        // range, each of which a change of every day leaves stale: the
+        // card's month grid in Day, and the list's mounted weeks in Agenda.
+        List<String> outsideRuns() {
+          final showing = switch (view) {
+            CalendarViewKind.day => days(grid.firstDay, grid.lastDay),
+            CalendarViewKind.agenda => mountedWeeks(),
+            _ => null,
+          };
+          if (showing == null) {
+            return const <String>[];
+          }
+          return <String>[
+            if (showing.first.isBefore(shown.first))
+              spanOf(
+                days(showing.first, CalendarDates.addDays(shown.first, -1)),
+              ),
+            if (showing.last.isAfter(shown.last))
+              spanOf(days(CalendarDates.addDays(shown.last, 1), showing.last)),
+          ];
+        }
+
+        final showsOutside =
+            view == CalendarViewKind.day || view == CalendarViewKind.agenda;
+        for (final change in changes) {
+          final label = "${view.name}, read-ahead $readAhead, $change";
+          final afterFrame = switch (change) {
+            "invalidate outside" || "days changed" =>
+              showsOutside
+                  ? <String>[spanOf(days(outside, outside))]
+                  : const <String>[],
+            "refresh" || "failed refresh" => outsideRuns(),
+            _ => const <String>[],
+          };
+          source.holds = true;
+          final before = source.reads.length;
+          var refreshed = false;
+          Object? refreshError;
+          final failure = StateError("The source failed.");
+          switch (change) {
+            case "invalidate shown":
+              caching.invalidate(selected, selected);
+            case "invalidate outside":
+              caching.invalidate(outside, outside);
+            case "days changed":
+              stream.add(CalendarDaysChanged<String>(outside, outside));
+            case "refresh":
+              caching.refresh().then<void>((_) {
+                refreshed = true;
+              });
+            case "failed refresh":
+              source.failure = failure;
+              caching.refresh().then<void>(
+                (_) {
+                  refreshed = true;
+                },
+                onError: (Object error) {
+                  refreshError = error;
+                },
+              );
+              source.failure = null;
+          }
+          expect(
+            spansOf(source.reads.skip(before)),
+            within[label],
+            reason: "$label: within the call",
+          );
+          final sentWithin = source.reads.length;
+          await tester.pump();
+          final sentAfterFrame = source.reads.length;
+          expect(
+            spansOf(source.reads.skip(sentWithin)),
+            afterFrame,
+            reason: "$label: after the frame",
+          );
+          for (final read in source.reads.skip(sentWithin)) {
+            expect(
+              read.last.isBefore(shown.first) || read.first.isAfter(shown.last),
+              isTrue,
+              reason: "$label: ${spanOf(read)} holds a shown day",
+            );
+          }
+          if (change == "failed refresh") {
+            expect(refreshed, isFalse, reason: label);
+            expect(refreshError, same(failure), reason: label);
+          }
+          var firstAnswer = true;
+          while (source.pending.isNotEmpty) {
+            source.pending.removeAt(0)();
+            await tester.pump();
+            if (change == "refresh" && firstAnswer) {
+              // The shown range's read answered, the views' reads held.
+              expect(refreshed, isTrue, reason: label);
+              expect(
+                source.pending,
+                hasLength(sentAfterFrame - sentWithin),
+                reason: label,
+              );
+            }
+            firstAnswer = false;
+          }
+          await tester.pumpAndSettle();
+          expect(
+            spansOf(source.reads.skip(sentAfterFrame)),
+            change == "failed refresh" && showsOutside
+                ? <String>[spanOf(shown)]
+                : const <String>[],
+            reason: "$label: while the held reads are answered",
+          );
+          source.holds = false;
+        }
+        await tester.pumpWidget(const SizedBox());
+        caching.dispose();
+        controller.dispose();
+        unawaited(stream.close());
+      }
+    }
+  });
+
+  testWidgets("CV74 after a refresh whose read failed, a step off the shown "
+      "range reads the days it leaves once where the card still shows them, "
+      "in Day, and none of them in Week and Month", (tester) async {
+    useTallView(tester);
+    String spanOf(DayRange read) {
+      return "${CalendarDates.isoDate(read.first)}.."
+          "${CalendarDates.isoDate(read.last)}";
+    }
+
+    List<String> spansOf(Iterable<DayRange> reads) {
+      return <String>[for (final read in reads) spanOf(read)];
+    }
+
+    final april = CalendarMonthGrid.of(tuesday);
+    final may = CalendarMonthGrid.of(DateTime(2026, 5, 1));
+    for (final view in <CalendarViewKind>[
+      CalendarViewKind.day,
+      CalendarViewKind.week,
+      CalendarViewKind.month,
+    ]) {
+      final label = view.name;
+      final source = HeldSource(<CalendarEntry<String>>[
+        entryOf("talk", tuesday, 10 * 60, 11 * 60),
+      ]);
+      final caching = CachingCalendarStore<String>(dataSource: source);
+      final controller = CalendarController(view: view, selectedDay: tuesday);
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            key: UniqueKey(),
+            store: caching,
+            controller: controller,
+            clock: fixedClock,
+            loadingBuilder: (context, state) {
+              return const Text("loading");
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(source.pending, isEmpty, reason: label);
+
+      source.holds = true;
+      final failure = StateError("The source failed.");
+      Object? refreshError;
+      source.failure = failure;
+      caching.refresh().then<void>(
+        (_) {},
+        onError: (Object error) {
+          refreshError = error;
+        },
+      );
+      source.failure = null;
+      final sentWithin = source.reads.length;
+      await tester.pump();
+      expect(refreshError, same(failure), reason: label);
+      // In Day the card asks for the runs of its month grid outside the
+      // shown week; Week and Month show no day outside the shown range.
+      expect(
+        spansOf(source.reads.skip(sentWithin)),
+        view == CalendarViewKind.day
+            ? <String>[
+                spanOf((
+                  first: april.firstDay,
+                  last: CalendarDates.addDays(monday, -1),
+                )),
+                spanOf((
+                  first: CalendarDates.addDays(sunday, 1),
+                  last: april.lastDay,
+                )),
+              ]
+            : const <String>[],
+        reason: "$label: after the frame",
+      );
+
+      // The days the step leaves that the new shown range does not hold.
+      final DayRange left = view == CalendarViewKind.month
+          ? (
+              first: april.firstDay,
+              last: CalendarDates.addDays(may.firstDay, -1),
+            )
+          : (first: monday, last: sunday);
+      final beforeStep = source.reads.length;
+      if (view == CalendarViewKind.day) {
+        controller.goTo(DateTime(2026, 4, 28));
+      } else {
+        await tester.tap(find.byTooltip(RegExp("^Next ")));
+      }
+      await tester.pumpAndSettle();
+      final sinceStep = source.reads.skip(beforeStep).toList();
+      // Setup sanity: the shown range moved off the days left.
+      expect(
+        caching.isWithinShown(left.first, left.first),
+        isFalse,
+        reason: label,
+      );
+      final holdingLeft = <DayRange>[
+        for (final read in sinceStep)
+          if (!read.last.isBefore(left.first) && !read.first.isAfter(left.last))
+            read,
+      ];
+      if (view == CalendarViewKind.day) {
+        expect(spansOf(holdingLeft), <String>[
+          spanOf(left),
+        ], reason: "$label: since the step");
+      } else {
+        expect(
+          spansOf(holdingLeft),
+          isEmpty,
+          reason: "$label: since the step, ${spansOf(sinceStep)}",
+        );
+      }
+      while (source.pending.isNotEmpty) {
+        source.pending.removeAt(0)();
+        await tester.pump();
+      }
+      source.holds = false;
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox());
+      caching.dispose();
+      controller.dispose();
+    }
+  });
+
+  testWidgets("CV69 opening each view, stepping in it, switching views, a "
+      "new controller, a zone, a new store and a goTo send the reads they "
+      "sent", (tester) async {
+    useTallView(tester);
+    // The reads each case sends, by view, read-ahead and whether the
+    // source holds its answers.
+    const expected = <String, List<String>>{
+      "agenda, read-ahead 0, answering": <String>[
+        "2026-03-30..2026-05-03",
+        "2026-05-04..2026-05-17",
+        "2026-05-18..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-06-01..2026-07-05",
+        "2026-07-27..2026-09-06",
+        "2026-07-06..2026-07-26",
+        "2026-09-07..2026-09-13",
+        "2026-09-14..2026-09-20",
+        "2026-09-21..2026-10-04",
+        "2026-09-13..2026-09-20",
+        "2026-03-29..2026-09-13",
+        "2026-09-20..2026-10-05",
+        "2026-09-14..2026-09-20",
+        "2026-08-31..2026-10-04",
+        "2026-06-15..2026-06-21",
+        "2026-06-29..2026-08-02",
+        "2026-06-01..2026-06-28",
+      ],
+      "agenda, read-ahead 0, holding": <String>[
+        "2026-03-30..2026-05-03",
+        "2026-04-13..2026-05-17",
+        "2026-05-18..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-06-01..2026-07-05",
+        "2026-07-27..2026-09-06",
+        "2026-07-06..2026-08-02",
+        "2026-07-20..2026-08-23",
+        "2026-09-07..2026-09-13",
+        "2026-09-14..2026-09-20",
+        "2026-09-21..2026-10-04",
+        "2026-09-13..2026-09-20",
+        "2026-03-29..2026-09-13",
+        "2026-09-20..2026-10-05",
+        "2026-09-14..2026-09-20",
+        "2026-08-31..2026-10-04",
+        "2026-06-15..2026-06-21",
+        "2026-06-29..2026-08-02",
+        "2026-06-01..2026-07-05",
+      ],
+      "agenda, read-ahead 2, answering": <String>[
+        "2026-03-28..2026-05-05",
+        "2026-05-06..2026-05-17",
+        "2026-05-18..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-06-01..2026-07-05",
+        "2026-07-25..2026-09-08",
+        "2026-07-06..2026-07-24",
+        "2026-09-09..2026-09-13",
+        "2026-09-14..2026-09-20",
+        "2026-09-21..2026-09-22",
+        "2026-09-23..2026-10-04",
+        "2026-09-13..2026-09-20",
+        "2026-03-27..2026-09-13",
+        "2026-09-20..2026-10-05",
+        "2026-09-12..2026-09-22",
+        "2026-08-31..2026-10-04",
+        "2026-06-13..2026-06-23",
+        "2026-06-29..2026-08-02",
+        "2026-06-01..2026-06-28",
+      ],
+      "agenda, read-ahead 2, holding": <String>[
+        "2026-03-28..2026-05-05",
+        "2026-04-13..2026-05-17",
+        "2026-05-18..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-06-01..2026-07-05",
+        "2026-07-25..2026-09-08",
+        "2026-07-06..2026-08-02",
+        "2026-07-20..2026-08-23",
+        "2026-09-09..2026-09-13",
+        "2026-09-14..2026-09-20",
+        "2026-09-21..2026-09-22",
+        "2026-09-21..2026-10-04",
+        "2026-09-13..2026-09-20",
+        "2026-03-27..2026-09-13",
+        "2026-09-20..2026-10-05",
+        "2026-09-12..2026-09-22",
+        "2026-08-31..2026-10-04",
+        "2026-06-13..2026-06-23",
+        "2026-06-29..2026-08-02",
+        "2026-06-01..2026-07-05",
+      ],
+      "day, read-ahead 0, answering": <String>[
+        "2026-04-20..2026-04-26",
+        "2026-03-30..2026-05-03",
+        "2026-05-04..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-08-10..2026-08-16",
+        "2026-06-29..2026-08-02",
+        "2026-08-03..2026-09-06",
+        "2026-09-14..2026-09-20",
+        "2026-09-13..2026-09-20",
+        "2026-03-29..2026-06-01",
+        "2026-06-28..2026-09-07",
+        "2026-09-20..2026-09-21",
+        "2026-09-14..2026-09-20",
+        "2026-06-15..2026-06-21",
+      ],
+      "day, read-ahead 0, holding": <String>[
+        "2026-04-20..2026-04-26",
+        "2026-03-30..2026-05-03",
+        "2026-05-04..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-08-10..2026-08-16",
+        "2026-06-29..2026-08-02",
+        "2026-07-27..2026-09-06",
+        "2026-09-14..2026-09-20",
+        "2026-09-13..2026-09-20",
+        "2026-03-29..2026-06-01",
+        "2026-06-28..2026-09-07",
+        "2026-09-20..2026-09-21",
+        "2026-09-14..2026-09-20",
+        "2026-06-15..2026-06-21",
+      ],
+      "day, read-ahead 2, answering": <String>[
+        "2026-04-18..2026-04-28",
+        "2026-03-30..2026-05-03",
+        "2026-03-28..2026-05-05",
+        "2026-05-06..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-08-08..2026-08-18",
+        "2026-06-29..2026-08-02",
+        "2026-08-03..2026-09-06",
+        "2026-09-12..2026-09-22",
+        "2026-09-13..2026-09-20",
+        "2026-03-27..2026-06-01",
+        "2026-06-28..2026-09-07",
+        "2026-09-11..2026-09-13",
+        "2026-09-20..2026-09-23",
+        "2026-09-12..2026-09-22",
+        "2026-06-13..2026-06-23",
+      ],
+      "day, read-ahead 2, holding": <String>[
+        "2026-04-18..2026-04-28",
+        "2026-03-30..2026-05-03",
+        "2026-03-28..2026-05-05",
+        "2026-05-04..2026-05-24",
+        "2026-05-25..2026-05-31",
+        "2026-08-08..2026-08-18",
+        "2026-06-29..2026-08-02",
+        "2026-07-27..2026-09-06",
+        "2026-09-12..2026-09-22",
+        "2026-09-13..2026-09-20",
+        "2026-03-27..2026-06-01",
+        "2026-06-28..2026-09-07",
+        "2026-09-11..2026-09-13",
+        "2026-09-20..2026-09-23",
+        "2026-09-12..2026-09-22",
+        "2026-06-13..2026-06-23",
+      ],
+      "week, read-ahead 0, answering": <String>[
+        "2026-04-20..2026-04-26",
+        "2026-04-27..2026-05-03",
+        "2026-05-04..2026-05-10",
+        "2026-03-30..2026-04-19",
+        "2026-05-11..2026-05-31",
+        "2026-08-10..2026-08-16",
+        "2026-08-31..2026-10-04",
+        "2026-08-30..2026-10-04",
+        "2026-03-29..2026-06-01",
+        "2026-08-09..2026-08-17",
+        "2026-10-04..2026-10-05",
+        "2026-08-31..2026-10-04",
+        "2026-06-01..2026-07-05",
+      ],
+      "week, read-ahead 0, holding": <String>[
+        "2026-04-20..2026-04-26",
+        "2026-04-27..2026-05-03",
+        "2026-05-04..2026-05-10",
+        "2026-03-30..2026-04-19",
+        "2026-05-11..2026-05-31",
+        "2026-08-10..2026-08-16",
+        "2026-08-31..2026-10-04",
+        "2026-08-30..2026-10-04",
+        "2026-03-29..2026-06-01",
+        "2026-08-09..2026-08-17",
+        "2026-10-04..2026-10-05",
+        "2026-08-31..2026-10-04",
+        "2026-06-01..2026-07-05",
+      ],
+      "week, read-ahead 2, answering": <String>[
+        "2026-04-18..2026-04-28",
+        "2026-04-29..2026-05-05",
+        "2026-05-06..2026-05-12",
+        "2026-03-28..2026-04-17",
+        "2026-05-13..2026-05-31",
+        "2026-06-01..2026-06-07",
+        "2026-08-08..2026-08-18",
+        "2026-08-29..2026-10-06",
+        "2026-08-30..2026-10-04",
+        "2026-03-27..2026-06-08",
+        "2026-08-07..2026-08-19",
+        "2026-08-28..2026-08-30",
+        "2026-10-04..2026-10-07",
+        "2026-08-29..2026-10-06",
+        "2026-05-30..2026-07-07",
+      ],
+      "week, read-ahead 2, holding": <String>[
+        "2026-04-18..2026-04-28",
+        "2026-04-29..2026-05-05",
+        "2026-05-06..2026-05-12",
+        "2026-03-28..2026-04-17",
+        "2026-05-13..2026-05-31",
+        "2026-06-01..2026-06-07",
+        "2026-08-08..2026-08-18",
+        "2026-08-29..2026-10-06",
+        "2026-08-30..2026-10-04",
+        "2026-03-27..2026-06-08",
+        "2026-08-07..2026-08-19",
+        "2026-08-28..2026-08-30",
+        "2026-10-04..2026-10-07",
+        "2026-08-29..2026-10-06",
+        "2026-05-30..2026-07-07",
+      ],
+      "month, read-ahead 0, answering": <String>[
+        "2026-03-30..2026-05-03",
+        "2026-05-04..2026-05-31",
+        "2026-06-01..2026-07-05",
+        "2026-07-27..2026-09-06",
+        "2026-09-07..2026-10-04",
+        "2026-10-05..2026-10-11",
+        "2026-10-12..2026-10-18",
+        "2026-10-19..2026-10-25",
+        "2026-08-30..2026-10-04",
+        "2026-03-29..2026-07-06",
+        "2026-07-26..2026-08-30",
+        "2026-10-04..2026-10-26",
+        "2026-08-31..2026-10-04",
+        "2026-10-05..2026-10-25",
+        "2026-06-01..2026-07-05",
+        "2026-07-06..2026-08-02",
+        "2026-08-03..2026-08-30",
+      ],
+      "month, read-ahead 0, holding": <String>[
+        "2026-03-30..2026-05-03",
+        "2026-05-04..2026-05-31",
+        "2026-06-01..2026-07-05",
+        "2026-07-27..2026-09-06",
+        "2026-09-07..2026-10-04",
+        "2026-09-07..2026-10-11",
+        "2026-10-12..2026-10-18",
+        "2026-10-19..2026-10-25",
+        "2026-08-30..2026-10-04",
+        "2026-03-29..2026-07-06",
+        "2026-07-26..2026-08-30",
+        "2026-10-04..2026-10-26",
+        "2026-09-06..2026-10-25",
+        "2026-08-31..2026-10-04",
+        "2026-09-07..2026-10-25",
+        "2026-06-01..2026-07-05",
+        "2026-06-29..2026-08-02",
+        "2026-07-27..2026-08-30",
+        "2026-06-15..2026-07-19",
+        "2026-06-08..2026-07-12",
+      ],
+      "month, read-ahead 2, answering": <String>[
+        "2026-03-28..2026-05-05",
+        "2026-05-06..2026-06-02",
+        "2026-06-03..2026-07-07",
+        "2026-07-25..2026-09-08",
+        "2026-09-09..2026-10-06",
+        "2026-10-07..2026-10-11",
+        "2026-10-12..2026-10-18",
+        "2026-10-19..2026-10-25",
+        "2026-08-30..2026-10-04",
+        "2026-03-27..2026-07-08",
+        "2026-07-24..2026-08-30",
+        "2026-10-04..2026-10-26",
+        "2026-08-29..2026-10-06",
+        "2026-10-07..2026-10-25",
+        "2026-05-30..2026-07-07",
+        "2026-07-08..2026-08-02",
+        "2026-08-03..2026-08-28",
+      ],
+      "month, read-ahead 2, holding": <String>[
+        "2026-03-28..2026-05-05",
+        "2026-05-06..2026-06-02",
+        "2026-06-03..2026-07-07",
+        "2026-07-25..2026-09-08",
+        "2026-09-09..2026-10-06",
+        "2026-09-09..2026-10-11",
+        "2026-10-12..2026-10-18",
+        "2026-10-19..2026-10-25",
+        "2026-08-30..2026-10-04",
+        "2026-03-27..2026-07-08",
+        "2026-07-24..2026-08-30",
+        "2026-10-04..2026-10-26",
+        "2026-09-06..2026-10-25",
+        "2026-08-29..2026-10-06",
+        "2026-09-07..2026-10-25",
+        "2026-05-30..2026-07-07",
+        "2026-06-29..2026-08-02",
+        "2026-07-27..2026-08-28",
+        "2026-06-15..2026-07-19",
+        "2026-06-08..2026-07-12",
+      ],
+    };
+    const views = CalendarViewKind.values;
+    for (final view in views) {
+      for (final readAhead in <int>[0, 2]) {
+        for (final holds in <bool>[false, true]) {
+          final label =
+              "${view.name}, read-ahead $readAhead, "
+              "${holds ? "holding" : "answering"}";
+          final source = HeldSource(<CalendarEntry<String>>[
+            entryOf("talk", tuesday, 10 * 60, 11 * 60),
+          ])..holds = holds;
+          final stores = <CachingCalendarStore<String>>[
+            CachingCalendarStore<String>(
+              dataSource: source,
+              readAhead: readAhead,
+            ),
+          ];
+          final controllers = <CalendarController>[
+            CalendarController(view: view, selectedDay: tuesday),
+          ];
+          final key = UniqueKey();
+          Future<void> pumpCalendar() async {
+            await tester.pumpWidget(
+              app(
+                CalendarView<String>(
+                  key: key,
+                  store: stores.last,
+                  controller: controllers.last,
+                  clock: fixedClock,
+                  loadingBuilder: (context, state) {
+                    return const Text("loading");
+                  },
+                  failureBuilder: (context, state) {
+                    return const Text("failed");
+                  },
+                ),
+              ),
+            );
+          }
+
+          // Settles, then answers the reads held and settles again, until
+          // none is held.
+          Future<void> settle() async {
+            await tester.pumpAndSettle();
+            while (source.pending.isNotEmpty) {
+              final answers = List.of(source.pending);
+              source.pending.clear();
+              for (final answer in answers) {
+                answer();
+              }
+              await tester.pumpAndSettle();
+            }
+          }
+
+          await pumpCalendar();
+          await settle();
+          for (final tooltip in <String>["^Next ", "^Next ", "^Previous "]) {
+            await tester.tap(find.byTooltip(RegExp(tooltip)));
+            await settle();
+          }
+          for (final other in views) {
+            if (other != view) {
+              controllers.last.view = other;
+              await settle();
+            }
+          }
+          controllers.last.view = view;
+          await settle();
+          controllers.add(
+            CalendarController(view: view, selectedDay: DateTime(2026, 8, 12)),
+          );
+          await pumpCalendar();
+          await settle();
+          controllers.add(
+            CalendarController(
+              view: views[(views.indexOf(view) + 1) % views.length],
+              selectedDay: DateTime(2026, 9, 16),
+            ),
+          );
+          await pumpCalendar();
+          await settle();
+          stores.last.zone = zoneApartFromDevice(DateTime(2026, 4, 21), 6);
+          await settle();
+          stores.add(
+            CachingCalendarStore<String>(
+              dataSource: source,
+              readAhead: readAhead,
+            ),
+          );
+          await pumpCalendar();
+          await settle();
+          controllers.last.goTo(DateTime(2026, 6, 17));
+          await settle();
+          expect(
+            <String>[
+              for (final read in source.reads)
+                "${CalendarDates.isoDate(read.first)}.."
+                    "${CalendarDates.isoDate(read.last)}",
+            ],
+            expected[label],
+            reason: label,
+          );
+          await tester.pumpWidget(const SizedBox());
+          for (final store in stores) {
+            store.dispose();
+          }
+          for (final controller in controllers) {
+            controller.dispose();
+          }
+        }
+      }
+    }
+  });
+
+  testWidgets("CV70 the retry of a failed view's cover sends the reads it "
+      "sent", (tester) async {
+    useTallView(tester);
+    // The reads each retry sends, by view and read-ahead.
+    const expected = <String, List<String>>{
+      "day, read-ahead 0": <String>["2026-04-20..2026-04-26"],
+      "day, read-ahead 2": <String>["2026-04-18..2026-04-28"],
+      "week, read-ahead 0": <String>["2026-04-20..2026-04-26"],
+      "week, read-ahead 2": <String>["2026-04-18..2026-04-28"],
+      "month, read-ahead 0": <String>["2026-03-30..2026-05-03"],
+      "month, read-ahead 2": <String>["2026-03-28..2026-05-05"],
+    };
+    for (final view in <CalendarViewKind>[
+      CalendarViewKind.day,
+      CalendarViewKind.week,
+      CalendarViewKind.month,
+    ]) {
+      for (final readAhead in <int>[0, 2]) {
+        final label = "${view.name}, read-ahead $readAhead";
+        final source = HeldSource(<CalendarEntry<String>>[
+          entryOf("talk", tuesday, 10 * 60, 11 * 60),
+        ])..failure = StateError("The source failed.");
+        final caching = CachingCalendarStore<String>(
+          dataSource: source,
+          readAhead: readAhead,
+        );
+        final controller = CalendarController(view: view, selectedDay: tuesday);
+        CalendarFailureState? failure;
+        await tester.pumpWidget(
+          app(
+            CalendarView<String>(
+              key: UniqueKey(),
+              store: caching,
+              controller: controller,
+              clock: fixedClock,
+              failureBuilder: (context, state) {
+                if (state.site == CalendarStateSite.cover) {
+                  failure = state;
+                }
+                return const Text("failed");
+              },
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        // Setup sanity: the view's cover failed.
+        expect(failure, isNotNull, reason: label);
+        expect(find.text("failed"), findsOneWidget, reason: label);
+        source.failure = null;
+        final before = source.reads.length;
+        failure!.retry();
+        await tester.pumpAndSettle();
+        expect(find.text("failed"), findsNothing, reason: label);
+        expect(
+          <String>[
+            for (final read in source.reads.skip(before))
+              "${CalendarDates.isoDate(read.first)}.."
+                  "${CalendarDates.isoDate(read.last)}",
+          ],
+          expected[label],
+          reason: label,
+        );
+        await tester.pumpWidget(const SizedBox());
+        caching.dispose();
+        controller.dispose();
+      }
+    }
+  });
+
+  testWidgets("CV71 Month's long press reports the slot the edit rules give "
+      "a create on its day", (tester) async {
+    final office = CalendarDayHours(8 * 60, 18 * 60);
+    final rules = CalendarEditRules<String>(
+      policy: const UnrestrictedEditPolicy<String>(),
+      hours: office,
+      slotMinutes: CalendarDates.defaultSlotMinutes,
+    );
+    final now = CalendarNow(time: fixedClock(), today: tuesday);
+    for (final end in <int>[9 * 60, 18 * 60]) {
+      final entries = <CalendarEntry<String>>[
+        entryOf("busy", tuesday, 8 * 60, end),
+      ];
+      final memory = MemoryCalendarStore<String>(
+        entries: entries,
+        hours: office,
+      );
+      final controller = CalendarController(view: CalendarViewKind.month);
+      final creates = <CalendarCreateRange>[];
+      await tester.pumpWidget(
+        app(
+          CalendarView<String>(
+            key: UniqueKey(),
+            store: memory,
+            controller: controller,
+            clock: fixedClock,
+            editable: true,
+            onCreateRange: (details) async {
+              creates.add(details.range);
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.longPress(find.byKey(monthStripKey(tuesday)));
+      await tester.pumpAndSettle();
+      final slot = rules.createSlotOn(tuesday, now, entries: entries)!;
+      expect(creates, <CalendarCreateRange>[
+        CalendarCreateRange(start: slot.start, end: slot.end),
+      ], reason: "an entry to $end");
+      await tester.pumpWidget(const SizedBox());
+      memory.dispose();
+      controller.dispose();
+    }
   });
 }

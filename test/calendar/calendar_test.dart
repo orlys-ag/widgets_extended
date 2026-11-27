@@ -240,6 +240,8 @@ void main() {
       MemoryCalendarStore,
       CalendarShownEntry,
       CalendarLoadStatus,
+      CalendarEntryReader,
+      CalendarStaleDays,
       CalendarEntryChanged,
       CalendarStoreException,
       CalendarHoursException,
@@ -333,6 +335,9 @@ void main() {
         "CalendarMoveRequest",
       },
       "lib/calendar/views/time_picker.dart": <String>{"CalendarTimePicker"},
+      "lib/calendar/views/view_details.dart": <String>{
+        "CalendarEntryTapDetails",
+      },
     });
     expect(
       <List<String>?>[
@@ -391,6 +396,34 @@ void main() {
       }.difference(<String>{"hashCode"}),
       <String>{"range", "globalRect", "userChoseLength"},
     );
+  });
+
+  test("B6 CalendarEntryTapDetails is declared once, under the views, as "
+      "an immutable final class, which the barrel shows from that file", () {
+    final declaration = RegExp(
+      r"^((?:@\w+\s+)*)((?:(?:abstract|base|final|interface|sealed)\s+)*)"
+      r"class\s+CalendarEntryTapDetails\b",
+      multiLine: true,
+    );
+    final declaring = <String, RegExpMatch>{
+      for (final file in moduleFiles())
+        file: ?declaration.firstMatch(
+          withoutComments(File(file).readAsStringSync()),
+        ),
+    };
+    expect(declaring.keys, hasLength(1));
+    final path = declaring.keys.single;
+    expect(path, startsWith("lib/calendar/views/"));
+    final match = declaring[path]!;
+    expect(match.group(1)!.split(RegExp(r"\s+")), contains("@immutable"));
+    expect(match.group(2)!.trim(), "final");
+    expect(<String>[
+      for (final export in exportsOf(
+        File(barrelPath).readAsStringSync(),
+        barrelPath,
+      ))
+        if (export.path == path) ...export.shown!,
+    ], contains("CalendarEntryTapDetails"));
   });
 
   test("B4 each class the barrel shows of the module's own files says how "
@@ -606,6 +639,42 @@ void main() {
         reason: path,
       );
     }
+  });
+
+  test("LY6 no file under lib/calendar/views names a store class or calls "
+      "a write", () {
+    final storeClass = RegExp(
+      r"\b(CalendarStore|MemoryCalendarStore|CachingCalendarStore)\b",
+    );
+    final write = RegExp(
+      r"\b(?:store|reader)\s*\.\s*(?:create|update|requestMove|requestDelete)"
+      r"\s*\("
+      r"|\.\s*(?:requestMove|requestDelete)\s*\(",
+    );
+    final views = trackedDartFiles("lib/calendar/views");
+    // Setup sanity: the views are listed, and each pattern finds what it
+    // looks for.
+    expect(
+      views,
+      containsAll(<String>[
+        "lib/calendar/views/timed_grid.dart",
+        "lib/calendar/views/month_board.dart",
+      ]),
+    );
+    expect(write.hasMatch("store.requestMove(x)"), isTrue);
+    expect(storeClass.hasMatch("CalendarStore<T>"), isTrue);
+    final offending = <String, List<String>>{};
+    for (final path in views) {
+      final source = withoutComments(File(path).readAsStringSync());
+      final found = <String>[
+        for (final pattern in <RegExp>[storeClass, write])
+          for (final match in pattern.allMatches(source)) match.group(0)!,
+      ];
+      if (found.isNotEmpty) {
+        offending[path] = found;
+      }
+    }
+    expect(offending, isEmpty);
   });
 
   test("RC19 each class whose values a host gives checks them with a throw "

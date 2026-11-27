@@ -1682,7 +1682,11 @@ void main() {
     expect(kept.length, greaterThan(4));
     counts.clear();
 
-    final store = tester.widget<MonthBoard<ItemPayload>>(month).store;
+    final store = tester
+        .widget<CalendarView<ItemPayload>>(
+          find.byType(CalendarView<ItemPayload>),
+        )
+        .store;
     store.requestDelete(brainstormId);
     await tester.pump();
     expect(counts.chipCalls[brainstormId], greaterThan(0));
@@ -1784,7 +1788,7 @@ void main() {
   });
 
   testWidgets("BA2 a day row draws the loading and failure builders' "
-      "content for its day, the failure with the store's error or none", (
+      "content for its day, the failure with its day's own error", (
     tester,
   ) async {
     final marks = MarkingBuilders();
@@ -1839,7 +1843,7 @@ void main() {
     await pumpFor(tester, const Duration(milliseconds: 1500));
 
     // A prefetch failure while the shown month is ready: May 4, the first
-    // day past April's month grid, leaves no error.
+    // day past April's month grid, gives its row its own read's error.
     await tester.pumpWidget(const SizedBox());
     final prefetch = MarkingBuilders();
     final prefetchApi = await pumpCalendar(
@@ -1872,10 +1876,17 @@ void main() {
       await tester.pump();
     }
     expect(unread, findsOneWidget);
-    final none = prefetch.failures.lastWhere((state) {
+    final own = prefetch.failures.lastWhere((state) {
       return state.first == may4;
     });
-    expect(none.error, isNull);
+    expect(
+      own.error,
+      isA<CalendarFailureException>().having(
+        (error) => error.message,
+        "message",
+        "Reading failed.",
+      ),
+    );
     await tester.pump(second);
     await tester.pumpAndSettle();
   });

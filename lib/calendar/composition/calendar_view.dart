@@ -1,6 +1,5 @@
 /// The calendar: its four views composed under a header and the folding
-/// calendar card, the controller a host sets and listens to, and what a
-/// tap on an entry reports.
+/// calendar card, and the controller a host sets and listens to.
 library;
 
 import 'dart:async';
@@ -21,6 +20,7 @@ import '../views/month_picker.dart';
 import '../views/move_request.dart';
 import '../views/pinch_zoom.dart' as pinch;
 import '../views/timed_grid.dart';
+import '../views/view_details.dart';
 import 'calendar_card.dart';
 import 'calendar_card_controller.dart';
 import 'calendar_header.dart';
@@ -58,23 +58,6 @@ CalendarViewKind calendarOpeningView(
     return requested;
   }
   return views.first;
-}
-
-/// A tap on an entry: the [entry] as the store holds it, and whether it is
-/// [editable], in edit mode with [CalendarView.editPolicy] letting it be
-/// edited ([CalendarEditPolicy.mayEdit]).
-@immutable
-final class CalendarEntryTapDetails<T> {
-  /// A tap on [entry], [editable] or not.
-  const CalendarEntryTapDetails({required this.entry, required this.editable});
-
-  /// The stored entry, without a pending move's requested time.
-  final CalendarEntry<T> entry;
-
-  /// Whether a host's form may change the entry: the calendar is
-  /// [CalendarView.editable] and its [CalendarView.editPolicy] lets the
-  /// entry be edited ([CalendarEditPolicy.mayEdit]).
-  final bool editable;
 }
 
 /// A calendar of [store]'s entries in the views [views] lists, under a
@@ -294,8 +277,10 @@ class CalendarView<T> extends StatefulWidget {
     this.bottomPadding = 0.0,
   });
 
-  /// The entries the calendar shows and its views write, and the hours it
-  /// shows and schedules in ([CalendarStore.hours]). The calendar asks it
+  /// The entries the calendar shows, and the hours it shows and schedules
+  /// in ([CalendarStore.hours]). The calendar, not its views, writes to it
+  /// a move or a resize no [onMoveRequest] takes
+  /// ([CalendarStore.requestMove]). The calendar asks it
   /// to show the range of days its view shows, and never disposes it. The
   /// calendar draws on its zone ([CalendarStore.zone]), the device's clock
   /// where it has none.
@@ -997,7 +982,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
       _waitingCreate = null;
       waiting.done.complete(
         Future<void>.sync(() {
-          return _openCreateFlow(day, waiting.globalRect, afterNow: true)?.done;
+          return _openCreateFlow(day, waiting.globalRect, afterNow: true);
         }),
       );
     } else if (store.readFailed(day)) {
@@ -1438,23 +1423,6 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     return false;
   }
 
-  /// A tap on the block or chip of [id]: reports the stored entry, and
-  /// whether a form may change it, the choice between a form that edits
-  /// and one that shows.
-  void _openEntry(String id) {
-    final onEntryTap = widget.onEntryTap;
-    final entry = widget.store.storedEntry(id);
-    if (onEntryTap == null || entry == null) {
-      return;
-    }
-    onEntryTap(
-      CalendarEntryTapDetails<T>(
-        entry: entry,
-        editable: widget.editable && _policy.mayEdit(entry, _now.value),
-      ),
-    );
-  }
-
   /// [CalendarView.onCreateRange]'s future for [details], a throw within
   /// the call failing it, so a view that marks the create clears the mark.
   Future<void> _createRange(CalendarCreateDetails details) {
@@ -1467,20 +1435,23 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
     });
   }
 
-  void _requestEdit(String id) {
-    final onEditRequest = widget.onEditRequest;
-    final entry = widget.store.storedEntry(id);
-    if (onEditRequest != null && entry != null) {
-      onEditRequest(entry);
-    }
+  /// The write of a move or a resize no [CalendarView.onMoveRequest]
+  /// takes: [request]'s requested entry written to the store
+  /// ([CalendarStore.requestMove]), its failure caught, whether it throws
+  /// within the call or its future fails, as a failed write shows the
+  /// stored entry again.
+  Future<void> _writeMove(CalendarMoveRequest<T> request) {
+    return Future<CalendarEntry<T>>.sync(() {
+      return widget.store.requestMove(request.requested);
+    }).then<void>((_) {}, onError: (Object error) {});
   }
 
-  void _requestDelete(String id) {
-    final onDeleteRequest = widget.onDeleteRequest;
-    final entry = widget.store.storedEntry(id);
-    if (onDeleteRequest != null && entry != null) {
-      onDeleteRequest(entry);
-    }
+  void _requestEdit(CalendarEditRequestDetails<T> details) {
+    widget.onEditRequest?.call(details.entry);
+  }
+
+  void _requestDelete(CalendarDeleteRequestDetails<T> details) {
+    widget.onDeleteRequest?.call(details.entry);
   }
 
   /// [CalendarController.createOn]: ends the wait of an earlier create,
@@ -1515,76 +1486,37 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
         return done.future;
       }
     }
-    return _openCreateFlow(shown, globalRect, afterNow: true)?.done;
+    return _openCreateFlow(shown, globalRect, afterNow: true);
   }
 
-  /// Month's long press on [day], whose cell lies at [globalRect],
-  /// selecting it first when it is a day of the shown month; a day of
-  /// another month leaves the selection and the month as they are. Returns
-  /// what [_openCreateFlow] returns.
-  ({DateTime start, Future<void> done})? _createOn(
-    DateTime day,
-    Rect globalRect,
-  ) {
-    if (_grid.contains(day)) {
-      _select(day);
-    }
-    return _openCreateFlow(_dayIn(day), globalRect);
-  }
-
-  /// Reports a create on [day], from the earliest start [_policy] gives it
-  /// ([CalendarEditPolicy.earliestStartOn]), at the slot
-  /// [CalendarEditRules.firstSlot] gives over the entries the store shows
-  /// on it: the first no entry shares, or, where [_policy]'s
-  /// [CalendarEditPolicy.allowsOverlaps] is false and none is, the first
-  /// sharing time only with entries its [CalendarEditPolicy.mayOverlap]
-  /// allows; or where it gives none, at the first slot of the hours from
-  /// that start, over an entry, refused or not, which asks [_policy]
-  /// nothing. Each is a slot whose times the clock reads, so none starts
-  /// before that start, and the slots are tried in the order of their
-  /// instants: where [day]'s clock repeats a stretch, from that start's
-  /// occurrence, and from the first pass on through the second before the
-  /// time after the stretch. Where [afterNow] and [day] is today, the start
-  /// is the later of that start and the current time
-  /// ([CalendarNow.timeOnToday]). It takes
-  /// [globalRect] as its rect and returns the start of the range it
-  /// reports with [_createRange]'s future. Where it leaves no such slot in
-  /// the hours, it reports [CalendarView.onCreateRefused] instead and
-  /// returns null.
-  ({DateTime start, Future<void> done})? _openCreateFlow(
+  /// Reports a create on [day] at the slot the rules of the moment give it
+  /// over the entries the store shows on it
+  /// ([CalendarEditRules.createSlotOn]), not before the current time where
+  /// [afterNow]. It takes [globalRect] as its rect and returns
+  /// [_createRange]'s future for the create. Where the rules give no slot,
+  /// it reports [CalendarView.onCreateRefused] instead and returns null.
+  Future<void>? _openCreateFlow(
     DateTime day,
     Rect globalRect, {
     bool afterNow = false,
   }) {
-    final rules = _takeRules();
-    final now = _now.value;
-    var start = rules.earliestStartOn(day, now);
-    final earliest = start.earliest;
-    if (afterNow &&
-        earliest != null &&
-        CalendarDates.dayNumber(start.day) ==
-            CalendarDates.dayNumber(now.today) &&
-        earliest.isBefore(now.timeOnToday)) {
-      start = CalendarEarliestStart(start.day, now.timeOnToday);
-    }
-    final shown = widget.store.entriesOn(day).map((shown) {
-      return shown.entry;
-    });
-    final slot =
-        rules.firstSlot(start, clearOf: shown, throughSecondPass: true) ??
-        rules.firstSlot(start, throughSecondPass: true);
+    final slot = _takeRules().createSlotOn(
+      day,
+      _now.value,
+      entries: widget.store.entriesOn(day).map((shown) {
+        return shown.entry;
+      }),
+      notBeforeNow: afterNow,
+    );
     if (slot == null) {
       widget.onCreateRefused?.call(day);
       return null;
     }
-    return (
-      start: slot.start,
-      done: _createRange(
-        CalendarCreateDetails(
-          range: CalendarCreateRange(start: slot.start, end: slot.end),
-          globalRect: globalRect,
-          userChoseLength: false,
-        ),
+    return _createRange(
+      CalendarCreateDetails(
+        range: CalendarCreateRange(start: slot.start, end: slot.end),
+        globalRect: globalRect,
+        userChoseLength: false,
       ),
     );
   }
@@ -1699,7 +1631,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
               key: const ValueKey<String>("day-list"),
               store: widget.store,
               weekdays: widget.weekdays,
-              format: widget.hourLabelFormat,
+              hourLabelFormat: widget.hourLabelFormat,
               hours: _hours,
               slotMinutes: widget.slotMinutes,
               editable: widget.editable,
@@ -1708,8 +1640,8 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
               now: _now,
               onTopDay: _select,
               onCreateRange: _createRange,
-              onEdit: _requestEdit,
-              onDelete: _requestDelete,
+              onEditRequest: _requestEdit,
+              onDeleteRequest: _requestDelete,
               cardBuilder: widget.cardBuilder,
               cardExtentOf: widget.cardExtentOf,
               addButtonBuilder: widget.addButtonBuilder,
@@ -1784,13 +1716,13 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                     selectedDay: _day,
                     now: _now,
                     onSelectDay: _select,
-                    onOpenEntry: _openEntry,
-                    onCreate: _createRange,
-                    onMoveRequest: widget.onMoveRequest,
-                    onZoom: (minSlotHeight, minDayWidth) {
+                    onEntryTap: widget.onEntryTap,
+                    onCreateRange: _createRange,
+                    onMoveRequest: widget.onMoveRequest ?? _writeMove,
+                    onZoom: (details) {
                       controller.setZoom(
-                        minSlotHeight: minSlotHeight,
-                        minDayWidth: minDayWidth,
+                        minSlotHeight: details.minSlotHeight,
+                        minDayWidth: details.minDayWidth,
                       );
                     },
                     editable: widget.editable,
@@ -1801,7 +1733,7 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                     hourLabelFormat: widget.hourLabelFormat,
                     minDayWidth: controller.minDayWidth,
                     minSlotHeight: controller.minSlotHeight,
-                    storeRange: range,
+                    loadRange: range,
                     // The week strip names Day's one day.
                     showsDayHeader: week,
                     blockBuilder: widget.blockBuilder,
@@ -1850,12 +1782,16 @@ class _CalendarViewState<T> extends State<CalendarView<T>>
                     now: _now,
                     onSelectDay: _select,
                     onOpenDay: _openDay,
-                    onCreateOnDay: widget.editable ? _createOn : null,
-                    onOpenEntry: _openEntry,
-                    onZoom: (weekScale, minDayWidth) {
+                    editable: widget.editable,
+                    editPolicy: _policy,
+                    takeRules: widget.editable ? _takeRules : null,
+                    onCreateRange: _createRange,
+                    onCreateRefused: widget.onCreateRefused,
+                    onEntryTap: widget.onEntryTap,
+                    onZoom: (details) {
                       controller.setZoom(
-                        monthWeekScale: weekScale,
-                        minDayWidth: minDayWidth,
+                        monthWeekScale: details.weekScale,
+                        minDayWidth: details.minDayWidth,
                       );
                     },
                     chipBuilder: widget.chipBuilder,

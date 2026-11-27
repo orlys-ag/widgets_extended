@@ -3,8 +3,9 @@
 /// day hides), the height a week rests at, the days that show cards, the
 /// bars an entry splits into, a chip drawn again for a new payload, the
 /// hour format its chips are handed and heard in, when its days are ready
-/// while the store shows another range, and its today, create mark and
-/// cover over a zoned store.
+/// while the store shows another range, the layout it takes by default, the
+/// create its long press reports, and its today, create mark and cover over
+/// a zoned store.
 library;
 
 import 'dart:async';
@@ -21,6 +22,7 @@ import 'package:widgets_extended/scheduling/dates/calendar_dates.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_data_source.dart';
 import 'package:widgets_extended/scheduling/entries/calendar_entry.dart';
 import 'package:widgets_extended/scheduling/policy/edit_policy.dart';
+import 'package:widgets_extended/scheduling/policy/edit_rules.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_builders.dart';
 import 'package:widgets_extended/calendar/presentation/calendar_theme.dart';
 import 'package:widgets_extended/scheduling/store/caching_calendar_store.dart';
@@ -162,18 +164,25 @@ class ReadSource implements CalendarDataSource<String> {
   }
 }
 
-/// A caching store over a [ReadSource] that counts its [isRead] calls.
+/// A caching store over a [ReadSource] that counts the queries of the
+/// load state of a range it answers, [statusOf] and [loadErrorOf].
 final class CountingStore extends CachingCalendarStore<String> {
   CountingStore(this.source) : super(dataSource: source);
 
   final ReadSource source;
 
-  int isReadCalls = 0;
+  int loadQueries = 0;
 
   @override
-  bool isRead(DateTime day) {
-    isReadCalls++;
-    return super.isRead(day);
+  CalendarLoadStatus statusOf(DateTime first, DateTime last) {
+    loadQueries++;
+    return super.statusOf(first, last);
+  }
+
+  @override
+  Object? loadErrorOf(DateTime first, DateTime last) {
+    loadQueries++;
+    return super.loadErrorOf(first, last);
   }
 }
 
@@ -422,12 +431,13 @@ void main() {
         home: MonthBoard<String>(
           store: store,
           grid: CalendarMonthGrid.of(day),
+          layout: CalendarMonthLayout.showAll,
           selectedDay: day,
           now: now,
           onSelectDay: (day) {},
           onOpenDay: (day) {},
-          onCreateOnDay: null,
-          onOpenEntry: (id) {},
+          onCreateRange: (details) async {},
+          onEntryTap: (details) {},
           chipBuilder: (context, entry, details) {
             calls.add(entry);
             return Text(entry.entry.payload);
@@ -473,24 +483,30 @@ void main() {
       CalendarNow(time: DateTime(2026, 4, 21, 9), today: april(21)),
     );
     addTearDown(now.dispose);
-    final pressed = <DateTime>[];
+    final pressed = <int>[];
     await tester.pumpWidget(
       MaterialApp(
         home: MonthBoard<String>(
           store: store,
           grid: grid,
+          layout: CalendarMonthLayout.showAll,
           selectedDay: april(20),
           now: now,
           onSelectDay: (day) {},
           onOpenDay: (day) {},
-          onCreateOnDay: (day, globalRect) {
-            pressed.add(day);
-            return (
-              start: DateTime(2026, 4, 21, 9),
-              done: Future<void>.value(),
+          editable: true,
+          takeRules: () {
+            return CalendarEditRules<String>(
+              policy: const UnrestrictedEditPolicy<String>(),
+              hours: CalendarDayHours.allDay,
+              slotMinutes: CalendarDates.defaultSlotMinutes,
             );
           },
-          onOpenEntry: (id) {},
+          onCreateRange: (details) {
+            pressed.add(CalendarDates.dayNumber(details.range.start));
+            return Future<void>.value();
+          },
+          onEntryTap: (details) {},
         ),
       ),
     );
@@ -498,14 +514,14 @@ void main() {
     expect(vibrations, isEmpty);
     await tester.longPress(find.byKey(monthStripKey(april(21))));
     await tester.pumpAndSettle();
-    expect(pressed, <DateTime>[april(21)]);
+    expect(pressed, <int>[CalendarDates.dayNumber(april(21))]);
     expect(vibrations, hasLength(1));
   });
 
   testWidgets("MB1 a month board whose grid the store does not show is "
-      "ready once every day of its grid is read, covers a failed read of "
-      "another range with the loading state, and reads no day in a "
-      "layout", (tester) async {
+      "ready once every day of its grid is read, which a failed read of "
+      "another range leaves so, shows the failure state once its own read "
+      "fails, and asks the store nothing in a layout", (tester) async {
     final source = ReadSource(<CalendarEntry<String>>[
       CalendarEntry<String>(
         id: "talk",
@@ -538,6 +554,7 @@ void main() {
         home: MonthBoard<String>(
           store: store,
           grid: shown,
+          layout: CalendarMonthLayout.showAll,
           weekScale: weekScale,
           selectedDay: CalendarDates.shownDayNear(
             DateTime(shown.year, shown.month),
@@ -546,8 +563,8 @@ void main() {
           now: now,
           onSelectDay: (day) {},
           onOpenDay: (day) {},
-          onCreateOnDay: null,
-          onOpenEntry: (id) {},
+          onCreateRange: (details) async {},
+          onEntryTap: (details) {},
           loadingBuilder: (context, state) {
             return const Text("loading");
           },
@@ -583,9 +600,10 @@ void main() {
     await tester.pumpAndSettle();
     expectShows(chips: true);
 
+    // June's own read, which the board asks for after the frame, fails.
     await tester.pumpWidget(board(june));
     await tester.pumpAndSettle();
-    expectShows(chips: false, cover: "loading");
+    expectShows(chips: false, cover: "failed");
 
     await tester.pumpWidget(board(workweek));
     await tester.pumpAndSettle();
@@ -596,7 +614,7 @@ void main() {
         )
         .controller
         .rows;
-    store.isReadCalls = 0;
+    store.loadQueries = 0;
     await tester.pumpWidget(board(workweek, weekScale: 1.5));
     final scaled = tester
         .widget<Board<String, MonthChip<String>>>(
@@ -606,7 +624,75 @@ void main() {
         .rows;
     // The new scale laid the weeks out again.
     expect(identical(scaled.axis, rows.axis), isFalse);
-    expect(store.isReadCalls, 0);
+    expect(store.loadQueries, 0);
+  });
+
+  testWidgets("MB10 a month board built with no layout lays out as "
+      "fitScreen", (tester) async {
+    tester.view.physicalSize = const Size(400.0, 600.0);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[
+        for (var hour = 8; hour < 20; hour++)
+          CalendarEntry<String>(
+            id: "task$hour",
+            start: DateTime(2026, 4, 21, hour),
+            end: DateTime(2026, 4, 21, hour + 1),
+            title: "task$hour",
+            color: const Color(0xFF336699),
+            payload: "task$hour",
+          ),
+      ],
+    );
+    addTearDown(store.dispose);
+    final now = ValueNotifier<CalendarNow>(
+      CalendarNow(time: DateTime(2026, 4, 21, 9), today: april(21)),
+    );
+    addTearDown(now.dispose);
+
+    /// The height of the 21st's cell on a board built with [layout], or
+    /// with none where it is null.
+    Future<double> heightUnder(CalendarMonthLayout? layout) async {
+      final key = ValueKey<Object?>(layout);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: layout == null
+              ? MonthBoard<String>(
+                  key: key,
+                  store: store,
+                  grid: grid,
+                  selectedDay: april(20),
+                  now: now,
+                  onSelectDay: (day) {},
+                  onOpenDay: (day) {},
+                  onCreateRange: (details) async {},
+                  onEntryTap: (details) {},
+                )
+              : MonthBoard<String>(
+                  key: key,
+                  store: store,
+                  grid: grid,
+                  layout: layout,
+                  selectedDay: april(20),
+                  now: now,
+                  onSelectDay: (day) {},
+                  onOpenDay: (day) {},
+                  onCreateRange: (details) async {},
+                  onEntryTap: (details) {},
+                ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return tester.getRect(find.byKey(monthDayKey(april(21)))).height;
+    }
+
+    final byDefault = await heightUnder(null);
+    final fitted = await heightUnder(CalendarMonthLayout.fitScreen);
+    final grown = await heightUnder(CalendarMonthLayout.showAll);
+    // Setup sanity: the two layouts give the 21st's week other heights.
+    expect(grown, isNot(fitted));
+    expect(byDefault, fitted);
   });
 
   testWidgets("MB2 the clock alone, with no build from above, builds no day "
@@ -623,12 +709,13 @@ void main() {
         home: MonthBoard<String>(
           store: store,
           grid: grid,
+          layout: CalendarMonthLayout.showAll,
           selectedDay: april(21),
           now: now,
           onSelectDay: (day) {},
           onOpenDay: (day) {},
-          onCreateOnDay: null,
-          onOpenEntry: (id) {},
+          onCreateRange: (details) async {},
+          onEntryTap: (details) {},
         ),
       ),
     );
@@ -707,12 +794,13 @@ void main() {
         home: MonthBoard<String>(
           store: store,
           grid: CalendarMonthGrid.of(day),
+          layout: CalendarMonthLayout.showAll,
           selectedDay: day,
           now: now,
           onSelectDay: (day) {},
           onOpenDay: (day) {},
-          onCreateOnDay: null,
-          onOpenEntry: (id) {},
+          onCreateRange: (details) async {},
+          onEntryTap: (details) {},
           hourLabelFormat: format,
           chipBuilder: recordChip,
         ),
@@ -759,14 +847,15 @@ void main() {
           home: MonthBoard<String>(
             store: store,
             grid: grid,
+            layout: CalendarMonthLayout.showAll,
             selectedDay: april(21),
             now: now,
             onSelectDay: (day) {},
             onOpenDay: (day) {},
-            onCreateOnDay: null,
-            onOpenEntry: (id) {},
-            onZoom: (weekScale, minDayWidth) {
-              zooms.add(weekScale);
+            onCreateRange: (details) async {},
+            onEntryTap: (details) {},
+            onZoom: (details) {
+              zooms.add(details.weekScale);
             },
           ),
         ),
@@ -846,13 +935,14 @@ void main() {
             child: MonthBoard<String>(
               store: store,
               grid: grid,
+              layout: CalendarMonthLayout.showAll,
               selectedDay: april(20),
               now: now,
               minDayWidth: minDayWidth,
               onSelectDay: (day) {},
               onOpenDay: (day) {},
-              onCreateOnDay: null,
-              onOpenEntry: (id) {},
+              onCreateRange: (details) async {},
+              onEntryTap: (details) {},
             ),
           ),
         ),
@@ -930,6 +1020,7 @@ void main() {
                 return MonthBoard<String>(
                   store: store,
                   grid: CalendarMonthGrid.of(selected, weekdays: weekdays),
+                  layout: CalendarMonthLayout.showAll,
                   selectedDay: selected,
                   now: now,
                   minDayWidth: minDayWidth,
@@ -942,8 +1033,8 @@ void main() {
                     }
                   },
                   onOpenDay: (day) {},
-                  onCreateOnDay: null,
-                  onOpenEntry: (id) {},
+                  onCreateRange: (details) async {},
+                  onEntryTap: (details) {},
                 );
               },
             ),
@@ -1094,24 +1185,34 @@ void main() {
     );
     addTearDown(now.dispose);
     final done = Completer<void>();
-    final pressed = <DateTime>[];
+    final pressed = <int>[];
+    // Hours from 22:00, so a long press creates at 22:00 of the pressed day
+    // on the store's clock.
+    final lateHours = CalendarDayHours(22 * 60, 24 * 60);
     await tester.pumpWidget(
       MaterialApp(
         home: MonthBoard<String>(
           store: store,
           grid: grid,
+          layout: CalendarMonthLayout.showAll,
+          hours: lateHours,
           selectedDay: april(20),
           now: now,
           onSelectDay: (day) {},
           onOpenDay: (day) {},
-          onCreateOnDay: (day, globalRect) {
-            pressed.add(day);
-            return (
-              start: tz.TZDateTime(behind, 2026, 4, 21, 22),
-              done: done.future,
+          editable: true,
+          takeRules: () {
+            return CalendarEditRules<String>(
+              policy: const UnrestrictedEditPolicy<String>(),
+              hours: lateHours,
+              slotMinutes: CalendarDates.defaultSlotMinutes,
             );
           },
-          onOpenEntry: (id) {},
+          onCreateRange: (details) {
+            pressed.add(CalendarDates.dayNumber(details.range.start));
+            return done.future;
+          },
+          onEntryTap: (details) {},
         ),
       ),
     );
@@ -1136,7 +1237,7 @@ void main() {
 
     await tester.longPress(find.byKey(monthStripKey(april(21))));
     await tester.pump();
-    expect(pressed, <DateTime>[april(21)]);
+    expect(pressed, <int>[CalendarDates.dayNumber(april(21))]);
     final mark = createMarkIn(tester, find.byType(MonthBoard<String>));
     final on21 = createMarksUnder(find.byKey(monthDayKey(april(21))), mark);
     final on22 = createMarksUnder(find.byKey(monthDayKey(april(22))), mark);
@@ -1166,12 +1267,13 @@ void main() {
         home: MonthBoard<String>(
           store: caching,
           grid: grid,
+          layout: CalendarMonthLayout.showAll,
           selectedDay: april(20),
           now: now,
           onSelectDay: (day) {},
           onOpenDay: (day) {},
-          onCreateOnDay: null,
-          onOpenEntry: (id) {},
+          onCreateRange: (details) async {},
+          onEntryTap: (details) {},
           loadingBuilder: (context, state) {
             loading.add(state);
             return const SizedBox.expand();
@@ -1224,13 +1326,14 @@ void main() {
         home: MonthBoard<String>(
           store: store,
           grid: grid,
+          layout: CalendarMonthLayout.showAll,
           weekScale: weekScale,
           selectedDay: selected,
           now: now,
           onSelectDay: (day) {},
           onOpenDay: (day) {},
-          onCreateOnDay: null,
-          onOpenEntry: (id) {},
+          onCreateRange: (details) async {},
+          onEntryTap: (details) {},
         ),
       );
     }

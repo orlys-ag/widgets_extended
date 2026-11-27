@@ -1,21 +1,26 @@
-/// Reads a library's source text: the body of a class it declares, the
-/// body of a constructor or method, the doc comment of a declaration, and
-/// the URIs and show clauses of its directives; and lists the Dart files
-/// Git holds under a directory. The scheduling and calendar modules' tests
-/// of what a class holds, what its docs say and what a file imports share
-/// them.
+/// Reads a library's source text: its code without comments, the body of
+/// a class it declares, the body of a constructor or method, the doc
+/// comment of a declaration, and the URIs and show clauses of its
+/// directives; and lists the Dart files Git holds under a directory. The
+/// scheduling and calendar modules' tests of what a class holds, what its
+/// code and docs say and what a file imports share them.
 library;
 
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+/// [source] without its comments.
+String withoutComments(String source) {
+  return source
+      .replaceAll(RegExp(r"/\*[\s\S]*?\*/"), "")
+      .replaceAll(RegExp(r"//[^\n]*"), "");
+}
+
 /// The body of the class [name] declares in [source], comments dropped, to
 /// its matching brace.
 String classBody(String source, String name) {
-  final code = source
-      .replaceAll(RegExp(r"/\*[\s\S]*?\*/"), "")
-      .replaceAll(RegExp(r"//[^\n]*"), "");
+  final code = withoutComments(source);
   final start = code.indexOf(RegExp("class $name\\b"));
   expect(start, isNot(-1), reason: name);
   final open = code.indexOf("{", start);

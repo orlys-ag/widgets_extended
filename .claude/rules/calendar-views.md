@@ -11,15 +11,23 @@ The contract of the four views and their parts. The conventions every layer foll
 - **Imports**: of Flutter, `package:flutter/widgets.dart` and the libraries
   below it; the scheduling module, through
   `lib/scheduling/scheduling.dart`; and the board and sliver_tree modules.
-- **Reads.** A view reads entries only through a `CalendarStore`, every
-  colour, text style, motion and icon from `CalendarTheme`, and every word
-  from `CalendarLocalizations`. It builds entry content and the loading and
+- **Reads.** A view reads entries only through a `CalendarEntryReader`,
+  a store or a reader of its owner's own, every colour, text style, motion
+  and icon from `CalendarTheme`, and every word from
+  `CalendarLocalizations`. It builds entry content and the loading and
   failure states through the presentation layer's builders, and takes its
   edit limits from the scheduling module's `CalendarEditPolicy` and
   `CalendarEditRules`.
-- **Store calls.** A view calls a store method that can notify, such as
-  `prefetch`, `retry` or a write, from a gesture or after the frame, never
-  during layout.
+- **Reader calls.** A view calls a reader method that can notify, such as
+  `prefetch` or `retry`, from a gesture or after the frame, never during
+  build or layout. A view asks its reader for the days it shows only after
+  the frame; the timed grid and the month board ask after the frame that
+  brings them those days, a new reader or a new zone, and judge their
+  loading and failure states from those days alone. A view that asks for
+  its days reads again the stale days it shows after the frame that
+  reports them.
+- **Writes.** A view writes nothing: it reports each write as a request
+  through a callback.
 - **No UI of its own.** A view opens no route, dialog or form: it reports a
   tap on an entry, a create range, a move or resize request, and edit and
   delete requests through callbacks.

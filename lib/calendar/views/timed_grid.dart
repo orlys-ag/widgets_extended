@@ -26,7 +26,9 @@ import 'day_cell.dart' show fittedLabel, labelSizeIn, numberBoxIn;
 import 'entry_split.dart';
 import 'move_request.dart';
 import 'pinch_zoom.dart';
+import 'stale_days_ask.dart';
 import 'timed_grid_layout.dart';
+import 'view_details.dart';
 
 /// The least height of the day header, which a text too tall for it grows
 /// ([_TimedGridState._measureHeader]).
@@ -615,7 +617,7 @@ CalendarCreateRange? _createRangeOf(
 /// from Monday 22:00 to Tuesday 02:00 shows one block at the end of
 /// Monday and one at the start of Tuesday. Rows follow the wall clock: on
 /// a day of 23 or 25 hours every column still has the same rows. A tap on
-/// a block that is not pending reports [onOpenEntry] with its entry's id; a
+/// a block that is not pending reports [onEntryTap] with its stored entry; a
 /// tap on a day header reports [onSelectDay]. Each block's content is what
 /// [blockBuilder] draws, told on a grid of one day column that the block
 /// is detailed, and which of its ends the hours cut or continue on
@@ -651,7 +653,7 @@ CalendarCreateRange? _createRangeOf(
 /// runs along the margin's bottom edge, where the first slot's line lies
 /// with the hours at their top. Each bar's content is what [chipBuilder]
 /// draws, told which of its ends continue past the shown days. A tap on a
-/// bar that is not pending reports [onOpenEntry] with its entry's id, in
+/// bar that is not pending reports [onEntryTap] with its stored entry, in
 /// edit mode and out of it.
 ///
 /// In edit mode, which [editable] turns on, a long press on any block of
@@ -669,40 +671,35 @@ CalendarCreateRange? _createRangeOf(
 /// time the clock skips requests and reports nothing; one on a time it
 /// repeats keeps the occurrence the gesture began in. Every other move or
 /// resize that lands is a [CalendarMoveRequest], which [onMoveRequest]
-/// receives, or with none the store writes ([CalendarStore.requestMove]),
-/// and which the grid shows at its requested times, pending, until that
-/// future completes. Out of edit mode the grid is read-only and asks
-/// [editPolicy] nothing: no block moves or
-/// resizes, and an empty slot creates nothing. In it [editPolicy] limits
-/// the gestures: a block or a bar whose entry it lets not move
+/// receives, and which the grid shows at its requested times, pending,
+/// until that function's future completes; the grid writes nothing. Out of edit
+/// mode the grid is read-only and asks [editPolicy] nothing: no block moves or
+/// resizes, and an empty slot creates nothing. In it [editPolicy] limits the
+/// gestures: a block or a bar whose entry it lets not move
 /// ([CalendarEditPolicy.mayMove]) takes no drag, a long press selecting it
-/// where it lets an edge of it resize, and a selected one has the handles
-/// of the edges it lets resize ([CalendarEditPolicy.resizableEdges]); no
-/// move or resize lands an entry on times it refuses
-/// ([CalendarEditPolicy.refusalsOf]); and no create gesture starts or
-/// reaches before the earliest start it gives the day the range starts on
-/// ([CalendarEditPolicy.earliestStartOn]).
-/// A block dragged above the first slot or below the last stops there, and
-/// so does a handle dragged past either. Where [editPolicy] allows overlaps
-/// ([CalendarEditPolicy.allowsOverlaps]), a move, a resize and a create go
-/// over other entries' times as over free ones, the blocks sharing a day's
-/// time laid side by side, and a move or a resize another answer refuses
-/// goes back rather than sliding to free time. Where it forbids them, a
-/// move, a resize and a create go over the times only of the entries
-/// [CalendarEditPolicy.mayOverlap] lets the change share. A move dropped
-/// where the policy refuses lands at the nearest time that shows, on that
-/// day or the day before or after it, whose sharing entries
-/// the policy all lets it share, or where the policy refuses every overlap
-/// ([CalendarEditPolicy.refusesEveryOverlap]) that no other entry's block
-/// covers, and goes back where there is none; a resize the policy refuses
-/// stops its dragged edge at the first entry in its way that the policy
-/// refuses; and a create's range stops short
-/// of the entry nearest the slot it started on that the policy does not let
-/// the range share, or keeps that slot alone where the entry shares its
-/// time. While a drag runs, a label
-/// over the grid names the days and times a release would give, or that a
-/// move has nowhere to land, and a move outlines the times it would land
-/// on.
+/// where it lets an edge of it resize, and a selected one has the handles of
+/// the edges it lets resize ([CalendarEditPolicy.resizableEdges]); no move or
+/// resize lands an entry on times it refuses ([CalendarEditPolicy.refusalsOf]);
+/// and no create gesture starts or reaches before the earliest start it gives
+/// the day the range starts on ([CalendarEditPolicy.earliestStartOn]). A block
+/// dragged above the first slot or below the last stops there, and so does a
+/// handle dragged past either. Where [editPolicy] allows overlaps
+/// ([CalendarEditPolicy.allowsOverlaps]), a move, a resize and a create go over
+/// other entries' times as over free ones, the blocks sharing a day's time laid
+/// side by side, and a move or a resize another answer refuses goes back rather
+/// than sliding to free time. Where it forbids them, a move, a resize and a
+/// create go over the times only of the entries [CalendarEditPolicy.mayOverlap]
+/// lets the change share. A move dropped where the policy refuses lands at the
+/// nearest time that shows, on that day or the day before or after it, whose
+/// sharing entries the policy all lets it share, or where the policy refuses
+/// every overlap ([CalendarEditPolicy.refusesEveryOverlap]) that no other
+/// entry's block covers, and goes back where there is none; a resize the policy
+/// refuses stops its dragged edge at the first entry in its way that the policy
+/// refuses; and a create's range stops short of the entry nearest the slot it
+/// started on that the policy does not let the range share, or keeps that slot
+/// alone where the entry shares its time. While a drag runs, a label over the
+/// grid names the days and times a release would give, or that a move has
+/// nowhere to land, and a move outlines the times it would land on.
 ///
 /// In edit mode a bar takes a long press as a block does. On a grid of more
 /// than one day column it moves by days, and once selected its left grip drags
@@ -734,7 +731,7 @@ CalendarCreateRange? _createRangeOf(
 /// frozen against the last slot does; the hour gutter runs on beside both. An
 /// entry on no shown day has no block either, and a pill in the day header's
 /// corner counts it. In edit mode empty body cells take a create gesture,
-/// reported through [onCreate], which a press starts once held for the
+/// reported through [onCreateRange], which a press starts once held for the
 /// long-press timeout ([kLongPressTimeout]), with the platform's long-press
 /// feedback ([Feedback.forLongPress]), or, with a mouse, a stylus or a
 /// trackpad, once moved more than 4 logical pixels, whichever comes first; a
@@ -746,7 +743,8 @@ CalendarCreateRange? _createRangeOf(
 /// entry [CalendarEditPolicy.mayOverlap] does not let a create of the slot
 /// share takes no create gesture, and a press on a block starts none,
 /// whatever the policy answers about it. The range picked stays marked, as a
-/// range being dragged is, until the create flow [onCreate] opens closes.
+/// range being dragged is, until the create flow [onCreateRange] opens
+/// closes.
 ///
 /// The day columns and the slot rows stretch to fill the grid, never
 /// smaller than [minDayWidth] and [minSlotHeight]; past those, it scrolls.
@@ -790,16 +788,19 @@ CalendarCreateRange? _createRangeOf(
 /// its row, the other bars stacking around it, until the drag requests its
 /// landing or ends.
 ///
-/// With no [storeRange], the days are ready while the store's shown range
-/// holds every one of them and its status is ready. With one, they are
-/// ready while the store shows exactly [storeRange] and its status is
-/// ready, or, while it shows another range, once it has read every day of
-/// [storeRange]; a store notify that moves the store off [storeRange]
-/// clears the selection. While its days are not ready a cover over the
-/// grid takes every press, centring what [loadingBuilder] draws while they
-/// are read, and what [failureBuilder] draws when the read the store waits
-/// on failed, where that read is of the grid's own range: [storeRange],
-/// or with none the store's shown range.
+/// The grid loads the days of [loadRange], or with none its own days: it
+/// asks [store] for them after the frame that brings it those days, a new
+/// store or a new zone of the store ([CalendarEntryReader.prefetch]),
+/// unless their read failed, and they are ready while the store answers
+/// them ready ([CalendarEntryReader.statusOf]). After the frame that the
+/// store reports stale days of them
+/// ([CalendarEntryReader.addStaleDaysListener]), it reads again each run of
+/// them the store answers [CalendarEntryReader.isStale] for. A new [loadRange]
+/// of other days clears the selection. While its days are not ready a cover
+/// over the grid takes every press, centring what [loadingBuilder] draws while
+/// they are read, and what [failureBuilder] draws when their read failed, with
+/// the store's error for them ([CalendarEntryReader.loadErrorOf]) and a retry
+/// of them ([CalendarEntryReader.retry]).
 ///
 /// The grid draws in the [CalendarTheme] above it and animates on the
 /// theme's motion; a block's content, the loading and the failure state
@@ -814,9 +815,9 @@ class TimedGrid<T> extends StatefulWidget {
     required this.selectedDay,
     required this.now,
     required this.onSelectDay,
-    required this.onOpenEntry,
-    required this.onCreate,
-    this.onMoveRequest,
+    this.onEntryTap,
+    required this.onCreateRange,
+    required this.onMoveRequest,
     this.editable = false,
     this.editPolicy,
     this.weekdays = CalendarWeekdaySet.all,
@@ -826,7 +827,7 @@ class TimedGrid<T> extends StatefulWidget {
     this.minDayWidth = minDayWidthLow,
     this.minSlotHeight = defaultMinSlotHeight,
     this.onZoom,
-    this.storeRange,
+    this.loadRange,
     this.showsDayHeader = true,
     this.blockBuilder,
     this.chipBuilder,
@@ -847,7 +848,7 @@ class TimedGrid<T> extends StatefulWidget {
          "A TimedGrid's minSlotHeight must be positive and finite.",
        );
 
-  final CalendarStore<T> store;
+  final CalendarEntryReader<T> store;
 
   /// Whether row 0 is a frozen header naming each column's day, whose
   /// corner over the gutter holds the pill counting the items on no shown
@@ -875,8 +876,14 @@ class TimedGrid<T> extends StatefulWidget {
 
   final ValueChanged<DateTime> onSelectDay;
 
-  /// Reports a tap on a block that is not pending, with its entry's id.
-  final ValueChanged<String> onOpenEntry;
+  /// Reports a tap on a block or a bar that is not pending: the entry as
+  /// [store] stores it ([CalendarEntryReader.storedEntry]), and whether it
+  /// is editable, [editable] and [editPolicy] letting it be edited
+  /// ([CalendarEditPolicy.mayEdit]). The grid reports nothing where the
+  /// store holds no stored entry of the id. Null for a grid whose taps on
+  /// entries report nothing, which then asks [editPolicy] nothing at a
+  /// tap.
+  final ValueChanged<CalendarEntryTapDetails<T>>? onEntryTap;
 
   /// Opens the create flow for a create gesture on empty cells, and
   /// completes when it closes: the details give the range the gesture
@@ -890,19 +897,16 @@ class TimedGrid<T> extends StatefulWidget {
   /// let go. A failure of the function, whether it throws within the call
   /// or its future fails, is not caught: a host that handles one passes a
   /// function that does.
-  final Future<void> Function(CalendarCreateDetails details) onCreate;
+  final Future<void> Function(CalendarCreateDetails details) onCreateRange;
 
   /// Takes each move or resize a gesture lands, and completes once the
-  /// host has written it or let it go. Until then the grid shows the
+  /// owner has written it or let it go. Until then the grid shows the
   /// entry at its requested times and pending, as a pending write shows
   /// it: a tap on it opens nothing, and no drag lifts it. Then the grid
-  /// shows the store's entry again. Null writes the request through the
-  /// store ([CalendarStore.requestMove]) and catches the write's failure,
-  /// as a failed write shows the stored entry again; a host that wants to
-  /// see failures passes its own function. A failure of the function,
-  /// whether it throws within the call or its future fails, is not caught:
-  /// a host that handles one passes a function that does.
-  final Future<void> Function(CalendarMoveRequest<T> request)? onMoveRequest;
+  /// shows the store's entry again. A failure of the function, whether it
+  /// throws within the call or its future fails, is not caught: an owner
+  /// that handles one passes a function that does.
+  final Future<void> Function(CalendarMoveRequest<T> request) onMoveRequest;
 
   /// Whether the grid is in edit mode: its blocks move and resize, and its
   /// empty slots take a create gesture, as [editPolicy] lets them. Out of
@@ -994,14 +998,14 @@ class TimedGrid<T> extends StatefulWidget {
   /// Reports the least slot height and day width a pinch zooms to, which
   /// the grid shows once its owner builds it with them as [minSlotHeight]
   /// and [minDayWidth]; null for a grid no pinch zooms.
-  final void Function(double minSlotHeight, double minDayWidth)? onZoom;
+  final ValueChanged<CalendarGridZoomDetails>? onZoom;
 
-  /// The range, both days inclusive, that the grid's owner asks [store] to
-  /// show for it, which holds the grid's days; null where the grid reads
-  /// the store's shown range alone. Where the store shows another range,
-  /// as it does in the frame before the owner's ask reaches it, the grid
-  /// is ready once the store has read every day of this one.
-  final ({DateTime first, DateTime last})? storeRange;
+  /// The days, both inclusive, that the grid asks [store] for and judges
+  /// its loading and failure states by, which hold the grid's days; null
+  /// for the grid's own days, from [firstDay] for [dayCount] days. A grid
+  /// that shows some days of a range its owner shows takes that range, so
+  /// its cover follows the whole range's read.
+  final ({DateTime first, DateTime last})? loadRange;
 
   /// Draws each block's content inside the box the grid gives it; null
   /// for [defaultCalendarBlockBuilder]. A new one, not `==` to the last,
@@ -1775,11 +1779,31 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   /// Whether the last [_sync] found its days ready.
   bool _syncedReady = false;
 
-  /// Whether the store has read every day of [TimedGrid.storeRange], and
-  /// whether it shows exactly that range, as [_noteRange] last found them;
-  /// both false with no range.
-  bool _rangeRead = false;
-  bool _showsRange = false;
+  /// The days the grid loads ([TimedGrid.loadRange], or with none the
+  /// tracks' days), as dates and as day numbers ([_takeLoadRange]).
+  late DateTime _loadFirst;
+  late DateTime _loadLast;
+  late int _loadFirstDay;
+  late int _loadLastDay;
+
+  /// What the store answers for the load range's status and, where it is
+  /// failed, error, as [_noteLoad] last found them, which [_daysReady] and
+  /// the cover read, so a layout reads fields rather than the store.
+  CalendarLoadStatus _loadStatus = CalendarLoadStatus.loading;
+  Object? _loadError;
+
+  /// Whether an ask for the load range waits for the end of the frame
+  /// ([_scheduleAsk]).
+  bool _askPending = false;
+
+  /// The store's zone at the last ask ([_askDays]), which the ask alone
+  /// writes, so a zone the grid took earlier, at its clock's notify
+  /// ([_handleNow]), still asks.
+  Location? _askedZone;
+
+  /// Reads again, after the frame, the days of the load range the store
+  /// reports stale ([StaleDaysAsk]).
+  late final StaleDaysAsk<T> _staleAsk;
 
   /// Whether a frame callback will put the styles' animation back.
   bool _restoreScheduled = false;
@@ -1822,7 +1846,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     );
     widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
-    _noteRange();
+    _takeLoadRange();
+    _staleAsk = StaleDaysAsk<T>(_loadDays)..listen(widget.store);
+    _noteLoad();
     _sync();
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
@@ -1844,6 +1870,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
         );
       }
     });
+    _scheduleAsk();
   }
 
   @override
@@ -1895,6 +1922,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       widget.store.addListener(_handleStore);
       _offRange = null;
     }
+    _staleAsk.listen(widget.store);
     final nowChanged = widget.now != oldWidget.now;
     if (nowChanged) {
       oldWidget.now.removeListener(_handleNow);
@@ -1980,9 +2008,24 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
             widget.bottomPadding != oldWidget.bottomPadding)) {
       _fitAxes(size);
     }
-    final rangeChanged = widget.storeRange != oldWidget.storeRange;
+    final rangeChanged =
+        widget.loadRange != oldWidget.loadRange ||
+        (widget.loadRange == null && tracksChanged);
+    var loadDaysChanged = false;
+    if (rangeChanged) {
+      final firstDay = _loadFirstDay;
+      final lastDay = _loadLastDay;
+      _takeLoadRange();
+      loadDaysChanged = _loadFirstDay != firstDay || _loadLastDay != lastDay;
+      if (loadDaysChanged && widget.loadRange != null) {
+        _selectedBlock.value = null;
+      }
+    }
     if (storeChanged || rangeChanged) {
-      _noteRange();
+      _noteLoad();
+    }
+    if (storeChanged || loadDaysChanged || widget.store.zone != _askedZone) {
+      _scheduleAsk();
     }
     if (storeChanged || tracksChanged || rangeChanged) {
       // New days are not ready yet, so they do not animate in either way;
@@ -2299,6 +2342,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _pressRange.dispose();
     _delayedRange.dispose();
     widget.store.removeListener(_handleStore);
+    _staleAsk.dispose();
     _header.dispose();
     _hiddenCount.dispose();
     _strip.dispose();
@@ -2935,7 +2979,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
     _pinchFocal = box.globalToLocal(update.focal);
     _forgetPinchFocalAfterFrame();
-    onZoom(slot, day);
+    onZoom(CalendarGridZoomDetails(minSlotHeight: slot, minDayWidth: day));
   }
 
   /// Forgets [_pinchFocal] and [_rowFocal] once the next frame is done,
@@ -2991,21 +3035,20 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// Follows the store, taking a new zone first ([_takeZone]), so the sync
   /// lays the refiled entries on tracks of the new clock and animates as
-  /// any store change does. A notify that moves it off the range it showed
-  /// for this grid clears the selection: the grid's owner, which moved it,
-  /// builds the grid on the days of its new range next. The entries of
-  /// the days outside the range are read again when a check next needs
-  /// them ([_offRange]), a create range in flight places its anchor again
-  /// on the entries the sync placed and tests the range a release there
-  /// would report ([_placeRangeAgain]), and where the policy forbids
-  /// overlaps a drag the board runs asks its gates again
+  /// any store change does. It notes the load range's state again
+  /// ([_noteLoad]), and where the store's zone is not the one the last ask
+  /// asked on, asks for the load range after the frame ([_scheduleAsk]).
+  /// The entries of the days outside the range are read again when a check
+  /// next needs them ([_offRange]), a create range in flight places its
+  /// anchor again on the entries the sync placed and tests the range a
+  /// release there would report ([_placeRangeAgain]), and where the policy
+  /// forbids overlaps a drag the board runs asks its gates again
   /// ([_askDragAgain]).
   void _handleStore() {
     _takeZone(widget);
-    final showedRange = _showsRange;
-    _noteRange();
-    if (showedRange && !_showsRange) {
-      _selectedBlock.value = null;
+    _noteLoad();
+    if (widget.store.zone != _askedZone) {
+      _scheduleAsk();
     }
     _offRange = null;
     _sync();
@@ -3033,16 +3076,12 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
   }
 
-  /// Hands [request] to [TimedGrid.onMoveRequest], or with none writes it
-  /// ([CalendarStore.requestMove]), holding it in [_held] until the future
-  /// completes, or fails, a throw within the call included. The hold syncs
-  /// within the call ([_handleStore]), as a store write's notify does, a
-  /// drag of the entry noted as requested first ([_Dragging.requested]).
-  ///
-  /// A failure of the store's write, whether [CalendarStore.requestMove]
-  /// throws within the call or its future fails, is caught, as a failed
-  /// write shows the stored entry again. A failure of
-  /// [TimedGrid.onMoveRequest], either way, is left uncaught in the zone.
+  /// Hands [request] to [TimedGrid.onMoveRequest], holding it in [_held]
+  /// until the future completes, or fails, a throw within the call
+  /// included. The hold syncs within the call ([_handleStore]), as a store
+  /// write's notify does, a drag of the entry noted as requested first
+  /// ([_Dragging.requested]). A failure of the function, either way, is
+  /// left uncaught in the zone.
   void _requestMove(CalendarMoveRequest<T> request) {
     final id = request.entry.id!;
     final drag = _drag;
@@ -3052,17 +3091,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _held[id] = (request: request, shown: request.requested);
     _handleStore();
     final onMoveRequest = widget.onMoveRequest;
-    final store = widget.store;
-    final Future<void> moving;
-    if (onMoveRequest == null) {
-      moving = Future<CalendarEntry<T>>.sync(() {
-        return store.requestMove(request.requested);
-      }).then<void>((_) {}, onError: (Object error) {});
-    } else {
-      moving = Future<void>.sync(() {
-        return onMoveRequest(request);
-      });
-    }
+    final moving = Future<void>.sync(() {
+      return onMoveRequest(request);
+    });
     moving.whenComplete(() {
       if (!identical(_held[id]?.request, request)) {
         return;
@@ -3139,62 +3170,85 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     return true;
   }
 
-  /// Notes whether the store has read every day of [TimedGrid.storeRange]
-  /// and whether it shows exactly that range, which [_daysReady] and
-  /// [_handleStore] read, so a layout reads fields rather than the store's
-  /// days.
-  void _noteRange() {
-    final range = widget.storeRange;
-    final store = widget.store;
+  /// Takes the load range: [TimedGrid.loadRange], or with none the tracks'
+  /// days, as local dates.
+  void _takeLoadRange() {
+    final range = widget.loadRange;
     if (range == null) {
-      _rangeRead = false;
-      _showsRange = false;
-      return;
+      _loadFirst = CalendarDates.dateOfDayNumber(_tracks.firstDay);
+      _loadLast = _lastDay;
+    } else {
+      _loadFirst = range.first;
+      _loadLast = range.last;
     }
-    _showsRange = store.isShown(range.first, range.last);
-    _rangeRead = _everyDayRead(store, range.first, range.last);
+    _loadFirstDay = CalendarDates.dayNumber(_loadFirst);
+    _loadLastDay = CalendarDates.dayNumber(_loadLast);
   }
 
-  static bool _everyDayRead<T>(
-    CalendarStore<T> store,
-    DateTime first,
-    DateTime last,
-  ) {
-    for (
-      var day = first;
-      !day.isAfter(last);
-      day = CalendarDates.addDays(day, 1)
-    ) {
-      if (!store.isRead(day)) {
-        return false;
-      }
+  /// The load range's day numbers, the days whose stale days the grid
+  /// reads again ([_staleAsk]).
+  ({int first, int last}) _loadDays() {
+    return (first: _loadFirstDay, last: _loadLastDay);
+  }
+
+  /// Notes the store's status of the load range, and its error where that
+  /// is failed ([CalendarEntryReader.statusOf],
+  /// [CalendarEntryReader.loadErrorOf]), which [_daysReady] and the cover
+  /// read. Runs in [initState], in [didUpdateWidget] for a new store or a
+  /// new load range, and at each store notify ([_handleStore]).
+  void _noteLoad() {
+    final store = widget.store;
+    final status = store.statusOf(_loadFirst, _loadLast);
+    _loadStatus = status;
+    _loadError = status == CalendarLoadStatus.failed
+        ? store.loadErrorOf(_loadFirst, _loadLast)
+        : null;
+  }
+
+  /// Asks for the load range after the frame ([_askDays]), once however
+  /// many new ranges, stores and zones a frame brings, and asks for that
+  /// frame where none is under way, since a store's ask can notify and a
+  /// build or a layout must not.
+  void _scheduleAsk() {
+    if (_askPending) {
+      return;
     }
-    return true;
+    _askPending = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _askPending = false;
+      if (mounted) {
+        _askDays();
+      }
+    });
+    SchedulerBinding.instance.ensureVisualUpdate();
+  }
+
+  /// Reads the load range's unread days ([CalendarEntryReader.prefetch]),
+  /// unless their read failed: a failed read leaves its days unread, and
+  /// the cover's retry reads them again ([_retryLoad]). Takes the store's
+  /// zone as the one asked on ([_askedZone]).
+  void _askDays() {
+    final store = widget.store;
+    _askedZone = store.zone;
+    if (store.statusOf(_loadFirst, _loadLast) != CalendarLoadStatus.failed) {
+      store.prefetch(_loadFirst, _loadLast);
+    }
+  }
+
+  /// The failure state's retry: a retry of the load range
+  /// ([CalendarEntryReader.retry]).
+  void _retryLoad() {
+    widget.store.retry(_loadFirst, _loadLast);
   }
 
   DateTime get _lastDay {
     return CalendarDates.dateOfDayNumber(_tracks.lastDay);
   }
 
-  /// Whether this grid's days are ready. With no [TimedGrid.storeRange],
-  /// while the store's shown range holds every one of them, all read: the
-  /// range may be wider than the grid, as a range holding the grid's whole
-  /// week is, and a sync that runs between the store taking a range
-  /// without this grid's days and this grid getting new ones finds them
-  /// not ready. With one, while the store shows exactly that range, ready,
-  /// and while it shows another, once every day of that range is read,
-  /// which is the status the store takes when it shows it.
+  /// Whether this grid's days are ready: whether the store answered the
+  /// load range ready when [_noteLoad] last asked.
   bool get _daysReady {
-    final store = widget.store;
-    final range = widget.storeRange;
-    if (range == null) {
-      return store.status == CalendarLoadStatus.ready &&
-          store.isWithinShown(widget.firstDay, _lastDay);
-    }
-    if (store.isShown(range.first, range.last)) {
-      return store.status == CalendarLoadStatus.ready;
-    }
-    return _rangeRead;
+    return _loadStatus == CalendarLoadStatus.ready;
   }
 
   /// Splits the days' shown entries when the days are ready, and none
@@ -3819,9 +3873,9 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   /// The index of the timed entries the store shows on the days outside
   /// the tracks' range that the [CalendarDates.dayNumber]s [firstDay] to
-  /// [lastDay] cover, [_offRange], having read first the days among them it has
-  /// not: one [CalendarStore.entriesBetween] before the range and one after it
-  /// at most, each wholly outside the range.
+  /// [lastDay] cover, [_offRange], having read first the days among them
+  /// it has not: one [CalendarEntryReader.entriesBetween] before the range
+  /// and one after it at most, each wholly outside the range.
   GridOverlapIndex<T> _offRangeOver(int firstDay, int lastDay) {
     final tracks = _tracks;
     final index = _offRange ??= GridOverlapIndex<T>(
@@ -5263,7 +5317,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     _besideCursor.value = cursor;
   }
 
-  /// Reports [range] through [TimedGrid.onCreate], marking until the
+  /// Reports [range] through [TimedGrid.onCreateRange], marking until the
   /// create flow closes the range from the slot of [anchor] to that of
   /// [focus], or for a range across the strip, [strip], the strip cells of
   /// its days, on whichever days the grid shows meanwhile. The report says
@@ -5300,7 +5354,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     });
     _updateStripMark();
     Future<void>.sync(() {
-      return widget.onCreate(details);
+      return widget.onCreateRange(details);
     }).whenComplete(() {
       if (mounted && create == _creates) {
         setState(() {
@@ -6171,6 +6225,29 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
     }
   }
 
+  /// A tap on the block or the bar of [id]: reports through
+  /// [TimedGrid.onEntryTap] the stored entry and whether it is editable,
+  /// asking [TimedGrid.editPolicy], or with none [_unrestricted], at
+  /// [TimedGrid.now]; reports and asks nothing where there is no
+  /// [TimedGrid.onEntryTap] or no stored entry of [id].
+  void _openEntry(String id) {
+    final onEntryTap = widget.onEntryTap;
+    if (onEntryTap == null) {
+      return;
+    }
+    final entry = widget.store.storedEntry(id);
+    if (entry == null) {
+      return;
+    }
+    final policy = widget.editPolicy ?? _unrestricted;
+    onEntryTap(
+      CalendarEntryTapDetails<T>(
+        entry: entry,
+        editable: widget.editable && policy.mayEdit(entry, widget.now.value),
+      ),
+    );
+  }
+
   Widget _buildBar(GridBar<T> bar) {
     final entry = bar.shown;
     final days = _tracks.columnCount > 1;
@@ -6194,7 +6271,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       onOpen: entry.pending
           ? null
           : () {
-              widget.onOpenEntry(entry.id);
+              _openEntry(entry.id);
             },
     );
   }
@@ -6295,7 +6372,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       onOpen: entry.pending
           ? null
           : () {
-              widget.onOpenEntry(entry.id);
+              _openEntry(entry.id);
             },
     );
   }
@@ -6315,10 +6392,10 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
   }
 
   /// The cover's content: what the failure builder draws for the grid's
-  /// days when the read the store waits on for [TimedGrid.storeRange], or
-  /// with none for its shown range, failed, with the store's load error as
-  /// it holds it, and what the loading builder draws otherwise.
-  Widget _buildCover(BuildContext context, CalendarStore<T> store) {
+  /// days when the load range's read failed, with the store's error for
+  /// it and a retry of it ([_retryLoad]), and what the loading builder
+  /// draws otherwise.
+  Widget _buildCover(BuildContext context) {
     final first = CalendarDates.dateOfDayNumber(
       _tracks.firstDay,
       zone: _tracks.zone,
@@ -6327,9 +6404,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
       _tracks.lastDay,
       zone: _tracks.zone,
     );
-    final range = widget.storeRange;
-    if (store.status == CalendarLoadStatus.failed &&
-        (range == null || store.isShown(range.first, range.last))) {
+    if (_loadStatus == CalendarLoadStatus.failed) {
       final failure = widget.failureBuilder ?? defaultCalendarFailureBuilder;
       return failure(
         context,
@@ -6337,8 +6412,8 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
           site: CalendarStateSite.cover,
           first: first,
           last: last,
-          error: store.loadError,
-          retry: store.retry,
+          error: _loadError,
+          retry: _retryLoad,
         ),
       );
     }
@@ -6355,7 +6430,6 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
 
   @override
   Widget build(BuildContext context) {
-    final store = widget.store;
     final range = _range;
     final drag = _drag;
     final styles = _styles;
@@ -6483,7 +6557,7 @@ class _TimedGridState<T> extends State<TimedGrid<T>>
                 child: _LoadOverlay(
                   child: Builder(
                     builder: (context) {
-                      return _buildCover(context, store);
+                      return _buildCover(context);
                     },
                   ),
                 ),

@@ -12,6 +12,7 @@ import '../../scheduling/scheduling.dart';
 import '../presentation/calendar_day_badges.dart';
 import '../presentation/calendar_theme.dart';
 import 'day_cell.dart';
+import 'stale_days_ask.dart';
 import 'week_strip.dart';
 
 /// How a release of a [MonthStrip] comes to rest.
@@ -82,10 +83,13 @@ DateTime monthFoldDay(
 /// one there, the last report naming the month it rests on; once it rests, it
 /// asks [store] to read the days of that month's grid, so their markers
 /// show, as it asks a new [store] after the frame that gives it, for the
-/// month it rests on or slides to. A new [month] the strip does not rest
-/// on slides it there, after the frame, over the [CalendarTheme]'s motion,
-/// or at once where its duration is zero, from a month short of it when it
-/// is further away.
+/// month it rests on or slides to. After the frame that the store reports
+/// stale days of that month's grid
+/// ([CalendarEntryReader.addStaleDaysListener]), it reads again each run of
+/// them the store answers [CalendarEntryReader.isStale] for. A new [month]
+/// the strip does not rest on slides it there, after the frame, over the
+/// [CalendarTheme]'s motion, or at once where its duration is zero, from a
+/// month short of it when it is further away.
 ///
 /// [collapse] runs from 0, the month, to 1, its week. As it runs the strip
 /// shrinks to one row and moves up by the rows above the week of
@@ -129,7 +133,7 @@ class MonthStrip<T> extends StatefulWidget {
     this.browseFrom,
   });
 
-  final CalendarStore<T> store;
+  final CalendarEntryReader<T> store;
 
   /// The first day of the month the strip shows.
   final DateTime month;
@@ -247,6 +251,10 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
   /// Whether a frame will read the month the strip rests on.
   bool _prefetchScheduled = false;
 
+  /// Reads again, after the frame, the days of [_month]'s grid the store
+  /// reports stale ([StaleDaysAsk]).
+  late final StaleDaysAsk<T> _staleAsk;
+
   /// The theme above the strip, whose motion a slide takes when it starts.
   late CalendarThemeData _theme;
 
@@ -276,6 +284,7 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
     _today = _plainTwinOf(widget.today);
     _foldDay = _foldTwinOf(widget.foldDay);
     widget.collapse.addListener(_handleCollapse);
+    _staleAsk = StaleDaysAsk<T>(_monthDays)..listen(widget.store);
     // After the frame, because a read may notify the day cells' listeners,
     // which must not rebuild mid-build.
     SchedulerBinding.instance.addPostFrameCallback((_) {
@@ -317,6 +326,7 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
       oldWidget.collapse.removeListener(_handleCollapse);
       widget.collapse.addListener(_handleCollapse);
     }
+    _staleAsk.listen(widget.store);
     if (widget.store != oldWidget.store) {
       // After the frame, as in initState. The month the strip rests on or
       // slides to, which a slide's end reads again where it moves on.
@@ -339,6 +349,7 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
   @override
   void dispose() {
     widget.collapse.removeListener(_handleCollapse);
+    _staleAsk.dispose();
     _scroll.dispose();
     _focus.dispose();
     super.dispose();
@@ -374,6 +385,16 @@ class _MonthStripState<T> extends State<MonthStrip<T>> {
   void _prefetch(DateTime month) {
     final grid = _gridOf(month);
     widget.store.prefetch(grid.firstDay, grid.lastDay);
+  }
+
+  /// The day numbers of the grid of [_month], the month the strip rests on
+  /// or slides to.
+  ({int first, int last}) _monthDays() {
+    final grid = _gridOf(_month);
+    return (
+      first: CalendarDates.dayNumber(grid.firstDay),
+      last: CalendarDates.dayNumber(grid.lastDay),
+    );
   }
 
   /// Slides the strip to [month], or to [MonthStrip.browseFrom]'s month
@@ -717,7 +738,7 @@ class _NeighbourDay<T> extends StatelessWidget {
     required this.dayBadges,
   });
 
-  final CalendarStore<T> store;
+  final CalendarEntryReader<T> store;
   final DateTime day;
   final bool isSelected;
   final bool isToday;

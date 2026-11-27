@@ -24,6 +24,8 @@ import '../presentation/calendar_theme.dart';
 import 'answer_builder.dart';
 import 'create_details.dart';
 import 'day_cell.dart' show labelSizeIn;
+import 'stale_days_ask.dart';
+import 'view_details.dart';
 
 /// The style the day list animates its rows with under [theme]: every
 /// family over its [CalendarThemeData.motionDuration] on its
@@ -692,7 +694,7 @@ final class DayListFailed extends DayListRow {
 }
 
 /// The rows of [day]'s block for [entries], the entries the store answers
-/// on [day], sorted as [CalendarStore.entriesOn] sorts them, each row
+/// on [day], sorted as [CalendarEntryReader.entriesOn] sorts them, each row
 /// holding the entry's piece on [day] ([CalendarDates.pieceOn]), a timed
 /// one's from no earlier than the minute [day]'s clock starts at, so on a
 /// day whose clock skips its midnight a piece carried from the day before
@@ -795,9 +797,9 @@ List<DayListRow> dayListRowsOf<T>(
 /// [addButtonBuilder] draws and a screen reader hears as adding an item at
 /// its time, that reports [onCreateRange]; what [loadingBuilder] draws while
 /// the day is unread; and while a failed read leaves the day
-/// [CalendarStore.readFailed], unread or read and changed since, what
+/// [CalendarEntryReader.readFailed], unread or read and changed since, what
 /// [failureBuilder] draws in place of its rows, with a retry that reads the
-/// shown days again. Times read in [format].
+/// shown days again. Times read in [hourLabelFormat].
 /// Unless [editable], the list has no dashed rows and hands the card
 /// builder no Edit or Delete, so a day without items shows its header
 /// alone, and asks [editPolicy] nothing. In edit mode a card is handed
@@ -833,9 +835,12 @@ List<DayListRow> dayListRowsOf<T>(
 /// list on it at once. While a drag or a fling scrolls it, the list
 /// reports through [onTopDay] each new day under its top, and reads the
 /// weeks of the days it holds built once it rests, as it does from a new
-/// [store], after the frame that gives it. A top day near the end of
-/// the list's days adds as many again after them, and one near their start
-/// re-centres the list on it.
+/// [store], after the frame that gives it. After the frame that the store
+/// reports stale days of those weeks
+/// ([CalendarEntryReader.addStaleDaysListener]), it reads again each run of
+/// them the store answers [CalendarEntryReader.isStale] for. A top day
+/// near the end of the list's days adds as many again after them, and one
+/// near their start re-centres the list on it.
 ///
 /// Every state stays inside one always-scrollable scroll view, so a drag
 /// on it reports the scroll an ancestor's listener reads.
@@ -852,7 +857,7 @@ class DayList<T> extends StatefulWidget {
     super.key,
     required this.store,
     required this.weekdays,
-    required this.format,
+    required this.hourLabelFormat,
     required this.hours,
     this.slotMinutes = CalendarDates.defaultSlotMinutes,
     required this.editable,
@@ -861,8 +866,8 @@ class DayList<T> extends StatefulWidget {
     required this.now,
     required this.onTopDay,
     required this.onCreateRange,
-    required this.onEdit,
-    required this.onDelete,
+    required this.onEditRequest,
+    required this.onDeleteRequest,
     this.cardBuilder,
     this.cardExtentOf,
     this.addButtonBuilder,
@@ -870,14 +875,14 @@ class DayList<T> extends StatefulWidget {
     this.failureBuilder,
   });
 
-  final CalendarStore<T> store;
+  final CalendarEntryReader<T> store;
 
   /// The days the list shows.
   final CalendarWeekdaySet weekdays;
 
   /// How the times beside the cards and on the gap rows read, as
   /// [CalendarLocalizations.formatTime] writes them.
-  final CalendarHourLabelFormat format;
+  final CalendarHourLabelFormat hourLabelFormat;
 
   /// The calendar's hours, which the gap rows cover; an item wholly
   /// outside them shows only in a banner's count.
@@ -899,7 +904,7 @@ class DayList<T> extends StatefulWidget {
   final CalendarEditPolicy<T>? editPolicy;
 
   /// The day the list brings to its top; a shown day, which the list reads
-  /// by its date on the store's clock ([CalendarStore.zone]), so a plain
+  /// by its date on the store's clock ([CalendarEntryReader.zone]), so a plain
   /// day and the store's day of the same date select the same day.
   final DateTime selectedDay;
 
@@ -933,8 +938,17 @@ class DayList<T> extends StatefulWidget {
   /// own row; a failure is left uncaught in the zone the press ran in.
   final Future<void> Function(CalendarCreateDetails details) onCreateRange;
 
-  final void Function(String id) onEdit;
-  final void Function(String id) onDelete;
+  /// A card's Edit was pressed ([CalendarCardDetails.onEdit]): the
+  /// details give its entry as [store] stores it
+  /// ([CalendarEntryReader.storedEntry]). Nothing is reported where the
+  /// store holds no stored entry of the card's id.
+  final ValueChanged<CalendarEditRequestDetails<T>> onEditRequest;
+
+  /// A card's Delete was pressed ([CalendarCardDetails.onDelete]): the
+  /// details give its entry as [store] stores it
+  /// ([CalendarEntryReader.storedEntry]). Nothing is reported where the
+  /// store holds no stored entry of the card's id.
+  final ValueChanged<CalendarDeleteRequestDetails<T>> onDeleteRequest;
 
   /// Draws each card inside the slot the list gives it, keyed
   /// [entryCardKey]; null for [defaultCalendarCardBuilder].
@@ -1065,6 +1079,10 @@ class _DayListState<T> extends State<DayList<T>> {
   /// Whether a frame will read the weeks of the days the list holds built.
   bool _prefetchScheduled = false;
 
+  /// Reads again, after the frame, the days of [_mountedWeeks] the store
+  /// reports stale ([StaleDaysAsk]).
+  late final StaleDaysAsk<T> _staleAsk;
+
   /// The day at the list's top as last reported or revealed, a day of the
   /// rows ([_listDayOf]).
   late DateTime _topDay;
@@ -1105,7 +1123,8 @@ class _DayListState<T> extends State<DayList<T>> {
   /// to the day by the tree's own measure.
   bool _landing = true;
 
-  /// The rows mounted, which [_dayAtTop] and [_prefetchShown] read.
+  /// The rows mounted, which [_dayAtTop], [_prefetchShown] and [_staleAsk]
+  /// read.
   final Set<_DayMarkerState> _markers = <_DayMarkerState>{};
 
   /// The day of the time [DayList.now] reads, whose block marks the
@@ -1174,6 +1193,7 @@ class _DayListState<T> extends State<DayList<T>> {
     PaintingBinding.instance.systemFonts.addListener(_handleFonts);
     widget.store.addListener(_handleStore);
     widget.now.addListener(_handleNow);
+    _staleAsk = StaleDaysAsk<T>(_mountedWeeks)..listen(widget.store);
     _scheduleLanding();
   }
 
@@ -1201,7 +1221,7 @@ class _DayListState<T> extends State<DayList<T>> {
   static const int _measuredHour = 10;
 
   /// Measures [_timeLabel] ([labelSizeIn]) in the time style on
-  /// [DayList.format]'s clock: as wide as the widest hour at minute 0,
+  /// [DayList.hourLabelFormat]'s clock: as wide as the widest hour at minute 0,
   /// widened by as much as the widest minute of [_measuredHour] outgrows
   /// that hour's minute 0, which is the widest time where a time lays out
   /// its hour and its minute side by side, and as the all-day label where
@@ -1211,7 +1231,7 @@ class _DayListState<T> extends State<DayList<T>> {
   /// of the fonts measures again at the next build ([_handleFonts]).
   void _measureTimes() {
     final strings = _strings;
-    final format = widget.format;
+    final format = widget.hourLabelFormat;
     var labels = _timeLabels;
     final madeFor = _timeLabelsFor;
     if (labels == null ||
@@ -1290,6 +1310,7 @@ class _DayListState<T> extends State<DayList<T>> {
       // mount need ask it.
       _schedulePrefetch();
     }
+    _staleAsk.listen(widget.store);
     if (widget.store.zone != _zone) {
       _takeZone();
     }
@@ -1306,7 +1327,7 @@ class _DayListState<T> extends State<DayList<T>> {
     if (widget.editPolicy != oldWidget.editPolicy) {
       _policyChanged = true;
     }
-    if (widget.format != oldWidget.format) {
+    if (widget.hourLabelFormat != oldWidget.hourLabelFormat) {
       _measureTimes();
     }
     if (widget.weekdays != oldWidget.weekdays) {
@@ -1335,6 +1356,7 @@ class _DayListState<T> extends State<DayList<T>> {
   void dispose() {
     PaintingBinding.instance.systemFonts.removeListener(_handleFonts);
     widget.store.removeListener(_handleStore);
+    _staleAsk.dispose();
     widget.now.removeListener(_handleNow);
     _calendarNow.dispose();
     _scroll.dispose();
@@ -1546,10 +1568,10 @@ class _DayListState<T> extends State<DayList<T>> {
   }
 
   /// The rows of [day]'s block as the store holds the day: a failed row
-  /// while its read failed ([CalendarStore.readFailed]), also a read day's
-  /// whose read again after a change failed, so the list shows no item the
-  /// source may no longer hold as current; otherwise its items' rows
-  /// ([dayListRowsOf]) once it is read, and until then a loading row.
+  /// while its read failed ([CalendarEntryReader.readFailed]), also a read
+  /// day's whose read again after a change failed, so the list shows no
+  /// item the source may no longer hold as current; otherwise its items'
+  /// rows ([dayListRowsOf]) once it is read, and until then a loading row.
   List<DayListRow> _blockRowsOf(DateTime day) {
     final store = widget.store;
     if (store.readFailed(day)) {
@@ -1849,10 +1871,11 @@ class _DayListState<T> extends State<DayList<T>> {
     );
   }
 
-  /// A failed row's retry: one [CalendarStore.retry] of the store's shown
-  /// range and [_mountedWeeks], which ends their days' failed marks, so
-  /// the rows of those days show loading at once, and reads their unread
-  /// days; with no row mounted, of the shown range alone.
+  /// A failed row's retry: one [CalendarEntryReader.retry] of
+  /// [_mountedWeeks], and of the range the reader shows where it shows
+  /// one, as a store does, which ends their days' failed marks, so the
+  /// rows of those days show loading at once, and reads their unread days;
+  /// with no row mounted, of the range the reader shows alone.
   void _retry() {
     final weeks = _mountedWeeks();
     if (weeks == null) {
@@ -1925,7 +1948,7 @@ class _DayListState<T> extends State<DayList<T>> {
         identical(made.addButtonBuilder, current.addButtonBuilder) &&
         identical(made.loadingBuilder, current.loadingBuilder) &&
         identical(made.failureBuilder, current.failureBuilder) &&
-        made.format == current.format &&
+        made.hourLabelFormat == current.hourLabelFormat &&
         made.hours == current.hours &&
         made.slotMinutes == current.slotMinutes &&
         made.editable == current.editable;
@@ -2048,7 +2071,7 @@ class _DayListState<T> extends State<DayList<T>> {
           span: span,
           clock: clock,
           hours: widget.hours,
-          format: widget.format,
+          format: widget.hourLabelFormat,
         );
       },
     );
@@ -2120,11 +2143,11 @@ class _DayListState<T> extends State<DayList<T>> {
     return _buildDashed(
       key: dayListGapKey(day, start, later: gap.later),
       mark: mark,
-      label: _strings.formatTime(start, widget.format),
+      label: _strings.formatTime(start, widget.hourLabelFormat),
       day: day,
       addMinute: addMinute,
       addLabel: _strings.addEntryAt(
-        _strings.formatTime(addMinute, widget.format),
+        _strings.formatTime(addMinute, widget.hourLabelFormat),
       ),
       onAdd: add == null
           ? null
@@ -2203,16 +2226,14 @@ class _DayListState<T> extends State<DayList<T>> {
           ConstrainedBox(
             key: dayListFailedKey(day),
             constraints: const BoxConstraints(minHeight: _failedRowExtent),
-            // Built again where the store's load error changes, which the
-            // day's body does not hold.
+            // Built again where the store's error for the day changes, which
+            // the day's body does not hold.
             child: AnswerBuilder<Object?>(
               listenables: <Listenable>[widget.store],
               answer: () {
-                return widget.store.loadError;
+                return widget.store.loadErrorOf(day, day);
               },
               builder: (context, error, child) {
-                // A day a prefetch failed to read, while the shown range is
-                // ready, has no load error.
                 return failure(
                   context,
                   CalendarFailureState(
@@ -2287,6 +2308,24 @@ class _DayListState<T> extends State<DayList<T>> {
     );
   }
 
+  /// A card's Edit of [id]: reports the stored entry through
+  /// [DayList.onEditRequest], or nothing where there is none.
+  void _requestEdit(String id) {
+    final entry = widget.store.storedEntry(id);
+    if (entry != null) {
+      widget.onEditRequest(CalendarEditRequestDetails<T>(entry: entry));
+    }
+  }
+
+  /// A card's Delete of [id]: reports the stored entry through
+  /// [DayList.onDeleteRequest], or nothing where there is none.
+  void _requestDelete(String id) {
+    final entry = widget.store.storedEntry(id);
+    if (entry != null) {
+      widget.onDeleteRequest(CalendarDeleteRequestDetails<T>(entry: entry));
+    }
+  }
+
   /// The time column and the card's slot of [row]'s piece of its entry.
   /// For an entry wholly on the row's day the column shows the later of
   /// its start and the hours', and for a piece of an entry over more than
@@ -2315,9 +2354,13 @@ class _DayListState<T> extends State<DayList<T>> {
     if (allDay) {
       time = _strings.allDay;
     } else if (row.first && row.last) {
-      time = _strings.formatTime(start, widget.format);
+      time = _strings.formatTime(start, widget.hourLabelFormat);
     } else {
-      time = _strings.formatTimeRange(row.start, row.end, widget.format);
+      time = _strings.formatTimeRange(
+        row.start,
+        row.end,
+        widget.hourLabelFormat,
+      );
     }
     final pieceStart = row.first ? calendarEntry.start : row.day;
     final pieceEnd = row.last
@@ -2391,19 +2434,19 @@ class _DayListState<T> extends State<DayList<T>> {
                 entry: entry,
                 builder: widget.cardBuilder ?? defaultCalendarCardBuilder<T>,
                 startsAt: inside && row.start < hours.start
-                    ? _strings.formatTime(row.start, widget.format)
+                    ? _strings.formatTime(row.start, widget.hourLabelFormat)
                     : null,
                 endsAt: inside && row.end > hours.end
-                    ? _strings.formatTime(row.end, widget.format)
+                    ? _strings.formatTime(row.end, widget.hourLabelFormat)
                     : null,
                 onEdit: answers.edits
                     ? () {
-                        widget.onEdit(entry.id);
+                        _requestEdit(entry.id);
                       }
                     : null,
                 onDelete: answers.deletes
                     ? () {
-                        widget.onDelete(entry.id);
+                        _requestDelete(entry.id);
                       }
                     : null,
               );
@@ -2420,7 +2463,7 @@ class _DayListState<T> extends State<DayList<T>> {
   /// in the timed grid's style for its rows outside the hours.
   Widget _buildHidden(DateTime day, int count, {required bool above}) {
     final minute = above ? widget.hours.start : widget.hours.end;
-    final time = _strings.formatTime(minute, widget.format);
+    final time = _strings.formatTime(minute, widget.hourLabelFormat);
     final styles = _styles;
     return Semantics(
       container: true,

@@ -150,6 +150,11 @@ void main() {
         calendar.CachingCalendarStore,
         widgets_extended.CachingCalendarStore,
       ],
+      "CalendarEntryReader": <Object>[
+        scheduling.CalendarEntryReader,
+        calendar.CalendarEntryReader,
+        widgets_extended.CalendarEntryReader,
+      ],
       "CalendarHoursException": <Object>[
         scheduling.CalendarHoursException,
         calendar.CalendarHoursException,
@@ -164,6 +169,11 @@ void main() {
         scheduling.CalendarShownEntry,
         calendar.CalendarShownEntry,
         widgets_extended.CalendarShownEntry,
+      ],
+      "CalendarStaleDays": <Object>[
+        scheduling.CalendarStaleDays,
+        calendar.CalendarStaleDays,
+        widgets_extended.CalendarStaleDays,
       ],
       "CalendarStore": <Object>[
         scheduling.CalendarStore,
@@ -291,7 +301,7 @@ void main() {
         widgets_extended.CalendarScheduleTooManyDays,
       ],
     };
-    expect(names, hasLength(54));
+    expect(names, hasLength(56));
     for (final MapEntry(key: name, value: values) in names.entries) {
       expect(values[1], values[0], reason: "calendar: $name");
       expect(values[2], values[0], reason: "package: $name");

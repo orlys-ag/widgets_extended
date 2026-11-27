@@ -268,8 +268,8 @@ void main() {
     expect(blockFinder(teamOffsiteId), findsOneWidget);
   });
 
-  testWidgets("F4 a day past the shown month whose read failed says it "
-      "could not be read, while the shown month is ready", (tester) async {
+  testWidgets("F4 a day past the shown month whose read failed says its "
+      "read's error, while the shown month is ready", (tester) async {
     final api = await pumpCalendar(
       tester,
       api: MockCalendarApi.seeded(today, latency: latency),
@@ -325,13 +325,10 @@ void main() {
       );
     }
     expect(
-      find.descendant(
-        of: failed,
-        matching: find.text("This day could not be read."),
-      ),
+      find.descendant(of: failed, matching: find.text("Reading failed.")),
       findsOneWidget,
     );
-    expect(find.text("Reading failed."), findsNothing);
+    expect(find.text("This day could not be read."), findsNothing);
     await tester.pump(latency);
     await tester.pumpAndSettle();
   });

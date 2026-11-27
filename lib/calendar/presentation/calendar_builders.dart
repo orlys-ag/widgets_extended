@@ -350,8 +350,8 @@ final class CalendarFailureState {
   /// in a row.
   final DateTime last;
 
-  /// The error the store's read failed with, as the store holds it; null
-  /// for a day whose read failed while the range the view shows is ready.
+  /// The error the reader holds for those days
+  /// ([CalendarEntryReader.loadErrorOf]), null where it holds none.
   final Object? error;
 
   /// Reads those days again.

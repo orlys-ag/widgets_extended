@@ -1127,19 +1127,11 @@ void expectBlockTitles(WidgetTester tester, CalendarThemeData theme) {
   expect(seen, greaterThan(0));
 }
 
-/// The calendar's [CalendarStore], read from the view that shows, which a
-/// test writes through as the calendar does.
+/// The calendar's [CalendarStore], read from the calendar, which a test
+/// writes through as the calendar does.
 CalendarStore<ItemPayload> storeOf(WidgetTester tester) {
-  final grid = find.byType(TimedGrid<ItemPayload>);
-  if (grid.evaluate().isNotEmpty) {
-    return tester.widget<TimedGrid<ItemPayload>>(grid).store;
-  }
-  final list = find.byType(DayList<ItemPayload>);
-  if (list.evaluate().isNotEmpty) {
-    return tester.widget<DayList<ItemPayload>>(list).store;
-  }
   return tester
-      .widget<MonthBoard<ItemPayload>>(find.byType(MonthBoard<ItemPayload>))
+      .widget<CalendarView<ItemPayload>>(find.byType(CalendarView<ItemPayload>))
       .store;
 }
 

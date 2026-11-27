@@ -493,6 +493,41 @@ final class CalendarEditRules<T> {
     return free ?? held;
   }
 
+  /// The slot a create on [day], a day's start, takes at [now], as a long
+  /// press on a day in a month creates: from the earliest start [policy]
+  /// gives [day] ([earliestStartOn]), the slot [firstSlot] gives over
+  /// [entries], the entries on [day]: the first no entry shares, or, where
+  /// [allowsOverlaps] is false and none is, the first sharing time only
+  /// with entries [policy]'s [CalendarEditPolicy.mayOverlap] allows; or
+  /// where it gives none, the first slot of the [hours] from that start,
+  /// over an entry, refused or not, which asks [policy] nothing. Each is a
+  /// slot whose times the clock reads, so none starts before that start,
+  /// and the slots are tried in the order of their instants: where [day]'s
+  /// clock repeats a stretch, from that start's occurrence, and from the
+  /// first pass on through the second before the time after the stretch.
+  /// Where [notBeforeNow] and [day] is [now]'s today
+  /// ([CalendarNow.today]), the start is the later of that start and the
+  /// current time ([CalendarNow.timeOnToday]). Null where the hours leave
+  /// no such slot from that start, as on a day the policy closes.
+  ({DateTime start, DateTime end})? createSlotOn(
+    DateTime day,
+    CalendarNow now, {
+    Iterable<CalendarEntry<T>> entries = const <Never>[],
+    bool notBeforeNow = false,
+  }) {
+    var start = earliestStartOn(day, now);
+    final earliest = start.earliest;
+    if (notBeforeNow &&
+        earliest != null &&
+        CalendarDates.dayNumber(start.day) ==
+            CalendarDates.dayNumber(now.today) &&
+        earliest.isBefore(now.timeOnToday)) {
+      start = CalendarEarliestStart(start.day, now.timeOnToday);
+    }
+    return firstSlot(start, clearOf: entries, throughSecondPass: true) ??
+        firstSlot(start, throughSecondPass: true);
+  }
+
   /// The second pass [firstSlot] reads after the first, of a search of
   /// [start]'s day that reads its clock in [reading]'s occurrence from its
   /// minute [from], where given: the instant the second pass starts

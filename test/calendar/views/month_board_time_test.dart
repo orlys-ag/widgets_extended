@@ -110,13 +110,14 @@ Future<void> pumpMonth(
       home: MonthBoard<String>(
         store: store,
         grid: grid,
+        layout: CalendarMonthLayout.showAll,
         hours: hours,
         selectedDay: selectedDay,
         now: now,
         onSelectDay: (day) {},
         onOpenDay: (day) {},
-        onCreateOnDay: null,
-        onOpenEntry: (id) {},
+        onCreateRange: (details) async {},
+        onEntryTap: (details) {},
       ),
     ),
   );
@@ -186,12 +187,13 @@ void main() {
         home: MonthBoard<String>(
           store: store,
           grid: april,
+          layout: CalendarMonthLayout.showAll,
           selectedDay: tuesday,
           now: now,
           onSelectDay: (day) {},
           onOpenDay: (day) {},
-          onCreateOnDay: null,
-          onOpenEntry: (id) {},
+          onCreateRange: (details) async {},
+          onEntryTap: (details) {},
         ),
       ),
     );

@@ -87,15 +87,15 @@ class Agenda {
     Widget list = DayList<String>(
       store: store,
       weekdays: CalendarWeekdaySet.all,
-      format: format,
+      hourLabelFormat: format,
       hours: store.hours,
       editable: true,
       selectedDay: tuesday,
       now: now,
       onTopDay: (day) {},
       onCreateRange: (details) async {},
-      onEdit: (id) {},
-      onDelete: (id) {},
+      onEditRequest: (details) {},
+      onDeleteRequest: (details) {},
     );
     if (theme != null) {
       list = CalendarTheme(data: theme, child: list);

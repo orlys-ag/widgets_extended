@@ -445,7 +445,12 @@ give one; a change of a kind it does not know, such as a
 `CalendarAllChanged`;
 `invalidate` and `refresh` tell it that entries changed at the source, so
 it reads those days again. A store of your own extends `CalendarStore`
-and answers entries in the order `compareCalendarEntries` gives.
+and answers entries in the order `compareCalendarEntries` gives. Every
+store is a `CalendarEntryReader`, its read side: a reader of your own,
+such as one filtering a store, extends `CalendarEntryReader`, forwards
+`addStaleDaysListener` and `removeStaleDaysListener` to the readers it
+reads, answers `isStale` from theirs, and is created once and kept across
+builds, as a store is.
 `CalendarDates` holds the civil-date helpers the calendar counts days and
 minutes with, such as `addDays` and `dayNumber`.
 
@@ -573,13 +578,15 @@ reporting nothing. A day
 before `firstDay` or after `lastDay`, compared by date, or one your
 `isEnabled` refuses, draws disabled and takes no tap; the picker asks
 `isEnabled` of a day at most once for each predicate and date of `value`,
-so give a function not `==` to the last where its answers change. With a
-`store`, a day with entries carries a badge for each kind your `dayBadges`
-gives them, as in `CalendarView`, or the primary dot without `dayBadges`;
-with no store no day carries a badge. It shows all seven weekdays, its
-weeks starting on the column `firstColumn`, 0 for Monday to 6 for Sunday,
-opens no route, and draws in the theme a `CalendarView` would resolve
-there, with its words from `CalendarLocalizations`. A parent that asks its
+so give a function not `==` to the last where its answers change. Its
+`store` takes a store or any `CalendarEntryReader`, such as one of yours
+filtering a store. With one, a day with entries carries a badge for each
+kind your `dayBadges` gives them, as in `CalendarView`, or the primary dot
+without `dayBadges`; with no store no day carries a badge. It shows all
+seven weekdays, its weeks starting on the column `firstColumn`, 0 for
+Monday to 6 for Sunday, opens no route, and draws in the theme a
+`CalendarView` would resolve there, with its words from
+`CalendarLocalizations`. A parent that asks its
 intrinsic height, such as an `IntrinsicHeight`, gets the height it lays
 out at, folded, unfolded or with its month picker open, and as it moves
 between them.
@@ -599,7 +606,8 @@ naming `day`, its time view, which take turns. A control of two segments,
 Date and Time, at the end of each view's header switches between them, and
 nothing else does: a day picked keeps the date view. Its value is `day` and
 `minute`, a minute after midnight on the clock of `store`'s zone, or of the
-device without a store; a tap on a day, the selected one included, reports
+device without a store, which, as the day picker's, takes a store or any
+`CalendarEntryReader`; a tap on a day, the selected one included, reports
 that day with the minute through `onChanged`, or with the time of that day
 nearest it on
 `minuteStep` where the day does not offer the minute, and a pick of a time
@@ -673,13 +681,14 @@ and failure builders replace what the views draw, and
 **Testing.** A test drives a real `CalendarController` and fills a
 `MemoryCalendarStore` with the entries it needs; a `CachingCalendarStore`
 over a fake or mock `CalendarDataSource` tests reads, writes and
-failures. `CalendarController`, the stores, `CalendarEditPolicy` and the
-localizations are `base` classes, which no class outside the package
-implements, so a mock that implements one does not compile; a spy
-extends one in a `final` class and overrides what it records. A store
-reports a listener's throw through `FlutterError.reportError` rather than
-let it fail the call, also in a plain Dart test with no binding, so a test
-that expects one sets `FlutterError.onError`.
+failures. `CalendarController`, `CalendarEntryReader`, the stores,
+`CalendarEditPolicy` and the localizations are `base` classes, which no
+class outside the package implements, so a mock that implements one
+does not compile; a spy extends one in a `final` class and overrides what
+it records. A store reports a listener's throw through
+`FlutterError.reportError` rather than let it fail the call, also in a
+plain Dart test with no binding, so a test that expects one sets
+`FlutterError.onError`.
 
 `demos/workspace_calendar/` is a complete calendar app on the public API.
 

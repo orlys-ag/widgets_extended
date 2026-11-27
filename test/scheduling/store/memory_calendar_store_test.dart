@@ -559,6 +559,38 @@ void main() {
     store.dispose();
   });
 
+  test("MS17 every range is ready, with no load error", () {
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[task("item-1", day, 600, 660)],
+    );
+    for (final (first, last) in <(DateTime, DateTime)>[
+      (DateTime(2026, 4, 20), DateTime(2026, 4, 26)),
+      (DateTime(2027, 1, 1), DateTime(2027, 1, 31)),
+      (day, day),
+      (DateTime(2026, 4, 26), DateTime(2026, 4, 20)),
+    ]) {
+      expect(store.statusOf(first, last), CalendarLoadStatus.ready);
+      expect(store.loadErrorOf(first, last), isNull);
+    }
+    store.dispose();
+  });
+
+  test("MS18 the store reports no stale day, at invalidate or refresh, "
+      "and takes none to be stale", () async {
+    final store = MemoryCalendarStore<String>(
+      entries: <CalendarEntry<String>>[task("item-1", day, 600, 660)],
+    );
+    final reports = <CalendarStaleDays>[];
+    store.addStaleDaysListener(reports.add);
+    store.show(DateTime(2026, 4, 20), DateTime(2026, 4, 26));
+    store.invalidate(day, day);
+    await store.refresh();
+    expect(reports, isEmpty);
+    expect(store.isStale(day), isFalse);
+    expect(store.isStale(DateTime(2027, 1, 1)), isFalse);
+    store.dispose();
+  });
+
   test("MS13 under hours of 08:00 to 18:00 a create of a timed entry from "
       "Tuesday's start to Wednesday's is refused for both its times", () async {
     final recorder = Recorder();

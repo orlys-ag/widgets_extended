@@ -181,10 +181,10 @@ class CalendarDateTimePicker<T> extends StatefulWidget {
   /// [minute] is. Null makes the picker take no pick.
   final void Function(DateTime day, int? minute)? onChanged;
 
-  /// The store whose entries badge the days, and whose zone's clock the
-  /// day and the time are read on; null for no badges and the device's
-  /// clock.
-  final CalendarStore<T>? store;
+  /// The store, or any reader, whose entries badge the days, and whose
+  /// zone's clock the day and the time are read on; null for no badges and
+  /// the device's clock.
+  final CalendarEntryReader<T>? store;
 
   /// The day the day picker rings as today, and against which the time
   /// view's header names [day]; null for the date the device's clock reads

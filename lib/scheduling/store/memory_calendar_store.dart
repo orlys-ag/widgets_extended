@@ -30,7 +30,8 @@ typedef CalendarEntryChanged<T> =
 /// Every range is shown and every day read: [status] is ready, and [show],
 /// [retry] and [prefetch] do nothing. The store is its entries' source,
 /// changed through its writes and [entries], so [invalidate] and [refresh]
-/// do nothing either.
+/// do nothing either, and it reports no stale day ([notifyStaleDays]): its
+/// [isStale] answers false.
 base class MemoryCalendarStore<T> extends CalendarStore<T> {
   /// A store holding [entries], each with an id no other has, taken to the
   /// store's zone where it has one. Throws an [ArgumentError] for an entry
@@ -147,6 +148,13 @@ base class MemoryCalendarStore<T> extends CalendarStore<T> {
   @override
   bool isRead(DateTime day) {
     return true;
+  }
+
+  /// False: the store is its entries' source, so no day it answers can
+  /// have changed elsewhere, and it reports no stale day.
+  @override
+  bool isStale(DateTime day) {
+    return false;
   }
 
   /// False: no read fails.

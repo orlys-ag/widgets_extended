@@ -1411,6 +1411,78 @@ the rules find.
 rather than `sealed`, so a host declares its own subclasses, and a `switch`
 over either needs a default case. A `CachingCalendarStore` takes a change of
 a kind it does not know as a `CalendarAllChanged`.
+- `CalendarEditRules.createSlotOn` answers the slot a create on a day takes,
+as Month's long press creates: from the policy's earliest start on the day,
+optionally not before the current time on today, the first slot no entry
+given shares, or the one an overlap the policy allows takes, or else the
+first slot of the hours from that start; null where the hours leave none.
+`CalendarView`'s long press in Month and `CalendarController.createOn` take
+their slot from it, on the same slots as before.
+- `CalendarEntryReader` is the read side of a store: listenable, it answers
+`zone`, `entriesOn`, `entriesBetween`, `dayHasShownEntries`, `isPending`,
+`storedEntry`, `isRead` and `readFailed`, and takes `prefetch` and `retry`.
+`CalendarStore` extends it, and a host's reader, such as one filtering a
+store, extends it in a `final` or `base` class. `statusOf` answers the load
+state of any range of days, walked from `isRead` and `readFailed` by
+default, and `loadErrorOf` its read error, null by default; a store answers
+its shown range's `status` and `loadError`, and a `CachingCalendarStore`
+any other range from its days and their failure marks.
+- A reader reports stale days, a `CalendarStaleDays` of one day or more or
+of every day, to the listeners `addStaleDaysListener` registers and
+`removeStaleDaysListener` removes, through `notifyStaleDays`, and `isStale`
+answers whether a day is one only a `prefetch` reads again, true by
+default; a widget asks it of the days reported as the report arrives and
+again after the frame, so a reader reports a day again once `isStale`
+comes to answer true for it; a reader over other readers forwards both
+registrations to them and answers `isStale` from theirs. A
+`CachingCalendarStore` reports, as each
+call into it ends, the read days the call left changed, a zone change's
+excepted, and the read days a show or a refresh's failed read leaves stale
+outside the shown range, and its `isStale` answers true for a read day
+outside the shown range that is changed, not marked `readFailed` and under
+no read in flight. A `MemoryCalendarStore` reports none, and its `isStale`
+answers false.
+- A host store that declares a member named `statusOf`, `loadErrorOf`,
+`addStaleDaysListener`, `removeStaleDaysListener`, `notifyStaleDays` or
+`isStale`, which `CalendarStore` now inherits from `CalendarEntryReader`,
+no longer compiles where its signature is no valid override of the
+reader's member, and otherwise overrides it.
+- A step of Week or Day that moves the range the calendar shows clears the
+block selection over a `MemoryCalendarStore` too, as it does over a
+`CachingCalendarStore`.
+- Agenda's failed row gives as `CalendarFailureState.error` its own day's
+read error (`loadErrorOf` of that day), which over a `CachingCalendarStore`
+is the error of the failed read that marked it, and over a host store that
+does not override `loadErrorOf` is null unless the store shows that day
+alone; it gave the shown range's `loadError`, null while that range was
+ready.
+- After a change at the source, the views, the calendar card and the
+pickers read again, after the frame, the changed days they show outside
+the range the store shows, which the store reports stale, one read for
+each run of them. After a refresh whose read fails, where a widget over
+the store shows days outside its shown range and reads them again, as
+Day's card, Agenda's list or a host's picker over the same store does,
+the first answer to those reads has the store read its shown range again,
+and where that read fails too, the shown range fails.
+- In Week and Month, `CalendarView`'s timed grid and month board ask the
+store for the days they show, through `prefetch`, after the frame that
+brings them those days, as Day's calendar card and Agenda's list already
+ask for theirs, and their failure state's retry is a `retry(first, last)`
+of those days, where it was `retry()`. A `MemoryCalendarStore` reads
+nothing, and a `CachingCalendarStore`'s `prefetch` sends nothing where the
+read of its `show` covers those days; a host store whose `prefetch` reads
+again days a read in flight covers sends a second read of them at each
+step.
+- `CalendarDayPicker.store` and `CalendarDateTimePicker.store` take any
+`CalendarEntryReader`, a store or a reader of the host's own, so a
+`store:` argument still compiles; code that reads a picker's `store` as a
+`CalendarStore` no longer compiles and needs the store itself.
+- `CalendarEntryTapDetails` is declared in
+`package:widgets_extended/calendar/views/view_details.dart`, beside the
+other details the views report, and the calendar barrel shows it from
+there, so code that names it through a barrel still compiles; code that
+imports it from `calendar/composition/calendar_view.dart` imports
+`calendar/views/view_details.dart` instead.
 
 ## 0.0.35
 

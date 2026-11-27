@@ -67,9 +67,11 @@ export 'policy/schedule_problem.dart'
 export 'store/caching_calendar_store.dart' show CachingCalendarStore;
 export 'store/calendar_store.dart'
     show
+        CalendarEntryReader,
         CalendarHoursException,
         CalendarLoadStatus,
         CalendarShownEntry,
+        CalendarStaleDays,
         CalendarStore,
         CalendarStoreException,
         CalendarWritePendingException,

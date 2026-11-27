@@ -168,7 +168,7 @@ class ListHost {
               child: DayList<String>(
                 store: store,
                 weekdays: weekdays,
-                format: format,
+                hourLabelFormat: format,
                 hours: hours,
                 slotMinutes: slotMinutes,
                 editable: editable,
@@ -183,8 +183,8 @@ class ListHost {
                 onCreateRange: (details) async {
                   creates.add(details.range);
                 },
-                onEdit: (id) {},
-                onDelete: (id) {},
+                onEditRequest: (details) {},
+                onDeleteRequest: (details) {},
                 cardBuilder: cardBuilder,
                 cardExtentOf: (entry) {
                   return 56.0;

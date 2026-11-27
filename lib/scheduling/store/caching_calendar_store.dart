@@ -159,12 +159,19 @@ class _Day {
 /// once a [show] or a [prefetch] covers it. Where that read fails, the day
 /// is marked [readFailed] as above, so a shown range holding it is failed
 /// rather than ready with what the source may no longer hold, until a
-/// read fills the day or a [show], a [retry] or a [refresh] reads it. A
-/// background read of the shown range's changed
-/// days runs from the first to the last of them that no read in flight
-/// covers; a shown day changed since the read covering it was sent is
-/// read once more when that read answers, so a burst of changes on a
-/// shown day being read costs one more read.
+/// read fills the day or a [show], a [retry] or a [refresh] reads it. So
+/// that whoever shows such a day outside the shown range can ask for it
+/// again, the store reports stale ([notifyStaleDays]), as each call into
+/// it ends, the read days the call left changed, a zone change's
+/// excepted, as it reads again every day it keeps, and the read days a
+/// [show] or a refresh's failed read leaves stale outside the shown
+/// range; [isStale] answers which of them a [prefetch] alone reads again,
+/// none of the shown range, whose changed days the store reads again
+/// itself. A background read of the shown range's changed days runs from
+/// the first to the last of them that no read in flight covers; a shown
+/// day changed since the read covering it was sent is read once more when
+/// that read answers, so a burst of changes on a shown day being read
+/// costs one more read.
 ///
 /// A write takes its entry pending from the call until the data source
 /// answers: a move or a resize shows the requested entry meanwhile, and an
@@ -333,6 +340,16 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// the outermost one has yet to notify.
   bool _notifyPending = false;
 
+  /// The span of the days, by [CalendarDates.dayNumber], that the call
+  /// under way has left stale ([isStale]) or may have, which the outermost
+  /// [_batch] call reports as it ends; null while it has noted none.
+  int? _staleFirst;
+  int? _staleLast;
+
+  /// Whether the call under way took every entry to have changed, which the
+  /// outermost [_batch] call reports as every day stale.
+  bool _staleAll = false;
+
   /// Follows from the shown range's days alone: ready once none of them is
   /// unread or [readFailed], failed while one is [readFailed], whether or
   /// not another read of it is in flight, and otherwise loading, as before
@@ -358,6 +375,49 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     return _loadError;
   }
 
+  /// The load state of the days from [first] to [last]: [status] where
+  /// they are the shown range, and otherwise from their days and their
+  /// marks alone, as [status] follows from the shown range's: ready once
+  /// none is unread or [readFailed], failed once one is [readFailed], and
+  /// otherwise loading. Ready for a [first] after [last].
+  @override
+  CalendarLoadStatus statusOf(DateTime first, DateTime last) {
+    if (isShown(first, last)) {
+      return super.statusOf(first, last);
+    }
+    return _loadOf(
+      CalendarDates.dayNumber(first),
+      CalendarDates.dayNumber(last),
+    ).status;
+  }
+
+  /// The error of the failed read of the days from [first] to [last]:
+  /// [loadError] where they are the shown range, and otherwise, while
+  /// [statusOf] answers failed for them, the error of the latest failure
+  /// among the [readFailed] marks on their days, as [loadError] is the
+  /// shown range's; null otherwise.
+  @override
+  Object? loadErrorOf(DateTime first, DateTime last) {
+    if (isShown(first, last)) {
+      return super.loadErrorOf(first, last);
+    }
+    return _loadOf(
+      CalendarDates.dayNumber(first),
+      CalendarDates.dayNumber(last),
+    ).error;
+  }
+
+  /// Whether [day] lies outside the shown range, as every day does before
+  /// the first [show], and is read, taken to have changed at its source
+  /// since the read that last filled it, not marked [readFailed], and
+  /// under no read in flight. The store reads such a day again only once a
+  /// [show] or a [prefetch] covers it, and reads the shown range's changed
+  /// days again itself, so it answers false for every shown day.
+  @override
+  bool isStale(DateTime day) {
+    return _isStaleDay(CalendarDates.dayNumber(day));
+  }
+
   /// Shows [first] to [last], both inclusive. A range whose days are all
   /// read is ready at once; otherwise it is loading. Where no read in
   /// flight covers its unread days, the show sends one read of them, of its
@@ -373,7 +433,11 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// does, is applied within it, so the call can leave the range ready, or
   /// failed where such a read failed and marked a day of it with no read
   /// asked for since in flight. Showing the range already shown changes
-  /// nothing, and so does a show after [dispose]. Throws an [ArgumentError]
+  /// nothing, and so does a show after [dispose]. As the call ends, the
+  /// show reports stale ([notifyStaleDays]) the read days of the range it
+  /// leaves that it leaves stale ([isStale]): changed, unmarked and under
+  /// no read, as a refresh whose read failed leaves them. Throws an
+  /// [ArgumentError]
   /// naming `last`, in every build, for a [last] whose day comes before
   /// [first]'s, also after [dispose].
   ///
@@ -391,6 +455,8 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
       return;
     }
     _batch(() {
+      final leftFirst = _shownFirst;
+      final leftLast = _shownLast;
       _shownFirst = firstDay;
       _shownLast = lastDay;
       _showCount++;
@@ -408,6 +474,9 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
       _readChangedShown(requested: true, failed: failed);
       _settleStatus();
       _notify();
+      if (leftFirst != null && leftLast != null) {
+        _noteStaleIn(leftFirst, leftLast);
+      }
     });
   }
 
@@ -579,7 +648,11 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// range holding it failed. It notifies nothing itself: a read it sends
   /// notifies once it changes what the store answers or marks a day,
   /// within the call where the source answers within it. [first] after
-  /// [last] gives no day. Does nothing after [dispose].
+  /// [last] gives no day. Does nothing after [dispose]. As the call ends,
+  /// after any read it sends, it reports the read days it leaves changed
+  /// as stale ([notifyStaleDays]), of which [isStale] answers true for
+  /// those outside the shown range that no read in flight covers; a read
+  /// in flight over them reports them as it answers.
   @override
   void invalidate(DateTime first, DateTime last) {
     final firstDay = CalendarDates.dayNumber(first);
@@ -587,8 +660,10 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     if (_disposed || firstDay > lastDay) {
       return;
     }
-    _markChanged(firstDay, lastDay, ++_clock);
-    _readChangedShown();
+    _batch(() {
+      _markChanged(firstDay, lastDay, ++_clock);
+      _readChangedShown();
+    });
   }
 
   /// Takes every entry to have changed, as [invalidate] does for every
@@ -605,27 +680,34 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// failed with; a zone change before it answers passes the wait to the
   /// read of the shown range that change sends. Completes at once before the
   /// first [show] and after [dispose], and when the store is disposed before
-  /// the read answers.
+  /// the read answers. As the call ends, after the read it sends, it
+  /// reports every day stale ([notifyStaleDays]), at once before the first
+  /// [show]; [isStale] answers true for the read days outside the shown
+  /// range that no read in flight covers. A read in flight when it is
+  /// called reports the days it fills as it answers. Where the read fails,
+  /// it leaves the shown range's read days changed and unmarked, which the
+  /// next read's answer reads again, and reports them stale as it fails or
+  /// as a [show] leaves them, once they lie outside the shown range.
   @override
   Future<void> refresh() {
     if (_disposed) {
       return Future<void>.value();
     }
-    _allChangedAt = ++_clock;
-    final first = _shownFirst;
-    final last = _shownLast;
-    if (first == null || last == null) {
-      return Future<void>.value();
-    }
-    final done = Completer<void>();
-    _batch(() {
+    return _batch(() {
+      _markAllChanged();
+      final first = _shownFirst;
+      final last = _shownLast;
+      if (first == null || last == null) {
+        return Future<void>.value();
+      }
+      final done = Completer<void>();
       final ended = <int>{};
       _endFailed(first, last, ended);
       _sendEnded(ended, () {
         _send(first, last, done: done, requested: true);
       });
+      return done.future;
     });
-    return done.future;
   }
 
   /// The first to the last unread day of the shown range and of the
@@ -844,8 +926,7 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
   /// leaves the days it fills changed.
   void _markChanged(int first, int last, int at) {
     for (final day in _readDaysIn(first, last)) {
-      final record = _days[day]!;
-      record.changedAt = math.max(record.changedAt, at);
+      _markDayChanged(day, _days[day]!, at);
     }
     for (final read in _reads) {
       if (read.first <= last && read.last >= first) {
@@ -933,6 +1014,22 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     if (first == null || last == null) {
       return false;
     }
+    final (:status, :error) = _loadOf(first, last);
+    if (status == _status && identical(error, _loadError)) {
+      return false;
+    }
+    _status = status;
+    _loadError = error;
+    return true;
+  }
+
+  /// The load state of the days from [first] to [last], by
+  /// [CalendarDates.dayNumber], and its error, from their days and their
+  /// marks alone: ready once none is unread or [readFailed]; failed once
+  /// one is [readFailed], with the error of the latest failure among the
+  /// marks on its days; and otherwise loading. Ready, with no error, for a
+  /// [first] after [last].
+  ({CalendarLoadStatus status, Object? error}) _loadOf(int first, int last) {
     var unread = false;
     _Mark? latest;
     for (var day = first; day <= last; day++) {
@@ -944,18 +1041,14 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
         latest = mark;
       }
     }
-    final status = latest != null
-        ? CalendarLoadStatus.failed
-        : unread
-        ? CalendarLoadStatus.loading
-        : CalendarLoadStatus.ready;
-    final error = latest?.error;
-    if (status == _status && identical(error, _loadError)) {
-      return false;
-    }
-    _status = status;
-    _loadError = error;
-    return true;
+    return (
+      status: latest != null
+          ? CalendarLoadStatus.failed
+          : unread
+          ? CalendarLoadStatus.loading
+          : CalendarLoadStatus.ready,
+      error: latest?.error,
+    );
   }
 
   /// Runs [body] as one call into the store. A [_notify] while a [_batch]
@@ -967,16 +1060,96 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
       return body();
     } finally {
       _depth--;
-      if (_depth == 0 && _notifyPending) {
-        _notifyPending = false;
-        // [body] can dispose the store, as a data source's write can from
-        // within its call, after which [notifyListeners] throws in debug
-        // builds.
-        if (!_disposed) {
-          notifyListeners();
+      if (_depth == 0) {
+        if (_notifyPending) {
+          _notifyPending = false;
+          // [body] can dispose the store, as a data source's write can from
+          // within its call, after which [notifyListeners] throws in debug
+          // builds.
+          if (!_disposed) {
+            notifyListeners();
+          }
         }
+        _reportStale();
       }
     }
+  }
+
+  /// Clears the stale days the call noted and, unless the store is
+  /// disposed, reports them ([notifyStaleDays]): every day where it took
+  /// every entry to have changed, and otherwise the span it noted, as day
+  /// starts on the store's clock.
+  void _reportStale() {
+    final all = _staleAll;
+    final first = _staleFirst;
+    final last = _staleLast;
+    _staleAll = false;
+    _staleFirst = null;
+    _staleLast = null;
+    if (_disposed) {
+      return;
+    }
+    if (all) {
+      notifyStaleDays(const CalendarStaleDays.all());
+    } else if (first != null && last != null) {
+      notifyStaleDays(
+        CalendarStaleDays(
+          CalendarDates.dateOfDayNumber(first, zone: zone),
+          CalendarDates.dateOfDayNumber(last, zone: zone),
+        ),
+      );
+    }
+  }
+
+  /// Widens the stale span the call under way reports to take [day].
+  void _noteStale(int day) {
+    final first = _staleFirst;
+    final last = _staleLast;
+    _staleFirst = first == null ? day : math.min(first, day);
+    _staleLast = last == null ? day : math.max(last, day);
+  }
+
+  /// Widens the stale span to take each day from [first] to [last] that
+  /// [_isStaleDay] answers true for.
+  void _noteStaleIn(int first, int last) {
+    for (var day = first; day <= last; day++) {
+      if (_isStaleDay(day)) {
+        _noteStale(day);
+      }
+    }
+  }
+
+  /// Takes [record], the read day [day], to have changed at the clock
+  /// [at], and notes it stale.
+  void _markDayChanged(int day, _Day record, int at) {
+    record.changedAt = math.max(record.changedAt, at);
+    _noteStale(day);
+  }
+
+  /// Takes every entry to have changed, and notes every day stale.
+  void _markAllChanged() {
+    _allChangedAt = ++_clock;
+    _staleAll = true;
+  }
+
+  /// Whether [day] lies outside the shown range, as every day does before
+  /// the first [show], and is read, changed, not marked [readFailed], and
+  /// under no read in flight: a day that only a [prefetch] reads again
+  /// ([isStale]).
+  bool _isStaleDay(int day) {
+    final shownFirst = _shownFirst;
+    final shownLast = _shownLast;
+    if (shownFirst != null &&
+        shownLast != null &&
+        day >= shownFirst &&
+        day <= shownLast) {
+      return false;
+    }
+    final record = _days[day];
+    return record != null &&
+        _isChanged(record) &&
+        !_failedDays.containsKey(day) &&
+        _inFlightCovering(day, day) == null;
   }
 
   /// Notes that what the store answers changed: the outermost [_batch]
@@ -1171,6 +1344,11 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
         }
       }
     }
+    if (answered == null && read.done != null) {
+      // The read days a refresh's failed read leaves changed and unmarked
+      // that a show has moved the shown range off are stale.
+      _noteStaleIn(read.first, read.last);
+    }
     final settled = _settleStatus();
     if (settled || changed || failed) {
       _notify();
@@ -1258,11 +1436,16 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     }
     if (filled.isNotEmpty) {
       _newestFillAt = math.max(_newestFillAt, at);
+      // A read sent before every entry was taken to have changed leaves the
+      // days it fills changed.
+      if (at < _allChangedAt) {
+        _noteStale(filled.first);
+        _noteStale(filled.last);
+      }
     }
     if (read.changedAt != 0) {
       for (var day = read.changedFirst; day <= read.changedLast; day++) {
-        final record = _days[day]!;
-        record.changedAt = math.max(record.changedAt, read.changedAt);
+        _markDayChanged(day, _days[day]!, read.changedAt);
       }
     }
     _index.open(opened);
@@ -1309,7 +1492,7 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
         for (var day = first; day <= last; day++) {
           final record = _days[day]!;
           if (record.filledAt == at) {
-            record.changedAt = math.max(record.changedAt, _clock);
+            _markDayChanged(day, record, _clock);
           }
         }
         continue;
@@ -1453,20 +1636,22 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     if (_disposed) {
       return;
     }
-    switch (change) {
-      case CalendarEntryPut<T>(:final entry):
-        _applyPut(entry);
-      case CalendarEntryRemoved<T>(:final id):
-        _applyRemoved(id);
-      case CalendarDaysChanged<T>(:final first, :final last):
-        _invalidateDeviceDays(first, last);
-      case CalendarAllChanged<T>():
-        _changeAll();
-      default:
-        // A kind of change the store does not know, which may have changed
-        // any entry.
-        _changeAll();
-    }
+    _batch(() {
+      switch (change) {
+        case CalendarEntryPut<T>(:final entry):
+          _applyPut(entry);
+        case CalendarEntryRemoved<T>(:final id):
+          _applyRemoved(id);
+        case CalendarDaysChanged<T>(:final first, :final last):
+          _invalidateDeviceDays(first, last);
+        case CalendarAllChanged<T>():
+          _changeAll();
+        default:
+          // A kind of change the store does not know, which may have
+          // changed any entry.
+          _changeAll();
+      }
+    });
   }
 
   /// Takes the entries on the device days from [first] to [last] to have
@@ -1517,13 +1702,13 @@ base class CachingCalendarStore<T> extends CalendarStore<T> {
     if (_disposed) {
       return;
     }
-    _changeAll();
+    _batch(_changeAll);
   }
 
   /// Takes every entry to have changed, and reads the shown range's read
   /// days again.
   void _changeAll() {
-    _allChangedAt = ++_clock;
+    _markAllChanged();
     _readChangedShown();
   }
 
