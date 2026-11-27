@@ -282,15 +282,20 @@ def commit_report(command, cwd, now, state_dir, powershell=False):
                 "--root", "--diff-merges=first-parent", head)
     committed = [p for p in (names or "").split("\0") if p]
 
+    # git reports the top level with its symlinks resolved and reads a relative
+    # path from its working directory resolved the same way, so both sides go
+    # through realpath; the path itself is not, since it may name a symlink.
+    real_top = os.path.realpath(top)
     fold = (lambda p: p.lower()) if os.name == "nt" else (lambda p: p)
     files, dirs, patterns, broad = {}, [], [], unparsed
     for subcommand, directory, args in found:
         paths, wide = named_paths(subcommand, args)
         broad = broad or wide
+        base = os.path.realpath(directory)
         for path in paths:
-            full = resolve(path, directory)
+            full = resolve(path, base)
             try:
-                relative = os.path.relpath(full, top).replace("\\", "/")
+                relative = os.path.relpath(full, real_top).replace("\\", "/")
             except ValueError:
                 relative = path                 # another drive: cannot match
             if relative == ".":
@@ -493,6 +498,27 @@ def self_test():
         expect("redirects and a comment are not read as paths",
                report("git add l.txt 2>/dev/null # stage\n"
                       "git commit -m l > out.txt") is None)
+
+        alias = os.path.join(scratch, "alias")
+        try:
+            os.symlink(repo, alias, target_is_directory=True)
+        except (OSError, NotImplementedError) as error:
+            alias = None
+            print("  skip  symlink cases: %r" % error)
+        if alias is not None:
+            commit("s", "s.txt")
+            expect("a repository reached through a symlinked directory matches its files",
+                   commit_report("git add s.txt && git commit -m s", alias,
+                                 time.time(), state) is None)
+            commit("t", "sub/t.txt")
+            expect("cd into a directory under a symlinked path covers its files",
+                   commit_report("cd sub && git add . && git commit -m t", alias,
+                                 time.time(), state) is None)
+            os.symlink("base.txt", os.path.join(repo, "ln.txt"))
+            run("add", "ln.txt")
+            run("commit", "-q", "-m", "ln")
+            expect("a tracked symlink is named as itself, not as its target",
+                   report("git add ln.txt && git commit -m ln") is None)
 
         commit("m", "m.txt")
         late = time.time() + COMMIT_WINDOW_SECONDS + 60
